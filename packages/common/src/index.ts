@@ -38,8 +38,8 @@ export { HTTP_STATUS_HINT, httpStatusHintOf, withHttpStatusHint } from './errors
 export type { HttpStatusHint } from './errors/status-hint.ts';
 
 // Health probe
-export { createCachedProbe } from './health/probe.ts';
-export type { CachedProbeOptions } from './health/probe.ts';
+export { createCachedProbe, resolveProbeTiming } from './health/probe.ts';
+export type { CachedProbeOptions, ProbeTiming } from './health/probe.ts';
 
 // Capability tokens
 export { CAPABILITIES, createCapabilityToken } from './tokens.ts';

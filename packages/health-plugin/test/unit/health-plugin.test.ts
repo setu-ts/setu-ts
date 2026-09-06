@@ -1555,4 +1555,43 @@ describe('HealthPlugin', () => {
       expect(result.body.checks.cache).toBeDefined();
     });
   });
+
+  describe('indicatorTimeoutMs (M90b)', () => {
+    it('refuses a non-positive or non-finite deadline at construction', () => {
+      for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(() => HealthPlugin({ indicatorTimeoutMs: bad })).toThrow(/indicatorTimeoutMs/);
+      }
+    });
+
+    it('applies the configured deadline to a never-settling indicator', async () => {
+      const plugin = HealthPlugin({ indicatorTimeoutMs: 30 });
+      const registered = new Map<string, unknown>();
+      const ctx = {
+        ...createFakeContext(),
+        services: {
+          register: (token: string, service: unknown) => {
+            registered.set(token, service);
+          },
+          get: (token: string) => registered.get(token),
+          has: (token: string) => registered.has(token),
+          getAll: () => [],
+          registerFactory: () => {},
+          unregister: () => false,
+        } as IServiceRegistry,
+      } as IPluginContext;
+      plugin.register(ctx);
+      const service = registered.get(CAPABILITIES.HEALTH) as HealthService;
+      service.registerIndicator('hung', () => new Promise(() => {}));
+
+      const started = Date.now();
+      const report = await service.check();
+      const elapsed = Date.now() - started;
+
+      expect(report.status).toBe('down');
+      expect(report.checks['hung']?.data).toEqual({ reason: 'timeout' });
+      // The deadline fired at ~30ms — not immediately, and not the 5s default.
+      expect(elapsed).toBeGreaterThanOrEqual(25);
+      expect(elapsed).toBeLessThan(2_000);
+    });
+  });
 });

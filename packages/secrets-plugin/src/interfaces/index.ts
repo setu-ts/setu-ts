@@ -41,6 +41,18 @@ export interface IAwsSecretsClient {
    * @param value - The new secret value
    */
   putSecretValue(secretId: string, value: string): Promise<void>;
+  /**
+   * Optional non-mutating reachability probe (M90b). When the injected
+   * facade exposes it, the provider's health indicator reports real
+   * reachability; when omitted, the indicator reports
+   * `reachable: 'unknown'` rather than reading a secret as a probe — a
+   * read is not a health check and would alter the plugin's cache and
+   * billing profile.
+   *
+   * @returns `true` when the backend answers
+   * @since 0.5.0
+   */
+  isHealthy?(): Promise<boolean>;
 }
 
 /**
@@ -63,6 +75,14 @@ export interface IGcpSecretsClient {
    * @param value - The new secret value
    */
   addSecretVersion(name: string, value: string): Promise<void>;
+  /**
+   * Optional non-mutating reachability probe (M90b). See
+   * {@linkcode IAwsSecretsClient.isHealthy} for the contract.
+   *
+   * @returns `true` when the backend answers
+   * @since 0.5.0
+   */
+  isHealthy?(): Promise<boolean>;
 }
 
 /**
@@ -85,6 +105,14 @@ export interface IAzureSecretsClient {
    * @param value - The new secret value
    */
   setSecret(name: string, value: string): Promise<void>;
+  /**
+   * Optional non-mutating reachability probe (M90b). See
+   * {@linkcode IAwsSecretsClient.isHealthy} for the contract.
+   *
+   * @returns `true` when the backend answers
+   * @since 0.5.0
+   */
+  isHealthy?(): Promise<boolean>;
 }
 
 /**
@@ -163,6 +191,19 @@ export interface SecretProvider {
   disconnect(): Promise<void>;
   /** Reports whether the provider is ready to serve reads. */
   isReady(): boolean;
+  /**
+   * Reports whether the provider's backend is reachable right now, for the
+   * plugin's health indicator (M90b).
+   *
+   * Optional: a provider with no non-mutating probe omits it, and the
+   * indicator then reports `reachable: 'unknown'` — never a lifecycle
+   * reading standing in for reachability. This answers a fact, not a
+   * policy: the indicator owns the `up`/`down` mapping.
+   *
+   * @returns `true` when the backend answers
+   * @since 0.5.0
+   */
+  isHealthy?(): Promise<boolean>;
   /**
    * Reads a secret.
    *

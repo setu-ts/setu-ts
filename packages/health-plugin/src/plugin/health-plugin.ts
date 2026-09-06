@@ -20,7 +20,7 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES, resolveRegistryEntry } from '@setu-ts/common';
 import type { HealthIndicatorEntry, HealthPluginOptions } from '../interfaces/index.ts';
-import { HealthService } from '../services/health-service.ts';
+import { HealthService, resolveIndicatorTimeout } from '../services/health-service.ts';
 import { createSelfIndicator } from '../indicators/self-indicator.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -63,6 +63,10 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
     ready: '/ready',
   };
   const indicators: readonly HealthIndicatorEntry[] = options?.indicators ?? [];
+  // Validated at CONSTRUCTION, not register: a bad deadline is a
+  // configuration error the caller can fix before any plugin runs, and the
+  // failure names the option (M90b).
+  const indicatorTimeoutMs = resolveIndicatorTimeout(options?.indicatorTimeoutMs);
 
   // Split the two arms once, at plugin construction, so `register` and the
   // `onInit` hook each read a single list. Instances keep their pre-factory
@@ -93,7 +97,7 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       const runtime = ctx.runtime;
 
       // Create the health service
-      const service = new HealthService(runtime);
+      const service = new HealthService(runtime, { indicatorTimeoutMs });
 
       // Register the service
       ctx.services.register<IHealthService>(CAPABILITIES.HEALTH, service);

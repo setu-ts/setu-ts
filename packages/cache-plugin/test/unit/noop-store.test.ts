@@ -45,4 +45,12 @@ describe('NoopStore', () => {
     const store = new NoopStore();
     await expect(store.clear()).resolves.toBeUndefined();
   });
+
+  it('isHealthy returns lifecycle truth (M90b)', async () => {
+    const store = new NoopStore();
+    // Ready from construction; disconnect flips the lifecycle answer.
+    await expect(store.isHealthy()).resolves.toBe(true);
+    await store.disconnect();
+    await expect(store.isHealthy()).resolves.toBe(false);
+  });
 });

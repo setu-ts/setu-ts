@@ -50,12 +50,18 @@ export function asBrokerAdapter(instance: IMessageBroker): MessageBrokerAdapter 
   /**
    * Tri-state reachability (M70c): delegates to the wrapped instance's
    * public `isHealthy?()` when it provides one, else `undefined`.
+   *
+   * The member is captured in a local and invoked through the OWNER
+   * (`.call(instance)`): a stateful `isHealthy` (`return this.#linked;`)
+   * must never be evaluated off its instance — the detached-reference
+   * class M90b fixed in the realtime backplane.
    */
   const reachability = async (): Promise<boolean | undefined> => {
-    if (typeof candidate.isHealthy !== 'function') {
+    const probe = candidate.isHealthy;
+    if (typeof probe !== 'function') {
       return undefined;
     }
-    return await (candidate.isHealthy as () => Promise<boolean>)();
+    return await (probe as () => Promise<boolean>).call(instance);
   };
 
   return {

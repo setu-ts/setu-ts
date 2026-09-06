@@ -1113,6 +1113,31 @@ Memory, Prisma, and custom services/UoWs throw
 service or Unit of Work not created by this package throws
 `Drizzle query access requires a database-plugin service or unit of work.`
 
+### Health status
+
+Since **M90b** the `database` indicator gates on the service's lifecycle FIRST, uncached — a closed
+database reads `down` immediately, never from an outcome cached before close. The gate is re-read
+after the probe settles as well, so a poll already in flight when `close()` begins reports `down`
+rather than publishing the answer the probe had cached a moment earlier. That gate reads
+`DatabaseService.isClosed`, a lifecycle-only member that reaches no adapter, so **every**
+`IDatabaseAdapter.isReady()` call happens behind it, inside a cached, bounded probe — 5-second TTL,
+2-second bound, built on `createCachedProbe` — and an adapter whose readiness performs I/O cannot
+hang `/health` past the bound. Repeated polls cost at most one readiness read per TTL; gating on
+`isHealthy()` instead read the adapter on the one path deliberately outside that bound, and cost two
+reads per poll. The consequence is the ordinary TTL trade-off, and it is the same one every other
+M90b indicator makes: closing the database reads `down` on the very next poll, while an adapter that
+loses readiness on its own — a pool that ends itself — is served from the cache for up to the TTL
+before the indicator reports it. A Drizzle registration that supplies
+`DrizzleAdapterOptions.poolStats` — an application-owned callback reading the driver's own
+documented pool API — also publishes the returned `DatabasePoolCapacity` snapshot
+(`{ total, idle, waiting }`) under `data.capacity`. Omitted, the payload carries no capacity fields.
+Capacity is data, not policy: no threshold is applied and no status changes because of it
+(caller-facing pool-timeout status mapping is M90f). A snapshot the callback returns in a malformed
+shape is dropped exactly like an absent one — a broken reading is never published as a number. A
+callback that throws, or one whose counters violate the documented shape (a negative count, or
+`idle` exceeding `total`, which counts idle + in use), is dropped the same way: capacity is omitted
+for that poll and the indicator's own lifecycle and reachability answer stands.
+
 ### Database Interface
 
 ```typescript
@@ -1137,6 +1162,10 @@ interface IRepository<Entity, Id extends EntityKey = string> {
   count(options?: CountOptions): Promise<number>;
 }
 ```
+
+The concrete `DatabaseService` additionally exposes `readonly isClosed: boolean` (**since 0.5.0**) —
+a lifecycle-only read that reaches no adapter, added for the health indicator's uncached gate.
+`isHealthy()` answers lifecycle AND adapter readiness together; `isClosed` answers lifecycle alone.
 
 `query()` is the existing backend-specific raw-SQL escape hatch. It requires a configured Drizzle
 instance with `execute()`; typed builders obtained through the Drizzle accessors do not.
@@ -2502,6 +2531,23 @@ app.router.get('/users/:id', async (ctx) => {
 });
 ```
 
+### Health status
+
+Since **M90b** the indicator reports two signals, and no longer conflates them: the store's
+lifecycle (`isReady()`) and its reachability. The Redis store probes with a typed `ping()`; the
+memory and no-op stores report their live lifecycle truth (an in-process store has no separate
+backend to reach). The probe is cached for 5 seconds and bounded at 2 seconds through
+`createCachedProbe`, so polling `/health` never turns into backend load.
+
+| Status | Meaning                                                                                 |
+| ------ | --------------------------------------------------------------------------------------- |
+| `up`   | The store is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The store is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ store, name, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`
+when the store offers no probe. A store that cannot probe is never reported as reachable — the
+absent capability stays explicitly `'unknown'`.
+
 ### Cache Middleware
 
 Transparent response-caching middleware that stores full HTTP responses (status, headers, body) and
@@ -3650,6 +3696,24 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
   injection types.
 - `ISecretManager` — re-exported from `@setu-ts/common` (`get` / `has` / `rotate`).
 
+### Health status
+
+Since **M90b** the indicator reports two signals, and no longer conflates them: the provider's
+lifecycle (`isReady()`) and its reachability. Vault is probed with an unauthenticated request to
+`/v1/sys/health` — no secret read, no token; `EnvProvider` reports its lifecycle truth. The AWS,
+GCP, and Azure providers publish real reachability ONLY when the injected facade exposes the
+optional `isHealthy()` member: a cloud SDK facade with no non-mutating probe is reported
+`reachable: 'unknown'` rather than reading a secret as a probe — a read is not a health check and
+would alter the cache and billing profile of the capability. The probe is cached for 5 seconds and
+bounded at 2 seconds through `createCachedProbe`.
+
+| Status | Meaning                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------ |
+| `up`   | The provider is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
+| `down` | The provider is not connected, or is connected but unreachable.                            |
+
+`data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
+
 ### Notes
 
 - `EnvProvider` is read-only: `rotate()` and provider `set` throw, since environment variables
@@ -4069,6 +4133,24 @@ interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
   client?: never;
   defaultQueue?: string;
   replyTopic?: string;
+  /** SDK retry budget for the data client. Optional on this arm only (M90b / X28-6). */
+  retryOptions?: ServiceBusRetryOptions;
+}
+
+/** Azure Service Bus SDK retry budget — passed ONLY to `ServiceBusClient`, never to the
+ * administration client. `mode` is translated to the SDK's numeric `RetryMode` before the
+ * client is constructed (the SDK compares the value with `===` against its enum). Omission
+ * preserves the Azure SDK default (`maxRetries: 3`, `retryDelayInMs: 30000`,
+ * `maxRetryDelayInMs: 90000`, `mode: 'fixed'`, `timeoutInMs: 60000`); `maxRetries: 0` is the
+ * documented short budget for a deployment that must fail fast toward a dead broker rather
+ * than hold a request for the default chain.
+ */
+interface ServiceBusRetryOptions {
+  maxRetries?: number;
+  retryDelayInMs?: number;
+  maxRetryDelayInMs?: number;
+  mode?: 'fixed' | 'exponential';
+  timeoutInMs?: number;
 }
 
 /** Azure Service Bus options — exclusive union of injected and production arms. */
@@ -4348,6 +4430,7 @@ export type {
   RedisStreamsMessagingOptions,
   RedisStreamsOptions,
   ServiceBusMessagingOptions,
+  ServiceBusRetryOptions,
 } from '@setu-ts/messaging-plugin';
 
 // Port types (structural)
@@ -4431,6 +4514,14 @@ reachability. A ready-but-unreachable broker is `down` with `data.reachable: fal
 distinction an operator needs to tell "we never started" from "the broker restarted under us". An
 unprobeable broker (e.g. the `custom` arm without `isHealthy`) is `up` with
 `data.reachable: 'unknown'`, honestly reporting "we did not check".
+
+Since **M90b** the Service Bus broker's transport implements the probe it documents: one
+administration round trip (`getNamespaceProperties()`) proves the namespace is reachable, and a
+positively identified 401/403 counts as reachable too — the namespace ANSWERED with an auth verdict,
+which a send/listen-only credential legitimately produces and which is not a network outage. Every
+broker's probe is cached for 5 seconds and bounded at 2 seconds through `createCachedProbe`, so a
+dead broker can no longer hold a health poll for the full transport timeout, and repeated polls cost
+at most one round trip per TTL.
 
 | Status | Meaning                                                                                  |
 | ------ | ---------------------------------------------------------------------------------------- |
@@ -4702,15 +4793,24 @@ rather than reported as zeros on RabbitMQ and SQS, whose counts need a managemen
 `GetQueueAttributes`: "this adapter cannot tell you" and "there is nothing there" are different
 answers, and an operator acting on a dead-letter alert needs to tell them apart.
 
+Since **M90b** the payload also carries `backlog` whenever at least one depth read succeeded: the
+sum of each successfully-read name's `ready + processing` — unfinished work. `dead` is deliberately
+EXCLUDED: a dead-lettered job is terminal, already visible per name, and would otherwise make an
+attended dead-letter queue read as "backlog". A partial read sums what it could read. `backlog` is a
+fact, not a threshold — no status changes because of it and no admission policy reads it.
+
 The counts are read only once the adapter has reported itself reachable, so a `down` payload carries
 `{ adapter, reachable }` and no `queues`. Counting against a backend already known to be unreachable
 would cost a failing round trip per name on every probe interval and tell an operator nothing that
-`reachable: false` does not.
+`reachable: false` does not. The reachability probe itself is cached for 5 seconds and bounded at 2
+seconds through `createCachedProbe`, so concurrent health polls share one backend round trip per TTL
+and a hung backend cannot hold the response past the bound.
 
 ```json
 {
   "adapter": "RedisQueue",
   "reachable": true,
+  "backlog": 3,
   "queues": { "thumbnail": { "ready": 0, "processing": 0, "dead": 1 } }
 }
 ```
@@ -5759,6 +5859,18 @@ has that field **dropped rather than published**: excess-property checking does 
 `Promise.resolve({ ... })` at the generic call, so the mistyped field type-checks, and `/health` is
 frequently the least protected endpoint in a deployment. The `latencyMs` in the report is always the
 one the health service measured.
+
+Since **M90b** the selected indicators run **concurrently**, each raced against a per-indicator
+deadline (`indicatorTimeoutMs`, default 5,000 — a positive finite number of milliseconds; anything
+else — zero, negative, `NaN`, `Infinity` — throws. `HealthService` is barrel-exported, so the same
+validation runs in its constructor as in `HealthPlugin`: constructing the service directly cannot
+bypass the check and store a value the deadline timer cannot honour). Sequential awaiting multiplied
+outage latency — a 2-second outage across six dependency indicators held `/health` for 12+ seconds —
+and one never-settling indicator left the whole endpoint pending forever. A timeout is recorded as
+`{ status: 'down', data: { reason: 'timeout' } }` and a rejection as
+`{ status: 'down', data: { reason: 'error' } }` with the thrown value never serialized into the
+report; each indicator's `latencyMs` is measured individually; and `checks` keeps registration
+order, so the report's shape is stable even though execution is not.
 
 ```typescript
 interface HealthCheckResult {
@@ -8527,6 +8639,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `encodeFrameData(data)`                         | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `decodeFrameData(payload)`                      | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `createCachedProbe(options)`                    | function | Builds a cached, coalesced, time-bounded reachability probe from `{ probe, hrtime, ttlMs?, timeoutMs?, setTimer?, clearTimer? }`. `hrtime` and the timer seam come from `IRuntimeServices` so a custom runtime's clock and timers are honoured; the timers fall back to the ambient ones. Every plugin's `isHealthy()` is built through it so a `/health` scrape cannot become load against the backend; a probe that rejects or exceeds `timeoutMs` resolves `false`                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `resolveProbeTiming(runtime)`                   | function | Resolves a probe's clock-and-timer surface — `{ hrtime, setTimer, clearTimer }` bound to the injected `IRuntimeServices` (e.g. `ctx.runtime`), ready to spread into `createCachedProbe`'s options. NO ambient `performance.now()`/`Date.now()` fallback: all time access outside `packages/runtime` goes through `IRuntimeServices` (AI_GUIDELINES §4), so a caller with no runtime to inject has no clock the probe may lawfully read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `parseCookie(header)`                           | function | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `Cookie()` source both need it and no plugin may import another                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `serializeCookie(n, v, a?)`                     | function | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `isWorkerReadySignal(m)`                        | function | Guard: narrows a worker message to a `WorkerReadySignal`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -8574,7 +8687,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Logging             | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Config              | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Validation          | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`, `ProbeTiming`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                                                                                                                                                                                                                                                                                                                                                |

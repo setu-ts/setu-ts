@@ -8,7 +8,12 @@
  * @module
  */
 import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
-import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createCachedProbe,
+  createCapabilityToken,
+  PLUGIN_PRIORITY,
+} from '@setu-ts/common';
 import type {
   BigtableAdapterOptions,
   CosmosAdapterOptions,
@@ -29,11 +34,18 @@ import { DynamoAdapter } from '../adapters/dynamo/dynamo-adapter.ts';
 import { CosmosAdapter } from '../adapters/cosmos/cosmos-adapter.ts';
 import { BigtableAdapter } from '../adapters/bigtable/bigtable-adapter.ts';
 import type { IDatabaseAdapter } from '@setu-ts/common';
+import { readPoolCapacity } from '../health/database-capacity.ts';
 import type { DataSource } from '../repositories/base-repository.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Default adapter when none is specified. */
 const DEFAULT_ADAPTER: DatabaseAdapterType = 'memory';
+
+/** Reachability outcome cache lifetime for the health probe (M90b), in ms. */
+const PROBE_TTL_MS = 5000;
+
+/** Per-probe timeout (M90b), in milliseconds. A slower probe counts as unreachable. */
+const PROBE_TIMEOUT_MS = 2000;
 
 /** Plugin name — matches the package name without the scope. */
 const PLUGIN_NAME = 'database-plugin';
@@ -125,13 +137,50 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
       // Register the database service.
       ctx.services.register<IDatabaseService>(token, service);
 
-      // Register health indicator.
+      // Register health indicator. M90b: the LIFECYCLE gate is uncached, so
+      // a closed service reads down immediately — never from an outcome
+      // cached before close. It reads `service.isClosed`, which reaches no
+      // adapter: gating on `isHealthy()` also called `IDatabaseAdapter
+      // .isReady()`, so the one read deliberately OUTSIDE the bound was an
+      // adapter call, and every poll paid for two readiness reads. The
+      // cached, bounded probe (5-second TTL on the runtime's monotonic
+      // clock, 2-second bound on the runtime's timers) now owns every
+      // adapter call and coalesces concurrent polls, so a driver that
+      // answers readiness slowly cannot hold `/health` past the bound. A
+      // Drizzle registration with `poolStats` publishes the
+      // application-supplied capacity snapshot — data, never a threshold.
+      const probe = createCachedProbe({
+        probe: () => service.isHealthy(),
+        ttlMs: PROBE_TTL_MS,
+        timeoutMs: PROBE_TIMEOUT_MS,
+        hrtime: () => ctx.runtime.hrtime(),
+        setTimer: (fn, ms) => ctx.runtime.setTimeout(fn, ms),
+        clearTimer: (handle) => ctx.runtime.clearTimeout(handle),
+      });
+
       ctx.health.register(`${token}`, async () => {
-        const healthy = await service.isHealthy();
-        return {
-          status: healthy ? 'up' : 'down',
-          data: { adapter: adapterType, name: connectionName },
+        const capacity = readPoolCapacity(adapter);
+        const data = {
+          adapter: adapterType,
+          name: connectionName,
+          ...(capacity !== undefined && { capacity }),
         };
+        if (service.isClosed) {
+          return { status: 'down', data };
+        }
+        const healthy = await probe();
+        // Read the gate AGAIN. `close()` sets its flag synchronously and only
+        // then awaits `disconnect()`, so a poll that passed the gate and then
+        // awaited can be holding an answer the probe computed — or cached —
+        // BEFORE the close, and would publish `up` for a database that has
+        // begun closing. That is precisely what the uncached gate exists to
+        // prevent, so it has to hold for a concurrent poll too, not only for
+        // one that starts after the close. The re-read costs one field and
+        // reaches no adapter.
+        if (service.isClosed) {
+          return { status: 'down', data };
+        }
+        return { status: healthy ? 'up' : 'down', data };
       });
 
       // Register shutdown hook.
@@ -232,6 +281,10 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
   // had never been configured.
   carry('entities');
   carry('transactionTimeout');
+  // The Drizzle arm's application-owned pool callback (M90b). Without this
+  // carry the option would be dropped at the plugin boundary and the
+  // health indicator would silently lose its capacity data.
+  carry('poolStats');
   carry('client');
   carry('objectIdCtor');
   carry('database');

@@ -135,6 +135,7 @@ package fits the plugin architecture.
 | `replacePrincipal`                | function  |
 | `replaceTenant`                   | function  |
 | `resolveKeysetSort`               | function  |
+| `resolveProbeTiming`              | function  |
 | `resolveRegistryEntry`            | function  |
 | `resolveResponseStatus`           | function  |
 | `respondWithAuthorizationFailure` | function  |
@@ -300,6 +301,7 @@ package fits the plugin architecture.
 | `PageResult`                      | interface |
 | `PickOptions`                     | interface |
 | `ProcessOptions`                  | interface |
+| `ProbeTiming`                     | interface |
 | `ProviderOptions`                 | interface |
 | `PutObjectOptions`                | interface |
 | `RbacConfig`                      | interface |

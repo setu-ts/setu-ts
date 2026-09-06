@@ -75,6 +75,18 @@ export class MemoryStore implements CacheStore {
     return this.#ready;
   }
 
+  /**
+   * Lifecycle truth (M90b): an in-process Map has no separate backend to
+   * reach, so reachability IS readiness — the process either holds the map
+   * or it does not.
+   *
+   * @returns `true` when connected
+   * @since 0.5.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(this.#ready);
+  }
+
   async get<T>(key: string): Promise<T | null> {
     const entry = this.#map.get(key);
     if (entry === undefined) {

@@ -785,6 +785,7 @@ imperative begin/commit.
 | `CustomDatabaseOptions`                   | interface |
 | `DatabaseAdapterOptions`                  | interface |
 | `DatabaseConnectionOptions`               | interface |
+| `DatabasePoolCapacity`                    | interface |
 | `DrizzleAdapterOptions`                   | interface |
 | `DrizzleCompositeKeyOptions`              | interface |
 | `DrizzleDatabase`                         | interface |

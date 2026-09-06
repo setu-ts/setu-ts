@@ -6,7 +6,72 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`@setu-ts/messaging-plugin` — Service Bus transport reachability and a retry budget (M90b /
+  X28-5, X28-6).** The adapted `ServiceBusSdkModule` administration client gains an optional
+  `getNamespaceProperties()` and the adapted transport now implements the documented `isHealthy()`
+  probe: a successful read proves the namespace is reachable, a positively identified 401/403 counts
+  as reachable too (the namespace answered — a send/listen-only credential is not a network outage),
+  and any other failure is unreachability. The new `ServiceBusRetryOptions` type (exported) is
+  accepted as `retryOptions` on the `service-bus` production arm only and is passed to
+  `ServiceBusClient` alone, never to the administration client; omission preserves the Azure SDK
+  defaults and `maxRetries: 0` is the documented short budget for failing fast toward a dead broker.
+
+- **`@setu-ts/health-plugin` — bounded, concurrent aggregation.** New
+  `HealthPluginOptions.indicatorTimeoutMs` (positive finite, default 5,000) applies a per-indicator
+  deadline; the service runs selected indicators concurrently, records each latency individually,
+  maps a timeout to `{ status: 'down', data: { reason: 'timeout' } }` and a rejection to
+  `{ status: 'down', data: { reason: 'error' } }` without serializing the thrown value, and keeps
+  `checks` in registration order. The deadline is validated by ONE check shared by both entry
+  points: `HealthService` is barrel-exported, so
+  `new HealthService(runtime, { indicatorTimeoutMs })` refuses zero, a negative, `NaN` and
+  `Infinity` exactly as `HealthPlugin` does rather than storing a value the deadline timer cannot
+  honour. See **Changed** for the behavior change to timing.
+
+- **`@setu-ts/database-plugin` — pool capacity as data.** New `DatabasePoolCapacity` type (exported)
+  and `DrizzleAdapterOptions.poolStats` — an application-owned callback reading the driver's own
+  pool API. The adapter publishes the snapshot to the `database` indicator under `data.capacity`;
+  omitted, no capacity fields appear. No threshold is applied. `DatabaseService` also gains
+  `readonly isClosed: boolean` — a lifecycle-only read that reaches no adapter — which is what the
+  indicator's uncached gate now reads: gating on `isHealthy()` called `IDatabaseAdapter.isReady()`
+  on the one path deliberately outside the probe's 2-second bound, and cost two readiness reads per
+  poll. Every adapter readiness call now happens inside the bounded, cached probe, and the gate is
+  re-read after the probe settles so a poll already in flight when `close()` begins cannot publish a
+  reachability answer the probe cached before it.
+
+- **`@setu-ts/cache-plugin`, `@setu-ts/secrets-plugin` — truthful reachability.** The `cache` and
+  `secrets` indicators now report `reachable` (`true`/`false`/`'unknown'`) beside lifecycle, through
+  probes cached 5 s and bounded 2 s via `createCachedProbe`: Redis probes with `ping()`, Vault with
+  an unauthenticated `/v1/sys/health` request (no secret read, no token), memory/noop/env report
+  lifecycle truth, and a cloud facade without the new optional `isHealthy()` member reports
+  `'unknown'` — never a secret read standing in for a probe.
+
+- **`@setu-ts/queue-plugin` — `backlog` fact.** The `queue` indicator carries `backlog` whenever at
+  least one depth read succeeded: the sum of each successful name's `ready + processing`,
+  deliberately excluding terminal `dead`. A fact, not a threshold.
+
 ### Changed
+
+- **BREAKING — `@setu-ts/cache-plugin` — `IRedisClient` gains a required `ping()`.** The Redis
+  store's reachability probe invokes it. Migration: an injected client structurally typed as
+  `IRedisClient` adds `ping(): Promise<string>` (ioredis already has it); the probe treats a
+  rejection as unreachability.
+
+- **BREAKING (behavior) — `@setu-ts/health-plugin` — indicators run concurrently under a deadline.**
+  Previously each selected indicator was awaited in registration order, so a 2-second outage across
+  six dependency indicators held `/health` for 12+ seconds and one never-settling indicator left the
+  endpoint pending forever. A timeout is now recorded as
+  `{ status: 'down', data: { reason: 'timeout' } }` and a rejection as
+  `{ status: 'down', data: { reason: 'error' } }`; report shape and key order are unchanged.
+  Migration: an indicator relying on serial execution relative to a sibling (none is documented to)
+  no longer gets it; assert on the report, not on wall-clock interleaving.
+
+- **`@setu-ts/realtime-backplane-plugin` — the `'messaging'` backplane calls the broker's
+  `isHealthy()` through its owner (X21-1).** The probe was captured as a detached reference, so a
+  broker whose `isHealthy` reads instance state (`ServiceBusBroker`'s private probe cache) threw a
+  bare `TypeError` through the health endpoint. It now invokes `broker.isHealthy()` and retains the
+  broker's own probe cache rather than adding a duplicate one.
 
 - **BREAKING — `@setu-ts/auth-plugin` — refresh-token stores now revoke credential families.**
   `RefreshTokenStore` gains required atomic `rotate(jti, successor)` and `revokeFamily(jti)`, and

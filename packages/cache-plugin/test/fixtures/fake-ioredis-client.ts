@@ -24,6 +24,8 @@ export interface FakeIoredisOptions {
   initialData?: Record<string, unknown>;
   /** Whether `connect()` should succeed (default `true`). */
   connectSucceeds?: boolean;
+  /** Whether `ping()` should succeed (default `true`). `false` simulates an outage. */
+  pingSucceeds?: boolean;
 }
 
 /**
@@ -48,7 +50,17 @@ export function createFakeIoredis(opts?: FakeIoredisOptions): {
     }
   }
 
+  const pingSucceeds = opts?.pingSucceeds ?? true;
+
   const client: IRedisClient = {
+    async ping(): Promise<string> {
+      calls.push({ method: 'ping', args: [] });
+      if (!pingSucceeds) {
+        throw new Error('PING failed');
+      }
+      return 'PONG';
+    },
+
     async get(key: string): Promise<string | null> {
       calls.push({ method: 'get', args: [key] });
       const val = data.get(key);

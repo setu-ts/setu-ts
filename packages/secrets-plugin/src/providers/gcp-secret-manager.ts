@@ -120,6 +120,16 @@ export async function loadGcpModule(): Promise<GcpSdkModule> {
 export class GcpSecretManagerProvider implements SecretProvider {
   #client: IGcpSecretsClient | null = null;
   readonly #options: GcpSecretManagerProviderOptions;
+  /**
+   * Reachability probe, present only when the resolved client supplies one
+   * (M90b). The GCP SDK facade has no non-mutating probe of its own, so the
+   * adapted (lazy) path stays `undefined` and the indicator reports
+   * `reachable: 'unknown'`; an injected facade that exposes `isHealthy`
+   * publishes real reachability.
+   *
+   * @since 0.5.0
+   */
+  isHealthy?: () => Promise<boolean>;
 
   /**
    * @param options - GCP connection/injection options
@@ -137,6 +147,7 @@ export class GcpSecretManagerProvider implements SecretProvider {
         );
       }
       this.#client = injected;
+      this.#attachProbe(injected);
       return;
     }
     this.#client = adaptGcpModule(await loadGcpModule(), this.#options.projectId);
@@ -149,6 +160,21 @@ export class GcpSecretManagerProvider implements SecretProvider {
 
   isReady(): boolean {
     return this.#client !== null;
+  }
+
+  /**
+   * Exposes the injected facade's optional probe, called through its OWNER
+   * so a facade reading instance state still resolves.
+   *
+   * @param client - The validated injected facade
+   */
+  #attachProbe(client: IGcpSecretsClient): void {
+    // Captured into a local before the guard so the closure keeps the
+    // narrowed function type and still calls through the owner.
+    const probe = client.isHealthy;
+    if (typeof probe === 'function') {
+      this.isHealthy = (): Promise<boolean> => probe.call(client);
+    }
   }
 
   /**

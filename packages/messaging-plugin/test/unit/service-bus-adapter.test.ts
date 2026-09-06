@@ -934,4 +934,174 @@ describe('adaptServiceBusModule', () => {
       expect(receiverCloses).toEqual(['orders/group']);
     });
   });
+
+  describe('namespace reachability probe (M90b)', () => {
+    interface ClientCtorCall {
+      connectionString: string;
+      options?: { retryOptions?: unknown } | undefined;
+    }
+
+    /** Minimal module with an admin whose namespace read and the data client's constructor args are captured. */
+    function createProbeModule(adminBehavior: () => Promise<unknown>): {
+      mod: ServiceBusSdkModule;
+      clientCtorCalls: ClientCtorCall[];
+    } {
+      const clientCtorCalls: ClientCtorCall[] = [];
+      const mod = {
+        // Numeric values match `@azure/core-amqp`'s RetryMode enum.
+        RetryMode: { Exponential: 0, Fixed: 1 },
+        ServiceBusClient: class {
+          constructor(connectionString: string, options?: { retryOptions?: unknown }) {
+            clientCtorCalls.push({ connectionString, options });
+          }
+          createSender() {
+            return {
+              sendMessages: () => Promise.resolve(),
+              close: () => Promise.resolve(),
+            };
+          }
+          createReceiver() {
+            return {
+              subscribe: () => ({ close: () => Promise.resolve() }),
+              completeMessage: () => Promise.resolve(),
+              abandonMessage: () => Promise.resolve(),
+              close: () => Promise.resolve(),
+            };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+        ServiceBusAdministrationClient: class {
+          createSubscription() {
+            return Promise.resolve();
+          }
+          deleteSubscription() {
+            return Promise.resolve();
+          }
+          getNamespaceProperties() {
+            return adminBehavior();
+          }
+        },
+      } as unknown as ServiceBusSdkModule;
+      return { mod, clientCtorCalls };
+    }
+
+    function authorizeError(status: number): Error {
+      return Object.assign(new Error(`authorization failed`), { statusCode: status });
+    }
+
+    it('resolves true when the namespace read succeeds', async () => {
+      const { mod } = createProbeModule(() => Promise.resolve({ createdTimeUtc: 'x' }));
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://demo/',
+      });
+      expect(typeof transport.isHealthy).toBe('function');
+      await expect(transport.isHealthy!()).resolves.toBe(true);
+    });
+
+    it('counts a positively identified 401 as reachable — the namespace answered', async () => {
+      const { mod } = createProbeModule(() => Promise.reject(authorizeError(401)));
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://demo/',
+      });
+      await expect(transport.isHealthy!()).resolves.toBe(true);
+    });
+
+    it('counts a positively identified 403 as reachable', async () => {
+      const { mod } = createProbeModule(() => Promise.reject(authorizeError(403)));
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://demo/',
+      });
+      await expect(transport.isHealthy!()).resolves.toBe(true);
+    });
+
+    it('resolves false on any other failure — an outage, not an auth verdict', async () => {
+      const { mod } = createProbeModule(() =>
+        Promise.reject(Object.assign(new Error('timeout'), { statusCode: 500 }))
+      );
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://demo/',
+      });
+      await expect(transport.isHealthy!()).resolves.toBe(false);
+    });
+
+    it('omits isHealthy when the administration client has no namespace read', () => {
+      const mod = {
+        ServiceBusClient: class {
+          constructor(_cs: string) {}
+          createSender() {
+            return { sendMessages: () => Promise.resolve(), close: () => Promise.resolve() };
+          }
+          createReceiver() {
+            return { subscribe: () => ({ close: () => Promise.resolve() }) };
+          }
+          close() {
+            return Promise.resolve();
+          }
+        },
+        ServiceBusAdministrationClient: class {
+          createSubscription() {
+            return Promise.resolve();
+          }
+          deleteSubscription() {
+            return Promise.resolve();
+          }
+        },
+      } as unknown as ServiceBusSdkModule;
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://demo/',
+      });
+      // A minimal fake degrades to `unknown` (no member), never a false `down`.
+      expect(transport.isHealthy).toBeUndefined();
+    });
+
+    it('passes the retry budget to the DATA client constructor only', () => {
+      const retryOptions = { maxRetries: 0, mode: 'fixed' as const };
+      const { mod, clientCtorCalls } = createProbeModule(() => Promise.resolve({}));
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://admin/',
+        retryOptions,
+      });
+      expect(clientCtorCalls).toHaveLength(1);
+      expect(clientCtorCalls[0].connectionString).toBe('Endpoint=sb://demo/');
+      // `mode` arrives translated to the SDK's numeric RetryMode (Fixed = 1).
+      expect(clientCtorCalls[0].options).toEqual({
+        retryOptions: { maxRetries: 0, mode: mod.RetryMode.Fixed },
+      });
+      void transport;
+    });
+
+    it('translates the exponential mode string to the SDK numeric enum', () => {
+      const { mod, clientCtorCalls } = createProbeModule(() => Promise.resolve({}));
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://admin/',
+        retryOptions: { mode: 'exponential', retryDelayInMs: 100 },
+      });
+      // Without the translation the SDK's `=== RetryMode.Exponential`
+      // comparison would silently treat 'exponential' as fixed delay.
+      expect(clientCtorCalls[0].options).toEqual({
+        retryOptions: { mode: mod.RetryMode.Exponential, retryDelayInMs: 100 },
+      });
+      void transport;
+    });
+
+    it('omits the client options object when no retry budget is configured', () => {
+      const { mod, clientCtorCalls } = createProbeModule(() => Promise.resolve({}));
+      adaptServiceBusModule(mod, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://demo/',
+      });
+      // The constructor is called with the connection string alone, so the
+      // SDK default retry policy is untouched.
+      expect(clientCtorCalls[0].options).toBeUndefined();
+    });
+  });
 });

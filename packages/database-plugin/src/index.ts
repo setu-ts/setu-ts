@@ -27,6 +27,7 @@ export type {
   DatabaseAdapterType,
   DatabaseConnectionOptions,
   DatabasePluginOptions,
+  DatabasePoolCapacity,
   DrizzleAdapterOptions,
   DrizzleCompositeKeyOptions,
   DrizzleDatabaseOptions,

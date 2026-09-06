@@ -330,6 +330,7 @@ export function MessagingPlugin(
           client?: import('../brokers/service-bus-broker.ts').IServiceBusTransport;
           defaultQueue?: string;
           replyTopic?: string;
+          retryOptions?: import('../interfaces/index.ts').ServiceBusRetryOptions;
         };
         const serviceBusOptions: import('../brokers/service-bus-broker.ts').ServiceBusOptions = {};
         if (serviceBusOpts.connectionString !== undefined) {
@@ -344,6 +345,9 @@ export function MessagingPlugin(
         }
         if (serviceBusOpts.replyTopic !== undefined) {
           serviceBusOptions.replyTopic = serviceBusOpts.replyTopic;
+        }
+        if (serviceBusOpts.retryOptions !== undefined) {
+          serviceBusOptions.retryOptions = serviceBusOpts.retryOptions;
         }
         if (logger !== undefined) serviceBusOptions.logger = logger;
         broker = new ServiceBusBroker(ctx.runtime, serializer, serviceBusOptions);

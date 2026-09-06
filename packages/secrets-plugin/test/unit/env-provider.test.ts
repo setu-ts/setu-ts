@@ -39,4 +39,11 @@ describe('EnvProvider', () => {
     const provider = new EnvProvider({});
     await expect(provider.set('k', 'v')).rejects.toThrow('EnvProvider is read-only');
   });
+
+  describe('isHealthy (M90b)', () => {
+    it('resolves true — the environment is process state, always reachable', async () => {
+      const provider = new EnvProvider({});
+      await expect(provider.isHealthy()).resolves.toBe(true);
+    });
+  });
 });

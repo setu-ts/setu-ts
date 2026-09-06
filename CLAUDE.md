@@ -4439,6 +4439,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `defaultRateLimitKey`'s JSDoc (C3) still recommended bare `trustProxy` as remedy #1 — the
   configuration X32-3 shows is attacker-controlled. The review also corrected an inaccuracy in its
   OWN fix, whose comment overstated what the `try` covered) — complete (PR #247)
+- **Milestone 90b** (`packages/secrets-plugin` + `packages/cache-plugin` +
+  `packages/realtime-backplane-plugin` + `packages/messaging-plugin` + `packages/health-plugin` +
+  `packages/queue-plugin` + `packages/database-plugin` — health that tells the truth, bounded) —
+  complete (PR #249). The last two packages without the `isHealthy` seam (X20-1/X29-1) now probe
+  real reachability through `createCachedProbe` (5 s TTL, 2 s bound, runtime clock and timers):
+  cache via a typed `ping()` on `IRedisClient` (BREAKING for injected-client facades — required
+  member), Vault via an unauthenticated `/v1/sys/health` request (no secret read, no token),
+  memory/noop/env via lifecycle truth, and cloud secrets via an OPTIONAL `isHealthy()` on the
+  injected facades — a facade without it reports `reachable: 'unknown'`, never a secret read
+  standing in for a probe. X28-5: the Service Bus adapter implements the probe its JSDoc claimed —
+  one administration `getNamespaceProperties()` round trip, with a positively identified 401/403
+  counted as reachable (the namespace answered — a send/listen-only credential is not an outage) —
+  and the broker owns the cached probe, while the new `ServiceBusRetryOptions` (production arm only)
+  gives X28-6's documented `maxRetries: 0` escape hatch without touching the SDK defaults. X21-1:
+  the messaging backplane calls `broker.isHealthy()` through its owner instead of a detached
+  reference that threw on any stateful broker. X29-2: health aggregation runs selected indicators
+  CONCURRENTLY under a per-indicator deadline (`HealthPluginOptions.indicatorTimeoutMs`, default
+  5,000, validated at construction), mapping timeouts to `{ reason: 'timeout' }` and rejections to
+  `{ reason: 'error' }` without serializing the throw; registration order is preserved in `checks`.
+  X35-1/X25-1 publish saturation as data, not policy: a Drizzle `poolStats` callback
+  (application-owned; new exported `DatabasePoolCapacity`) surfaces `data.capacity`, and the queue
+  indicator carries `backlog` = Σ(ready + processing) over successfully-read names, `dead`
+  deliberately excluded as terminal.
 - **Milestone 90c** (`auth-plugin` — credential revocation and token type) — complete (PR #248).
   Refresh pairs have distinct typed identifiers; refresh credentials cannot authenticate as bearer
   access tokens; logout and replay call `RefreshTokenStore.revokeFamily`, then revoke each paired
@@ -4451,7 +4474,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   produced **8 findings, 4 High**, all now closed as M89a (declarations that enforce nothing), M89b
   (caller errors that read as server faults), and M89c (the ingress surface above) — grouped by
   defect **shape** rather than by package, the M70a–M70n precedent. The X20–X38 register that
-  follows it is being closed the same way: M90a (abuse control) is complete; M90b–M90f remain open.
+  follows it is being closed the same way: M90a (abuse control), M90b (health truth bounded, PR
+  pending), and M90c (credential revocation and token type) are complete; M90d–M90f remain open.
 
 ## Verification (run before declaring any work done)
 

@@ -35,6 +35,17 @@ export class NoopStore implements CacheStore {
     return this.#ready;
   }
 
+  /**
+   * Lifecycle truth (M90b): the no-op backend stores nothing, so the only
+   * honest reachability answer is whether the store is connected.
+   *
+   * @returns `true` when connected
+   * @since 0.5.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(this.#ready);
+  }
+
   get<T>(_key: string): Promise<T | null> {
     return Promise.resolve(null);
   }

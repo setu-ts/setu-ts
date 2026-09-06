@@ -54,6 +54,17 @@ export class EnvProvider implements SecretProvider {
   }
 
   /**
+   * Lifecycle truth (M90b): environment variables are process state, so the
+   * only honest reachability answer is readiness.
+   *
+   * @returns `true` — the environment is always reachable
+   * @since 0.5.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(this.isReady());
+  }
+
+  /**
    * Reads the environment variable for a secret name.
    *
    * @param name - Secret name/path

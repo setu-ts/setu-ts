@@ -158,6 +158,26 @@ export class DatabaseService implements IDatabaseService {
     );
   }
 
+  /**
+   * Reports whether {@linkcode close} has run — a LIFECYCLE-only read that
+   * reaches no adapter and performs no I/O (M90b).
+   *
+   * `isHealthy()` answers two questions at once: the service's own lifecycle
+   * AND the adapter's readiness. The `database` health indicator gates on
+   * lifecycle uncached — a closed database must read `down` immediately,
+   * never from an outcome cached before close — and bounds the adapter
+   * question inside its cached probe. Reading `isHealthy()` for the gate
+   * therefore called the adapter on the ONE path that is deliberately
+   * outside that bound, and made a poll cost two readiness reads instead of
+   * one. This is the gate.
+   *
+   * @returns `true` once the service has been closed
+   * @since 0.5.0
+   */
+  get isClosed(): boolean {
+    return this._closed;
+  }
+
   /** @inheritdoc */
   isHealthy(): Promise<boolean> {
     if (this._closed) return Promise.resolve(false);

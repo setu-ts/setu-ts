@@ -120,6 +120,16 @@ function buildAwsConfig(
 export class AwsKmsProvider implements SecretProvider {
   #client: IAwsSecretsClient | null = null;
   readonly #options: AwsKmsProviderOptions;
+  /**
+   * Reachability probe, present only when the resolved client supplies one
+   * (M90b). The AWS SDK facade has no non-mutating probe of its own, so the
+   * adapted (lazy) path stays `undefined` and the indicator reports
+   * `reachable: 'unknown'`; an injected facade that exposes `isHealthy`
+   * publishes real reachability.
+   *
+   * @since 0.5.0
+   */
+  isHealthy?: () => Promise<boolean>;
 
   /**
    * @param options - AWS connection/injection options
@@ -137,6 +147,7 @@ export class AwsKmsProvider implements SecretProvider {
         );
       }
       this.#client = injected;
+      this.#attachProbe(injected);
       return;
     }
     this.#client = adaptAwsModule(await loadAwsModule(), this.#options);
@@ -149,6 +160,21 @@ export class AwsKmsProvider implements SecretProvider {
 
   isReady(): boolean {
     return this.#client !== null;
+  }
+
+  /**
+   * Exposes the injected facade's optional probe, called through its OWNER
+   * so a facade reading instance state still resolves.
+   *
+   * @param client - The validated injected facade
+   */
+  #attachProbe(client: IAwsSecretsClient): void {
+    // Captured into a local before the guard so the closure keeps the
+    // narrowed function type and still calls through the owner.
+    const probe = client.isHealthy;
+    if (typeof probe === 'function') {
+      this.isHealthy = (): Promise<boolean> => probe.call(client);
+    }
   }
 
   /**

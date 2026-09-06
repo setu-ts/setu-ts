@@ -9239,7 +9239,7 @@ fields (`code` first) read through the same guard, plus
 | 89b       | ✅     | caller errors read as server faults (X18-2, X19-1)                                         |
 | 89c       | ✅     | 0.3.0 ingress surface (X16-1, X16-2)                                                       |
 | 90a       | ✅     | abuse control that actually protects                                                       |
-| 90b       | ⬜     | health that tells the truth, bounded                                                       |
+| 90b       | ✅     | health that tells the truth, bounded                                                       |
 | 90c       | ✅     | credential revocation and token type ([#248](https://github.com/setu-ts/setu-ts/pull/248)) |
 | 90d       | ⬜     | the two brokers that cannot start                                                          |
 | 90e       | ⬜     | static delivery correctness                                                                |

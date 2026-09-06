@@ -116,6 +116,16 @@ export async function loadAzureModule(): Promise<AzureSdkModule> {
 export class AzureKeyVaultProvider implements SecretProvider {
   #client: IAzureSecretsClient | null = null;
   readonly #options: AzureKeyVaultProviderOptions;
+  /**
+   * Reachability probe, present only when the resolved client supplies one
+   * (M90b). The Azure SDK facade has no non-mutating probe of its own, so
+   * the adapted (lazy) path stays `undefined` and the indicator reports
+   * `reachable: 'unknown'`; an injected facade that exposes `isHealthy`
+   * publishes real reachability.
+   *
+   * @since 0.5.0
+   */
+  isHealthy?: () => Promise<boolean>;
 
   /**
    * @param options - Azure connection/injection options
@@ -133,6 +143,7 @@ export class AzureKeyVaultProvider implements SecretProvider {
         );
       }
       this.#client = injected;
+      this.#attachProbe(injected);
       return;
     }
     this.#client = adaptAzureModule(await loadAzureModule(), this.#options.vaultUrl);
@@ -145,6 +156,21 @@ export class AzureKeyVaultProvider implements SecretProvider {
 
   isReady(): boolean {
     return this.#client !== null;
+  }
+
+  /**
+   * Exposes the injected facade's optional probe, called through its OWNER
+   * so a facade reading instance state still resolves.
+   *
+   * @param client - The validated injected facade
+   */
+  #attachProbe(client: IAzureSecretsClient): void {
+    // Captured into a local before the guard so the closure keeps the
+    // narrowed function type and still calls through the owner.
+    const probe = client.isHealthy;
+    if (typeof probe === 'function') {
+      this.isHealthy = (): Promise<boolean> => probe.call(client);
+    }
   }
 
   /**

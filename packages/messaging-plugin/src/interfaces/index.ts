@@ -467,6 +467,39 @@ export type PubSubMessagingOptions =
   | PubSubMessagingOptionsProduction;
 
 /**
+ * Azure Service Bus SDK retry budget for the data client (M90b / X28-6).
+ *
+ * Shape mirrors `@azure/service-bus`'s `RetryOptions`: `maxRetries`,
+ * `retryDelayInMs`, `maxRetryDelayInMs`, `mode`, and `timeoutInMs`. It is
+ * passed ONLY to `ServiceBusClient` — never to the administration client,
+ * whose pipeline options are a different contract. Omission preserves the
+ * Azure SDK default; `maxRetries: 0` is the documented short retry budget
+ * for a deployment that must fail fast toward a dead broker rather than
+ * hold a request for the 90 s default chain.
+ *
+ * @since 0.5.0
+ */
+export interface ServiceBusRetryOptions {
+  /**
+   * Maximum number of retry attempts before an operation fails.
+   * The SDK default is `3`; `0` disables retries entirely.
+   */
+  readonly maxRetries?: number;
+  /** Delay before the first retry, in milliseconds. The SDK default is `30000`. */
+  readonly retryDelayInMs?: number;
+  /** Ceiling the exponential backoff grows to, in milliseconds. The SDK default is `90000`. */
+  readonly maxRetryDelayInMs?: number;
+  /**
+   * Backoff curve. Translated to the SDK's numeric `RetryMode` before
+   * `ServiceBusClient` is constructed (the SDK compares the value with
+   * `===` against its enum). The SDK default when omitted is `'fixed'`.
+   */
+  readonly mode?: 'fixed' | 'exponential';
+  /** Whole-operation timeout, in milliseconds. The SDK default is `60000`. */
+  readonly timeoutInMs?: number;
+}
+
+/**
  * Azure Service Bus arm — injected transport variant.
  *
  * When {@link client} is provided, production credentials are not required.
@@ -501,6 +534,14 @@ export interface ServiceBusMessagingOptionsProduction extends MessagingCommonOpt
   client?: never;
   defaultQueue?: string;
   replyTopic?: string;
+  /**
+   * SDK retry budget for the data client (M90b / X28-6). Optional on the
+   * production arm only — an injected transport owns its own client and its
+   * retry configuration. Omitted preserves the Azure SDK default.
+   *
+   * @since 0.5.0
+   */
+  retryOptions?: ServiceBusRetryOptions;
 }
 
 /**

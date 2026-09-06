@@ -57,4 +57,113 @@ describe('ServiceBusBroker health (M70c)', () => {
     expect(await broker.reachability()).toBeUndefined();
     expect(await broker.isHealthy()).toBe(true); // not known down
   });
+
+  describe('bounded, cached probe (M90b)', () => {
+    /**
+     * Runtime with a MANUALLY advanced monotonic clock, so TTL expiry is
+     * driven by the test rather than the wall clock.
+     */
+    function createManualRuntime(): {
+      runtime: ReturnType<typeof createFakeRuntime>;
+      advance: (ms: number) => void;
+    } {
+      let clock = 0;
+      const base = createFakeRuntime();
+      const runtime = {
+        ...base,
+        hrtime: () => clock,
+      } as ReturnType<typeof createFakeRuntime>;
+      return { runtime, advance: (ms: number) => void (clock += ms) };
+    }
+
+    it('serves repeated reachability calls from the 5s cache', async () => {
+      const manual = createManualRuntime();
+      let transportProbes = 0;
+      const broker = new ServiceBusBroker(manual.runtime, new JsonSerializer(), {
+        connectionString: 'Endpoint=sb://test/',
+        client: makeTransport(() => {
+          transportProbes++;
+          return Promise.resolve(true);
+        }),
+      });
+      await broker.connect();
+
+      await broker.reachability();
+      await broker.reachability();
+      manual.advance(4_999);
+      await broker.reachability();
+      // All three answered from the one cached outcome.
+      expect(transportProbes).toBe(1);
+
+      manual.advance(1); // TTL boundary crossed: 5_000 elapsed.
+      await broker.reachability();
+      expect(transportProbes).toBe(2);
+    });
+
+    it('bounds a hung transport: reachability resolves false after the 2s deadline', async () => {
+      const runtime = createFakeRuntime();
+      const timers: Array<{ at: number; fn: () => void }> = [];
+      let clock = 0;
+      const manualRuntime = {
+        ...runtime,
+        hrtime: () => clock,
+        setTimeout: (fn: () => void, ms: number) => {
+          timers.push({ at: clock + ms, fn });
+          return { id: timers.length };
+        },
+        clearTimeout: (_handle: unknown) => {},
+      } as ReturnType<typeof createFakeRuntime>;
+
+      const broker = new ServiceBusBroker(manualRuntime, new JsonSerializer(), {
+        connectionString: 'Endpoint=sb://test/',
+        client: makeTransport(() => new Promise(() => {})), // never settles
+      });
+      await broker.connect();
+
+      const pending = broker.reachability();
+      // Fire the deadline timer the probe armed.
+      clock = 2_000;
+      for (const timer of timers.splice(0)) timer.fn();
+      expect(await pending).toBe(false);
+      expect(await broker.isHealthy()).toBe(false);
+    });
+
+    it('does not report a broker down when a hung transport later answers true', async () => {
+      // Two consecutive calls inside the TTL share ONE in-flight probe; the
+      // hung transport's eventual answer is not double-counted.
+      const runtime = createFakeRuntime();
+      let released: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        released = resolve;
+      });
+      let probes = 0;
+      const broker = new ServiceBusBroker(runtime, new JsonSerializer(), {
+        connectionString: 'Endpoint=sb://test/',
+        client: makeTransport(() => {
+          probes++;
+          return gate.then(() => true);
+        }),
+      });
+      await broker.connect();
+
+      const first = broker.reachability();
+      const second = broker.reachability();
+      released!();
+      expect(await first).toBe(true);
+      expect(await second).toBe(true);
+      expect(probes).toBe(1);
+    });
+
+    it('drops the cached probe on disconnect: reachability is unknown afterwards', async () => {
+      const broker = makeBroker(makeTransport(() => Promise.resolve(true)));
+      await broker.connect();
+      expect(await broker.reachability()).toBe(true);
+      await broker.disconnect();
+      // Post-close the broker has no transport to probe: `undefined` ("not
+      // known down", M70c) — never the cached stale `true`, and never a
+      // fresh probe fired against the closed client.
+      expect(await broker.reachability()).toBeUndefined();
+      expect(await broker.isHealthy()).toBe(true);
+    });
+  });
 });

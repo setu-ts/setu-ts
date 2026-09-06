@@ -734,8 +734,17 @@ describe("DatabasePlugin — the 'cosmos' arm", () => {
     // Driven through the indicator the plugin REGISTERS, not `isReady()` — the
     // health path is what this asserts, and `cosmos-adapter.test.ts` already
     // covers the readiness sequence on its own. `register()` connects the
-    // adapter, so the transition worth pinning is up → down, which is how the
-    // memory arm's indicator test above is written too.
+    // adapter, so the transition worth pinning is up → down.
+    //
+    // The close goes through the SERVICE, which is both the production path
+    // (the plugin's `onClose` hook calls it) and the one the memory arm's
+    // indicator test above uses. It is also the transition the indicator
+    // answers WITHOUT consulting the adapter: the uncached gate reads
+    // `DatabaseService.isClosed`, so a closed database reads `down`
+    // immediately even though the first poll left a warm `up` in the probe's
+    // 5-second cache. Disconnecting the adapter behind the service's back is
+    // a REACHABILITY change instead, and reachability is cached for the TTL
+    // here exactly as it is in every other M90b indicator.
     const fake = createFakeCosmosClient({ containers: { Order: { partitionKeyPaths: ['/id'] } } });
     const adapter = new CosmosAdapter({ client: fake.client, database: 'app' });
     const healthChecks: Map<string, () => Promise<unknown>> = new Map();
@@ -747,7 +756,8 @@ describe("DatabasePlugin — the 'cosmos' arm", () => {
     await plugin.register!(ctx);
     const indicator = healthChecks.get('database')!;
     expect((await indicator() as { status: string }).status).toBe('up');
-    await adapter.disconnect();
+    await ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE).close();
     expect((await indicator() as { status: string }).status).toBe('down');
+    expect(adapter.isReady()).toBe(false);
   });
 });

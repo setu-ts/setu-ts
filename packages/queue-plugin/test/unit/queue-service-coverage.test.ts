@@ -558,3 +558,124 @@ describe('health indicator — depth probing is ordered behind reachability (X8-
     });
   });
 });
+
+describe('health indicator — cached reachability and backlog (M90b)', () => {
+  it('serves repeated indicator invocations from one probe per TTL', async () => {
+    const adapter = new MemoryQueue();
+    let probes = 0;
+    adapter.isHealthy = () => {
+      probes++;
+      return Promise.resolve(true);
+    };
+    const runtime = new FakeRuntimeServices();
+    const service = new QueueService(adapter, runtime);
+    await service.connect();
+
+    const indicator = service.createHealthIndicator();
+    await indicator();
+    await indicator();
+    // Both answered from the cached outcome — no second backend round trip.
+    expect(probes).toBe(1);
+
+    // Past the 5-second TTL, the next call probes afresh. The sweep fires the
+    // worker-loop interval too, which is harmless with no jobs registered.
+    await runtime.advanceMs(5_100);
+    await indicator();
+    expect(probes).toBe(2);
+  });
+
+  it('coalesces concurrent invocations into one in-flight probe', async () => {
+    const adapter = new MemoryQueue();
+    let probes = 0;
+    adapter.isHealthy = () => {
+      probes++;
+      return new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1));
+    };
+    const service = new QueueService(adapter, new FakeRuntimeServices());
+    await service.connect();
+
+    const indicator = service.createHealthIndicator();
+    await Promise.all([indicator(), indicator(), indicator()]);
+    expect(probes).toBe(1);
+  });
+
+  it('publishes backlog as the sum of ready + processing across successfully read names', async () => {
+    const adapter = new MemoryQueue();
+    const depths = new Map<string, { ready: number; processing: number; dead: number }>([
+      ['thumbnail', { ready: 2, processing: 1, dead: 7 }],
+      ['render', { ready: 0, processing: 4, dead: 9 }],
+    ]);
+    adapter.depths = (name: string) => Promise.resolve(depths.get(name)!);
+    const service = new QueueService(adapter, new FakeRuntimeServices());
+    await service.connect();
+    service.process('thumbnail', () => {});
+    service.process('render', () => {});
+
+    const result = await service.createHealthIndicator()();
+
+    expect(result.status).toBe('up');
+    // dead is TERMINAL and excluded: 2+1 + 0+4 = 7, not 23.
+    expect(result.data?.['backlog']).toBe(7);
+  });
+
+  it('publishes a zero backlog when the readable names are empty', async () => {
+    const adapter = new MemoryQueue();
+    adapter.isHealthy = () => Promise.resolve(true);
+    adapter.depths = () => Promise.resolve({ ready: 0, processing: 0, dead: 0 });
+    const service = new QueueService(adapter, new FakeRuntimeServices());
+    await service.connect();
+    service.process('thumbnail', () => {});
+
+    const result = await service.createHealthIndicator()();
+
+    // "empty" and "cannot read" are different answers: zero IS published.
+    expect(result.data?.['backlog']).toBe(0);
+  });
+
+  it('sums what a partial read could read, skipping the failing name', async () => {
+    const adapter = new MemoryQueue();
+    adapter.depths = (name: string) => {
+      if (name === 'broken') {
+        return Promise.reject(new Error('CONNREFUSED'));
+      }
+      return Promise.resolve({ ready: 3, processing: 1, dead: 0 });
+    };
+    const errors: string[] = [];
+    const service = new QueueService(adapter, new FakeRuntimeServices(), {
+      logger: {
+        error: (message: string) => {
+          errors.push(message);
+        },
+      },
+    });
+    await service.connect();
+    service.process('ok', () => {});
+    service.process('broken', () => {});
+
+    const result = await service.createHealthIndicator()();
+
+    expect(result.status).toBe('up');
+    // Only the successful name counts toward the aggregate.
+    expect(result.data?.['backlog']).toBe(4);
+    expect(result.data?.['queues']).toEqual({ ok: { ready: 3, processing: 1, dead: 0 } });
+    expect(errors).toContain('queue depth probe failed');
+  });
+
+  it('reports reachable unknown and still reads depths when the adapter cannot probe', async () => {
+    const adapter = new MemoryQueue();
+    // The adapter offers no probe at all — the M70c `unknown` arm. The
+    // member lives on the prototype, so it is shadowed with a non-function
+    // rather than deleted; the service feature-detects with `typeof`.
+    (adapter as unknown as Record<string, unknown>).isHealthy = 'cannot probe';
+    adapter.depths = () => Promise.resolve({ ready: 1, processing: 2, dead: 0 });
+    const service = new QueueService(adapter, new FakeRuntimeServices());
+    await service.connect();
+    service.process('thumbnail', () => {});
+
+    const result = await service.createHealthIndicator()();
+
+    expect(result.status).toBe('up');
+    expect(result.data?.['reachable']).toBe('unknown');
+    expect(result.data?.['backlog']).toBe(3);
+  });
+});
