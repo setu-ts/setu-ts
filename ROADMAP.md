@@ -8852,6 +8852,231 @@ entity)` alongside the existing `prefixCacheKey(tenantId, key)` shape —
 is the recommended fix and is a flagged `common` widening; whether it lands optional or required is
 the decision, since a required member breaks out-of-repo implementors.
 
+## Milestone 90: X20–X38 Defect Closeout
+
+The `smoke/` programme's **X20–X38** exercises, run against published `0.4.0`, produced **49
+findings, 12 High, across 19 exercises**. They are closed as lettered milestones grouped by defect
+**shape** rather than by package — the M70a–M70n and M89 precedent, where each letter stays
+independently reviewable. Six of the ten letters span more than one package.
+
+Two blocks fed it. **X20–X33** was designed. **X34–X38** was read off the first block's _Still to
+run_ tails, where four items were each named by two or three exercises — the signal that they were
+their own exercises rather than chores belonging to any one of them.
+
+> **The reproductions are NOT in this repository.** `smoke/` is excluded locally
+> (`.git/info/exclude`), so every `X…-FINDINGS.md` citation below names a file that exists on the
+> machine the exercise ran on and not in a clone. `smoke/X20-X33-GROUPING.md` is the compiled
+> register and stays the authority for the full row set; the source citations in each letter are the
+> durable half, since they point at `packages/`.
+
+| Letter   | Shape                                              | Findings | High | Packages                                                               |
+| -------- | -------------------------------------------------- | -------- | ---- | ---------------------------------------------------------------------- |
+| **M90a** | Abuse control that actually protects               | 6        | 3    | auth, http-security, graphql                                           |
+| **M90b** | Health that tells the truth, bounded               | 7        | 4    | secrets, cache, realtime-backplane, messaging, health, queue, database |
+| **M90c** | Credential revocation and token type               | 4        | 2    | auth                                                                   |
+| **M90d** | The two brokers that cannot start                  | 4        | 2    | messaging                                                              |
+| **M90e** | Static delivery correctness                        | 2        | 1    | static                                                                 |
+| **M90f** | Caller errors reach the client correctly           | 6        | 0    | secrets, resilience, auth, database, kernel, exceptions                |
+| **M90g** | Concurrency loses work silently                    | 4        | 0    | database, session, cache, common                                       |
+| **M90h** | Documentation that survives contact                | 5        | 0    | docs, database, session, http-security, scheduler                      |
+| **M90i** | Observability that joins up                        | 3        | 0    | common, queue-plugin, logger-plugin, telemetry-plugin                  |
+| **M90j** | The operator's diagnostic survives to the operator | 3        | 0    | database-plugin, common, messaging-plugin                              |
+
+**Recommended order.** M90a, M90b and M90d carry every High finding and should lead. M90f and M90j
+are the two whose value is disproportionate to their size: both are one rule applied inconsistently
+across five or six packages, and both have a mechanism already built (`withHttpStatusHint` from
+M89b, and `serializeError`'s existing guarded read). M90h is doc-only and can ride any of the
+others.
+
+### Milestone 90a: Abuse Control That Actually Protects
+
+**Package(s):** `packages/auth-plugin`, `packages/http-security-plugin`, `packages/graphql-plugin`
+
+**Objective:** Make the three rate/size/breadth limiters bound what they claim to bound. X32-1 (the
+exhausted limiter answers `429` to `/live` and `/ready`, so a burst of abuse takes the pod out of
+rotation), X32-4 (`requestSizeMiddleware` is bypassed entirely by chunked transfer encoding) and
+X32-6 (GraphQL query breadth is unbounded — depth is limited, fan-out is not) are the High rows.
+X32-4 and X32-6 are **not independent**: the body-size limit is the only thing bounding a breadth
+attack today, so fixing either alone leaves the hole open. X32-2 (the `429` bypasses the configured
+error format), X32-3 (leftmost `X-Forwarded-For` is trusted) and X32-5 (unnamespaced Redis keys, so
+two applications sharing a Redis share a limiter) complete the set.
+
+### Milestone 90b: Health That Tells the Truth, Bounded
+
+**Package(s):** `packages/secrets-plugin`, `packages/cache-plugin`,
+`packages/realtime-backplane-plugin`, `packages/messaging-plugin`, `packages/health-plugin`,
+`packages/queue-plugin`, `packages/database-plugin`
+
+**Objective:** Finish the `isHealthy?` sweep M70c began, and answer the question the sweep did not
+ask. X29 stopped every backend at once and found `cache` and `secrets` still reporting `up` (X20-1,
+X29-1) — those two are the last packages without the seam. X28-5 is the seventh member and the
+worst-behaved: `ServiceBusBroker.reachability()` returns `undefined` because `adaptServiceBusModule`
+never implements `isHealthy`, while its own JSDoc says _"the real adapter peeks the namespace via
+its existing client"_ — so the production path takes the branch documented as being for "a minimal
+fake", forever, and each publish then holds a request for 90 s (X28-6).
+
+**The new question is saturation, and it is a different shape.** X35-1 and X25-1 both report
+`status: up` while the capability is at capacity — a connection pool at 100% with seven waiters, and
+a queue with a 151,206-job backlog. `pool.waitingCount` exists and
+`grep -rniE "waitingCount|totalCount|idleCount|saturat"` over `database-plugin` returns nothing.
+M70k's per-name queue depths _do_ surface the backlog, which is the group's own fix already working
+and the model for the pool. X29-2 (a `/health` taking 42 s under outage) bounds the whole thing.
+
+### Milestone 90c: Credential Revocation and Token Type
+
+**Package(s):** `packages/auth-plugin`
+
+**Objective:** X22-1 (logout leaves the access token valid until expiry) and X22-2 (a refresh token
+authenticates as an access token) are the High rows. X36 supplies the contrast that makes X22-1's
+fix concrete: a **session** credential _is_ revoked at logout, on both realtime transports, because
+it is server-authoritative — so the recommendation is a revocation list or short-lived access
+tokens, not a documentation note. X22-3 (reuse is detected but the token chain is not revoked) and
+X22-5 (the `403` names the required role) complete it.
+
+### Milestone 90d: The Two Brokers That Cannot Start
+
+**Package(s):** `packages/messaging-plugin`
+
+**Objective:** X28-1 and X28-2 are High and identical in consequence: `nats` and `kafka` shipped in
+M14b, were never driven by any exercise, and **fail during `register()` with an uncaught
+rejection**, so an application configured with either never binds a socket. Kafka's cause is exact —
+`attachFaultListener` passes `'DISCONNECT'` where kafkajs requires
+`producer.events.DISCONNECT === 'producer.disconnect'`; probed, `on("CONNECT")` throws and
+`on("producer.connect")` is accepted. NATS refuses `subjects: ['>']` with _"capturing all subjects
+requires no-ack to be true"_. X28-3 (both NATS failures are bare platform errors) and X28-4 (both
+**cloud** brokers drop `messageId`/`timestamp` that their platforms supply) ride with them.
+
+### Milestone 90e: Static Delivery Correctness
+
+**Package(s):** `packages/static-plugin`
+
+**Objective:** X31-1 is High and its blast radius is what makes it so: `CONTENT_ENCODINGS` maps
+`gz → gzip` when _matching_ the request and emits `sidecar.format` when _answering_ it
+(`static-handler.ts:295`), so a `.gz` sidecar is served as `content-encoding: gz`. Brotli is correct
+only by coincidence (identity mapping). Measured through a real nginx `proxy_cache`:
+`content-encoding: gz`, `X-Cache-Status: HIT`, decoded **0 bytes** — so a shared cache stores and
+redistributes the undecodable variant, and the failure **outlives an origin fix** until the entry
+expires. X31-2 (a cross-variant `If-None-Match` returns `304`) is the same family.
+
+### Milestone 90f: Caller Errors Reach the Client Correctly
+
+**Package(s):** `packages/secrets-plugin`, `packages/resilience-plugin`, `packages/auth-plugin`,
+`packages/database-plugin`, `packages/kernel`, `packages/exceptions`
+
+**Objective:** One rule, applied consistently: _a condition the caller caused, or can act on, must
+not arrive as `500`._ M89b built the mechanism (`withHttpStatusHint`) and closed two instances; this
+is six more, in five packages, **three of them found in a single block**:
+
+| Finding | Condition                                     | Correct answer                                                                                 |
+| ------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `X38-1` | SQLSTATE `40001` `could not serialize access` | `409` — the canonical _retry me_ signal, converted to _do not retry_                           |
+| `X35-2` | connection-pool timeout                       | `503` + `Retry-After` — transient backpressure                                                 |
+| `X37-1` | malformed JSON request body                   | `400` — and `ValidationPlugin` already answers `400` for a body that parses but fails a schema |
+| `X20-2` | `rotate()` on a read-only secrets provider    | `501`                                                                                          |
+| `X32-7` | `BulkheadFullError`                           | `503`                                                                                          |
+| `X19-1` | (closed in M89b — listed for the shape)       | —                                                                                              |
+
+X38-1 is the sharpest: the database supplies a machine-readable retry classifier and the framework
+converts it into a permanent-fault status, which makes optimistic concurrency — the standard answer
+to X38-3's lost update — unusable, because the caller cannot tell a conflict from a bug.
+
+### Milestone 90g: Concurrency Loses Work Silently
+
+**Package(s):** `packages/database-plugin`, `packages/session-plugin`, `packages/cache-plugin`,
+`packages/common`
+
+**Objective:** X24-2 measured that a read-modify-write through the portable repository API loses an
+update — on the memory adapter and equally on real PostgreSQL at READ COMMITTED. **X38 measured the
+escapes**, and the result is the decision this milestone has to take: `SELECT … FOR UPDATE` and a
+single-statement `UPDATE … SET n = n + delta` both work, SERIALIZABLE correctly prevents the anomaly
+— and **none of them is expressible through the portable API**. `transaction<T>(work)` takes one
+parameter and `grep -rniE "isolation|serializable|repeatable.read|read.committed"` over `common`
+returns nothing. So a correct concurrent write is adapter-specific by construction, and nothing
+documents that cliff. X22-6 (concurrent session writes lose one on both strategies) and X24-1 (no
+cache-miss coalescing — 100 of 100 concurrent misses reached the origin) are the same shape in two
+more packages.
+
+Suggested contract: an optional `transaction(work, { isolation })` translated per adapter and
+refused by name where unsupported — the `UnsupportedFilterOperatorError` precedent. It does not make
+`FOR UPDATE` portable, but paired with M90f's retryable status it makes the _optimistic_ strategy
+portable, which is the one that generalises.
+
+### Milestone 90h: Documentation That Survives Contact
+
+**Package(s):** docs, `packages/database-plugin`, `packages/session-plugin`,
+`packages/http-security-plugin`, `packages/scheduler-plugin`
+
+**Objective:** Five rows where a published claim does not survive being followed. X22-4 (the auth
+README's `// per IP` annotation on an example that is not per-IP), X26-2 (`IRepository.findPage`
+became required with no CHANGELOG note), X26-1 (the upgrade guide omits removing
+`experimentalDecorators` — measured, that one edit takes a project from 17 errors to 3), X33-2 (the
+documented login example cannot run with the documented CSRF option), and X20-3's consequence:
+`ISecretManager.set()` means four different things across five providers — Vault and Azure create on
+write, AWS and GCP do not, `EnvProvider` throws — and nothing says so.
+
+### Milestone 90i: Observability That Joins Up
+
+**Package(s):** `packages/common`, `packages/queue-plugin`, `packages/logger-plugin`,
+`packages/telemetry-plugin`
+
+**Objective:** X29-3 was left ungrouped in the first compile because one finding is not a shape. It
+is three now, and they are one question: _can an operator follow a single request through the
+system?_
+
+X34 answered the positive half — the **broker** hop carries the trace across a process boundary with
+an unbroken parent chain (`POST /fanout` → `publish` → `receive` → `handle`, one trace, two
+processes), and the join is demonstrably via the header rather than ambient context, which is what
+M75 could not prove in-repo. So the capability exists and works.
+
+What is missing is a **channel** on one ingress and a **bridge** to one sink:
+
+- **X34-1** — `AddJobOptions` is `{ delayMs?, maxAttempts? }` and `IJob` is
+  `{ id, name, data, attempts }`. `grep -c headers` over `common/src/services/queue.ts` and
+  `scheduler.ts` is **0** for both, and `IngressContext.headers` states it: _"populated on the
+  `'messaging'` arm only … absent means there was no channel."_ So this is a **designed capability
+  gap**, not an adapter declining to read something — which makes the fix a `common` widening
+  (`AddJobOptions.headers?` + `IJob.headers?` mirroring `MessageMetadata.headers`, both optional per
+  the M42 `signal?` precedent) rather than a bug fix. The scheduler's fresh root is **correct** and
+  is not in scope: a tick has no upstream request.
+- **X34-2** — `grep -rn "traceId|spanId|traceparent"` over `packages/logger-plugin/src` returns
+  nothing. The identifier lives in `common` and `telemetry-plugin` and no bridge exists either way,
+  so an operator holding a trace id cannot find the log lines and vice versa. `requestId` is a
+  kernel-assigned id unrelated to the trace. Suggested fix: enrich each record with the active
+  span's `trace_id`/`span_id` when a telemetry capability is registered, read optionally exactly as
+  M45b reads `CAPABILITIES.METRICS`.
+
+### Milestone 90j: The Operator's Diagnostic Survives to the Operator
+
+**Package(s):** `packages/database-plugin`, `packages/common`, `packages/messaging-plugin`
+
+**Objective:** Distinct from M90f, and the distinction is the point. M90f is about what the
+**caller** is told; this is about what is left for the **operator** after masking has correctly done
+its job. X12-3/M70b deliberately mask an internal error for the client _while the logger receives
+the real one_. In these three the real one never reaches any logger.
+
+- **X35-3** — `} catch {` with no binding, then
+  `throw new Error('Drizzle transaction failed to
+  start')` with no `cause`
+  (`drizzle-adapter.ts:350`), so node-postgres's own `timeout exceeded when trying to connect` is
+  destroyed rather than masked. Measured across the package: **7 catch-then-throw sites drop their
+  cause**, spanning every shipped adapter family (drizzle ×2, prisma, mongo, cosmos ×2, dynamo), and
+  of **162** `throw new` sites **zero** pass a cause. Two do not bind the caught value at all. The
+  consequence generalises: every transaction-start failure on Drizzle — permission, network, bad
+  search path — reduces to the same eight words.
+- **X38-2** — `SerializedError` is exactly `{ name, message, stack?, cause? }` and `readMember` is
+  typed to those four keys, so pg's `code: '40001'`, `severity`, `constraint`, MongoDB's `codeName`
+  and the AWS SDK's `$metadata` are all dropped. Log-based classification — alerting on a `40001`
+  rate — is impossible.
+- **X28-7** — `"Service Bus receiver error: AggregateError"` is the entire record; the `errors`
+  array is never read, while the publish path in the same file logs a full cause chain.
+
+**The fix is not "log everything."** `serializeError`'s guarded-read design is deliberately
+Proxy-safe and correct, and a pg error carries the failing query text and parameters — exactly what
+X12-3 exists to keep out of logs. The right shape is a small **allowlist** of standard classifier
+fields (`code` first) read through the same guard, plus
+`catch (cause) { throw new Error('…', { cause }); }` at the seven sites. Both are mechanical, and
+`serializeError` already walks a cause chain when one exists.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                             |
@@ -8981,3 +9206,13 @@ the decision, since a required member breaks out-of-repo implementors.
 | 89a       | ✅     | declarations that enforce nothing (X18-3/5/4/1)     |
 | 89b       | ✅     | caller errors read as server faults (X18-2, X19-1)  |
 | 89c       | ✅     | 0.3.0 ingress surface (X16-1, X16-2)                |
+| 90a       | ⬜     | abuse control that actually protects                |
+| 90b       | ⬜     | health that tells the truth, bounded                |
+| 90c       | ⬜     | credential revocation and token type                |
+| 90d       | ⬜     | the two brokers that cannot start                   |
+| 90e       | ⬜     | static delivery correctness                         |
+| 90f       | ⬜     | caller errors reach the client correctly            |
+| 90g       | ⬜     | concurrency loses work silently                     |
+| 90h       | ⬜     | documentation that survives contact                 |
+| 90i       | ⬜     | observability that joins up                         |
+| 90j       | ⬜     | operator diagnostics survive to the operator        |
