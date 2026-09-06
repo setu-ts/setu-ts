@@ -169,6 +169,17 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           return { status: 'down', data };
         }
         const healthy = await probe();
+        // Read the gate AGAIN. `close()` sets its flag synchronously and only
+        // then awaits `disconnect()`, so a poll that passed the gate and then
+        // awaited can be holding an answer the probe computed — or cached —
+        // BEFORE the close, and would publish `up` for a database that has
+        // begun closing. That is precisely what the uncached gate exists to
+        // prevent, so it has to hold for a concurrent poll too, not only for
+        // one that starts after the close. The re-read costs one field and
+        // reaches no adapter.
+        if (service.isClosed) {
+          return { status: 'down', data };
+        }
         return { status: healthy ? 'up' : 'down', data };
       });
 

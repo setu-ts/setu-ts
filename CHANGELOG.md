@@ -36,7 +36,9 @@ All notable changes to this project are documented here. The format follows
   `readonly isClosed: boolean` — a lifecycle-only read that reaches no adapter — which is what the
   indicator's uncached gate now reads: gating on `isHealthy()` called `IDatabaseAdapter.isReady()`
   on the one path deliberately outside the probe's 2-second bound, and cost two readiness reads per
-  poll. Every adapter readiness call now happens inside the bounded, cached probe.
+  poll. Every adapter readiness call now happens inside the bounded, cached probe, and the gate is
+  re-read after the probe settles so a poll already in flight when `close()` begins cannot publish a
+  reachability answer the probe cached before it.
 
 - **`@setu-ts/cache-plugin`, `@setu-ts/secrets-plugin` — truthful reachability.** The `cache` and
   `secrets` indicators now report `reachable` (`true`/`false`/`'unknown'`) beside lifecycle, through

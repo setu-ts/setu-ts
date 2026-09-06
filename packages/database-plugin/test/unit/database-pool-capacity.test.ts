@@ -269,6 +269,36 @@ describe('database indicator capacity data (M90b)', () => {
     expect(adapter.readyCalls).toBe(1);
   });
 
+  it('reads down when the close begins while a poll is awaiting the probe', async () => {
+    // `close()` sets its flag synchronously and only then awaits
+    // `disconnect()`, so a poll that has already passed the gate is awaiting
+    // an answer computed BEFORE the close. Publishing that `up` is exactly
+    // what the uncached gate exists to prevent — PUBLIC_API's words are
+    // "never from an outcome cached before close" — so the guarantee has to
+    // hold for a concurrent poll too, not only for one that starts after.
+    //
+    // The first poll is what makes this deterministic: it leaves `true` in
+    // the probe's cache, and the fixture's frozen `hrtime` keeps it warm, so
+    // the second poll's `probe()` hands back an already-resolved `true`
+    // rather than deferring a fresh read. A COLD probe would not show the
+    // defect at all — `createCachedProbe` defers the call through
+    // `Promise.resolve().then(...)`, so the fresh read would itself observe
+    // the close and answer `false` whether the re-read exists or not.
+    const adapter = new FakeAdapter();
+    await adapter.connect();
+    const { indicator, close } = await registerIndicator(adapter);
+
+    expect((await indicator()).status).toBe('up');
+
+    // Passes the gate and takes the cached `true`; nothing is awaited between
+    // this line and the close, so the flag is set before the continuation
+    // runs.
+    const pending = indicator();
+    await close();
+
+    expect((await pending).status).toBe('down');
+  });
+
   it('reads down after close — the lifecycle gate is uncached', async () => {
     const adapter = new FakeAdapter(() => ({ total: 12, idle: 3, waiting: 7 }));
     const { indicator, close } = await registerIndicator(adapter);

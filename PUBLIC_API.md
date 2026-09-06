@@ -1116,7 +1116,9 @@ service or Unit of Work not created by this package throws
 ### Health status
 
 Since **M90b** the `database` indicator gates on the service's lifecycle FIRST, uncached — a closed
-database reads `down` immediately, never from an outcome cached before close. That gate reads
+database reads `down` immediately, never from an outcome cached before close. The gate is re-read
+after the probe settles as well, so a poll already in flight when `close()` begins reports `down`
+rather than publishing the answer the probe had cached a moment earlier. That gate reads
 `DatabaseService.isClosed`, a lifecycle-only member that reaches no adapter, so **every**
 `IDatabaseAdapter.isReady()` call happens behind it, inside a cached, bounded probe — 5-second TTL,
 2-second bound, built on `createCachedProbe` — and an adapter whose readiness performs I/O cannot
