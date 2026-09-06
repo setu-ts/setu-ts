@@ -56,6 +56,113 @@ All notable changes to this project are documented here. The format follows
   assertions from `500` to `501` and synchronous `try`/`catch` call sites to `await` or `.catch()`;
   use each adapter's migration CLI instead of `migrate()`.
 
+- **BREAKING (behaviour) — `@setu-ts/auth-plugin` — the rate limiter's `429` body answers in the
+  application's configured error format** (X32-2). `rateLimitMiddleware` wrote its own body with
+  `ctx.response.status(429).json({ error, message })`. M70f routed every first-party short-circuit
+  through the `respondWithError` seam — upload, tenant, session, the nine auth guards,
+  http-security's three, the flag guard — and missed this one, presumably because the limiter is
+  middleware rather than a guard. So the ONE status a client is most likely to handle
+  programmatically was the one status that ignored `errorHandler`'s configuration, and a consumer
+  parsing Problem Details (which this framework's own generated SDK does) got an unreadable body
+  under `application/json`. The `Retry-After` and `RateLimit-*` headers are unchanged.
+  **Migration:** the body shape changes. With `errorHandler({ format: 'rfc9457' })` the `429` is now
+  Problem Details under `application/problem+json`, carrying `detail` and no `message`; with
+  `format: 'default'` it is `{ statusCode, message, details: { detail } }`, the shape every other
+  refusal already used; with no `errorHandler` registered it is the seam's `{ error, detail }`
+  fallback. A client reading `body.message` for the limiter's text should read `body.detail` (or
+  `body.details.detail` under `'default'`).
+
+- **BREAKING (behaviour) — `@setu-ts/auth-plugin` — an exhausted rate limiter no longer refuses the
+  operational probes** (X32-1). `RateLimitOptions` had no exclusion member at all, and the
+  middleware is documented as a global one, so a burst of abuse made `/live` answer `429` — which a
+  Kubernetes kubelet reads as a failed liveness probe and restarts the container, whose only fault
+  was being under load. `exclude` now defaults to the six operational paths (`/live`, `/ready`,
+  `/health`, `/metrics`, `/openapi.json`, `/docs`), the same list `tenantMiddleware` exempts. An
+  exempt path increments no counter and carries no `RateLimit-*` headers, because the limit does not
+  govern it. **Migration:** pass `exclude: []` to restore the previous behaviour. A caller list
+  REPLACES the defaults, so spread `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` to extend them.
+
+- **BREAKING (wire keys) — `@setu-ts/auth-plugin` — `RedisRateLimitStore` namespaces its keys**
+  (X32-5). Keys were written exactly as `keyGenerator` produced them — `anonymous`,
+  `ip:203.0.113.7`, `user:42` — so two applications sharing one managed Redis counted against each
+  other's budget, and combined with X32-1 service A's traffic would restart service B's pods. Both
+  sibling Redis stores in this framework already namespace and both explain why in their own source.
+  `keyPrefix` defaults to `'setu:ratelimit:'`. **Migration:** in-flight counters under the old keys
+  are orphaned, so the blast radius is one window — they are TTL-bounded and expire on their own.
+  Pass `keyPrefix: ''` for the previous keys byte for byte.
+
+### Added
+
+- **`@setu-ts/common` — `createPathMatcher(patterns)` and `PathPattern`**, the one path-exclusion
+  matcher. Three middlewares already carried a private copy of the matching loop and X32-1's fix
+  would have made a fourth (§11.1). The copies disagreed: two matched literals only, one accepted a
+  `RegExp` but ran an O(n) `typeof` branch per request, and exactly one of the three reset
+  `lastIndex` before `.test` — which is the difference between a `g`-flagged pattern matching every
+  request and matching every other request. The list is partitioned ONCE at construction, literals
+  into a `Set` and patterns into an array walked only on a literal miss, so an all-literal list
+  (every default in this framework) costs the same hash lookup the hand-rolled copies did, and
+  `tenantMiddleware` gets faster than its previous per-entry loop. `RateLimitOptions.exclude`,
+  `MultiTenancyPluginOptions.exclude`, `RequestLoggerOptions.excludePaths` and
+  `MetricsPluginOptions.excludePaths` all read it. Those last two widen from `readonly string[]` to
+  `readonly PathPattern[]`: source-compatible for callers, and breaking only for a consumer
+  EXTRACTING the option type into a narrower one.
+
+- **`@setu-ts/runtime` — `RuntimeOptions.maxBodyBytes` and `RequestBodyTooLargeError`**, the request
+  body bound no header can switch off (X32-4). `requestSizeMiddleware` refuses on a declared
+  `Content-Length`; a chunked request declares none, and since M87 made the body read lazy the read
+  happens inside the handler, after every middleware has returned — so the middleware could not
+  close the bypass at all, and `Request.arrayBuffer()` buffered a body of any size. The read now
+  streams with a byte cap, comparing the running total before a chunk is retained and cancelling the
+  source on refusal rather than abandoning it. Omitted, the read is unbounded and the uncapped
+  branch keeps `arrayBuffer()` verbatim, so an application that configures no limit runs the
+  previous code exactly. The refusal is branded with a `413` status hint, so an application running
+  `errorHandler` answers `413 Payload Too Large` in its configured format. There are deliberately
+  TWO knobs for one concern — the mapping runs before any plugin and no channel exists between them
+  — and the docs say which is load-bearing: a reader who sets only `maxBodySize` keeps the previous
+  behaviour rather than getting a silent regression. `HttpAdapterFactories`' members now take an
+  optional `HttpAdapterOptions`, which keeps a zero-argument injected fake assignable.
+
+- **`@setu-ts/http-security-plugin` — `IpSecurityOptions.trustedProxies` and `proxyHops`**,
+  resolving the client from the RIGHT of a proxy header (X32-3). `trustProxy: true` took the
+  LEFTMOST entry, which is safe only behind a proxy that overwrites the header — and the standard
+  nginx idiom (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`) APPENDS, so a request
+  arriving with a forged `X-Forwarded-For: 7.7.7.7` reached the application as
+  `7.7.7.7, 198.51.100.9` and the leftmost entry was the value the caller chose. Anything keyed on
+  `CLIENT_IP_STATE_KEY` — including `defaultRateLimitKey` — was then keyed on attacker input.
+  `trustedProxies` walks right to left and returns the first entry that is not a trusted proxy;
+  `proxyHops` returns the nth from the right for proxies with no fixed address, and a header shorter
+  than the declared chain resolves `undefined` rather than falling back to a guess. The two are
+  mutually exclusive and supplying both throws at middleware construction, as does a
+  `trustedProxies` entry whose CIDR width is not plain digits (`Number('')` is `0`, so `'10.0.0.1/'`
+  would compile to a `/0` matcher trusting every IPv4 address, and a chain whose leftmost entry is
+  IPv6 would then return that caller-supplied value as the client) and a `proxyHops` that is not a
+  non-negative integer (`0` is the rightmost entry): without that guard it resolves `undefined` for
+  every caller and silently degrades a rate limiter keyed on the client IP to one shared bucket.
+  **With neither supplied resolution stays leftmost, unchanged** — X32-3 requires the operator to
+  have opted into `trustProxy`, so a silent default flip would be a larger change than the finding.
+  Only IPv4 CIDR is expanded numerically; every other form is compared as a case-insensitive
+  literal, deliberately, since a wrong expansion would silently TRUST an untrusted hop.
+
+- **`@setu-ts/graphql-plugin` — `GraphqlPluginOptions.maxNodes`**, a query-breadth budget (X32-6).
+  `maxDepth` was the only query-cost control and it bounds NESTING: a document two levels deep can
+  still ask for a hundred thousand fields, because every alias is a separate field. Measured, one
+  such request produced a ~5 MB response and **+822 MB RSS** with `maxDepth: 5` configured and
+  unable to see it, and the only thing bounding it was the request-body size. `maxNodes` counts the
+  fields a document would resolve — aliases separately, and each fragment spread costing its
+  definition at EVERY spread site, so defining a hundred fields once and spreading them a thousand
+  times counts as a hundred thousand rather than eleven hundred. Expansion is memoized, so a deep
+  fragment graph reports a large count in time linear in the document's own size; without that the
+  counter would itself be the denial of service. **Off by default (`0`)**, so no released
+  application starts refusing a document it used to serve. A document's cost is its **largest
+  operation**, not the sum of all of them — only the operation `operationName` selects is ever
+  executed, so summing refused a bundled document whose selected operation was within budget, and
+  the sibling `maxDepth` was already per-operation. A value that is not a non-negative integer
+  throws at construction, for the same reason `maxBodyBytes` does: `maxNodes <= 0` is `false` for
+  `NaN`, so the rule would be built and then never report, silently enforcing nothing while reading
+  as configured. The rule itself is deliberately NOT exported: it is configured through `maxNodes`,
+  nothing outside the package constructs it, and exporting it would leak the plugin's private
+  graphql facades into the published surface — which `deno doc --lint` reports (the M82 precedent).
+
 ## [0.4.0] — 2026-09-05
 
 **A declaration that enforced nothing now enforces, and a caller's mistake stops reading as a server

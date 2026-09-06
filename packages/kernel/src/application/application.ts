@@ -1019,7 +1019,33 @@ class Application implements IKernelApplication {
     // M46 originally had to intercept the upgrade inside the adapter to avoid.
     // A handshake that does carry framing headers is disturbed by this read
     // and then refused below, so no upgrade is ever attempted on it.
-    if ((await ctx.request.bytes()).length > 0) {
+    //
+    // The read itself can REJECT, not merely return a non-empty body:
+    // `RuntimePlugin({ maxBodyBytes })` bounds it, and a body past the cap
+    // rejects with `RequestBodyTooLargeError`. The read is therefore wrapped in
+    // a `try` whose `catch` settles the reserved slot before rethrowing — it is
+    // the only call between the router's accept and `setUpgradeIntent` that can
+    // throw, so nothing else needs the same treatment. Without it a rejection
+    // escapes to the
+    // fallback 500 with `onClose` never called, and since the router claims a
+    // pending slot at accept time, `maxConnections` malformed requests from an
+    // unauthenticated client permanently exhaust the budget — every later
+    // conformant upgrade then gets 503. `websocket-service.ts` states that a
+    // "refused or malformed upgrade can never leak a slot"; this is what makes
+    // that true for a rejecting read as well as a returning one.
+    let bodyLength: number;
+    try {
+      bodyLength = (await ctx.request.bytes()).length;
+    } catch (cause) {
+      decision.sink.onClose({ code: 1006, reason: 'Upgrade request body could not be read' });
+      // Re-thrown rather than answered here: the body-limit refusal carries its
+      // own status hint (413), and `errorHandler` is what turns that into a
+      // response in the application's configured format. Answering a fixed 400
+      // would discard the hint and report the wrong cause.
+      throw cause;
+    }
+
+    if (bodyLength > 0) {
       // The router already accepted, so it may be holding a reserved
       // connection slot for this socket. RFC 6455 close code 1006 (abnormal
       // closure) is the honest signal that no connection was ever established.

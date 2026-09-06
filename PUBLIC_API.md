@@ -246,6 +246,44 @@ app.register(RuntimePlugin({
 }));
 ```
 
+### Bounding the request body
+
+`maxBodyBytes` caps the request-body read **where the body is actually consumed**, and no request
+header can switch it off:
+
+```typescript
+app.register(RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 }));
+```
+
+Omitted, the read is unbounded — the released behaviour, byte for byte.
+
+**There are two knobs for one concern, and both are needed.**
+`HttpSecurityPlugin({ requestSize: { maxBodySize } })` refuses on a **declared** `Content-Length`
+before anything is read, which is cheaper and reports earlier; a **chunked** request declares no
+length, and since M87 made the body lazy the read happens inside the handler, after every middleware
+has returned. So the middleware bounds declared lengths and this option bounds the read itself. They
+are separate because the request mapping runs before any plugin and there is no channel between
+them: `mapWebRequestToFrameworkRequest` receives a `Request` and nothing else.
+
+Set both, and set `maxBodyBytes` to the same value as `maxBodySize` or higher. A reader who sets
+only `maxBodySize` gets the pre-M90a behaviour — declared lengths bounded, chunked bodies unbounded
+— rather than a silent regression.
+
+A body past the cap rejects with `RequestBodyTooLargeError`, branded with a `413` status hint, so an
+application running `errorHandler` answers `413 Payload Too Large` in its configured format rather
+than the masked `500` an unbranded throw from that depth would produce. With no `errorHandler`
+registered the brand has no reader and the kernel's opaque `500` answers instead — which is how
+every status hint behaves, not something specific to this one.
+
+**`0` means "refuse every request that carries a body"**, not "disabled". That is the opposite of
+what `0` means for `maxDepth`, `maxNodes`, `maxBatchSize` and `documentCacheSize` elsewhere in this
+framework, so it is stated rather than left to be inferred: omitting the option is the one way to
+say unbounded. A value that is not a non-negative integer **throws at `RuntimePlugin(...)`** —
+before an application exists — rather than being accepted. `NaN` is the case that motivates the
+guard: every comparison against `NaN` is `false`, so a `NaN` cap would accept every chunk and
+silently disable the bound, and `Number(env.MAX_BODY_BYTES)` yields exactly `NaN` for an unset or
+misspelled variable. `Infinity` is refused for the same one-way-to-say-it reason.
+
 ### Accessing Runtime Services
 
 ```typescript
@@ -486,7 +524,8 @@ import { createRequestLoggerMiddleware } from '@setu-ts/logger-plugin';
 
 app.middleware.add(createRequestLoggerMiddleware({
   slowRequestThreshold: 1000,
-  excludePaths: ['/health'],
+  // A string is an EXACT path match; a RegExp is tested against the path (M90a).
+  excludePaths: ['/health', /^\/internal\//],
 }));
 ```
 
@@ -1973,43 +2012,45 @@ They still fail closed either way; what changed is that the refusal is legible.
 
 ### Exports
 
-| Export                       | File                                      | Description                                                                             |
-| ---------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| `AuthPlugin`                 | `src/plugin/auth-plugin.ts`               | Plugin factory                                                                          |
-| `AuthPluginOptions`          | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies`) |
-| `JwtOptions`                 | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme)                   |
-| `ApiKeyOptions`              | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                                  |
-| `LocalOptions`               | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                                             |
-| `SessionAuthOptions`         | `src/interfaces/index.ts`                 | Session strategy config (required `toPrincipal` callback)                               |
-| `PasswordHasher`             | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                                       |
-| `MalformedPasswordHashError` | `src/services/password-hasher.ts`         | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash               |
-| `authMiddleware`             | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`                       |
-| `requireAuth`                | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                                         |
-| `requireRole`                | `src/guards/index.ts`                     | Guard: require a role (401/403)                                                         |
-| `requirePermission`          | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                                   |
-| `requireAnyRole`             | `src/guards/index.ts`                     | Guard: require any of the given roles                                                   |
-| `requireAllPermissions`      | `src/guards/index.ts`                     | Guard: require all of the given permissions                                             |
-| `publicRoute`                | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                                          |
-| `RefreshTokenService`        | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                               |
-| `RefreshTokenOptions`        | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                                               |
-| `TokenPair`                  | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                           |
-| `RefreshTokenStore`          | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records                               |
-| `RefreshTokenRecord`         | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                                      |
-| `MemoryRefreshTokenStore`    | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                                                |
-| `rateLimitMiddleware`        | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)                        |
-| `RateLimitOptions`           | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter                                                |
-| `RateLimitStore`             | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                                         |
-| `RateLimitResult`            | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                                          |
-| `MemoryRateLimitStore`       | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                                    |
-| `RedisRateLimitStore`        | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                                   |
-| `IAuthService`               | re-export                                 | From `@setu-ts/common`                                                                  |
-| `IJwtService`                | re-export                                 | From `@setu-ts/common`                                                                  |
-| `IAuthorizationService`      | re-export                                 | From `@setu-ts/common`                                                                  |
-| `IAuthStrategy`              | re-export                                 | From `@setu-ts/common`                                                                  |
-| `IPrincipal`                 | re-export                                 | From `@setu-ts/common`                                                                  |
-| `JwtSignOptions`             | re-export                                 | From `@setu-ts/common`                                                                  |
-| `RbacConfig`                 | re-export                                 | From `@setu-ts/common`                                                                  |
-| `RoleDefinition`             | re-export                                 | From `@setu-ts/common`                                                                  |
+| Export                              | File                                      | Description                                                                                     |
+| ----------------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `AuthPlugin`                        | `src/plugin/auth-plugin.ts`               | Plugin factory                                                                                  |
+| `AuthPluginOptions`                 | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies`)         |
+| `JwtOptions`                        | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme)                           |
+| `ApiKeyOptions`                     | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                                          |
+| `LocalOptions`                      | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                                                     |
+| `SessionAuthOptions`                | `src/interfaces/index.ts`                 | Session strategy config (required `toPrincipal` callback)                                       |
+| `PasswordHasher`                    | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                                               |
+| `MalformedPasswordHashError`        | `src/services/password-hasher.ts`         | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash                       |
+| `authMiddleware`                    | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`                               |
+| `requireAuth`                       | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                                                 |
+| `requireRole`                       | `src/guards/index.ts`                     | Guard: require a role (401/403)                                                                 |
+| `requirePermission`                 | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                                           |
+| `requireAnyRole`                    | `src/guards/index.ts`                     | Guard: require any of the given roles                                                           |
+| `requireAllPermissions`             | `src/guards/index.ts`                     | Guard: require all of the given permissions                                                     |
+| `publicRoute`                       | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                                                  |
+| `RefreshTokenService`               | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                                       |
+| `RefreshTokenOptions`               | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                                                       |
+| `TokenPair`                         | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                                   |
+| `RefreshTokenStore`                 | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records                                       |
+| `RefreshTokenRecord`                | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                                              |
+| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                                                        |
+| `rateLimitMiddleware`               | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)                                |
+| `RateLimitOptions`                  | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter, including `exclude`                                   |
+| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | `src/middleware/rate-limit-middleware.ts` | The six operational paths `exclude` exempts by default; spread it to extend rather than replace |
+| `RateLimitStore`                    | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                                                 |
+| `RateLimitResult`                   | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                                                  |
+| `MemoryRateLimitStore`              | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                                            |
+| `RedisRateLimitStore`               | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`), namespacing keys under `keyPrefix`       |
+| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | `src/stores/redis-rate-limit-store.ts`    | `'setu:ratelimit:'` — the namespace `RedisRateLimitStore` applies when no `keyPrefix` is given  |
+| `IAuthService`                      | re-export                                 | From `@setu-ts/common`                                                                          |
+| `IJwtService`                       | re-export                                 | From `@setu-ts/common`                                                                          |
+| `IAuthorizationService`             | re-export                                 | From `@setu-ts/common`                                                                          |
+| `IAuthStrategy`                     | re-export                                 | From `@setu-ts/common`                                                                          |
+| `IPrincipal`                        | re-export                                 | From `@setu-ts/common`                                                                          |
+| `JwtSignOptions`                    | re-export                                 | From `@setu-ts/common`                                                                          |
+| `RbacConfig`                        | re-export                                 | From `@setu-ts/common`                                                                          |
+| `RoleDefinition`                    | re-export                                 | From `@setu-ts/common`                                                                          |
 
 ### Registration
 
@@ -2130,19 +2171,46 @@ app.router.post('/auth/logout', async (ctx) => {
 principal unless your `keyGenerator` does) and registered under **no capability token**. Requests
 are counted per key (default `ctx.request.ip ?? 'anonymous'`) in a `windowMs` window; when the count
 exceeds `max` the middleware **short-circuits with 429** (downstream stages, including the handler,
-do not run) and a JSON body `{ error: 'Too Many Requests', message }`. Headers: always `Retry-After`
-on 429; with `standardHeaders` (default `true`) also `RateLimit-Limit`, `RateLimit-Remaining`, and
+do not run). Since M90a the body is written through the `respondWithError` seam, so it answers in
+the application's configured error format — Problem Details under
+`errorHandler({ format: 'rfc9457' })`, the framework-default shape otherwise — exactly like the
+`401` a guard produces in the same application. Headers: always `Retry-After` on 429; with
+`standardHeaders` (default `true`) also `RateLimit-Limit`, `RateLimit-Remaining`, and
 `RateLimit-Reset` — `RateLimit-Reset` and `Retry-After` are both **delta-seconds** until the window
 resets (IETF draft semantics), never epoch timestamps. The default store is an in-memory
 fixed-window counter (single-process); pass `store: new RedisRateLimitStore({ url, runtime })` for
 multi-instance deployments (ioredis is inject-or-lazy: pass `client` to inject, otherwise
 `npm:ioredis@5.x` is lazily imported on first use).
 
-```typescript
-import { rateLimitMiddleware, RedisRateLimitStore } from '@setu-ts/auth-plugin';
+**`exclude` exempts the operational probes, and it is on by default.** Registered globally — the
+usage below — the limiter sees `/live` and `/ready` too, so an exhausted bucket answered the
+liveness probe `429` and a Kubernetes kubelet restarted the container. Omitted, `exclude` is
+`DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` —
+`['/live', '/ready', '/health', '/metrics', '/openapi.json',
+'/docs']`, the same six
+`tenantMiddleware` exempts. A caller list **replaces** those rather than extending them, so spread
+the constant to keep them; `[]` exempts nothing, which is the pre-M90a behaviour. An exempt path
+increments no counter and carries no `RateLimit-*` headers, because the limit does not govern it.
 
-// Global: 100 requests per minute per client IP (in-memory store)
-app.middleware.add(rateLimitMiddleware({ windowMs: 60_000, max: 100 }));
+**`RedisRateLimitStore` namespaces its keys.** `keyPrefix` defaults to `'setu:ratelimit:'`, so two
+applications sharing one managed Redis no longer count against each other's budget — the generated
+keys (`anonymous`, `ip:…`, `user:…`) are generic enough to collide. Pass a per-application value
+when one Redis serves several; pass `''` for the pre-M90a wire keys.
+
+```typescript
+import {
+  DEFAULT_RATE_LIMIT_EXCLUDED_PATHS,
+  rateLimitMiddleware,
+  RedisRateLimitStore,
+} from '@setu-ts/auth-plugin';
+
+// Global: 100 requests per minute per client IP (in-memory store).
+// The six operational paths are exempt by default; add your own by spreading.
+app.middleware.add(rateLimitMiddleware({
+  windowMs: 60_000,
+  max: 100,
+  exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
+}));
 
 // Per-route, keyed by authenticated user, Redis-backed
 app.router.post('/expensive', {
@@ -2151,7 +2219,11 @@ app.router.post('/expensive', {
       windowMs: 60_000,
       max: 5,
       keyGenerator: (ctx) => ctx.request.user?.id ?? ctx.request.ip ?? 'anonymous',
-      store: new RedisRateLimitStore({ url: 'redis://localhost:6379', runtime }),
+      store: new RedisRateLimitStore({
+        url: 'redis://localhost:6379',
+        runtime,
+        keyPrefix: 'orders-api:rl:',
+      }),
       message: 'Too many expensive calls — try again shortly',
     }),
   ],
@@ -2354,11 +2426,51 @@ further allowed origins. Both headers absent → pass through (non-browser clien
 Checks `Content-Length` against `maxBodySize` (default 1 MiB). Over limit → 413 short-circuit
 without reading body. Absent or malformed `Content-Length` → pass through.
 
+**This layer bounds a DECLARED length only, and that is by design — but it is not the whole
+defence.** A chunked request declares no `Content-Length`, so there is nothing here to check, and
+because M87 made the body read lazy the read happens inside the handler, after this middleware has
+already returned. The unbypassable bound therefore lives where the body is consumed:
+`RuntimePlugin({ maxBodyBytes })` (see [RuntimePlugin](#runtimeplugin-setu-tsruntime)). Set both.
+The middleware is the cheaper layer — it refuses on a header before a socket is drained, which the
+read bound cannot do — and `maxBodyBytes` is the one no client can disable. Setting only
+`maxBodySize` gets you the pre-M90a behaviour: declared lengths bounded, chunked bodies unbounded.
+
+`411 Length Required` was considered and rejected as the alternative: it refuses every legitimate
+streaming upload as the price of closing the bypass.
+
 #### IP Security (`ipSecurityMiddleware`)
 
-Resolves client IP and publishes to `ctx.state.set(CLIENT_IP_STATE_KEY, ip)`. When
-`trustProxy: true`, reads the configured `ipHeader` (default `X-Forwarded-For`) and takes the
-leftmost address. Never short-circuits.
+Resolves client IP and publishes to `ctx.state.set(CLIENT_IP_STATE_KEY, ip)`. Never short-circuits.
+
+**With `trustProxy: true` and nothing else, the LEFTMOST address is taken — which is safe only
+behind a proxy that OVERWRITES the header.** The standard nginx idiom
+(`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`) **appends** instead, so a request
+arriving with a forged `X-Forwarded-For: 7.7.7.7` reaches the application as `7.7.7.7, 198.51.100.9`
+and the leftmost entry is the value the caller chose. Anything keyed on `CLIENT_IP_STATE_KEY` —
+including `defaultRateLimitKey` — is then keyed on attacker input.
+
+Two options resolve the client from the RIGHT instead, which is the standard algorithm and what
+Express `trust proxy` and Fastify `trustProxy` offer:
+
+| Option           | Behaviour                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trustedProxies` | Literal addresses or IPv4 CIDR blocks. The header is walked right to left; the first entry that is **not** one of these is the client. Every entry trusted → `undefined`. A `/`-suffixed entry whose width is not plain digits throws at middleware construction — `Number('')` is `0`, so a trailing slash would otherwise compile to a `/0` matcher that trusts every IPv4 address.  |
+| `proxyHops`      | The nth entry from the right, for proxies that cannot be addressed by IP. `0` is the rightmost entry. A header shorter than the declared chain → `undefined`, never a guess. A value that is not a non-negative integer throws at middleware construction, because it would otherwise resolve `undefined` for every caller and silently degrade the rate limiter to one shared bucket. |
+
+They are **mutually exclusive** — supplying both throws at middleware construction, because they are
+two different answers to the same question. `trustedProxies` lists the addresses that appear in the
+header **because a proxy further out contributed them**: under one appending nginx the header
+contains no proxy address at all (nginx appends its peer, the real client), so nothing in that chain
+is trusted and the rightmost entry is the answer. Only IPv4 CIDR is expanded numerically; every
+other form — a bare address, an IPv6 literal, an IPv6 CIDR, an unparseable block — is compared as a
+case-insensitive string, deliberately, because a wrong expansion would silently TRUST an untrusted
+hop. A block whose network is at or above `128.0.0.0` is handled correctly: those addresses exceed
+int31, so the bitwise mask operates on a negative int32 and both sides are normalised with `>>> 0` —
+without which a high-bit block would fail to match and a trusted proxy's own address would be
+resolved as the client.
+
+With neither option supplied, resolution stays leftmost, unchanged from before M90a: no released
+deployment changes behaviour silently.
 
 **`trustProxy` is the only working source on the first-party adapters.** The fallback to
 `request.ip` is vestigial since M23: a web `Request` carries no peer address, so the shared `fetch`
@@ -5855,8 +5967,9 @@ app.register(MetricsPlugin({
   defaultMetrics: true,
   httpMetrics: true,
   // Replaces the default ['/health', '/live', '/ready'] exclusion set; the
-  // plugin's own endpoint is always excluded either way.
-  excludePaths: ['/health', '/live', '/ready'],
+  // plugin's own endpoint is always excluded either way. A string is an EXACT
+  // path match; a RegExp is tested against the path (M90a).
+  excludePaths: ['/health', '/live', '/ready', /^\/_ops\//],
   customMetrics: [
     { name: 'users_total', help: 'Total users', type: 'counter' },
     { name: 'active_connections', help: 'Active connections', type: 'gauge' },
@@ -8487,6 +8600,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `sealRequestIdentity(request)`          | function | Installs the one-implicit-write request identity guard for `user` and `tenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `replacePrincipal(request, principal)`  | function | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `replaceTenant(request, tenant)`        | function | Deliberately replaces `request.tenant` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `createPathMatcher(patterns)`           | function | Builds a path-exclusion predicate from a `readonly PathPattern[]`. The list is partitioned ONCE at construction — literals into a `Set`, patterns into an array walked only on a literal miss — so an all-literal list costs one hash lookup per request, and `lastIndex` is reset before each `.test` so a `g`/`y`-flagged pattern matches on every call rather than every other one. Here because four middlewares need it (`rateLimitMiddleware`, `tenantMiddleware`, `createRequestLoggerMiddleware`, `HttpCollector`) and no plugin may import another                                                                                                                                                                                                                                                                                                                                                                      |
 | `isPromiseLike(value)`                  | function | Duck-typed thenable test (M87) — see the note below the Types table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 
 ### Types
@@ -8495,7 +8609,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`, `JsonValue` — the recursive JSON-safe value type (M74); `SseMessage.data` is typed with it, and its object arm admits `undefined` because `JSON.stringify` drops such a key                                                                                                                                                                                                                                                                                                                                            |
-| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`, `PathPattern` — one path-exclusion entry, `string \| RegExp` (M90a); a string is an EXACT match, never a prefix                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                                                                                                                                                                                                                              |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -8822,27 +8936,28 @@ Cloudflare Workers.
 
 ### Values (runtime exports)
 
-| Export                            | Kind     | Purpose                                                                                    |
-| --------------------------------- | -------- | ------------------------------------------------------------------------------------------ |
-| `RuntimePlugin`                   | function | Creates the runtime plugin (registers `CAPABILITIES.RUNTIME`)                              |
-| `detectRuntime`                   | function | Detects the current runtime platform (`'node' \| 'deno' \| 'bun' \| 'cloudflare-workers'`) |
-| `createRuntimeServices`           | function | Creates `IRuntimeServices` for the detected platform, without an application               |
-| `buildNodeHost`                   | function | Builds a `NodeHost` from injected `NodeModules` (defaults to real `node:` built-ins)       |
-| `buildBunHost`                    | function | Builds a `BunHost` from injected `BunModules` (defaults to `node:` built-ins)              |
-| `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                             |
-| `createNodeRuntimeServices`       | function | Creates `IRuntimeServices` backed by Node.js APIs                                          |
-| `createBunRuntimeServices`        | function | Creates `IRuntimeServices` backed by Bun APIs                                              |
-| `createCloudflareRuntimeServices` | function | Creates `IRuntimeServices` backed by Cloudflare Workers APIs (edge-compatible)             |
-| `DenoHttpAdapter`                 | class    | Deno HTTP server adapter implementing `IHttpAdapter`                                       |
-| `NodeHttpAdapter`                 | class    | Node.js HTTP server adapter implementing `IHttpAdapter`                                    |
-| `BunHttpAdapter`                  | class    | Bun HTTP server adapter implementing `IHttpAdapter`                                        |
-| `CloudflareWorkersHttpAdapter`    | class    | Cloudflare Workers HTTP adapter implementing `IHttpAdapter` (fetch-only, no listen)        |
-| `createWebWorkerHost`             | function | Creates an `IWorkerHost` over the web `Worker` API (Deno/Bun); throws if `Worker` absent   |
-| `createNodeWorkerHost`            | function | Creates an `IWorkerHost` over `node:worker_threads`                                        |
-| `defineWorkerTask`                | function | **`@setu-ts/runtime/worker` subpath.** Registers a worker module's task handler            |
-| `isDenoHttpServerHandle`          | function | Type guard for `DenoHttpServerHandle`                                                      |
-| `isNodeHttpServerHandle`          | function | Type guard for `NodeHttpServerHandle`                                                      |
-| `isBunHttpServerHandle`           | function | Type guard for `BunHttpServerHandle`                                                       |
+| Export                            | Kind     | Purpose                                                                                                                                                                                                                                                           |
+| --------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RuntimePlugin`                   | function | Creates the runtime plugin (registers `CAPABILITIES.RUNTIME`)                                                                                                                                                                                                     |
+| `RequestBodyTooLargeError`        | class    | Raised by the bounded body read when a request body exceeds `RuntimeOptions.maxBodyBytes`. Carries `maxBodyBytes` and is branded with a `413` HTTP status hint, so an application running `errorHandler` answers `413 Payload Too Large` in its configured format |
+| `detectRuntime`                   | function | Detects the current runtime platform (`'node' \| 'deno' \| 'bun' \| 'cloudflare-workers'`)                                                                                                                                                                        |
+| `createRuntimeServices`           | function | Creates `IRuntimeServices` for the detected platform, without an application                                                                                                                                                                                      |
+| `buildNodeHost`                   | function | Builds a `NodeHost` from injected `NodeModules` (defaults to real `node:` built-ins)                                                                                                                                                                              |
+| `buildBunHost`                    | function | Builds a `BunHost` from injected `BunModules` (defaults to `node:` built-ins)                                                                                                                                                                                     |
+| `createDenoRuntimeServices`       | function | Creates `IRuntimeServices` backed by Deno APIs                                                                                                                                                                                                                    |
+| `createNodeRuntimeServices`       | function | Creates `IRuntimeServices` backed by Node.js APIs                                                                                                                                                                                                                 |
+| `createBunRuntimeServices`        | function | Creates `IRuntimeServices` backed by Bun APIs                                                                                                                                                                                                                     |
+| `createCloudflareRuntimeServices` | function | Creates `IRuntimeServices` backed by Cloudflare Workers APIs (edge-compatible)                                                                                                                                                                                    |
+| `DenoHttpAdapter`                 | class    | Deno HTTP server adapter implementing `IHttpAdapter`                                                                                                                                                                                                              |
+| `NodeHttpAdapter`                 | class    | Node.js HTTP server adapter implementing `IHttpAdapter`                                                                                                                                                                                                           |
+| `BunHttpAdapter`                  | class    | Bun HTTP server adapter implementing `IHttpAdapter`                                                                                                                                                                                                               |
+| `CloudflareWorkersHttpAdapter`    | class    | Cloudflare Workers HTTP adapter implementing `IHttpAdapter` (fetch-only, no listen)                                                                                                                                                                               |
+| `createWebWorkerHost`             | function | Creates an `IWorkerHost` over the web `Worker` API (Deno/Bun); throws if `Worker` absent                                                                                                                                                                          |
+| `createNodeWorkerHost`            | function | Creates an `IWorkerHost` over `node:worker_threads`                                                                                                                                                                                                               |
+| `defineWorkerTask`                | function | **`@setu-ts/runtime/worker` subpath.** Registers a worker module's task handler                                                                                                                                                                                   |
+| `isDenoHttpServerHandle`          | function | Type guard for `DenoHttpServerHandle`                                                                                                                                                                                                                             |
+| `isNodeHttpServerHandle`          | function | Type guard for `NodeHttpServerHandle`                                                                                                                                                                                                                             |
+| `isBunHttpServerHandle`           | function | Type guard for `BunHttpServerHandle`                                                                                                                                                                                                                              |
 
 WebSocket upgrade support (Milestone 46) — shared primitives:
 
@@ -8875,50 +8990,51 @@ Per-runtime upgrade seams:
 
 ### Types
 
-| Export                              | Kind | Purpose                                                                        |
-| ----------------------------------- | ---- | ------------------------------------------------------------------------------ |
-| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`platform`, `env`)                                |
-| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`, `env`)            |
-| `RuntimeAdapterFactories`           | type | Platform → runtime adapter factory map                                         |
-| `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                              |
-| `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                          |
-| `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                        |
-| `DenoDirEntry`                      | type | Directory entry yielded by `DenoHost.readDir()` (an `AsyncIterable`)           |
-| `NodeHost`                          | type | Host interface for the Node adapter (extension point)                          |
-| `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                                        |
-| `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)                   |
-| `BunHost`                           | type | Host interface for the Bun adapter (extension point)                           |
-| `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                                         |
-| `BunModules`                        | type | Injectable built-ins for `buildBunHost` (testing seam)                         |
-| `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                                     |
-| `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                                     |
-| `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                                      |
-| `CloudflareWorkersHttpServerHandle` | type | Internal server handle for CloudflareWorkersHttpAdapter                        |
-| `DenoServeHost`                     | type | Injectable host interface for DenoHttpAdapter (extension point)                |
-| `NodeServeHost`                     | type | Injectable host interface for NodeHttpAdapter (extension point)                |
-| `BunServeHost`                      | type | Injectable host interface for BunHttpAdapter (extension point)                 |
-| `BunServer`                         | type | Bun server handle returned by `Bun.serve`                                      |
-| `HttpAdapterFactories`              | type | Platform→adapter factory map for RuntimePlugin                                 |
-| `WebWorkerGlobals`                  | type | Injectable seam for `createWebWorkerHost` (`Worker` + concurrency)             |
-| `WebWorkerLike`                     | type | Minimal web `Worker` shape the host consumes                                   |
-| `NodeWorkerModules`                 | type | Injectable seam for `createNodeWorkerHost` (`Worker` + `availableParallelism`) |
-| `NodeWorkerLike`                    | type | Minimal `worker_threads.Worker` shape the host consumes                        |
-| `WebSocketLike`                     | type | Minimal web `WebSocket` shape the adapters drive                               |
-| `DenoWebSocketLike`                 | type | A web socket exposing the `on*` handler properties (Deno)                      |
-| `DenoWebSocketUpgrade`              | type | Result shape of `Deno.upgradeWebSocket` (`{ socket, response }`)               |
-| `BunServerWebSocket`                | type | Minimal Bun `ServerWebSocket` shape, carrying `data`                           |
-| `BunSocketData`                     | type | Per-socket data Bun carries from `upgrade()` to its handlers (`{ sink }`)      |
-| `BunWebSocketHandlers`              | type | The serve-time handler object for `Bun.serve`'s `websocket` option             |
-| `CloudflareServerSocket`            | type | Workers server-half socket (`accept()` + `addEventListener`)                   |
-| `CloudflareWebSocketPair`           | type | A created Workers pair (`{ client, server }`)                                  |
-| `CloudflareWebSocketHost`           | type | Injectable seam for the Workers upgrader (extension point)                     |
-| `CloudflareUpgradeResponseInit`     | type | The Workers 101 response init, including the `webSocket` member                |
-| `WsModuleLike`                      | type | Structural facade over the `ws` module (`{ WebSocketServer }`)                 |
-| `WsServerLike`                      | type | Structural facade over a `noServer` `ws` `WebSocketServer`                     |
-| `WsSocketLike`                      | type | Structural facade over a `ws` socket                                           |
-| `NodeIncomingMessage`               | type | Minimal `node:http.IncomingMessage` shape for building an upgrade `Request`    |
-| `RawUpgradeSocket`                  | type | Minimal raw duplex socket shape a refusal writes to                            |
-| `UpgradeEmitter`                    | type | A server handle that emits the raw `upgrade` event                             |
+| Export                              | Kind | Purpose                                                                                                                                       |
+| ----------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RuntimeOptions`                    | type | Options for `RuntimePlugin` (`platform`, `env`, `maxBodyBytes`)                                                                               |
+| `CreateRuntimeServicesOptions`      | type | Options for `createRuntimeServices` (`platform`, `adapters`, `env`)                                                                           |
+| `RuntimeAdapterFactories`           | type | Platform → runtime adapter factory map                                                                                                        |
+| `GlobalScope`                       | type | Injectable global scope shape for `detectRuntime`                                                                                             |
+| `DenoHost`                          | type | Host interface for the Deno adapter (extension point)                                                                                         |
+| `DenoFileInfo`                      | type | File info returned by `DenoHost.stat()`                                                                                                       |
+| `DenoDirEntry`                      | type | Directory entry yielded by `DenoHost.readDir()` (an `AsyncIterable`)                                                                          |
+| `NodeHost`                          | type | Host interface for the Node adapter (extension point)                                                                                         |
+| `NodeFsInfo`                        | type | File info returned by `NodeHost.stat()`                                                                                                       |
+| `NodeModules`                       | type | Injectable Node built-ins for `buildNodeHost` (testing seam)                                                                                  |
+| `BunHost`                           | type | Host interface for the Bun adapter (extension point)                                                                                          |
+| `BunFileInfo`                       | type | File info returned by `BunHost.stat()`                                                                                                        |
+| `BunModules`                        | type | Injectable built-ins for `buildBunHost` (testing seam)                                                                                        |
+| `DenoHttpServerHandle`              | type | Internal server handle for DenoHttpAdapter                                                                                                    |
+| `NodeHttpServerHandle`              | type | Internal server handle for NodeHttpAdapter                                                                                                    |
+| `BunHttpServerHandle`               | type | Internal server handle for BunHttpAdapter                                                                                                     |
+| `CloudflareWorkersHttpServerHandle` | type | Internal server handle for CloudflareWorkersHttpAdapter                                                                                       |
+| `DenoServeHost`                     | type | Injectable host interface for DenoHttpAdapter (extension point)                                                                               |
+| `NodeServeHost`                     | type | Injectable host interface for NodeHttpAdapter (extension point)                                                                               |
+| `BunServeHost`                      | type | Injectable host interface for BunHttpAdapter (extension point)                                                                                |
+| `BunServer`                         | type | Bun server handle returned by `Bun.serve`                                                                                                     |
+| `HttpAdapterFactories`              | type | Platform→adapter factory map for RuntimePlugin. Each factory takes an optional `HttpAdapterOptions`, so a zero-argument fake stays assignable |
+| `HttpAdapterOptions`                | type | Construction options every first-party HTTP adapter accepts (`maxBodyBytes`)                                                                  |
+| `WebWorkerGlobals`                  | type | Injectable seam for `createWebWorkerHost` (`Worker` + concurrency)                                                                            |
+| `WebWorkerLike`                     | type | Minimal web `Worker` shape the host consumes                                                                                                  |
+| `NodeWorkerModules`                 | type | Injectable seam for `createNodeWorkerHost` (`Worker` + `availableParallelism`)                                                                |
+| `NodeWorkerLike`                    | type | Minimal `worker_threads.Worker` shape the host consumes                                                                                       |
+| `WebSocketLike`                     | type | Minimal web `WebSocket` shape the adapters drive                                                                                              |
+| `DenoWebSocketLike`                 | type | A web socket exposing the `on*` handler properties (Deno)                                                                                     |
+| `DenoWebSocketUpgrade`              | type | Result shape of `Deno.upgradeWebSocket` (`{ socket, response }`)                                                                              |
+| `BunServerWebSocket`                | type | Minimal Bun `ServerWebSocket` shape, carrying `data`                                                                                          |
+| `BunSocketData`                     | type | Per-socket data Bun carries from `upgrade()` to its handlers (`{ sink }`)                                                                     |
+| `BunWebSocketHandlers`              | type | The serve-time handler object for `Bun.serve`'s `websocket` option                                                                            |
+| `CloudflareServerSocket`            | type | Workers server-half socket (`accept()` + `addEventListener`)                                                                                  |
+| `CloudflareWebSocketPair`           | type | A created Workers pair (`{ client, server }`)                                                                                                 |
+| `CloudflareWebSocketHost`           | type | Injectable seam for the Workers upgrader (extension point)                                                                                    |
+| `CloudflareUpgradeResponseInit`     | type | The Workers 101 response init, including the `webSocket` member                                                                               |
+| `WsModuleLike`                      | type | Structural facade over the `ws` module (`{ WebSocketServer }`)                                                                                |
+| `WsServerLike`                      | type | Structural facade over a `noServer` `ws` `WebSocketServer`                                                                                    |
+| `WsSocketLike`                      | type | Structural facade over a `ws` socket                                                                                                          |
+| `NodeIncomingMessage`               | type | Minimal `node:http.IncomingMessage` shape for building an upgrade `Request`                                                                   |
+| `RawUpgradeSocket`                  | type | Minimal raw duplex socket shape a refusal writes to                                                                                           |
+| `UpgradeEmitter`                    | type | A server handle that emits the raw `upgrade` event                                                                                            |
 
 Contract notes:
 
@@ -10470,25 +10586,64 @@ GraphqlPlugin({ schema });
 
 ### Options
 
-| Option               | Type                                      | Default    | Description                                                                            |
-| -------------------- | ----------------------------------------- | ---------- | -------------------------------------------------------------------------------------- |
-| `typeDefs`           | `string`                                  | -          | SDL schema definition (schema-first mode)                                              |
-| `resolvers`          | `ResolverMap`                             | -          | Resolver map (schema-first mode)                                                       |
-| `schema`             | `GraphqlSchemaLike`                       | -          | Pre-built schema (code-first mode)                                                     |
-| `path`               | `string`                                  | `/graphql` | Endpoint path                                                                          |
-| `graphiql`           | `boolean`                                 | `true`     | Enable GraphiQL UI                                                                     |
-| `introspection`      | `boolean`                                 | `true`     | Enable schema introspection                                                            |
-| `maxDepth`           | `number`                                  | `10`       | Maximum query depth (0 to disable)                                                     |
-| `validationRules`    | `unknown[]`                               | omitted    | Extra rules, appended after the built-ins, assembled once at registration              |
-| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal server errors                                                            |
-| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter applied after masking                                           |
-| `documentCacheSize`  | `number`                                  | `1000`     | Max cached documents (0 to disable)                                                    |
-| `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder                                                                 |
-| `rootValue`          | `unknown`                                 | omitted    | Root value for resolvers                                                               |
-| `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module (for testing or code-first scenarios)                          |
-| `subscriptions`      | `GraphqlSubscriptionsOptions`             | omitted    | Subscription transports. **Omitted registers no transport route at all.**              |
-| `apq`                | `GraphqlApqOptions`                       | omitted    | Automatic Persisted Queries. **Omitted disables APQ**; requires `CAPABILITIES.RUNTIME` |
-| `maxBatchSize`       | `number`                                  | `0`        | **`0` disables batching** and an array body is still refused with `400`                |
+| Option               | Type                                      | Default    | Description                                                                                                                                                                              |
+| -------------------- | ----------------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `typeDefs`           | `string`                                  | -          | SDL schema definition (schema-first mode)                                                                                                                                                |
+| `resolvers`          | `ResolverMap`                             | -          | Resolver map (schema-first mode)                                                                                                                                                         |
+| `schema`             | `GraphqlSchemaLike`                       | -          | Pre-built schema (code-first mode)                                                                                                                                                       |
+| `path`               | `string`                                  | `/graphql` | Endpoint path                                                                                                                                                                            |
+| `graphiql`           | `boolean`                                 | `true`     | Enable GraphiQL UI                                                                                                                                                                       |
+| `introspection`      | `boolean`                                 | `true`     | Enable schema introspection                                                                                                                                                              |
+| `maxDepth`           | `number`                                  | `10`       | Maximum query **depth** — nesting only (0 to disable). See the note below                                                                                                                |
+| `maxNodes`           | `number`                                  | `0`        | Maximum fields a document's **largest operation** may resolve, counting every alias separately and expanding each fragment spread at its spread site. **`0` (the default) is unbounded** |
+| `validationRules`    | `unknown[]`                               | omitted    | Extra rules, appended after the built-ins, assembled once at registration                                                                                                                |
+| `maskInternalErrors` | `boolean`                                 | `true`     | Mask internal server errors                                                                                                                                                              |
+| `formatError`        | `(error: unknown) => unknown`             | omitted    | Custom error formatter applied after masking                                                                                                                                             |
+| `documentCacheSize`  | `number`                                  | `1000`     | Max cached documents (0 to disable)                                                                                                                                                      |
+| `buildContext`       | `(input: GraphqlContextInput) => unknown` | omitted    | Custom context builder                                                                                                                                                                   |
+| `rootValue`          | `unknown`                                 | omitted    | Root value for resolvers                                                                                                                                                                 |
+| `graphqlModule`      | `GraphqlModuleLike`                       | omitted    | Injected graphql module (for testing or code-first scenarios)                                                                                                                            |
+| `subscriptions`      | `GraphqlSubscriptionsOptions`             | omitted    | Subscription transports. **Omitted registers no transport route at all.**                                                                                                                |
+| `apq`                | `GraphqlApqOptions`                       | omitted    | Automatic Persisted Queries. **Omitted disables APQ**; requires `CAPABILITIES.RUNTIME`                                                                                                   |
+| `maxBatchSize`       | `number`                                  | `0`        | **`0` disables batching** and an array body is still refused with `400`                                                                                                                  |
+
+#### Query cost: depth and breadth are different dimensions
+
+`maxDepth` bounds NESTING and nothing else. A document can be two levels deep and still ask for a
+hundred thousand fields, because every alias is a separate field:
+
+```graphql
+query { a0: user { id } a1: user { id } ... a99999: user { id } }
+```
+
+That document has depth 2, so `maxDepth: 5` has no objection to it — measured, one such request
+produced a ~5 MB response and **+822 MB RSS**. Before M90a the only limit standing between it and
+the process was the request-body size, which one HTTP request can exhaust.
+
+`maxNodes` bounds the other dimension, by WORK rather than by shape. It counts the fields an
+operation would resolve, with two properties that matter:
+
+- **Every alias counts separately**, which is what makes the document above measurable at all.
+- **A fragment spread costs its definition's fields at every spread site**, so defining a hundred
+  fields once and spreading them a thousand times is counted as a hundred thousand rather than as
+  eleven hundred. Expansion is memoized, so a deeply nested fragment graph reports a very large
+  count in time linear in the document's own size — without that the counter would itself be the
+  denial of service.
+- **A document's cost is its LARGEST operation, not the sum of all of them.** Only the operation
+  `operationName` selects is ever executed, so summing would refuse a bundled document whose
+  selected operation is well within budget. The policy is therefore "no operation in this document
+  may exceed the budget" — which is also how `maxDepth` already behaves, since it counts each
+  field's own ancestor path and is per-operation by construction.
+
+The rule itself is **not** exported: it is configured through `maxNodes` and nothing outside this
+package constructs it, so exporting it would only leak the plugin's private graphql facades into the
+published surface (the M82 precedent — `deno doc --lint` reports exactly that).
+
+It is **off by default**, because turning it on would start refusing large legitimate documents in
+existing applications. Pick a budget from the largest query your own clients issue. Set both
+options: neither stands in for the other, and a refusal is reported the same way `maxDepth`'s is — a
+validation error, so `200` under the JSON media type and `400` under
+`application/graphql-response+json`.
 
 #### `subscriptions`
 

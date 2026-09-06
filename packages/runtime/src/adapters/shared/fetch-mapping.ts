@@ -14,12 +14,56 @@
  */
 
 import type { HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
+import { withHttpStatusHint } from '@setu-ts/common';
 
 // Hoisted TextDecoder — avoids per-call allocation (A1 — no slice needed).
 const decoder = new TextDecoder();
 
 /** Shared empty body — a bodyless request allocates nothing. */
 const EMPTY_BODY = new Uint8Array(0);
+
+/**
+ * Raised when a request body exceeds the configured
+ * {@linkcode RuntimeOptions.maxBodyBytes} cap.
+ *
+ * Branded with a `413` {@linkcode withHttpStatusHint HTTP status hint}, so an
+ * application running `errorHandler` answers `413 Content Too Large` in its
+ * configured format rather than the masked `500` an unbranded throw from this
+ * depth would produce. The brand's `detail` names the limit and never the
+ * observed size: the observed size is only ever a lower bound (the read stops
+ * at the cap), so reporting it would be misleading.
+ *
+ * @since 0.5.0
+ */
+export class RequestBodyTooLargeError extends Error {
+  /** The configured cap, in bytes. */
+  readonly maxBodyBytes: number;
+
+  /**
+   * Builds the refusal for a body that exceeded the configured cap.
+   *
+   * @param maxBodyBytes - The configured cap that was exceeded
+   */
+  constructor(maxBodyBytes: number) {
+    super(
+      `Request body exceeds the configured maximum of ${maxBodyBytes} bytes ` +
+        '(RuntimePlugin({ maxBodyBytes }))',
+    );
+    this.name = 'RequestBodyTooLargeError';
+    this.maxBodyBytes = maxBodyBytes;
+    withHttpStatusHint(this, {
+      status: 413,
+      // `'Payload Too Large'` rather than RFC 9110's newer
+      // `'Content Too Large'`: it is what `@setu-ts/exceptions` maps 413 to,
+      // and what `requestSizeMiddleware` already reports for the same
+      // condition. A Problem Details formatter derives `title` from the status
+      // anyway, so a different string here would only make the two 413 sites
+      // disagree in the `'default'` format.
+      title: 'Payload Too Large',
+      detail: `Request body exceeds the maximum of ${maxBodyBytes} bytes.`,
+    });
+  }
+}
 
 /**
  * The framework request, as a class so that every accessor and body method
@@ -39,12 +83,20 @@ class FrameworkRequest implements IRequest {
   readonly #raw: Request;
   #body: Promise<Uint8Array> | undefined;
   #headers: Headers | undefined;
+  readonly #maxBodyBytes: number | undefined;
 
-  constructor(raw: Request, method: HttpMethod, url: string, path: string) {
+  constructor(
+    raw: Request,
+    method: HttpMethod,
+    url: string,
+    path: string,
+    maxBodyBytes?: number,
+  ) {
     this.#raw = raw;
     this.method = method;
     this.url = url;
     this.path = path;
+    this.#maxBodyBytes = maxBodyBytes;
   }
 
   /**
@@ -134,8 +186,80 @@ class FrameworkRequest implements IRequest {
       native.get('content-length') === null &&
       native.get('transfer-encoding') === null;
     if (bodyless) return Promise.resolve(EMPTY_BODY);
-    return this.#raw.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+    if (this.#maxBodyBytes === undefined) {
+      // No cap configured — the released path, byte for byte. `arrayBuffer()`
+      // is also the cheapest read on every runtime, so an application that
+      // sets no limit pays nothing for the option's existence.
+      return this.#raw.arrayBuffer().then((buffer) => new Uint8Array(buffer));
+    }
+    return readBounded(this.#raw, this.#maxBodyBytes);
   }
+}
+
+/**
+ * Reads a request body, refusing past a byte cap.
+ *
+ * This is the bound that a request header cannot switch off.
+ * `requestSizeMiddleware` refuses on a declared `Content-Length` before
+ * anything is read, which is cheaper and reports earlier — but a chunked
+ * request declares no length, and since M87 made the body lazy the read
+ * happens inside the handler, AFTER every middleware has returned. So the only
+ * place a chunked body can be bounded is where it is actually consumed.
+ *
+ * The cap is compared against the running total BEFORE a chunk is retained, so
+ * at most one chunk beyond the limit is ever held. The reader is cancelled on
+ * refusal rather than merely abandoned: an abandoned `ReadableStream` holds its
+ * source open (the M70k HEAD-descriptor-leak class), which on a server means
+ * the connection stays draining.
+ *
+ * `raw.body` is read only on this path. That matters on Node, where touching
+ * `.body` materializes the full undici `Request` the lightweight facade exists
+ * to avoid (M87) — which is why the uncapped branch above never reaches it.
+ *
+ * @param raw - The web-standard request
+ * @param maxBodyBytes - The cap, in bytes
+ * @returns The body bytes
+ * @throws {RequestBodyTooLargeError} When the body exceeds the cap
+ */
+async function readBounded(raw: Request, maxBodyBytes: number): Promise<Uint8Array> {
+  const stream = raw.body;
+  if (stream === null) {
+    // Framing headers were present but there is no stream: an empty body.
+    return EMPTY_BODY;
+  }
+
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (total + value.byteLength > maxBodyBytes) {
+        throw new RequestBodyTooLargeError(maxBodyBytes);
+      }
+      total += value.byteLength;
+      chunks.push(value);
+    }
+  } finally {
+    // Releasing the lock is not enough — the source stays open until the
+    // stream is cancelled. `cancel()` rejects on an already-errored stream,
+    // which must not replace the refusal with a different failure.
+    await reader.cancel().catch(() => {});
+  }
+
+  // One chunk is the overwhelmingly common case; returning it directly avoids
+  // a full copy of every uploaded body.
+  if (chunks.length === 1) {
+    return chunks[0] as Uint8Array;
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
 }
 
 /**
@@ -224,14 +348,23 @@ export function extractPath(url: string): string {
  * promise, so every eagerly-async link in this chain forecloses it.
  *
  * @param request - A web-standard `Request`
+ * @param maxBodyBytes - Optional cap on the body read, in bytes. Omitted, the
+ *   body is read unbounded — the released behaviour. Supplied, a body past the
+ *   cap rejects with {@linkcode RequestBodyTooLargeError}, which no request
+ *   header can disable. `RuntimePlugin({ maxBodyBytes })` is what threads it
+ *   here.
  * @returns The framework request
  */
-export function mapWebRequestToFrameworkRequest(request: Request): IRequest {
+export function mapWebRequestToFrameworkRequest(
+  request: Request,
+  maxBodyBytes?: number,
+): IRequest {
   return new FrameworkRequest(
     request,
     request.method.toUpperCase() as HttpMethod,
     request.url,
     extractPath(request.url),
+    maxBodyBytes,
   );
 }
 

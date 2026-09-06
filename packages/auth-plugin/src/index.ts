@@ -41,7 +41,11 @@ export { MalformedPasswordHashError, PasswordHasher } from './services/password-
 
 // Middleware
 export { authMiddleware } from './middleware/auth-middleware.ts';
-export { defaultRateLimitKey, rateLimitMiddleware } from './middleware/rate-limit-middleware.ts';
+export {
+  DEFAULT_RATE_LIMIT_EXCLUDED_PATHS,
+  defaultRateLimitKey,
+  rateLimitMiddleware,
+} from './middleware/rate-limit-middleware.ts';
 export type { RateLimitOptions } from './middleware/rate-limit-middleware.ts';
 
 // Guards
@@ -63,7 +67,10 @@ export { MemoryRefreshTokenStore } from './stores/refresh-token-store.ts';
 // Rate limit store
 export type { RateLimitResult, RateLimitStore } from './stores/rate-limit-store.ts';
 export { MemoryRateLimitStore } from './stores/rate-limit-store.ts';
-export { RedisRateLimitStore } from './stores/redis-rate-limit-store.ts';
+export {
+  DEFAULT_RATE_LIMIT_KEY_PREFIX,
+  RedisRateLimitStore,
+} from './stores/redis-rate-limit-store.ts';
 
 // Re-export common contracts
 export type {

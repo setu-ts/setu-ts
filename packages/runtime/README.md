@@ -22,7 +22,7 @@ npx jsr add @setu-ts/runtime
 
 | Area            | Exports                                                                                |
 | --------------- | -------------------------------------------------------------------------------------- |
-| Plugin          | `RuntimePlugin`, `RuntimeOptions`                                                      |
+| Plugin          | `RuntimePlugin`, `RuntimeOptions`, `HttpAdapterOptions`, `RequestBodyTooLargeError`    |
 | Detection       | `detectRuntime`, `GlobalScope`                                                         |
 | Deno adapter    | `createDenoRuntimeServices`, `DenoHost`, `DenoFileInfo`, `DenoDirEntry`                |
 | Node adapter    | `createNodeRuntimeServices`, `NodeHost`, `NodeFsInfo`                                  |
@@ -67,6 +67,35 @@ RuntimePlugin({ platform: 'node' });
 | `env`          | `Record<string, unknown>` | —                 | Cloudflare Workers `env`. Only its **string** entries populate `runtime.env`. |
 | `adapters`     | `RuntimeAdapterFactories` | —                 | Internal: override runtime adapter factories.                                 |
 | `httpAdapters` | `HttpAdapterFactories`    | built-in four     | Internal: override HTTP adapter factories.                                    |
+| `maxBodyBytes` | `number`                  | — (unbounded)     | Cap on the request-body read, enforced where the body is consumed.            |
+
+### Bounding the request body
+
+```typescript
+RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 });
+```
+
+Omitted, the read is unbounded — the released behaviour, byte for byte.
+
+This is the layer no request header can switch off.
+`HttpSecurityPlugin({ requestSize: { maxBodySize } })` refuses on a **declared** `Content-Length`
+before anything is read, which is cheaper and reports earlier; a **chunked** request declares no
+length, and since the body read became lazy it happens inside the handler, after every middleware
+has returned. So the middleware bounds declared lengths and this option bounds the read itself.
+There are two knobs because the request mapping runs before any plugin and there is no channel
+between them: `mapWebRequestToFrameworkRequest` receives a `Request` and nothing else. Set both, and
+set `maxBodyBytes` to the same value as `maxBodySize` or higher.
+
+A body past the cap rejects with `RequestBodyTooLargeError`, branded with a `413` HTTP status hint,
+so an application running `errorHandler` answers `413 Payload Too Large` in its configured format
+rather than a masked `500`. With no `errorHandler` registered the brand has no reader and the
+kernel's opaque `500` answers instead.
+
+**`0` refuses every request that carries a body** — it does NOT disable the check, which is what `0`
+means for `maxDepth`/`maxNodes`/`maxBatchSize` elsewhere in this framework. Omitting the option is
+the one way to say unbounded. A value that is not a non-negative integer throws at
+`RuntimePlugin(...)`; `NaN` in particular would make every comparison against the cap `false` and
+silently disable the bound, and `Number()` of an unset environment variable is exactly `NaN`.
 
 `adapters` and `httpAdapters` are marked `@internal` — they exist so unit tests can run without OS
 permissions or real runtime globals, not as application configuration.
@@ -135,6 +164,7 @@ package fits the plugin architecture.
 | `normalizeFrame`                       | function  |
 | `rejectRawUpgrade`                     | function  |
 | `RuntimePlugin`                        | function  |
+| `RequestBodyTooLargeError`             | class     |
 | `toReadyState`                         | function  |
 | `toTransportError`                     | function  |
 | `toWsReadyState`                       | function  |
@@ -179,6 +209,7 @@ package fits the plugin architecture.
 | `NodeWorkerLike`                       | interface |
 | `NodeWorkerModules`                    | interface |
 | `RawUpgradeSocket`                     | interface |
+| `HttpAdapterOptions`                   | interface |
 | `RuntimeAdapterFactories`              | interface |
 | `RuntimeOptions`                       | interface |
 | `UpgradeEmitter`                       | interface |

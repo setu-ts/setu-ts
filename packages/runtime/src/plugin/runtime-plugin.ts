@@ -11,6 +11,7 @@ import type { IHttpAdapter, IPlugin, IPluginContext, RuntimePlatform } from '@se
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { detectRuntime } from '../detector/runtime-detector.ts';
+import type { HttpAdapterOptions } from '../adapters/shared/adapter-options.ts';
 import type { RuntimeAdapterFactories } from '../adapters/shared/runtime-services-factory.ts';
 import { createRuntimeServices } from '../adapters/shared/runtime-services-factory.ts';
 import { DenoHttpAdapter } from '../adapters/deno/deno-http-adapter.ts';
@@ -67,23 +68,65 @@ export interface RuntimeOptions {
    * @since 0.2.0
    */
   env?: Readonly<Record<string, unknown>>;
+  /**
+   * Maximum request-body size, in bytes, enforced where the body is read.
+   * Omitted, the read is unbounded — the released behaviour, byte for byte.
+   *
+   * This is the layer no request header can switch off.
+   * `HttpSecurityPlugin({ requestSize: { maxBodySize } })` refuses on a
+   * DECLARED `Content-Length` before anything is read, which is cheaper and
+   * reports earlier — but a chunked request declares no length, and since M87
+   * made the body lazy the read happens inside the handler, after every
+   * middleware has returned. So a chunked body can only be bounded here.
+   *
+   * The two knobs exist because the mapping runs before any plugin and there
+   * is no channel between them: `mapWebRequestToFrameworkRequest` receives a
+   * `Request` and nothing else. Set both, and set this one to the same value
+   * or higher.
+   *
+   * A body past the cap rejects with `RequestBodyTooLargeError`, branded with
+   * a `413` status hint, so an application running `errorHandler` answers
+   * `413 Payload Too Large` in its configured format. With no `errorHandler`
+   * registered the brand has no reader and the kernel's opaque `500` answers
+   * instead, which is how every other status hint behaves.
+   *
+   * **`0` means "refuse every request that carries a body"**, not "disabled" —
+   * unlike `maxDepth`, `maxNodes`, `maxBatchSize` and `documentCacheSize`
+   * elsewhere in this framework, where `0` disables the check. Omit the option
+   * for unbounded; there is exactly one way to say that. A value that is not a
+   * non-negative integer — a negative, a fraction, or the `NaN` that
+   * `Number(env.MAX_BODY_BYTES)` yields for an unset or misspelled variable —
+   * **throws here** rather than being accepted: `NaN` would make every
+   * comparison against the cap `false` and silently disable the bound, which is
+   * the one failure a size limit must not have.
+   *
+   * @example
+   * ```typescript
+   * RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 })
+   * ```
+   * @since 0.5.0
+   */
+  maxBodyBytes?: number;
 }
 
 /**
  * Map of platform → HTTP adapter factory. Used internally for dependency injection.
  */
 export interface HttpAdapterFactories {
-  deno?: () => IHttpAdapter;
-  node?: () => IHttpAdapter;
-  bun?: () => IHttpAdapter;
-  'cloudflare-workers'?: () => IHttpAdapter;
+  deno?: (options?: HttpAdapterOptions) => IHttpAdapter;
+  node?: (options?: HttpAdapterOptions) => IHttpAdapter;
+  bun?: (options?: HttpAdapterOptions) => IHttpAdapter;
+  'cloudflare-workers'?: (options?: HttpAdapterOptions) => IHttpAdapter;
 }
 
+// Each factory takes the adapter options the plugin resolved. The parameter is
+// optional, so an injected zero-argument fake — which is what every test in
+// this repository supplies — stays assignable.
 const defaultHttpAdapters: HttpAdapterFactories = {
-  deno: () => new DenoHttpAdapter(),
-  node: () => new NodeHttpAdapter(),
-  bun: () => new BunHttpAdapter(),
-  'cloudflare-workers': () => new CloudflareWorkersHttpAdapter(),
+  deno: (options) => new DenoHttpAdapter(undefined, options),
+  node: (options) => new NodeHttpAdapter(undefined, undefined, options),
+  bun: (options) => new BunHttpAdapter(undefined, options),
+  'cloudflare-workers': (options) => new CloudflareWorkersHttpAdapter(undefined, options),
 };
 
 /**
@@ -102,6 +145,25 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   const runtimeAdapters = options?.adapters;
   const httpAdapters = options?.httpAdapters ?? defaultHttpAdapters;
   const workerEnv = options?.env;
+  const maxBodyBytes = options?.maxBodyBytes;
+
+  // Validated at FACTORY time, before an application exists: an
+  // out-of-domain cap is a configuration mistake, and `NaN` in particular
+  // fails OPEN — `total + n > NaN` is always `false`, so the bound would
+  // silently never fire. `Number()` of an unset env var is exactly `NaN`,
+  // which is the likeliest way this value is supplied in a deployment.
+  // `Infinity` is rejected too: omitting the option already means unbounded,
+  // so there is one way to say it rather than two.
+  if (
+    maxBodyBytes !== undefined &&
+    (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0)
+  ) {
+    throw new Error(
+      `RuntimePlugin: maxBodyBytes must be a non-negative integer, received ` +
+        `${String(maxBodyBytes)}. Omit the option for an unbounded body read; ` +
+        `note that 0 refuses every request carrying a body.`,
+    );
+  }
 
   return {
     name: 'runtime',
@@ -124,12 +186,19 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
       ctx.services.register(CAPABILITIES.RUNTIME, services);
 
       // Register HTTP adapter
-      const httpAdapterFactory =
-        (httpAdapters as Record<string, (() => IHttpAdapter) | undefined>)[platform];
+      const httpAdapterFactory = (httpAdapters as Record<
+        string,
+        ((adapterOptions?: HttpAdapterOptions) => IHttpAdapter) | undefined
+      >)[platform];
       if (httpAdapterFactory === undefined) {
         throw new Error(`No HTTP adapter for platform: ${platform}`);
       }
-      const httpAdapter = httpAdapterFactory();
+      // `exactOptionalPropertyTypes`: omit the member entirely when unset, so
+      // an adapter reading `options?.maxBodyBytes` sees the same `undefined`
+      // either way and no caller can pass an explicit `undefined`.
+      const httpAdapter = httpAdapterFactory(
+        maxBodyBytes === undefined ? {} : { maxBodyBytes },
+      );
       ctx.services.register(CAPABILITIES.HTTP_ADAPTER, httpAdapter);
     },
   };

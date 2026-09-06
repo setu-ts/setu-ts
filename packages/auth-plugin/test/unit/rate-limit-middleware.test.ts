@@ -14,95 +14,8 @@ import {
 } from '../../src/middleware/rate-limit-middleware.ts';
 import type { RateLimitResult, RateLimitStore } from '../../src/stores/rate-limit-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
-import { CAPABILITIES, CLIENT_IP_STATE_KEY } from '@setu-ts/common';
-import type {
-  HandlerResult,
-  IPrincipal,
-  IRequest,
-  IRequestContext,
-  IResponse,
-  IServiceRegistry,
-} from '@setu-ts/common';
-
-interface CapturedResponse {
-  status: number;
-  headers: Headers;
-  body: unknown;
-}
-
-function createContext(
-  runtime: ReturnType<typeof createFakeRuntime>,
-  options?: { ip?: string; user?: IPrincipal },
-): { ctx: IRequestContext; captured: CapturedResponse } {
-  const captured: CapturedResponse = { status: 200, headers: new Headers(), body: null };
-
-  const request: IRequest & { user?: IPrincipal } = {
-    method: 'GET',
-    url: 'http://localhost/',
-    path: '/',
-    headers: new Headers(),
-    ...(options?.ip !== undefined ? { ip: options.ip } : {}),
-    json: <T>() => Promise.resolve({} as T),
-    text: () => Promise.resolve(''),
-    bytes: () => Promise.resolve(new Uint8Array()),
-  };
-  if (options?.user !== undefined) {
-    request.user = options.user;
-  }
-
-  const response: IResponse = {
-    status: (code: number) => {
-      captured.status = code;
-      return response;
-    },
-    header: (name: string, value: string) => {
-      captured.headers.set(name, value);
-      return response;
-    },
-    appendHeader: () => response,
-    json: (body: unknown): HandlerResult => {
-      captured.body = body;
-      return { __handlerResult: true } as unknown as HandlerResult;
-    },
-    text: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    html: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    send: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    redirect: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    stream: (): HandlerResult => ({ __handlerResult: true } as unknown as HandlerResult),
-    snapshot: () => ({
-      streaming: false,
-      status: captured.status,
-      headers: captured.headers,
-      body: null,
-    }),
-  };
-
-  const services = {
-    get: <T>(token: string): T => {
-      if (token === CAPABILITIES.RUNTIME) {
-        return runtime as T;
-      }
-      throw new Error(`unexpected token: ${token}`);
-    },
-    has: () => true,
-    register: () => {},
-  } as unknown as IServiceRegistry;
-
-  const _abortCtrl = new AbortController();
-  const ctx: IRequestContext = {
-    id: 'test',
-    request,
-    response,
-    services,
-    params: {},
-    query: {},
-    state: new Map(),
-    startTime: 0,
-    signal: _abortCtrl.signal,
-  };
-
-  return { ctx, captured };
-}
+import { createContext } from '../fixtures/rate-limit-context.ts';
+import { CLIENT_IP_STATE_KEY } from '@setu-ts/common';
 
 describe('rateLimitMiddleware', () => {
   it('under-limit request calls next and sets RateLimit-* headers', async () => {
@@ -140,7 +53,7 @@ describe('rateLimitMiddleware', () => {
     expect(downstreamInvocations).toBe(2);
 
     const third = createContext(runtime, { ip: '5.6.7.8' });
-    const result = await middleware(third.ctx, next);
+    await middleware(third.ctx, next);
 
     expect(downstreamInvocations).toBe(2); // downstream NOT invoked
     expect(third.captured.status).toBe(429);
@@ -148,11 +61,19 @@ describe('rateLimitMiddleware', () => {
     expect(third.captured.headers.get('RateLimit-Limit')).toBe('2');
     expect(third.captured.headers.get('RateLimit-Remaining')).toBe('0');
     expect(third.captured.headers.get('RateLimit-Reset')).toBe('60'); // delta-seconds
+    // `detail`, not `message` (M90a §3.7). The 429 now goes through
+    // `respondWithError`, so with no `errorHandler` registered it takes that
+    // seam's `{ error, detail? }` fallback — the shape M70f converged every
+    // other first-party short-circuit onto. A BREAKING body change, recorded
+    // in the CHANGELOG.
     expect(third.captured.body).toEqual({
       error: 'Too Many Requests',
-      message: 'Rate limit exceeded',
+      detail: 'Rate limit exceeded',
     });
-    expect(result).toBeDefined(); // the HandlerResult short-circuits the pipeline
+    // `next()` is what the pipeline reads to continue, and it was not called —
+    // the middleware no longer returns a `HandlerResult`, because
+    // `respondWithError` writes the response and returns `void` (the shape
+    // every other first-party short-circuit already used).
   });
 
   it('uses a custom message in the 429 body', async () => {
@@ -167,7 +88,8 @@ describe('rateLimitMiddleware', () => {
     await middleware(ctx, () => Promise.resolve());
 
     expect(captured.status).toBe(429);
-    expect(captured.body).toEqual({ error: 'Too Many Requests', message: 'Slow down' });
+    // The configured `message` is served as the responder seam's `detail`.
+    expect(captured.body).toEqual({ error: 'Too Many Requests', detail: 'Slow down' });
   });
 
   it('custom keyGenerator isolates callers into separate counters', async () => {
