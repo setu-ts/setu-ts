@@ -24,7 +24,9 @@ the optional `rbac` configuration is supplied:
 | Authorization (RBAC)   | `'authorization'`  | `IAuthorizationService` (when `rbac` is configured) |
 
 Without `rbac`, the four authorization guards answer **`501 Not Implemented`** rather than throwing
-— see [Guards](#guards).
+— see [Guards](#guards). A configured policy that the caller fails answers
+`403 Insufficient
+privileges`; it never names the required role or permission.
 
 > **Refresh tokens and rate limiting ship in this package.** `IJwtService` itself exposes only
 > `sign` / `verify` / `decode`, but do not hand-roll a refresh token as `sign({ expiresIn: '7d' })`
@@ -219,22 +221,23 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 
 ## Options
 
-| Option                | Type                                                  | Default           | Description                                                                                     |
-| --------------------- | ----------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `jwt.secret`          | `string \| Uint8Array`                                | -                 | HS256 key. Required for HS256.                                                                  |
-| `jwt.privateKey`      | `string` (PEM)                                        | -                 | RS256 private key. Required for RS256.                                                          |
-| `jwt.publicKey`       | `string` (PEM)                                        | -                 | RS256 public key. Required for RS256.                                                           |
-| `jwt.algorithm`       | `'HS256' \| 'RS256'`                                  | inferred          | Inferred from which key material is provided.                                                   |
-| `jwt.audience`        | `string`                                              | -                 | Expected `aud`; enforced on verify.                                                             |
-| `jwt.issuer`          | `string`                                              | -                 | Expected `iss`; enforced on verify.                                                             |
-| `jwt.header`          | `string`                                              | `'authorization'` | Header name for bearer extraction.                                                              |
-| `jwt.scheme`          | `string`                                              | `'bearer'`        | Token scheme prefix.                                                                            |
-| `apiKey.header`       | `string`                                              | `'X-API-Key'`     | Header holding the API key.                                                                     |
-| `apiKey.validate`     | `(key) => Promise<IPrincipal \| null>`                | -                 | App-supplied API-key lookup.                                                                    |
-| `local.verify`        | `(identifier, secret) => Promise<IPrincipal \| null>` | -                 | App-supplied credential check.                                                                  |
-| `rbac.roles`          | `Record<string, RoleDefinition>`                      | -                 | Role → permissions + `inherits` hierarchy.                                                      |
-| `session.toPrincipal` | `(view: SessionView) => IPrincipal \| null`           | -                 | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`. |
-| `strategies`          | `readonly IAuthStrategy[]`                            | -                 | Caller-supplied strategies, appended after every built-in in declaration order.                 |
+| Option                           | Type                                                  | Default           | Description                                                                                     |
+| -------------------------------- | ----------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
+| `jwt.secret`                     | `string \| Uint8Array`                                | -                 | HS256 key. Required for HS256.                                                                  |
+| `jwt.privateKey`                 | `string` (PEM)                                        | -                 | RS256 private key. Required for RS256.                                                          |
+| `jwt.publicKey`                  | `string` (PEM)                                        | -                 | RS256 public key. Required for RS256.                                                           |
+| `jwt.algorithm`                  | `'HS256' \| 'RS256'`                                  | inferred          | Inferred from which key material is provided.                                                   |
+| `jwt.audience`                   | `string`                                              | -                 | Expected `aud`; enforced on verify.                                                             |
+| `jwt.issuer`                     | `string`                                              | -                 | Expected `iss`; enforced on verify.                                                             |
+| `jwt.header`                     | `string`                                              | `'authorization'` | Header name for bearer extraction.                                                              |
+| `jwt.scheme`                     | `string`                                              | `'bearer'`        | Token scheme prefix.                                                                            |
+| `jwt.accessTokenRevocationStore` | `IAccessTokenRevocationStore`                         | -                 | Shared store that rejects revoked typed access tokens.                                          |
+| `apiKey.header`                  | `string`                                              | `'X-API-Key'`     | Header holding the API key.                                                                     |
+| `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                | -                 | App-supplied API-key lookup.                                                                    |
+| `local.verify`                   | `(identifier, secret) => Promise<IPrincipal \| null>` | -                 | App-supplied credential check.                                                                  |
+| `rbac.roles`                     | `Record<string, RoleDefinition>`                      | -                 | Role → permissions + `inherits` hierarchy.                                                      |
+| `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`           | -                 | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`. |
+| `strategies`                     | `readonly IAuthStrategy[]`                            | -                 | Caller-supplied strategies, appended after every built-in in declaration order.                 |
 
 Supplying neither `jwt.secret` (HS256) nor `jwt.privateKey` + `jwt.publicKey` (RS256) throws at
 registration.
@@ -242,22 +245,51 @@ registration.
 ## Refresh Tokens
 
 `RefreshTokenService` is an app-instantiated service (like `PasswordHasher`) — it is not an
-`AuthPlugin` option and registers nothing. It mints access + refresh pairs, **rotates** on every
-`refresh` (the presented token's `jti` is revoked; replaying it returns `null`), and **revokes** on
-logout. A refresh token is a signed JWT with `type: 'refresh'` and a random `jti`, tracked in a
-pluggable async `RefreshTokenStore` (`MemoryRefreshTokenStore` ships; single-process, lazy expiry).
-`refresh()`/`revoke()` never throw on a bad token — invalid, expired, or tampered input yields
-`null`/`false`.
+`AuthPlugin` option and registers nothing. It mints typed access + refresh pairs with distinct
+random `jti`s, **rotates** on every `refresh`, and **revokes** on logout. A refresh token is a
+signed JWT with `type: 'refresh'`, which bearer authentication refuses. A replayed refresh token
+revokes its complete descendant family. `refresh()`/`revoke()` never throw on a bad token — invalid,
+expired, or tampered input yields `null`/`false`.
+
+To make logout invalidate the paired access credential before its normal expiry, construct one
+`IAccessTokenRevocationStore` and pass that same instance to both `AuthPlugin` and
+`RefreshTokenService`. `MemoryAccessTokenRevocationStore` is single-process; a multi-instance
+application supplies a shared implementation. Access revocation requires `accessToken.expiresIn`, so
+revocation entries are bounded. `RefreshTokenStore` implementations must persist family lineage and
+make `rotate(jti, successor)` and `revokeFamily(jti)` linearizable per family; the shipped
+`MemoryRefreshTokenStore` does both with lazy expiry.
 
 ```typescript
-import { MemoryRefreshTokenStore, RefreshTokenService } from '@setu-ts/auth-plugin';
+import {
+  AuthPlugin,
+  MemoryAccessTokenRevocationStore,
+  MemoryRefreshTokenStore,
+  RefreshTokenService,
+} from '@setu-ts/auth-plugin';
+import type { IJwtService, IRuntimeServices } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { createRuntimeServices, RuntimePlugin } from '@setu-ts/runtime';
+
+const accessTokenRevocations = new MemoryAccessTokenRevocationStore(createRuntimeServices());
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    AuthPlugin({
+      jwt: { secret: config.get('JWT_SECRET'), accessTokenRevocationStore: accessTokenRevocations },
+    }),
+  ],
+});
+await app.start();
+const jwt = app.services.get<IJwtService>('jwt');
+const runtime = app.services.get<IRuntimeServices>('runtime');
 
 const refresh = new RefreshTokenService({
-  jwt, // IJwtService resolved from the 'jwt' token
+  jwt,
   store: new MemoryRefreshTokenStore(runtime),
-  runtime, // IRuntimeServices resolved from the 'runtime' token
+  runtime,
   accessToken: { expiresIn: '15m' },
   refreshTokenExpiresIn: '30d',
+  accessTokenRevocationStore: accessTokenRevocations,
 });
 
 const pair = await refresh.issue(principal); // { accessToken, refreshToken }
@@ -265,15 +297,16 @@ const next = await refresh.refresh(pair.refreshToken); // new pair; old token no
 await refresh.revoke(next!.refreshToken); // logout
 ```
 
-| Option                  | Type                | Default     | Description                                    |
-| ----------------------- | ------------------- | ----------- | ---------------------------------------------- |
-| `jwt`                   | `IJwtService`       | -           | Signs/verifies both tokens.                    |
-| `store`                 | `RefreshTokenStore` | -           | Rotation/revocation backend.                   |
-| `runtime`               | `IRuntimeServices`  | -           | `randomBytes` (jti) + `now()` (expiry).        |
-| `accessToken.expiresIn` | `string`            | jwt default | Access-token lifetime.                         |
-| `accessToken.audience`  | `string`            | -           | `aud` on both tokens; enforced on verify.      |
-| `accessToken.issuer`    | `string`            | -           | `iss` on both tokens; enforced on verify.      |
-| `refreshTokenExpiresIn` | `string`            | `'7d'`      | Refresh-token lifetime (JWT `exp` AND record). |
+| Option                       | Type                          | Default     | Description                                                               |
+| ---------------------------- | ----------------------------- | ----------- | ------------------------------------------------------------------------- |
+| `jwt`                        | `IJwtService`                 | -           | Signs/verifies both tokens.                                               |
+| `store`                      | `RefreshTokenStore`           | -           | Rotation/revocation backend.                                              |
+| `runtime`                    | `IRuntimeServices`            | -           | `randomBytes` (jti) + `now()` (expiry).                                   |
+| `accessToken.expiresIn`      | `string`                      | jwt default | Access-token lifetime.                                                    |
+| `accessToken.audience`       | `string`                      | -           | `aud` on both tokens; enforced on verify.                                 |
+| `accessToken.issuer`         | `string`                      | -           | `iss` on both tokens; enforced on verify.                                 |
+| `refreshTokenExpiresIn`      | `string`                      | `'7d'`      | Refresh-token lifetime (JWT `exp` AND record).                            |
+| `accessTokenRevocationStore` | `IAccessTokenRevocationStore` | -           | Shared access-token invalidation store; requires `accessToken.expiresIn`. |
 
 ## Rate Limiting
 
@@ -284,20 +317,12 @@ registered under no capability token. Over-limit requests are short-circuited wi
 in-memory (single-process); use `RedisRateLimitStore` for multi-instance deployments (pass an
 ioredis-compatible `client`, or `npm:ioredis@5.x` is lazily imported on first use).
 
-The 429 body is written through `@setu-ts/common`'s error-responder seam, so it answers in the
-application's configured format — Problem Details under `errorHandler({ format: 'rfc9457' })` —
-exactly like the 401 a guard produces in the same application.
-
-**The operational probes are exempt by default.** Registered globally, the limiter sees `/live` and
-`/ready` too, so an exhausted bucket answered the liveness probe 429 and the kubelet restarted the
-container. `exclude` defaults to `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` — `/live`, `/ready`, `/health`,
-`/metrics`, `/openapi.json`, `/docs`. A caller list **replaces** that rather than extending it, so
-spread the constant; `[]` exempts nothing.
-
-**`RedisRateLimitStore` namespaces its keys** under `keyPrefix` (default `'setu:ratelimit:'`), so
-two applications sharing one managed Redis do not count against each other's budget — the generated
-keys (`anonymous`, `ip:…`, `user:…`) are generic enough to collide. Pass `''` for the
-pre-namespacing keys.
+The 429 body uses `@setu-ts/common`'s error-responder seam, so it follows the application's
+configured error format. The operational paths `/live`, `/ready`, `/health`, `/metrics`,
+`/openapi.json`, and `/docs` are exempt by default through `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS`; an
+`exclude` list replaces the defaults, so spread the constant to extend them. `RedisRateLimitStore`
+prefixes its keys with `'setu:ratelimit:'` by default; set `keyPrefix` per application when several
+share Redis, or `''` to keep pre-M90a keys.
 
 ```typescript
 import {
@@ -306,14 +331,13 @@ import {
   RedisRateLimitStore,
 } from '@setu-ts/auth-plugin';
 
-// Per IP, with the six operational paths exempt plus one of your own.
 app.middleware.add(rateLimitMiddleware({
   windowMs: 60_000,
   max: 100,
   exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
-}));
+})); // per IP
 
-// Redis-backed, keyed by authenticated user, namespaced per application
+// Redis-backed, keyed by authenticated user
 rateLimitMiddleware({
   windowMs: 60_000,
   max: 5,
@@ -326,15 +350,15 @@ rateLimitMiddleware({
 });
 ```
 
-| Option            | Type                     | Default                   | Description                                                                                                                |
-| ----------------- | ------------------------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `windowMs`        | `number`                 | -                         | Window length in ms.                                                                                                       |
-| `max`             | `number`                 | -                         | Max requests per window per key.                                                                                           |
-| `store`           | `RateLimitStore`         | `MemoryRateLimitStore`    | Counter backend.                                                                                                           |
-| `keyGenerator`    | `(ctx) => string`        | `ip ?? 'anonymous'`       | Caller identity for the counter.                                                                                           |
-| `message`         | `string`                 | `'Rate limit exceeded'`   | 429 body message.                                                                                                          |
-| `standardHeaders` | `boolean`                | `true`                    | Emit `RateLimit-*` headers.                                                                                                |
-| `exclude`         | `readonly PathPattern[]` | the six operational paths | Paths the limiter skips entirely. A string is an EXACT match; a `RegExp` is tested against the path. `[]` exempts nothing. |
+| Option            | Type                     | Default                 | Description                                                              |
+| ----------------- | ------------------------ | ----------------------- | ------------------------------------------------------------------------ |
+| `windowMs`        | `number`                 | -                       | Window length in ms.                                                     |
+| `max`             | `number`                 | -                       | Max requests per window per key.                                         |
+| `store`           | `RateLimitStore`         | `MemoryRateLimitStore`  | Counter backend.                                                         |
+| `keyGenerator`    | `(ctx) => string`        | `ip ?? 'anonymous'`     | Caller identity for the counter.                                         |
+| `message`         | `string`                 | `'Rate limit exceeded'` | 429 body message.                                                        |
+| `standardHeaders` | `boolean`                | `true`                  | Emit `RateLimit-*` headers.                                              |
+| `exclude`         | `readonly PathPattern[]` | six operational paths   | Paths skipped entirely; strings match exactly and regexps test the path. |
 
 ## Guards and OpenAPI
 
@@ -358,8 +382,6 @@ MIT
 | ----------------------------------- | --------- |
 | `authMiddleware`                    | function  |
 | `AuthPlugin`                        | function  |
-| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
-| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
 | `defaultRateLimitKey`               | function  |
 | `publicRoute`                       | function  |
 | `rateLimitMiddleware`               | function  |
@@ -368,12 +390,16 @@ MIT
 | `requireAuth`                       | function  |
 | `requirePermission`                 | function  |
 | `requireRole`                       | function  |
+| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
+| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
 | `MalformedPasswordHashError`        | class     |
+| `MemoryAccessTokenRevocationStore`  | class     |
 | `MemoryRateLimitStore`              | class     |
 | `MemoryRefreshTokenStore`           | class     |
 | `PasswordHasher`                    | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
+| `IAccessTokenRevocationStore`       | interface |
 | `ApiKeyOptions`                     | interface |
 | `AuthPluginOptions`                 | interface |
 | `IAuthorizationService`             | interface |
@@ -394,6 +420,7 @@ MIT
 | `RoleDefinition`                    | interface |
 | `SessionAuthOptions`                | interface |
 | `TokenPair`                         | interface |
+| `IRefreshTokenRotation`             | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

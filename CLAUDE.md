@@ -4439,6 +4439,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `defaultRateLimitKey`'s JSDoc (C3) still recommended bare `trustProxy` as remedy #1 — the
   configuration X32-3 shows is attacker-controlled. The review also corrected an inaccuracy in its
   OWN fix, whose comment overstated what the `try` covered) — complete (PR #247)
+- **Milestone 90c** (`auth-plugin` — credential revocation and token type) — complete (PR #248).
+  Refresh pairs have distinct typed identifiers; refresh credentials cannot authenticate as bearer
+  access tokens; logout and replay call `RefreshTokenStore.revokeFamily`, then revoke each paired
+  access-token JTI through `IAccessTokenRevocationStore`; and policy failures disclose no role or
+  permission name. Rotation is atomic at the refresh-store boundary, so concurrent requests cannot
+  mint two descendants.
 - **Next milestone** — **M40** (final release), the only open row in Progress Tracking: the 1.0 gate
   named in README's Versioning section — benchmarks, a security audit, and the Node/Bun compat
   suites as release gates. The `smoke/` programme's X16–X19 exercises against published `0.3.0`

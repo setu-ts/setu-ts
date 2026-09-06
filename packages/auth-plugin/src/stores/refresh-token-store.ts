@@ -20,7 +20,26 @@ export interface RefreshTokenRecord {
   readonly expiresAt: number;
   /** Whether the token has been revoked. */
   revoked: boolean;
+  /** Family identifier shared by a rotated refresh-token lineage. */
+  readonly familyId?: string;
+  /** Identifier of the paired access token, when issued by the current service. */
+  readonly accessTokenJti?: string;
+  /** Absolute expiry timestamp for the paired access token. */
+  readonly accessTokenExpiresAt?: number;
 }
+
+/** Result of atomically rotating one refresh token into its successor. */
+export type IRefreshTokenRotation =
+  | {
+    /** The presented record, live when its successor was stored. */
+    readonly record: RefreshTokenRecord;
+    readonly rotated: true;
+  }
+  | {
+    /** The presented record when it exists and has not expired, otherwise null. */
+    readonly record: RefreshTokenRecord | null;
+    readonly rotated: false;
+  };
 
 /**
  * Store interface for refresh tokens.
@@ -41,6 +60,27 @@ export interface RefreshTokenStore {
   get(jti: string): Promise<RefreshTokenRecord | null>;
   /** Revoke a token by jti. */
   revoke(jti: string): Promise<void>;
+  /**
+   * Atomically consume a live refresh token and persist its successor.
+   *
+   * Remote implementations must make the conditional live-token check, parent
+   * revocation, successor write, and family-revoked-marker check one atomic
+   * operation. This prevents two concurrent refresh requests from minting
+   * independent descendants and prevents a rotation after family revocation.
+   */
+  rotate(jti: string, successor: RefreshTokenRecord): Promise<IRefreshTokenRotation>;
+  /**
+   * Revoke every refresh token in the requested token's family.
+   *
+   * Returns the affected records so the caller can also revoke their paired
+   * access credentials through its separately configured store. Remote
+   * implementations must serialize this operation with `rotate()` for the
+   * same family: durably mark the family revoked and revoke current members in
+   * one operation, while `rotate()` atomically rejects a marked family. A
+   * rotation ordered before this operation must have its successor included;
+   * one ordered after it must not persist a successor.
+   */
+  revokeFamily(jti: string): Promise<readonly RefreshTokenRecord[]>;
 }
 
 /**
@@ -82,5 +122,48 @@ export class MemoryRefreshTokenStore implements RefreshTokenStore {
       record.revoked = true;
     }
     return Promise.resolve();
+  }
+
+  rotate(jti: string, successor: RefreshTokenRecord): Promise<IRefreshTokenRotation> {
+    const record = this.#map.get(jti);
+    if (record === undefined) {
+      return Promise.resolve<IRefreshTokenRotation>({ record: null, rotated: false });
+    }
+    if (this.#runtime.now() >= record.expiresAt) {
+      this.#map.delete(jti);
+      return Promise.resolve<IRefreshTokenRotation>({ record: null, rotated: false });
+    }
+    if (record.revoked) {
+      return Promise.resolve<IRefreshTokenRotation>({ record, rotated: false });
+    }
+
+    record.revoked = true;
+    this.#map.set(successor.jti, successor);
+    return Promise.resolve<IRefreshTokenRotation>({ record, rotated: true });
+  }
+
+  revokeFamily(jti: string): Promise<readonly RefreshTokenRecord[]> {
+    const requested = this.#map.get(jti);
+    if (requested === undefined) {
+      return Promise.resolve([]);
+    }
+    if (this.#runtime.now() >= requested.expiresAt) {
+      this.#map.delete(jti);
+      return Promise.resolve([]);
+    }
+
+    const familyId = requested.familyId ?? requested.jti;
+    const revoked: RefreshTokenRecord[] = [];
+    const now = this.#runtime.now();
+    for (const [candidateJti, candidate] of this.#map) {
+      if ((candidate.familyId ?? candidate.jti) === familyId) {
+        candidate.revoked = true;
+        revoked.push(candidate);
+      }
+      if (now >= candidate.expiresAt) {
+        this.#map.delete(candidateJti);
+      }
+    }
+    return Promise.resolve(revoked);
   }
 }

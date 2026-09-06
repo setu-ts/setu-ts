@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as auth from '../../src/index.ts';
 import type { IPrincipal, SessionView } from '@setu-ts/common';
-import type { SessionAuthOptions } from '../../src/index.ts';
+import type { IRefreshTokenRotation, SessionAuthOptions } from '../../src/index.ts';
 
 /**
  * Barrel exports test.
@@ -65,6 +65,7 @@ describe('barrel exports', () => {
   });
 
   it('exports stores', () => {
+    expect(auth.MemoryAccessTokenRevocationStore).toBeDefined();
     expect(auth.MemoryRefreshTokenStore).toBeDefined();
     expect(auth.MemoryRateLimitStore).toBeDefined();
     expect(auth.RedisRateLimitStore).toBeDefined();
@@ -74,6 +75,11 @@ describe('barrel exports', () => {
     // Type exports are verified by deno check - this test just confirms
     // the module can be imported without errors
     expect(auth).toBeDefined();
+  });
+
+  it('exports the IRefreshTokenRotation type', () => {
+    const result: IRefreshTokenRotation = { record: null, rotated: false };
+    expect(result.rotated).toBe(false);
   });
 
   it('exports the SessionAuthOptions type (declared against the barrel)', () => {

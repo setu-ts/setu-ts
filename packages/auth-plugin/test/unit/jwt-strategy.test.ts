@@ -6,6 +6,7 @@ import { beforeAll, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { JwtStrategy } from '../../src/strategies/jwt-strategy.ts';
 import { JwtService } from '../../src/services/jwt-service.ts';
+import { MemoryAccessTokenRevocationStore } from '../../src/stores/access-token-revocation-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import type { IRequest } from '@setu-ts/common';
 
@@ -85,6 +86,34 @@ describe('JwtStrategy', () => {
     expect(principal).toBeNull();
   });
 
+  it('rejects a refresh token as a bearer access credential', async () => {
+    const token = await jwt.sign({ sub: 'user123', type: 'refresh', jti: 'refresh-1' });
+    const request = createRequest({ authorization: `Bearer ${token}` });
+
+    expect(await strategy.authenticate(request)).toBeNull();
+  });
+
+  it('rejects a revoked typed access token when a store is configured', async () => {
+    const runtime = createFakeRuntime(1000000);
+    const store = new MemoryAccessTokenRevocationStore(runtime);
+    const revokingStrategy = new JwtStrategy({
+      jwtService: jwt,
+      accessTokenRevocationStore: store,
+    });
+    const token = await jwt.sign({ sub: 'user123', type: 'access', jti: 'access-1' });
+    await store.revoke('access-1', runtime.now() + 1000);
+
+    expect(await revokingStrategy.authenticate(createRequest({ authorization: `Bearer ${token}` })))
+      .toBeNull();
+  });
+
+  it('keeps direct JWT access tokens compatible when they have no type claim', async () => {
+    const token = await jwt.sign({ sub: 'user123' });
+
+    expect(await strategy.authenticate(createRequest({ authorization: `Bearer ${token}` }))).not
+      .toBeNull();
+  });
+
   it('returns null when scheme is missing', async () => {
     const request = createRequest({ authorization: 'justtoken' });
     const principal = await strategy.authenticate(request);
@@ -135,6 +164,15 @@ describe('JwtStrategy', () => {
     expect(principal!.claims!.custom).toBe('value');
     expect(principal!.claims!.sub).toBeUndefined();
     expect(principal!.claims!.iat).toBeUndefined();
+  });
+
+  it('does not expose token type or identifier in principal claims', async () => {
+    const token = await jwt.sign({ sub: 'user123', type: 'access', jti: 'access-1' });
+    const principal = await strategy.authenticate(
+      createRequest({ authorization: `Bearer ${token}` }),
+    );
+
+    expect(principal?.claims).toBeUndefined();
   });
 
   it('has the name "jwt"', () => {

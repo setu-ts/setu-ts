@@ -61,8 +61,16 @@ export { RefreshTokenService } from './services/refresh-token-service.ts';
 export type { RefreshTokenOptions, TokenPair } from './services/refresh-token-service.ts';
 
 // Refresh token store
-export type { RefreshTokenRecord, RefreshTokenStore } from './stores/refresh-token-store.ts';
+export type {
+  IRefreshTokenRotation,
+  RefreshTokenRecord,
+  RefreshTokenStore,
+} from './stores/refresh-token-store.ts';
 export { MemoryRefreshTokenStore } from './stores/refresh-token-store.ts';
+
+// Access-token revocation store
+export type { IAccessTokenRevocationStore } from './stores/access-token-revocation-store.ts';
+export { MemoryAccessTokenRevocationStore } from './stores/access-token-revocation-store.ts';
 
 // Rate limit store
 export type { RateLimitResult, RateLimitStore } from './stores/rate-limit-store.ts';
