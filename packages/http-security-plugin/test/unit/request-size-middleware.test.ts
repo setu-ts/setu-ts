@@ -134,4 +134,45 @@ describe('requestSizeMiddleware', () => {
       expect(nextCalled).toHaveLength(1);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // X32-4 — chunked encoding
+  // -------------------------------------------------------------------------
+
+  describe('chunked encoding (X32-4)', () => {
+    it('a chunked request reaches next() — this layer CANNOT bound it', async () => {
+      // Deliberately asserting the limitation rather than a fix. A chunked
+      // request declares no `Content-Length`, so a header check has nothing to
+      // read; and since M87 made the body lazy, the read happens inside the
+      // handler, AFTER this middleware has already returned. The bound that
+      // cannot be bypassed therefore lives where the body is consumed —
+      // `RuntimePlugin({ maxBodyBytes })`, asserted in
+      // `packages/runtime/test/unit/read-body-bound.test.ts`.
+      //
+      // `411 Length Required` was rejected as the alternative: it refuses every
+      // legitimate streaming upload as the price of closing the bypass.
+      const { ctx, nextCalled } = createFakeContext({
+        request: { headers: { 'Transfer-Encoding': 'chunked' } },
+      });
+      const mw = requestSizeMiddleware({ maxBodySize: 10 });
+      await mw(ctx, async () => {
+        nextCalled.push(true);
+      });
+      expect(nextCalled).toHaveLength(1);
+    });
+
+    it('a DECLARED length is still refused, so the cheap layer keeps working', async () => {
+      // The two layers are complementary: this one refuses before a socket is
+      // drained, which the read bound cannot do.
+      const { ctx, nextCalled, response } = createFakeContext({
+        request: { headers: { 'Content-Length': '11' } },
+      });
+      const mw = requestSizeMiddleware({ maxBodySize: 10 });
+      await mw(ctx, async () => {
+        nextCalled.push(true);
+      });
+      expect(nextCalled).toHaveLength(0);
+      expect(response.statuses).toContain(413);
+    });
+  });
 });

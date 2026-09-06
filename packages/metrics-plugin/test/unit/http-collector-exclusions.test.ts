@@ -10,6 +10,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import type { PathPattern } from '@setu-ts/common';
 import { DEFAULT_EXCLUDED_PATHS, HttpCollector } from '../../src/collectors/http-collector.ts';
 import { MetricsService } from '../../src/services/metrics-service.ts';
 import type { Counter } from '../../src/metrics/counter.ts';
@@ -21,7 +22,7 @@ import { createFakeContext } from '../fixtures/fake-request-context.ts';
 const BUCKETS = [0.1];
 
 /** Wires a collector with the given exclusion list and registers its metrics. */
-function setup(excludedPaths?: readonly string[]) {
+function setup(excludedPaths?: readonly PathPattern[]) {
   const service = new MetricsService();
   const runtime = new FakeRuntime();
   const collector = new HttpCollector(service, runtime, BUCKETS, excludedPaths);

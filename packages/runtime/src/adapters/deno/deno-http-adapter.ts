@@ -24,6 +24,7 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { DenoWebSocketUpgrade } from './deno-ws-upgrader.ts';
@@ -114,9 +115,11 @@ export class DenoHttpServerHandle {
   #server: DenoServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
   #host: DenoServeHost;
+  readonly #maxBodyBytes: number | undefined;
 
-  constructor(host: DenoServeHost) {
+  constructor(host: DenoServeHost, maxBodyBytes?: number) {
     this.#host = host;
+    this.#maxBodyBytes = maxBodyBytes;
   }
 
   /**
@@ -167,7 +170,7 @@ export class DenoHttpServerHandle {
    */
   createFetchHandler(): (request: Request) => Response | Promise<Response> {
     return (request: Request): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -247,14 +250,15 @@ export function isDenoHttpServerHandle(handle: ServerHandle): handle is DenoHttp
  * Deno HTTP adapter implementation.
  *
  * @param host - Injected Deno serve host (defaults to real Deno global)
+ * @param options - Adapter options; `maxBodyBytes` bounds the body read
  */
 export class DenoHttpAdapter implements IHttpAdapter {
   #host: DenoServeHost;
   #handle: DenoHttpServerHandle;
 
-  constructor(host?: DenoServeHost) {
+  constructor(host?: DenoServeHost, options?: HttpAdapterOptions) {
     this.#host = host ?? defaultDenoServeHost;
-    this.#handle = new DenoHttpServerHandle(this.#host);
+    this.#handle = new DenoHttpServerHandle(this.#host, options?.maxBodyBytes);
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {

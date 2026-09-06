@@ -441,7 +441,17 @@ error[private-type-ref]: public type references private type
       // so it is neither a ratchet win nor a regression. Reproduced on the host
       // and in the official `denoland/deno:2.9.6` container, which is what
       // distinguishes a real reading from a local artifact.
-      expect(DOC_LINT_BASELINE).toBe(497);
+      //
+      // M90a lowered it to 496, and the ratchet is what produced that number.
+      // Exporting `createMaxNodesRule`/`countResolvedFields` from
+      // `graphql-plugin`'s barrel — symmetric with the already-exported
+      // `createDepthLimitRule` — added five `private-type-ref` diagnostics,
+      // because the rule's signature names three package-private types. Neither
+      // symbol had a consumer outside its own test, so both were cut (the M82
+      // precedent), and two pre-existing missing-description diagnostics were
+      // paid down on files the milestone already touched. Lowered rather than
+      // widened, which is the whole point of a ratchet.
+      expect(DOC_LINT_BASELINE).toBe(496);
       // The pin and the baseline are only meaningful together, so the version
       // is asserted beside the count: moving one without the other is exactly
       // the drift this pair exists to make impossible.

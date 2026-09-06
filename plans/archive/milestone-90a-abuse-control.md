@@ -259,6 +259,85 @@ probes still answer `200`. X32-1 exists because no test ever composed those two 
 - **Scope: seven packages** → the six findings genuinely span them (§2 C1). Mitigation: each finding
   is independently revertable, and the shared matcher lands first so the other changes build on it.
 
+## 8b. Corrections found during implementation
+
+Each item below is a claim in this plan that did not survive the code, recorded here rather than
+quietly dropped (CLAUDE.md: a plan at `plans/` root belongs to a milestone under construction and is
+corrected normally).
+
+- **§3.4's "named error" is under-specified, and the fix is stronger.** `RequestBodyTooLargeError`
+  is branded with a `413` **HTTP status hint** (M89b's `withHttpStatusHint`), so an application
+  running `errorHandler` answers `413` in its configured format. Without the brand the refusal
+  reaches `errorHandler` as a plain `Error` from deep inside the adapter, is normalised to `500`,
+  and is masked — the exact defect class M89b exists to close, and it would have made the
+  milestone's own headline fix arrive as an opaque server error. Its `title` is
+  `'Payload Too Large'` rather than RFC 9110's newer `'Content Too Large'`, because that is what
+  `@setu-ts/exceptions` maps `413` to and what `requestSizeMiddleware` already reports for the same
+  condition; a Problem Details formatter derives `title` from the status anyway, so a different
+  string would only make the two `413` sites disagree under `'default'`.
+- **§4's "no new export in `auth-plugin`, `graphql-plugin` or `runtime`" is not kept,
+  deliberately.** Five symbols are added, each with a real reader:
+  `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` (without it "the defaults plus mine" means retyping six
+  strings, which is the drift §3.1 exists to remove — `metrics-plugin`'s own
+  `DEFAULT_EXCLUDED_PATHS` is the precedent), `DEFAULT_RATE_LIMIT_KEY_PREFIX`,
+  `RequestBodyTooLargeError` (a caller wanting `instanceof`), and `HttpAdapterOptions`
+  (**mandatory** — it appears in the exported `HttpAdapterFactories` signature, and
+  `deno doc --lint` rejects a private type in a public one, the M82 lesson). All four are documented
+  in `PUBLIC_API.md` and the package READMEs in the same change.
+- **`createMaxNodesRule` and `countResolvedFields` were exported and then CUT, and the ratchet is
+  what settled it.** Exporting them beside the already-exported `createDepthLimitRule` looked
+  symmetric, and it added **5** `private-type-ref` diagnostics — the rule's signature names three
+  package-private types — pushing M38's JSDoc ratchet from `497` to `502`. That is the M82 situation
+  exactly: neither symbol has a consumer outside its own test (the rule is configured through
+  `maxNodes`; the counter's "budget from real traffic" use was speculative, which is the
+  dead-surface rule), so both are internal now. With the two cut and two pre-existing
+  missing-description diagnostics paid down on files this milestone touches, the total is back to
+  `497` and `DOC_LINT_BASELINE` needs no change.
+- **§3.6's file is `src/security/max-nodes.ts`, not `src/validation/max-nodes.ts`.** No
+  `validation/` directory exists in `graphql-plugin`; the depth rule this one pairs with lives in
+  `src/security/`, and splitting two rules of one kind across two directories would be the drift the
+  plan objects to elsewhere.
+- **§3.6's rule is a `Document` visitor, not a per-`Field` one.** A field count needs fragment
+  expansion, which a per-field visitor cannot do without re-walking the document for every field it
+  sees. The count is taken once at the document root, which also means exactly one error per
+  document.
+- **A fragment spread costs its definition at EVERY spread site.** §3.6 said "counts selection-set
+  nodes across the whole document (aliases included)", which read literally counts a fragment's
+  fields once per DEFINITION and leaves the obvious evasion open: a hundred fields defined once and
+  spread a thousand times is eleven hundred nodes driving a hundred thousand resolutions. Expansion
+  is memoized so the count stays computable in linear time, and a fragment re-entered while being
+  expanded counts zero (graphql's own `NoFragmentCycles` reports the real error).
+- **§3.3's `trustedProxies` semantics needed stating, and writing the test is what exposed it.** The
+  option lists the addresses that appear IN the header because a proxy further out contributed them.
+  Under one appending nginx the header contains no proxy address at all — nginx appends its PEER,
+  the real client — so nothing in that chain is trusted and the rightmost entry is the answer. The
+  first draft of `ip-security-proxy.test.ts` declared the client's own address as a trusted proxy
+  and then expected it to be returned; the two expectations are contradictory, and the code was
+  right.
+- **§3.7 changes the `429` body shape, which §3.7 did not say.** Routing through `respondWithError`
+  means the body is whatever the configured formatter writes: `{ error, detail }` with no handler,
+  Problem Details under `'rfc9457'`, and `{ statusCode, message, details }` under `'default'` —
+  never the `{ error, message }` it wrote before. That is a breaking change and is in the CHANGELOG;
+  two existing unit assertions were updated with the reason recorded at the call site.
+- **§6's `request-size-chunked.test.ts` is a `describe` block inside
+  `request-size-middleware.test.ts`.** The middleware layer is unchanged, and an
+  absent-`Content-Length` pass-through was already covered there, so a separate file would have been
+  a near-duplicate. The new block asserts the CHUNKED case by name and points at the runtime test
+  that carries the bound.
+- **§6's rate-limit fixture is extracted rather than duplicated.** `rate-limit-exclude.test.ts`
+  needs the same recording `IRequestContext` the existing unit file builds, so it moved to
+  `test/fixtures/rate-limit-context.ts` (widened with a `path` option) and both files read it.
+- **One test the plan did not name was added, and it is the one that proves the option is wired.**
+  `packages/runtime/test/integration/max-body-bytes.test.ts` boots a real kernel application and
+  posts a real chunked body through `app.fetch`, so the whole thread — plugin option → adapter
+  factory → adapter → handle → mapping — is exercised. The unit tests drive the mapping directly and
+  would pass with `RuntimePlugin` dropping the option on the floor.
+- **A measured web-streams fact, recorded because a test asserted the opposite first.** `cancel()`
+  on an already-closed `ReadableStream` is a no-op and does NOT invoke the underlying source's
+  `cancel`: a stream read to `done` has released its source itself. So `readBounded`'s `finally`
+  cancel is load-bearing only on the early-exit path — which is precisely the path where an
+  abandoned stream would keep a connection draining.
+
 ## 9. Out of scope
 
 - **X32-7** (`BulkheadFullError` → masked `500`) — **M90f**, which sweeps every unbranded

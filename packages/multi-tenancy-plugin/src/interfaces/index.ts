@@ -7,7 +7,7 @@
  * @module
  */
 
-import type { ITenantResolver } from '@setu-ts/common';
+import type { ITenantResolver, PathPattern } from '@setu-ts/common';
 
 // ---------------------------------------------------------------------------
 // Options types
@@ -146,7 +146,7 @@ export interface MultiTenancyPluginOptions {
    * the previous behaviour (no path is exempt) for an application whose own
    * routes sit on those paths.
    */
-  exclude?: readonly (string | RegExp)[];
+  exclude?: readonly PathPattern[];
 }
 
 // ---------------------------------------------------------------------------

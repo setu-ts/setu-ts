@@ -74,8 +74,18 @@ export const CLEAN_PACKAGES = new Set([
  * reader does not mistake 753 -> 497 for 256 documentation fixes. Moving the
  * pin BACK to 2.9.5 requires re-measuring in the same change; the two constants
  * are only meaningful together.
+ *
+ * M90a lowered it to 496, and the ratchet is what produced the number rather
+ * than a target anyone aimed at. Exporting `createMaxNodesRule` and
+ * `countResolvedFields` from `graphql-plugin`'s barrel — symmetric with the
+ * already-exported `createDepthLimitRule` — added five `private-type-ref`
+ * diagnostics, because the rule's signature names three package-private types.
+ * Neither symbol had a consumer outside its own test, so both were cut (the M82
+ * precedent), and two pre-existing missing-description diagnostics were paid
+ * down on files the milestone already touched. Lowered rather than widened,
+ * which is the whole point.
  */
-export const DOC_LINT_BASELINE = 497;
+export const DOC_LINT_BASELINE = 496;
 
 /**
  * The Deno version {@linkcode DOC_LINT_BASELINE} was measured on.

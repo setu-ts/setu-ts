@@ -281,4 +281,116 @@ describe('GraphQL security', () => {
       expect(maskedMsg).not.toBe(unmaskedMsg);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // X32-6 — breadth limit
+  // -------------------------------------------------------------------------
+
+  describe('node budget (X32-6)', () => {
+    const typeDefs = `
+      type Query {
+        user: User
+      }
+      type User {
+        id: ID
+        name: String
+      }
+    `;
+    const resolvers = {
+      Query: { user: () => ({ id: '1', name: 'ada' }) },
+    };
+
+    /** 200 aliases of the same field at depth 2 — the X32-6 shape. */
+    function aliasBomb(count: number): string {
+      const aliases = Array.from({ length: count }, (_, i) => `a${i}: user { id name }`);
+      return `{ ${aliases.join(' ')} }`;
+    }
+
+    it('refuses an alias bomb through the REAL validator when maxNodes is set', async () => {
+      // The unit tests drive the rule directly; only this proves the plugin
+      // option reaches `validate()` at all.
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          GraphqlPlugin({ typeDefs, resolvers, maxNodes: 100 }),
+        ],
+      });
+      await app.start({ port: 0 });
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/graphql',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: aliasBomb(200) }),
+        });
+        const json = await res.json() as { errors?: Array<{ message?: string }>; data?: unknown };
+
+        // A validation error under the JSON media type is 200 (the B1
+        // watershed), same as the depth limiter above.
+        expect(res.statusCode).toBe(200);
+        expect(json.errors?.[0]?.message).toContain('Maximum node count is 100');
+        expect(json.data).toBeUndefined();
+      } finally {
+        await app.stop();
+      }
+    });
+
+    it('serves the SAME query when maxNodes is unset — the released default', async () => {
+      // Default-off, so no released application starts refusing a document it
+      // used to serve. This is the discriminating half.
+      const app = createApplication({
+        plugins: [RuntimePlugin(), GraphqlPlugin({ typeDefs, resolvers })],
+      });
+      await app.start({ port: 0 });
+      try {
+        const res = await app.inject({
+          method: 'POST',
+          url: '/graphql',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: aliasBomb(200) }),
+        });
+        const json = await res.json() as { errors?: unknown; data?: Record<string, unknown> };
+
+        expect(res.statusCode).toBe(200);
+        expect(json.errors).toBeUndefined();
+        expect(Object.keys(json.data ?? {})).toHaveLength(200);
+      } finally {
+        await app.stop();
+      }
+    });
+
+    it('depth and breadth are independent limits', async () => {
+      // A narrow query well within `maxNodes` is served, and a wide one within
+      // `maxDepth` is refused — so neither limiter is standing in for the other.
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          GraphqlPlugin({ typeDefs, resolvers, maxDepth: 10, maxNodes: 10 }),
+        ],
+      });
+      await app.start({ port: 0 });
+      try {
+        const narrow = await app.inject({
+          method: 'POST',
+          url: '/graphql',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: '{ user { id name } }' }),
+        });
+        const narrowJson = await narrow.json() as { data?: unknown; errors?: unknown };
+        expect(narrowJson.errors).toBeUndefined();
+        expect(narrowJson.data).toBeDefined();
+
+        const wide = await app.inject({
+          method: 'POST',
+          url: '/graphql',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: aliasBomb(20) }),
+        });
+        const wideJson = await wide.json() as { errors?: Array<{ message?: string }> };
+        expect(wideJson.errors?.[0]?.message).toContain('Maximum node count is 10');
+      } finally {
+        await app.stop();
+      }
+    });
+  });
 });

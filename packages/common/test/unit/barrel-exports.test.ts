@@ -231,3 +231,29 @@ describe('@setu-ts/common barrel — M87 request-path predicate', () => {
     expect(common.isPromiseLike({ then: 'not callable' })).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M90a — the shared path-exclusion matcher
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M90a path matcher', () => {
+  it('exports createPathMatcher, which four middlewares read from here', () => {
+    // Pinned against the BARREL, not `../../src/path-matcher.ts`: dropping the
+    // re-export leaves the matcher's own unit tests green, because they import
+    // the concrete module, while `auth-plugin`, `multi-tenancy-plugin`,
+    // `logger-plugin` and `metrics-plugin` all resolve it by name from here
+    // (the M56 defect class).
+    expect(typeof common.createPathMatcher).toBe('function');
+  });
+
+  it('exports the PathPattern type the three widened options are declared with', () => {
+    // A type-only export cannot be probed at runtime, so it is asserted at
+    // COMPILE time — an annotation declared against the barrel. Dropping
+    // `export type { PathPattern }` fails `deno check` here.
+    const patterns: readonly common.PathPattern[] = ['/live', /^\/_ops\//];
+    const isExcluded = common.createPathMatcher(patterns);
+    expect(isExcluded('/live')).toBe(true);
+    expect(isExcluded('/_ops/x')).toBe(true);
+    expect(isExcluded('/orders')).toBe(false);
+  });
+});

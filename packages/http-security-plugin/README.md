@@ -157,18 +157,29 @@ origin echoes nothing.
 
 ### RequestSizeOptions
 
-| Option         | Type      | Default     | Description                        |
-| -------------- | --------- | ----------- | ---------------------------------- |
-| `enabled?`     | `boolean` | `true`      | Toggle size limiting               |
-| `maxBodySize?` | `number`  | `1_048_576` | Maximum body size in bytes (1 MiB) |
+| Option         | Type      | Default     | Description                                     |
+| -------------- | --------- | ----------- | ----------------------------------------------- |
+| `enabled?`     | `boolean` | `true`      | Toggle size limiting                            |
+| `maxBodySize?` | `number`  | `1_048_576` | Maximum **declared** body size in bytes (1 MiB) |
+
+`maxBodySize` bounds a declared `Content-Length` and nothing else — a chunked request declares none,
+and the body read happens inside the handler, after this middleware has returned. The bound no
+client can disable lives where the body is consumed: `RuntimePlugin({ maxBodyBytes })`. Set both,
+and set `maxBodyBytes` to the same value or higher. See "Bounding the request body" in
+`PUBLIC_API.md`.
 
 ### IpSecurityOptions
 
-| Option        | Type      | Default           | Description                                    |
-| ------------- | --------- | ----------------- | ---------------------------------------------- |
-| `enabled?`    | `boolean` | `true`            | Toggle IP resolution                           |
-| `trustProxy?` | `boolean` | `false`           | Read IP from proxy header (trusted proxy only) |
-| `ipHeader?`   | `string`  | `X-Forwarded-For` | Proxy header name                              |
+| Option            | Type                | Default           | Description                                                       |
+| ----------------- | ------------------- | ----------------- | ----------------------------------------------------------------- |
+| `enabled?`        | `boolean`           | `true`            | Toggle IP resolution                                              |
+| `trustProxy?`     | `boolean`           | `false`           | Read IP from proxy header                                         |
+| `ipHeader?`       | `string`            | `X-Forwarded-For` | Proxy header name                                                 |
+| `trustedProxies?` | `readonly string[]` | —                 | Proxy addresses or IPv4 CIDR blocks; resolves rightmost-untrusted |
+| `proxyHops?`      | `number`            | —                 | The nth entry from the right, when proxies have no fixed address  |
+
+`trustedProxies` and `proxyHops` are **mutually exclusive** — supplying both throws at middleware
+construction.
 
 ### SecurityHeadersOptions
 
@@ -184,8 +195,13 @@ origin echoes nothing.
 
 ## Security Considerations
 
-- **IP Security:** `trustProxy: true` should only be enabled behind a trusted reverse proxy that
-  validates the proxy header. An untrusted client can forge `X-Forwarded-For`.
+- **IP Security:** `trustProxy: true` on its own trusts the header's **leftmost** entry, which is
+  safe only behind a proxy that OVERWRITES it. The standard nginx idiom
+  (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`) **appends**, so a request arriving
+  with a forged `X-Forwarded-For: 7.7.7.7` reaches the application as `7.7.7.7, 198.51.100.9` and
+  the leftmost entry is the value the caller chose — which is then what `defaultRateLimitKey` counts
+  against. Behind an appending proxy, set `trustedProxies` (or `proxyHops`) so the client is
+  resolved from the right.
 - **CSRF:** The stateless Origin/Referer check is the OWASP-recommended stateless CSRF defense.
   Non-browser clients (which send neither header) pass through by design. Use `customHeader` for
   defense-in-depth on API-style clients.

@@ -284,28 +284,57 @@ registered under no capability token. Over-limit requests are short-circuited wi
 in-memory (single-process); use `RedisRateLimitStore` for multi-instance deployments (pass an
 ioredis-compatible `client`, or `npm:ioredis@5.x` is lazily imported on first use).
 
+The 429 body is written through `@setu-ts/common`'s error-responder seam, so it answers in the
+application's configured format — Problem Details under `errorHandler({ format: 'rfc9457' })` —
+exactly like the 401 a guard produces in the same application.
+
+**The operational probes are exempt by default.** Registered globally, the limiter sees `/live` and
+`/ready` too, so an exhausted bucket answered the liveness probe 429 and the kubelet restarted the
+container. `exclude` defaults to `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` — `/live`, `/ready`, `/health`,
+`/metrics`, `/openapi.json`, `/docs`. A caller list **replaces** that rather than extending it, so
+spread the constant; `[]` exempts nothing.
+
+**`RedisRateLimitStore` namespaces its keys** under `keyPrefix` (default `'setu:ratelimit:'`), so
+two applications sharing one managed Redis do not count against each other's budget — the generated
+keys (`anonymous`, `ip:…`, `user:…`) are generic enough to collide. Pass `''` for the
+pre-namespacing keys.
+
 ```typescript
-import { rateLimitMiddleware, RedisRateLimitStore } from '@setu-ts/auth-plugin';
+import {
+  DEFAULT_RATE_LIMIT_EXCLUDED_PATHS,
+  rateLimitMiddleware,
+  RedisRateLimitStore,
+} from '@setu-ts/auth-plugin';
 
-app.middleware.add(rateLimitMiddleware({ windowMs: 60_000, max: 100 })); // per IP
+// Per IP, with the six operational paths exempt plus one of your own.
+app.middleware.add(rateLimitMiddleware({
+  windowMs: 60_000,
+  max: 100,
+  exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
+}));
 
-// Redis-backed, keyed by authenticated user
+// Redis-backed, keyed by authenticated user, namespaced per application
 rateLimitMiddleware({
   windowMs: 60_000,
   max: 5,
   keyGenerator: (ctx) => ctx.request.user?.id ?? ctx.request.ip ?? 'anonymous',
-  store: new RedisRateLimitStore({ url: 'redis://localhost:6379', runtime }),
+  store: new RedisRateLimitStore({
+    url: 'redis://localhost:6379',
+    runtime,
+    keyPrefix: 'orders-api:rl:',
+  }),
 });
 ```
 
-| Option            | Type              | Default                 | Description                      |
-| ----------------- | ----------------- | ----------------------- | -------------------------------- |
-| `windowMs`        | `number`          | -                       | Window length in ms.             |
-| `max`             | `number`          | -                       | Max requests per window per key. |
-| `store`           | `RateLimitStore`  | `MemoryRateLimitStore`  | Counter backend.                 |
-| `keyGenerator`    | `(ctx) => string` | `ip ?? 'anonymous'`     | Caller identity for the counter. |
-| `message`         | `string`          | `'Rate limit exceeded'` | 429 body message.                |
-| `standardHeaders` | `boolean`         | `true`                  | Emit `RateLimit-*` headers.      |
+| Option            | Type                     | Default                   | Description                                                                                                                |
+| ----------------- | ------------------------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `windowMs`        | `number`                 | -                         | Window length in ms.                                                                                                       |
+| `max`             | `number`                 | -                         | Max requests per window per key.                                                                                           |
+| `store`           | `RateLimitStore`         | `MemoryRateLimitStore`    | Counter backend.                                                                                                           |
+| `keyGenerator`    | `(ctx) => string`        | `ip ?? 'anonymous'`       | Caller identity for the counter.                                                                                           |
+| `message`         | `string`                 | `'Rate limit exceeded'`   | 429 body message.                                                                                                          |
+| `standardHeaders` | `boolean`                | `true`                    | Emit `RateLimit-*` headers.                                                                                                |
+| `exclude`         | `readonly PathPattern[]` | the six operational paths | Paths the limiter skips entirely. A string is an EXACT match; a `RegExp` is tested against the path. `[]` exempts nothing. |
 
 ## Guards and OpenAPI
 
@@ -325,44 +354,46 @@ MIT
 
 ## Exports
 
-| Export                       | Kind      |
-| ---------------------------- | --------- |
-| `authMiddleware`             | function  |
-| `AuthPlugin`                 | function  |
-| `defaultRateLimitKey`        | function  |
-| `publicRoute`                | function  |
-| `rateLimitMiddleware`        | function  |
-| `requireAllPermissions`      | function  |
-| `requireAnyRole`             | function  |
-| `requireAuth`                | function  |
-| `requirePermission`          | function  |
-| `requireRole`                | function  |
-| `MalformedPasswordHashError` | class     |
-| `MemoryRateLimitStore`       | class     |
-| `MemoryRefreshTokenStore`    | class     |
-| `PasswordHasher`             | class     |
-| `RedisRateLimitStore`        | class     |
-| `RefreshTokenService`        | class     |
-| `ApiKeyOptions`              | interface |
-| `AuthPluginOptions`          | interface |
-| `IAuthorizationService`      | interface |
-| `IAuthService`               | interface |
-| `IAuthStrategy`              | interface |
-| `IJwtService`                | interface |
-| `IPrincipal`                 | interface |
-| `JwtOptions`                 | interface |
-| `JwtSignOptions`             | interface |
-| `LocalOptions`               | interface |
-| `RateLimitOptions`           | interface |
-| `RateLimitResult`            | interface |
-| `RateLimitStore`             | interface |
-| `RbacConfig`                 | interface |
-| `RefreshTokenOptions`        | interface |
-| `RefreshTokenRecord`         | interface |
-| `RefreshTokenStore`          | interface |
-| `RoleDefinition`             | interface |
-| `SessionAuthOptions`         | interface |
-| `TokenPair`                  | interface |
+| Export                              | Kind      |
+| ----------------------------------- | --------- |
+| `authMiddleware`                    | function  |
+| `AuthPlugin`                        | function  |
+| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
+| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
+| `defaultRateLimitKey`               | function  |
+| `publicRoute`                       | function  |
+| `rateLimitMiddleware`               | function  |
+| `requireAllPermissions`             | function  |
+| `requireAnyRole`                    | function  |
+| `requireAuth`                       | function  |
+| `requirePermission`                 | function  |
+| `requireRole`                       | function  |
+| `MalformedPasswordHashError`        | class     |
+| `MemoryRateLimitStore`              | class     |
+| `MemoryRefreshTokenStore`           | class     |
+| `PasswordHasher`                    | class     |
+| `RedisRateLimitStore`               | class     |
+| `RefreshTokenService`               | class     |
+| `ApiKeyOptions`                     | interface |
+| `AuthPluginOptions`                 | interface |
+| `IAuthorizationService`             | interface |
+| `IAuthService`                      | interface |
+| `IAuthStrategy`                     | interface |
+| `IJwtService`                       | interface |
+| `IPrincipal`                        | interface |
+| `JwtOptions`                        | interface |
+| `JwtSignOptions`                    | interface |
+| `LocalOptions`                      | interface |
+| `RateLimitOptions`                  | interface |
+| `RateLimitResult`                   | interface |
+| `RateLimitStore`                    | interface |
+| `RbacConfig`                        | interface |
+| `RefreshTokenOptions`               | interface |
+| `RefreshTokenRecord`                | interface |
+| `RefreshTokenStore`                 | interface |
+| `RoleDefinition`                    | interface |
+| `SessionAuthOptions`                | interface |
+| `TokenPair`                         | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

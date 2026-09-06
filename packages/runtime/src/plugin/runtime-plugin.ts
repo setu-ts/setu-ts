@@ -11,6 +11,7 @@ import type { IHttpAdapter, IPlugin, IPluginContext, RuntimePlatform } from '@se
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { detectRuntime } from '../detector/runtime-detector.ts';
+import type { HttpAdapterOptions } from '../adapters/shared/adapter-options.ts';
 import type { RuntimeAdapterFactories } from '../adapters/shared/runtime-services-factory.ts';
 import { createRuntimeServices } from '../adapters/shared/runtime-services-factory.ts';
 import { DenoHttpAdapter } from '../adapters/deno/deno-http-adapter.ts';
@@ -67,23 +68,53 @@ export interface RuntimeOptions {
    * @since 0.2.0
    */
   env?: Readonly<Record<string, unknown>>;
+  /**
+   * Maximum request-body size, in bytes, enforced where the body is read.
+   * Omitted, the read is unbounded — the released behaviour, byte for byte.
+   *
+   * This is the layer no request header can switch off.
+   * `HttpSecurityPlugin({ requestSize: { maxBodySize } })` refuses on a
+   * DECLARED `Content-Length` before anything is read, which is cheaper and
+   * reports earlier — but a chunked request declares no length, and since M87
+   * made the body lazy the read happens inside the handler, after every
+   * middleware has returned. So a chunked body can only be bounded here.
+   *
+   * The two knobs exist because the mapping runs before any plugin and there
+   * is no channel between them: `mapWebRequestToFrameworkRequest` receives a
+   * `Request` and nothing else. Set both, and set this one to the same value
+   * or higher.
+   *
+   * A body past the cap rejects with `RequestBodyTooLargeError`, branded with
+   * a `413` status hint, so an application running `errorHandler` answers
+   * `413 Content Too Large` in its configured format.
+   *
+   * @example
+   * ```typescript
+   * RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 })
+   * ```
+   * @since 0.5.0
+   */
+  maxBodyBytes?: number;
 }
 
 /**
  * Map of platform → HTTP adapter factory. Used internally for dependency injection.
  */
 export interface HttpAdapterFactories {
-  deno?: () => IHttpAdapter;
-  node?: () => IHttpAdapter;
-  bun?: () => IHttpAdapter;
-  'cloudflare-workers'?: () => IHttpAdapter;
+  deno?: (options?: HttpAdapterOptions) => IHttpAdapter;
+  node?: (options?: HttpAdapterOptions) => IHttpAdapter;
+  bun?: (options?: HttpAdapterOptions) => IHttpAdapter;
+  'cloudflare-workers'?: (options?: HttpAdapterOptions) => IHttpAdapter;
 }
 
+// Each factory takes the adapter options the plugin resolved. The parameter is
+// optional, so an injected zero-argument fake — which is what every test in
+// this repository supplies — stays assignable.
 const defaultHttpAdapters: HttpAdapterFactories = {
-  deno: () => new DenoHttpAdapter(),
-  node: () => new NodeHttpAdapter(),
-  bun: () => new BunHttpAdapter(),
-  'cloudflare-workers': () => new CloudflareWorkersHttpAdapter(),
+  deno: (options) => new DenoHttpAdapter(undefined, options),
+  node: (options) => new NodeHttpAdapter(undefined, undefined, options),
+  bun: (options) => new BunHttpAdapter(undefined, options),
+  'cloudflare-workers': (options) => new CloudflareWorkersHttpAdapter(undefined, options),
 };
 
 /**
@@ -102,6 +133,7 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   const runtimeAdapters = options?.adapters;
   const httpAdapters = options?.httpAdapters ?? defaultHttpAdapters;
   const workerEnv = options?.env;
+  const maxBodyBytes = options?.maxBodyBytes;
 
   return {
     name: 'runtime',
@@ -124,12 +156,19 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
       ctx.services.register(CAPABILITIES.RUNTIME, services);
 
       // Register HTTP adapter
-      const httpAdapterFactory =
-        (httpAdapters as Record<string, (() => IHttpAdapter) | undefined>)[platform];
+      const httpAdapterFactory = (httpAdapters as Record<
+        string,
+        ((adapterOptions?: HttpAdapterOptions) => IHttpAdapter) | undefined
+      >)[platform];
       if (httpAdapterFactory === undefined) {
         throw new Error(`No HTTP adapter for platform: ${platform}`);
       }
-      const httpAdapter = httpAdapterFactory();
+      // `exactOptionalPropertyTypes`: omit the member entirely when unset, so
+      // an adapter reading `options?.maxBodyBytes` sees the same `undefined`
+      // either way and no caller can pass an explicit `undefined`.
+      const httpAdapter = httpAdapterFactory(
+        maxBodyBytes === undefined ? {} : { maxBodyBytes },
+      );
       ctx.services.register(CAPABILITIES.HTTP_ADAPTER, httpAdapter);
     },
   };

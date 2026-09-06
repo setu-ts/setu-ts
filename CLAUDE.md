@@ -4335,12 +4335,92 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   marker — the v0.3.0 lesson, where a marker shielded live guidance — they now read
   "pre-derivation", which cannot go stale. Every marker in the tree was re-audited; all four shield
   genuinely historical text, with the live sentences above them.
+- **Milestone 90a** (`common` + `auth-plugin` + `http-security-plugin` + `runtime` +
+  `graphql-plugin` + `logger-plugin` + `metrics-plugin` — abuse control that actually protects. Six
+  X32 findings with one shape: each limiter is correct on the path its tests exercise and unbounded
+  on a path nothing composes. **The ROADMAP's three-package list was corrected to seven** (the
+  M70b/M70g/M70h/M70k precedent) because two rows do not live where the section assumed: X32-4's
+  body read is in `runtime`, and X32-1's fix needed a matcher three packages already carried a
+  private copy of.
+
+  **X32-1** `RateLimitOptions` had no exclusion member at all, so an exhausted global bucket
+  answered `/live` with `429` and the kubelet restarted a container whose only fault was load.
+  `exclude` defaults to the six operational paths (**breaking**, `[]` restores it); an exempt path
+  increments no counter and carries no `RateLimit-*` headers, since the limit does not govern it.
+  **X32-2** the `429` is written through `respondWithError`: M70f routed every first-party
+  short-circuit through that seam and missed this one — presumably because the limiter is middleware
+  rather than a guard — leaving the ONE status a client most needs to parse as the one that ignored
+  the configured format. The body shape therefore changes (**breaking**, CHANGELOG'd). **X32-5**
+  `RedisRateLimitStore` gains `keyPrefix` (default `'setu:ratelimit:'`); both sibling Redis stores
+  already namespace and both explain why in their own source, while this one wrote `anonymous`
+  verbatim — so two applications on one managed Redis shared a limiter, and combined with X32-1
+  service A's traffic restarted service B's pods.
+
+  **X32-3** `trustedProxies`/`proxyHops` resolve the client from the RIGHT. `trustProxy: true` took
+  the LEFTMOST entry, which is safe only behind a proxy that OVERWRITES the header — and the
+  standard nginx idiom appends, so a forged `X-Forwarded-For: 7.7.7.7` arrived as
+  `7.7.7.7, 198.51.100.9` and everything keyed on `CLIENT_IP_STATE_KEY` was keyed on attacker input.
+  **With neither option supplied resolution stays leftmost, unchanged**: the finding requires the
+  operator to have opted into `trustProxy`, so a silent default flip would be a larger change than
+  the defect. Only IPv4 CIDR is expanded numerically; every other form is a case-insensitive
+  literal, deliberately, since a wrong expansion would silently TRUST an untrusted hop.
+
+  **X32-4 is not implementable where the ROADMAP put it.** `requestSizeMiddleware` reads
+  `Content-Length`; a chunked request declares none, and M87 made the body read lazy so it happens
+  inside the handler, AFTER middleware has returned — the middleware has no access to the read at
+  all. So the bound goes where the body is consumed: `RuntimePlugin({ maxBodyBytes })` threads a cap
+  into `mapWebRequestToFrameworkRequest`, which streams with a byte cap, compares the running total
+  BEFORE retaining a chunk, and CANCELS the source on refusal rather than abandoning it (an
+  abandoned stream keeps a connection draining — the M70k descriptor-leak class). Absent, the
+  uncapped branch keeps `arrayBuffer()` verbatim, so an application setting no limit runs the
+  previous code exactly. `411
+  Length Required` was rejected: it refuses every legitimate streaming
+  upload as the price. **Two knobs for one concern, and the docs say which is load-bearing** — the
+  mapping runs before any plugin and `mapWebRequestToFrameworkRequest` receives a `Request` and
+  nothing else, so no channel exists; a reader who sets only `maxBodySize` keeps today's behaviour
+  rather than getting a silent regression. `RequestBodyTooLargeError` is branded with a `413`
+  **status hint** (M89b), which the plan did not specify and which matters: unbranded, the refusal
+  reaches `errorHandler` as a plain `Error` from adapter depth, is normalised to `500` and masked —
+  the milestone's headline fix would have arrived as an opaque server error.
+
+  **X32-6** `maxDepth` bounds NESTING, and the measured attack was 100,000 aliases at depth 2 — a ~5
+  MB response and **+822 MB RSS** from one request, with `maxDepth: 5` configured and unable to see
+  it. `maxNodes` counts the fields a document resolves; **off by default**, so nothing released
+  starts refusing a document it used to serve. A fragment spread costs its definition at EVERY
+  spread site, which the plan's "counts nodes across the document" would not have done — a hundred
+  fields defined once and spread a thousand times is eleven hundred nodes driving a hundred thousand
+  resolutions. Expansion is memoized, so a deep fragment graph reports a large count in time linear
+  in the document's size; without that the counter would itself be the denial of service.
+
+  **The matcher DELETES duplicates rather than creating a fifth** (§11.1): `createPathMatcher` +
+  `PathPattern` in `common`, adopted by all four call sites. The three private copies disagreed —
+  two matched literals only, one ran an O(n) `typeof` branch per request, and **exactly one of the
+  three reset `lastIndex`** before `.test`, which is the difference between a `g`-flagged pattern
+  matching every request and matching every other request. Partitioning once at construction keeps
+  logger and metrics on the same `Set.has` lookup they had, and makes `tenantMiddleware` faster.
+
+  **Seven negative controls were each observed failing and reverted, and the second is why it was
+  worth running them.** Reverting the responder routing left BOTH "the 429 and a guard's 401 agree"
+  cases green — because `/guarded` was not exempt from the limiter, so the comparison was a 429
+  against a 429 and would have passed whatever the limiter wrote. The route is now exempt and both
+  statuses are pinned, so the comparison cannot go vacuous again. Writing
+  `ip-security-proxy.test.ts` also exposed that the first draft declared the CLIENT's own address as
+  a trusted proxy and then expected it back: `trustedProxies` lists addresses that appear in the
+  header because a proxy further out contributed them, and under one appending nginx the header
+  contains none — the code was right and the test was wrong.
+
+  Two barrel exports were **CUT during verification rather than shipped** (the M82 precedent):
+  exporting `createMaxNodesRule`/`countResolvedFields` beside `createDepthLimitRule` added five
+  `private-type-ref` diagnostics and pushed M38's ratchet from 497 to 502, and neither had a
+  consumer outside its own test. With those cut and two pre-existing missing-description diagnostics
+  paid down, `DOC_LINT_BASELINE` drops to **496**) — complete (PR pending)
 - **Next milestone** — **M40** (final release), the only open row in Progress Tracking: the 1.0 gate
   named in README's Versioning section — benchmarks, a security audit, and the Node/Bun compat
   suites as release gates. The `smoke/` programme's X16–X19 exercises against published `0.3.0`
   produced **8 findings, 4 High**, all now closed as M89a (declarations that enforce nothing), M89b
   (caller errors that read as server faults), and M89c (the ingress surface above) — grouped by
-  defect **shape** rather than by package, the M70a–M70n precedent.
+  defect **shape** rather than by package, the M70a–M70n precedent. The X20–X38 register that
+  follows it is being closed the same way: M90a (abuse control) is complete; M90b–M90f remain open.
 
 ## Verification (run before declaring any work done)
 

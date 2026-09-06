@@ -353,8 +353,29 @@ export type GraphqlPluginOptions =
 
     /**
      * Maximum query depth. Defaults to 10. Set to 0 to disable.
+     *
+     * Bounds NESTING only. A document can be two levels deep and still ask for
+     * a hundred thousand fields, because every alias is a separate field — see
+     * {@linkcode GraphqlPluginOptions.maxNodes}, which bounds that dimension.
      */
     maxDepth?: number;
+
+    /**
+     * Maximum number of fields a document may resolve, counting every alias
+     * separately and expanding each fragment spread at its spread site.
+     *
+     * Omitted or `0`, unbounded — the released behaviour. The only limit then
+     * standing between an alias bomb and the process is the request-body size,
+     * which one HTTP request can exhaust: 100,000 aliases at depth 2 is a
+     * ~2 MB document.
+     *
+     * Left off by default because a legitimate large document in an existing
+     * application would otherwise start being refused. Pick a budget from the
+     * largest query your own clients issue and set it.
+     *
+     * @since 0.5.0
+     */
+    maxNodes?: number;
 
     /**
      * Additional validation rules to append.
