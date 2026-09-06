@@ -158,9 +158,21 @@ member an isolation level must reach.
   key. `cacheMiddleware` uses it on the miss path, and a new
   `CacheService.getOrSet(key, factory,
   ttlSeconds?)` uses the same registry. A waiter replays the
-  leader's stored payload and answers `X-Cache: COALESCED`. Entries are removed in a `finally`. If
-  the leader **fails**, the in-flight promise rejects and each waiter then runs the origin itself —
-  exactly what would have happened without coalescing.
+  leader's stored payload and answers `X-Cache: COALESCED`. Entries are removed in a `finally`. The
+  in-flight promise resolves to a **replay outcome**, never to a bare payload:
+  `{ replayable: true,
+  payload }` when the leader produced a cacheable buffered response,
+  `{ replayable: false }` when it did not. A waiter holding a non-replayable outcome — and a waiter
+  whose leader **rejected** — runs the origin itself, exactly what would have happened without
+  coalescing.
+
+  **The outcome type is load-bearing rather than defensive.** A waiter joins before `next()` has
+  returned, so at join time nothing is known about the leader's response — and `cacheMiddleware`
+  learns a response is streaming only by reading `snapshot().streaming` **after** the handler runs
+  (`cache-middleware.ts:116-129`). A design that assumed M42's existing streaming guard kept a
+  streaming response out of the coalescer would be wrong about the ordering: that guard runs too
+  late to prevent a join. `{ replayable: false }` is what a leader reports for a streaming body, a
+  non-cacheable status, or anything else it declined to store.
 - **Why:** the finding lists three fixes in preference order and the first two are the same
   mechanism; shipping them as two would be the split that produced every "one capability, two
   implementations" defect in this register — a middleware that coalesces and a `getOrSet` that does
@@ -254,20 +266,21 @@ M56 defect class).
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                  | src covered                      | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                            |
-| -------------------------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `database-plugin/test/unit/transaction-isolation.test.ts` (new)            | every adapter                    | One case per §3.1 matrix row: honoured levels reach the driver with the translated value (asserted on a recording fake), refused levels throw `UnsupportedIsolationLevelError` naming the adapter and the level, and the `501` brand is readable via `httpStatusHintOf`.    |
-| `database-plugin/test/unit/memory-isolation.test.ts` (new)                 | `adapters/memory/…`              | The X24-2 probe verbatim: `'serializable'` yields `80`; no option yields `90` (the default is unchanged).                                                                                                                                                                   |
-| `database-plugin/test/unit/drizzle-isolation-bridge.test.ts` (new)         | `query/drizzle-database.ts`      | A branded bridge receives `TransactionOptions` as its third argument; an unbranded one causes a refusal naming `withIsolationSupport`; a two-parameter bridge still type-checks (a compile-time case).                                                                      |
-| `database-plugin/test/integration/real-prisma-adapter.test.ts` (extended)  | `adapters/prisma/…`              | Guarded on `DATABASE_URL`: the X24-2 probe at `'serializable'` against real PostgreSQL yields `80`, and a `40001` that M90f reports as `409` is equally correct — the test accepts exactly those two outcomes rather than picking the one a single run happened to produce. |
-| `database-plugin/test/integration/real-drizzle-adapter.test.ts` (extended) | `adapters/drizzle/…`             | Same, through a branded bridge; and an unbranded bridge refuses without touching the database.                                                                                                                                                                              |
-| `database-plugin/test/integration/real-mongo-adapter.test.ts` (extended)   | `adapters/mongo/…`               | `'serializable'` reaches `startTransaction` with a snapshot read concern; the other three refuse.                                                                                                                                                                           |
-| `cache-plugin/test/unit/coalescer.test.ts` (new)                           | `services/coalescer.ts`          | One leader for N waiters; the registry is empty after settlement (no leak); a rejecting leader leaves the key clear and each waiter re-runs; two different stores do not share a key.                                                                                       |
-| `cache-plugin/test/integration/cache-stampede.test.ts` (new)               | `middleware/cache-middleware.ts` | The X24-1 probe: 100 concurrent requests to a 300 ms handler produce **1** handler invocation, `X-Cache` distribution `{ MISS: 1, COALESCED: 99 }`, and identical bodies. Vacuity-checked first, exactly as the finding did: request 1 `MISS`, request 2 `HIT`.             |
-| `cache-plugin/test/unit/cache-service.test.ts` (extended)                  | `services/cache-service.ts`      | `getOrSet` calls the factory once for N concurrent callers, stores the value, and honours an explicit and a defaulted TTL.                                                                                                                                                  |
-| `cache-plugin/test/integration/no-options-unchanged.test.ts` (new)         | `middleware/cache-middleware.ts` | A sequential MISS→HIT pair is byte-identical to today, including headers.                                                                                                                                                                                                   |
-| `session-plugin/test/integration/concurrent-writes.test.ts` (new)          | documentation guard              | Two overlapping requests on one cookie: the cookie strategy produces two divergent snapshots and the store strategy loses one write — the exact behaviour C1 documents.                                                                                                     |
-| `*/test/unit/barrel-exports.test.ts` (extended, three packages)            | each `src/index.ts`              | The added symbols are exported and nothing else joined.                                                                                                                                                                                                                     |
+| Test file                                                                  | src covered                      | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                             |
+| -------------------------------------------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `database-plugin/test/unit/transaction-isolation.test.ts` (new)            | every adapter                    | One case per §3.1 matrix row: honoured levels reach the driver with the translated value (asserted on a recording fake), refused levels throw `UnsupportedIsolationLevelError` naming the adapter and the level, and the `501` brand is readable via `httpStatusHintOf`.     |
+| `database-plugin/test/unit/memory-isolation.test.ts` (new)                 | `adapters/memory/…`              | The X24-2 probe verbatim: `'serializable'` yields `80`; no option yields `90` (the default is unchanged).                                                                                                                                                                    |
+| `database-plugin/test/unit/drizzle-isolation-bridge.test.ts` (new)         | `query/drizzle-database.ts`      | A branded bridge receives `TransactionOptions` as its third argument; an unbranded one causes a refusal naming `withIsolationSupport`; a two-parameter bridge still type-checks (a compile-time case).                                                                       |
+| `database-plugin/test/integration/real-prisma-adapter.test.ts` (extended)  | `adapters/prisma/…`              | Guarded on `DATABASE_URL`: the X24-2 probe at `'serializable'` against real PostgreSQL yields `80`, and a `40001` that M90f reports as `409` is equally correct — the test accepts exactly those two outcomes rather than picking the one a single run happened to produce.  |
+| `database-plugin/test/integration/real-drizzle-adapter.test.ts` (extended) | `adapters/drizzle/…`             | Same, through a branded bridge; and an unbranded bridge refuses without touching the database.                                                                                                                                                                               |
+| `database-plugin/test/integration/real-mongo-adapter.test.ts` (extended)   | `adapters/mongo/…`               | `'serializable'` reaches `startTransaction` with a snapshot read concern; the other three refuse.                                                                                                                                                                            |
+| `cache-plugin/test/unit/coalescer.test.ts` (new)                           | `services/coalescer.ts`          | One leader for N waiters; the registry is empty after settlement (no leak); a rejecting leader leaves the key clear and each waiter re-runs; a leader resolving `{ replayable: false }` sends every waiter to the origin; two different stores do not share a key.           |
+| `cache-plugin/test/integration/coalesce-streaming.test.ts` (new)           | `middleware/cache-middleware.ts` | N genuinely concurrent requests to a **streaming** route: every one reaches the origin, each receives its own stream, and no response carries `X-Cache: COALESCED`. The join happens before the streaming guard can run, so this is the case §3.4's outcome type exists for. |
+| `cache-plugin/test/integration/cache-stampede.test.ts` (new)               | `middleware/cache-middleware.ts` | The X24-1 probe: 100 concurrent requests to a 300 ms handler produce **1** handler invocation, `X-Cache` distribution `{ MISS: 1, COALESCED: 99 }`, and identical bodies. Vacuity-checked first, exactly as the finding did: request 1 `MISS`, request 2 `HIT`.              |
+| `cache-plugin/test/unit/cache-service.test.ts` (extended)                  | `services/cache-service.ts`      | `getOrSet` calls the factory once for N concurrent callers, stores the value, and honours an explicit and a defaulted TTL.                                                                                                                                                   |
+| `cache-plugin/test/integration/no-options-unchanged.test.ts` (new)         | `middleware/cache-middleware.ts` | A sequential MISS→HIT pair is byte-identical to today, including headers.                                                                                                                                                                                                    |
+| `session-plugin/test/integration/concurrent-writes.test.ts` (new)          | documentation guard              | Two overlapping requests on one cookie: the cookie strategy produces two divergent snapshots and the store strategy loses one write — the exact behaviour C1 documents.                                                                                                      |
+| `*/test/unit/barrel-exports.test.ts` (extended, three packages)            | each `src/index.ts`              | The added symbols are exported and nothing else joined.                                                                                                                                                                                                                      |
 
 **Negative controls to run and revert before hand-off**, each observed failing:
 
@@ -317,10 +330,11 @@ DATABASE_URL=postgres://… MONGO_URL=… deno task test
 - **Coalescing changes an unconditional behaviour.** Mitigation: the only observable differences are
   a new `X-Cache` value and fewer handler invocations; the sequential path is pinned byte-identical;
   and the leader-failure path is pinned to today's behaviour so a failing origin is never worse.
-- **A coalesced waiter must not replay a streaming response.** Mitigation: `cacheMiddleware` already
-  skips `encodePayload` when `snapshot().streaming === true` (M42), so a streaming response is never
-  a cache candidate and never a coalescing candidate; a test pins that a streaming route is
-  untouched.
+- **A coalesced waiter must not replay a streaming response**, and M42's existing streaming guard
+  **does not prevent the join** — it runs after `next()`, by which point waiters have attached.
+  Mitigation: §3.4's `{ replayable: false }` outcome, plus a test driving genuinely concurrent
+  requests at a streaming route that asserts every waiter reached the origin and received its own
+  stream — rather than a test that requests a streaming route once.
 - **The memory adapter's new mutex could deadlock a nested transaction.** Mitigation: a test opens a
   transaction inside a transaction and asserts the documented behaviour rather than a hang, with a
   bounded timeout so a regression fails instead of stalling the suite.

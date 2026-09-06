@@ -67,8 +67,13 @@ than a preamble to it.
 - **Decision:** the README line becomes
   `// keyed by authenticated user; every anonymous caller shares ONE bucket unless
   ipSecurityMiddleware is registered with trustProxy`,
-  and a new test registers **exactly** that composition and asserts the resolved key is the literal
-  `'anonymous'` for two different client addresses.
+  and a new test registers the composition the README **shows** — `rateLimitMiddleware(...)` alone,
+  with **no** `ipSecurityMiddleware` — and asserts the resolved key is the literal `'anonymous'` for
+  two different client addresses. That is what `defaultRateLimitKey` yields there: with no
+  authenticated principal, no `CLIENT_IP_STATE_KEY` (only `ipSecurityMiddleware` publishes one) and
+  no `ctx.request.ip` (no first-party adapter can populate it — M23), preference 4 is all that is
+  left. The remedy the comment names is deliberately **not** registered; a case that did register it
+  would assert per-address keys and would be testing the remedy rather than the claim.
 - **Why:** the fence compiler already compiles this README (`fence-compiler:69`) and cannot see a
   comment, so a corrected comment can rot exactly as the original did. The claim underneath it is
   mechanically checkable, and pinning it means the next person to change `defaultRateLimitKey` finds
@@ -176,7 +181,7 @@ new code.
 
 | Test file                                                                 | src covered             | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                              |
 | ------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth-plugin/test/integration/documented-rate-limit-key.test.ts` (new)    | none (claim guard)      | The README's exact composition: two requests from different client addresses share one bucket, and the resolved key is `'anonymous'` — so the corrected comment is checked, not just written.                                                                                 |
+| `auth-plugin/test/integration/documented-rate-limit-key.test.ts` (new)    | none (claim guard)      | The README's composition — `rateLimitMiddleware` alone, **no** `ipSecurityMiddleware`: two requests from different client addresses share one bucket and the resolved key is `'anonymous'`, so the corrected comment is checked rather than merely written.                   |
 | `database-plugin/test/unit/repository-implementor-contract.test.ts` (new) | none (compile tripwire) | A hand-written `IRepository<Row, string>` that does not extend `BaseRepository` and implements every required member; adding a required member to the interface breaks this file at `deno check`.                                                                             |
 | `session-plugin/test/integration/documented-csrf-sequence.test.ts` (new)  | none (claim guard)      | With `SessionPlugin({ csrf: {} })`: a bare `POST /login` answers `403`; the documented safe-request-then-mutation sequence answers `200`; the `## Session fixation` example works inside it. Asserts the successful path **first**, so the file cannot pass vacuously (§3.4). |
 | `test/package-readme-fence-compiler.test.ts` (unchanged)                  | the two READMEs         | Already covers `auth-plugin` (7 fences) and `session-plugin` (10). Fence counts are updated if an edit adds or removes one — the gate fails loudly on a count change, which is by design.                                                                                     |
