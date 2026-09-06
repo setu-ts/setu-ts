@@ -4442,7 +4442,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 90b** (`packages/secrets-plugin` + `packages/cache-plugin` +
   `packages/realtime-backplane-plugin` + `packages/messaging-plugin` + `packages/health-plugin` +
   `packages/queue-plugin` + `packages/database-plugin` — health that tells the truth, bounded) —
-  complete (PR pending). The last two packages without the `isHealthy` seam (X20-1/X29-1) now probe
+  complete (PR #249). The last two packages without the `isHealthy` seam (X20-1/X29-1) now probe
   real reachability through `createCachedProbe` (5 s TTL, 2 s bound, runtime clock and timers):
   cache via a typed `ping()` on `IRedisClient` (BREAKING for injected-client facades — required
   member), Vault via an unauthenticated `/v1/sys/health` request (no secret read, no token),
