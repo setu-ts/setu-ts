@@ -202,4 +202,18 @@ describe('createMaxNodesRule', () => {
     const rule = createMaxNodesRule(-1, MockGraphQLError);
     expect(rule({ reportError: () => {} }).Document).toBeUndefined();
   });
+
+  it('a NaN budget makes the rule silently INERT — which is why the service refuses it', () => {
+    // `maxNodes <= 0` is `false` for NaN, so the rule IS created; then
+    // `count > NaN` is `false` for every document, so it never reports. The
+    // limit reads as configured and enforces nothing — fail-open. `GraphqlService`
+    // refuses the value at construction so this state is unreachable through
+    // either documented entry point; see `graphql-service.test.ts`.
+    const reported: string[] = [];
+    const rule = createMaxNodesRule(Number.NaN, MockGraphQLError);
+    const visitor = rule({ reportError: (e) => reported.push(e.message) });
+    expect(visitor.Document).toBeDefined();
+    visitor.Document?.(doc('{ a b c d e f g h }'));
+    expect(reported).toEqual([]);
+  });
 });

@@ -397,6 +397,60 @@ the rest are recorded.
   and the multipart parser uses `Uint8Array.slice`, which is offset-relative. No divergence reaches
   a caller.
 
+## 8d. Findings from the code-review pass
+
+Run after verification, at high effort, over `main..HEAD`. Two correctness findings and two missed
+doc deliverables; all four fixed on this branch.
+
+- **A body-carrying upgrade refused by the new cap LEAKED a WebSocket connection slot.** The
+  kernel's RFC 6455 body guard reads `ctx.request.bytes()` _after_ `IWebSocketService.routeUpgrade`
+  has accepted — and the router claims a pending slot at accept time (M46). While that read could
+  only RETURN, the guard settled the slot with `sink.onClose({ code: 1006 })` before answering
+  `400`, and `websocket-service.ts:595` states in as many words that "a refused or malformed upgrade
+  can never leak a slot and starve `maxConnections`". `maxBodyBytes` makes the read able to REJECT,
+  so the rejection escaped to the fallback `500` with `onClose` never called. Upgrade detection is
+  **header-only** — no method check — so a POST carrying `Upgrade: websocket` and an oversized body
+  is detected as an upgrade, which makes this reachable by an unauthenticated client with no socket
+  and no handshake. Measured with `maxConnections: 2`: two such requests, then a conformant upgrade
+  answered **`503`** for the life of the process, where the same sequence without a cap answered
+  `400`. The read is now wrapped in a `try` whose `catch` settles the slot and rethrows — rethrown
+  rather than answered, so the refusal's own `413` hint still reaches `errorHandler`. This adds
+  **`packages/kernel`** to the milestone's package set (the M70b/M70g/M70h/M70k list-correction
+  precedent): the defect is one this milestone introduces, and CLAUDE.md puts such a fix on the
+  milestone's own branch. Regression test in `websocket-plugin/test/integration/`, with a no-cap
+  control; reverting the fix fails exactly the capacity assertion while both siblings still pass.
+- **`maxNodes: NaN` silently disabled the GraphQL breadth limit** — the same fail-open mechanism as
+  the `maxBodyBytes: NaN` case §8c records, in the other numeric option this milestone introduces.
+  `maxNodes <= 0` is `false` for `NaN`, so the rule IS built; then `count > NaN` is `false` for
+  every document, so it never reports while reading as configured. Guarded in `GraphqlService`'s
+  constructor rather than the plugin factory, because the service is barrel-exported and both
+  documented entry points must agree — the plugin constructs it during `register()`, so a bad value
+  is a startup failure either way. `0` still disables deliberately and is accepted. `maxDepth` has
+  the identical laxity and is **pre-existing**, so it is recorded as a residual risk rather than
+  changed.
+- **C2's `docs/deployment.md` deliverable never shipped.** The row names three sites; the JSDoc
+  `@example` and the `auth-plugin` README moved and `docs/deployment.md` was untouched. It now
+  carries a "Nothing in the request pipeline may refuse a probe" section stating the asymmetry (a
+  refused liveness probe is a restart, not a dropped request), the two first-party middlewares that
+  exempt the six operational paths by default, that a caller list REPLACES those defaults, and that
+  moving the probes means updating every exclusion list _and_ the manifest together.
+- **C3's `defaultRateLimitKey` JSDoc deliverable never shipped.** The row names three sites; the
+  `http-security-plugin` README and the `PUBLIC_API.md` IP-security section moved, and the
+  function's own JSDoc still listed "Register `ipSecurityMiddleware` (with `trustProxy`)" as remedy
+  #1 — the configuration X32-3 shows is attacker-controlled under an appending proxy, with no
+  mention of the `trustedProxies`/`proxyHops` this milestone added. Both are exactly the class the
+  review procedure warns has shipped before: a doc deliverable named in the plan, passed over with
+  every gate green, leaving the package recommending behaviour the same milestone had just shown to
+  be unsafe.
+- **Recorded, not changed.** `RedisRateLimitStore.increment` issues INCR → PEXPIRE → PTTL against
+  one shared key, which is three awaited operations on shared external state; the namespaced key is
+  computed ONCE into a local and reused for all three, so no interleave can make them address
+  different keys, and the prefix introduces no new ordering. The interleave window between INCR and
+  PEXPIRE is pre-existing and unchanged. `createPathMatcher` writes `lastIndex = 0` on the caller's
+  own `RegExp` — documented, and a caller sharing one stateful pattern between an exclusion list and
+  its own `exec` loop is contrived, but a defensive clone at construction would remove the side
+  effect entirely.
+
 ## 9. Out of scope
 
 - **X32-7** (`BulkheadFullError` → masked `500`) — **M90f**, which sweeps every unbranded

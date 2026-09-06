@@ -174,7 +174,8 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
  *
  * 1. `ctx.request.user?.id` — the authenticated principal, when auth middleware ran first.
  * 2. `ctx.state.get(CLIENT_IP_STATE_KEY)` — the IP `ipSecurityMiddleware` publishes (it needs
- *    `trustProxy` plus a proxy header to resolve one).
+ *    `trustProxy` plus a proxy header to resolve one). **See the warning below: on its own
+ *    `trustProxy` can make this key attacker-controlled.**
  * 3. `ctx.request.ip` — set only by a custom `IHttpAdapter`; the first-party adapters
  *    cannot populate it, because a web `Request` carries no peer address (M23).
  * 4. `'anonymous'`.
@@ -183,8 +184,19 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
  * requests per window across ALL callers, which both starves legitimate traffic
  * and fails to limit any individual client. The previous default went straight
  * from `ctx.request.ip` to `'anonymous'`, so on every first-party adapter that
- * is exactly what it did. Register `ipSecurityMiddleware` (with `trustProxy`),
- * put this after authentication, or pass your own `keyGenerator`.
+ * is exactly what it did. Register `ipSecurityMiddleware`, put this after
+ * authentication, or pass your own `keyGenerator`.
+ *
+ * **`trustProxy: true` alone is not enough, and this is the sharper hazard of
+ * the two.** It resolves the LEFTMOST entry of the proxy header, which is safe
+ * only behind a proxy that OVERWRITES that header. The standard nginx idiom
+ * (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`) APPENDS, so a
+ * request arriving with a forged `X-Forwarded-For: 7.7.7.7` reaches the
+ * application as `7.7.7.7, 198.51.100.9` and this function keys the limiter on
+ * the value the caller chose — rotating it defeats the budget entirely, which is
+ * worse than the global counter above because it looks configured. Behind an
+ * appending proxy, set `ipSecurityMiddleware({ trustProxy: true, trustedProxies })`
+ * (or `proxyHops`) so the client is resolved from the right.
  *
  * @param ctx - The request context
  * @returns The key to count against

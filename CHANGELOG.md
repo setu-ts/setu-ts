@@ -151,10 +151,13 @@ All notable changes to this project are documented here. The format follows
   times counts as a hundred thousand rather than eleven hundred. Expansion is memoized, so a deep
   fragment graph reports a large count in time linear in the document's own size; without that the
   counter would itself be the denial of service. **Off by default (`0`)**, so no released
-  application starts refusing a document it used to serve. The rule itself is deliberately NOT
-  exported: it is configured through `maxNodes`, nothing outside the package constructs it, and
-  exporting it would leak the plugin's private graphql facades into the published surface — which
-  `deno doc --lint` reports (the M82 precedent).
+  application starts refusing a document it used to serve. A value that is not a non-negative
+  integer throws at construction, for the same reason `maxBodyBytes` does: `maxNodes <= 0` is
+  `false` for `NaN`, so the rule would be built and then never report, silently enforcing nothing
+  while reading as configured. The rule itself is deliberately NOT exported: it is configured
+  through `maxNodes`, nothing outside the package constructs it, and exporting it would leak the
+  plugin's private graphql facades into the published surface — which `deno doc --lint` reports (the
+  M82 precedent).
 
 ## [0.4.0] — 2026-09-05
 
