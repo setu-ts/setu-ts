@@ -213,7 +213,12 @@ member an isolation level must reach.
 ### 3.5 Coalescing is per process, and that is stated rather than implied
 
 - **Decision:** no cross-replica coordination. The README and `PUBLIC_API.md` say that N replicas
-  produce at most N origin calls per key.
+  produce at most N origin calls per key **for one overlapping batch behind a leader that succeeds
+  and is replayable** — and name the three cases that exceed it: a rejected leader and a
+  `{ replayable: false }` leader each send every waiter to the origin (§3.4), and a batch arriving
+  after the entry has settled starts a new leader. The bound describes one window rather than a
+  budget over time, and saying so is the difference between a documented guarantee and one a reader
+  finds false the first time an origin fails.
 - **Why:** cross-process coalescing needs a distributed lock, which is a different capability
   (`IDistributedLock`, M18) and a different failure model — a lock holder that dies leaves every
   waiter blocked, which is worse than a stampede. Both prior in-repo coalescers (M47, M50) are
@@ -370,6 +375,16 @@ DATABASE_URL=postgres://… MONGO_URL=… deno task test
   independent transaction behind a short one proceeds normally; a nested one fails by the bound
   instead of hanging. Both paths are tested, and the plan states plainly that the two are not
   distinguished rather than implying they are. Savepoints stay out of scope (§9).
+
+  **A timed-out waiter must leave the queue, and that is correctness rather than tidiness.**
+  `DatabaseService.transaction()` awaits `beginTransaction()` **before** its `try`
+  (`database-service.ts:114-115`), so a rejected acquisition yields no handle and nothing will ever
+  call `commit()` or `rollback()`. A waiter left queued would acquire the mutex once the current
+  holder released it and then hold it forever, converting a bounded failure into a permanent stall
+  for every later transaction — strictly worse than the deadlock the bound exists to prevent. The
+  rejection therefore removes the waiter from the queue first, and a test asserts that a transaction
+  started after a timed-out one still acquires and commits. This is M47's bulkhead lesson in a
+  second place: a waiter cancelled while queued leaves the queue and never runs.
 
 ## 9. Out of scope
 
