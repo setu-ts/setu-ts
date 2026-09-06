@@ -20,6 +20,12 @@ export interface RefreshTokenRecord {
   readonly expiresAt: number;
   /** Whether the token has been revoked. */
   revoked: boolean;
+  /** Family identifier shared by a rotated refresh-token lineage. */
+  readonly familyId?: string;
+  /** Identifier of the paired access token, when issued by the current service. */
+  readonly accessTokenJti?: string;
+  /** Absolute expiry timestamp for the paired access token. */
+  readonly accessTokenExpiresAt?: number;
 }
 
 /**
@@ -41,6 +47,13 @@ export interface RefreshTokenStore {
   get(jti: string): Promise<RefreshTokenRecord | null>;
   /** Revoke a token by jti. */
   revoke(jti: string): Promise<void>;
+  /**
+   * Revoke every refresh token in the requested token's family.
+   *
+   * Returns the affected records so the caller can also revoke their paired
+   * access credentials through its separately configured store.
+   */
+  revokeFamily(jti: string): Promise<readonly RefreshTokenRecord[]>;
 }
 
 /**
@@ -82,5 +95,30 @@ export class MemoryRefreshTokenStore implements RefreshTokenStore {
       record.revoked = true;
     }
     return Promise.resolve();
+  }
+
+  revokeFamily(jti: string): Promise<readonly RefreshTokenRecord[]> {
+    const requested = this.#map.get(jti);
+    if (requested === undefined) {
+      return Promise.resolve([]);
+    }
+    if (this.#runtime.now() >= requested.expiresAt) {
+      this.#map.delete(jti);
+      return Promise.resolve([]);
+    }
+
+    const familyId = requested.familyId ?? requested.jti;
+    const revoked: RefreshTokenRecord[] = [];
+    for (const [candidateJti, candidate] of this.#map) {
+      if (this.#runtime.now() >= candidate.expiresAt) {
+        this.#map.delete(candidateJti);
+        continue;
+      }
+      if ((candidate.familyId ?? candidate.jti) === familyId) {
+        candidate.revoked = true;
+        revoked.push(candidate);
+      }
+    }
+    return Promise.resolve(revoked);
   }
 }

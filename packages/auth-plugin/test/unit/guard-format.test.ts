@@ -172,7 +172,7 @@ describe('auth guards keep their status and short-circuit (M70f)', () => {
     await requireRole('admin')(ctx, next(state));
     expect(state.status).toBe(403);
     expect(state.continued).toBe(false);
-    expect(state.body).toEqual({ error: 'Forbidden', detail: 'Role "admin" is required' });
+    expect(state.body).toEqual({ error: 'Forbidden', detail: 'Insufficient privileges' });
   });
 
   it('requirePermission rejects an authenticated but insufficient caller with 403', async () => {
@@ -182,7 +182,7 @@ describe('auth guards keep their status and short-circuit (M70f)', () => {
     expect(state.continued).toBe(false);
     expect(state.body).toEqual({
       error: 'Forbidden',
-      detail: 'Permission "users:create" is required',
+      detail: 'Insufficient privileges',
     });
   });
 
@@ -191,6 +191,7 @@ describe('auth guards keep their status and short-circuit (M70f)', () => {
     await requireAnyRole(['admin', 'manager'])(ctx, next(state));
     expect(state.status).toBe(403);
     expect(state.continued).toBe(false);
+    expect(state.body).toEqual({ error: 'Forbidden', detail: 'Insufficient privileges' });
   });
 
   it('requireAllPermissions rejects an authenticated but insufficient caller with 403', async () => {
@@ -198,6 +199,7 @@ describe('auth guards keep their status and short-circuit (M70f)', () => {
     await requireAllPermissions(['a', 'b'])(ctx, next(state));
     expect(state.status).toBe(403);
     expect(state.continued).toBe(false);
+    expect(state.body).toEqual({ error: 'Forbidden', detail: 'Insufficient privileges' });
   });
 
   it('an authorized caller passes through (handler runs)', async () => {

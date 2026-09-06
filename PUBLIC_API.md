@@ -1973,43 +1973,45 @@ They still fail closed either way; what changed is that the refusal is legible.
 
 ### Exports
 
-| Export                       | File                                      | Description                                                                             |
-| ---------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| `AuthPlugin`                 | `src/plugin/auth-plugin.ts`               | Plugin factory                                                                          |
-| `AuthPluginOptions`          | `src/interfaces/index.ts`                 | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies`) |
-| `JwtOptions`                 | `src/interfaces/index.ts`                 | JWT config (key material, algorithm, expected aud/iss, header/scheme)                   |
-| `ApiKeyOptions`              | `src/interfaces/index.ts`                 | API-key strategy config (header + `validate` callback)                                  |
-| `LocalOptions`               | `src/interfaces/index.ts`                 | Local credential config (`verify` callback)                                             |
-| `SessionAuthOptions`         | `src/interfaces/index.ts`                 | Session strategy config (required `toPrincipal` callback)                               |
-| `PasswordHasher`             | `src/services/password-hasher.ts`         | PBKDF2-SHA256 hash/verify utility                                                       |
-| `MalformedPasswordHashError` | `src/services/password-hasher.ts`         | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash               |
-| `authMiddleware`             | `src/middleware/auth-middleware.ts`       | Global middleware: authenticates and populates `ctx.request.user`                       |
-| `requireAuth`                | `src/guards/index.ts`                     | Guard: require an authenticated principal (401)                                         |
-| `requireRole`                | `src/guards/index.ts`                     | Guard: require a role (401/403)                                                         |
-| `requirePermission`          | `src/guards/index.ts`                     | Guard: require a permission (401/403)                                                   |
-| `requireAnyRole`             | `src/guards/index.ts`                     | Guard: require any of the given roles                                                   |
-| `requireAllPermissions`      | `src/guards/index.ts`                     | Guard: require all of the given permissions                                             |
-| `publicRoute`                | `src/guards/index.ts`                     | Guard: explicitly allow unauthenticated access                                          |
-| `RefreshTokenService`        | `src/services/refresh-token-service.ts`   | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                               |
-| `RefreshTokenOptions`        | `src/services/refresh-token-service.ts`   | `RefreshTokenService` constructor options                                               |
-| `TokenPair`                  | `src/services/refresh-token-service.ts`   | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                           |
-| `RefreshTokenStore`          | `src/stores/refresh-token-store.ts`       | Pluggable async store interface for refresh-token records                               |
-| `RefreshTokenRecord`         | `src/stores/refresh-token-store.ts`       | Record shape store implementations produce/consume                                      |
-| `MemoryRefreshTokenStore`    | `src/stores/refresh-token-store.ts`       | Default in-memory store with lazy expiry                                                |
-| `rateLimitMiddleware`        | `src/middleware/rate-limit-middleware.ts` | Fixed-window rate limiter middleware factory (429 short-circuit)                        |
-| `RateLimitOptions`           | `src/middleware/rate-limit-middleware.ts` | `rateLimitMiddleware(options)` parameter                                                |
-| `RateLimitStore`             | `src/stores/rate-limit-store.ts`          | Pluggable store interface (`increment`/`reset`)                                         |
-| `RateLimitResult`            | `src/stores/rate-limit-store.ts`          | `{ count, resetTime }` returned by `increment`                                          |
-| `MemoryRateLimitStore`       | `src/stores/rate-limit-store.ts`          | Default in-memory fixed-window store                                                    |
-| `RedisRateLimitStore`        | `src/stores/redis-rate-limit-store.ts`    | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                                   |
-| `IAuthService`               | re-export                                 | From `@setu-ts/common`                                                                  |
-| `IJwtService`                | re-export                                 | From `@setu-ts/common`                                                                  |
-| `IAuthorizationService`      | re-export                                 | From `@setu-ts/common`                                                                  |
-| `IAuthStrategy`              | re-export                                 | From `@setu-ts/common`                                                                  |
-| `IPrincipal`                 | re-export                                 | From `@setu-ts/common`                                                                  |
-| `JwtSignOptions`             | re-export                                 | From `@setu-ts/common`                                                                  |
-| `RbacConfig`                 | re-export                                 | From `@setu-ts/common`                                                                  |
-| `RoleDefinition`             | re-export                                 | From `@setu-ts/common`                                                                  |
+| Export                             | File                                          | Description                                                                             |
+| ---------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `AuthPlugin`                       | `src/plugin/auth-plugin.ts`                   | Plugin factory                                                                          |
+| `AuthPluginOptions`                | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies`) |
+| `JwtOptions`                       | `src/interfaces/index.ts`                     | JWT config (key material, algorithm, expected aud/iss, header/scheme)                   |
+| `ApiKeyOptions`                    | `src/interfaces/index.ts`                     | API-key strategy config (header + `validate` callback)                                  |
+| `LocalOptions`                     | `src/interfaces/index.ts`                     | Local credential config (`verify` callback)                                             |
+| `SessionAuthOptions`               | `src/interfaces/index.ts`                     | Session strategy config (required `toPrincipal` callback)                               |
+| `PasswordHasher`                   | `src/services/password-hasher.ts`             | PBKDF2-SHA256 hash/verify utility                                                       |
+| `MalformedPasswordHashError`       | `src/services/password-hasher.ts`             | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash               |
+| `authMiddleware`                   | `src/middleware/auth-middleware.ts`           | Global middleware: authenticates and populates `ctx.request.user`                       |
+| `requireAuth`                      | `src/guards/index.ts`                         | Guard: require an authenticated principal (401)                                         |
+| `requireRole`                      | `src/guards/index.ts`                         | Guard: require a role (401/403)                                                         |
+| `requirePermission`                | `src/guards/index.ts`                         | Guard: require a permission (401/403)                                                   |
+| `requireAnyRole`                   | `src/guards/index.ts`                         | Guard: require any of the given roles                                                   |
+| `requireAllPermissions`            | `src/guards/index.ts`                         | Guard: require all of the given permissions                                             |
+| `publicRoute`                      | `src/guards/index.ts`                         | Guard: explicitly allow unauthenticated access                                          |
+| `RefreshTokenService`              | `src/services/refresh-token-service.ts`       | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                               |
+| `RefreshTokenOptions`              | `src/services/refresh-token-service.ts`       | `RefreshTokenService` constructor options                                               |
+| `TokenPair`                        | `src/services/refresh-token-service.ts`       | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                           |
+| `RefreshTokenStore`                | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                               |
+| `RefreshTokenRecord`               | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                      |
+| `MemoryRefreshTokenStore`          | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                |
+| `AccessTokenRevocationStore`       | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                     |
+| `MemoryAccessTokenRevocationStore` | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                           |
+| `rateLimitMiddleware`              | `src/middleware/rate-limit-middleware.ts`     | Fixed-window rate limiter middleware factory (429 short-circuit)                        |
+| `RateLimitOptions`                 | `src/middleware/rate-limit-middleware.ts`     | `rateLimitMiddleware(options)` parameter                                                |
+| `RateLimitStore`                   | `src/stores/rate-limit-store.ts`              | Pluggable store interface (`increment`/`reset`)                                         |
+| `RateLimitResult`                  | `src/stores/rate-limit-store.ts`              | `{ count, resetTime }` returned by `increment`                                          |
+| `MemoryRateLimitStore`             | `src/stores/rate-limit-store.ts`              | Default in-memory fixed-window store                                                    |
+| `RedisRateLimitStore`              | `src/stores/redis-rate-limit-store.ts`        | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                                   |
+| `IAuthService`                     | re-export                                     | From `@setu-ts/common`                                                                  |
+| `IJwtService`                      | re-export                                     | From `@setu-ts/common`                                                                  |
+| `IAuthorizationService`            | re-export                                     | From `@setu-ts/common`                                                                  |
+| `IAuthStrategy`                    | re-export                                     | From `@setu-ts/common`                                                                  |
+| `IPrincipal`                       | re-export                                     | From `@setu-ts/common`                                                                  |
+| `JwtSignOptions`                   | re-export                                     | From `@setu-ts/common`                                                                  |
+| `RbacConfig`                       | re-export                                     | From `@setu-ts/common`                                                                  |
+| `RoleDefinition`                   | re-export                                     | From `@setu-ts/common`                                                                  |
 
 ### Registration
 
@@ -2076,28 +2078,42 @@ app.router.post('/auth/login', async (ctx) => {
 ### Refresh Tokens (M16b)
 
 `RefreshTokenService` is an **app-instantiated** class (like `PasswordHasher`) — it is NOT an
-`AuthPlugin` option and registers no service. A refresh token is a signed JWT carrying
-`type: 'refresh'` and a random `jti`; a pluggable server-side store tracks each `jti` so the service
-can **rotate** (each `refresh` revokes the presented token and mints a fresh pair — replay of a
-rotated token returns `null`) and **revoke** (logout). `refresh()`/`revoke()` never throw on a bad
-token: an invalid, expired, or tampered token yields `null`/`false`. The access token uses the
-`accessToken` options; the refresh token uses `refreshTokenExpiresIn` (default `'7d'`). Both carry
-the configured `audience`/`issuer` so `verify` enforces them. `MemoryRefreshTokenStore` is the
-default backend (single-process; lazy expiry on `get`); a Redis-backed `RefreshTokenStore` is
-deferred — the async interface makes it a later drop-in.
+`AuthPlugin` option and registers no service. It issues distinct typed access + refresh JWTs, each
+with a random `jti`; bearer authentication rejects `type: 'refresh'`. A pluggable server-side
+`RefreshTokenStore` tracks refresh-token families: rotation revokes the presented refresh token and
+mints a descendant, while replay or logout revokes the complete family. `refresh()`/`revoke()` never
+throw on a bad token: invalid, expired, or tampered input yields `null`/`false`.
+
+To invalidate an access credential at logout before its regular expiry, construct one
+`AccessTokenRevocationStore` and pass that exact instance to `AuthPlugin({ jwt: { ... } })` and the
+`RefreshTokenService`. Its `revoke(jti, expiresAt)` entries are bounded, so setting
+`accessTokenRevocationStore` on the refresh service requires `accessToken.expiresIn`. The shipped
+`MemoryAccessTokenRevocationStore` is single-process; multi-instance deployments must supply a
+shared implementation. Custom `RefreshTokenStore` implementations must preserve `familyId` and
+implement `revokeFamily(jti)` so replay and logout can revoke the family.
 
 ```typescript
-import { MemoryRefreshTokenStore, RefreshTokenService } from '@setu-ts/auth-plugin';
+import {
+  AuthPlugin,
+  MemoryAccessTokenRevocationStore,
+  MemoryRefreshTokenStore,
+  RefreshTokenService,
+} from '@setu-ts/auth-plugin';
 import type { IJwtService, IRuntimeServices } from '@setu-ts/common';
 
 const jwt = app.services.get<IJwtService>('jwt');
 const runtime = app.services.get<IRuntimeServices>('runtime');
+const accessTokenRevocations = new MemoryAccessTokenRevocationStore(runtime);
+app.register(AuthPlugin({
+  jwt: { secret: config.get('JWT_SECRET'), accessTokenRevocationStore: accessTokenRevocations },
+}));
 const refresh = new RefreshTokenService({
   jwt,
   store: new MemoryRefreshTokenStore(runtime),
   runtime,
   accessToken: { expiresIn: '15m', audience: 'my-app-users', issuer: 'my-app' },
   refreshTokenExpiresIn: '30d',
+  accessTokenRevocationStore: accessTokenRevocations,
 });
 
 // Login: issue the pair after verifying credentials
@@ -2115,7 +2131,7 @@ app.router.post('/auth/refresh', async (ctx) => {
   return ctx.response.json(pair);
 });
 
-// Logout: revoke the refresh token
+// Logout: revoke the refresh family and its paired access credentials
 app.router.post('/auth/logout', async (ctx) => {
   const { refreshToken } = await ctx.request.json<{ refreshToken: string }>();
   await refresh.revoke(refreshToken);

@@ -19,6 +19,9 @@ const AUTHENTICATED: RouteSecurityMetadata = Object.freeze({ authenticated: true
 /** Brand for a guard that explicitly marks a route public. */
 const PUBLIC: RouteSecurityMetadata = Object.freeze({ authenticated: false });
 
+/** Generic detail returned when an authenticated caller fails a policy check. */
+const INSUFFICIENT_PRIVILEGES = 'Insufficient privileges';
+
 /**
  * Resolves the authorization service, or answers `501` when none is registered.
  *
@@ -113,7 +116,7 @@ export function requireRole(role: string): MiddlewareFunction {
       respondWithError(ctx, {
         status: 403,
         title: 'Forbidden',
-        detail: `Role "${role}" is required`,
+        detail: INSUFFICIENT_PRIVILEGES,
       });
       return;
     }
@@ -154,7 +157,7 @@ export function requirePermission(permission: string): MiddlewareFunction {
       respondWithError(ctx, {
         status: 403,
         title: 'Forbidden',
-        detail: `Permission "${permission}" is required`,
+        detail: INSUFFICIENT_PRIVILEGES,
       });
       return;
     }
@@ -195,7 +198,7 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
       respondWithError(ctx, {
         status: 403,
         title: 'Forbidden',
-        detail: `One of these roles is required: ${roles.join(', ')}`,
+        detail: INSUFFICIENT_PRIVILEGES,
       });
       return;
     }
@@ -239,7 +242,7 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
       respondWithError(ctx, {
         status: 403,
         title: 'Forbidden',
-        detail: `All of these permissions are required: ${permissions.join(', ')}`,
+        detail: INSUFFICIENT_PRIVILEGES,
       });
       return;
     }

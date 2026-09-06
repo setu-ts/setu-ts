@@ -39,16 +39,8 @@ const AUTHENTICATION_REQUIRED = 'Authentication required';
 /** Detail for the fail-closed refusal when no authorization provider exists. */
 const NOT_CONFIGURED_DETAIL = 'Authorization is not configured';
 
-/**
- * The refusal detail for a failed check: `Role "x" is required` for one name,
- * `One of these roles is required: a, b` for several — the exact strings
- * `requireRole` and `requireAnyRole` answer with.
- */
-function requirementDetail(kind: 'Role' | 'Permission', names: readonly string[]): string {
-  return names.length === 1
-    ? `${kind} "${names[0]}" is required`
-    : `One of these ${kind.toLowerCase()}s is required: ${names.join(', ')}`;
-}
+/** Generic detail for a failed policy check, matching auth-plugin guards. */
+const INSUFFICIENT_PRIVILEGES = 'Insufficient privileges';
 
 /**
  * Builds one enforcing middleware for one restriction kind: `401` without a
@@ -56,8 +48,6 @@ function requirementDetail(kind: 'Role' | 'Permission', names: readonly string[]
  * closed — the route is never served unguarded), `403` when the check fails.
  */
 function authorizationMiddleware(
-  kind: 'Role' | 'Permission',
-  names: readonly string[],
   holds: (authorization: IAuthorizationService, principal: IPrincipal) => boolean,
 ): MiddlewareFunction {
   const middleware = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
@@ -87,7 +77,7 @@ function authorizationMiddleware(
       respondWithError(ctx, {
         status: 403,
         title: 'Forbidden',
-        detail: requirementDetail(kind, names),
+        detail: INSUFFICIENT_PRIVILEGES,
       });
       return;
     }
@@ -105,11 +95,7 @@ function authorizationMiddleware(
  * @returns The branded middleware
  */
 export function createRolesMiddleware(roles: readonly string[]): MiddlewareFunction {
-  return authorizationMiddleware(
-    'Role',
-    roles,
-    (authorization, user) => authorization.hasAnyRole(user, roles),
-  );
+  return authorizationMiddleware((authorization, user) => authorization.hasAnyRole(user, roles));
 }
 
 /**
@@ -124,9 +110,7 @@ export function createRolesMiddleware(roles: readonly string[]): MiddlewareFunct
  * @returns The branded middleware
  */
 export function createPermissionsMiddleware(permissions: readonly string[]): MiddlewareFunction {
-  return authorizationMiddleware(
-    'Permission',
-    permissions,
-    (authorization, user) => permissions.some((p) => authorization.hasPermission(user, p)),
+  return authorizationMiddleware((authorization, user) =>
+    permissions.some((p) => authorization.hasPermission(user, p))
   );
 }

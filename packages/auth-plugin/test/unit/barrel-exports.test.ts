@@ -65,6 +65,7 @@ describe('barrel exports', () => {
   });
 
   it('exports stores', () => {
+    expect(auth.MemoryAccessTokenRevocationStore).toBeDefined();
     expect(auth.MemoryRefreshTokenStore).toBeDefined();
     expect(auth.MemoryRateLimitStore).toBeDefined();
     expect(auth.RedisRateLimitStore).toBeDefined();

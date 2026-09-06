@@ -76,4 +76,70 @@ describe('MemoryRefreshTokenStore', () => {
 
     expect(await store.get('nonexistent')).toBeNull();
   });
+
+  it('revokeFamily revokes every live record in the requested lineage', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+    const first = { ...makeRecord(runtime, 'first'), familyId: 'family-1' };
+    const second = { ...makeRecord(runtime, 'second'), familyId: 'family-1' };
+    const other = { ...makeRecord(runtime, 'other'), familyId: 'family-2' };
+
+    await store.save(first);
+    await store.save(second);
+    await store.save(other);
+
+    const revoked = await store.revokeFamily('first');
+
+    expect(revoked.map((record) => record.jti).sort()).toEqual(['first', 'second']);
+    expect((await store.get('first'))?.revoked).toBe(true);
+    expect((await store.get('second'))?.revoked).toBe(true);
+    expect((await store.get('other'))?.revoked).toBe(false);
+  });
+
+  it('treats a legacy record without familyId as its own family', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+    await store.save(makeRecord(runtime, 'legacy'));
+
+    const revoked = await store.revokeFamily('legacy');
+
+    expect(revoked.map((record) => record.jti)).toEqual(['legacy']);
+    expect((await store.get('legacy'))?.revoked).toBe(true);
+  });
+
+  it('returns no records when the requested family token is missing', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+
+    expect(await store.revokeFamily('missing')).toEqual([]);
+  });
+
+  it('evicts an expired requested family token rather than revoking it', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+    const record = makeRecord(runtime, 'expired');
+    await store.save(record);
+    runtime.setNow(record.expiresAt);
+
+    expect(await store.revokeFamily('expired')).toEqual([]);
+    expect(await store.get('expired')).toBeNull();
+  });
+
+  it('skips an expired sibling while revoking a live family member', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+    const live = { ...makeRecord(runtime, 'live'), familyId: 'family-1' };
+    const expired = {
+      ...makeRecord(runtime, 'expired'),
+      familyId: 'family-1',
+      expiresAt: runtime.now(),
+    };
+    await store.save(live);
+    await store.save(expired);
+
+    const revoked = await store.revokeFamily('live');
+
+    expect(revoked.map((record) => record.jti)).toEqual(['live']);
+    expect(await store.get('expired')).toBeNull();
+  });
 });

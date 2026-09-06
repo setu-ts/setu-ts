@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING — `@setu-ts/auth-plugin` — refresh-token stores now revoke credential families.**
+  `RefreshTokenStore` gains required `revokeFamily(jti)`, and custom implementations must persist
+  the optional lineage fields on `RefreshTokenRecord` so a replayed refresh token and logout can
+  revoke every descendant. `MemoryRefreshTokenStore` implements it. `RefreshTokenService` now issues
+  typed, distinct access and refresh JWT identifiers; bearer authentication rejects a signed
+  `type: 'refresh'` token. For immediate access-token logout, construct one
+  `AccessTokenRevocationStore` and pass it to both `AuthPlugin({ jwt: { ... } })` and
+  `RefreshTokenService`; the new memory implementation is single-process and the refresh service
+  requires `accessToken.expiresIn` when this option is used. Policy failures still answer `403`, but
+  their detail is now `Insufficient privileges` rather than disclosing required roles or
+  permissions. Migration: add `revokeFamily` to custom refresh stores, retain family fields, and
+  update tests that assert the old 403 detail.
+
 - **BREAKING — `@setu-ts/cli` — bare `setu generate` is informational, not an error.** With no
   schematic named it printed the available schematics through the normal output sink yet exited `2`
   — an error exit whose guidance read like help. It now lists the schematics and exits `0`, printing

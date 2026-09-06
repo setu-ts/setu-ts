@@ -5,6 +5,7 @@
  */
 
 import type { IAuthStrategy, IPrincipal, RbacConfig, SessionView } from '@setu-ts/common';
+import type { AccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 
 /**
  * JWT configuration options.
@@ -28,6 +29,11 @@ export interface JwtOptions {
   readonly header?: string;
   /** Token scheme prefix (default: 'bearer'). */
   readonly scheme?: string;
+  /**
+   * Optional shared store that rejects revoked typed access credentials.
+   * Supply the same instance to `RefreshTokenService` for logout invalidation.
+   */
+  readonly accessTokenRevocationStore?: AccessTokenRevocationStore;
 }
 
 /**

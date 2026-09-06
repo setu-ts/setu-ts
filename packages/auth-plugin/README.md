@@ -24,7 +24,9 @@ the optional `rbac` configuration is supplied:
 | Authorization (RBAC)   | `'authorization'`  | `IAuthorizationService` (when `rbac` is configured) |
 
 Without `rbac`, the four authorization guards answer **`501 Not Implemented`** rather than throwing
-— see [Guards](#guards).
+— see [Guards](#guards). A configured policy that the caller fails answers
+`403 Insufficient
+privileges`; it never names the required role or permission.
 
 > **Refresh tokens and rate limiting ship in this package.** `IJwtService` itself exposes only
 > `sign` / `verify` / `decode`, but do not hand-roll a refresh token as `sign({ expiresIn: '7d' })`
@@ -219,22 +221,23 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 
 ## Options
 
-| Option                | Type                                                  | Default           | Description                                                                                     |
-| --------------------- | ----------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `jwt.secret`          | `string \| Uint8Array`                                | -                 | HS256 key. Required for HS256.                                                                  |
-| `jwt.privateKey`      | `string` (PEM)                                        | -                 | RS256 private key. Required for RS256.                                                          |
-| `jwt.publicKey`       | `string` (PEM)                                        | -                 | RS256 public key. Required for RS256.                                                           |
-| `jwt.algorithm`       | `'HS256' \| 'RS256'`                                  | inferred          | Inferred from which key material is provided.                                                   |
-| `jwt.audience`        | `string`                                              | -                 | Expected `aud`; enforced on verify.                                                             |
-| `jwt.issuer`          | `string`                                              | -                 | Expected `iss`; enforced on verify.                                                             |
-| `jwt.header`          | `string`                                              | `'authorization'` | Header name for bearer extraction.                                                              |
-| `jwt.scheme`          | `string`                                              | `'bearer'`        | Token scheme prefix.                                                                            |
-| `apiKey.header`       | `string`                                              | `'X-API-Key'`     | Header holding the API key.                                                                     |
-| `apiKey.validate`     | `(key) => Promise<IPrincipal \| null>`                | -                 | App-supplied API-key lookup.                                                                    |
-| `local.verify`        | `(identifier, secret) => Promise<IPrincipal \| null>` | -                 | App-supplied credential check.                                                                  |
-| `rbac.roles`          | `Record<string, RoleDefinition>`                      | -                 | Role → permissions + `inherits` hierarchy.                                                      |
-| `session.toPrincipal` | `(view: SessionView) => IPrincipal \| null`           | -                 | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`. |
-| `strategies`          | `readonly IAuthStrategy[]`                            | -                 | Caller-supplied strategies, appended after every built-in in declaration order.                 |
+| Option                           | Type                                                  | Default           | Description                                                                                     |
+| -------------------------------- | ----------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
+| `jwt.secret`                     | `string \| Uint8Array`                                | -                 | HS256 key. Required for HS256.                                                                  |
+| `jwt.privateKey`                 | `string` (PEM)                                        | -                 | RS256 private key. Required for RS256.                                                          |
+| `jwt.publicKey`                  | `string` (PEM)                                        | -                 | RS256 public key. Required for RS256.                                                           |
+| `jwt.algorithm`                  | `'HS256' \| 'RS256'`                                  | inferred          | Inferred from which key material is provided.                                                   |
+| `jwt.audience`                   | `string`                                              | -                 | Expected `aud`; enforced on verify.                                                             |
+| `jwt.issuer`                     | `string`                                              | -                 | Expected `iss`; enforced on verify.                                                             |
+| `jwt.header`                     | `string`                                              | `'authorization'` | Header name for bearer extraction.                                                              |
+| `jwt.scheme`                     | `string`                                              | `'bearer'`        | Token scheme prefix.                                                                            |
+| `jwt.accessTokenRevocationStore` | `AccessTokenRevocationStore`                          | -                 | Shared store that rejects revoked typed access tokens.                                          |
+| `apiKey.header`                  | `string`                                              | `'X-API-Key'`     | Header holding the API key.                                                                     |
+| `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                | -                 | App-supplied API-key lookup.                                                                    |
+| `local.verify`                   | `(identifier, secret) => Promise<IPrincipal \| null>` | -                 | App-supplied credential check.                                                                  |
+| `rbac.roles`                     | `Record<string, RoleDefinition>`                      | -                 | Role → permissions + `inherits` hierarchy.                                                      |
+| `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`           | -                 | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`. |
+| `strategies`                     | `readonly IAuthStrategy[]`                            | -                 | Caller-supplied strategies, appended after every built-in in declaration order.                 |
 
 Supplying neither `jwt.secret` (HS256) nor `jwt.privateKey` + `jwt.publicKey` (RS256) throws at
 registration.
@@ -242,15 +245,31 @@ registration.
 ## Refresh Tokens
 
 `RefreshTokenService` is an app-instantiated service (like `PasswordHasher`) — it is not an
-`AuthPlugin` option and registers nothing. It mints access + refresh pairs, **rotates** on every
-`refresh` (the presented token's `jti` is revoked; replaying it returns `null`), and **revokes** on
-logout. A refresh token is a signed JWT with `type: 'refresh'` and a random `jti`, tracked in a
-pluggable async `RefreshTokenStore` (`MemoryRefreshTokenStore` ships; single-process, lazy expiry).
-`refresh()`/`revoke()` never throw on a bad token — invalid, expired, or tampered input yields
-`null`/`false`.
+`AuthPlugin` option and registers nothing. It mints typed access + refresh pairs with distinct
+random `jti`s, **rotates** on every `refresh`, and **revokes** on logout. A refresh token is a
+signed JWT with `type: 'refresh'`, which bearer authentication refuses. A replayed refresh token
+revokes its complete descendant family. `refresh()`/`revoke()` never throw on a bad token — invalid,
+expired, or tampered input yields `null`/`false`.
+
+To make logout invalidate the paired access credential before its normal expiry, construct one
+`AccessTokenRevocationStore` and pass that same instance to both `AuthPlugin` and
+`RefreshTokenService`. `MemoryAccessTokenRevocationStore` is single-process; a multi-instance
+application supplies a shared implementation. Access revocation requires `accessToken.expiresIn`, so
+revocation entries are bounded. `RefreshTokenStore` implementations must persist family lineage and
+implement `revokeFamily(jti)`; the shipped `MemoryRefreshTokenStore` does both with lazy expiry.
 
 ```typescript
-import { MemoryRefreshTokenStore, RefreshTokenService } from '@setu-ts/auth-plugin';
+import {
+  MemoryAccessTokenRevocationStore,
+  MemoryRefreshTokenStore,
+  RefreshTokenService,
+} from '@setu-ts/auth-plugin';
+
+const accessTokenRevocations = new MemoryAccessTokenRevocationStore(runtime);
+
+app.register(AuthPlugin({
+  jwt: { secret: config.get('JWT_SECRET'), accessTokenRevocationStore: accessTokenRevocations },
+}));
 
 const refresh = new RefreshTokenService({
   jwt, // IJwtService resolved from the 'jwt' token
@@ -258,6 +277,7 @@ const refresh = new RefreshTokenService({
   runtime, // IRuntimeServices resolved from the 'runtime' token
   accessToken: { expiresIn: '15m' },
   refreshTokenExpiresIn: '30d',
+  accessTokenRevocationStore: accessTokenRevocations,
 });
 
 const pair = await refresh.issue(principal); // { accessToken, refreshToken }
@@ -265,15 +285,16 @@ const next = await refresh.refresh(pair.refreshToken); // new pair; old token no
 await refresh.revoke(next!.refreshToken); // logout
 ```
 
-| Option                  | Type                | Default     | Description                                    |
-| ----------------------- | ------------------- | ----------- | ---------------------------------------------- |
-| `jwt`                   | `IJwtService`       | -           | Signs/verifies both tokens.                    |
-| `store`                 | `RefreshTokenStore` | -           | Rotation/revocation backend.                   |
-| `runtime`               | `IRuntimeServices`  | -           | `randomBytes` (jti) + `now()` (expiry).        |
-| `accessToken.expiresIn` | `string`            | jwt default | Access-token lifetime.                         |
-| `accessToken.audience`  | `string`            | -           | `aud` on both tokens; enforced on verify.      |
-| `accessToken.issuer`    | `string`            | -           | `iss` on both tokens; enforced on verify.      |
-| `refreshTokenExpiresIn` | `string`            | `'7d'`      | Refresh-token lifetime (JWT `exp` AND record). |
+| Option                       | Type                         | Default     | Description                                                               |
+| ---------------------------- | ---------------------------- | ----------- | ------------------------------------------------------------------------- |
+| `jwt`                        | `IJwtService`                | -           | Signs/verifies both tokens.                                               |
+| `store`                      | `RefreshTokenStore`          | -           | Rotation/revocation backend.                                              |
+| `runtime`                    | `IRuntimeServices`           | -           | `randomBytes` (jti) + `now()` (expiry).                                   |
+| `accessToken.expiresIn`      | `string`                     | jwt default | Access-token lifetime.                                                    |
+| `accessToken.audience`       | `string`                     | -           | `aud` on both tokens; enforced on verify.                                 |
+| `accessToken.issuer`         | `string`                     | -           | `iss` on both tokens; enforced on verify.                                 |
+| `refreshTokenExpiresIn`      | `string`                     | `'7d'`      | Refresh-token lifetime (JWT `exp` AND record).                            |
+| `accessTokenRevocationStore` | `AccessTokenRevocationStore` | -           | Shared access-token invalidation store; requires `accessToken.expiresIn`. |
 
 ## Rate Limiting
 
@@ -325,44 +346,46 @@ MIT
 
 ## Exports
 
-| Export                       | Kind      |
-| ---------------------------- | --------- |
-| `authMiddleware`             | function  |
-| `AuthPlugin`                 | function  |
-| `defaultRateLimitKey`        | function  |
-| `publicRoute`                | function  |
-| `rateLimitMiddleware`        | function  |
-| `requireAllPermissions`      | function  |
-| `requireAnyRole`             | function  |
-| `requireAuth`                | function  |
-| `requirePermission`          | function  |
-| `requireRole`                | function  |
-| `MalformedPasswordHashError` | class     |
-| `MemoryRateLimitStore`       | class     |
-| `MemoryRefreshTokenStore`    | class     |
-| `PasswordHasher`             | class     |
-| `RedisRateLimitStore`        | class     |
-| `RefreshTokenService`        | class     |
-| `ApiKeyOptions`              | interface |
-| `AuthPluginOptions`          | interface |
-| `IAuthorizationService`      | interface |
-| `IAuthService`               | interface |
-| `IAuthStrategy`              | interface |
-| `IJwtService`                | interface |
-| `IPrincipal`                 | interface |
-| `JwtOptions`                 | interface |
-| `JwtSignOptions`             | interface |
-| `LocalOptions`               | interface |
-| `RateLimitOptions`           | interface |
-| `RateLimitResult`            | interface |
-| `RateLimitStore`             | interface |
-| `RbacConfig`                 | interface |
-| `RefreshTokenOptions`        | interface |
-| `RefreshTokenRecord`         | interface |
-| `RefreshTokenStore`          | interface |
-| `RoleDefinition`             | interface |
-| `SessionAuthOptions`         | interface |
-| `TokenPair`                  | interface |
+| Export                             | Kind      |
+| ---------------------------------- | --------- |
+| `authMiddleware`                   | function  |
+| `AuthPlugin`                       | function  |
+| `defaultRateLimitKey`              | function  |
+| `publicRoute`                      | function  |
+| `rateLimitMiddleware`              | function  |
+| `requireAllPermissions`            | function  |
+| `requireAnyRole`                   | function  |
+| `requireAuth`                      | function  |
+| `requirePermission`                | function  |
+| `requireRole`                      | function  |
+| `MalformedPasswordHashError`       | class     |
+| `MemoryAccessTokenRevocationStore` | class     |
+| `MemoryRateLimitStore`             | class     |
+| `MemoryRefreshTokenStore`          | class     |
+| `PasswordHasher`                   | class     |
+| `RedisRateLimitStore`              | class     |
+| `RefreshTokenService`              | class     |
+| `AccessTokenRevocationStore`       | interface |
+| `ApiKeyOptions`                    | interface |
+| `AuthPluginOptions`                | interface |
+| `IAuthorizationService`            | interface |
+| `IAuthService`                     | interface |
+| `IAuthStrategy`                    | interface |
+| `IJwtService`                      | interface |
+| `IPrincipal`                       | interface |
+| `JwtOptions`                       | interface |
+| `JwtSignOptions`                   | interface |
+| `LocalOptions`                     | interface |
+| `RateLimitOptions`                 | interface |
+| `RateLimitResult`                  | interface |
+| `RateLimitStore`                   | interface |
+| `RbacConfig`                       | interface |
+| `RefreshTokenOptions`              | interface |
+| `RefreshTokenRecord`               | interface |
+| `RefreshTokenStore`                | interface |
+| `RoleDefinition`                   | interface |
+| `SessionAuthOptions`               | interface |
+| `TokenPair`                        | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

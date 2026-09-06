@@ -116,7 +116,7 @@ describe('authorization middleware refusals', () => {
     ]);
   });
 
-  it('answers 403 naming the single required role, byte-identical with requireRole', async () => {
+  it('answers generic 403 detail, byte-identical with requireRole', async () => {
     const middleware = createRolesMiddleware(['admin']);
     const { ctx, response } = fakeRequestContext({
       user: { id: 'u1', roles: ['viewer'] },
@@ -127,11 +127,11 @@ describe('authorization middleware refusals', () => {
 
     expect(response.statuses).toEqual([403]);
     expect(response.bodies).toEqual([
-      { error: 'Forbidden', detail: 'Role "admin" is required' },
+      { error: 'Forbidden', detail: 'Insufficient privileges' },
     ]);
   });
 
-  it('answers 403 naming every role when several are declared', async () => {
+  it('answers generic 403 detail when several roles are declared', async () => {
     const middleware = createRolesMiddleware(['admin', 'owner']);
     const { ctx, response } = fakeRequestContext({
       user: { id: 'u1', roles: ['viewer'] },
@@ -142,7 +142,7 @@ describe('authorization middleware refusals', () => {
 
     expect(response.statuses).toEqual([403]);
     expect(response.bodies).toEqual([
-      { error: 'Forbidden', detail: 'One of these roles is required: admin, owner' },
+      { error: 'Forbidden', detail: 'Insufficient privileges' },
     ]);
   });
 
@@ -183,7 +183,7 @@ describe('authorization middleware refusals', () => {
     expect(failing.response.bodies).toEqual([
       {
         error: 'Forbidden',
-        detail: 'One of these permissions is required: billing:write, billing:admin',
+        detail: 'Insufficient privileges',
       },
     ]);
   });

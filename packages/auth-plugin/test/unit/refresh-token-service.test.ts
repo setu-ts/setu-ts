@@ -10,21 +10,27 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { RefreshTokenService } from '../../src/services/refresh-token-service.ts';
 import { MemoryRefreshTokenStore } from '../../src/stores/refresh-token-store.ts';
+import { MemoryAccessTokenRevocationStore } from '../../src/stores/access-token-revocation-store.ts';
 import { JwtService } from '../../src/services/jwt-service.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 function makeService(options?: {
   accessToken?: { expiresIn?: string; audience?: string; issuer?: string };
   refreshTokenExpiresIn?: string;
+  withAccessTokenRevocationStore?: boolean;
 }): {
   runtime: ReturnType<typeof createFakeRuntime>;
   jwt: JwtService;
   store: MemoryRefreshTokenStore;
+  accessTokenRevocationStore: MemoryAccessTokenRevocationStore | undefined;
   service: RefreshTokenService;
 } {
   const runtime = createFakeRuntime();
   const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
   const store = new MemoryRefreshTokenStore(runtime);
+  const accessTokenRevocationStore = options?.withAccessTokenRevocationStore
+    ? new MemoryAccessTokenRevocationStore(runtime)
+    : undefined;
   const service = new RefreshTokenService({
     jwt,
     store,
@@ -33,8 +39,9 @@ function makeService(options?: {
     ...(options?.refreshTokenExpiresIn !== undefined
       ? { refreshTokenExpiresIn: options.refreshTokenExpiresIn }
       : {}),
+    ...(accessTokenRevocationStore === undefined ? {} : { accessTokenRevocationStore }),
   });
-  return { runtime, jwt, store, service };
+  return { runtime, jwt, store, accessTokenRevocationStore, service };
 }
 
 describe('RefreshTokenService', () => {
@@ -53,10 +60,14 @@ describe('RefreshTokenService', () => {
         sub: string;
         roles: string[];
         permissions: string[];
+        type: string;
+        jti: string;
       }>(pair.accessToken);
       expect(accessPayload.sub).toBe('user-123');
       expect(accessPayload.roles).toEqual(['user']);
       expect(accessPayload.permissions).toEqual(['users:read']);
+      expect(accessPayload.type).toBe('access');
+      expect(typeof accessPayload.jti).toBe('string');
 
       const refreshPayload = await jwt.verify<{
         sub: string;
@@ -66,6 +77,7 @@ describe('RefreshTokenService', () => {
       expect(refreshPayload.type).toBe('refresh');
       expect(refreshPayload.sub).toBe('user-123');
       expect(typeof refreshPayload.jti).toBe('string');
+      expect(refreshPayload.jti).not.toBe(accessPayload.jti);
 
       const record = await store.get(refreshPayload.jti);
       expect(record?.principalId).toBe('user-123');
@@ -236,6 +248,34 @@ describe('RefreshTokenService', () => {
       expect(first).not.toBeNull();
       expect(second).toBeNull();
     });
+
+    it('revokes the replaced access token when rotation uses a revocation store', async () => {
+      const { jwt, service, accessTokenRevocationStore } = makeService({
+        accessToken: { expiresIn: '1h' },
+        withAccessTokenRevocationStore: true,
+      });
+      const pair = await service.issue({ id: 'user-123' });
+      const oldAccessJti = (await jwt.verify<{ jti: string }>(pair.accessToken)).jti;
+
+      const rotated = await service.refresh(pair.refreshToken);
+
+      expect(rotated).not.toBeNull();
+      expect(await accessTokenRevocationStore?.isRevoked(oldAccessJti)).toBe(true);
+    });
+
+    it('revokes every descendant access token after replay of a rotated refresh token', async () => {
+      const { jwt, service, accessTokenRevocationStore } = makeService({
+        accessToken: { expiresIn: '1h' },
+        withAccessTokenRevocationStore: true,
+      });
+      const first = await service.issue({ id: 'user-123' });
+      const second = await service.refresh(first.refreshToken);
+      const descendantJti = (await jwt.verify<{ jti: string }>(second!.accessToken)).jti;
+
+      expect(await service.refresh(first.refreshToken)).toBeNull();
+
+      expect(await accessTokenRevocationStore?.isRevoked(descendantJti)).toBe(true);
+    });
   });
 
   describe('revoke', () => {
@@ -244,6 +284,32 @@ describe('RefreshTokenService', () => {
       const pair = await service.issue({ id: 'user-123' });
 
       expect(await service.revoke(pair.refreshToken)).toBe(true);
+    });
+
+    it('revokes the paired access credential at logout when a shared store is configured', async () => {
+      const { jwt, service, accessTokenRevocationStore } = makeService({
+        accessToken: { expiresIn: '1h' },
+        withAccessTokenRevocationStore: true,
+      });
+      const pair = await service.issue({ id: 'user-123' });
+      const accessJti = (await jwt.verify<{ jti: string }>(pair.accessToken)).jti;
+
+      expect(await service.revoke(pair.refreshToken)).toBe(true);
+      expect(await accessTokenRevocationStore?.isRevoked(accessJti)).toBe(true);
+    });
+
+    it('requires a bounded access lifetime when access revocation is configured', () => {
+      const runtime = createFakeRuntime();
+      const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
+
+      expect(() =>
+        new RefreshTokenService({
+          jwt,
+          store: new MemoryRefreshTokenStore(runtime),
+          runtime,
+          accessTokenRevocationStore: new MemoryAccessTokenRevocationStore(runtime),
+        })
+      ).toThrow('accessToken.expiresIn');
     });
 
     it('returns false when the record is already revoked', async () => {
