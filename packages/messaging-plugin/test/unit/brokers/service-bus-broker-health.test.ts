@@ -153,5 +153,17 @@ describe('ServiceBusBroker health (M70c)', () => {
       expect(await second).toBe(true);
       expect(probes).toBe(1);
     });
+
+    it('drops the cached probe on disconnect: reachability is unknown afterwards', async () => {
+      const broker = makeBroker(makeTransport(() => Promise.resolve(true)));
+      await broker.connect();
+      expect(await broker.reachability()).toBe(true);
+      await broker.disconnect();
+      // Post-close the broker has no transport to probe: `undefined` ("not
+      // known down", M70c) — never the cached stale `true`, and never a
+      // fresh probe fired against the closed client.
+      expect(await broker.reachability()).toBeUndefined();
+      expect(await broker.isHealthy()).toBe(true);
+    });
   });
 });

@@ -498,6 +498,25 @@ describe('HealthService', () => {
       expect(manual.pendingTimers()).toBe(0);
     });
 
+    it('clears the deadline timer when an indicator throws synchronously (no handle leak)', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime, { indicatorTimeoutMs: 5_000 });
+      const driverDiagnostic = 'sync indicator blew up before returning a promise';
+
+      service.registerIndicator('sync-throw', () => {
+        throw new Error(driverDiagnostic);
+      });
+
+      const report = await service.check();
+      // A synchronous throw is a failing check — recorded as `error`, the
+      // thrown value never serialized into the report.
+      expect(report.status).toBe('down');
+      expect(report.checks['sync-throw']?.data).toEqual({ reason: 'error' });
+      expect(JSON.stringify(report)).not.toContain(driverDiagnostic);
+      // The deadline handle did not outlive the throw.
+      expect(manual.pendingTimers()).toBe(0);
+    });
+
     it('defaults the deadline to 5,000ms when omitted', async () => {
       const manual = createManualRuntime();
       const service = new HealthService(manual.runtime);

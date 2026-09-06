@@ -583,6 +583,11 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     if (this.#transport) {
       await this.#transport.close();
       this.#transport = null;
+      // Drop the cached probe WITH the transport (M90b): a surviving probe
+      // would serve the stale cached outcome within its TTL and then fire
+      // real I/O against the closed client. Post-close `reachability()`
+      // answers `undefined` — not known down (M70c), never stale `true`.
+      this.#probe = null;
     }
     this.#ready = false;
   }

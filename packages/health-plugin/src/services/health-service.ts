@@ -165,7 +165,10 @@ export class HealthService implements IHealthService {
    * report. The losing branch never runs its resolve after the winner
    * settled — a `Promise` settles once — and a deadline hit resolves
    * `down`/`timeout` rather than rejecting, so the caller treats it as a
-   * recorded outcome, not an exception.
+   * recorded outcome, not an exception. The invocation is deferred through
+   * `Promise.resolve().then(check)` — the exact shape of `createCachedProbe`'s
+   * `runProbe` — so an indicator that throws SYNCHRONOUSLY becomes a
+   * rejection on the microtask queue and can never skip the clear.
    *
    * @param check - The indicator to run
    * @returns The indicator's outcome, or the timeout outcome
@@ -176,16 +179,18 @@ export class HealthService implements IHealthService {
         () => resolve({ status: 'down', data: { reason: 'timeout' } }),
         this.#indicatorTimeoutMs,
       );
-      check().then(
-        (result) => {
-          this.#runtime.clearTimeout(handle);
-          resolve(result);
-        },
-        (error: unknown) => {
-          this.#runtime.clearTimeout(handle);
-          reject(error);
-        },
-      );
+      Promise.resolve()
+        .then(check)
+        .then(
+          (result) => {
+            this.#runtime.clearTimeout(handle);
+            resolve(result);
+          },
+          (error: unknown) => {
+            this.#runtime.clearTimeout(handle);
+            reject(error);
+          },
+        );
     });
   }
 
