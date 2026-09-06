@@ -47,13 +47,14 @@ no attack uses.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                                                      | Resolution (picked side)                                                                                                                                       | Doc deliverable (same PR)                                                                           |
-| -- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| C1 | ROADMAP M90a names three packages (`auth-plugin`, `http-security-plugin`, `graphql-plugin`); §1 shows the body read lives in `runtime` and the exclusion unification touches `common`, `logger-plugin` and `metrics-plugin`.                  | **Correct the package list to seven.** The M70b / M70g / M70h / M70k precedent: the ROADMAP list is corrected in the plan when source-checking contradicts it. | ROADMAP M90a "Package(s)" line updated in this PR.                                                  |
-| C2 | `rateLimitMiddleware`'s own `@example` is a bare global `app.middleware.add(rateLimitMiddleware({ windowMs: 60000, max: 100 }))` — precisely the configuration with the X32-1 hazard, presented as the recommended usage.                     | Change the `@example` to show `exclude` in use, and add the probe interaction to the `auth-plugin` README and `docs/deployment.md`.                            | JSDoc `@example`, `auth-plugin/README.md`, `docs/deployment.md`.                                    |
-| C3 | `defaultRateLimitKey`'s remedy list names `trustProxy` as remedy #1 without stating it requires an **overwriting** proxy; X32-3 shows an appending proxy (the standard `$proxy_add_x_forwarded_for` idiom) makes the key attacker-controlled. | State the condition at the remedy, and ship the `trustedProxies`/`proxyHops` fix (§3.3) so a correct answer exists.                                            | `defaultRateLimitKey` JSDoc, `http-security-plugin/README.md`, `PUBLIC_API.md` IP-security section. |
-| C4 | `requestSizeMiddleware`'s module doc says the check happens "before any body reading" — a real design property — while no user-facing doc says a chunked body is therefore unbounded.                                                         | Keep the early check AND add the read bound (§3.4); document both layers and which one is load-bearing.                                                        | `http-security-plugin/README.md`, `PUBLIC_API.md`, option JSDoc.                                    |
-| C5 | `graphql-plugin` advertises depth limiting as its query-cost control; X32-6 shows depth bounds nesting only and the body-size limit is what actually carries the defence.                                                                     | Add a node/complexity budget (§3.6) and document that `maxDepth` bounds nesting alone.                                                                         | `graphql-plugin/README.md`, `PUBLIC_API.md` GraphQL section.                                        |
+| #  | Conflict                                                                                                                                                                                                                                                                                                                                                         | Resolution (picked side)                                                                                                                                                                         | Doc deliverable (same PR)                                                                                                                                                                                                      |
+| -- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C1 | ROADMAP M90a names three packages (`auth-plugin`, `http-security-plugin`, `graphql-plugin`); §1 shows the body read lives in `runtime` and the exclusion unification touches `common`, `logger-plugin` and `metrics-plugin`.                                                                                                                                     | **Correct the package list to seven.** The M70b / M70g / M70h / M70k precedent: the ROADMAP list is corrected in the plan when source-checking contradicts it.                                   | ROADMAP M90a "Package(s)" line updated in this PR.                                                                                                                                                                             |
+| C2 | `rateLimitMiddleware`'s own `@example` is a bare global `app.middleware.add(rateLimitMiddleware({ windowMs: 60000, max: 100 }))` — precisely the configuration with the X32-1 hazard, presented as the recommended usage.                                                                                                                                        | Change the `@example` to show `exclude` in use, and add the probe interaction to the `auth-plugin` README and `docs/deployment.md`.                                                              | JSDoc `@example`, `auth-plugin/README.md`, `docs/deployment.md`.                                                                                                                                                               |
+| C3 | `defaultRateLimitKey`'s remedy list names `trustProxy` as remedy #1 without stating it requires an **overwriting** proxy; X32-3 shows an appending proxy (the standard `$proxy_add_x_forwarded_for` idiom) makes the key attacker-controlled.                                                                                                                    | State the condition at the remedy, and ship the `trustedProxies`/`proxyHops` fix (§3.3) so a correct answer exists.                                                                              | `defaultRateLimitKey` JSDoc, `http-security-plugin/README.md`, `PUBLIC_API.md` IP-security section.                                                                                                                            |
+| C4 | `requestSizeMiddleware`'s module doc says the check happens "before any body reading" — a real design property — while no user-facing doc says a chunked body is therefore unbounded.                                                                                                                                                                            | Keep the early check AND add the read bound (§3.4); document both layers and which one is load-bearing.                                                                                          | `http-security-plugin/README.md`, `PUBLIC_API.md`, option JSDoc.                                                                                                                                                               |
+| C5 | `graphql-plugin` advertises depth limiting as its query-cost control; X32-6 shows depth bounds nesting only and the body-size limit is what actually carries the defence.                                                                                                                                                                                        | Add a node/complexity budget (§3.6) and document that `maxDepth` bounds nesting alone.                                                                                                           | `graphql-plugin/README.md`, `PUBLIC_API.md` GraphQL section.                                                                                                                                                                   |
+| C6 | The body limit is now configured in **two places** — `HttpSecurityPlugin({ requestSize: { maxBodySize } })` for the declaration check and `RuntimePlugin({ maxBodyBytes })` for the read bound — because the mapping runs before any plugin and no channel exists between them (§1, `mapWebRequestToFrameworkRequest(request: Request)` takes only the request). | Ship both and **say so**, rather than inventing a cross-plugin channel for one option. A single knob would need the adapter to read the service registry at map time, which it has no access to. | `http-security-plugin/README.md` and `PUBLIC_API.md` state that `maxBodySize` bounds only declared lengths and that `RuntimePlugin({ maxBodyBytes })` is the unbypassable bound; `runtime/README.md` documents the new option. |
 
 ## 3. Design decisions
 
@@ -61,7 +62,7 @@ no attack uses.
 
 - **Decision:** Add
   `createPathMatcher(patterns: readonly (string | RegExp)[]): (path: string) => boolean` to
-  `packages/common/src/http/path-matcher.ts`, exported from the barrel. It partitions ONCE at
+  `packages/common/src/path-matcher.ts`, exported from the barrel. It partitions ONCE at
   construction into a `Set<string>` of literals and an array of RegExps, then matches
   `literals.has(path) || regexes.some(r => { r.lastIndex = 0; return r.test(path); })`. All four
   call sites adopt it: `rateLimitMiddleware` (new), `tenantMiddleware`, `requestLogger`,
@@ -111,9 +112,9 @@ no attack uses.
   correct `413` before any read). Add the bound that cannot be bypassed where the read actually
   happens: `FrameworkRequest#readBody` streams `this.#raw.body` with a byte cap instead of calling
   `arrayBuffer()`, rejecting with a named error past the cap. The cap is supplied to the mapping by
-  a new optional `maxBodyBytes` on the runtime's request-mapping options, defaulted from
-  `HttpSecurityPlugin({ requestSize: { maxBodySize } })` where configured and otherwise absent
-  (unbounded, today's behaviour).
+  a new optional `maxBodyBytes` on **`RuntimeOptions`** (`RuntimePlugin({ maxBodyBytes })`),
+  threaded through the adapters it constructs into `mapWebRequestToFrameworkRequest`; absent →
+  unbounded, today's exact behaviour.
 - **Why:** §1 establishes the read is in `packages/runtime`, so X32-4's preferred fix is not
   implementable in `http-security-plugin` at all — the middleware has no access to the read, and
   because M87 made the body lazy the read happens _after_ middleware has already returned. The
@@ -141,10 +142,10 @@ no attack uses.
 
 ### 3.6 A node budget bounds GraphQL breadth
 
-- **Decision:** Add `maxNodes?: number` to the GraphQL validation options, implemented as a
-  validation rule that counts selection-set nodes across the whole document (aliases included) and
-  refuses past the budget with the same error shape `maxDepth` uses. Default: **absent**
-  (unbounded), so no released application changes behaviour.
+- **Decision:** Add `maxNodes?: number` beside `maxDepth` on `GraphqlPluginOptions`' intersection
+  arm (`options.ts:357`), implemented as a validation rule that counts selection-set nodes across
+  the whole document (aliases included) and refuses past the budget with the same error shape
+  `maxDepth` uses. Default: **absent** (unbounded), so no released application changes behaviour.
 - **Why:** X32-6 measured 100,000 aliases at depth 2 producing a 4,988 KB response and **+822 MB
   RSS** from one request, with `maxDepth: 5` configured and unable to see it — a depth limiter
   counts the path, and breadth is a different dimension. A node count is the standard companion and
@@ -181,22 +182,22 @@ dropped barrel export left 18 tests green).
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                        | Consumer                                               | Behavior (per implementation)                                                                                          |
-| --------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `RateLimitOptions.exclude`                    | `rateLimitMiddleware` via `createPathMatcher`          | Omitted → six operational defaults; `[]` → nothing exempt; a match skips the limiter body entirely and calls `next()`. |
-| `IpSecurityOptions.trustedProxies`            | `ipSecurityMiddleware` XFF resolution                  | Rightmost entry that is not in the list. Absent → leftmost, unchanged.                                                 |
-| `IpSecurityOptions.proxyHops`                 | `ipSecurityMiddleware` XFF resolution                  | nth entry from the right. Mutually exclusive with `trustedProxies`; supplying both throws at middleware construction.  |
-| `RequestSizeOptions.maxBodySize` (existing)   | `requestSizeMiddleware` **and** the runtime read bound | Now feeds both layers: the `Content-Length` refusal and `maxBodyBytes` on the mapping.                                 |
-| `RedisRateLimitStoreOptions.keyPrefix`        | `RedisRateLimitStore` key construction                 | Omitted → `'setu:ratelimit:'`; supplied → replaces it.                                                                 |
-| `GraphqlValidationOptions.maxNodes`           | The new node-count validation rule                     | Omitted → unbounded (today's behaviour); set → refuse past the budget.                                                 |
-| `RequestLoggerOptions.excludePaths` (widened) | `requestLogger` via `createPathMatcher`                | Behaviour unchanged for string input; RegExp now accepted.                                                             |
-| `MetricsPluginOptions.excludePaths` (widened) | `HttpCollector` via `createPathMatcher`                | Behaviour unchanged for string input; RegExp now accepted; still REPLACES the defaults.                                |
+| Option                                             | Consumer                                               | Behavior (per implementation)                                                                                          |
+| -------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `RateLimitOptions.exclude`                         | `rateLimitMiddleware` via `createPathMatcher`          | Omitted → six operational defaults; `[]` → nothing exempt; a match skips the limiter body entirely and calls `next()`. |
+| `IpSecurityOptions.trustedProxies`                 | `ipSecurityMiddleware` XFF resolution                  | Rightmost entry that is not in the list. Absent → leftmost, unchanged.                                                 |
+| `IpSecurityOptions.proxyHops`                      | `ipSecurityMiddleware` XFF resolution                  | nth entry from the right. Mutually exclusive with `trustedProxies`; supplying both throws at middleware construction.  |
+| `RequestSizeOptions.maxBodySize` (existing)        | `requestSizeMiddleware` **and** the runtime read bound | Now feeds both layers: the `Content-Length` refusal and `maxBodyBytes` on the mapping.                                 |
+| `keyPrefix` on `RedisRateLimitStore`'s ctor object | `RedisRateLimitStore` key construction                 | Omitted → `'setu:ratelimit:'`; supplied → replaces it.                                                                 |
+| `GraphqlPluginOptions.maxNodes`                    | The new node-count validation rule                     | Omitted → unbounded (today's behaviour); set → refuse past the budget.                                                 |
+| `RequestLoggerOptions.excludePaths` (widened)      | `requestLogger` via `createPathMatcher`                | Behaviour unchanged for string input; RegExp now accepted.                                                             |
+| `MetricsPluginOptions.excludePaths` (widened)      | `HttpCollector` via `createPathMatcher`                | Behaviour unchanged for string input; RegExp now accepted; still REPLACES the defaults.                                |
 
 ## 5. Implementation files
 
 | File                                                                      | Purpose                                                                  |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `packages/common/src/http/path-matcher.ts`                                | `createPathMatcher`, `PathPattern` — the one matcher (§3.1).             |
+| `packages/common/src/path-matcher.ts`                                     | `createPathMatcher`, `PathPattern` — the one matcher (§3.1).             |
 | `packages/common/src/index.ts`                                            | Barrel: the two new exports.                                             |
 | `packages/auth-plugin/src/middleware/rate-limit-middleware.ts`            | `exclude` option + matcher; `respondWithError` for the 429 (§3.2, §3.7). |
 | `packages/auth-plugin/src/stores/redis-rate-limit-store.ts`               | `keyPrefix` (§3.5).                                                      |
@@ -252,6 +253,9 @@ probes still answer `200`. X32-1 exists because no test ever composed those two 
 - **`maxNodes` refusing a legitimate large document** → default absent; documented as opt-in.
 - **The Redis key move orphans in-flight counters** → counters are TTL-bounded, so the blast radius
   is one window. Stated in the CHANGELOG.
+- **Two knobs for one concern (C6) invites setting only one** → the `http-security-plugin` docs name
+  both and say which is load-bearing; a reader who sets only `maxBodySize` gets today's behaviour
+  (declared lengths bounded, chunked unbounded) rather than a silent regression.
 - **Scope: seven packages** → the six findings genuinely span them (§2 C1). Mitigation: each finding
   is independently revertable, and the shared matcher lands first so the other changes build on it.
 
