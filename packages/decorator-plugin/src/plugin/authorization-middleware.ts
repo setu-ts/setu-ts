@@ -9,12 +9,9 @@
  * plugin's `register()` is honoured and the fail-closed refusal applies
  * exactly while no provider exists.
  *
- * Every refusal answers through `respondWithError` with the same status,
- * title and detail strings `@setu-ts/auth-plugin`'s guards use, so a
- * decorated route and a `@UseGuards(requireRole(...))` route refuse
- * identically. §2.2 forbids importing the guards themselves, so the shared
- * implementation is the CAPABILITY, and the byte-identity is pinned by an
- * integration test rather than by construction.
+ * Every refusal answers through the shared `@setu-ts/common` authorization
+ * responder, so a decorated route and a `@UseGuards(requireRole(...))` route
+ * refuse identically without either plugin importing the other.
  *
  * @module
  */
@@ -25,22 +22,17 @@ import type {
   MiddlewareFunction,
   RouteSecurityMetadata,
 } from '@setu-ts/common';
-import { CAPABILITIES, respondWithError, withSecurityMetadata } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  respondWithAuthorizationFailure,
+  withSecurityMetadata,
+} from '@setu-ts/common';
 
 /**
  * Brand carried by every appended middleware, so M57's `deriveSecurity` sees
  * a decorated route's enforcement the same way it sees a guard's.
  */
 const AUTHENTICATED: RouteSecurityMetadata = Object.freeze({ authenticated: true });
-
-/** Detail for an absent principal — identical to the guards' string. */
-const AUTHENTICATION_REQUIRED = 'Authentication required';
-
-/** Detail for the fail-closed refusal when no authorization provider exists. */
-const NOT_CONFIGURED_DETAIL = 'Authorization is not configured';
-
-/** Generic detail for a failed policy check, matching auth-plugin guards. */
-const INSUFFICIENT_PRIVILEGES = 'Insufficient privileges';
 
 /**
  * Builds one enforcing middleware for one restriction kind: `401` without a
@@ -53,11 +45,7 @@ function authorizationMiddleware(
   const middleware = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      respondWithError(ctx, {
-        status: 401,
-        title: 'Unauthorized',
-        detail: AUTHENTICATION_REQUIRED,
-      });
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
 
@@ -65,20 +53,12 @@ function authorizationMiddleware(
     // after this plugin's register() is honoured, and the 501 below applies
     // exactly while none exists.
     if (!ctx.services.has(CAPABILITIES.AUTHORIZATION)) {
-      respondWithError(ctx, {
-        status: 501,
-        title: 'Not Implemented',
-        detail: NOT_CONFIGURED_DETAIL,
-      });
+      respondWithAuthorizationFailure(ctx, 'not-configured');
       return;
     }
     const authorization = ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
     if (!holds(authorization, user)) {
-      respondWithError(ctx, {
-        status: 403,
-        title: 'Forbidden',
-        detail: INSUFFICIENT_PRIVILEGES,
-      });
+      respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
       return;
     }
 

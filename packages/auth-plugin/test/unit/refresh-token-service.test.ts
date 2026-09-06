@@ -290,6 +290,29 @@ describe('RefreshTokenService', () => {
 
       expect(await accessTokenRevocationStore?.isRevoked(descendantJti)).toBe(true);
     });
+
+    it('keeps a revoked access token blocked through JwtService expiry boundary', async () => {
+      const runtime = createFakeRuntime(100);
+      const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
+      const accessTokenRevocationStore = new MemoryAccessTokenRevocationStore(runtime);
+      const service = new RefreshTokenService({
+        jwt,
+        store: new MemoryRefreshTokenStore(runtime),
+        runtime,
+        accessToken: { expiresIn: '1s' },
+        accessTokenRevocationStore,
+      });
+      const pair = await service.issue({ id: 'user-123' });
+      const accessJti = (await jwt.verify<{ jti: string }>(pair.accessToken)).jti;
+
+      await service.revoke(pair.refreshToken);
+      runtime.setNow(1_000); // exp === floor(now / 1000), so JwtService still accepts it.
+
+      expect(await accessTokenRevocationStore.isRevoked(accessJti)).toBe(true);
+
+      runtime.setNow(2_000); // JwtService rejects it at this instant.
+      expect(await accessTokenRevocationStore.isRevoked(accessJti)).toBe(false);
+    });
   });
 
   describe('revoke', () => {
@@ -332,6 +355,20 @@ describe('RefreshTokenService', () => {
 
       expect(await service.revoke(pair.refreshToken)).toBe(true);
       expect(await service.revoke(pair.refreshToken)).toBe(false);
+    });
+
+    it('revokes descendants when logout presents an already-rotated ancestor', async () => {
+      const { jwt, service, accessTokenRevocationStore } = makeService({
+        accessToken: { expiresIn: '1h' },
+        withAccessTokenRevocationStore: true,
+      });
+      const first = await service.issue({ id: 'user-123' });
+      const second = await service.refresh(first.refreshToken);
+      const descendantJti = (await jwt.verify<{ jti: string }>(second!.accessToken)).jti;
+
+      expect(await service.revoke(first.refreshToken)).toBe(false);
+      expect(await accessTokenRevocationStore?.isRevoked(descendantJti)).toBe(true);
+      expect(await service.refresh(second!.refreshToken)).toBeNull();
     });
 
     it('returns false for a token that does not verify (tampered)', async () => {

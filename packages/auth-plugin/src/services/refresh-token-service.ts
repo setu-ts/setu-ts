@@ -5,10 +5,10 @@
  */
 
 import type { IJwtService, IPrincipal, IRuntimeServices } from '@setu-ts/common';
-import { encodeBase64Url } from '../utils/base64url.ts';
+import { decodeBase64Url, encodeBase64Url } from '../utils/base64url.ts';
 import { parseDuration } from '../utils/duration.ts';
 import type { RefreshTokenRecord, RefreshTokenStore } from '../stores/refresh-token-store.ts';
-import type { AccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
+import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 
 /**
  * Options for constructing a RefreshTokenService.
@@ -33,7 +33,7 @@ export interface RefreshTokenOptions {
    * refresh-token replay. Requires `accessToken.expiresIn` so entries remain
    * bounded.
    */
-  readonly accessTokenRevocationStore?: AccessTokenRevocationStore;
+  readonly accessTokenRevocationStore?: IAccessTokenRevocationStore;
 }
 
 /**
@@ -64,7 +64,7 @@ export class RefreshTokenService {
   } | undefined;
   private readonly refreshTokenExpiresIn: string;
   private readonly refreshTokenExpiresInMs: number;
-  private readonly accessTokenRevocationStore: AccessTokenRevocationStore | undefined;
+  private readonly accessTokenRevocationStore: IAccessTokenRevocationStore | undefined;
   private readonly accessTokenExpiresInMs: number | undefined;
 
   constructor(options: RefreshTokenOptions) {
@@ -153,9 +153,12 @@ export class RefreshTokenService {
       revoked: false,
       familyId,
       accessTokenJti,
-      ...(this.accessTokenExpiresInMs === undefined
-        ? {}
-        : { accessTokenExpiresAt: now + this.accessTokenExpiresInMs }),
+      ...(this.accessTokenExpiresInMs === undefined ? {} : {
+        accessTokenExpiresAt: accessTokenRevocationExpiry(
+          accessToken,
+          this.runtime.now() + this.accessTokenExpiresInMs + 1_000,
+        ),
+      }),
     };
 
     return { pair: { accessToken, refreshToken }, record };
@@ -223,12 +226,13 @@ export class RefreshTokenService {
     }
 
     const record = await this.store.get(payload.jti);
-    if (record === null || record.revoked) {
+    if (record === null) {
       return false;
     }
 
+    const wasLive = !record.revoked;
     await this.revokeFamilyAccessTokens(payload.jti);
-    return true;
+    return wasLive;
   }
 
   /** Revoke one access credential when ordinary refresh rotation replaces it. */
@@ -256,4 +260,32 @@ export class RefreshTokenService {
       await this.revokeAccessToken(record);
     }
   }
+}
+
+/**
+ * Return the instant at which JwtService will reject a token with this `exp`.
+ *
+ * JwtService accepts `exp === floor(now / 1000)`, so revocation must remain
+ * active until the next whole second. A custom signer that omits `exp` falls
+ * back to the conservative lifetime calculated after signing.
+ */
+function accessTokenRevocationExpiry(token: string, fallback: number): number {
+  const encodedPayload = token.split('.')[1];
+  if (encodedPayload === undefined) {
+    return fallback;
+  }
+  try {
+    const payload: unknown = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedPayload)));
+    if (
+      typeof payload === 'object' &&
+      payload !== null &&
+      typeof (payload as { exp?: unknown }).exp === 'number' &&
+      Number.isFinite((payload as { exp: number }).exp)
+    ) {
+      return ((payload as { exp: number }).exp + 1) * 1_000;
+    }
+  } catch {
+    // The signer returned an opaque token; retain the conservative fallback.
+  }
+  return fallback;
 }

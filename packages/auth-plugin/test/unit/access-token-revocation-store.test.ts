@@ -49,6 +49,40 @@ describe('MemoryAccessTokenRevocationStore', () => {
     expect(await store.isRevoked('access-1')).toBe(false);
   });
 
+  it('cleans expiry entries in order without scanning active revocations', async () => {
+    const runtime = createFakeRuntime(0);
+    const store = new MemoryAccessTokenRevocationStore(runtime);
+    await store.revoke('one-hundred', 100);
+    await store.revoke('three-hundred', 300);
+    await store.revoke('two-hundred', 200);
+    await store.revoke('four-hundred', 400);
+    await store.revoke('three-fifty', 350);
+    await store.revoke('fifty', 50);
+
+    runtime.setNow(50);
+
+    expect(await store.isRevoked('fifty')).toBe(false);
+    expect(await store.isRevoked('one-hundred')).toBe(true);
+    expect(await store.isRevoked('two-hundred')).toBe(true);
+    expect(await store.isRevoked('three-hundred')).toBe(true);
+    expect(await store.isRevoked('three-fifty')).toBe(true);
+    expect(await store.isRevoked('four-hundred')).toBe(true);
+  });
+
+  it('retains the latest expiry when an older heap entry is swept', async () => {
+    const runtime = createFakeRuntime(0);
+    const store = new MemoryAccessTokenRevocationStore(runtime);
+    await store.revoke('access-1', 100);
+    await store.revoke('access-1', 200);
+
+    runtime.setNow(100);
+    expect(await store.isRevoked('other')).toBe(false);
+    expect(await store.isRevoked('access-1')).toBe(true);
+
+    runtime.setNow(200);
+    expect(await store.isRevoked('access-1')).toBe(false);
+  });
+
   it('rejects a non-finite expiry instead of retaining an entry forever', async () => {
     const runtime = createFakeRuntime();
     const store = new MemoryAccessTokenRevocationStore(runtime);

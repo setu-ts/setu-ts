@@ -1,6 +1,7 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
+import { requireRole } from '@setu-ts/auth-plugin';
 import type {
   IAuthorizationService,
   IPrincipal,
@@ -118,17 +119,20 @@ describe('authorization middleware refusals', () => {
 
   it('answers generic 403 detail, byte-identical with requireRole', async () => {
     const middleware = createRolesMiddleware(['admin']);
-    const { ctx, response } = fakeRequestContext({
+    const decorator = fakeRequestContext({
+      user: { id: 'u1', roles: ['viewer'] },
+      authorization: fakeAuthorization(['viewer']),
+    });
+    const guard = fakeRequestContext({
       user: { id: 'u1', roles: ['viewer'] },
       authorization: fakeAuthorization(['viewer']),
     });
 
-    await middleware(ctx, next);
+    await middleware(decorator.ctx, next);
+    await requireRole('admin')(guard.ctx, next);
 
-    expect(response.statuses).toEqual([403]);
-    expect(response.bodies).toEqual([
-      { error: 'Forbidden', detail: 'Insufficient privileges' },
-    ]);
+    expect(decorator.response.statuses).toEqual(guard.response.statuses);
+    expect(decorator.response.bodies).toEqual(guard.response.bodies);
   });
 
   it('answers generic 403 detail when several roles are declared', async () => {

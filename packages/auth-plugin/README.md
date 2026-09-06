@@ -231,7 +231,7 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 | `jwt.issuer`                     | `string`                                              | -                 | Expected `iss`; enforced on verify.                                                             |
 | `jwt.header`                     | `string`                                              | `'authorization'` | Header name for bearer extraction.                                                              |
 | `jwt.scheme`                     | `string`                                              | `'bearer'`        | Token scheme prefix.                                                                            |
-| `jwt.accessTokenRevocationStore` | `AccessTokenRevocationStore`                          | -                 | Shared store that rejects revoked typed access tokens.                                          |
+| `jwt.accessTokenRevocationStore` | `IAccessTokenRevocationStore`                         | -                 | Shared store that rejects revoked typed access tokens.                                          |
 | `apiKey.header`                  | `string`                                              | `'X-API-Key'`     | Header holding the API key.                                                                     |
 | `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                | -                 | App-supplied API-key lookup.                                                                    |
 | `local.verify`                   | `(identifier, secret) => Promise<IPrincipal \| null>` | -                 | App-supplied credential check.                                                                  |
@@ -252,11 +252,11 @@ revokes its complete descendant family. `refresh()`/`revoke()` never throw on a 
 expired, or tampered input yields `null`/`false`.
 
 To make logout invalidate the paired access credential before its normal expiry, construct one
-`AccessTokenRevocationStore` and pass that same instance to both `AuthPlugin` and
+`IAccessTokenRevocationStore` and pass that same instance to both `AuthPlugin` and
 `RefreshTokenService`. `MemoryAccessTokenRevocationStore` is single-process; a multi-instance
 application supplies a shared implementation. Access revocation requires `accessToken.expiresIn`, so
 revocation entries are bounded. `RefreshTokenStore` implementations must persist family lineage and
-implement atomic `rotate(jti, successor)` plus `revokeFamily(jti)`; the shipped
+make `rotate(jti, successor)` and `revokeFamily(jti)` linearizable per family; the shipped
 `MemoryRefreshTokenStore` does both with lazy expiry.
 
 ```typescript
@@ -297,16 +297,16 @@ const next = await refresh.refresh(pair.refreshToken); // new pair; old token no
 await refresh.revoke(next!.refreshToken); // logout
 ```
 
-| Option                       | Type                         | Default     | Description                                                               |
-| ---------------------------- | ---------------------------- | ----------- | ------------------------------------------------------------------------- |
-| `jwt`                        | `IJwtService`                | -           | Signs/verifies both tokens.                                               |
-| `store`                      | `RefreshTokenStore`          | -           | Rotation/revocation backend.                                              |
-| `runtime`                    | `IRuntimeServices`           | -           | `randomBytes` (jti) + `now()` (expiry).                                   |
-| `accessToken.expiresIn`      | `string`                     | jwt default | Access-token lifetime.                                                    |
-| `accessToken.audience`       | `string`                     | -           | `aud` on both tokens; enforced on verify.                                 |
-| `accessToken.issuer`         | `string`                     | -           | `iss` on both tokens; enforced on verify.                                 |
-| `refreshTokenExpiresIn`      | `string`                     | `'7d'`      | Refresh-token lifetime (JWT `exp` AND record).                            |
-| `accessTokenRevocationStore` | `AccessTokenRevocationStore` | -           | Shared access-token invalidation store; requires `accessToken.expiresIn`. |
+| Option                       | Type                          | Default     | Description                                                               |
+| ---------------------------- | ----------------------------- | ----------- | ------------------------------------------------------------------------- |
+| `jwt`                        | `IJwtService`                 | -           | Signs/verifies both tokens.                                               |
+| `store`                      | `RefreshTokenStore`           | -           | Rotation/revocation backend.                                              |
+| `runtime`                    | `IRuntimeServices`            | -           | `randomBytes` (jti) + `now()` (expiry).                                   |
+| `accessToken.expiresIn`      | `string`                      | jwt default | Access-token lifetime.                                                    |
+| `accessToken.audience`       | `string`                      | -           | `aud` on both tokens; enforced on verify.                                 |
+| `accessToken.issuer`         | `string`                      | -           | `iss` on both tokens; enforced on verify.                                 |
+| `refreshTokenExpiresIn`      | `string`                      | `'7d'`      | Refresh-token lifetime (JWT `exp` AND record).                            |
+| `accessTokenRevocationStore` | `IAccessTokenRevocationStore` | -           | Shared access-token invalidation store; requires `accessToken.expiresIn`. |
 
 ## Rate Limiting
 
@@ -377,7 +377,7 @@ MIT
 | `PasswordHasher`                   | class     |
 | `RedisRateLimitStore`              | class     |
 | `RefreshTokenService`              | class     |
-| `AccessTokenRevocationStore`       | interface |
+| `IAccessTokenRevocationStore`      | interface |
 | `ApiKeyOptions`                    | interface |
 | `AuthPluginOptions`                | interface |
 | `IAuthorizationService`            | interface |
@@ -394,7 +394,7 @@ MIT
 | `RbacConfig`                       | interface |
 | `RefreshTokenOptions`              | interface |
 | `RefreshTokenRecord`               | interface |
-| `RefreshTokenRotation`             | interface |
+| `IRefreshTokenRotation`            | interface |
 | `RefreshTokenStore`                | interface |
 | `RoleDefinition`                   | interface |
 | `SessionAuthOptions`               | interface |

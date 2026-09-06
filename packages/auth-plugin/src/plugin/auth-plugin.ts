@@ -14,7 +14,7 @@ import { RbacService } from '../services/rbac-service.ts';
 import { JwtStrategy } from '../strategies/jwt-strategy.ts';
 import { ApiKeyStrategy } from '../strategies/api-key-strategy.ts';
 import { SessionStrategy } from '../strategies/session-strategy.ts';
-import type { AccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
+import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -111,7 +111,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         jwtService: JwtService;
         header?: string;
         scheme?: string;
-        accessTokenRevocationStore?: AccessTokenRevocationStore;
+        accessTokenRevocationStore?: IAccessTokenRevocationStore;
       } = { jwtService };
       if (options.jwt.header !== undefined) {
         jwtStrategyOpts.header = options.jwt.header;

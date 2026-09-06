@@ -27,6 +27,8 @@ export type {
   ErrorResponseInit,
   IErrorResponder,
 } from './errors/error-responder.ts';
+export { respondWithAuthorizationFailure } from './errors/authorization-responder.ts';
+export type { AuthorizationFailure } from './errors/authorization-responder.ts';
 // Error serialization for structured logging (M70f, X2-5)
 export { serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';

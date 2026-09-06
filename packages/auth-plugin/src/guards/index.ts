@@ -5,7 +5,11 @@
  */
 
 import type { IAuthorizationService, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES, respondWithError, withSecurityMetadata } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  respondWithAuthorizationFailure,
+  withSecurityMetadata,
+} from '@setu-ts/common';
 import type { RouteSecurityMetadata } from '@setu-ts/common';
 
 /**
@@ -18,9 +22,6 @@ const AUTHENTICATED: RouteSecurityMetadata = Object.freeze({ authenticated: true
 
 /** Brand for a guard that explicitly marks a route public. */
 const PUBLIC: RouteSecurityMetadata = Object.freeze({ authenticated: false });
-
-/** Generic detail returned when an authenticated caller fails a policy check. */
-const INSUFFICIENT_PRIVILEGES = 'Insufficient privileges';
 
 /**
  * Resolves the authorization service, or answers `501` when none is registered.
@@ -49,11 +50,7 @@ const INSUFFICIENT_PRIVILEGES = 'Insufficient privileges';
  */
 function resolveAuthorization(ctx: IRequestContext): IAuthorizationService | null {
   if (!ctx.services.has(CAPABILITIES.AUTHORIZATION)) {
-    respondWithError(ctx, {
-      status: 501,
-      title: 'Not Implemented',
-      detail: 'Authorization is not configured',
-    });
+    respondWithAuthorizationFailure(ctx, 'not-configured');
     return null;
   }
   return ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION);
@@ -73,11 +70,7 @@ export function requireAuth(): MiddlewareFunction {
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      respondWithError(ctx, {
-        status: 401,
-        title: 'Unauthorized',
-        detail: 'Authentication required',
-      });
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
     await next();
@@ -100,11 +93,7 @@ export function requireRole(role: string): MiddlewareFunction {
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      respondWithError(ctx, {
-        status: 401,
-        title: 'Unauthorized',
-        detail: 'Authentication required',
-      });
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
 
@@ -113,11 +102,7 @@ export function requireRole(role: string): MiddlewareFunction {
       return;
     }
     if (!authService.hasRole(user, role)) {
-      respondWithError(ctx, {
-        status: 403,
-        title: 'Forbidden',
-        detail: INSUFFICIENT_PRIVILEGES,
-      });
+      respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
       return;
     }
 
@@ -141,11 +126,7 @@ export function requirePermission(permission: string): MiddlewareFunction {
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      respondWithError(ctx, {
-        status: 401,
-        title: 'Unauthorized',
-        detail: 'Authentication required',
-      });
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
 
@@ -154,11 +135,7 @@ export function requirePermission(permission: string): MiddlewareFunction {
       return;
     }
     if (!authService.hasPermission(user, permission)) {
-      respondWithError(ctx, {
-        status: 403,
-        title: 'Forbidden',
-        detail: INSUFFICIENT_PRIVILEGES,
-      });
+      respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
       return;
     }
 
@@ -182,11 +159,7 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      respondWithError(ctx, {
-        status: 401,
-        title: 'Unauthorized',
-        detail: 'Authentication required',
-      });
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
 
@@ -195,11 +168,7 @@ export function requireAnyRole(roles: readonly string[]): MiddlewareFunction {
       return;
     }
     if (!authService.hasAnyRole(user, roles)) {
-      respondWithError(ctx, {
-        status: 403,
-        title: 'Forbidden',
-        detail: INSUFFICIENT_PRIVILEGES,
-      });
+      respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
       return;
     }
 
@@ -226,11 +195,7 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const user = ctx.request.user;
     if (!user) {
-      respondWithError(ctx, {
-        status: 401,
-        title: 'Unauthorized',
-        detail: 'Authentication required',
-      });
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
 
@@ -239,11 +204,7 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
       return;
     }
     if (!authService.hasAllPermissions(user, permissions)) {
-      respondWithError(ctx, {
-        status: 403,
-        title: 'Forbidden',
-        detail: INSUFFICIENT_PRIVILEGES,
-      });
+      respondWithAuthorizationFailure(ctx, 'insufficient-privileges');
       return;
     }
 

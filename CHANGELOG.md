@@ -14,12 +14,13 @@ All notable changes to this project are documented here. The format follows
   replayed refresh token and logout can revoke every descendant. `MemoryRefreshTokenStore`
   implements both. `RefreshTokenService` now issues typed, distinct access and refresh JWT
   identifiers; bearer authentication rejects a signed `type: 'refresh'` token. For immediate
-  access-token logout, construct one `AccessTokenRevocationStore` and pass it to both
+  access-token logout, construct one `IAccessTokenRevocationStore` and pass it to both
   `AuthPlugin({ jwt: { ... } })` and `RefreshTokenService`; the new memory implementation is
   single-process and the refresh service requires `accessToken.expiresIn` when this option is used.
   Policy failures still answer `403`, but their detail is now `Insufficient privileges` rather than
   disclosing required roles or permissions. Migration: add atomic `rotate` and `revokeFamily` to
-  custom refresh stores, retain family fields, and update tests that assert the old 403 detail.
+  custom refresh stores, retain family fields, serialize family revocation with rotation, and update
+  tests that assert the old 403 detail.
 
 - **BREAKING — `@setu-ts/cli` — bare `setu generate` is informational, not an error.** With no
   schematic named it printed the available schematics through the normal output sink yet exited `2`

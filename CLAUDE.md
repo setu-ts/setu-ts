@@ -4337,9 +4337,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   genuinely historical text, with the live sentences above them.
 - **Milestone 90c** (`auth-plugin` — credential revocation and token type) — complete (PR pending).
   Refresh pairs now have distinct typed identifiers; refresh credentials cannot authenticate as
-  bearer access tokens; logout and replay revoke the credential family through a shared, bounded
-  access-token revocation store; and policy failures disclose no role or permission name. Rotation
-  is atomic at the refresh-store boundary, so concurrent requests cannot mint two descendants.
+  bearer access tokens; logout and replay call `RefreshTokenStore.revokeFamily`, then revoke each
+  paired access-token JTI through `IAccessTokenRevocationStore`; and policy failures disclose no
+  role or permission name. Rotation is atomic at the refresh-store boundary, so concurrent requests
+  cannot mint two descendants.
 - **Next milestone** — **M90d** (the two brokers that cannot start), the next recommended High
   finding group in `ROADMAP.md`.
 

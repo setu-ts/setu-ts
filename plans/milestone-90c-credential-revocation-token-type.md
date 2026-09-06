@@ -48,7 +48,7 @@ deployments while making stateful logout real and explicit.
 
 ### 3.1 Shared bounded access-token revocation
 
-- **Decision:** Add exported `AccessTokenRevocationStore` (`revoke(jti, expiresAt)` /
+- **Decision:** Add exported `IAccessTokenRevocationStore` (`revoke(jti, expiresAt)` /
   `isRevoked(jti)`) and `MemoryAccessTokenRevocationStore`. Both `JwtOptions` and
   `RefreshTokenOptions` receive the same optional `accessTokenRevocationStore` instance.
   `RefreshTokenService` refuses that option unless `accessToken.expiresIn` is set, then stores a
@@ -76,10 +76,10 @@ deployments while making stateful logout real and explicit.
 
 - **Decision:** Add optional lineage fields to `RefreshTokenRecord` (`familyId`, access `jti`, and
   access expiry), required atomic `rotate(jti, successor)` to `RefreshTokenStore`, and required
-  `revokeFamily(jti)`. `rotate` conditionally consumes a live parent and stores its successor as one
-  operation; a concurrent caller observes the revoked parent, then revokes the whole family. Replay
-  and logout call `revokeFamily`, then revoke each returned access `jti` through the optional access
-  revocation store.
+  family-linearizable `revokeFamily(jti)`. `rotate` conditionally consumes a live parent and stores
+  its successor as one operation; a concurrent caller observes the revoked parent, then revokes the
+  whole family. Replay and logout call `revokeFamily`, then revoke each returned access `jti`
+  through the optional access revocation store.
 - **Why:** A separate async `get` then `revoke` lets two remote callers mint descendants from one
   parent. Atomic rotation preserves single-use credentials. Returning affected records keeps the
   refresh store focused on lineage and the separate revocation port focused on access credentials.
@@ -101,7 +101,7 @@ deployments while making stateful logout real and explicit.
 
 | Exported symbol                                                      | Kind                      | Consumer / real code path that READS it                                                                                                  |
 | -------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `AccessTokenRevocationStore`                                         | interface                 | `JwtStrategy` reads `isRevoked`; `RefreshTokenService` calls `revoke`; application supplies an implementation.                           |
+| `IAccessTokenRevocationStore`                                        | interface                 | `JwtStrategy` reads `isRevoked`; `RefreshTokenService` calls `revoke`; application supplies an implementation.                           |
 | `MemoryAccessTokenRevocationStore`                                   | class                     | Application can construct the single-process implementation; its methods implement the two production call paths above.                  |
 | `AuthPlugin`                                                         | function                  | Application plugin registration constructs `JwtStrategy` with JWT options.                                                               |
 | `AuthPluginOptions`, `JwtOptions`                                    | interfaces                | Application configures the plugin; the plugin reads `jwt.accessTokenRevocationStore`.                                                    |
@@ -174,8 +174,8 @@ deno task test:coverage     # read ANSI-stripped per-file table; ≥90% branch/f
 
 ## 9. Out of scope
 
-- A Redis or database implementation of `AccessTokenRevocationStore`; applications supply it until a
-  dedicated adapter milestone owns one.
+- A Redis or database implementation of `IAccessTokenRevocationStore`; applications supply it until
+  a dedicated adapter milestone owns one.
 - Bulk/user-wide credential invalidation and admin session management.
 - Altering generic `IJwtService` verification; the optional strategy seam avoids a `common` contract
   change.

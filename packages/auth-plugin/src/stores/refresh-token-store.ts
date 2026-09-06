@@ -29,7 +29,7 @@ export interface RefreshTokenRecord {
 }
 
 /** Result of atomically rotating one refresh token into its successor. */
-export interface RefreshTokenRotation {
+export interface IRefreshTokenRotation {
   /** The presented record when it exists and has not expired, otherwise null. */
   readonly record: RefreshTokenRecord | null;
   /** Whether the presented token was live and the successor was stored. */
@@ -59,15 +59,21 @@ export interface RefreshTokenStore {
    * Atomically consume a live refresh token and persist its successor.
    *
    * Remote implementations must make the conditional live-token check, parent
-   * revocation, and successor write one atomic operation. This prevents two
-   * concurrent refresh requests from minting independent descendants.
+   * revocation, successor write, and family-revoked-marker check one atomic
+   * operation. This prevents two concurrent refresh requests from minting
+   * independent descendants and prevents a rotation after family revocation.
    */
-  rotate(jti: string, successor: RefreshTokenRecord): Promise<RefreshTokenRotation>;
+  rotate(jti: string, successor: RefreshTokenRecord): Promise<IRefreshTokenRotation>;
   /**
    * Revoke every refresh token in the requested token's family.
    *
    * Returns the affected records so the caller can also revoke their paired
-   * access credentials through its separately configured store.
+   * access credentials through its separately configured store. Remote
+   * implementations must serialize this operation with `rotate()` for the
+   * same family: durably mark the family revoked and revoke current members in
+   * one operation, while `rotate()` atomically rejects a marked family. A
+   * rotation ordered before this operation must have its successor included;
+   * one ordered after it must not persist a successor.
    */
   revokeFamily(jti: string): Promise<readonly RefreshTokenRecord[]>;
 }
@@ -113,7 +119,7 @@ export class MemoryRefreshTokenStore implements RefreshTokenStore {
     return Promise.resolve();
   }
 
-  rotate(jti: string, successor: RefreshTokenRecord): Promise<RefreshTokenRotation> {
+  rotate(jti: string, successor: RefreshTokenRecord): Promise<IRefreshTokenRotation> {
     const record = this.#map.get(jti);
     if (record === undefined) {
       return Promise.resolve({ record: null, rotated: false });

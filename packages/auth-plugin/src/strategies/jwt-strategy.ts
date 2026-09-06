@@ -5,7 +5,7 @@
  */
 
 import type { IAuthStrategy, IJwtService, IPrincipal, IRequest } from '@setu-ts/common';
-import type { AccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
+import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 
 /**
  * JWT strategy options.
@@ -14,7 +14,7 @@ export interface JwtStrategyOptions {
   readonly jwtService: IJwtService;
   readonly header?: string;
   readonly scheme?: string;
-  readonly accessTokenRevocationStore?: AccessTokenRevocationStore;
+  readonly accessTokenRevocationStore?: IAccessTokenRevocationStore;
 }
 
 /**
@@ -25,7 +25,7 @@ export class JwtStrategy implements IAuthStrategy {
   private readonly jwtService: IJwtService;
   private readonly header: string;
   private readonly scheme: string;
-  private readonly accessTokenRevocationStore: AccessTokenRevocationStore | undefined;
+  private readonly accessTokenRevocationStore: IAccessTokenRevocationStore | undefined;
 
   constructor(options: JwtStrategyOptions) {
     this.jwtService = options.jwtService;

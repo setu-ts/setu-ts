@@ -129,6 +129,21 @@ describe('MemoryRefreshTokenStore', () => {
     expect((await store.get('other'))?.revoked).toBe(false);
   });
 
+  it('refuses rotation after the parent family has been revoked', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+    await store.save({ ...makeRecord(runtime, 'parent'), familyId: 'family-1' });
+
+    await store.revokeFamily('parent');
+    const result = await store.rotate(
+      'parent',
+      { ...makeRecord(runtime, 'child'), familyId: 'family-1' },
+    );
+
+    expect(result.rotated).toBe(false);
+    expect(await store.get('child')).toBeNull();
+  });
+
   it('treats a legacy record without familyId as its own family', async () => {
     const runtime = createFakeRuntime();
     const store = new MemoryRefreshTokenStore(runtime);
