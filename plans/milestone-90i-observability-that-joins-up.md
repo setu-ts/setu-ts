@@ -37,7 +37,7 @@ optional capability read.
   the channel), X34-2 (an optional `ITelemetryService.activeSpanContext?`, implemented by
   `TelemetryService`, and a trace-enriching logger decorator), and the doc deliverables C1–C3.
 - **NOT this milestone:** The **scheduler**. X34 records its fresh root as **correct** — a tick has
-  no upstream request — so `common/src/services/scheduler.ts` gains no header channel, and §3.6
+  no upstream request — so `common/src/services/scheduler.ts` gains no header channel, and §3.7
   states why rather than leaving the asymmetry unexplained. `cloudflare-plugin`'s `WorkersQueue`
   (§9). Audit entries and metrics exemplars, which are the other two joins X29 asked about and
   neither of which has a finding. Any change to the trace-context codec, which M75 promoted into
@@ -64,7 +64,7 @@ optional capability read.
 | the guard-every-call lesson                   | M45b code review                                                          | Every call into a replaceable capability is guarded, because an instrument or a service that throws turns the reporting path into the fault. The logger decorator inherits this rule verbatim.                                                                             |
 | activation is what makes an active span exist | M75 (`TracedBroker`, `TelemetryService.withSpan`, `TracerHost.activate?`) | M75 registered an `AsyncLocalStorageContextManager` and made `withSpan` call `context.with`. Without that there is no active span to read, so X34-2's fix is only possible **after** M75 — recorded rather than assumed.                                                   |
 | the two service implementations               | `telemetry-plugin/src/services/telemetry-service.ts:131,221`              | `TelemetryService` and `NoopTelemetryService`, both `implements ITelemetryService`. An optional member is implemented by the first and omitted by the second.                                                                                                              |
-| the logger implementations                    | `logger-plugin/src/loggers/`                                              | `console-logger.ts`, `pino-logger.ts`, `noop-logger.ts`, plus `normalize-metadata.ts`. Both real loggers use `#` private fields, so a **detached method** breaks them (M52c) — which constrains §3.4's decorator.                                                          |
+| the logger implementations                    | `logger-plugin/src/loggers/`                                              | `console-logger.ts`, `pino-logger.ts`, `noop-logger.ts`, plus `normalize-metadata.ts`. Both real loggers use `#` private fields, so a **detached method** breaks them (M52c) — which constrains §3.5's decorator.                                                          |
 | the measured asymmetry                        | `smoke/X34-FINDINGS.md` (X34-1)                                           | In one run: `receive x34.orders` and `x34.broker.handle` join the request trace; `x34.queue.handle` is orphaned with `parent=-`; `x34.scheduler.handle` has its own trace **correctly**. The run is its own control.                                                       |
 | the cross-process proof                       | `smoke/X29-FINDINGS.md` (X29-3)                                           | 3 spans on trace `b4509aaa…` in the producer, the same id received in a different process — the hop carries _the request's_ trace, which is the assertion M75's own review found missing in-repo.                                                                          |
 | §2.2 dependency direction                     | `AI_GUIDELINES.md` §2.2                                                   | `logger-plugin` may not import `telemetry-plugin`. The bridge is `CAPABILITIES.TELEMETRY` plus a `common` contract member — the channel, exactly as M75's codec is.                                                                                                        |
@@ -75,7 +75,7 @@ optional capability read.
 | #  | Conflict                                                                                                                                                                                                | Resolution (picked side)                                                                                                                                                           | Doc deliverable (same PR)                                                                                                                              |
 | -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | C1 | The ROADMAP's M90i section says X34-2 is fixed by reading the active span "exactly as M45b reads `CAPABILITIES.METRICS`". `ITelemetryService` has one member and no active-span accessor, so it is not. | The resolution pattern is right and the read is unavailable. Add the accessor as an **optional** contract member and keep the M45b resolution shape for the capability itself.     | ROADMAP M90i bullet corrected to name the `common` widening; `PUBLIC_API.md` telemetry section documents `activeSpanContext?`.                         |
-| C2 | `M86`'s `IngressContext.headers` JSDoc states headers are "populated on the `'messaging'` arm only … absent means there was no channel" — accurate today and false the moment the queue carries one.    | The JSDoc is a statement about current capability, and this milestone changes the capability. Update it in the same PR rather than leaving a contract comment that has gone stale. | `common` `IngressContext.headers` JSDoc updated to name both arms and to keep the scheduler's absence explicit (§3.6).                                 |
+| C2 | `M86`'s `IngressContext.headers` JSDoc states headers are "populated on the `'messaging'` arm only … absent means there was no channel" — accurate today and false the moment the queue carries one.    | The JSDoc is a statement about current capability, and this milestone changes the capability. Update it in the same PR rather than leaving a contract comment that has gone stale. | `common` `IngressContext.headers` JSDoc updated to name both arms and to keep the scheduler's absence explicit (§3.7).                                 |
 | C3 | Neither `queue-plugin`'s README nor `PUBLIC_API.md` says the queue is a trace boundary, so a reader who has seen M75's messaging work reasonably assumes the queue behaves the same way. X29-3 says so. | The behaviour changes, so the assumption becomes correct — and the docs state what is propagated, by which adapters, and what a missing header means.                              | `queue-plugin` README and `PUBLIC_API.md` gain a propagation section; `logger-plugin`'s gain the enrichment fields and the absent-telemetry behaviour. |
 
 ## 3. Design decisions
@@ -118,7 +118,22 @@ optional capability read.
 - **Test home:** `queue-plugin/test/unit/traced-queue.test.ts` and
   `queue-plugin/test/integration/trace-continuity-real.test.ts`.
 
-### 3.3 Every adapter carries the map, and the two that need real work are named
+### 3.3 The queue ingress envelope carries the header too
+
+- **Decision:** `withIngressBehaviors` (`queue-plugin/src/processors/job-processor.ts:203`) adds
+  `headers: job.headers` to the `IngressContext` it builds, so an M86 queue behaviour reads the
+  channel the same way the `'messaging'` arm's does.
+- **Why:** the envelope is `{ kind: 'queue', name, payload: job, attempt }` today — no `headers` —
+  and M86's own contract says `IngressContext.headers` **absent means there was no channel**. After
+  §3.1 the queue HAS one, so leaving the member absent would state something false about the
+  capability, which is the ambiguity §3.1 exists to remove. A behaviour could reach
+  `ctx.payload.headers` regardless, but then the two ingress arms would be read differently for one
+  concept, which is the drift a shared envelope exists to prevent.
+- **Test home:** `queue-plugin/test/integration/queue-behaviors.test.ts` (extended) — a behaviour
+  observes the value when a job carries headers, and observes the member **absent** when it does
+  not.
+
+### 3.4 Every adapter carries the map, and the two that need real work are named
 
 - **Decision:** `memory-queue.ts` and `redis-queue.ts` carry it with no change to their envelopes —
   Redis serializes the whole job (`redis-queue.ts:192`) and memory holds the object.
@@ -133,7 +148,7 @@ optional capability read.
   RabbitMQ case and a guarded ElasticMQ case asserting the header on the wire, plus unit cases for
   memory and Redis.
 
-### 3.4 `activeSpanContext?` is an optional `common` member, read through a guarded decorator
+### 3.5 `activeSpanContext?` is an optional `common` member, read through a guarded decorator
 
 - **Decision:** `ITelemetryService` gains `activeSpanContext?(): SpanContext | undefined`.
   `TelemetryService` implements it over the OTel context manager M75 registers;
@@ -152,7 +167,7 @@ optional capability read.
   `logger-plugin/test/unit/trace-enriched-logger.test.ts` (including a throwing telemetry service
   and a service omitting the member), and `logger-plugin/test/integration/log-trace-join.test.ts`.
 
-### 3.5 The record fields are `trace_id` and `span_id`, in snake case, deliberately
+### 3.6 The record fields are `trace_id` and `span_id`, in snake case, deliberately
 
 - **Decision:** the two enrichment fields are named `trace_id` and `span_id`, departing from the
   framework's own camelCase metadata convention (`requestId`).
@@ -163,7 +178,7 @@ optional capability read.
   it reads as a decision rather than an inconsistency.
 - **Test home:** `logger-plugin/test/unit/trace-enriched-logger.test.ts` asserts the exact keys.
 
-### 3.6 The scheduler gets no header channel, and the asymmetry is documented
+### 3.7 The scheduler gets no header channel, and the asymmetry is documented
 
 - **Decision:** `common/src/services/scheduler.ts` is unchanged. `IngressContext.headers` stays
   **absent** on the `'scheduler'` arm, and the JSDoc says why.
@@ -176,10 +191,14 @@ optional capability read.
 - **Test home:** `common/test/unit/ingress-contract.test.ts` (extended) pins that the scheduler arm
   carries no headers.
 
-### 3.7 Absent telemetry changes nothing, and that is pinned
+### 3.8 Absent telemetry changes nothing, and that is pinned
 
-- **Decision:** with no `CAPABILITIES.TELEMETRY` registered, queue jobs carry no `headers` and log
-  records carry no `trace_id`/`span_id` — byte-identical to today on both paths.
+- **Decision:** with no `CAPABILITIES.TELEMETRY` registered, nothing is **injected** — a job carries
+  no framework-written `traceparent` and a log record carries no `trace_id`/`span_id`, which is
+  byte-identical to today on both paths. A `headers` map the **caller** passed in `AddJobOptions` is
+  still carried end to end: `headers` is a public option on a public contract, so its delivery
+  cannot depend on which capabilities happen to be registered. Absent telemetry the member is absent
+  only when the caller supplied none.
 - **Why:** this is the M45b contract and the reason both reads are optional. It also keeps the
   three-state semantics honest: absent means no channel, and an application without telemetry has
   none.
@@ -213,7 +232,8 @@ does not export it). A `barrel-exports.test.ts` case in each pins that (the M56 
 | `common/src/services/ingress.ts` (JSDoc only)                    | C2 — the `IngressContext.headers` statement, and the scheduler's deliberate absence.                                                     |
 | `queue-plugin/src/tracing/traced-queue.ts`                       | The decorator over `IQueue` (§3.2).                                                                                                      |
 | `queue-plugin/src/plugin/queue-plugin.ts`                        | `optionalDependencies` gains `CAPABILITIES.TELEMETRY`; the constructed `QueueService` is wrapped before registration when it is present. |
-| `queue-plugin/src/adapters/{memory,redis,rabbitmq,sqs}-queue.ts` | Carry the map (§3.3).                                                                                                                    |
+| `queue-plugin/src/processors/job-processor.ts`                   | `withIngressBehaviors` adds `headers` to the `IngressContext` (§3.3).                                                                    |
+| `queue-plugin/src/adapters/{memory,redis,rabbitmq,sqs}-queue.ts` | Carry the map (§3.4).                                                                                                                    |
 | `queue-plugin/src/interfaces/index.ts`                           | `StoredJob.headers?`, so the map survives persistence (§3.2).                                                                            |
 | `telemetry-plugin/src/services/telemetry-service.ts`             | `activeSpanContext` on `TelemetryService`; `NoopTelemetryService` omits it.                                                              |
 | `logger-plugin/src/loggers/trace-enriched-logger.ts`             | The decorator.                                                                                                                           |
@@ -225,14 +245,15 @@ does not export it). A `barrel-exports.test.ts` case in each pins that (the M56 
 | Test file                                                                     | src covered                        | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                 |
 | ----------------------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `common/test/unit/queue-contract.test.ts` (new)                               | `services/queue.ts`                | Type-level: an `IQueue` implementation omitting `headers` on both types still satisfies the contract (the M55 `runtime-contracts` precedent).                                                                                                                                                                                                                    |
-| `common/test/unit/ingress-contract.test.ts` (extended)                        | `services/ingress.ts`              | The scheduler arm carries no headers; the queue arm now may (§3.6).                                                                                                                                                                                                                                                                                              |
+| `common/test/unit/ingress-contract.test.ts` (extended)                        | `services/ingress.ts`              | The scheduler arm carries no headers; the queue arm now may (§3.7).                                                                                                                                                                                                                                                                                              |
 | `queue-plugin/test/unit/traced-queue.test.ts` (new)                           | `tracing/traced-queue.ts`          | `add` injects a well-formed `traceparent` into `AddJobOptions.headers` under a producer span; a processor registered through the wrapper is invoked with its span parented to the context extracted from `job.headers`; a job with **no** headers starts a root span and does not throw; a telemetry service that throws leaves both `add` and dispatch working. |
 | `queue-plugin/test/unit/{memory,redis,rabbitmq,sqs}-queue.test.ts` (extended) | each adapter                       | Headers survive enqueue → reserve → dispatch; an adapter given no headers omits the member rather than reporting `{}`.                                                                                                                                                                                                                                           |
+| `queue-plugin/test/integration/queue-behaviors.test.ts` (extended)            | `processors/job-processor.ts`      | An ingress behaviour reads `ctx.headers` for a job that carries them, and sees the member **absent** for one that does not (§3.3).                                                                                                                                                                                                                               |
 | `queue-plugin/test/integration/header-conformance.test.ts` (new)              | all four adapters                  | One table over four adapters, so an adapter that stops carrying the map fails here rather than in its own file — the `messaging-plugin` precedent.                                                                                                                                                                                                               |
 | `queue-plugin/test/integration/trace-continuity-real.test.ts` (new)           | `tracing/traced-queue.ts`          | Guarded on `REDIS_URL` and `RABBITMQ_URL`, with the real OTel API and SDK: `POST /order` → `add` → `handle` is **one trace** with an unbroken parent chain. The X29-3 shape, asserted by matching the id rather than `toBeDefined()` (M75's own review lesson).                                                                                                  |
-| `queue-plugin/test/integration/no-options-unchanged.test.ts` (extended)       | `plugin/queue-plugin.ts`           | Without telemetry the enqueued job is byte-identical to today.                                                                                                                                                                                                                                                                                                   |
+| `queue-plugin/test/integration/no-options-unchanged.test.ts` (extended)       | `plugin/queue-plugin.ts`           | Without telemetry, a job enqueued with no `headers` is byte-identical to today, **and** a job enqueued WITH caller-supplied `headers` delivers them unchanged (§3.8) — the two cases together are what stop delivery depending on capability registration.                                                                                                       |
 | `telemetry-plugin/test/unit/active-span-context.test.ts` (new)                | `services/telemetry-service.ts`    | Inside `withSpan`, `activeSpanContext()` reports the running span's ids; outside any span it reports `undefined`; `NoopTelemetryService` does not declare the member.                                                                                                                                                                                            |
-| `logger-plugin/test/unit/trace-enriched-logger.test.ts` (new)                 | `loggers/trace-enriched-logger.ts` | The exact keys `trace_id`/`span_id` (§3.5); a telemetry service **omitting** the member enriches nothing; one that **throws** is caught and the record still logs; the wrapped logger keeps its receiver, driven against the REAL `ConsoleLogger` with its `#` fields (M52c).                                                                                    |
+| `logger-plugin/test/unit/trace-enriched-logger.test.ts` (new)                 | `loggers/trace-enriched-logger.ts` | The exact keys `trace_id`/`span_id` (§3.6); a telemetry service **omitting** the member enriches nothing; one that **throws** is caught and the record still logs; the wrapped logger keeps its receiver, driven against the REAL `ConsoleLogger` with its `#` fields (M52c).                                                                                    |
 | `logger-plugin/test/integration/log-trace-join.test.ts` (new)                 | `plugin/logger-plugin.ts`          | Through a real application with the real `TelemetryPlugin` and `LoggerPlugin`: a log line emitted inside a request span carries the same `trace_id` the exported span reports. The join, end to end.                                                                                                                                                             |
 | `logger-plugin/test/integration/no-telemetry-unchanged.test.ts` (new)         | `plugin/logger-plugin.ts`          | Without telemetry the record is byte-identical to today.                                                                                                                                                                                                                                                                                                         |
 | `*/test/unit/barrel-exports.test.ts` (extended, three packages)               | each `src/index.ts`                | Neither decorator leaked into a public surface, and `common`'s three additions are exported.                                                                                                                                                                                                                                                                     |
@@ -246,7 +267,7 @@ does not export it). A `barrel-exports.test.ts` case in each pins that (the M56 
    decorator.
 3. Return `undefined` from `activeSpanContext` unconditionally → the log-trace-join case fails while
    every logger unit test passes, so the join is what is measured and not the plumbing.
-4. Enrich with `traceId`/`spanId` in camelCase → the key assertion fails; §3.5's departure is
+4. Enrich with `traceId`/`spanId` in camelCase → the key assertion fails; §3.6's departure is
    deliberate and pinned.
 
 ## 7. Verification gates
@@ -295,7 +316,7 @@ The ignored-test count is the proof they ran.
 
 ## 9. Out of scope
 
-- **The scheduler's header channel** — §3.6: X34 records its fresh root as correct, and adding one
+- **The scheduler's header channel** — §3.7: X34 records its fresh root as correct, and adding one
   would remove the distinction between "no cause" and "cause lost".
 - **`cloudflare-plugin`'s `WorkersQueue`** — it satisfies `IQueue` from another package, and its
   `{ v, name, id, data, maxAttempts? }` envelope is a **wire format** shared with a deployed

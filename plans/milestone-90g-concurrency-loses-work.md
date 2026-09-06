@@ -93,16 +93,16 @@ member an isolation level must reach.
   `UnsupportedIsolationLevelError(adapter, level)`, branded `501` with M89b's `withHttpStatusHint`.
   Support matrix:
 
-  | Adapter   | Honoured                                                                        | Refused by name    |
-  | --------- | ------------------------------------------------------------------------------- | ------------------ |
-  | Prisma    | all four, via `$transaction(fn, { isolationLevel })`                            | none               |
-  | Drizzle   | all four, **only** through a bridge declared with `withIsolationSupport` (§3.2) | all four otherwise |
-  | Memory    | `'serializable'` (§3.3)                                                         | the other three    |
-  | MongoDB   | `'serializable'` → `readConcern: 'snapshot'` + `writeConcern: majority`         | the other three    |
-  | D1        | none — a deferred batch has no isolation surface (M52c)                         | all four           |
-  | DynamoDB  | none — `TransactWriteItems` is atomic, not levelled                             | all four           |
-  | Cosmos DB | none — a batch is scoped to one partition key (M81)                             | all four           |
-  | Bigtable  | none — one row is the atomicity unit (M82)                                      | all four           |
+  | Adapter   | Honoured                                                                                                                                                                                                                                                                     | Refused by name    |
+  | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+  | Prisma    | all four, via `$transaction(fn, { isolationLevel })`                                                                                                                                                                                                                         | none               |
+  | Drizzle   | all four, **only** through a bridge declared with `withIsolationSupport` (§3.2)                                                                                                                                                                                              | all four otherwise |
+  | Memory    | `'serializable'` (§3.3)                                                                                                                                                                                                                                                      | the other three    |
+  | MongoDB   | `'serializable'` → `readConcern: 'snapshot'` + `writeConcern: majority` — **snapshot isolation, which prevents X24-2's lost update but is NOT the SQL `SERIALIZABLE` contract**, stated in the matrix, the JSDoc and `PUBLIC_API.md` rather than implied by the level's name | the other three    |
+  | D1        | none — a deferred batch has no isolation surface (M52c)                                                                                                                                                                                                                      | all four           |
+  | DynamoDB  | none — `TransactWriteItems` is atomic, not levelled                                                                                                                                                                                                                          | all four           |
+  | Cosmos DB | none — a batch is scoped to one partition key (M81)                                                                                                                                                                                                                          | all four           |
+  | Bigtable  | none — one row is the atomicity unit (M82)                                                                                                                                                                                                                                   | all four           |
 
 - **Why:** silently ignoring an unsupported level is the one outcome that must not ship, because it
   reproduces the exact defect — an application believes it asked for SERIALIZABLE, gets READ
@@ -123,6 +123,15 @@ member an isolation level must reach.
   bridge assignable. `createDrizzleDatabase` reads the brand and records it; `DrizzleAdapter`
   refuses an isolation request against an unbranded bridge, naming `withIsolationSupport` in the
   message. `createDrizzleDatabase`'s own signature is unchanged.
+
+  **The brand is a declaration, and the type system cannot check it** — TypeScript accepts a
+  two-parameter function wherever a three-parameter callback is expected, and no signature can force
+  a body to USE a parameter. So `withIsolationSupport` can be called on a bridge that ignores the
+  options, and nothing at compile time or run time will say so. That is stated in its JSDoc, in
+  `PUBLIC_API.md` and in the refusal's own message rather than left for a reader to discover, and it
+  is the same shape M69 already accepted for `transactionBridge` itself: the bridge is application
+  code, so its behaviour is the application's assertion. What the brand buys is that the assertion
+  must be made **explicitly** — silence defaults to a refusal, never to a silent downgrade.
 - **Why:** the bridge is **application-owned** (M69), so the adapter cannot verify that a level it
   passed was honoured — and a widened callback type alone would let an existing two-parameter bridge
   silently drop the option, which is §3.1's forbidden outcome dressed as a type-safe change. Arity
@@ -165,6 +174,12 @@ member an isolation level must reach.
   `{ replayable: false }` when it did not. A waiter holding a non-replayable outcome — and a waiter
   whose leader **rejected** — runs the origin itself, exactly what would have happened without
   coalescing.
+
+  That retry is explicit per-waiter logic rather than a consequence of clearing the map: a waiter
+  already holds the shared promise, so removing the entry in `finally` only affects arrivals AFTER
+  settlement. Each waiter therefore awaits the shared outcome inside its own `try` and, on a
+  rejection or a `{ replayable: false }`, calls `next()` itself — so N waiters behind a failed
+  leader produce N origin calls, which is exactly today's behaviour and never fewer.
 
   **The outcome type is load-bearing rather than defensive.** A waiter joins before `next()` has
   returned, so at join time nothing is known about the leader's response — and `cacheMiddleware`
@@ -335,9 +350,12 @@ DATABASE_URL=postgres://… MONGO_URL=… deno task test
   Mitigation: §3.4's `{ replayable: false }` outcome, plus a test driving genuinely concurrent
   requests at a streaming route that asserts every waiter reached the origin and received its own
   stream — rather than a test that requests a streaming route once.
-- **The memory adapter's new mutex could deadlock a nested transaction.** Mitigation: a test opens a
-  transaction inside a transaction and asserts the documented behaviour rather than a hang, with a
-  bounded timeout so a regression fails instead of stalling the suite.
+- **The memory adapter's new mutex would deadlock a nested transaction**, since the mutex is held
+  until commit or rollback and is not reentrant. Mitigation: the behaviour is **defined rather than
+  merely bounded** — a `beginTransaction({ isolation: 'serializable' })` issued while this adapter
+  already holds the mutex is **refused by name** with `NestedTransactionError`, never queued. A test
+  asserts the refusal and that it is prompt, so a regression fails rather than stalling the suite;
+  savepoints are out of scope (§9).
 
 ## 9. Out of scope
 
