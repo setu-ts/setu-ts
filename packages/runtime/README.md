@@ -88,7 +88,14 @@ set `maxBodyBytes` to the same value as `maxBodySize` or higher.
 
 A body past the cap rejects with `RequestBodyTooLargeError`, branded with a `413` HTTP status hint,
 so an application running `errorHandler` answers `413 Payload Too Large` in its configured format
-rather than a masked `500`.
+rather than a masked `500`. With no `errorHandler` registered the brand has no reader and the
+kernel's opaque `500` answers instead.
+
+**`0` refuses every request that carries a body** — it does NOT disable the check, which is what `0`
+means for `maxDepth`/`maxNodes`/`maxBatchSize` elsewhere in this framework. Omitting the option is
+the one way to say unbounded. A value that is not a non-negative integer throws at
+`RuntimePlugin(...)`; `NaN` in particular would make every comparison against the cap `false` and
+silently disable the bound, and `Number()` of an unset environment variable is exactly `NaN`.
 
 `adapters` and `httpAdapters` are marked `@internal` — they exist so unit tests can run without OS
 permissions or real runtime globals, not as application configuration.

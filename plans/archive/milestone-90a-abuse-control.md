@@ -338,6 +338,65 @@ corrected normally).
   cancel is load-bearing only on the early-exit path — which is precisely the path where an
   abandoned stream would keep a connection draining.
 
+## 8c. Findings from the milestone verification pass
+
+Run after the implementation commit, against the committed tree, through real kernel applications
+(`.verify-90a/driver*.ts`, deleted afterwards). Two were code defects and are fixed on this branch;
+the rest are recorded.
+
+- **`maxBodyBytes: NaN` silently DISABLED the bound — fail-open in a size limit.** `total + n > NaN`
+  is `false` for every chunk, so the cap never fired and a 4 KiB body sailed through a configured
+  64-byte limit. `Number(env.MAX_BODY_BYTES)` yields exactly `NaN` for an unset or misspelled
+  variable, which is the likeliest way this option's value is supplied in a deployment — so the
+  input is plausible, not hypothetical. `RuntimePlugin(...)` now refuses any `maxBodyBytes` that is
+  not a non-negative integer, at FACTORY time, before an application exists (the M52c/M52d/M59
+  binding-guard family). `Infinity` is refused too: omitting the option already means unbounded, so
+  there is one way to say it. Reverting the guard fails 4 steps.
+- **`proxyHops` accepted a negative, a fraction and `NaN`, each resolving `undefined` for every
+  caller.** Fail-SAFE rather than fail-open — the limiter degrades to one shared `'anonymous'`
+  bucket, which is more restrictive — but silent, while the mutual-exclusion refusal eight lines
+  above it throws at construction for a less consequential mistake. Same guard, same reasoning, same
+  file.
+- **`maxBodyBytes: 0` refuses every request carrying a body, which is the OPPOSITE of this
+  framework's own `0` convention** (`maxDepth`, `maxNodes`, `maxBatchSize`, `documentCacheSize` all
+  disable at `0` — and `maxNodes` is an option this very milestone added). It was documented
+  nowhere. Kept as-is rather than remapped, because `undefined` already means unbounded and
+  remapping `0` would give two spellings of one thing while removing an expressible configuration —
+  but now stated in the JSDoc, `PUBLIC_API.md` and the runtime README, and pinned by a test.
+- **No committed test drove a high-bit IPv4 CIDR**, the one input class where
+  `compileTrustedProxy`'s arithmetic could break: a network at or above `128.0.0.0` exceeds int31,
+  so `&` operates on a negative int32 and correctness depends on the `>>> 0` on both sides. Every
+  committed CIDR case used `10.x`, which never reaches that path. Probed correct, then pinned with
+  three cases (`200.0.0.0/8`, `255.255.255.255/32`, `128.0.0.0/1`); reverting one `>>> 0` fails
+  them.
+- **Two stale rows in this plan's own tables, both contradicting its C6.** §4.1 says
+  `RequestSizeOptions.maxBodySize` "now feeds both layers: the `Content-Length` refusal and
+  `maxBodyBytes` on the mapping", and §5 says `request-size-middleware.ts` "feeds `maxBodyBytes` to
+  the runtime". Neither is true and neither could be: C6 records that no channel exists between the
+  plugin and the mapping, which is why there are two independent options. The implementation follows
+  C6; `request-size-middleware.ts` is unchanged by this milestone, and its absence from the diff is
+  correct rather than a missing deliverable. Verified by probe: with `maxBodySize: 64` and no
+  `maxBodyBytes`, a 4 KiB chunked body is served (200) while a 4 KiB DECLARED length is refused
+  (413).
+- **§6's planned `graphql-max-nodes.test.ts` shipped as `max-nodes.test.ts`**, matching the src file
+  it covers. §8b recorded the sibling `request-size-chunked.test.ts` rename and missed this one.
+- **§6's "logger / metrics existing exclusion tests must pass unchanged" held for logger and needed
+  a one-line type edit for metrics**, which is §8's own predicted risk materialising exactly as
+  written: `http-collector-exclusions.test.ts` extracts the option type into a local helper
+  (`readonly string[]`), so widening the option broke the EXTRACTOR and not the callers. No
+  assertion moved; the logger tests are byte-identical.
+- **A verification-harness fact worth keeping.** An in-process `new Request(url, { body: '...' })`
+  carries **no** `Content-Length` header — Deno computes it at wire time — so
+  `requestSizeMiddleware`, which reads that header, is UNREACHABLE through `app.fetch` unless the
+  probe sets it explicitly. A first probe read the resulting `200` as a missing refusal; measuring
+  the header list is what distinguished the artifact from a defect.
+- **Checked and clear, recorded so a reviewer need not re-derive it.** `readBounded`'s single-chunk
+  fast path returns the stream's own `Uint8Array` rather than a fresh copy, so a capped read can
+  hand back a view with a non-zero `byteOffset` where the uncapped `arrayBuffer()` path never does.
+  No in-repo consumer touches `.buffer` or `byteOffset` (`grep` over the four `.bytes()` readers),
+  and the multipart parser uses `Uint8Array.slice`, which is offset-relative. No divergence reaches
+  a caller.
+
 ## 9. Out of scope
 
 - **X32-7** (`BulkheadFullError` → masked `500`) — **M90f**, which sweeps every unbranded

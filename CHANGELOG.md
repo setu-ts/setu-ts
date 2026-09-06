@@ -132,11 +132,14 @@ All notable changes to this project are documented here. The format follows
   `trustedProxies` walks right to left and returns the first entry that is not a trusted proxy;
   `proxyHops` returns the nth from the right for proxies with no fixed address, and a header shorter
   than the declared chain resolves `undefined` rather than falling back to a guess. The two are
-  mutually exclusive and supplying both throws at middleware construction. **With neither supplied
-  resolution stays leftmost, unchanged** — X32-3 requires the operator to have opted into
-  `trustProxy`, so a silent default flip would be a larger change than the finding. Only IPv4 CIDR
-  is expanded numerically; every other form is compared as a case-insensitive literal, deliberately,
-  since a wrong expansion would silently TRUST an untrusted hop.
+  mutually exclusive and supplying both throws at middleware construction, as does a `proxyHops`
+  that is not a non-negative integer (`0` is the rightmost entry): without that guard it resolves
+  `undefined` for every caller and silently degrades a rate limiter keyed on the client IP to one
+  shared bucket. **With neither supplied resolution stays leftmost, unchanged** — X32-3 requires the
+  operator to have opted into `trustProxy`, so a silent default flip would be a larger change than
+  the finding. Only IPv4 CIDR is expanded numerically; every other form is compared as a
+  case-insensitive literal, deliberately, since a wrong expansion would silently TRUST an untrusted
+  hop.
 
 - **`@setu-ts/graphql-plugin` — `GraphqlPluginOptions.maxNodes`**, a query-breadth budget (X32-6).
   `maxDepth` was the only query-cost control and it bounds NESTING: a document two levels deep can

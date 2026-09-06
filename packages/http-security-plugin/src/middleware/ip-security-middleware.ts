@@ -74,6 +74,12 @@ export interface IpSecurityOptions {
    * the request did not traverse the expected chain, and guessing would
    * reintroduce the spoof this option exists to close.
    *
+   * `0` is the rightmost entry (no hop skipped). A value that is not a
+   * non-negative integer **throws at middleware construction** rather than
+   * silently resolving `undefined` on every request, which is what a negative,
+   * a fraction, or the `NaN` that `Number()` yields for an unset environment
+   * variable would otherwise do.
+   *
    * Mutually exclusive with {@linkcode IpSecurityOptions.trustedProxies}.
    *
    * @since 0.5.0
@@ -173,6 +179,21 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
       'ipSecurityMiddleware: `trustedProxies` and `proxyHops` are mutually ' +
         'exclusive — they are two different answers to the same question ' +
         '(which entry in the forwarded chain is the client). Supply one.',
+    );
+  }
+
+  // Refused here rather than per request: an out-of-domain hop count resolves
+  // `undefined` for every caller, which degrades the rate limiter to one shared
+  // `'anonymous'` bucket with no signal anywhere. `Number()` of an unset
+  // environment variable is `NaN`, so this is a plausible input rather than a
+  // hypothetical one.
+  if (
+    proxyHops !== undefined &&
+    (!Number.isSafeInteger(proxyHops) || proxyHops < 0)
+  ) {
+    throw new Error(
+      `ipSecurityMiddleware: proxyHops must be a non-negative integer, ` +
+        `received ${String(proxyHops)}. 0 selects the rightmost entry.`,
     );
   }
 

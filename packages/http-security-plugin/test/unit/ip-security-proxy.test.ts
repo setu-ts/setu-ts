@@ -107,6 +107,24 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
       ).toBe('1.2.3.4');
     });
 
+    it('a high-bit CIDR network matches (int32 sign-extension hazard)', async () => {
+      // 200.x exceeds int31, so `ipv4ToNumber` returns a value whose `&`
+      // operand is a NEGATIVE int32. The `>>> 0` on both the mask application
+      // and the base is what keeps the comparison correct; without it a
+      // high-bit block would silently fail to match and the hop would be
+      // treated as UNtrusted — resolving a proxy's own address as the client.
+      // Every other CIDR case here uses 10.x, which never reaches that path.
+      expect(
+        await resolve('1.2.3.4, 203.0.113.5, 200.0.0.7', { trustedProxies: ['200.0.0.0/8'] }),
+      ).toBe('203.0.113.5');
+      expect(
+        await resolve('1.2.3.4, 255.255.255.255', { trustedProxies: ['255.255.255.255/32'] }),
+      ).toBe('1.2.3.4');
+      expect(
+        await resolve('1.2.3.4, 128.0.0.1', { trustedProxies: ['128.0.0.0/1'] }),
+      ).toBe('1.2.3.4');
+    });
+
     it('an octet above 255 is not a valid address and never matches a CIDR', async () => {
       expect(await resolve('1.2.3.4, 10.0.0.300', { trustedProxies: ['10.0.0.0/8'] }))
         .toBe('10.0.0.300');
@@ -204,6 +222,21 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
       expect(() => ipSecurityMiddleware({ trustedProxies: ['10.0.0.1'], proxyHops: 1 })).toThrow(
         /mutually/,
       );
+    });
+
+    for (const bad of [Number.NaN, -1, 1.5]) {
+      it(`refuses proxyHops: ${String(bad)} at construction`, async () => {
+        // Without the guard each of these resolves `undefined` for EVERY
+        // caller — the rate limiter then degrades to one shared `'anonymous'`
+        // bucket with no signal anywhere. `Number()` of an unset env var is
+        // `NaN`, so this is a plausible input, not a hypothetical one.
+        expect(() => ipSecurityMiddleware({ trustProxy: true, proxyHops: bad }))
+          .toThrow(/proxyHops must be a non-negative integer/);
+      });
+    }
+
+    it('accepts proxyHops: 0 — the rightmost entry, no hop skipped', async () => {
+      expect(await resolve(APPENDED, { proxyHops: 0 })).toBe('198.51.100.9');
     });
 
     it('a disabled middleware is a pass-through before the refusal', async () => {

@@ -271,7 +271,18 @@ only `maxBodySize` gets the pre-M90a behaviour — declared lengths bounded, chu
 
 A body past the cap rejects with `RequestBodyTooLargeError`, branded with a `413` status hint, so an
 application running `errorHandler` answers `413 Payload Too Large` in its configured format rather
-than the masked `500` an unbranded throw from that depth would produce.
+than the masked `500` an unbranded throw from that depth would produce. With no `errorHandler`
+registered the brand has no reader and the kernel's opaque `500` answers instead — which is how
+every status hint behaves, not something specific to this one.
+
+**`0` means "refuse every request that carries a body"**, not "disabled". That is the opposite of
+what `0` means for `maxDepth`, `maxNodes`, `maxBatchSize` and `documentCacheSize` elsewhere in this
+framework, so it is stated rather than left to be inferred: omitting the option is the one way to
+say unbounded. A value that is not a non-negative integer **throws at `RuntimePlugin(...)`** —
+before an application exists — rather than being accepted. `NaN` is the case that motivates the
+guard: every comparison against `NaN` is `false`, so a `NaN` cap would accept every chunk and
+silently disable the bound, and `Number(env.MAX_BODY_BYTES)` yields exactly `NaN` for an unset or
+misspelled variable. `Infinity` is refused for the same one-way-to-say-it reason.
 
 ### Accessing Runtime Services
 
@@ -2441,10 +2452,10 @@ including `defaultRateLimitKey` — is then keyed on attacker input.
 Two options resolve the client from the RIGHT instead, which is the standard algorithm and what
 Express `trust proxy` and Fastify `trustProxy` offer:
 
-| Option           | Behaviour                                                                                                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `trustedProxies` | Literal addresses or IPv4 CIDR blocks. The header is walked right to left; the first entry that is **not** one of these is the client. Every entry trusted → `undefined`. |
-| `proxyHops`      | The nth entry from the right, for proxies that cannot be addressed by IP. A header shorter than the declared chain → `undefined`, never a guess.                          |
+| Option           | Behaviour                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `trustedProxies` | Literal addresses or IPv4 CIDR blocks. The header is walked right to left; the first entry that is **not** one of these is the client. Every entry trusted → `undefined`.                                                                                                                                                                                                              |
+| `proxyHops`      | The nth entry from the right, for proxies that cannot be addressed by IP. `0` is the rightmost entry. A header shorter than the declared chain → `undefined`, never a guess. A value that is not a non-negative integer throws at middleware construction, because it would otherwise resolve `undefined` for every caller and silently degrade the rate limiter to one shared bucket. |
 
 They are **mutually exclusive** — supplying both throws at middleware construction, because they are
 two different answers to the same question. `trustedProxies` lists the addresses that appear in the
@@ -2453,7 +2464,10 @@ contains no proxy address at all (nginx appends its peer, the real client), so n
 is trusted and the rightmost entry is the answer. Only IPv4 CIDR is expanded numerically; every
 other form — a bare address, an IPv6 literal, an IPv6 CIDR, an unparseable block — is compared as a
 case-insensitive string, deliberately, because a wrong expansion would silently TRUST an untrusted
-hop.
+hop. A block whose network is at or above `128.0.0.0` is handled correctly: those addresses exceed
+int31, so the bitwise mask operates on a negative int32 and both sides are normalised with `>>> 0` —
+without which a high-bit block would fail to match and a trusted proxy's own address would be
+resolved as the client.
 
 With neither option supplied, resolution stays leftmost, unchanged from before M90a: no released
 deployment changes behaviour silently.

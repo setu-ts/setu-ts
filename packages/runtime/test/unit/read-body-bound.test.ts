@@ -180,6 +180,35 @@ describe('bounded body read (X32-4)', () => {
     await expect(framework.bytes()).rejects.toThrow(RequestBodyTooLargeError);
   });
 
+  // -------------------------------------------------------------------------
+  // Option domain — the guard added in verification
+  // -------------------------------------------------------------------------
+
+  it('a NaN cap would DISABLE the bound, so RuntimePlugin refuses it', async () => {
+    // The reason the guard exists rather than being defensive polish:
+    // `total + n > NaN` is always `false`, so a NaN cap accepts every chunk and
+    // the bound silently never fires — fail-OPEN in a size limit. `Number()` of
+    // an unset or misspelled env var is exactly `NaN`, which is how this value
+    // is supplied in a real deployment. Asserted at the mapping level here (the
+    // arithmetic), and refused at the factory in `runtime-plugin.test.ts`.
+    const { request } = streamedRequest([chunk('X'.repeat(1_000))]);
+    const framework = mapWebRequestToFrameworkRequest(request, Number.NaN);
+    // Documents the arithmetic the guard protects against: unbounded.
+    expect((await framework.bytes()).byteLength).toBe(1_000);
+  });
+
+  it('a cap of 0 refuses any body but still serves a bodyless request', async () => {
+    // `0` means "refuse every request carrying a body" — NOT "disabled", which
+    // is what `0` means for `maxDepth`/`maxNodes`/`maxBatchSize` elsewhere in
+    // this framework. Pinned so the divergence cannot drift silently.
+    const { request } = streamedRequest([chunk('X')]);
+    await expect(mapWebRequestToFrameworkRequest(request, 0).bytes())
+      .rejects.toThrow(RequestBodyTooLargeError);
+
+    const bodyless = new Request('http://localhost/');
+    expect((await mapWebRequestToFrameworkRequest(bodyless, 0).bytes()).byteLength).toBe(0);
+  });
+
   it('json() and text() both surface the refusal', async () => {
     const a = streamedRequest([chunk('{"a":1}')]);
     const b = streamedRequest([chunk('{"a":1}')]);

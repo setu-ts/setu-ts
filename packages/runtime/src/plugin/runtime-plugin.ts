@@ -86,7 +86,19 @@ export interface RuntimeOptions {
    *
    * A body past the cap rejects with `RequestBodyTooLargeError`, branded with
    * a `413` status hint, so an application running `errorHandler` answers
-   * `413 Content Too Large` in its configured format.
+   * `413 Payload Too Large` in its configured format. With no `errorHandler`
+   * registered the brand has no reader and the kernel's opaque `500` answers
+   * instead, which is how every other status hint behaves.
+   *
+   * **`0` means "refuse every request that carries a body"**, not "disabled" —
+   * unlike `maxDepth`, `maxNodes`, `maxBatchSize` and `documentCacheSize`
+   * elsewhere in this framework, where `0` disables the check. Omit the option
+   * for unbounded; there is exactly one way to say that. A value that is not a
+   * non-negative integer — a negative, a fraction, or the `NaN` that
+   * `Number(env.MAX_BODY_BYTES)` yields for an unset or misspelled variable —
+   * **throws here** rather than being accepted: `NaN` would make every
+   * comparison against the cap `false` and silently disable the bound, which is
+   * the one failure a size limit must not have.
    *
    * @example
    * ```typescript
@@ -134,6 +146,24 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   const httpAdapters = options?.httpAdapters ?? defaultHttpAdapters;
   const workerEnv = options?.env;
   const maxBodyBytes = options?.maxBodyBytes;
+
+  // Validated at FACTORY time, before an application exists: an
+  // out-of-domain cap is a configuration mistake, and `NaN` in particular
+  // fails OPEN — `total + n > NaN` is always `false`, so the bound would
+  // silently never fire. `Number()` of an unset env var is exactly `NaN`,
+  // which is the likeliest way this value is supplied in a deployment.
+  // `Infinity` is rejected too: omitting the option already means unbounded,
+  // so there is one way to say it rather than two.
+  if (
+    maxBodyBytes !== undefined &&
+    (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0)
+  ) {
+    throw new Error(
+      `RuntimePlugin: maxBodyBytes must be a non-negative integer, received ` +
+        `${String(maxBodyBytes)}. Omit the option for an unbounded body read; ` +
+        `note that 0 refuses every request carrying a body.`,
+    );
+  }
 
   return {
     name: 'runtime',
