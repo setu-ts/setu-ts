@@ -371,6 +371,28 @@ describe('RefreshTokenService', () => {
       expect(await service.refresh(second!.refreshToken)).toBeNull();
     });
 
+    it('revokes an expired ancestor access token when logging out through a live descendant', async () => {
+      const runtime = createFakeRuntime(0);
+      const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
+      const accessTokenRevocationStore = new MemoryAccessTokenRevocationStore(runtime);
+      const service = new RefreshTokenService({
+        jwt,
+        store: new MemoryRefreshTokenStore(runtime),
+        runtime,
+        accessToken: { expiresIn: '1h' },
+        refreshTokenExpiresIn: '1s',
+        accessTokenRevocationStore,
+      });
+      const first = await service.issue({ id: 'user-123' });
+      const firstAccessJti = (await jwt.verify<{ jti: string }>(first.accessToken)).jti;
+      runtime.setNow(500);
+      const second = await service.refresh(first.refreshToken);
+
+      runtime.setNow(1_000); // first record expired; second record remains live until 1,500.
+      expect(await service.revoke(second!.refreshToken)).toBe(true);
+      expect(await accessTokenRevocationStore.isRevoked(firstAccessJti)).toBe(true);
+    });
+
     it('returns false for a token that does not verify (tampered)', async () => {
       const { service } = makeService();
       const pair = await service.issue({ id: 'user-123' });

@@ -173,7 +173,7 @@ describe('MemoryRefreshTokenStore', () => {
     expect(await store.get('expired')).toBeNull();
   });
 
-  it('skips an expired sibling while revoking a live family member', async () => {
+  it('returns and evicts an expired sibling while revoking a live family member', async () => {
     const runtime = createFakeRuntime();
     const store = new MemoryRefreshTokenStore(runtime);
     const live = { ...makeRecord(runtime, 'live'), familyId: 'family-1' };
@@ -187,7 +187,8 @@ describe('MemoryRefreshTokenStore', () => {
 
     const revoked = await store.revokeFamily('live');
 
-    expect(revoked.map((record) => record.jti)).toEqual(['live']);
+    expect(revoked.map((record) => record.jti).sort()).toEqual(['expired', 'live']);
+    expect(expired.revoked).toBe(true);
     expect(await store.get('expired')).toBeNull();
   });
 });

@@ -11,6 +11,9 @@
 // Plugin factory
 export { RuntimePlugin } from './plugin/runtime-plugin.ts';
 export type { HttpAdapterFactories, RuntimeOptions } from './plugin/runtime-plugin.ts';
+export type { HttpAdapterOptions } from './adapters/shared/adapter-options.ts';
+// Raised by the bounded body read `RuntimeOptions.maxBodyBytes` arms.
+export { RequestBodyTooLargeError } from './adapters/shared/fetch-mapping.ts';
 
 // Runtime detection
 export { detectRuntime } from './detector/runtime-detector.ts';

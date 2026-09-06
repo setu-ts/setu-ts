@@ -246,6 +246,21 @@ app.register(RuntimePlugin({
 }));
 ```
 
+### Bounding the request body
+
+`maxBodyBytes` caps the request-body read **where the body is actually consumed**:
+
+```typescript
+app.register(RuntimePlugin({ maxBodyBytes: 10 * 1024 * 1024 }));
+```
+
+Use it with `HttpSecurityPlugin({ requestSize: { maxBodySize } })`: that middleware rejects a
+declared `Content-Length` before reading, while this option bounds chunked bodies as they are read.
+Set both to the same value or make `maxBodyBytes` larger. Omit `maxBodyBytes` for an unbounded read;
+`0` refuses every request that carries a body. A non-negative integer is required. An over-limit
+read rejects with a `RequestBodyTooLargeError` carrying a `413` status hint, so `errorHandler`
+answers `413 Payload Too Large` in its configured format.
+
 ### Accessing Runtime Services
 
 ```typescript
@@ -486,7 +501,8 @@ import { createRequestLoggerMiddleware } from '@setu-ts/logger-plugin';
 
 app.middleware.add(createRequestLoggerMiddleware({
   slowRequestThreshold: 1000,
-  excludePaths: ['/health'],
+  // A string is an EXACT path match; a RegExp is tested against the path (M90a).
+  excludePaths: ['/health', /^\/internal\//],
 }));
 ```
 
@@ -1973,46 +1989,48 @@ They still fail closed either way; what changed is that the refusal is legible.
 
 ### Exports
 
-| Export                             | File                                          | Description                                                                             |
-| ---------------------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `AuthPlugin`                       | `src/plugin/auth-plugin.ts`                   | Plugin factory                                                                          |
-| `AuthPluginOptions`                | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies`) |
-| `JwtOptions`                       | `src/interfaces/index.ts`                     | JWT config (key material, algorithm, expected aud/iss, header/scheme)                   |
-| `ApiKeyOptions`                    | `src/interfaces/index.ts`                     | API-key strategy config (header + `validate` callback)                                  |
-| `LocalOptions`                     | `src/interfaces/index.ts`                     | Local credential config (`verify` callback)                                             |
-| `SessionAuthOptions`               | `src/interfaces/index.ts`                     | Session strategy config (required `toPrincipal` callback)                               |
-| `PasswordHasher`                   | `src/services/password-hasher.ts`             | PBKDF2-SHA256 hash/verify utility                                                       |
-| `MalformedPasswordHashError`       | `src/services/password-hasher.ts`             | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash               |
-| `authMiddleware`                   | `src/middleware/auth-middleware.ts`           | Global middleware: authenticates and populates `ctx.request.user`                       |
-| `requireAuth`                      | `src/guards/index.ts`                         | Guard: require an authenticated principal (401)                                         |
-| `requireRole`                      | `src/guards/index.ts`                         | Guard: require a role (401/403)                                                         |
-| `requirePermission`                | `src/guards/index.ts`                         | Guard: require a permission (401/403)                                                   |
-| `requireAnyRole`                   | `src/guards/index.ts`                         | Guard: require any of the given roles                                                   |
-| `requireAllPermissions`            | `src/guards/index.ts`                         | Guard: require all of the given permissions                                             |
-| `publicRoute`                      | `src/guards/index.ts`                         | Guard: explicitly allow unauthenticated access                                          |
-| `RefreshTokenService`              | `src/services/refresh-token-service.ts`       | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                               |
-| `RefreshTokenOptions`              | `src/services/refresh-token-service.ts`       | `RefreshTokenService` constructor options                                               |
-| `TokenPair`                        | `src/services/refresh-token-service.ts`       | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                           |
-| `RefreshTokenStore`                | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                               |
-| `RefreshTokenRecord`               | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                      |
-| `IRefreshTokenRotation`            | `src/stores/refresh-token-store.ts`           | Result of atomically rotating a refresh record                                          |
-| `MemoryRefreshTokenStore`          | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                |
-| `IAccessTokenRevocationStore`      | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                     |
-| `MemoryAccessTokenRevocationStore` | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                           |
-| `rateLimitMiddleware`              | `src/middleware/rate-limit-middleware.ts`     | Fixed-window rate limiter middleware factory (429 short-circuit)                        |
-| `RateLimitOptions`                 | `src/middleware/rate-limit-middleware.ts`     | `rateLimitMiddleware(options)` parameter                                                |
-| `RateLimitStore`                   | `src/stores/rate-limit-store.ts`              | Pluggable store interface (`increment`/`reset`)                                         |
-| `RateLimitResult`                  | `src/stores/rate-limit-store.ts`              | `{ count, resetTime }` returned by `increment`                                          |
-| `MemoryRateLimitStore`             | `src/stores/rate-limit-store.ts`              | Default in-memory fixed-window store                                                    |
-| `RedisRateLimitStore`              | `src/stores/redis-rate-limit-store.ts`        | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`)                                   |
-| `IAuthService`                     | re-export                                     | From `@setu-ts/common`                                                                  |
-| `IJwtService`                      | re-export                                     | From `@setu-ts/common`                                                                  |
-| `IAuthorizationService`            | re-export                                     | From `@setu-ts/common`                                                                  |
-| `IAuthStrategy`                    | re-export                                     | From `@setu-ts/common`                                                                  |
-| `IPrincipal`                       | re-export                                     | From `@setu-ts/common`                                                                  |
-| `JwtSignOptions`                   | re-export                                     | From `@setu-ts/common`                                                                  |
-| `RbacConfig`                       | re-export                                     | From `@setu-ts/common`                                                                  |
-| `RoleDefinition`                   | re-export                                     | From `@setu-ts/common`                                                                  |
+| Export                              | File                                          | Description                                                                                     |
+| ----------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `AuthPlugin`                        | `src/plugin/auth-plugin.ts`                   | Plugin factory                                                                                  |
+| `AuthPluginOptions`                 | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies`)         |
+| `JwtOptions`                        | `src/interfaces/index.ts`                     | JWT config (key material, algorithm, expected aud/iss, header/scheme)                           |
+| `ApiKeyOptions`                     | `src/interfaces/index.ts`                     | API-key strategy config (header + `validate` callback)                                          |
+| `LocalOptions`                      | `src/interfaces/index.ts`                     | Local credential config (`verify` callback)                                                     |
+| `SessionAuthOptions`                | `src/interfaces/index.ts`                     | Session strategy config (required `toPrincipal` callback)                                       |
+| `PasswordHasher`                    | `src/services/password-hasher.ts`             | PBKDF2-SHA256 hash/verify utility                                                               |
+| `MalformedPasswordHashError`        | `src/services/password-hasher.ts`             | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash                       |
+| `authMiddleware`                    | `src/middleware/auth-middleware.ts`           | Global middleware: authenticates and populates `ctx.request.user`                               |
+| `requireAuth`                       | `src/guards/index.ts`                         | Guard: require an authenticated principal (401)                                                 |
+| `requireRole`                       | `src/guards/index.ts`                         | Guard: require a role (401/403)                                                                 |
+| `requirePermission`                 | `src/guards/index.ts`                         | Guard: require a permission (401/403)                                                           |
+| `requireAnyRole`                    | `src/guards/index.ts`                         | Guard: require any of the given roles                                                           |
+| `requireAllPermissions`             | `src/guards/index.ts`                         | Guard: require all of the given permissions                                                     |
+| `publicRoute`                       | `src/guards/index.ts`                         | Guard: explicitly allow unauthenticated access                                                  |
+| `RefreshTokenService`               | `src/services/refresh-token-service.ts`       | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                                       |
+| `RefreshTokenOptions`               | `src/services/refresh-token-service.ts`       | `RefreshTokenService` constructor options                                                       |
+| `TokenPair`                         | `src/services/refresh-token-service.ts`       | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                                   |
+| `RefreshTokenStore`                 | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                                       |
+| `RefreshTokenRecord`                | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                              |
+| `IRefreshTokenRotation`             | `src/stores/refresh-token-store.ts`           | Result of atomically rotating a refresh record                                                  |
+| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                        |
+| `IAccessTokenRevocationStore`       | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                             |
+| `MemoryAccessTokenRevocationStore`  | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                                   |
+| `rateLimitMiddleware`               | `src/middleware/rate-limit-middleware.ts`     | Fixed-window rate limiter middleware factory (429 short-circuit)                                |
+| `RateLimitOptions`                  | `src/middleware/rate-limit-middleware.ts`     | `rateLimitMiddleware(options)` parameter, including `exclude`                                   |
+| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | `src/middleware/rate-limit-middleware.ts`     | The six operational paths `exclude` exempts by default; spread it to extend rather than replace |
+| `RateLimitStore`                    | `src/stores/rate-limit-store.ts`              | Pluggable store interface (`increment`/`reset`)                                                 |
+| `RateLimitResult`                   | `src/stores/rate-limit-store.ts`              | `{ count, resetTime }` returned by `increment`                                                  |
+| `MemoryRateLimitStore`              | `src/stores/rate-limit-store.ts`              | Default in-memory fixed-window store                                                            |
+| `RedisRateLimitStore`               | `src/stores/redis-rate-limit-store.ts`        | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`), namespacing keys under `keyPrefix`       |
+| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | `src/stores/redis-rate-limit-store.ts`        | `'setu:ratelimit:'` — the namespace `RedisRateLimitStore` applies when no `keyPrefix` is given  |
+| `IAuthService`                      | re-export                                     | From `@setu-ts/common`                                                                          |
+| `IJwtService`                       | re-export                                     | From `@setu-ts/common`                                                                          |
+| `IAuthorizationService`             | re-export                                     | From `@setu-ts/common`                                                                          |
+| `IAuthStrategy`                     | re-export                                     | From `@setu-ts/common`                                                                          |
+| `IPrincipal`                        | re-export                                     | From `@setu-ts/common`                                                                          |
+| `JwtSignOptions`                    | re-export                                     | From `@setu-ts/common`                                                                          |
+| `RbacConfig`                        | re-export                                     | From `@setu-ts/common`                                                                          |
+| `RoleDefinition`                    | re-export                                     | From `@setu-ts/common`                                                                          |
 
 ### Registration
 
@@ -2164,11 +2182,30 @@ fixed-window counter (single-process); pass `store: new RedisRateLimitStore({ ur
 multi-instance deployments (ioredis is inject-or-lazy: pass `client` to inject, otherwise
 `npm:ioredis@5.x` is lazily imported on first use).
 
-```typescript
-import { rateLimitMiddleware, RedisRateLimitStore } from '@setu-ts/auth-plugin';
+The 429 body is written through `respondWithError`, so it uses the application's configured error
+format — including Problem Details under `errorHandler({ format: 'rfc9457' })` — just like a guard
+failure. **Operational probes are exempt by default:** `exclude` is
+`DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` (`/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, and
+`/docs`). A caller list replaces those defaults, so spread the constant to extend it; `[]` exempts
+nothing. Exempt paths do not increment a counter or receive `RateLimit-*` headers.
 
-// Global: 100 requests per minute per client IP (in-memory store)
-app.middleware.add(rateLimitMiddleware({ windowMs: 60_000, max: 100 }));
+`RedisRateLimitStore` namespaces keys under `keyPrefix` (default `'setu:ratelimit:'`) so two
+applications sharing one Redis deployment do not count against each other. Pass `''` to use the
+pre-namespacing keys.
+
+```typescript
+import {
+  DEFAULT_RATE_LIMIT_EXCLUDED_PATHS,
+  rateLimitMiddleware,
+  RedisRateLimitStore,
+} from '@setu-ts/auth-plugin';
+
+// Global: 100 requests per minute per client IP; retain the default probe exclusions.
+app.middleware.add(rateLimitMiddleware({
+  windowMs: 60_000,
+  max: 100,
+  exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
+}));
 
 // Per-route, keyed by authenticated user, Redis-backed
 app.router.post('/expensive', {
@@ -2177,7 +2214,11 @@ app.router.post('/expensive', {
       windowMs: 60_000,
       max: 5,
       keyGenerator: (ctx) => ctx.request.user?.id ?? ctx.request.ip ?? 'anonymous',
-      store: new RedisRateLimitStore({ url: 'redis://localhost:6379', runtime }),
+      store: new RedisRateLimitStore({
+        url: 'redis://localhost:6379',
+        runtime,
+        keyPrefix: 'orders-api:rl:',
+      }),
       message: 'Too many expensive calls — try again shortly',
     }),
   ],
@@ -8511,6 +8552,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `HTTP_STATUS_HINT`                              | const    | `Symbol.for('setu.http.status-hint')`, the key the two functions above use. `Symbol.for` (not `Symbol()`) so two copies of the package in one process resolve the same key                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `validatedStateKey(target)`                     | function | Returns `` `validation-plugin:validated-${target}` `` — the `ctx.state` key under which `validation-plugin`'s middleware writes a validated value and `decorator-plugin`'s `Body()`/`Query()`/`Param()` sources read it back. Exported so two packages agree on the wire format byte-for-byte instead of each hardcoding the literal (the M47 frame-codec precedent)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `CLIENT_IP_STATE_KEY`                           | const    | `http-security-plugin:client-ip`, the cross-package key `ipSecurityMiddleware` writes and `rateLimitMiddleware` reads                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `createPathMatcher(patterns)`                   | function | Builds a path-exclusion predicate from `readonly PathPattern[]`; strings match exactly and regular expressions are tested against the path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `sealRequestIdentity(request)`                  | function | Installs the one-implicit-write request identity guard for `user` and `tenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `replacePrincipal(request, principal)`          | function | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `replaceTenant(request, tenant)`                | function | Deliberately replaces `request.tenant` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -8522,7 +8564,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tokens              | `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PluginPriority`, `JsonValue` — the recursive JSON-safe value type (M74); `SseMessage.data` is typed with it, and its object arm admits `undefined` because `JSON.stringify` drops such a key                                                                                                                                                                                                                                                                                                                                            |
-| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Utilities           | `Result<T, E>`, `Ok<T>`, `Err<E>`, `Option<T>`, `Some<T>`, `None`, `PathPattern` — one path-exclusion entry (`string \| RegExp`); a string is an exact match, never a prefix                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Plugin contract     | `IPlugin`, `IPluginContext`, `IApplication`, `StartOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Plugin context APIs | `IMiddlewareApi`, `MiddlewareOptions`, `IRouterApi`, `IEnvironmentApi`, `EnvVarSpec`, `IHealthApi`, `IMetricsApi`, `IOpenApiApi`, `IDecoratorApi`, `DecoratorHandler`, `ICliApi`, `CliCommandHandler`, `ILifecycleApi`, `IMetadataStore`                                                                                                                                                                                                                                                                                                                                                                                              |
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -8548,7 +8590,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Storage             | `IStorage`, `SignedUrlOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Mail                | `IMailer`, `MailMessage`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Notifications       | `INotifier` (with optional `sendSettled?`), `NotificationMessage`, `ChannelSendResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| Errors              | `IErrorResponder`, `ErrorResponseInit`, `ErrorResponderTarget`, `SerializedError` — the request-scoped error responder seam and the pure error serializer (M70f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Errors              | `IErrorResponder`, `ErrorResponseInit`, `ErrorResponderTarget`, `SerializedError`, `AuthorizationFailure` — the request-scoped error responder seam, standard authorization refusals, and the pure error serializer (M70f)                                                                                                                                                                                                                                                                                                                                                                                                            |
 | Feature flags       | `IFeatureFlags`, `FlagContext`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Multi-tenancy       | `IMultiTenancyService`, `ITenantRepository`, `ITenantResolver`, `ITenant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | SSR                 | `ISsrService`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |

@@ -29,12 +29,17 @@ export interface RefreshTokenRecord {
 }
 
 /** Result of atomically rotating one refresh token into its successor. */
-export interface IRefreshTokenRotation {
-  /** The presented record when it exists and has not expired, otherwise null. */
-  readonly record: RefreshTokenRecord | null;
-  /** Whether the presented token was live and the successor was stored. */
-  readonly rotated: boolean;
-}
+export type IRefreshTokenRotation =
+  | {
+    /** The presented record, live when its successor was stored. */
+    readonly record: RefreshTokenRecord;
+    readonly rotated: true;
+  }
+  | {
+    /** The presented record when it exists and has not expired, otherwise null. */
+    readonly record: RefreshTokenRecord | null;
+    readonly rotated: false;
+  };
 
 /**
  * Store interface for refresh tokens.
@@ -122,19 +127,19 @@ export class MemoryRefreshTokenStore implements RefreshTokenStore {
   rotate(jti: string, successor: RefreshTokenRecord): Promise<IRefreshTokenRotation> {
     const record = this.#map.get(jti);
     if (record === undefined) {
-      return Promise.resolve({ record: null, rotated: false });
+      return Promise.resolve<IRefreshTokenRotation>({ record: null, rotated: false });
     }
     if (this.#runtime.now() >= record.expiresAt) {
       this.#map.delete(jti);
-      return Promise.resolve({ record: null, rotated: false });
+      return Promise.resolve<IRefreshTokenRotation>({ record: null, rotated: false });
     }
     if (record.revoked) {
-      return Promise.resolve({ record, rotated: false });
+      return Promise.resolve<IRefreshTokenRotation>({ record, rotated: false });
     }
 
     record.revoked = true;
     this.#map.set(successor.jti, successor);
-    return Promise.resolve({ record, rotated: true });
+    return Promise.resolve<IRefreshTokenRotation>({ record, rotated: true });
   }
 
   revokeFamily(jti: string): Promise<readonly RefreshTokenRecord[]> {
@@ -149,14 +154,14 @@ export class MemoryRefreshTokenStore implements RefreshTokenStore {
 
     const familyId = requested.familyId ?? requested.jti;
     const revoked: RefreshTokenRecord[] = [];
+    const now = this.#runtime.now();
     for (const [candidateJti, candidate] of this.#map) {
-      if (this.#runtime.now() >= candidate.expiresAt) {
-        this.#map.delete(candidateJti);
-        continue;
-      }
       if ((candidate.familyId ?? candidate.jti) === familyId) {
         candidate.revoked = true;
         revoked.push(candidate);
+      }
+      if (now >= candidate.expiresAt) {
+        this.#map.delete(candidateJti);
       }
     }
     return Promise.resolve(revoked);

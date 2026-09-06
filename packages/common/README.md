@@ -28,7 +28,7 @@ npx jsr add @setu-ts/common
 | Optional DI         | `IContainer`, `Provider`, `ServiceScope`                                                                                                                                                                                                                                                     |
 | Domain contracts    | `ILogger`, `IConfig`, `IValidationService`, `IHealthIndicator`, `IMetric`, `IJwtService`, `IOrmAdapter`, `ICacheStore`, `IEventBus`, `IMessageBroker`, `IQueue`, `ISecretManager`, `IAuditLogger`, `ICircuitBreaker`, `IStorage`, `IMailer`, `INotifier`, `IFeatureFlags`, `ITenantResolver` |
 | Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PLUGIN_PRIORITY`                                                                                                                                                                               |
-| Utility types       | `Result<T, E>` (`ok`, `err`, `isOk`, `isErr`, `unwrap`), `Option<T>` (`some`, `none`, `isSome`, `isNone`, `fromNullable`)                                                                                                                                                                    |
+| Utility types       | `Result<T, E>` (`ok`, `err`, `isOk`, `isErr`, `unwrap`), `Option<T>` (`some`, `none`, `isSome`, `isNone`, `fromNullable`), `PathPattern` (`createPathMatcher`)                                                                                                                               |
 
 ## Usage
 
@@ -106,6 +106,7 @@ package fits the plugin architecture.
 | `contextToTraceparent`            | function  |
 | `createCachedProbe`               | function  |
 | `createCapabilityToken`           | function  |
+| `createPathMatcher`               | function  |
 | `decodeCursor`                    | function  |
 | `decodeFrameData`                 | function  |
 | `encodeCursor`                    | function  |
@@ -380,6 +381,7 @@ package fits the plugin architecture.
 | `NextFunction`                    | type      |
 | `Option`                          | type      |
 | `OrderDirection`                  | type      |
+| `PathPattern`                     | type      |
 | `PluginPriority`                  | type      |
 | `Provider`                        | type      |
 | `RealtimeFrameHandler`            | type      |

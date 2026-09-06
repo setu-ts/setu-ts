@@ -46,6 +46,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
   const graphiql = options.graphiql ?? true;
   const introspection = options.introspection ?? true;
   const maxDepth = options.maxDepth ?? 10;
+  const maxNodes = options.maxNodes ?? 0;
   const maskInternalErrors = options.maskInternalErrors ?? true;
   const documentCacheSize = options.documentCacheSize ?? 1000;
   const formatError = options.formatError ?? ((_e: unknown) => _e);
@@ -118,6 +119,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
         documentCacheSize,
         ...(options.validationRules && { validationRules: options.validationRules }),
         maxDepth,
+        maxNodes,
         introspection,
         maskInternalErrors,
         formatError,

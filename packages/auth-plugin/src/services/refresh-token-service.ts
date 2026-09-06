@@ -203,7 +203,7 @@ export class RefreshTokenService {
       }
       return null;
     }
-    await this.revokeAccessToken(rotation.record!);
+    await this.revokeAccessToken(rotation.record);
 
     return issued.pair;
   }

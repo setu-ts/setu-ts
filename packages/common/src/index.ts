@@ -77,6 +77,10 @@ export type {
 export { replacePrincipal, replaceTenant, sealRequestIdentity } from './request-identity.ts';
 export { CLIENT_IP_STATE_KEY } from './state-keys.ts';
 
+// Path-exclusion matcher (M90a) — the one matcher four middlewares share
+export { createPathMatcher } from './path-matcher.ts';
+export type { PathPattern } from './path-matcher.ts';
+
 // W3C trace context codec
 export {
   contextToTraceparent,

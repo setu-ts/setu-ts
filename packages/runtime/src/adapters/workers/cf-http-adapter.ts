@@ -24,6 +24,7 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { CloudflareWebSocketHost } from './cf-ws-upgrader.ts';
@@ -41,9 +42,11 @@ export class CloudflareWorkersServerHandle {
   #handler: ((request: IRequest) => IResponse | Promise<IResponse>) | null = null;
   readonly #upgrades = new UpgradeRouterStore();
   #wsHost: CloudflareWebSocketHost | null;
+  readonly #maxBodyBytes: number | undefined;
 
-  constructor(wsHost?: CloudflareWebSocketHost) {
+  constructor(wsHost?: CloudflareWebSocketHost, maxBodyBytes?: number) {
     this.#wsHost = wsHost ?? null;
+    this.#maxBodyBytes = maxBodyBytes;
   }
 
   /**
@@ -78,7 +81,7 @@ export class CloudflareWorkersServerHandle {
    */
   createFetchHandler(): (request: Request) => Response | Promise<Response> {
     return (request: Request): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -133,12 +136,13 @@ export class CloudflareWorkersServerHandle {
  * is a no-op. Deployers export `export default { fetch: app.fetch }`.
  *
  * @param wsHost - Injected WebSocket host (defaults to the real Workers globals)
+ * @param options - Adapter options; `maxBodyBytes` bounds the body read
  */
 export class CloudflareWorkersHttpAdapter implements IHttpAdapter {
   #handle: CloudflareWorkersServerHandle;
 
-  constructor(wsHost?: CloudflareWebSocketHost) {
-    this.#handle = new CloudflareWorkersServerHandle(wsHost);
+  constructor(wsHost?: CloudflareWebSocketHost, options?: HttpAdapterOptions) {
+    this.#handle = new CloudflareWorkersServerHandle(wsHost, options?.maxBodyBytes);
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {
