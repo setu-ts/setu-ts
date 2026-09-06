@@ -92,11 +92,51 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
         .toBeUndefined();
     });
 
+    it('refuses a non-numeric CIDR width at construction (CodeRabbit review)', async () => {
+      // `Number('')` is 0, so `'10.0.0.1/'` used to compile to a /0 matcher that
+      // TRUSTS EVERY IPv4 address: an all-IPv4 chain then resolved no client at
+      // all (one shared limiter bucket), and a chain whose leftmost entry was
+      // IPv6 returned that caller-supplied value as the client — X32-3
+      // reintroduced by a typo. `Number` also reads `'0x20'` as 32, silently
+      // applying a mask the text does not state.
+      for (
+        const bad of ['10.0.0.1/', '10.0.0.0/ 8', '10.0.0.0/+8', '10.0.0.0/0x20', '10.0.0.0/8e0']
+      ) {
+        expect(() => ipSecurityMiddleware({ trustProxy: true, trustedProxies: [bad] }))
+          .toThrow(/malformed\s+CIDR width/);
+      }
+    });
+
+    it('still accepts every legitimate entry form', async () => {
+      // The guard checks digits only and NOT the 0–32 range, so an IPv6 CIDR
+      // keeps its documented literal-comparison path rather than being refused.
+      for (
+        const good of [
+          '10.0.0.1',
+          '10.0.0.0/8',
+          '10.0.0.0/0',
+          '10.0.0.0/32',
+          '2001:db8::1',
+          '2001:db8::/64',
+        ]
+      ) {
+        expect(() => ipSecurityMiddleware({ trustProxy: true, trustedProxies: [good] }))
+          .not.toThrow();
+      }
+    });
+
     it('a malformed CIDR falls back to a literal string comparison', async () => {
       // A wrong numeric expansion would silently TRUST an untrusted hop, so an
       // unparseable block matches only its own literal text.
       expect(await resolve('1.2.3.4, 10.0.0.1/99', { trustedProxies: ['10.0.0.1/99'] }))
         .toBe('1.2.3.4');
+      // A width of three or more digits is a legitimate IPv6 form (`/128`) as
+      // far as the digit guard is concerned, so it is NOT refused — it falls to
+      // the literal comparison, which trusts nothing.
+      expect(await resolve('1.2.3.4, 10.0.0.0/999', { trustedProxies: ['10.0.0.0/999'] }))
+        .toBe('1.2.3.4');
+      expect(await resolve('1.2.3.4, 10.0.0.7', { trustedProxies: ['10.0.0.0/999'] }))
+        .toBe('10.0.0.7');
       expect(await resolve('1.2.3.4, 10.0.0.5', { trustedProxies: ['10.0.0.1/99'] }))
         .toBe('10.0.0.5');
     });

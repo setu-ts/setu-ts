@@ -359,6 +359,52 @@ describe('GraphQL security', () => {
       }
     });
 
+    it('a bundled document is judged by its LARGEST operation, not the sum', async () => {
+      // Qodo review finding: summing refused a document whose SELECTED operation
+      // was within budget. Each operation here costs 3 (user + id + name) against
+      // a budget of 4; summed they are 6. The sibling `maxDepth` already behaved
+      // per-operation, so the two limiters disagreed about what a "query" is.
+      const bundled = `
+        query A { user { id name } }
+        query B { user { id name } }
+      `;
+      const app = createApplication({
+        plugins: [RuntimePlugin(), GraphqlPlugin({ typeDefs, resolvers, maxNodes: 4 })],
+      });
+      await app.start({ port: 0 });
+      try {
+        for (const operationName of ['A', 'B']) {
+          const res = await app.inject({
+            method: 'POST',
+            url: '/graphql',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ query: bundled, operationName }),
+          });
+          const json = await res.json() as { errors?: unknown; data?: unknown };
+          expect(json.errors).toBeUndefined();
+          expect(json.data).toBeDefined();
+        }
+
+        // The bound still binds: an operation that alone exceeds the budget is
+        // refused whichever operation the caller selects, which is the policy —
+        // no operation in the document may exceed it.
+        const withBig = `
+          query Small { user { id } }
+          query Big { ${Array.from({ length: 10 }, (_, i) => `a${i}: user { id name }`).join(' ')} }
+        `;
+        const res = await app.inject({
+          method: 'POST',
+          url: '/graphql',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: withBig, operationName: 'Small' }),
+        });
+        const json = await res.json() as { errors?: Array<{ message?: string }> };
+        expect(json.errors?.[0]?.message).toContain('Maximum node count is 4');
+      } finally {
+        await app.stop();
+      }
+    });
+
     it('depth and breadth are independent limits', async () => {
       // A narrow query well within `maxNodes` is served, and a wide one within
       // `maxDepth` is refused — so neither limiter is standing in for the other.

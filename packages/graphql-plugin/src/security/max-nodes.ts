@@ -63,8 +63,22 @@ type SelectionSetLike = { selections: readonly GraphqlSelectionNodeLike[] } | nu
  *
  * An unresolvable spread also counts zero — `KnownFragmentNames` reports it.
  *
+ * **A document's cost is its LARGEST operation, not the sum of all of them.**
+ * Only one operation is ever executed — the one `operationName` selects — so
+ * summing would refuse a bundled document whose selected operation is well
+ * within budget, which is a false refusal rather than a bound. Taking the
+ * maximum states the policy the limit actually wants: no operation in this
+ * document may exceed the budget. It also matches the sibling `maxDepth`, which
+ * counts each field's own ancestor path and is therefore per-operation already —
+ * before this, the two limiters in one package disagreed about what a "query"
+ * is, and a two-operation document that `maxDepth` served was refused here.
+ *
+ * The rule cannot read `operationName`: a validation rule receives the document
+ * and the validation cache is keyed on query text alone. The maximum needs
+ * neither, so nothing has to be threaded through the executor.
+ *
  * @param document - The parsed document
- * @returns The number of fields the document's operations would resolve
+ * @returns The number of fields the document's largest operation would resolve
  */
 export function countResolvedFields(document: GraphqlDocumentNodeLike): number {
   const fragments = new Map<string, GraphqlDefinitionNodeLike>();
@@ -111,13 +125,16 @@ export function countResolvedFields(document: GraphqlDocumentNodeLike): number {
     return total;
   };
 
-  let total = 0;
+  let largest = 0;
   for (const definition of document.definitions) {
     if (definition.kind === 'OperationDefinition') {
-      total += countSelections(definition.selectionSet);
+      const cost = countSelections(definition.selectionSet);
+      if (cost > largest) {
+        largest = cost;
+      }
     }
   }
-  return total;
+  return largest;
 }
 
 /**
@@ -151,7 +168,7 @@ export function createMaxNodesRule(
         context.reportError(
           new GraphQLError(
             `Query is too large. Maximum node count is ${maxNodes}, ` +
-              `but query resolves ${count} fields`,
+              `but its largest operation resolves ${count} fields`,
           ),
         );
       }

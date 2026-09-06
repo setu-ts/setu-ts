@@ -451,6 +451,50 @@ doc deliverables; all four fixed on this branch.
   its own `exec` loop is contrived, but a defensive clone at construction would remove the side
   effect entirely.
 
+## 8e. Findings from the PR review bots (PR #247)
+
+Five inline findings across two bots. Three fixed, two declined with evidence — the convention here
+is one reply per thread, verifying before agreeing.
+
+- **FIXED (CodeRabbit, Major) — a `trustedProxies` entry with an empty CIDR width trusted every IPv4
+  address.** `Number('')` is `0`, so `'10.0.0.1/'` compiled to a `/0` matcher. Probed: an all-IPv4
+  chain then resolved `clientIp: undefined` (the limiter degrades to one shared bucket), and a chain
+  whose leftmost entry was IPv6 returned that **caller-supplied** value as the client — X32-3
+  reintroduced by a typo in configuration. `Number` also reads `'0x20'` as `32`, silently applying a
+  mask the text does not state. The width must now be plain digits, and a non-digit width is refused
+  at construction rather than falling through, matching this milestone's other two guards. The range
+  is deliberately NOT checked at the refusal: an IPv6 CIDR such as `2001:db8::/64` has a digit width
+  above 32 and must keep its documented literal-comparison path (verified — all six legitimate forms
+  still construct). **Two details of the report did not survive measurement**: of the four "loose"
+  widths it listed, `' 8'`, `'+8'` and `'8e0'` all resolved the client CORRECTLY before the fix,
+  because `Number` maps each to `8` and a `/8` mask matches the proxy; only the empty width and the
+  hex form were defects.
+- **FIXED (Qodo, Bug) — `countResolvedFields` summed EVERY operation instead of the one that
+  executes.** Probed with two 3-field operations against `maxNodes: 4`: both `operationName=A` and
+  `operationName=B` were refused at a counted 6, though each is individually within budget. The
+  sibling `maxDepth` served the identical document, so the two limiters in one package disagreed
+  about what a "query" is. Now the **maximum** over operations, which needs no `operationName`
+  plumbing (a validation rule receives the document, and the cache is keyed on query text) and
+  states the policy the limit actually wants: no operation in the document may exceed the budget.
+  The error message says "its largest operation resolves N fields" so a developer debugging a
+  bundled document is not misled.
+- **FIXED (Qodo, Medium) — the `exhausted` test double sampled `Date.now()` while the middleware
+  samples `runtime.now()`.** Benign as written, and the reply says why: the app runs the real
+  `RuntimePlugin`, so both are the wall clock, and `Math.ceil` absorbs the sub-millisecond gap. But
+  it is the "never mix clocks" pattern the repo names as a recurring pitfall, and it produced a real
+  flake in the v0.4.0 cycle (`queue-plugin`: 20 failing offsets in a 6000-offset sweep). The double
+  now reads the injected clock, so nobody copies the pattern into a fake-clock test.
+- **DECLINED (Qodo, Medium) — `IXxx` interface naming.** Refuted with the same evidence that
+  withdrew it in M86: the convention marks PORTS, not data shapes, and `packages/common` exports 114
+  non-prefixed interfaces. `HttpAdapterOptions` is an options bag beside `RuntimeOptions` and
+  `CloudflareRuntimeOptions`; `ValidationRuleContext`/`MaxNodesVisitor` are module-private
+  structural shapes matching `DepthLimitVisitor` beside them; `CapturedResponse` is a test fixture.
+  Renaming any of them would make each inconsistent with its own immediate neighbours.
+- **DECLINED (Qodo, Medium) — the unused `_context` parameter in the disabled-rule branch.**
+  Technically removable, but `createDepthLimitRule` in the same directory has the byte-identical
+  `(_context: ValidationRuleContext) => ({})`, so removing it here would make the two sibling rules
+  differ for no behavioural gain. Consistency with the neighbour is worth more than one underscore.
+
 ## 9. Out of scope
 
 - **X32-7** (`BulkheadFullError` → masked `500`) — **M90f**, which sweeps every unbranded

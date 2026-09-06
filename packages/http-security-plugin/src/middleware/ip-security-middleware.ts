@@ -115,7 +115,33 @@ function compileTrustedProxy(entry: string): (candidate: string) => boolean {
   const slash = entry.indexOf('/');
   if (slash !== -1) {
     const network = entry.slice(0, slash);
-    const bits = Number(entry.slice(slash + 1));
+    const width = entry.slice(slash + 1);
+    // The digits are checked explicitly rather than inferred from `Number`,
+    // for the same reason `ipv4ToNumber` checks octets that way — and here it
+    // is a security requirement rather than tidiness. `Number('')` is `0`, so
+    // a trailing-slash entry (`'10.0.0.1/'`) would otherwise compile to a `/0`
+    // matcher that TRUSTS EVERY IPv4 address: an all-IPv4 chain then resolves
+    // no client at all, and a chain whose leftmost entry is IPv6 returns that
+    // caller-supplied value as the client — X32-3 reintroduced by a typo in
+    // configuration. `Number` also accepts `'0x20'` as 32, which silently
+    // applies a mask the text does not say. An unparseable width falls through
+    // to the literal comparison below, which is what this function's own
+    // contract promises and which trusts nothing.
+    // A width that is not plain digits is refused outright rather than falling
+    // through: EVERY legitimate CIDR width is plain digits, in either family, so
+    // this can reject no valid entry — while silently falling through would trust
+    // nothing and degrade an IP-keyed limiter to one shared bucket with no
+    // signal. The range is deliberately NOT checked here: an IPv6 CIDR such as
+    // `2001:db8::/64` has a digit width above 32 and must keep its documented
+    // literal-comparison path.
+    if (!/^[0-9]+$/.test(width)) {
+      throw new Error(
+        `ipSecurityMiddleware: trustedProxies entry '${entry}' has a malformed ` +
+          `CIDR width. Use plain digits (e.g. '10.0.0.0/8'), or omit the slash ` +
+          `to compare the entry literally.`,
+      );
+    }
+    const bits = width.length <= 2 ? Number(width) : Number.NaN;
     const networkValue = ipv4ToNumber(network);
     if (
       networkValue !== null && Number.isInteger(bits) && bits >= 0 && bits <= 32

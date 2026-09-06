@@ -94,23 +94,23 @@ GraphqlPlugin({
 
 ## Options
 
-| Option               | Type                 | Default    | Description                                                                                                                                      |
-| -------------------- | -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `typeDefs`           | `string`             | -          | SDL schema definition (schema-first mode)                                                                                                        |
-| `resolvers`          | `ResolverMap`        | -          | Resolver map (schema-first mode)                                                                                                                 |
-| `schema`             | `GraphqlSchemaLike`  | -          | Pre-built schema (code-first mode)                                                                                                               |
-| `path`               | `string`             | `/graphql` | Endpoint path                                                                                                                                    |
-| `graphiql`           | `boolean`            | `true`     | Enable GraphiQL UI                                                                                                                               |
-| `introspection`      | `boolean`            | `true`     | Enable schema introspection                                                                                                                      |
-| `maxDepth`           | `number`             | `10`       | Maximum query **depth** — nesting only (0 to disable)                                                                                            |
-| `maxNodes`           | `number`             | `0`        | Maximum fields a document may **resolve**, aliases counted separately and fragment spreads expanded at each site. `0` (the default) is unbounded |
-| `validationRules`    | `unknown[]`          | `[]`       | Additional validation rules                                                                                                                      |
-| `maskInternalErrors` | `boolean`            | `true`     | Mask internal server errors                                                                                                                      |
-| `formatError`        | `(error) => error`   | -          | Custom error formatter                                                                                                                           |
-| `documentCacheSize`  | `number`             | `1000`     | Max cached documents (0 to disable)                                                                                                              |
-| `buildContext`       | `(input) => context` | -          | Custom context builder                                                                                                                           |
-| `rootValue`          | `unknown`            | -          | Root value for resolvers                                                                                                                         |
-| `graphqlModule`      | `GraphqlModuleLike`  | -          | Injected graphql module                                                                                                                          |
+| Option               | Type                 | Default    | Description                                                                                                                                                          |
+| -------------------- | -------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `typeDefs`           | `string`             | -          | SDL schema definition (schema-first mode)                                                                                                                            |
+| `resolvers`          | `ResolverMap`        | -          | Resolver map (schema-first mode)                                                                                                                                     |
+| `schema`             | `GraphqlSchemaLike`  | -          | Pre-built schema (code-first mode)                                                                                                                                   |
+| `path`               | `string`             | `/graphql` | Endpoint path                                                                                                                                                        |
+| `graphiql`           | `boolean`            | `true`     | Enable GraphiQL UI                                                                                                                                                   |
+| `introspection`      | `boolean`            | `true`     | Enable schema introspection                                                                                                                                          |
+| `maxDepth`           | `number`             | `10`       | Maximum query **depth** — nesting only (0 to disable)                                                                                                                |
+| `maxNodes`           | `number`             | `0`        | Maximum fields a document's **largest operation** may resolve, aliases counted separately and fragment spreads expanded at each site. `0` (the default) is unbounded |
+| `validationRules`    | `unknown[]`          | `[]`       | Additional validation rules                                                                                                                                          |
+| `maskInternalErrors` | `boolean`            | `true`     | Mask internal server errors                                                                                                                                          |
+| `formatError`        | `(error) => error`   | -          | Custom error formatter                                                                                                                                               |
+| `documentCacheSize`  | `number`             | `1000`     | Max cached documents (0 to disable)                                                                                                                                  |
+| `buildContext`       | `(input) => context` | -          | Custom context builder                                                                                                                                               |
+| `rootValue`          | `unknown`            | -          | Root value for resolvers                                                                                                                                             |
+| `graphqlModule`      | `GraphqlModuleLike`  | -          | Injected graphql module                                                                                                                                              |
 
 ## Platform Notes
 

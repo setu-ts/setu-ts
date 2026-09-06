@@ -182,7 +182,10 @@ and set `maxBodyBytes` to the same value or higher. See "Bounding the request bo
 construction. So does a `proxyHops` that is not a non-negative integer (`0` is the rightmost entry):
 without that guard a negative, a fraction, or the `NaN` that `Number()` yields for an unset
 environment variable resolves `undefined` for every caller, which silently degrades a rate limiter
-keyed on the client IP to one shared bucket.
+keyed on the client IP to one shared bucket. A `trustedProxies` entry whose CIDR width is not plain
+digits is refused the same way: `Number('')` is `0`, so `'10.0.0.1/'` would otherwise compile to a
+`/0` matcher that trusts every IPv4 address. Omit the slash to compare an entry literally, which is
+already how a bare address and an IPv6 CIDR are handled.
 
 ### SecurityHeadersOptions
 

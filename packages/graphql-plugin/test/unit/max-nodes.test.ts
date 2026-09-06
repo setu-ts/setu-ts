@@ -73,8 +73,17 @@ describe('countResolvedFields', () => {
     expect(countResolvedFields(doc('{ a { b { c { d { e } } } } }'))).toBe(5);
   });
 
-  it('counts across several operations in one document', () => {
-    expect(countResolvedFields(doc('query A { a b } query B { c }'))).toBe(3);
+  it('reports the LARGEST operation, not the sum of all of them', () => {
+    // Only one operation is ever executed — the one `operationName` selects — so
+    // summing refuses a bundled document whose selected operation is well within
+    // budget. Before this the same document counted 3.
+    expect(countResolvedFields(doc('query A { a b } query B { c }'))).toBe(2);
+    expect(countResolvedFields(doc('query A { a } query B { b c d }'))).toBe(3);
+  });
+
+  it('a single-operation document is unaffected by the maximum', () => {
+    // The overwhelmingly common shape: max over one operation IS that operation.
+    expect(countResolvedFields(doc('{ user { id name } }'))).toBe(3);
   });
 
   it('an inline fragment costs only what it selects', () => {
@@ -162,7 +171,7 @@ describe('createMaxNodesRule', () => {
     const reported = run(3, '{ a b c d }');
     expect(reported).toHaveLength(1);
     expect(reported[0]).toContain('Maximum node count is 3');
-    expect(reported[0]).toContain('resolves 4 fields');
+    expect(reported[0]).toContain('its largest operation resolves 4 fields');
   });
 
   it('refuses an alias bomb at depth 2', () => {
@@ -170,7 +179,7 @@ describe('createMaxNodesRule', () => {
     const aliases = Array.from({ length: 200 }, (_, i) => `a${i}: user { id }`).join(' ');
     const reported = run(50, `{ ${aliases} }`);
     expect(reported).toHaveLength(1);
-    expect(reported[0]).toContain('resolves 400 fields');
+    expect(reported[0]).toContain('its largest operation resolves 400 fields');
   });
 
   it('accepts the SAME alias bomb when maxNodes is unset', () => {

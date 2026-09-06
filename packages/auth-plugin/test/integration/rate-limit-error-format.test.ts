@@ -29,28 +29,44 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { errorHandler } from '@setu-ts/exceptions';
 import type { ErrorFormat } from '@setu-ts/exceptions';
-import type { HandlerResult, IPluginContext, IRequestContext } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import type {
+  HandlerResult,
+  IPluginContext,
+  IRequestContext,
+  IRuntimeServices,
+} from '@setu-ts/common';
 import type { RateLimitResult, RateLimitStore } from '../../src/stores/rate-limit-store.ts';
 
 /**
- * A store that reports every key as already past any budget.
+ * Builds a store that reports every key as already past any budget.
  *
  * `resetTime` is an ABSOLUTE epoch-ms timestamp, which is what the
  * {@linkcode RateLimitStore} contract says and what both shipped stores return
  * — `MemoryRateLimitStore` from `runtime.now()`, `RedisRateLimitStore` from
  * `now + PTTL`. A double returning a small constant instead would make the
  * middleware's `ceil((resetTime - now) / 1000)` produce a large negative
- * `Retry-After` and the header assertions below meaningless: this app runs the
- * REAL `RuntimePlugin`, so `now()` is the wall clock.
+ * `Retry-After` and the header assertions below meaningless.
+ *
+ * It reads the **same `IRuntimeServices` clock the middleware reads**, rather
+ * than `Date.now()`. Both resolve to the wall clock in this app, which runs the
+ * real `RuntimePlugin`, so the two are interchangeable here — but sampling the
+ * host clock in a double while the code under test samples an injected one is
+ * the "never mix clocks" pitfall, and it has produced a real flake in this
+ * repository before (`queue-plugin`, fixed in the v0.4.0 cycle: 20 failing
+ * offsets in a 6000-offset sweep). Reading the injected clock keeps the pattern
+ * correct for anyone who copies it into a fake-clock test.
  */
-const exhausted: RateLimitStore = {
-  increment(): Promise<RateLimitResult> {
-    return Promise.resolve({ count: 1_000_000, resetTime: Date.now() + 60_000 });
-  },
-  reset(): Promise<void> {
-    return Promise.resolve();
-  },
-};
+function exhaustedStore(runtime: IRuntimeServices): RateLimitStore {
+  return {
+    increment(): Promise<RateLimitResult> {
+      return Promise.resolve({ count: 1_000_000, resetTime: runtime.now() + 60_000 });
+    },
+    reset(): Promise<void> {
+      return Promise.resolve();
+    },
+  };
+}
 
 /**
  * One application carrying BOTH short-circuit sites: the limiter's `429` and a
@@ -76,7 +92,7 @@ async function bootApp(format: ErrorFormat) {
             rateLimitMiddleware({
               windowMs: 60_000,
               max: 1,
-              store: exhausted,
+              store: exhaustedStore(ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
               // `/guarded` is exempt so the GUARD's 401 is reachable. Without
               // this the limiter refuses it first and the comparison below is
               // a 429 against a 429 — which passes whatever the limiter writes,
