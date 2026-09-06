@@ -4336,12 +4336,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   "pre-derivation", which cannot go stale. Every marker in the tree was re-audited; all four shield
   genuinely historical text, with the live sentences above them.
 - **Milestone 90a** (`common` + `auth-plugin` + `http-security-plugin` + `runtime` +
-  `graphql-plugin` + `logger-plugin` + `metrics-plugin` — abuse control that actually protects. Six
-  X32 findings with one shape: each limiter is correct on the path its tests exercise and unbounded
-  on a path nothing composes. **The ROADMAP's three-package list was corrected to seven** (the
-  M70b/M70g/M70h/M70k precedent) because two rows do not live where the section assumed: X32-4's
-  body read is in `runtime`, and X32-1's fix needed a matcher three packages already carried a
-  private copy of.
+  `graphql-plugin` + `logger-plugin` + `metrics-plugin` + `kernel` — abuse control that actually
+  protects. Six X32 findings with one shape: each limiter is correct on the path its tests exercise
+  and unbounded on a path nothing composes. **The ROADMAP's three-package list was corrected to
+  eight** (the M70b/M70g/M70h/M70k precedent) because two rows do not live where the section
+  assumed: X32-4's body read is in `runtime`, and X32-1's fix needed a matcher three packages
+  already carried a private copy of — and `kernel` joined during code review, for the reason at the
+  end of this entry.
 
   **X32-1** `RateLimitOptions` had no exclusion member at all, so an exhausted global bucket
   answered `/live` with `429` and the kubelet restarted a container whose only fault was load.
@@ -4399,7 +4400,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   matching every request and matching every other request. Partitioning once at construction keeps
   logger and metrics on the same `Set.has` lookup they had, and makes `tenantMiddleware` faster.
 
-  **Seven negative controls were each observed failing and reverted, and the second is why it was
+  **Eleven negative controls were each observed failing and reverted, and the second is why it was
   worth running them.** Reverting the responder routing left BOTH "the 429 and a guard's 401 agree"
   cases green — because `/guarded` was not exempt from the limiter, so the comparison was a 429
   against a 429 and would have passed whatever the limiter wrote. The route is now exempt and both
@@ -4413,7 +4414,31 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   exporting `createMaxNodesRule`/`countResolvedFields` beside `createDepthLimitRule` added five
   `private-type-ref` diagnostics and pushed M38's ratchet from 497 to 502, and neither had a
   consumer outside its own test. With those cut and two pre-existing missing-description diagnostics
-  paid down, `DOC_LINT_BASELINE` drops to **496**) — complete (PR pending)
+  paid down, `DOC_LINT_BASELINE` drops to **496**.
+
+  **Verification and code review then found six more defects, and the first is the one that would
+  have hurt.** A body-carrying WebSocket upgrade refused by the new cap **leaked the connection slot
+  the router reserved**: the kernel's RFC 6455 body guard reads the body AFTER `routeUpgrade`
+  accepted, and while that read could only RETURN the guard released the slot before answering `400`
+  — `websocket-service.ts:595` says in as many words that "a refused or malformed upgrade can never
+  leak a slot". `maxBodyBytes` makes the read able to REJECT, so the rejection escaped with
+  `onClose` never called; and since upgrade detection is header-only, a POST carrying
+  `Upgrade: websocket` and an oversized body reaches it with no socket, no handshake and no
+  authentication. Measured with `maxConnections: 2`: two such requests left every later conformant
+  upgrade answering **503 for the life of the process**, where the same sequence with no cap
+  answered `400`. That is why `kernel` is in the package list. **`maxBodyBytes: NaN` silently
+  DISABLED the bound and `maxNodes: NaN` silently disabled the breadth limit** — every comparison
+  against `NaN` is `false`, so both caps accepted everything while reading as configured, and
+  `Number(env.…)` yields exactly `NaN` for an unset variable: fail-open in two security controls
+  from the likeliest real input. Both now refuse an out-of-domain value at construction, as does
+  `proxyHops`, whose negative/fractional/`NaN` values resolved `undefined` for every caller and
+  degraded the limiter to one shared bucket. `maxBodyBytes: 0` refuses every body — the OPPOSITE of
+  the `0 = disabled` convention every sibling option in this framework uses — kept, since omitting
+  already means unbounded, but now documented in three sites. And **two doc deliverables the plan
+  named were passed over with every gate green**: `docs/deployment.md` (C2) was untouched, and
+  `defaultRateLimitKey`'s JSDoc (C3) still recommended bare `trustProxy` as remedy #1 — the
+  configuration X32-3 shows is attacker-controlled. The review also corrected an inaccuracy in its
+  OWN fix, whose comment overstated what the `try` covered) — complete (PR #247)
 - **Next milestone** — **M40** (final release), the only open row in Progress Tracking: the 1.0 gate
   named in README's Versioning section — benchmarks, a security audit, and the Node/Bun compat
   suites as release gates. The `smoke/` programme's X16–X19 exercises against published `0.3.0`

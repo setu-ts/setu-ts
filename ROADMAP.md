@@ -8871,7 +8871,7 @@ their own exercises rather than chores belonging to any one of them.
 
 | Letter   | Shape                                              | Findings | High | Packages                                                               |
 | -------- | -------------------------------------------------- | -------- | ---- | ---------------------------------------------------------------------- |
-| **M90a** | Abuse control that actually protects               | 6        | 3    | common, auth, http-security, runtime, graphql, logger, metrics         |
+| **M90a** | Abuse control that actually protects               | 6        | 3    | common, auth, http-security, runtime, graphql, logger, metrics, kernel |
 | **M90b** | Health that tells the truth, bounded               | 7        | 4    | secrets, cache, realtime-backplane, messaging, health, queue, database |
 | **M90c** | Credential revocation and token type               | 4        | 2    | auth                                                                   |
 | **M90d** | The two brokers that cannot start                  | 4        | 2    | messaging                                                              |
@@ -8909,7 +8909,8 @@ folded into a letter later if a second instance turns up.
 ### Milestone 90a: Abuse Control That Actually Protects
 
 **Package(s):** `packages/common`, `packages/auth-plugin`, `packages/http-security-plugin`,
-`packages/runtime`, `packages/graphql-plugin`, `packages/logger-plugin`, `packages/metrics-plugin`
+`packages/runtime`, `packages/graphql-plugin`, `packages/logger-plugin`, `packages/metrics-plugin`,
+`packages/kernel`
 
 **Corrected from the three this section originally named** (the M70b / M70g / M70h / M70k precedent
 — the list is corrected in the plan when source-checking contradicts it). Two rows do not live where
@@ -8918,7 +8919,10 @@ so it is not implementable in `http-security-plugin` at all: the middleware has 
 read, and because M87 made the body lazy the read happens _after_ middleware has returned. And
 X32-1's fix needs a path-exclusion matcher, which three packages already carry a private copy of —
 so the matcher is promoted to `common` and `logger-plugin` / `metrics-plugin` adopt it, which
-DELETES two duplicates rather than creating a fifth (§11.1).
+DELETES two duplicates rather than creating a fifth (§11.1). `packages/kernel` joined during code
+review: the new body cap makes the kernel's RFC 6455 upgrade-body guard able to REJECT rather than
+only return, which leaked the WebSocket connection slot the router reserved at accept time — so an
+unauthenticated client could exhaust `maxConnections` with that many malformed requests.
 
 **Objective:** Make the three rate/size/breadth limiters bound what they claim to bound. X32-1 (the
 exhausted limiter answers `429` to `/live` and `/ready`, so a burst of abuse takes the pod out of
