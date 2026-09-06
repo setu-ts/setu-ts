@@ -67,6 +67,14 @@ export class MessagingBackplane implements IRealtimeBackplane {
    * member: a broker that omits it is *unknown*, and the indicator reads
    * absence of `isHealthy` (not `false`) as that.
    *
+   * M90b (X21-1): the delegation calls through the OWNER —
+   * `broker.isHealthy()`, not a detached `const probe = broker.isHealthy`
+   * reference. A broker whose `isHealthy` reads instance state
+   * (`ServiceBusBroker`'s private probe cache, among others) throws a bare
+   * `TypeError` when invoked unbound, which a health endpoint then reports
+   * as an error rather than a fact. It retains the resolved broker's own
+   * probe cache rather than adding a duplicate backplane-level cache.
+   *
    * @since 0.2.0
    */
   isHealthy?: () => Promise<boolean>;
@@ -80,9 +88,12 @@ export class MessagingBackplane implements IRealtimeBackplane {
     this.#broker = broker;
     this.origin = origin;
     this.#topic = topic;
+    // Captured into a local before the guard: the delegation below must call
+    // the member through its OWNER, and a `const` local keeps the narrowed
+    // function type inside the closure.
     const probe = broker.isHealthy;
     if (typeof probe === 'function') {
-      this.isHealthy = (): Promise<boolean> => probe();
+      this.isHealthy = (): Promise<boolean> => probe.call(broker);
     }
   }
 

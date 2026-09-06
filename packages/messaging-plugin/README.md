@@ -276,6 +276,7 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 | `RedisStreamsOptions`          | interface |
 | `RequestOptions`               | interface |
 | `ServiceBusOptions`            | interface |
+| `ServiceBusRetryOptions`       | interface |
 | `ServiceBusSdkModule`          | interface |
 | `SubscribeOptions`             | interface |
 | `SubscriptionDefinition`       | interface |

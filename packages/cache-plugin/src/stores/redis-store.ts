@@ -128,6 +128,29 @@ export class RedisStore implements CacheStore {
     return this.#ready;
   }
 
+  /**
+   * Probes Redis with a typed `ping()` (M90b). `false` after disconnect —
+   * a store with no client cannot answer — and otherwise `true` only when
+   * the server answers, a rejection being unreachability.
+   *
+   * The plugin caches and bounds this probe; this method is the raw
+   * per-call question.
+   *
+   * @returns `true` when Redis answers `ping`
+   * @since 0.5.0
+   */
+  async isHealthy(): Promise<boolean> {
+    if (this.#client === null) {
+      return false;
+    }
+    try {
+      await this.#client.ping();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async get<T>(key: string): Promise<T | null> {
     if (!this.#client) {
       return null;

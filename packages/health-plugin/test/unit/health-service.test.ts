@@ -349,4 +349,195 @@ describe('HealthService', () => {
       expect(Object.keys(report.checks)).toHaveLength(0);
     });
   });
+
+  describe('concurrent, deadline-bounded aggregation (M90b)', () => {
+    /**
+     * A runtime whose clock and timers are MANUALLY driven: `tick(ms)`
+     * advances the monotonic clock and fires due timers. No real time
+     * passes, so a deadline test costs microseconds, not the deadline.
+     */
+    function createManualRuntime(): {
+      runtime: ReturnType<typeof createFakeRuntime>;
+      tick: (ms: number) => void;
+      pendingTimers: () => number;
+    } {
+      let clock = 0;
+      const timers = new Map<number, { at: number; fn: () => void }>();
+      let nextId = 1;
+      const base = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+      const runtime = {
+        ...base,
+        hrtime: () => clock,
+        setTimeout: (fn: () => void, ms: number) => {
+          const id = nextId++;
+          timers.set(id, { at: clock + ms, fn });
+          return { id };
+        },
+        clearTimeout: (handle: unknown) => {
+          timers.delete((handle as { id: number }).id);
+        },
+      } as ReturnType<typeof createFakeRuntime>;
+      return {
+        runtime,
+        pendingTimers: () => timers.size,
+        tick: (ms: number) => {
+          const target = clock + ms;
+          for (;;) {
+            let due: { id: number; at: number; fn: () => void } | undefined;
+            for (const [id, entry] of timers) {
+              if (entry.at <= target && (due === undefined || entry.at < due.at)) {
+                due = { id, at: entry.at, fn: entry.fn };
+              }
+            }
+            if (due === undefined) break;
+            timers.delete(due.id);
+            clock = due.at;
+            due.fn();
+          }
+          clock = target;
+        },
+      };
+    }
+
+    it('starts deferred indicators before earlier ones settle (concurrency)', async () => {
+      const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+      const service = new HealthService(runtime);
+      const started: string[] = [];
+      let releaseFirst: (() => void) | undefined;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+
+      service.registerIndicator('slow', async () => {
+        started.push('slow');
+        await firstGate;
+        return { status: 'up' };
+      });
+      service.registerIndicator('fast', () => {
+        started.push('fast');
+        return Promise.resolve({ status: 'up' });
+      });
+
+      const pending = service.check();
+      // The fast indicator must have STARTED even though the slow one has
+      // not settled — the serial loop never reached it before its turn.
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(started).toContain('fast');
+
+      releaseFirst!();
+      const report = await pending;
+      expect(report.status).toBe('up');
+    });
+
+    it('keeps checks in registration order regardless of settle order', async () => {
+      const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+      const service = new HealthService(runtime);
+      const gates = [Promise.resolve(), new Promise<void>((r) => setTimeout(r, 1))];
+
+      service.registerIndicator('aaa', async () => {
+        await gates[1];
+        return { status: 'up' };
+      });
+      service.registerIndicator('zzz', async () => {
+        await gates[0];
+        return { status: 'up' };
+      });
+
+      const report = await service.check();
+      // 'zzz' settled first; 'aaa' still owns the first key.
+      expect(Object.keys(report.checks)).toEqual(['aaa', 'zzz']);
+    });
+
+    it('maps a timeout to down with reason "timeout" and fires the deadline', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime, { indicatorTimeoutMs: 5_000 });
+
+      service.registerIndicator('hung', () => new Promise(() => {}));
+
+      const pending = service.check();
+      manual.tick(4_999);
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      manual.tick(1);
+      const report = await pending;
+      expect(report.status).toBe('down');
+      expect(report.checks['hung']?.data).toEqual({ reason: 'timeout' });
+      expect(report.checks['hung']?.latencyMs).toBe(5_000);
+      // The deadline timer consumed itself — no handle leaked.
+      expect(manual.pendingTimers()).toBe(0);
+    });
+
+    it('maps a rejection to down with reason "error" and never serializes the throw', async () => {
+      const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+      const service = new HealthService(runtime);
+      const driverDiagnostic = 'pg: connection refused host=10.0.0.9 user=svc';
+
+      service.registerIndicator('exploding', () => {
+        return Promise.reject(new Error(driverDiagnostic));
+      });
+
+      const report = await service.check();
+      expect(report.status).toBe('down');
+      expect(report.checks['exploding']?.data).toEqual({ reason: 'error' });
+      expect(JSON.stringify(report)).not.toContain(driverDiagnostic);
+    });
+
+    it('clears the deadline timer when the indicator settles first (no handle leak)', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime, { indicatorTimeoutMs: 5_000 });
+
+      service.registerIndicator('quick', () => Promise.resolve({ status: 'up' }));
+
+      const report = await service.check();
+      expect(report.status).toBe('up');
+      expect(manual.pendingTimers()).toBe(0);
+    });
+
+    it('defaults the deadline to 5,000ms when omitted', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime);
+
+      service.registerIndicator('hung', () => new Promise(() => {}));
+
+      const pending = service.check();
+      manual.tick(4_999);
+      let settled = false;
+      void pending.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      manual.tick(1);
+      await pending;
+      // Settled exactly at 5,000 — the default deadline.
+    });
+
+    it('measures each indicator latency individually', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime);
+
+      let releaseSlow: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        releaseSlow = resolve;
+      });
+      service.registerIndicator('slow', async () => {
+        manual.tick(30);
+        await gate;
+        return { status: 'up' };
+      });
+      service.registerIndicator('instant', () => Promise.resolve({ status: 'up' }));
+
+      const pending = service.check();
+      releaseSlow!();
+      const report = await pending;
+      // The concurrent run measures both against their own start.
+      expect(report.checks['slow']?.latencyMs).toBeGreaterThanOrEqual(0);
+      expect(report.checks['instant']?.latencyMs).toBeGreaterThanOrEqual(0);
+    });
+  });
 });

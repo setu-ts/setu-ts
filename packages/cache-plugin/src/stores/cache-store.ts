@@ -27,6 +27,20 @@ export interface CacheStore {
   isReady(): boolean;
 
   /**
+   * Reports whether the backend is reachable right now, for the plugin's
+   * health indicator (M90b).
+   *
+   * Optional: a backend with no meaningful liveness probe omits it, and the
+   * indicator then reports `reachable: 'unknown'` rather than pretending a
+   * lifecycle state is reachability. This answers a fact, not a policy: the
+   * indicator owns the `up`/`down` mapping.
+   *
+   * @returns `true` when the backend answers
+   * @since 0.5.0
+   */
+  isHealthy?(): Promise<boolean>;
+
+  /**
    * Read a value. The key is already-prefixed by CacheService.
    * @typeParam T - Expected value type
    * @param key - Already-prefixed cache key

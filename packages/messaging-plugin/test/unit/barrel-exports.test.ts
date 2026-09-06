@@ -6,6 +6,7 @@ import type {
   PubSubOptions,
   ServiceBusMessagingOptions,
   ServiceBusOptions,
+  ServiceBusRetryOptions,
 } from '../../src/index.ts';
 
 /**
@@ -65,6 +66,9 @@ describe('barrel exports', () => {
     // the types are part of the module's exported surface.
     const _pubSubOpts: PubSubOptions = {};
     const _serviceBusOpts: ServiceBusOptions = {};
+    // M90b: the retry budget type is nameable from the barrel — a production
+    // `service-bus` arm needs it to configure `retryOptions`.
+    const _serviceBusRetry: ServiceBusRetryOptions = { maxRetries: 0 };
     const _pubSubMessagingOpts: PubSubMessagingOptions = { broker: 'pubsub', projectId: 'test' };
     const _serviceBusMessagingOpts: ServiceBusMessagingOptions = {
       broker: 'service-bus',
@@ -72,6 +76,7 @@ describe('barrel exports', () => {
     };
     expect(_pubSubOpts).toBeDefined();
     expect(_serviceBusOpts).toBeDefined();
+    expect(_serviceBusRetry).toBeDefined();
     expect(_pubSubMessagingOpts).toBeDefined();
     expect(_serviceBusMessagingOpts).toBeDefined();
   });

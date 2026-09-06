@@ -14,15 +14,17 @@
  * @module
  */
 
-import type {
-  ISubscription,
-  MessageHandler,
-  MessageMetadata,
-  RequestHandler,
-  RequestOptions,
-  SubscribeOptions,
+import {
+  createCachedProbe,
+  type ISubscription,
+  type MessageHandler,
+  type MessageMetadata,
+  type RequestHandler,
+  type RequestOptions,
+  type SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
+import type { ServiceBusRetryOptions } from '../interfaces/index.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
@@ -36,6 +38,12 @@ const DEFAULT_REPLY_TOPIC = 'messaging.replies';
 
 /** Default subscription name. */
 const DEFAULT_QUEUE = 'messaging-consumers';
+
+/** Reachability outcome cache lifetime for the broker probe (M90b), in ms. */
+const PROBE_TTL_MS = 5000;
+
+/** Per-probe timeout (M90b), in milliseconds. A slower probe counts as unreachable. */
+const PROBE_TIMEOUT_MS = 2000;
 
 /**
  * Structural type matching the real SDK's ProcessErrorArgs callback argument
@@ -84,7 +92,10 @@ export interface IServiceBusReceiver {
  * Declares the constructors used from the real Azure Service Bus SDK.
  */
 export interface ServiceBusSdkModule {
-  ServiceBusClient: new (connectionString: string) => {
+  ServiceBusClient: new (
+    connectionString: string,
+    options?: { retryOptions?: ServiceBusRetryOptions },
+  ) => {
     createSender(queueOrTopicName: string): {
       sendMessages(messages: { body: unknown }): Promise<void>;
       close(): Promise<void>;
@@ -100,6 +111,14 @@ export interface ServiceBusSdkModule {
   ServiceBusAdministrationClient: new (connectionString: string) => {
     createSubscription(topicName: string, subscriptionName: string): Promise<unknown>;
     deleteSubscription(topicName: string, subscriptionName: string): Promise<unknown>;
+    /**
+     * Reads the namespace's runtime description (M90b). One cheap
+     * administration round trip is the only non-mutating call that proves
+     * the namespace itself is reachable; optional so a minimal fake module
+     * without it degrades to `unknown` reachability rather than a false
+     * `down`.
+     */
+    getNamespaceProperties?(): Promise<unknown>;
   };
 }
 
@@ -166,8 +185,34 @@ export interface ServiceBusOptions {
   defaultQueue?: string;
   /** Shared reply topic for request-reply (must pre-exist). */
   replyTopic?: string;
+  /**
+   * SDK retry budget for the data client (M90b / X28-6). Forwarded to
+   * `ServiceBusClient` only — the administration client is never given it.
+   *
+   * @since 0.5.0
+   */
+  retryOptions?: ServiceBusRetryOptions;
   /** Optional logger. */
   logger?: { error: (msg: string) => void };
+}
+
+/**
+ * Positively identifies an authorization response from Service Bus (M90b).
+ *
+ * A 401/403 is the namespace ANSWERING with an auth verdict, which proves
+ * the transport path is reachable — a send/listen-only credential is not a
+ * network outage. The SDK surfaces HTTP failures as objects carrying a
+ * numeric `statusCode`; anything else is treated as unreachable.
+ *
+ * @param error - The caught probe error
+ * @returns `true` when the error is an identified 401/403 response
+ */
+function isAuthorizationResponse(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+  const statusCode = (error as { statusCode?: unknown }).statusCode;
+  return statusCode === 401 || statusCode === 403;
 }
 
 /**
@@ -220,14 +265,22 @@ export function adaptServiceBusModule(
     connectionString: string;
     adminConnectionString: string;
     logger?: { error: (msg: string) => void } | undefined;
+    retryOptions?: ServiceBusRetryOptions | undefined;
   },
 ): IServiceBusTransport {
-  const client = new mod.ServiceBusClient(options.connectionString);
+  // The retry budget rides the DATA client only: the administration
+  // client's pipeline options are a different contract and never receive it.
+  const client = options.retryOptions !== undefined
+    ? new mod.ServiceBusClient(options.connectionString, { retryOptions: options.retryOptions })
+    : new mod.ServiceBusClient(options.connectionString);
   const admin = new mod.ServiceBusAdministrationClient(options.adminConnectionString);
 
   const senders = new Map<string, ReturnType<typeof client['createSender']>>();
   // Track multiple receiver handles per key to support duplicate opens
   const receivers = new Map<string, OpenReceiver[]>();
+  // Captured once so the probe below needs no assertion and keeps calling
+  // through the owner.
+  const readNamespace = admin.getNamespaceProperties;
 
   return {
     send: async (
@@ -340,6 +393,27 @@ export function adaptServiceBusModule(
       receivers.clear();
       await client.close();
     },
+
+    // M90b: the documented production reachability probe, implemented.
+    // One cheap administration round trip proves the namespace is
+    // reachable; a positively identified 401/403 also counts (the
+    // namespace ANSWERED with an auth verdict — a send/listen-only
+    // credential is not a network outage), and any other failure is
+    // unreachability. Omitted when the module's administration client has
+    // no namespace read, so a minimal fake degrades to `unknown` rather
+    // than lying `down`. The broker caches and bounds this probe.
+    ...(typeof readNamespace === 'function'
+      ? {
+        isHealthy: async (): Promise<boolean> => {
+          try {
+            await readNamespace.call(admin);
+            return true;
+          } catch (error) {
+            return isAuthorizationResponse(error);
+          }
+        },
+      }
+      : {}),
   };
 }
 
@@ -361,6 +435,15 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   #ready = false;
   #subscriptions: Map<string, IServiceBusSubscription>;
   #rr: RequestReplyCore;
+  #retryOptions: ServiceBusRetryOptions | undefined;
+  /**
+   * Cached, bounded reachability probe (M90b), built once at `connect()`
+   * over the resolved transport's `isHealthy`. The broker — not the health
+   * endpoint — owns the 5-second cache and the 2-second bound, so polling
+   * `/health` cannot turn into broker load, and a hung transport cannot
+   * hold a health response past the bound.
+   */
+  #probe: (() => Promise<boolean>) | null = null;
 
   constructor(
     runtime: IRuntimeServices,
@@ -375,6 +458,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     this.#defaultQueue = options?.defaultQueue ?? DEFAULT_QUEUE;
     this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
     this.#logger = options?.logger;
+    this.#retryOptions = options?.retryOptions;
     this.#subscriptions = new Map();
     this.#rr = new RequestReplyCore({
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
@@ -467,6 +551,21 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
         connectionString: this.#connectionString,
         adminConnectionString: this.#adminConnectionString,
         logger: this.#logger,
+        retryOptions: this.#retryOptions,
+      });
+    }
+
+    const transport = this.#transport;
+    if (transport !== null && typeof transport.isHealthy === 'function') {
+      const isHealthy = transport.isHealthy;
+      this.#probe = createCachedProbe({
+        // Bound call: a transport's `isHealthy` may read instance state.
+        probe: () => isHealthy.call(transport),
+        ttlMs: PROBE_TTL_MS,
+        timeoutMs: PROBE_TIMEOUT_MS,
+        hrtime: this.#runtime.hrtime.bind(this.#runtime),
+        setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+        clearTimer: (handle) => this.#runtime.clearTimeout(handle),
       });
     }
 
@@ -493,24 +592,26 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Tri-state backend reachability (M70c).
+   * Tri-state backend reachability (M70c, bounded in M90b).
    *
    * The Azure SDK owns streaming-pull reconnection, so the broker issues no
    * reconnect loop of its own; the probe delegates to the transport's
-   * `isHealthy?()` (the real adapter peeks the namespace via its existing
-   * client). `true`/`false` from the transport, `undefined` when the
-   * transport omits the member (a minimal fake) — the indicator then reports
+   * `isHealthy?()` — the real adapter reads the namespace through the
+   * administration client — through the broker's own cached probe (5 s
+   * TTL, 2 s bound), so repeated health polls cost at most one round trip
+   * per TTL and a hung transport cannot hold a caller past the bound.
+   * `true`/`false` from the probe, `undefined` when the transport omits the
+   * member (a minimal fake) — the indicator then reports
    * `reachable: 'unknown'`.
    *
    * @returns `true`/`false`/`undefined` as described
    * @since 0.1.0
    */
   async reachability(): Promise<boolean | undefined> {
-    const transport = this.#transport;
-    if (transport === null || typeof transport.isHealthy !== 'function') {
+    if (this.#probe === null) {
       return undefined;
     }
-    return await transport.isHealthy();
+    return await this.#probe();
   }
 
   /**

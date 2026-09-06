@@ -6,7 +6,62 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`@setu-ts/messaging-plugin` — Service Bus transport reachability and a retry budget (M90b /
+  X28-5, X28-6).** The adapted `ServiceBusSdkModule` administration client gains an optional
+  `getNamespaceProperties()` and the adapted transport now implements the documented `isHealthy()`
+  probe: a successful read proves the namespace is reachable, a positively identified 401/403 counts
+  as reachable too (the namespace answered — a send/listen-only credential is not a network outage),
+  and any other failure is unreachability. The new `ServiceBusRetryOptions` type (exported) is
+  accepted as `retryOptions` on the `service-bus` production arm only and is passed to
+  `ServiceBusClient` alone, never to the administration client; omission preserves the Azure SDK
+  defaults and `maxRetries: 0` is the documented short budget for failing fast toward a dead broker.
+
+- **`@setu-ts/health-plugin` — bounded, concurrent aggregation.** New
+  `HealthPluginOptions.indicatorTimeoutMs` (positive finite, default 5,000) applies a per-indicator
+  deadline; the service runs selected indicators concurrently, records each latency individually,
+  maps a timeout to `{ status: 'down', data: { reason: 'timeout' } }` and a rejection to
+  `{ status: 'down', data: { reason: 'error' } }` without serializing the thrown value, and keeps
+  `checks` in registration order. See **Changed** for the behavior change to timing.
+
+- **`@setu-ts/database-plugin` — pool capacity as data.** New `DatabasePoolCapacity` type (exported)
+  and `DrizzleAdapterOptions.poolStats` — an application-owned callback reading the driver's own
+  pool API. The adapter publishes the snapshot to the `database` indicator under `data.capacity`;
+  omitted, no capacity fields appear. No threshold is applied.
+
+- **`@setu-ts/cache-plugin`, `@setu-ts/secrets-plugin` — truthful reachability.** The `cache` and
+  `secrets` indicators now report `reachable` (`true`/`false`/`'unknown'`) beside lifecycle, through
+  probes cached 5 s and bounded 2 s via `createCachedProbe`: Redis probes with `ping()`, Vault with
+  an unauthenticated `/v1/sys/health` request (no secret read, no token), memory/noop/env report
+  lifecycle truth, and a cloud facade without the new optional `isHealthy()` member reports
+  `'unknown'` — never a secret read standing in for a probe.
+
+- **`@setu-ts/queue-plugin` — `backlog` fact.** The `queue` indicator carries `backlog` whenever at
+  least one depth read succeeded: the sum of each successful name's `ready + processing`,
+  deliberately excluding terminal `dead`. A fact, not a threshold.
+
 ### Changed
+
+- **BREAKING — `@setu-ts/cache-plugin` — `IRedisClient` gains a required `ping()`.** The Redis
+  store's reachability probe invokes it. Migration: an injected client structurally typed as
+  `IRedisClient` adds `ping(): Promise<string>` (ioredis already has it); the probe treats a
+  rejection as unreachability.
+
+- **BREAKING (behavior) — `@setu-ts/health-plugin` — indicators run concurrently under a deadline.**
+  Previously each selected indicator was awaited in registration order, so a 2-second outage across
+  six dependency indicators held `/health` for 12+ seconds and one never-settling indicator left the
+  endpoint pending forever. A timeout is now recorded as
+  `{ status: 'down', data: { reason: 'timeout' } }` and a rejection as
+  `{ status: 'down', data: { reason: 'error' } }`; report shape and key order are unchanged.
+  Migration: an indicator relying on serial execution relative to a sibling (none is documented to)
+  no longer gets it; assert on the report, not on wall-clock interleaving.
+
+- **`@setu-ts/realtime-backplane-plugin` — the `'messaging'` backplane calls the broker's
+  `isHealthy()` through its owner (X21-1).** The probe was captured as a detached reference, so a
+  broker whose `isHealthy` reads instance state (`ServiceBusBroker`'s private probe cache) threw a
+  bare `TypeError` through the health endpoint. It now invokes `broker.isHealthy()` and retains the
+  broker's own probe cache rather than adding a duplicate one.
 
 - **BREAKING — `@setu-ts/cli` — bare `setu generate` is informational, not an error.** With no
   schematic named it printed the available schematics through the normal output sink yet exited `2`

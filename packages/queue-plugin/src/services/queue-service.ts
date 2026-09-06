@@ -7,22 +7,30 @@
  * @module
  */
 
-import type {
-  AddJobOptions,
-  HealthCheckResult,
-  IJob,
-  IQueue,
-  JobProcessor,
-  ProcessOptions,
-  RecurringOptions,
+import {
+  type AddJobOptions,
+  createCachedProbe,
+  type HealthCheckResult,
+  type HealthIndicatorFn,
+  type IJob,
+  type IQueue,
+  type JobProcessor,
+  type ProcessOptions,
+  type RecurringOptions,
 } from '@setu-ts/common';
-import type { HealthIndicatorFn, IRuntimeServices, TimerHandle } from '@setu-ts/common';
+import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from '../adapters/queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import { runJob } from '../processors/job-processor.ts';
 import type { JobOutcome } from '../processors/job-processor.ts';
 import type { QueueCollector } from '../metrics/queue-collector.ts';
 import { cronNextMs } from '../scheduler/cron-calculator.ts';
+
+/** Reachability outcome cache lifetime for the health probe (M90b), in ms. */
+const PROBE_TTL_MS = 5000;
+
+/** Per-probe timeout (M90b), in milliseconds. A slower probe counts as unreachable. */
+const PROBE_TIMEOUT_MS = 2000;
 
 /**
  * Minimal logger surface the service reports through — structurally compatible
@@ -222,14 +230,26 @@ export class QueueService implements IQueue {
    * right now). A ready-but-unreachable adapter is `down` with
    * `data.reachable: false`; an adapter that cannot probe is `up` with
    * `data.reachable: 'unknown'`. `data.adapter` is preserved.
+   *
+   * M90b: reachability is answered through ONE cached, bounded probe built
+   * here, at indicator-creation (registration) time — 5-second TTL on the
+   * runtime's monotonic clock, 2-second bound on the runtime's own timers —
+   * so polling `/health` costs at most one backend round trip per TTL, a
+   * hung backend cannot hold the response past the bound, and concurrent
+   * callers share one in-flight probe. The probe is called through its
+   * OWNER, since an adapter's `isHealthy` reads instance state. The report
+   * also carries `backlog`, the sum of each successfully-read name's
+   * `ready + processing` — unfinished work; `dead` is terminal and stays
+   * visible per name.
    */
   createHealthIndicator(): HealthIndicatorFn {
+    const probe = this.#buildProbe();
     return async (): Promise<HealthCheckResult> => {
       const adapterName = this.#adapter.constructor.name;
       if (!this.isReady()) {
         return { status: 'down', data: { adapter: adapterName, reachable: false } };
       }
-      if (typeof this.#adapter.isHealthy !== 'function') {
+      if (probe === undefined) {
         return {
           status: 'up',
           data: { adapter: adapterName, reachable: 'unknown', ...(await this.#collectDepths()) },
@@ -240,7 +260,7 @@ export class QueueService implements IQueue {
       // failing round trip per name on every probe interval, each one reported
       // — so an outage would fill the log with depth failures that say nothing
       // the `reachable: false` beside them does not.
-      const reachable = await this.#adapter.isHealthy();
+      const reachable = await probe();
       if (reachable === false) {
         return { status: 'down', data: { adapter: adapterName, reachable: false } };
       }
@@ -249,6 +269,27 @@ export class QueueService implements IQueue {
         data: { adapter: adapterName, reachable: true, ...(await this.#collectDepths()) },
       };
     };
+  }
+
+  /**
+   * Builds the cached, bounded reachability probe over the adapter's
+   * optional `isHealthy` (M90b). `undefined` when the adapter cannot probe —
+   * the indicator then reports `reachable: 'unknown'`.
+   */
+  #buildProbe(): (() => Promise<boolean>) | undefined {
+    const isHealthy = this.#adapter.isHealthy;
+    if (typeof isHealthy !== 'function') {
+      return undefined;
+    }
+    const adapter = this.#adapter;
+    return createCachedProbe({
+      probe: () => isHealthy.call(adapter),
+      ttlMs: PROBE_TTL_MS,
+      timeoutMs: PROBE_TIMEOUT_MS,
+      hrtime: this.#runtime.hrtime.bind(this.#runtime),
+      setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+      clearTimer: (handle) => this.#runtime.clearTimeout(handle),
+    });
   }
 
   /**
@@ -275,14 +316,25 @@ export class QueueService implements IQueue {
       return {};
     }
     const queues: Record<string, QueueDepths> = {};
+    // M90b: the aggregate unfinished-work count across every name whose
+    // depth read SUCCEEDED — `ready + processing` each. `dead` is excluded:
+    // a dead-lettered job is terminal, already visible per name, and would
+    // otherwise make an attended dead-letter queue read as "backlog". A
+    // partial read sums what it could read — facts, not a threshold.
+    let backlog = 0;
     for (const name of this.#processors.keys()) {
       try {
-        queues[name] = await readDepths.call(this.#adapter, name);
+        const depth = await readDepths.call(this.#adapter, name);
+        queues[name] = depth;
+        backlog += depth.ready + depth.processing;
       } catch (error) {
         this.#report('queue depth probe failed', error, { name });
       }
     }
-    return Object.keys(queues).length === 0 ? {} : { queues };
+    if (Object.keys(queues).length === 0) {
+      return {};
+    }
+    return { queues, backlog };
   }
 
   #startWorkerLoop(): void {

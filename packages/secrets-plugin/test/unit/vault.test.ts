@@ -134,4 +134,45 @@ describe('HashiCorpVaultProvider', () => {
       globalThis.fetch = original;
     }
   });
+
+  describe('isHealthy (M90b)', () => {
+    it('probes /v1/sys/health with no token and no secret read', async () => {
+      const calls: Call[] = [];
+      const provider = new HashiCorpVaultProvider({
+        ...base,
+        http: fakeHttp(jsonResponse({ initialized: true, sealed: false }), calls),
+      });
+      await provider.connect();
+
+      await expect(provider.isHealthy()).resolves.toBe(true);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].url).toBe('https://vault.example.com/v1/sys/health');
+      expect(calls[0].init?.method).toBe('GET');
+      const headers = (calls[0].init?.headers ?? {}) as Record<string, string>;
+      expect(headers['X-Vault-Token']).toBeUndefined();
+    });
+
+    it('counts any HTTP status as reachable — Vault reports standby/sealed states via status codes', async () => {
+      const provider = new HashiCorpVaultProvider({
+        ...base,
+        http: fakeHttp(new Response(null, { status: 429 }), []),
+      });
+      await provider.connect();
+      await expect(provider.isHealthy()).resolves.toBe(true);
+    });
+
+    it('resolves false on a network failure', async () => {
+      const provider = new HashiCorpVaultProvider({
+        ...base,
+        http: (() => Promise.reject(new Error('ECONNREFUSED'))) as unknown as IVaultHttp,
+      });
+      await provider.connect();
+      await expect(provider.isHealthy()).resolves.toBe(false);
+    });
+
+    it('resolves false with no address configured', async () => {
+      const provider = new HashiCorpVaultProvider({});
+      await expect(provider.isHealthy()).resolves.toBe(false);
+    });
+  });
 });

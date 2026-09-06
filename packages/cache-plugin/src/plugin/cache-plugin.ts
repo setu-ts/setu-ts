@@ -7,8 +7,19 @@
  *
  * @module
  */
-import type { ICacheStore, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
-import { CAPABILITIES, createCapabilityToken, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type {
+  ICacheStore,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+  TimerHandle,
+} from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createCachedProbe,
+  createCapabilityToken,
+  PLUGIN_PRIORITY,
+} from '@setu-ts/common';
 import type { CachePluginOptions, CacheStoreOptions } from '../interfaces/index.ts';
 import type { CacheStore } from '../stores/cache-store.ts';
 import { MemoryStore } from '../stores/memory-store.ts';
@@ -103,13 +114,31 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
       // Register the cache service under the derived token.
       ctx.services.register<ICacheStore>(token, service);
 
-      // Register health indicator.
-      // deno-lint-ignore require-await -- HealthIndicatorFn requires Promise return but backend.isReady() is sync
+      // Register health indicator. M90b: reports BOTH signals. `isReady()`
+      // is lifecycle (never started / shut down → `down`); the cached probe
+      // is reachability (the backend answers right now). A ready backend
+      // whose probe fails is `down` with `data.reachable: false`; a backend
+      // that cannot probe is `up` with `data.reachable: 'unknown'` —
+      // never a falsely affirmative `true`.
+      const probe = buildReachabilityProbe(backend, ctx);
+
       ctx.health.register(`${token}`, async () => {
-        const ready = backend.isReady();
+        if (!backend.isReady()) {
+          return {
+            status: 'down',
+            data: { store: storeType, name: instanceName, reachable: false },
+          };
+        }
+        if (probe === undefined) {
+          return {
+            status: 'up',
+            data: { store: storeType, name: instanceName, reachable: 'unknown' },
+          };
+        }
+        const reachable = await probe();
         return {
-          status: ready ? 'up' : 'down',
-          data: { store: storeType, name: instanceName },
+          status: reachable ? 'up' : 'down',
+          data: { store: storeType, name: instanceName, reachable },
         };
       });
 
@@ -188,6 +217,70 @@ function buildStoreOptions(opts?: CacheStoreOptions): CacheStoreOptions {
     result.maxSize = opts.maxSize;
   }
   return result as CacheStoreOptions;
+}
+
+/**
+ * Builds the cached, bounded reachability probe for a backend (M90b).
+ *
+ * One `createCachedProbe` closure per plugin instance, constructed at
+ * registration time: it coalesces concurrent health callers into a single
+ * in-flight probe, caches the outcome for a TTL, and bounds each probe with
+ * a timeout, so polling `/health` never turns into backend load. The TTL is
+ * measured on the runtime's monotonic clock and the timeout on the runtime's
+ * own timers; without a runtime capability (bare unit-test contexts) the
+ * helper's ambient-timer defaults apply over a monotonic `performance`
+ * reading.
+ *
+ * @param backend - The connected backend store
+ * @param ctx - Plugin context (runtime resolution)
+ * @returns The cached probe, or `undefined` when the backend cannot probe
+ */
+function buildReachabilityProbe(
+  backend: CacheStore,
+  ctx: IPluginContext,
+): (() => Promise<boolean>) | undefined {
+  const isHealthy = backend.isHealthy;
+  if (typeof isHealthy !== 'function') {
+    return undefined;
+  }
+  const timing = resolveProbeTiming(ctx);
+  return createCachedProbe({
+    // Bound call: the store's `isHealthy` reads private state, so it must be
+    // invoked on its owner.
+    probe: () => isHealthy.call(backend),
+    ttlMs: PROBE_TTL_MS,
+    timeoutMs: PROBE_TIMEOUT_MS,
+    hrtime: timing.hrtime,
+    ...(timing.setTimer !== undefined ? { setTimer: timing.setTimer } : {}),
+    ...(timing.clearTimer !== undefined ? { clearTimer: timing.clearTimer } : {}),
+  });
+}
+
+/** Reachability outcome cache lifetime, in milliseconds. */
+const PROBE_TTL_MS = 5000;
+
+/** Per-probe timeout, in milliseconds. A slower probe counts as unreachable. */
+const PROBE_TIMEOUT_MS = 2000;
+
+/**
+ * Resolves the probe's monotonic clock and timer surface from the runtime
+ * capability when registered, falling back to a monotonic `performance`
+ * reading (the ambient timers stay the probe helper's own defaults).
+ */
+function resolveProbeTiming(ctx: IPluginContext): {
+  hrtime: () => number;
+  setTimer?: ((fn: () => void, ms: number) => TimerHandle) | undefined;
+  clearTimer?: ((handle: TimerHandle) => void) | undefined;
+} {
+  if (ctx.services.has(CAPABILITIES.RUNTIME)) {
+    const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    return {
+      hrtime: runtime.hrtime.bind(runtime),
+      setTimer: runtime.setTimeout.bind(runtime),
+      clearTimer: runtime.clearTimeout.bind(runtime),
+    };
+  }
+  return { hrtime: () => performance.now() };
 }
 
 /**

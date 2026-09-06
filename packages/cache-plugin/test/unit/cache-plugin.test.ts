@@ -5,6 +5,7 @@ import type { IPluginContext } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { CachePlugin } from '../../src/plugin/cache-plugin.ts';
+import { createFakeIoredis } from '../fixtures/fake-ioredis-client.ts';
 import manifest from '../../deno.json' with { type: 'json' };
 
 /**
@@ -265,9 +266,14 @@ describe('CachePlugin', () => {
   describe('runtime clock injection', () => {
     it('resolves clock from runtime service when available', async () => {
       const { ctx, registered } = createFakeContext();
-      // Register a fake runtime so resolveClock can find it.
+      // Register a fake runtime so resolveClock can find it. The double
+      // carries every member the plugin reads (hrtime for the memory
+      // clock, the timer pair for the M90b reachability probe) — the real
+      // IRuntimeServices contract requires all of them.
       ctx.services.register(CAPABILITIES.RUNTIME, {
         hrtime: () => 12345,
+        setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+        clearTimeout: (handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>),
       });
       const plugin = CachePlugin();
       await plugin.register(ctx);
@@ -292,6 +298,65 @@ describe('CachePlugin', () => {
     it('has version 0.1.0', () => {
       const plugin = CachePlugin();
       expect(plugin.version).toBe(manifest.version);
+    });
+  });
+
+  describe('health reachability (M90b)', () => {
+    it('reports down with reachable: false when Redis ping fails', async () => {
+      const plugin = CachePlugin({
+        store: 'redis',
+        options: { client: createFakeIoredis({ pingSucceeds: false }).client },
+      });
+      const { ctx, healthIndicators } = createFakeContext();
+      await plugin.register(ctx);
+
+      const indicator = healthIndicators.get(CAPABILITIES.CACHE) as () => Promise<{
+        status: string;
+        data?: Record<string, unknown>;
+      }>;
+      const health = await indicator();
+      expect(health.status).toBe('down');
+      expect(health.data?.['reachable']).toBe(false);
+      expect(health.data?.['store']).toBe('redis');
+    });
+
+    it('reports up with reachable: true when Redis answers', async () => {
+      const plugin = CachePlugin({
+        store: 'redis',
+        options: { client: createFakeIoredis().client },
+      });
+      const { ctx, healthIndicators } = createFakeContext();
+      await plugin.register(ctx);
+
+      const indicator = healthIndicators.get(CAPABILITIES.CACHE) as () => Promise<{
+        status: string;
+        data?: Record<string, unknown>;
+      }>;
+      const health = await indicator();
+      expect(health.status).toBe('up');
+      expect(health.data?.['reachable']).toBe(true);
+    });
+
+    it('coalesces concurrent checks into one ping per TTL', async () => {
+      const fake = createFakeIoredis();
+      let pingCalls = 0;
+      const counting = Object.create(fake.client) as typeof fake.client;
+      counting.ping = (): Promise<string> => {
+        pingCalls++;
+        return Promise.resolve('PONG');
+      };
+      const plugin = CachePlugin({ store: 'redis', options: { client: counting } });
+      const { ctx, healthIndicators } = createFakeContext();
+      await plugin.register(ctx);
+
+      const indicator = healthIndicators.get(CAPABILITIES.CACHE) as () => Promise<{
+        status: string;
+        data?: Record<string, unknown>;
+      }>;
+      // Two back-to-back invocations land inside the probe TTL: the second
+      // is served from the cached outcome, not a second backend round trip.
+      await Promise.all([indicator(), indicator()]);
+      expect(pingCalls).toBe(1);
     });
   });
 });

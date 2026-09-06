@@ -10,8 +10,9 @@ import type {
   IPluginContext,
   IRuntimeServices,
   ISecretManager,
+  TimerHandle,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, createCachedProbe, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   IAwsSecretsClient,
   IAzureSecretsClient,
@@ -126,11 +127,28 @@ export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
       // Log metadata only — never a secret value (AI_GUIDELINES §13.3).
       logger?.debug('SecretsPlugin registered', { provider: providerType });
 
-      ctx.health.register(CAPABILITIES.SECRETS, () =>
-        Promise.resolve({
-          status: provider.isReady() ? 'up' : 'down',
-          data: { provider: providerType },
-        }));
+      // M90b: reports BOTH signals. `isReady()` is lifecycle (never
+      // started / shut down → `down`); the cached probe is reachability.
+      // A ready provider whose probe fails is `down` with
+      // `data.reachable: false`; a provider with no non-mutating probe is
+      // `up` with `data.reachable: 'unknown'` — a null/absent secret is
+      // never used as a health answer, so health cannot alter data
+      // semantics.
+      const probe = buildReachabilityProbe(provider, ctx);
+
+      ctx.health.register(CAPABILITIES.SECRETS, async () => {
+        if (!provider.isReady()) {
+          return { status: 'down', data: { provider: providerType, reachable: false } };
+        }
+        if (probe === undefined) {
+          return { status: 'up', data: { provider: providerType, reachable: 'unknown' } };
+        }
+        const reachable = await probe();
+        return {
+          status: reachable ? 'up' : 'down',
+          data: { provider: providerType, reachable },
+        };
+      });
 
       ctx.lifecycle.onClose(async () => {
         await provider.disconnect();
@@ -173,6 +191,67 @@ function resolveLogger(ctx: IPluginContext): ILogger | undefined {
     return ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
   }
   return undefined;
+}
+
+/**
+ * Builds the cached, bounded reachability probe for a provider (M90b).
+ *
+ * One `createCachedProbe` closure per plugin instance, constructed at
+ * registration time: concurrent health callers share one in-flight probe,
+ * the outcome is cached for a TTL on the runtime's monotonic clock, and
+ * each probe is bounded by the runtime's own timers. `undefined` when the
+ * provider offers no probe — the indicator then reports
+ * `reachable: 'unknown'`.
+ *
+ * @param provider - The connected provider
+ * @param ctx - Plugin context (runtime resolution)
+ * @returns The cached probe, or `undefined` when the provider cannot probe
+ */
+function buildReachabilityProbe(
+  provider: SecretProvider,
+  ctx: IPluginContext,
+): (() => Promise<boolean>) | undefined {
+  const isHealthy = provider.isHealthy;
+  if (typeof isHealthy !== 'function') {
+    return undefined;
+  }
+  const timing = resolveProbeTiming(ctx);
+  return createCachedProbe({
+    // Bound call: a provider's `isHealthy` may read instance state.
+    probe: () => isHealthy.call(provider),
+    ttlMs: PROBE_TTL_MS,
+    timeoutMs: PROBE_TIMEOUT_MS,
+    hrtime: timing.hrtime,
+    ...(timing.setTimer !== undefined ? { setTimer: timing.setTimer } : {}),
+    ...(timing.clearTimer !== undefined ? { clearTimer: timing.clearTimer } : {}),
+  });
+}
+
+/** Reachability outcome cache lifetime, in milliseconds. */
+const PROBE_TTL_MS = 5000;
+
+/** Per-probe timeout, in milliseconds. A slower probe counts as unreachable. */
+const PROBE_TIMEOUT_MS = 2000;
+
+/**
+ * Resolves the probe's monotonic clock and timer surface from the runtime
+ * capability when registered, falling back to a monotonic `performance`
+ * reading (the ambient timers stay the probe helper's own defaults).
+ */
+function resolveProbeTiming(ctx: IPluginContext): {
+  hrtime: () => number;
+  setTimer?: ((fn: () => void, ms: number) => TimerHandle) | undefined;
+  clearTimer?: ((handle: TimerHandle) => void) | undefined;
+} {
+  if (ctx.services.has(CAPABILITIES.RUNTIME)) {
+    const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    return {
+      hrtime: runtime.hrtime.bind(runtime),
+      setTimer: runtime.setTimeout.bind(runtime),
+      clearTimer: runtime.clearTimeout.bind(runtime),
+    };
+  }
+  return { hrtime: () => performance.now() };
 }
 
 /** Narrows an injected client to the AWS facade by structural probe. */

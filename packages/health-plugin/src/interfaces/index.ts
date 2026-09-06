@@ -77,4 +77,20 @@ export interface HealthPluginOptions {
    * Defaults to `[]`.
    */
   readonly indicators?: readonly HealthIndicatorEntry[];
+
+  /**
+   * Deadline applied independently to every selected indicator, in
+   * milliseconds (M90b). Must be a positive finite number; anything else —
+   * zero, negative, `NaN`, `Infinity` — throws at plugin construction.
+   *
+   * An indicator that has not settled within the deadline is recorded as
+   * `{ status: 'down', data: { reason: 'timeout' } }`; one that rejects is
+   * recorded as `{ status: 'down', data: { reason: 'error' } }`. Either way
+   * the report itself stays bounded, so a dead dependency can no longer
+   * leave the whole endpoint pending.
+   *
+   * @default 5000
+   * @since 0.5.0
+   */
+  readonly indicatorTimeoutMs?: number;
 }

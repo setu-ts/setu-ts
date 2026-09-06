@@ -4335,6 +4335,29 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   marker — the v0.3.0 lesson, where a marker shielded live guidance — they now read
   "pre-derivation", which cannot go stale. Every marker in the tree was re-audited; all four shield
   genuinely historical text, with the live sentences above them.
+- **Milestone 90b** (`packages/secrets-plugin` + `packages/cache-plugin` +
+  `packages/realtime-backplane-plugin` + `packages/messaging-plugin` + `packages/health-plugin` +
+  `packages/queue-plugin` + `packages/database-plugin` — health that tells the truth, bounded) —
+  complete (PR pending). The last two packages without the `isHealthy` seam (X20-1/X29-1) now probe
+  real reachability through `createCachedProbe` (5 s TTL, 2 s bound, runtime clock and timers):
+  cache via a typed `ping()` on `IRedisClient` (BREAKING for injected-client facades — required
+  member), Vault via an unauthenticated `/v1/sys/health` request (no secret read, no token),
+  memory/noop/env via lifecycle truth, and cloud secrets via an OPTIONAL `isHealthy()` on the
+  injected facades — a facade without it reports `reachable: 'unknown'`, never a secret read
+  standing in for a probe. X28-5: the Service Bus adapter implements the probe its JSDoc claimed —
+  one administration `getNamespaceProperties()` round trip, with a positively identified 401/403
+  counted as reachable (the namespace answered — a send/listen-only credential is not an outage) —
+  and the broker owns the cached probe, while the new `ServiceBusRetryOptions` (production arm only)
+  gives X28-6's documented `maxRetries: 0` escape hatch without touching the SDK defaults. X21-1:
+  the messaging backplane calls `broker.isHealthy()` through its owner instead of a detached
+  reference that threw on any stateful broker. X29-2: health aggregation runs selected indicators
+  CONCURRENTLY under a per-indicator deadline (`HealthPluginOptions.indicatorTimeoutMs`, default
+  5,000, validated at construction), mapping timeouts to `{ reason: 'timeout' }` and rejections to
+  `{ reason: 'error' }` without serializing the throw; registration order is preserved in `checks`.
+  X35-1/X25-1 publish saturation as data, not policy: a Drizzle `poolStats` callback
+  (application-owned; new exported `DatabasePoolCapacity`) surfaces `data.capacity`, and the queue
+  indicator carries `backlog` = Σ(ready + processing) over successfully-read names, `dead`
+  deliberately excluded as terminal.
 - **Next milestone** — **M40** (final release), the only open row in Progress Tracking: the 1.0 gate
   named in README's Versioning section — benchmarks, a security audit, and the Node/Bun compat
   suites as release gates. The `smoke/` programme's X16–X19 exercises against published `0.3.0`

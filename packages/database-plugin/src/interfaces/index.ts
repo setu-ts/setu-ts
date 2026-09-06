@@ -668,6 +668,27 @@ export interface DrizzleCompositeKeyOptions {
 }
 
 /**
+ * A point-in-time reading of the database driver's connection-pool counters
+ * (M90b).
+ *
+ * The application supplies the reading — it owns the driver and its
+ * documented pool API, which a framework package cannot reach through the
+ * opaque configured Drizzle instance. The adapter publishes the snapshot to
+ * the `database` health indicator verbatim; no threshold is applied and no
+ * status changes because of it: saturation is data before policy.
+ *
+ * @since 0.5.0
+ */
+export interface DatabasePoolCapacity {
+  /** Total connections the pool holds (idle + in use). */
+  readonly total: number;
+  /** Connections currently idle in the pool. */
+  readonly idle: number;
+  /** Callers currently waiting for a connection. */
+  readonly waiting: number;
+}
+
+/**
  * {@linkcode DatabaseAdapterOptions} narrowed for the Drizzle arm: the
  * configured instance and the table registry are both required.
  *
@@ -733,6 +754,35 @@ export interface DrizzleAdapterOptions extends DatabaseAdapterOptions {
    * @since 0.2.0
    */
   readonly entities?: Readonly<Record<string, DrizzleCompositeKeyOptions>>;
+
+  /**
+   * Application-owned callback reporting the driver's connection-pool
+   * counters (M90b). The application reads its own driver's documented pool
+   * API — the configured Drizzle identity is opaque to this package — and
+   * the adapter publishes the returned {@linkcode DatabasePoolCapacity}
+   * snapshot to the `database` health indicator through an internal seam.
+   *
+   * Omitted, the indicator carries no capacity fields. No threshold is
+   * applied: saturation is data, not policy.
+   *
+   * @example
+   * ```typescript
+   * app.register(DatabasePlugin({
+   *   type: 'drizzle',
+   *   options: {
+   *     drizzleInstance: createDrizzleDatabase(db, bridge),
+   *     drizzleTables,
+   *     poolStats: () => ({
+   *       total: pool.totalCount,
+   *       idle: pool.idleCount,
+   *       waiting: pool.waitingCount,
+   *     }),
+   *   },
+   * }));
+   * ```
+   * @since 0.5.0
+   */
+  readonly poolStats?: () => DatabasePoolCapacity;
 }
 
 /**

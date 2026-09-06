@@ -63,6 +63,10 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
     ready: '/ready',
   };
   const indicators: readonly HealthIndicatorEntry[] = options?.indicators ?? [];
+  // Validated at CONSTRUCTION, not register: a bad deadline is a
+  // configuration error the caller can fix before any plugin runs, and the
+  // failure names the option (M90b).
+  const indicatorTimeoutMs = resolveIndicatorTimeout(options?.indicatorTimeoutMs);
 
   // Split the two arms once, at plugin construction, so `register` and the
   // `onInit` hook each read a single list. Instances keep their pre-factory
@@ -93,7 +97,7 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       const runtime = ctx.runtime;
 
       // Create the health service
-      const service = new HealthService(runtime);
+      const service = new HealthService(runtime, { indicatorTimeoutMs });
 
       // Register the service
       ctx.services.register<IHealthService>(CAPABILITIES.HEALTH, service);
@@ -137,6 +141,30 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       });
     },
   };
+}
+
+/** Default per-indicator deadline (M90b), in milliseconds. */
+const DEFAULT_INDICATOR_TIMEOUT_MS = 5000;
+
+/**
+ * Validates the per-indicator deadline (M90b).
+ *
+ * @param raw - The configured value, or `undefined` for the default
+ * @returns The validated deadline in milliseconds
+ * @throws {Error} When the value is not a positive finite number
+ */
+function resolveIndicatorTimeout(raw: number | undefined): number {
+  if (raw === undefined) {
+    return DEFAULT_INDICATOR_TIMEOUT_MS;
+  }
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
+    throw new Error(
+      `HealthPlugin({ indicatorTimeoutMs }) must be a positive finite number of milliseconds, received ${
+        String(raw)
+      }`,
+    );
+  }
+  return raw;
 }
 
 /**

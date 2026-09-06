@@ -123,6 +123,34 @@ export class HashiCorpVaultProvider implements SecretProvider {
     }
   }
 
+  /**
+   * Probes Vault's unauthenticated `/v1/sys/health` (M90b). Any HTTP
+   * response proves the server answered — Vault reports its standby and
+   * sealing states through STATUS CODES on this endpoint, all of which mean
+   * "reachable" — and a network failure does not. No secret is read and the
+   * auth token is not sent: the health endpoint is unauthenticated by
+   * design, and a read is not a probe.
+   *
+   * @returns `true` when the Vault server answers
+   * @since 0.5.0
+   */
+  async isHealthy(): Promise<boolean> {
+    if (this.#address === '') {
+      return false;
+    }
+    try {
+      const res = await this.#http(`${this.#address}/v1/sys/health`, { method: 'GET' });
+      // Release the unread body so the connection is not held open.
+      await res.body?.cancel().catch(() => {
+        // A body the transport already closed cannot be cancelled; the
+        // status answer still proved reachability.
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Builds the KV v2 data URL for a secret path. */
   #dataUrl(name: string): string {
     return `${this.#address}/v1/${this.#mount}/data/${name}`;

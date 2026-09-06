@@ -45,9 +45,15 @@ export function createFakeContext(
   const onCloseHandlers: Array<() => Promise<void> | void> = [];
   const logs: LogCall[] = [];
 
+  // The double carries every member the plugin reads. The real
+  // IRuntimeServices contract requires the timer pair, and the M90b
+  // reachability probe builds on it — a runtime missing them is a
+  // contract-violating double that hides defects.
   const runtime = {
     env,
     hrtime: (): number => performance.now(),
+    setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+    clearTimeout: (handle: unknown): void => clearTimeout(handle as ReturnType<typeof setTimeout>),
   } as unknown as IRuntimeServices;
   if (registerRuntimeService) {
     registered.set(CAPABILITIES.RUNTIME, runtime);

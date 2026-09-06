@@ -10,7 +10,7 @@ import { AwsKmsProvider } from '../../src/providers/aws-kms.ts';
 import { GcpSecretManagerProvider } from '../../src/providers/gcp-secret-manager.ts';
 import { AzureKeyVaultProvider } from '../../src/providers/azure-key-vault.ts';
 import { HashiCorpVaultProvider } from '../../src/providers/vault.ts';
-import type { SecretsProviderType } from '../../src/interfaces/index.ts';
+import type { IVaultHttp, SecretsProviderType } from '../../src/interfaces/index.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import manifest from '../../deno.json' with { type: 'json' };
 
@@ -83,10 +83,11 @@ describe('SecretsPlugin.register', () => {
     const service = registered.get(CAPABILITIES.SECRETS) as ISecretManager;
     expect(await service.get('database/password')).toBe('s3cret');
 
-    // The health indicator reports up for a ready provider.
+    // The health indicator reports up for a ready provider, with the
+    // env provider's lifecycle-truth reachability (M90b).
     const health = await healthIndicators.get(CAPABILITIES.SECRETS)!();
     expect(health.status).toBe('up');
-    expect(health.data).toEqual({ provider: 'env' });
+    expect(health.data).toEqual({ provider: 'env', reachable: true });
 
     // The close handler runs without error.
     await onCloseHandlers[0]();
@@ -137,5 +138,70 @@ describe('SecretsPlugin.register', () => {
 
     const service = registered.get(CAPABILITIES.SECRETS) as ISecretManager;
     expect(await service.get('token')).toBe('t');
+  });
+
+  describe('health reachability (M90b)', () => {
+    interface HealthFn {
+      (): Promise<{ status: string; data?: Record<string, unknown> }>;
+    }
+
+    it('reports unknown for an injected facade without a probe — never a false true', async () => {
+      const client = {
+        getSecretValue: (_id: string): Promise<string | null> => Promise.resolve('v'),
+        putSecretValue: (_id: string, _v: string): Promise<void> => Promise.resolve(),
+      };
+      const plugin = SecretsPlugin({ provider: 'aws-kms', options: { client } });
+      const { ctx, healthIndicators } = createFakeContext();
+      await plugin.register(ctx);
+
+      const indicator = healthIndicators.get(CAPABILITIES.SECRETS) as HealthFn;
+      const health = await indicator();
+      expect(health.status).toBe('up');
+      expect(health.data).toEqual({ provider: 'aws-kms', reachable: 'unknown' });
+    });
+
+    it('reports down with reachable: false when the provider probe fails', async () => {
+      const plugin = SecretsPlugin({
+        provider: 'vault',
+        options: {
+          address: 'https://vault.example.com',
+          token: 't',
+          http: (() => Promise.reject(new Error('ECONNREFUSED'))) as unknown as IVaultHttp,
+        },
+      });
+      const { ctx, healthIndicators } = createFakeContext();
+      await plugin.register(ctx);
+
+      const indicator = healthIndicators.get(CAPABILITIES.SECRETS) as HealthFn;
+      const health = await indicator();
+      expect(health.status).toBe('down');
+      expect(health.data).toEqual({ provider: 'vault', reachable: false });
+    });
+
+    it('reports down with reachable: false when the provider was never connected', async () => {
+      // A provider that fails connect() never reaches the indicator
+      // registration, so drive the not-ready branch through a provider whose
+      // backend probe answers false AFTER a successful connect: disconnect
+      // via the close handler, then read the indicator.
+      const plugin = SecretsPlugin({
+        provider: 'vault',
+        options: {
+          address: 'https://vault.example.com',
+          token: 't',
+          http: (() =>
+            Promise.resolve(
+              new Response(JSON.stringify({ initialized: true }), { status: 200 }),
+            )) as unknown as IVaultHttp,
+        },
+      });
+      const { ctx, healthIndicators, onCloseHandlers } = createFakeContext();
+      await plugin.register(ctx);
+      await onCloseHandlers[0]();
+
+      const indicator = healthIndicators.get(CAPABILITIES.SECRETS) as HealthFn;
+      const health = await indicator();
+      expect(health.status).toBe('down');
+      expect(health.data).toEqual({ provider: 'vault', reachable: false });
+    });
   });
 });

@@ -88,6 +88,7 @@ export type {
   RedisStreamsMessagingOptions,
   RedisStreamsOptions,
   ServiceBusMessagingOptions,
+  ServiceBusRetryOptions,
   SubscriptionDefinition,
   SubscriptionEntry,
 } from './interfaces/index.ts';

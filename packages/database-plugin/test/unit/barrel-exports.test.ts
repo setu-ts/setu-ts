@@ -26,6 +26,7 @@ import type {
   CosmosQuerySpec,
   CosmosRequestOptions,
   CursorValue,
+  DatabasePoolCapacity,
   DrizzleAdapterOptions,
   DrizzleDatabaseOptions,
   DynamoAdapterOptions,
@@ -134,6 +135,13 @@ describe('database-plugin barrel exports', () => {
   it('re-exports CursorValue from the application-facing data-access contract', () => {
     const cursorValue: CursorValue = new Date('2026-08-31T00:00:00.000Z');
     expect(cursorValue).toBeInstanceOf(Date);
+  });
+
+  it('re-exports DatabasePoolCapacity, which types a published option (M90b)', () => {
+    // Compile-time pin (the M56 defect class): a type export leaves no
+    // runtime trace, so an annotation is the assertion.
+    const capacity: DatabasePoolCapacity = { total: 10, idle: 4, waiting: 0 };
+    expect(capacity.total).toBe(10);
   });
 
   it('re-exports SqlJsonDialect, which types a published option', () => {

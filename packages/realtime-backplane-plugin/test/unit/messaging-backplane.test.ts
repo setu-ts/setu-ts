@@ -208,3 +208,42 @@ describe('MessagingBackplane handler isolation', () => {
     await backplane.close();
   });
 });
+
+describe('MessagingBackplane isHealthy (M90b / X21-1)', () => {
+  /**
+   * A broker whose `isHealthy` READS INSTANCE STATE — the shape the
+   * detached-reference defect could not survive: capturing
+   * `const probe = broker.isHealthy` and calling `probe()` throws a bare
+   * `TypeError`, which a health endpoint reports as an error instead of a
+   * fact.
+   */
+  class BrokerWithStatefulProbe extends FakeBroker {
+    #reachable = true;
+    isHealthy(): Promise<boolean> {
+      return Promise.resolve(this.#reachable);
+    }
+    setReachable(value: boolean): void {
+      this.#reachable = value;
+    }
+  }
+
+  it('delegates through the OWNER, so a stateful broker probe resolves', async () => {
+    const broker = new BrokerWithStatefulProbe();
+    const backplane = new MessagingBackplane(broker, 'origin-a', 'frames');
+    expect(typeof backplane.isHealthy).toBe('function');
+    await expect(backplane.isHealthy!()).resolves.toBe(true);
+  });
+
+  it('retains the live broker state: a later outage is reported, not cached', async () => {
+    const broker = new BrokerWithStatefulProbe();
+    const backplane = new MessagingBackplane(broker, 'origin-a', 'frames');
+    await expect(backplane.isHealthy!()).resolves.toBe(true);
+    broker.setReachable(false);
+    await expect(backplane.isHealthy!()).resolves.toBe(false);
+  });
+
+  it('stays undefined when the broker has no probe — unknown, not false', () => {
+    const backplane = new MessagingBackplane(new FakeBroker(), 'origin-a', 'frames');
+    expect(backplane.isHealthy).toBeUndefined();
+  });
+});

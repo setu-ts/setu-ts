@@ -32,6 +32,8 @@ import {
   resolveKeysetSort,
   sortFingerprint,
 } from '@setu-ts/common';
+import { DATABASE_POOL_CAPACITY } from '../../health/database-capacity.ts';
+import type { DatabasePoolCapacity } from '../../interfaces/index.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
 import { UnsupportedQueryFeatureError } from '../../errors.ts';
@@ -190,6 +192,14 @@ export type DrizzleOperators = {
  * @since 0.1.0
  */
 export class DrizzleAdapter implements IDatabaseAdapter {
+  /**
+   * Internal capacity-reader seam (M90b). Attached in the constructor ONLY
+   * when `poolStats` is configured; `DatabasePlugin` feature-detects it, and
+   * every other adapter — built-in or custom — carries no member, so
+   * `common`'s port and every non-Drizzle registration stay unchanged.
+   */
+  [DATABASE_POOL_CAPACITY]?: () => DatabasePoolCapacity;
+
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
   private _transactionBridge:
@@ -201,6 +211,12 @@ export class DrizzleAdapter implements IDatabaseAdapter {
 
   constructor(options?: DatabaseAdapterOptions) {
     this._options = options ?? undefined;
+    // The application owns the pool callback; the adapter only publishes
+    // what it returns, validated at read time by the plugin.
+    const poolStats = (this._options as DrizzleAdapterOptions | undefined)?.poolStats;
+    if (poolStats !== undefined) {
+      this[DATABASE_POOL_CAPACITY] = poolStats;
+    }
   }
 
   /** @inheritdoc */

@@ -189,4 +189,28 @@ describe('RedisStore', () => {
       expect(typeof RedisCtor).toBe('function');
     });
   });
+
+  describe('isHealthy (M90b)', () => {
+    it('resolves true when the client answers ping', async () => {
+      const { client } = createFakeIoredis();
+      const store = new RedisStore('', { client });
+      await store.connect();
+      await expect(store.isHealthy()).resolves.toBe(true);
+    });
+
+    it('resolves false when ping rejects (outage)', async () => {
+      const { client } = createFakeIoredis({ pingSucceeds: false });
+      const store = new RedisStore('', { client });
+      await store.connect();
+      await expect(store.isHealthy()).resolves.toBe(false);
+    });
+
+    it('resolves false after disconnect — no client, no answer', async () => {
+      const { client } = createFakeIoredis();
+      const store = new RedisStore('', { client });
+      await store.connect();
+      await store.disconnect();
+      await expect(store.isHealthy()).resolves.toBe(false);
+    });
+  });
 });

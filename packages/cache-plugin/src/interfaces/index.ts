@@ -70,6 +70,15 @@ export interface IRedisClient {
   /** Check if a key exists. Returns `1` or `0`. */
   exists(key: string): Promise<number>;
   /**
+   * Pings the server (M90b). The Redis store's reachability probe invokes it;
+   * a `PONG` response proves the backend is reachable, and a rejection does
+   * not. The real ioredis client implements it.
+   *
+   * @returns The server's `PONG` reply
+   * @since 0.5.0
+   */
+  ping(): Promise<string>;
+  /**
    * Cursor-based scan. Returns `[cursor, keys[]]`. Use `'0'` to start
    * and continue until cursor returns `'0'`.
    */

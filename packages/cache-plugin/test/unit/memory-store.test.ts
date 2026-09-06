@@ -184,4 +184,16 @@ describe('MemoryStore', () => {
       expect(result).toEqual({ hello: 'world' });
     });
   });
+
+  describe('isHealthy (M90b)', () => {
+    it('returns lifecycle truth: true after connect, false after disconnect', async () => {
+      const fresh = new MemoryStore('');
+      // Not connected yet.
+      await expect(fresh.isHealthy()).resolves.toBe(false);
+      await fresh.connect();
+      await expect(fresh.isHealthy()).resolves.toBe(true);
+      await fresh.disconnect();
+      await expect(fresh.isHealthy()).resolves.toBe(false);
+    });
+  });
 });
