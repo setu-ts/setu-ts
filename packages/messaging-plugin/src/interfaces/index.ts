@@ -489,7 +489,11 @@ export interface ServiceBusRetryOptions {
   readonly retryDelayInMs?: number;
   /** Ceiling the exponential backoff grows to, in milliseconds. The SDK default is `90000`. */
   readonly maxRetryDelayInMs?: number;
-  /** Backoff curve. The SDK default is `'exponential'`. */
+  /**
+   * Backoff curve. Translated to the SDK's numeric `RetryMode` before
+   * `ServiceBusClient` is constructed (the SDK compares the value with
+   * `===` against its enum). The SDK default when omitted is `'fixed'`.
+   */
   readonly mode?: 'fixed' | 'exponential';
   /** Whole-operation timeout, in milliseconds. The SDK default is `60000`. */
   readonly timeoutInMs?: number;

@@ -31,6 +31,20 @@ describe('RedisStore', () => {
       };
       expect(validateClient(partial)).toBe(false); // missing quit
     });
+
+    it('returns false when the client lacks ping — the probe needs it', () => {
+      // M90b: a client without `ping` would register and then fail every
+      // health poll inside isHealthy's catch; reject it at validation.
+      const withoutPing: Partial<IRedisClient> = {
+        get: async () => null,
+        set: async () => null,
+        del: async () => 0,
+        exists: async () => 0,
+        scan: async () => ['0', []],
+        quit: async () => {},
+      };
+      expect(validateClient(withoutPing)).toBe(false); // missing ping
+    });
   });
 
   describe('with injected fake client', () => {
@@ -46,6 +60,19 @@ describe('RedisStore', () => {
         client: { invalid: true } as unknown as IRedisClient,
       });
       await expect(store.connect()).rejects.toThrow();
+    });
+
+    it('rejects a client missing ping at connect time, not at health poll', async () => {
+      const withoutPing = {
+        get: async () => null,
+        set: async () => null,
+        del: async () => 0,
+        exists: async () => 0,
+        scan: async () => ['0', []],
+        quit: async () => {},
+      } as unknown as IRedisClient;
+      const store = new RedisStore('', { client: withoutPing });
+      await expect(store.connect()).rejects.toThrow(/ping/);
     });
 
     it('get returns null when key missing', async () => {

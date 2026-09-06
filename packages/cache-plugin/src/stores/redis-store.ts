@@ -39,7 +39,10 @@ export function validateClient(client: unknown): client is IRedisClient {
   if (client === null || typeof client !== 'object') {
     return false;
   }
-  const required = ['get', 'set', 'del', 'exists', 'scan', 'quit'];
+  // `ping` included (M90b): the reachability probe invokes it, so a client
+  // missing it must be rejected here — at registration — instead of failing
+  // every later health poll through `isHealthy`'s catch.
+  const required = ['get', 'set', 'del', 'exists', 'scan', 'quit', 'ping'];
   for (const method of required) {
     if (typeof (client as Record<string, unknown>)[method] !== 'function') {
       return false;
@@ -65,7 +68,7 @@ async function resolveClient(
     if (!validateClient(injectedClient)) {
       throw new Error(
         'Injected Redis client does not match the required structural shape ' +
-          '(needs: get, set, del, exists, scan, quit)',
+          '(needs: get, set, del, exists, scan, quit, ping)',
       );
     }
     return injectedClient;

@@ -948,6 +948,8 @@ describe('adaptServiceBusModule', () => {
     } {
       const clientCtorCalls: ClientCtorCall[] = [];
       const mod = {
+        // Numeric values match `@azure/core-amqp`'s RetryMode enum.
+        RetryMode: { Exponential: 0, Fixed: 1 },
         ServiceBusClient: class {
           constructor(connectionString: string, options?: { retryOptions?: unknown }) {
             clientCtorCalls.push({ connectionString, options });
@@ -1069,7 +1071,25 @@ describe('adaptServiceBusModule', () => {
       });
       expect(clientCtorCalls).toHaveLength(1);
       expect(clientCtorCalls[0].connectionString).toBe('Endpoint=sb://demo/');
-      expect(clientCtorCalls[0].options).toEqual({ retryOptions });
+      // `mode` arrives translated to the SDK's numeric RetryMode (Fixed = 1).
+      expect(clientCtorCalls[0].options).toEqual({
+        retryOptions: { maxRetries: 0, mode: mod.RetryMode.Fixed },
+      });
+      void transport;
+    });
+
+    it('translates the exponential mode string to the SDK numeric enum', () => {
+      const { mod, clientCtorCalls } = createProbeModule(() => Promise.resolve({}));
+      const transport = adaptServiceBusModule(mod, {
+        connectionString: 'Endpoint=sb://demo/',
+        adminConnectionString: 'Endpoint=sb://admin/',
+        retryOptions: { mode: 'exponential', retryDelayInMs: 100 },
+      });
+      // Without the translation the SDK's `=== RetryMode.Exponential`
+      // comparison would silently treat 'exponential' as fixed delay.
+      expect(clientCtorCalls[0].options).toEqual({
+        retryOptions: { mode: mod.RetryMode.Exponential, retryDelayInMs: 100 },
+      });
       void transport;
     });
 

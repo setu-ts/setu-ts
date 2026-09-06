@@ -1125,7 +1125,10 @@ documented pool API — also publishes the returned `DatabasePoolCapacity` snaps
 (`{ total, idle, waiting }`) under `data.capacity`. Omitted, the payload carries no capacity fields.
 Capacity is data, not policy: no threshold is applied and no status changes because of it
 (caller-facing pool-timeout status mapping is M90f). A snapshot the callback returns in a malformed
-shape is dropped exactly like an absent one — a broken reading is never published as a number.
+shape is dropped exactly like an absent one — a broken reading is never published as a number. A
+callback that throws, or one whose counters violate the documented shape (a negative count, or
+`idle` exceeding `total`, which counts idle + in use), is dropped the same way: capacity is omitted
+for that poll and the indicator's own lifecycle and reachability answer stands.
 
 ### Database Interface
 
@@ -4123,10 +4126,12 @@ interface ServiceBusMessagingOptionsProduction extends MessagingCommonOptions {
 }
 
 /** Azure Service Bus SDK retry budget — passed ONLY to `ServiceBusClient`, never to the
- * administration client. Omission preserves the Azure SDK default (`maxRetries: 3`,
- * `retryDelayInMs: 30000`, `maxRetryDelayInMs: 90000`, `mode: 'exponential'`,
- * `timeoutInMs: 60000`); `maxRetries: 0` is the documented short budget for a deployment
- * that must fail fast toward a dead broker rather than hold a request for the default chain.
+ * administration client. `mode` is translated to the SDK's numeric `RetryMode` before the
+ * client is constructed (the SDK compares the value with `===` against its enum). Omission
+ * preserves the Azure SDK default (`maxRetries: 3`, `retryDelayInMs: 30000`,
+ * `maxRetryDelayInMs: 90000`, `mode: 'fixed'`, `timeoutInMs: 60000`); `maxRetries: 0` is the
+ * documented short budget for a deployment that must fail fast toward a dead broker rather
+ * than hold a request for the default chain.
  */
 interface ServiceBusRetryOptions {
   maxRetries?: number;

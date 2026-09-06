@@ -92,9 +92,17 @@ export interface IServiceBusReceiver {
  * Declares the constructors used from the real Azure Service Bus SDK.
  */
 export interface ServiceBusSdkModule {
+  /**
+   * The SDK's numeric `RetryMode` enum (re-exported by `@azure/service-bus`).
+   * The public `ServiceBusRetryOptions.mode` string is translated through
+   * this before reaching the SDK — `@azure/core-amqp` compares the value
+   * with `===` against its enum, so an untranslated string silently
+   * behaves as the SDK default (`Fixed`).
+   */
+  RetryMode: { readonly Exponential: number; readonly Fixed: number };
   ServiceBusClient: new (
     connectionString: string,
-    options?: { retryOptions?: ServiceBusRetryOptions },
+    options?: { retryOptions?: Omit<ServiceBusRetryOptions, 'mode'> & { mode?: number } },
   ) => {
     createSender(queueOrTopicName: string): {
       sendMessages(messages: { body: unknown }): Promise<void>;
@@ -253,6 +261,27 @@ export async function loadServiceBusModule(): Promise<ServiceBusSdkModule> {
 }
 
 /**
+ * Translates the public `ServiceBusRetryOptions` shape into the SDK's
+ * constructor shape: `mode` becomes the numeric `RetryMode` value. Without
+ * the translation, `'exponential'` reaches `@azure/core-amqp`'s
+ * `calculateDelay`, fails its `=== RetryMode.Exponential` comparison, and
+ * silently behaves as fixed delay.
+ *
+ * @param mod - The loaded SDK module (supplies the enum values)
+ * @param retryOptions - The public retry budget
+ * @returns The SDK-shaped retry budget
+ */
+function toSdkRetryOptions(
+  mod: ServiceBusSdkModule,
+  retryOptions: ServiceBusRetryOptions,
+): Omit<ServiceBusRetryOptions, 'mode'> & { mode?: number } {
+  return {
+    ...retryOptions,
+    mode: retryOptions.mode === 'exponential' ? mod.RetryMode.Exponential : mod.RetryMode.Fixed,
+  };
+}
+
+/**
  * Adapts the real Azure Service Bus SDK module to the domain port.
  *
  * @param mod - The loaded SDK module
@@ -271,7 +300,10 @@ export function adaptServiceBusModule(
   // The retry budget rides the DATA client only: the administration
   // client's pipeline options are a different contract and never receive it.
   const client = options.retryOptions !== undefined
-    ? new mod.ServiceBusClient(options.connectionString, { retryOptions: options.retryOptions })
+    ? new mod.ServiceBusClient(
+      options.connectionString,
+      { retryOptions: toSdkRetryOptions(mod, options.retryOptions) },
+    )
     : new mod.ServiceBusClient(options.connectionString);
   const admin = new mod.ServiceBusAdministrationClient(options.adminConnectionString);
 

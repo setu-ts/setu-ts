@@ -36,7 +36,9 @@ export const DATABASE_POOL_CAPACITY: unique symbol = Symbol.for(
  * The reader returns whatever the application's `poolStats` callback
  * returned — application-owned code this package cannot type-check at the
  * boundary — so the plugin validates before publishing. Every field must be
- * a finite number: a `NaN` or infinite counter is a broken reading, not a
+ * a finite, non-negative counter, and `idle` cannot exceed `total` (the
+ * published type documents `total` as idle + in use): a `NaN`, an infinite
+ * or negative counter, or an `idle > total` pair is a broken reading, not a
  * capacity.
  *
  * @param value - The candidate snapshot
@@ -48,8 +50,11 @@ export function isDatabasePoolCapacity(value: unknown): value is DatabasePoolCap
   }
   const candidate = value as Record<string, unknown>;
   return typeof candidate.total === 'number' && Number.isFinite(candidate.total) &&
+    candidate.total >= 0 &&
     typeof candidate.idle === 'number' && Number.isFinite(candidate.idle) &&
-    typeof candidate.waiting === 'number' && Number.isFinite(candidate.waiting);
+    candidate.idle >= 0 && candidate.idle <= candidate.total &&
+    typeof candidate.waiting === 'number' && Number.isFinite(candidate.waiting) &&
+    candidate.waiting >= 0;
 }
 
 /**
@@ -58,7 +63,11 @@ export function isDatabasePoolCapacity(value: unknown): value is DatabasePoolCap
  * A malformed snapshot — the application's callback returning a partial or
  * non-numeric object — is `undefined`, exactly like an adapter without the
  * seam: "cannot report capacity" and "no capacity configured" are the same
- * observable answer, and neither may publish a wrong number.
+ * observable answer, and neither may publish a wrong number. A callback
+ * that THROWS (a getter over a closed or faulty pool, a driver error) is
+ * handled the same way: capacity is data, never a threshold, so the failure
+ * is folded into the same `undefined` answer instead of rejecting the
+ * health indicator that is only collecting it.
  *
  * @param adapter - The connected adapter
  * @returns The validated snapshot, or `undefined` when unavailable
@@ -68,6 +77,12 @@ export function readPoolCapacity(adapter: IDatabaseAdapter): DatabasePoolCapacit
   if (typeof reader !== 'function') {
     return undefined;
   }
-  const snapshot = (reader as () => unknown)();
-  return isDatabasePoolCapacity(snapshot) ? snapshot : undefined;
+  try {
+    const snapshot = (reader as () => unknown)();
+    return isDatabasePoolCapacity(snapshot) ? snapshot : undefined;
+  } catch {
+    // Handled above: a throwing application callback means "capacity is
+    // unavailable this poll", never "the database changed status".
+    return undefined;
+  }
 }

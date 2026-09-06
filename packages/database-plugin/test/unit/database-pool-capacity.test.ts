@@ -144,6 +144,15 @@ describe('isDatabasePoolCapacity guard (M90b)', () => {
     expect(isDatabasePoolCapacity({ total: Infinity, idle: 4, waiting: 0 })).toBe(false);
     expect(isDatabasePoolCapacity({ total: '10', idle: 4, waiting: 0 })).toBe(false);
   });
+
+  it('rejects counters that violate the documented relationships', () => {
+    // `total` counts idle + in use, so idle cannot exceed it.
+    expect(isDatabasePoolCapacity({ total: 10, idle: 11, waiting: 0 })).toBe(false);
+    // Counts cannot be negative.
+    expect(isDatabasePoolCapacity({ total: -1, idle: 0, waiting: 0 })).toBe(false);
+    expect(isDatabasePoolCapacity({ total: 10, idle: -1, waiting: 0 })).toBe(false);
+    expect(isDatabasePoolCapacity({ total: 10, idle: 4, waiting: -1 })).toBe(false);
+  });
 });
 
 describe('readPoolCapacity seam (M90b)', () => {
@@ -158,6 +167,13 @@ describe('readPoolCapacity seam (M90b)', () => {
 
   it('returns undefined when the reader returns a malformed snapshot', () => {
     const adapter = new FakeAdapter(() => ({ total: 10 }));
+    expect(readPoolCapacity(adapter)).toBeUndefined();
+  });
+
+  it('returns undefined when the reader throws — capacity is data, not a fault', () => {
+    const adapter = new FakeAdapter(() => {
+      throw new Error('pool is closed');
+    });
     expect(readPoolCapacity(adapter)).toBeUndefined();
   });
 });
@@ -205,6 +221,25 @@ describe('database indicator capacity data (M90b)', () => {
 
   it('drops a malformed snapshot exactly like an absent one', async () => {
     const adapter = new FakeAdapter(() => ({ total: 12, idle: 'three', waiting: 7 }));
+    const { indicator } = await registerIndicator(adapter);
+    const health = await indicator();
+    expect(health.status).toBe('up');
+    expect(health.data).toEqual({ adapter: 'custom', name: 'default' });
+  });
+
+  it('a throwing poolStats callback never rejects the indicator', async () => {
+    const adapter = new FakeAdapter(() => {
+      throw new Error('pool accessor exploded');
+    });
+    const { indicator } = await registerIndicator(adapter);
+    const health = await indicator();
+    // The indicator's own lifecycle answer stands; no capacity fields ship.
+    expect(health.status).toBe('up');
+    expect(health.data).toEqual({ adapter: 'custom', name: 'default' });
+  });
+
+  it('drops a snapshot whose counters violate the documented shape', async () => {
+    const adapter = new FakeAdapter(() => ({ total: 12, idle: 13, waiting: 0 }));
     const { indicator } = await registerIndicator(adapter);
     const health = await indicator();
     expect(health.status).toBe('up');
