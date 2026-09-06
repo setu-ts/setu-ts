@@ -4335,12 +4335,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   marker — the v0.3.0 lesson, where a marker shielded live guidance — they now read
   "pre-derivation", which cannot go stale. Every marker in the tree was re-audited; all four shield
   genuinely historical text, with the live sentences above them.
-- **Next milestone** — **M40** (final release), the only open row in Progress Tracking: the 1.0 gate
-  named in README's Versioning section — benchmarks, a security audit, and the Node/Bun compat
-  suites as release gates. The `smoke/` programme's X16–X19 exercises against published `0.3.0`
-  produced **8 findings, 4 High**, all now closed as M89a (declarations that enforce nothing), M89b
-  (caller errors that read as server faults), and M89c (the ingress surface above) — grouped by
-  defect **shape** rather than by package, the M70a–M70n precedent.
+- **Milestone 90c** (`auth-plugin` — credential revocation and token type) — complete (PR pending).
+  Refresh pairs now have distinct typed identifiers; refresh credentials cannot authenticate as
+  bearer access tokens; logout and replay revoke the credential family through a shared, bounded
+  access-token revocation store; and policy failures disclose no role or permission name. Rotation
+  is atomic at the refresh-store boundary, so concurrent requests cannot mint two descendants.
+- **Next milestone** — **M90d** (the two brokers that cannot start), the next recommended High
+  finding group in `ROADMAP.md`.
 
 ## Verification (run before declaring any work done)
 

@@ -32,21 +32,33 @@ export class MemoryAccessTokenRevocationStore implements AccessTokenRevocationSt
   }
 
   revoke(jti: string, expiresAt: number): Promise<void> {
-    if (expiresAt > this.#runtime.now()) {
+    if (!Number.isFinite(expiresAt)) {
+      return Promise.reject(new Error('Access-token revocation expiry must be finite'));
+    }
+    const now = this.#runtime.now();
+    this.#sweepExpired(now);
+    if (expiresAt > now) {
       this.#revokedUntil.set(jti, expiresAt);
     }
     return Promise.resolve();
   }
 
   isRevoked(jti: string): Promise<boolean> {
+    const now = this.#runtime.now();
+    this.#sweepExpired(now);
     const expiresAt = this.#revokedUntil.get(jti);
     if (expiresAt === undefined) {
       return Promise.resolve(false);
     }
-    if (this.#runtime.now() >= expiresAt) {
-      this.#revokedUntil.delete(jti);
-      return Promise.resolve(false);
-    }
     return Promise.resolve(true);
+  }
+
+  /** Remove every expired entry whenever the store is used. */
+  #sweepExpired(now: number): void {
+    for (const [jti, expiresAt] of this.#revokedUntil) {
+      if (now >= expiresAt) {
+        this.#revokedUntil.delete(jti);
+      }
+    }
   }
 }

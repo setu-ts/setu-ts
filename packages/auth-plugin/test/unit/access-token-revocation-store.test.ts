@@ -36,4 +36,24 @@ describe('MemoryAccessTokenRevocationStore', () => {
 
     expect(await store.isRevoked('access-1')).toBe(false);
   });
+
+  it('globally sweeps expired entries on a later unrelated access', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryAccessTokenRevocationStore(runtime);
+    const expiresAt = runtime.now() + 1000;
+    await store.revoke('access-1', expiresAt);
+    runtime.setNow(expiresAt);
+
+    expect(await store.isRevoked('other')).toBe(false);
+    runtime.setNow(expiresAt - 1);
+    expect(await store.isRevoked('access-1')).toBe(false);
+  });
+
+  it('rejects a non-finite expiry instead of retaining an entry forever', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryAccessTokenRevocationStore(runtime);
+
+    await expect(store.revoke('access-1', Infinity)).rejects.toThrow('must be finite');
+    await expect(store.revoke('access-2', NaN)).rejects.toThrow('must be finite');
+  });
 });

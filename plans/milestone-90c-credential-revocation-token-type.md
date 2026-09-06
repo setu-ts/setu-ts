@@ -1,7 +1,7 @@
 # Milestone 90c — Credential Revocation and Token Type (`@setu-ts/auth-plugin`)
 
-> **Status:** Planning. Branch: `feat/m90c-integrity-recovery`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Branch: `feat/m90c-integrity-recovery`. `main` is protected —
+> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
@@ -75,14 +75,14 @@ deployments while making stateful logout real and explicit.
 ### 3.3 Refresh-family replay and logout
 
 - **Decision:** Add optional lineage fields to `RefreshTokenRecord` (`familyId`, access `jti`, and
-  access expiry) and required `revokeFamily(jti)` to `RefreshTokenStore`, returning every family
-  record it revoked. Normal rotation continues to revoke only the presented refresh record and
-  issues a descendant with its `familyId`; a replay of an already-revoked record and an explicit
-  logout call `revokeFamily`, then revoke each returned access `jti` through the optional access
+  access expiry), required atomic `rotate(jti, successor)` to `RefreshTokenStore`, and required
+  `revokeFamily(jti)`. `rotate` conditionally consumes a live parent and stores its successor as one
+  operation; a concurrent caller observes the revoked parent, then revokes the whole family. Replay
+  and logout call `revokeFamily`, then revoke each returned access `jti` through the optional access
   revocation store.
-- **Why:** Rotation must leave its fresh descendant usable, whereas replay and logout must kill the
-  whole credential family. Returning affected records keeps the refresh store focused on refresh
-  lineage and the separate revocation port focused on access credentials.
+- **Why:** A separate async `get` then `revoke` lets two remote callers mint descendants from one
+  parent. Atomic rotation preserves single-use credentials. Returning affected records keeps the
+  refresh store focused on lineage and the separate revocation port focused on access credentials.
 - **Test home:** `test/unit/memory-refresh-token-store.test.ts`,
   `test/unit/refresh-token-service.test.ts`, and
   `test/integration/refresh-rate-limit-integration.test.ts`.
@@ -106,7 +106,7 @@ deployments while making stateful logout real and explicit.
 | `AuthPlugin`                                                         | function                  | Application plugin registration constructs `JwtStrategy` with JWT options.                                                               |
 | `AuthPluginOptions`, `JwtOptions`                                    | interfaces                | Application configures the plugin; the plugin reads `jwt.accessTokenRevocationStore`.                                                    |
 | `RefreshTokenService`, `RefreshTokenOptions`, `TokenPair`            | class/interfaces          | Login, refresh, and logout route handlers issue/revoke pairs; service reads its supplied store.                                          |
-| `RefreshTokenStore`, `RefreshTokenRecord`, `MemoryRefreshTokenStore` | interface/interface/class | Refresh service persists lineage and calls `revokeFamily`; application can supply a durable implementation.                              |
+| `RefreshTokenStore`, `RefreshTokenRecord`, `MemoryRefreshTokenStore` | interface/interface/class | Refresh service atomically rotates lineage and calls `revokeFamily`; application can supply a durable implementation.                    |
 | Existing auth exports                                                | functions/classes/types   | Unchanged exported guards, middleware, rate-limit, password, and common-contract re-exports retain their existing application consumers. |
 
 ### 4.1 Options — every option names its consumer
@@ -135,17 +135,17 @@ deployments while making stateful logout real and explicit.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                                                           | src covered                                            | Key assertions (and the signature each call type-checks against)                                                                                                                                                       |
-| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/unit/access-token-revocation-store.test.ts`                                                                                                   | `src/stores/access-token-revocation-store.ts`          | `revoke(jti, expiresAt)` marks only until `runtime.now() >= expiresAt`; `isRevoked(jti)` lazily removes expired values.                                                                                                |
-| `test/unit/memory-refresh-token-store.test.ts`                                                                                                      | `src/stores/refresh-token-store.ts`                    | `revokeFamily(jti): Promise<readonly RefreshTokenRecord[]>` revokes all matching family records, returns them, and treats legacy/no-family records as singletons.                                                      |
-| `test/unit/refresh-token-service.test.ts`                                                                                                           | `src/services/refresh-token-service.ts`                | Issued pairs have distinct typed JTIs; configuration without access expiry throws when a revocation store is supplied; logout/replay revokes paired/descendant access ids; normal rotation leaves the new pair usable. |
-| `test/unit/jwt-strategy.test.ts`                                                                                                                    | `src/strategies/jwt-strategy.ts`                       | `authenticate(request): Promise<IPrincipal \| null>` rejects `type: 'refresh'`, rejects revoked typed access IDs, and preserves direct token compatibility.                                                            |
-| `test/unit/auth-plugin.test.ts`                                                                                                                     | `src/interfaces/index.ts`, `src/plugin/auth-plugin.ts` | The configured `jwt.accessTokenRevocationStore` reaches the registered passive strategy and absent option changes no setup.                                                                                            |
-| `test/unit/guards.test.ts`, `test/unit/guard-format.test.ts`                                                                                        | `src/guards/index.ts`                                  | Each failed role/permission guard is 403, does not call next, preserves configured formats, and never includes policy names.                                                                                           |
-| `packages/decorator-plugin/test/unit/plugin/authorization-enforcement.test.ts`, `packages/decorator-plugin/test/integration/roles-enforced.test.ts` | decorator authorization middleware                     | Decorator spelling keeps the generic detail and remains byte-identical with `requireRole`.                                                                                                                             |
-| `test/unit/barrel-exports.test.ts`                                                                                                                  | `src/index.ts`                                         | New port/type/class are publicly reachable alongside all existing exports.                                                                                                                                             |
-| `test/integration/refresh-rate-limit-integration.test.ts`                                                                                           | service + plugin wiring                                | A shared memory store permits a fresh access credential, rejects it after logout, and rejects a descendant family after replay.                                                                                        |
+| Test file                                                                                                                                           | src covered                                            | Key assertions (and the signature each call type-checks against)                                                                                                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/unit/access-token-revocation-store.test.ts`                                                                                                   | `src/stores/access-token-revocation-store.ts`          | `revoke(jti, expiresAt)` marks only until `runtime.now() >= expiresAt`; `isRevoked(jti)` lazily removes expired values.                                                                                                               |
+| `test/unit/memory-refresh-token-store.test.ts`                                                                                                      | `src/stores/refresh-token-store.ts`                    | Atomic `rotate(jti, successor)` admits one concurrent consumer, and `revokeFamily(jti): Promise<readonly RefreshTokenRecord[]>` revokes all matching family records, returns them, and treats legacy/no-family records as singletons. |
+| `test/unit/refresh-token-service.test.ts`                                                                                                           | `src/services/refresh-token-service.ts`                | Issued pairs have distinct typed JTIs; configuration without access expiry throws when a revocation store is supplied; logout/replay revokes paired/descendant access ids; normal rotation leaves the new pair usable.                |
+| `test/unit/jwt-strategy.test.ts`                                                                                                                    | `src/strategies/jwt-strategy.ts`                       | `authenticate(request): Promise<IPrincipal \| null>` rejects `type: 'refresh'`, rejects revoked typed access IDs, and preserves direct token compatibility.                                                                           |
+| `test/unit/auth-plugin.test.ts`                                                                                                                     | `src/interfaces/index.ts`, `src/plugin/auth-plugin.ts` | The configured `jwt.accessTokenRevocationStore` reaches the registered passive strategy and absent option changes no setup.                                                                                                           |
+| `test/unit/guards.test.ts`, `test/unit/guard-format.test.ts`                                                                                        | `src/guards/index.ts`                                  | Each failed role/permission guard is 403, does not call next, preserves configured formats, and never includes policy names.                                                                                                          |
+| `packages/decorator-plugin/test/unit/plugin/authorization-enforcement.test.ts`, `packages/decorator-plugin/test/integration/roles-enforced.test.ts` | decorator authorization middleware                     | Decorator spelling keeps the generic detail and remains byte-identical with `requireRole`.                                                                                                                                            |
+| `test/unit/barrel-exports.test.ts`                                                                                                                  | `src/index.ts`                                         | New port/type/class are publicly reachable alongside all existing exports.                                                                                                                                                            |
+| `test/integration/refresh-rate-limit-integration.test.ts`                                                                                           | service + plugin wiring                                | A shared memory store permits a fresh access credential, rejects it after logout, and rejects a descendant family after replay.                                                                                                       |
 
 ## 7. Verification gates
 
@@ -161,11 +161,11 @@ deno task test:coverage     # read ANSI-stripped per-file table; ≥90% branch/f
 
 ## 8. Risks & mitigations
 
-- A revocation list with no expiry leaks memory indefinitely → require `accessToken.expiresIn`
-  whenever `accessTokenRevocationStore` is configured, and lazily delete expired in-memory entries.
+- A revocation list with no expiry leaks memory indefinitely → require `accessToken.expiresIn`,
+  reject non-finite entries, and sweep expired in-memory entries on every store operation.
 - A custom refresh store may hold legacy records with no lineage → type optional fields and treat a
-  missing family ID as a one-record family; document the required new `revokeFamily` implementation
-  for durable stores.
+  missing family ID as a one-record family; document the required atomic `rotate` and `revokeFamily`
+  implementations for durable stores.
 - Multi-instance logout is ineffective with separate process-local stores → label the memory
   implementation single-process and direct deployments to provide one shared durable implementation
   to both constructors.

@@ -53,6 +53,39 @@ describe('MemoryRefreshTokenStore', () => {
     expect(await store.get('nonexistent')).toBeNull();
   });
 
+  it('rotates one live record atomically and refuses a second consume', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+    await store.save({ ...makeRecord(runtime, 'parent'), familyId: 'family-1' });
+    const successor = { ...makeRecord(runtime, 'child'), familyId: 'family-1' };
+
+    const [first, second] = await Promise.all([
+      store.rotate('parent', successor),
+      store.rotate('parent', { ...makeRecord(runtime, 'other-child'), familyId: 'family-1' }),
+    ]);
+
+    expect([first, second].filter((result) => result.rotated)).toHaveLength(1);
+    expect((await store.get('parent'))?.revoked).toBe(true);
+    expect(await store.get('child')).not.toBeNull();
+    expect(await store.get('other-child')).toBeNull();
+  });
+
+  it('does not rotate an expired or already-revoked record', async () => {
+    const runtime = createFakeRuntime();
+    const store = new MemoryRefreshTokenStore(runtime);
+    const expired = { ...makeRecord(runtime, 'expired'), expiresAt: runtime.now() };
+    await store.save(expired);
+
+    const expiredResult = await store.rotate('expired', makeRecord(runtime, 'child'));
+    expect(expiredResult).toEqual({ record: null, rotated: false });
+
+    await store.save(makeRecord(runtime, 'revoked'));
+    await store.revoke('revoked');
+    const revokedResult = await store.rotate('revoked', makeRecord(runtime, 'child-2'));
+    expect(revokedResult.record?.revoked).toBe(true);
+    expect(revokedResult.rotated).toBe(false);
+  });
+
   it('expired record is evicted on get and returns null', async () => {
     const runtime = createFakeRuntime();
     const store = new MemoryRefreshTokenStore(runtime);

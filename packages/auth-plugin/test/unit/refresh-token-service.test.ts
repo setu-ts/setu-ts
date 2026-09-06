@@ -249,6 +249,20 @@ describe('RefreshTokenService', () => {
       expect(second).toBeNull();
     });
 
+    it('concurrent refresh requests consume one token only and revoke its family', async () => {
+      const { service } = makeService();
+      const pair = await service.issue({ id: 'user-123' });
+
+      const [first, second] = await Promise.all([
+        service.refresh(pair.refreshToken),
+        service.refresh(pair.refreshToken),
+      ]);
+
+      expect([first, second].filter((candidate) => candidate !== null)).toHaveLength(1);
+      const issued = first ?? second;
+      expect(await service.refresh(issued!.refreshToken)).toBeNull();
+    });
+
     it('revokes the replaced access token when rotation uses a revocation store', async () => {
       const { jwt, service, accessTokenRevocationStore } = makeService({
         accessToken: { expiresIn: '1h' },

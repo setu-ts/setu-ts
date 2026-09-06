@@ -9226,7 +9226,7 @@ fields (`code` first) read through the same guard, plus
 | 89c       | ✅     | 0.3.0 ingress surface (X16-1, X16-2)                |
 | 90a       | ⬜     | abuse control that actually protects                |
 | 90b       | ⬜     | health that tells the truth, bounded                |
-| 90c       | ⬜     | credential revocation and token type                |
+| 90c       | ✅     | credential revocation and token type (PR pending)   |
 | 90d       | ⬜     | the two brokers that cannot start                   |
 | 90e       | ⬜     | static delivery correctness                         |
 | 90f       | ⬜     | caller errors reach the client correctly            |

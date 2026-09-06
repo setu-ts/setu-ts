@@ -1995,6 +1995,7 @@ They still fail closed either way; what changed is that the refusal is legible.
 | `TokenPair`                        | `src/services/refresh-token-service.ts`       | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                           |
 | `RefreshTokenStore`                | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                               |
 | `RefreshTokenRecord`               | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                      |
+| `RefreshTokenRotation`             | `src/stores/refresh-token-store.ts`           | Result of atomically rotating a refresh record                                          |
 | `MemoryRefreshTokenStore`          | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                |
 | `AccessTokenRevocationStore`       | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                     |
 | `MemoryAccessTokenRevocationStore` | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                           |
@@ -2090,7 +2091,8 @@ To invalidate an access credential at logout before its regular expiry, construc
 `accessTokenRevocationStore` on the refresh service requires `accessToken.expiresIn`. The shipped
 `MemoryAccessTokenRevocationStore` is single-process; multi-instance deployments must supply a
 shared implementation. Custom `RefreshTokenStore` implementations must preserve `familyId` and
-implement `revokeFamily(jti)` so replay and logout can revoke the family.
+implement atomic `rotate(jti, successor)` and `revokeFamily(jti)` so concurrent refresh requests,
+replay, and logout can revoke the family.
 
 ```typescript
 import {
@@ -2100,13 +2102,21 @@ import {
   RefreshTokenService,
 } from '@setu-ts/auth-plugin';
 import type { IJwtService, IRuntimeServices } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { createRuntimeServices, RuntimePlugin } from '@setu-ts/runtime';
 
+const accessTokenRevocations = new MemoryAccessTokenRevocationStore(createRuntimeServices());
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    AuthPlugin({
+      jwt: { secret: config.get('JWT_SECRET'), accessTokenRevocationStore: accessTokenRevocations },
+    }),
+  ],
+});
+await app.start();
 const jwt = app.services.get<IJwtService>('jwt');
 const runtime = app.services.get<IRuntimeServices>('runtime');
-const accessTokenRevocations = new MemoryAccessTokenRevocationStore(runtime);
-app.register(AuthPlugin({
-  jwt: { secret: config.get('JWT_SECRET'), accessTokenRevocationStore: accessTokenRevocations },
-}));
 const refresh = new RefreshTokenService({
   jwt,
   store: new MemoryRefreshTokenStore(runtime),

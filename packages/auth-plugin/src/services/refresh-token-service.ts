@@ -7,7 +7,7 @@
 import type { IJwtService, IPrincipal, IRuntimeServices } from '@setu-ts/common';
 import { encodeBase64Url } from '../utils/base64url.ts';
 import { parseDuration } from '../utils/duration.ts';
-import type { RefreshTokenStore } from '../stores/refresh-token-store.ts';
+import type { RefreshTokenRecord, RefreshTokenStore } from '../stores/refresh-token-store.ts';
 import type { AccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 
 /**
@@ -97,6 +97,16 @@ export class RefreshTokenService {
 
   /** Issue a token pair in a known refresh-token family. */
   private async issueForFamily(principal: IPrincipal, familyId: string): Promise<TokenPair> {
+    const issued = await this.createPair(principal, familyId);
+    await this.store.save(issued.record);
+    return issued.pair;
+  }
+
+  /** Create a pair and its refresh-store record without persisting either. */
+  private async createPair(
+    principal: IPrincipal,
+    familyId: string,
+  ): Promise<{ readonly pair: TokenPair; readonly record: RefreshTokenRecord }> {
     const refreshTokenJti = encodeBase64Url(this.runtime.randomBytes(16));
     const accessTokenJti = encodeBase64Url(this.runtime.randomBytes(16));
     const now = this.runtime.now();
@@ -135,8 +145,7 @@ export class RefreshTokenService {
       refreshOptions,
     );
 
-    // Store the refresh token record
-    await this.store.save({
+    const record: RefreshTokenRecord = {
       jti: refreshTokenJti,
       principalId: principal.id,
       principal,
@@ -147,9 +156,9 @@ export class RefreshTokenService {
       ...(this.accessTokenExpiresInMs === undefined
         ? {}
         : { accessTokenExpiresAt: now + this.accessTokenExpiresInMs }),
-    });
+    };
 
-    return { accessToken, refreshToken };
+    return { pair: { accessToken, refreshToken }, record };
   }
 
   /**
@@ -183,12 +192,17 @@ export class RefreshTokenService {
       return null;
     }
 
-    // Rotate: revoke the presented jti
-    await this.store.revoke(payload.jti);
-    await this.revokeAccessToken(record);
+    const issued = await this.createPair(record.principal, record.familyId ?? record.jti);
+    const rotation = await this.store.rotate(payload.jti, issued.record);
+    if (!rotation.rotated) {
+      if (rotation.record !== null) {
+        await this.revokeFamilyAccessTokens(payload.jti);
+      }
+      return null;
+    }
+    await this.revokeAccessToken(rotation.record!);
 
-    // Issue a fresh pair from the stored principal snapshot
-    return this.issueForFamily(record.principal, record.familyId ?? record.jti);
+    return issued.pair;
   }
 
   /**

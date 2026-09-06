@@ -2,7 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as auth from '../../src/index.ts';
 import type { IPrincipal, SessionView } from '@setu-ts/common';
-import type { SessionAuthOptions } from '../../src/index.ts';
+import type { RefreshTokenRotation, SessionAuthOptions } from '../../src/index.ts';
 
 /**
  * Barrel exports test.
@@ -75,6 +75,11 @@ describe('barrel exports', () => {
     // Type exports are verified by deno check - this test just confirms
     // the module can be imported without errors
     expect(auth).toBeDefined();
+  });
+
+  it('exports the RefreshTokenRotation type', () => {
+    const result: RefreshTokenRotation = { record: null, rotated: false };
+    expect(result.rotated).toBe(false);
   });
 
   it('exports the SessionAuthOptions type (declared against the barrel)', () => {

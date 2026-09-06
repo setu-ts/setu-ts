@@ -256,25 +256,37 @@ To make logout invalidate the paired access credential before its normal expiry,
 `RefreshTokenService`. `MemoryAccessTokenRevocationStore` is single-process; a multi-instance
 application supplies a shared implementation. Access revocation requires `accessToken.expiresIn`, so
 revocation entries are bounded. `RefreshTokenStore` implementations must persist family lineage and
-implement `revokeFamily(jti)`; the shipped `MemoryRefreshTokenStore` does both with lazy expiry.
+implement atomic `rotate(jti, successor)` plus `revokeFamily(jti)`; the shipped
+`MemoryRefreshTokenStore` does both with lazy expiry.
 
 ```typescript
 import {
+  AuthPlugin,
   MemoryAccessTokenRevocationStore,
   MemoryRefreshTokenStore,
   RefreshTokenService,
 } from '@setu-ts/auth-plugin';
+import type { IJwtService, IRuntimeServices } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { createRuntimeServices, RuntimePlugin } from '@setu-ts/runtime';
 
-const accessTokenRevocations = new MemoryAccessTokenRevocationStore(runtime);
-
-app.register(AuthPlugin({
-  jwt: { secret: config.get('JWT_SECRET'), accessTokenRevocationStore: accessTokenRevocations },
-}));
+const accessTokenRevocations = new MemoryAccessTokenRevocationStore(createRuntimeServices());
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    AuthPlugin({
+      jwt: { secret: config.get('JWT_SECRET'), accessTokenRevocationStore: accessTokenRevocations },
+    }),
+  ],
+});
+await app.start();
+const jwt = app.services.get<IJwtService>('jwt');
+const runtime = app.services.get<IRuntimeServices>('runtime');
 
 const refresh = new RefreshTokenService({
-  jwt, // IJwtService resolved from the 'jwt' token
+  jwt,
   store: new MemoryRefreshTokenStore(runtime),
-  runtime, // IRuntimeServices resolved from the 'runtime' token
+  runtime,
   accessToken: { expiresIn: '15m' },
   refreshTokenExpiresIn: '30d',
   accessTokenRevocationStore: accessTokenRevocations,
@@ -382,6 +394,7 @@ MIT
 | `RbacConfig`                       | interface |
 | `RefreshTokenOptions`              | interface |
 | `RefreshTokenRecord`               | interface |
+| `RefreshTokenRotation`             | interface |
 | `RefreshTokenStore`                | interface |
 | `RoleDefinition`                   | interface |
 | `SessionAuthOptions`               | interface |

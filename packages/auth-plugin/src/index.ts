@@ -57,7 +57,11 @@ export { RefreshTokenService } from './services/refresh-token-service.ts';
 export type { RefreshTokenOptions, TokenPair } from './services/refresh-token-service.ts';
 
 // Refresh token store
-export type { RefreshTokenRecord, RefreshTokenStore } from './stores/refresh-token-store.ts';
+export type {
+  RefreshTokenRecord,
+  RefreshTokenRotation,
+  RefreshTokenStore,
+} from './stores/refresh-token-store.ts';
 export { MemoryRefreshTokenStore } from './stores/refresh-token-store.ts';
 
 // Access-token revocation store

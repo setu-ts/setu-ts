@@ -28,6 +28,14 @@ export interface RefreshTokenRecord {
   readonly accessTokenExpiresAt?: number;
 }
 
+/** Result of atomically rotating one refresh token into its successor. */
+export interface RefreshTokenRotation {
+  /** The presented record when it exists and has not expired, otherwise null. */
+  readonly record: RefreshTokenRecord | null;
+  /** Whether the presented token was live and the successor was stored. */
+  readonly rotated: boolean;
+}
+
 /**
  * Store interface for refresh tokens.
  *
@@ -47,6 +55,14 @@ export interface RefreshTokenStore {
   get(jti: string): Promise<RefreshTokenRecord | null>;
   /** Revoke a token by jti. */
   revoke(jti: string): Promise<void>;
+  /**
+   * Atomically consume a live refresh token and persist its successor.
+   *
+   * Remote implementations must make the conditional live-token check, parent
+   * revocation, and successor write one atomic operation. This prevents two
+   * concurrent refresh requests from minting independent descendants.
+   */
+  rotate(jti: string, successor: RefreshTokenRecord): Promise<RefreshTokenRotation>;
   /**
    * Revoke every refresh token in the requested token's family.
    *
@@ -95,6 +111,24 @@ export class MemoryRefreshTokenStore implements RefreshTokenStore {
       record.revoked = true;
     }
     return Promise.resolve();
+  }
+
+  rotate(jti: string, successor: RefreshTokenRecord): Promise<RefreshTokenRotation> {
+    const record = this.#map.get(jti);
+    if (record === undefined) {
+      return Promise.resolve({ record: null, rotated: false });
+    }
+    if (this.#runtime.now() >= record.expiresAt) {
+      this.#map.delete(jti);
+      return Promise.resolve({ record: null, rotated: false });
+    }
+    if (record.revoked) {
+      return Promise.resolve({ record, rotated: false });
+    }
+
+    record.revoked = true;
+    this.#map.set(successor.jti, successor);
+    return Promise.resolve({ record, rotated: true });
   }
 
   revokeFamily(jti: string): Promise<readonly RefreshTokenRecord[]> {
