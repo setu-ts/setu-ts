@@ -13,11 +13,13 @@ works, a single-statement `UPDATE … SET n = n + delta` works, SERIALIZABLE cor
 anomaly — and **none of them is expressible through the portable API**. `transaction<T>(work)` takes
 one parameter, `IUnitOfWork` exposes exactly one member, and
 `grep -rniE "isolation|serializable|repeatable.read|read.committed"` over `packages/common/src`
-returns nothing. So a correct concurrent write is adapter-specific by construction, at exactly the
-point where portability matters most, and nothing documents the cliff. X22-6 and X24-1 are the same
-shape in two more packages: a session commit writes the whole payload as a snapshot, so two
-overlapping requests writing different keys lose one; and neither `cacheMiddleware` nor the cache
-contract coalesces concurrent misses, so 100 of 100 simultaneous misses reached the origin.
+finds no isolation concept at all — re-measured on this tree, its 11 hits are every one of them the
+unrelated word "JSON-serializable" (the finding recorded 5 against published `0.4.0`). So a correct
+concurrent write is adapter-specific by construction, at exactly the point where portability matters
+most, and nothing documents the cliff. X22-6 and X24-1 are the same shape in two more packages: a
+session commit writes the whole payload as a snapshot, so two overlapping requests writing different
+keys lose one; and neither `cacheMiddleware` nor the cache contract coalesces concurrent misses, so
+100 of 100 simultaneous misses reached the origin.
 
 The decision this milestone has to take is the ROADMAP's own: **make the optimistic strategy
 portable.** It does not make `FOR UPDATE` portable — a locking read is a different contract — but
@@ -208,8 +210,9 @@ member an isolation level must reach.
   opt-in, because an application cannot be relying on N origin calls for one key: the middleware's
   documented purpose is protecting the origin, and the only observable difference is a new `X-Cache`
   value and fewer handler invocations. The asymmetry is deliberate and stated in the CHANGELOG.
-- **Test home:** `cache-plugin/test/integration/no-options-unchanged.test.ts` (extended) and
-  `database-plugin/test/integration/database-plugin.test.ts`.
+- **Test home:** `cache-plugin/test/integration/no-options-unchanged.test.ts` (new — `cache-plugin`
+  has no such file today, though `queue-plugin` and `messaging-plugin` each ship one and this is the
+  same guard) and `database-plugin/test/integration/database-plugin.test.ts`.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -262,7 +265,7 @@ M56 defect class).
 | `cache-plugin/test/unit/coalescer.test.ts` (new)                           | `services/coalescer.ts`          | One leader for N waiters; the registry is empty after settlement (no leak); a rejecting leader leaves the key clear and each waiter re-runs; two different stores do not share a key.                                                                                       |
 | `cache-plugin/test/integration/cache-stampede.test.ts` (new)               | `middleware/cache-middleware.ts` | The X24-1 probe: 100 concurrent requests to a 300 ms handler produce **1** handler invocation, `X-Cache` distribution `{ MISS: 1, COALESCED: 99 }`, and identical bodies. Vacuity-checked first, exactly as the finding did: request 1 `MISS`, request 2 `HIT`.             |
 | `cache-plugin/test/unit/cache-service.test.ts` (extended)                  | `services/cache-service.ts`      | `getOrSet` calls the factory once for N concurrent callers, stores the value, and honours an explicit and a defaulted TTL.                                                                                                                                                  |
-| `cache-plugin/test/integration/no-options-unchanged.test.ts` (extended)    | `middleware/cache-middleware.ts` | A sequential MISS→HIT pair is byte-identical to today, including headers.                                                                                                                                                                                                   |
+| `cache-plugin/test/integration/no-options-unchanged.test.ts` (new)         | `middleware/cache-middleware.ts` | A sequential MISS→HIT pair is byte-identical to today, including headers.                                                                                                                                                                                                   |
 | `session-plugin/test/integration/concurrent-writes.test.ts` (new)          | documentation guard              | Two overlapping requests on one cookie: the cookie strategy produces two divergent snapshots and the store strategy loses one write — the exact behaviour C1 documents.                                                                                                     |
 | `*/test/unit/barrel-exports.test.ts` (extended, three packages)            | each `src/index.ts`              | The added symbols are exported and nothing else joined.                                                                                                                                                                                                                     |
 

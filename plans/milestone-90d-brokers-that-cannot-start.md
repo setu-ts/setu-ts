@@ -123,12 +123,13 @@ because all four are one question: does an adapter read what its transport actua
   the stream branch rethrows the second when `streams.add` rejects, and when `streams.info` rejects
   with anything other than `stream not found`. Both carry the platform error as `cause`.
 - **Why:** this is the guard-family shape the project has already fixed three times — M52c (D1),
-  M52d (Durable Objects), M70k (queue bindings) — and `cloudflare-plugin/src/facades.ts:402` states
-  the principle in as many words: fail with a name rather than at the first request with a bare
-  platform error. Two classes rather than one with a `reason` discriminant, because a discriminant
-  field would have no reader outside its own test (the dead-surface rule) while two classes each get
-  read by an application's `catch`. The `cause` chain is what keeps the platform's own text — the
-  `503`, the `no-ack` sentence — reachable rather than replaced.
+  M52d (Durable Objects), M70k (queue bindings) — and
+  `cloudflare-plugin/src/bindings/facades.ts:421-423` states the principle in as many words: fail
+  with a name rather than at the first request with a bare platform error. Two classes rather than
+  one with a `reason` discriminant, because a discriminant field would have no reader outside its
+  own test (the dead-surface rule) while two classes each get read by an application's `catch`. The
+  `cause` chain is what keeps the platform's own text — the `503`, the `no-ack` sentence — reachable
+  rather than replaced.
 - **Test home:** `test/unit/nats-broker.test.ts` — an injected connection whose `jetstreamManager`
   rejects, and one whose `streams.add` rejects, each asserted for the class, the named remedy, and
   `cause` identity.
