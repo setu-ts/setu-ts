@@ -120,10 +120,20 @@ optional capability read.
 
 ### 3.3 The queue ingress envelope carries the header too
 
-- **Decision:** `withIngressBehaviors` (`queue-plugin/src/processors/job-processor.ts:203`) adds
-  `headers: job.headers` to the `IngressContext` it builds, so an M86 queue behaviour reads the
-  channel the same way the `'messaging'` arm's does.
-- **Why:** the envelope is `{ kind: 'queue', name, payload: job, attempt }` today — no `headers` —
+- **Decision:** `withIngressBehaviors` (`queue-plugin/src/processors/job-processor.ts:203`) adds the
+  header map to the `IngressContext` it builds **through a conditional spread**
+  (`...(job.headers === undefined ? {} : { headers: job.headers })`), never `headers: job.headers`,
+  so an M86 queue behaviour reads the channel the same way the `'messaging'` arm's does. The map
+  must be carried end to end for that to mean anything: `QueueService.add` copies `options.headers`
+  onto the `StoredJob` (`queue-service.ts:181`) and `runJob` copies `storedJob.headers` onto the
+  `IJob` it hands the processor — without both hops `job.headers` is always `undefined` and this
+  section is decorative.
+- **Why:** the spread rather than the plain assignment is the care that matters here:
+  `headers:
+  job.headers` on an absent map creates an **own property whose value is `undefined`**,
+  so a behaviour testing presence (`'headers' in ctx`) sees a channel that does not exist — the
+  precise inversion of the contract, and the `exactOptionalPropertyTypes` trap this repository
+  documents. The envelope is `{ kind: 'queue', name, payload: job, attempt }` today — no `headers` —
   and M86's own contract says `IngressContext.headers` **absent means there was no channel**. After
   §3.1 the queue HAS one, so leaving the member absent would state something false about the
   capability, which is the ambiguity §3.1 exists to remove. A behaviour could reach
@@ -225,20 +235,21 @@ does not export it). A `barrel-exports.test.ts` case in each pins that (the M56 
 
 ## 5. Implementation files
 
-| File                                                             | Purpose                                                                                                                                  |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `common/src/services/queue.ts`                                   | `AddJobOptions.headers?`, `IJob.headers?`, with `MessageMetadata.headers`'s semantics.                                                   |
-| `common/src/services/telemetry.ts`                               | `ITelemetryService.activeSpanContext?`.                                                                                                  |
-| `common/src/services/ingress.ts` (JSDoc only)                    | C2 — the `IngressContext.headers` statement, and the scheduler's deliberate absence.                                                     |
-| `queue-plugin/src/tracing/traced-queue.ts`                       | The decorator over `IQueue` (§3.2).                                                                                                      |
-| `queue-plugin/src/plugin/queue-plugin.ts`                        | `optionalDependencies` gains `CAPABILITIES.TELEMETRY`; the constructed `QueueService` is wrapped before registration when it is present. |
-| `queue-plugin/src/processors/job-processor.ts`                   | `withIngressBehaviors` adds `headers` to the `IngressContext` (§3.3).                                                                    |
-| `queue-plugin/src/adapters/{memory,redis,rabbitmq,sqs}-queue.ts` | Carry the map (§3.4).                                                                                                                    |
-| `queue-plugin/src/interfaces/index.ts`                           | `StoredJob.headers?`, so the map survives persistence (§3.2).                                                                            |
-| `telemetry-plugin/src/services/telemetry-service.ts`             | `activeSpanContext` on `TelemetryService`; `NoopTelemetryService` omits it.                                                              |
-| `logger-plugin/src/loggers/trace-enriched-logger.ts`             | The decorator.                                                                                                                           |
-| `logger-plugin/src/plugin/logger-plugin.ts`                      | `optionalDependencies` gains `CAPABILITIES.TELEMETRY`; wraps the resolved logger.                                                        |
-| `README.md` × 2, `PUBLIC_API.md`, `ROADMAP.md`, `CHANGELOG.md`   | C1–C3 and the two feature entries.                                                                                                       |
+| File                                                             | Purpose                                                                                                                                                    |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `common/src/services/queue.ts`                                   | `AddJobOptions.headers?`, `IJob.headers?`, with `MessageMetadata.headers`'s semantics.                                                                     |
+| `common/src/services/telemetry.ts`                               | `ITelemetryService.activeSpanContext?`.                                                                                                                    |
+| `common/src/services/ingress.ts` (JSDoc only)                    | C2 — the `IngressContext.headers` statement, and the scheduler's deliberate absence.                                                                       |
+| `queue-plugin/src/tracing/traced-queue.ts`                       | The decorator over `IQueue` (§3.2).                                                                                                                        |
+| `queue-plugin/src/plugin/queue-plugin.ts`                        | `optionalDependencies` gains `CAPABILITIES.TELEMETRY`; the constructed `QueueService` is wrapped before registration when it is present.                   |
+| `queue-plugin/src/processors/job-processor.ts`                   | `withIngressBehaviors` adds `headers` to the `IngressContext` by conditional spread; `runJob` copies `storedJob.headers` onto the delivered `IJob` (§3.3). |
+| `queue-plugin/src/services/queue-service.ts`                     | `add` copies `AddJobOptions.headers` onto the `StoredJob` (§3.3).                                                                                          |
+| `queue-plugin/src/adapters/{memory,redis,rabbitmq,sqs}-queue.ts` | Carry the map (§3.4).                                                                                                                                      |
+| `queue-plugin/src/interfaces/index.ts`                           | `StoredJob.headers?`, so the map survives persistence (§3.2).                                                                                              |
+| `telemetry-plugin/src/services/telemetry-service.ts`             | `activeSpanContext` on `TelemetryService`; `NoopTelemetryService` omits it.                                                                                |
+| `logger-plugin/src/loggers/trace-enriched-logger.ts`             | The decorator.                                                                                                                                             |
+| `logger-plugin/src/plugin/logger-plugin.ts`                      | `optionalDependencies` gains `CAPABILITIES.TELEMETRY`; wraps the resolved logger.                                                                          |
+| `README.md` × 2, `PUBLIC_API.md`, `ROADMAP.md`, `CHANGELOG.md`   | C1–C3 and the two feature entries.                                                                                                                         |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -248,7 +259,8 @@ does not export it). A `barrel-exports.test.ts` case in each pins that (the M56 
 | `common/test/unit/ingress-contract.test.ts` (extended)                        | `services/ingress.ts`              | The scheduler arm carries no headers; the queue arm now may (§3.7).                                                                                                                                                                                                                                                                                              |
 | `queue-plugin/test/unit/traced-queue.test.ts` (new)                           | `tracing/traced-queue.ts`          | `add` injects a well-formed `traceparent` into `AddJobOptions.headers` under a producer span; a processor registered through the wrapper is invoked with its span parented to the context extracted from `job.headers`; a job with **no** headers starts a root span and does not throw; a telemetry service that throws leaves both `add` and dispatch working. |
 | `queue-plugin/test/unit/{memory,redis,rabbitmq,sqs}-queue.test.ts` (extended) | each adapter                       | Headers survive enqueue → reserve → dispatch; an adapter given no headers omits the member rather than reporting `{}`.                                                                                                                                                                                                                                           |
-| `queue-plugin/test/integration/queue-behaviors.test.ts` (extended)            | `processors/job-processor.ts`      | An ingress behaviour reads `ctx.headers` for a job that carries them, and sees the member **absent** for one that does not (§3.3).                                                                                                                                                                                                                               |
+| `queue-plugin/test/integration/queue-behaviors.test.ts` (extended)            | `processors/job-processor.ts`      | An ingress behaviour reads `ctx.headers` for a job that carries them, and for one that does not the member is **absent** rather than present-and-`undefined` — asserted with `'headers' in ctx`, the only check that separates the two (§3.3).                                                                                                                   |
+| `queue-plugin/test/unit/queue-service.test.ts` (extended)                     | `services/queue-service.ts`        | `add({ headers })` with no telemetry registered delivers that exact map to the processor through `StoredJob` → `IJob`, and `add()` with none leaves the member absent at both hops.                                                                                                                                                                              |
 | `queue-plugin/test/integration/header-conformance.test.ts` (new)              | all four adapters                  | One table over four adapters, so an adapter that stops carrying the map fails here rather than in its own file — the `messaging-plugin` precedent.                                                                                                                                                                                                               |
 | `queue-plugin/test/integration/trace-continuity-real.test.ts` (new)           | `tracing/traced-queue.ts`          | Guarded on `REDIS_URL` and `RABBITMQ_URL`, with the real OTel API and SDK: `POST /order` → `add` → `handle` is **one trace** with an unbroken parent chain. The X29-3 shape, asserted by matching the id rather than `toBeDefined()` (M75's own review lesson).                                                                                                  |
 | `queue-plugin/test/integration/no-options-unchanged.test.ts` (extended)       | `plugin/queue-plugin.ts`           | Without telemetry, a job enqueued with no `headers` is byte-identical to today, **and** a job enqueued WITH caller-supplied `headers` delivers them unchanged (§3.8) — the two cases together are what stop delivery depending on capability registration.                                                                                                       |

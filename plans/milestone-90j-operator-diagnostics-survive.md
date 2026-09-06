@@ -80,14 +80,25 @@ parameters, which is exactly the disclosure X12-3 exists to contain. The right s
 
 - **Decision:** `SerializedError` gains
   `classifiers?: Readonly<Record<string, string | number | boolean>>` and
-  `errors?: readonly SerializedError[]`. `readMember`'s key union widens to include the allowlist
-  and `errors`; every new read goes through the same `try`.
+  `errors?: readonly SerializedError[]`, plus `omittedErrorCount?: number` — the width cap's
+  counterpart. `readMember`'s key union widens to include the allowlist and `errors`; every new read
+  goes through the same `try`.
+
+  The count is a **typed member rather than a convention**, because §3.2's width cap is otherwise
+  satisfiable by silently dropping entries: an implementation that truncates without saying so meets
+  the budget and loses the fact that anything was lost, which is the class of defect this milestone
+  exists to close. It is absent when nothing was omitted, so a bounded aggregate looks exactly as it
+  does today, and `describeError` (§3.4) renders it into the string sink.
 - **Why:** both members are additive and optional, so a consumer reading the existing four is
   unaffected (§9.4). Reusing `readMember` rather than adding a second reader is the point — the
   guarded-read design is documented as deliberate, and a spread or an `Object.entries` walk would
   defeat it in exactly the case the comment describes (a Proxy-wrapped ORM error). `errors` is a
   first-class member rather than an allowlisted key because it holds `SerializedError` values and
-  must recurse under the same depth bound, which a scalar allowlist cannot express.
+  must recurse under the same depth bound, which a scalar allowlist cannot express. Its **traversal
+  is guarded too, not only its read**: `readMember` catches a throwing `errors` getter, and nothing
+  else would catch a throwing ITERATOR on the array it returns — an `AggregateError` subclass or a
+  Proxy can supply one, and `serializeError` is documented never to throw. Traversal is therefore
+  indexed rather than iterated, inside its own `try`, falling back to reporting the member absent.
 - **Test home:** `common/test/unit/serialize-error.test.ts` (extended) — a pg-shaped error, a Proxy
   whose `code` getter throws, an `AggregateError`, and a nested `AggregateError` at the depth bound.
 
@@ -217,6 +228,7 @@ defect class).
 | `database-plugin/test/integration/real-drizzle-adapter.test.ts` (extended)           | `drizzle-adapter.ts`               | Guarded on `DATABASE_URL`: a transaction-start failure against a real pool reports node-postgres's own sentence in the cause chain rather than the eight words — the X35-3 shape, end to end.                                                                                                                                                                                                                                                                                                                       |
 | `messaging-plugin/test/unit/describe-error.test.ts` (new)                            | `brokers/describe-error.ts`        | An `AggregateError` with two members and an empty `message` renders both; a two-deep cause chain renders both levels; a thrown non-`Error` renders its stringification; a hostile `Proxy` renders something rather than throwing.                                                                                                                                                                                                                                                                                   |
 | `messaging-plugin/test/unit/service-bus-broker.test.ts` (extended)                   | `brokers/service-bus-broker.ts`    | The receiver record for an `AggregateError` names its members; the two sibling sites do the same. The X28-7 regression guard.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `messaging-plugin/test/unit/raw-error-interpolation-audit.test.ts` (new)             | every broker under `src/brokers/`  | A source-level audit rejecting `${err}`-shaped interpolation of a caught value into a logger call anywhere in `src/brokers/`, with a `raw-interpolation: <reason>` escape marker. §5 sweeps five brokers and only Service Bus has a behavioural test, so a missed one would still emit the bare class name while every listed test passed — the M70e `npm-specifier-audit` shape, and cheaper than five near-identical fixtures.                                                                                    |
 | `messaging-plugin/test/integration/outage-real.test.ts` (extended)                   | `brokers/service-bus-broker.ts`    | Guarded: during a real outage the logged record carries more than the class name.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `logger-plugin/test/unit/normalize-metadata.test.ts` (extended)                      | `loggers/normalize-metadata.ts`    | A `SerializedError` carrying `classifiers` and `errors` survives normalization and redaction intact — the additions are useless if the logger drops them, and nothing today asserts it does not.                                                                                                                                                                                                                                                                                                                    |
 | `*/test/unit/barrel-exports.test.ts` (extended, three packages)                      | each `src/index.ts`                | `common` gained the two members; neither plugin's surface moved, and no `logger` option type changed (§3.5).                                                                                                                                                                                                                                                                                                                                                                                                        |

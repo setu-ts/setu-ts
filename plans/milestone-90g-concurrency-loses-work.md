@@ -178,8 +178,16 @@ member an isolation level must reach.
   That retry is explicit per-waiter logic rather than a consequence of clearing the map: a waiter
   already holds the shared promise, so removing the entry in `finally` only affects arrivals AFTER
   settlement. Each waiter therefore awaits the shared outcome inside its own `try` and, on a
-  rejection or a `{ replayable: false }`, calls `next()` itself — so N waiters behind a failed
+  rejection or a `{ replayable: false }`, **re-runs its own origin** — so N waiters behind a failed
   leader produce N origin calls, which is exactly today's behaviour and never fewer.
+
+  "Its own origin" differs per entry point, and the coalescer therefore takes it as a callback
+  rather than assuming one: `cacheMiddleware` passes `() => next()`, and `CacheService.getOrSet`
+  passes its own `factory`, which has no `next` to call. A middleware-only `{ replayable: false }` —
+  a streaming or non-cacheable HTTP response — can never reach a `getOrSet` caller, because the two
+  never share a leader: the registry is keyed per store AND per key, and a service key and a
+  composed HTTP cache key are different strings. Both entry points get a rejected-leader case and a
+  non-replayable-leader case.
 
   **The outcome type is load-bearing rather than defensive.** A waiter joins before `next()` has
   returned, so at join time nothing is known about the leader's response — and `cacheMiddleware`
@@ -350,12 +358,18 @@ DATABASE_URL=postgres://… MONGO_URL=… deno task test
   Mitigation: §3.4's `{ replayable: false }` outcome, plus a test driving genuinely concurrent
   requests at a streaming route that asserts every waiter reached the origin and received its own
   stream — rather than a test that requests a streaming route once.
-- **The memory adapter's new mutex would deadlock a nested transaction**, since the mutex is held
-  until commit or rollback and is not reentrant. Mitigation: the behaviour is **defined rather than
-  merely bounded** — a `beginTransaction({ isolation: 'serializable' })` issued while this adapter
-  already holds the mutex is **refused by name** with `NestedTransactionError`, never queued. A test
-  asserts the refusal and that it is prompt, so a regression fails rather than stalling the suite;
-  savepoints are out of scope (§9).
+- **The memory adapter's new mutex would deadlock a nested transaction**, since it is held until
+  commit or rollback and is not reentrant — and **the adapter cannot tell a nested call from an
+  independent one**, which is the correction this risk needed. `beginTransaction()` receives no
+  caller identity, `IUnitOfWork` exposes only `getRepository()`, and distinguishing them would need
+  `AsyncLocalStorage` context tracking that Workers does not offer. So an earlier draft's promise of
+  a _prompt_ `NestedTransactionError` for the nested case and a _wait_ for the independent one is
+  not implementable at this seam. Mitigation: **a bounded wait for both** — a queued acquirer that
+  does not obtain the mutex within `serializableAcquireTimeoutMs` rejects with
+  `TransactionAcquireTimeoutError`, whose message names nesting as the likeliest cause. An
+  independent transaction behind a short one proceeds normally; a nested one fails by the bound
+  instead of hanging. Both paths are tested, and the plan states plainly that the two are not
+  distinguished rather than implying they are. Savepoints stay out of scope (§9).
 
 ## 9. Out of scope
 
