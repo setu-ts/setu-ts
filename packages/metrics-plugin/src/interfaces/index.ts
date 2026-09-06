@@ -9,7 +9,7 @@
  *
  * @module
  */
-import type { MetricConfig, MetricType } from '@setu-ts/common';
+import type { MetricConfig, MetricType, PathPattern } from '@setu-ts/common';
 
 /**
  * Named metric config for declarative registration.
@@ -83,7 +83,7 @@ export interface MetricsPluginOptions {
    *
    * @default ['/health', '/live', '/ready']
    */
-  readonly excludePaths?: readonly string[];
+  readonly excludePaths?: readonly PathPattern[];
 
   /**
    * Enable built-in HTTP metrics.

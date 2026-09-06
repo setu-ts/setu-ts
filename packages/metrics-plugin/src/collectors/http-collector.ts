@@ -11,7 +11,9 @@ import type {
   IRuntimeServices,
   MetricOptions,
   NextFunction,
+  PathPattern,
 } from '@setu-ts/common';
+import { createPathMatcher } from '@setu-ts/common';
 import type { MetricsService } from '../services/metrics-service.ts';
 
 /**
@@ -37,7 +39,7 @@ export const HTTP_METRICS = {
  * probe routes. Literals because §2.2 forbids `metrics-plugin` importing
  * `health-plugin`; an application that moved its probes passes them here.
  */
-export const DEFAULT_EXCLUDED_PATHS: readonly string[] = ['/health', '/live', '/ready'];
+export const DEFAULT_EXCLUDED_PATHS: readonly PathPattern[] = ['/health', '/live', '/ready'];
 
 /**
  * HTTP metrics collector — registers and tracks HTTP request metrics.
@@ -45,7 +47,7 @@ export const DEFAULT_EXCLUDED_PATHS: readonly string[] = ['/health', '/live', '/
 export class HttpCollector {
   readonly #metricsService: MetricsService;
   readonly #runtime: IRuntimeServices;
-  readonly #excludedPaths: ReadonlySet<string>;
+  readonly #isExcluded: (path: string) => boolean;
 
   // Metric instances
   #durationHistogram?: IHistogram;
@@ -76,11 +78,14 @@ export class HttpCollector {
     metricsService: MetricsService,
     runtime: IRuntimeServices,
     durationBuckets: readonly number[],
-    excludedPaths?: readonly string[],
+    excludedPaths?: readonly PathPattern[],
   ) {
     this.#metricsService = metricsService;
     this.#runtime = runtime;
-    this.#excludedPaths = new Set(excludedPaths ?? []);
+    // Partitioned once at construction — for the all-string lists this option
+    // is given in practice the per-request cost is the same `Set.has` lookup
+    // the collector performed inline before M90a.
+    this.#isExcluded = createPathMatcher(excludedPaths ?? []);
 
     // HTTP series are labelled by method + status ONLY — never by path
     // (unbounded cardinality). These labels are fixed, not configurable.
@@ -128,7 +133,7 @@ export class HttpCollector {
     // X10-7: skip our own scrape and the health probes BEFORE any instrument
     // is touched, so an excluded request never perturbs even
     // `http_active_requests` and `/metrics` does not count its own scrapes.
-    if (this.#excludedPaths.has(ctx.request.path)) {
+    if (this.#isExcluded(ctx.request.path)) {
       await next();
       return;
     }

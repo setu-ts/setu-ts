@@ -9,8 +9,9 @@ import type {
   IRequestContext,
   IRuntimeServices,
   MiddlewareFunction,
+  PathPattern,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, createPathMatcher } from '@setu-ts/common';
 
 import { NoopLogger } from '../loggers/noop-logger.ts';
 
@@ -22,8 +23,13 @@ import { NoopLogger } from '../loggers/noop-logger.ts';
 export interface RequestLoggerOptions {
   /** Requests slower than this (ms) trigger a `warn` entry. Defaults to `5000`. */
   readonly slowRequestThreshold?: number;
-  /** Exact paths to skip logging (e.g. `['/health']`). */
-  readonly excludePaths?: readonly string[];
+  /**
+   * Paths to skip logging (e.g. `['/health']`). A string is an EXACT match; a
+   * `RegExp` is tested against the path.
+   *
+   * Default: `[]` — nothing is skipped, unchanged.
+   */
+  readonly excludePaths?: readonly PathPattern[];
 }
 
 /** Default slow-request threshold in milliseconds. */
@@ -48,11 +54,14 @@ export function createRequestLoggerMiddleware(
   options?: RequestLoggerOptions,
 ): MiddlewareFunction {
   const threshold = options?.slowRequestThreshold ?? DEFAULT_SLOW_THRESHOLD;
-  const exclude = new Set(options?.excludePaths ?? []);
+  // Partitioned once at registration. For an all-string list — which is every
+  // list this option has ever been given — the matcher is the same `Set.has`
+  // lookup this middleware performed inline before M90a.
+  const isExcluded = createPathMatcher(options?.excludePaths ?? []);
 
   return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     const path = ctx.request.path;
-    if (exclude.has(path)) {
+    if (isExcluded(path)) {
       await next();
       return;
     }

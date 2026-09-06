@@ -94,22 +94,23 @@ GraphqlPlugin({
 
 ## Options
 
-| Option               | Type                 | Default    | Description                               |
-| -------------------- | -------------------- | ---------- | ----------------------------------------- |
-| `typeDefs`           | `string`             | -          | SDL schema definition (schema-first mode) |
-| `resolvers`          | `ResolverMap`        | -          | Resolver map (schema-first mode)          |
-| `schema`             | `GraphqlSchemaLike`  | -          | Pre-built schema (code-first mode)        |
-| `path`               | `string`             | `/graphql` | Endpoint path                             |
-| `graphiql`           | `boolean`            | `true`     | Enable GraphiQL UI                        |
-| `introspection`      | `boolean`            | `true`     | Enable schema introspection               |
-| `maxDepth`           | `number`             | `10`       | Maximum query depth (0 to disable)        |
-| `validationRules`    | `unknown[]`          | `[]`       | Additional validation rules               |
-| `maskInternalErrors` | `boolean`            | `true`     | Mask internal server errors               |
-| `formatError`        | `(error) => error`   | -          | Custom error formatter                    |
-| `documentCacheSize`  | `number`             | `1000`     | Max cached documents (0 to disable)       |
-| `buildContext`       | `(input) => context` | -          | Custom context builder                    |
-| `rootValue`          | `unknown`            | -          | Root value for resolvers                  |
-| `graphqlModule`      | `GraphqlModuleLike`  | -          | Injected graphql module                   |
+| Option               | Type                 | Default    | Description                                                                                                                                                          |
+| -------------------- | -------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `typeDefs`           | `string`             | -          | SDL schema definition (schema-first mode)                                                                                                                            |
+| `resolvers`          | `ResolverMap`        | -          | Resolver map (schema-first mode)                                                                                                                                     |
+| `schema`             | `GraphqlSchemaLike`  | -          | Pre-built schema (code-first mode)                                                                                                                                   |
+| `path`               | `string`             | `/graphql` | Endpoint path                                                                                                                                                        |
+| `graphiql`           | `boolean`            | `true`     | Enable GraphiQL UI                                                                                                                                                   |
+| `introspection`      | `boolean`            | `true`     | Enable schema introspection                                                                                                                                          |
+| `maxDepth`           | `number`             | `10`       | Maximum query **depth** — nesting only (0 to disable)                                                                                                                |
+| `maxNodes`           | `number`             | `0`        | Maximum fields a document's **largest operation** may resolve, aliases counted separately and fragment spreads expanded at each site. `0` (the default) is unbounded |
+| `validationRules`    | `unknown[]`          | `[]`       | Additional validation rules                                                                                                                                          |
+| `maskInternalErrors` | `boolean`            | `true`     | Mask internal server errors                                                                                                                                          |
+| `formatError`        | `(error) => error`   | -          | Custom error formatter                                                                                                                                               |
+| `documentCacheSize`  | `number`             | `1000`     | Max cached documents (0 to disable)                                                                                                                                  |
+| `buildContext`       | `(input) => context` | -          | Custom context builder                                                                                                                                               |
+| `rootValue`          | `unknown`            | -          | Root value for resolvers                                                                                                                                             |
+| `graphqlModule`      | `GraphqlModuleLike`  | -          | Injected graphql module                                                                                                                                              |
 
 ## Platform Notes
 
@@ -219,7 +220,11 @@ under another client's hash. Hashing uses `IRuntimeServices.subtle`, so `apq` re
 
 ## Security
 
-- Query depth limiting is enabled by default (max 10 levels)
+- Query depth limiting is enabled by default (max 10 levels). **`maxDepth` bounds NESTING only** — a
+  document can be two levels deep and still ask for a hundred thousand fields, because every alias
+  is a separate field. `maxNodes` bounds that dimension by counting the fields a document resolves;
+  it is **off by default**, so set it from the largest query your own clients issue. Neither option
+  stands in for the other
 - Internal errors are masked by default — including errors raised inside a live subscription, which
   are masked by the same code path the HTTP transport uses
 - APQ verifies a submitted hash against the submitted document before persisting it

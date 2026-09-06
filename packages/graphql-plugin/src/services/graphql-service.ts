@@ -24,6 +24,7 @@ import { executeGraphql, toInternalError } from '../execution/executor.ts';
 import { subscribeGraphql } from '../execution/subscribe.ts';
 import { maskErrors } from '../security/mask-errors.ts';
 import { createDepthLimitRule } from '../security/depth-limit.ts';
+import { createMaxNodesRule } from '../security/max-nodes.ts';
 
 /** Options {@linkcode maskStream} forwards to {@linkcode maskErrors}. */
 interface MaskOptions {
@@ -98,6 +99,7 @@ export class GraphqlService implements IGraphqlService {
   #customValidationRules: unknown[] | undefined;
   #validationRules: unknown[]; // A1: built once at construction, reused per request
   #maxDepth: number;
+  #maxNodes: number;
   #introspection: boolean;
   #maskInternalErrors: boolean;
   #formatError: (error: unknown) => unknown;
@@ -115,6 +117,12 @@ export class GraphqlService implements IGraphqlService {
       documentCacheSize: number;
       validationRules?: unknown[];
       maxDepth: number;
+      /**
+       * Field budget; `0` or omitted disables the rule. Optional rather than
+       * required because the plugin option it mirrors defaults to off, so a
+       * caller constructing this service directly should not have to opt out.
+       */
+      maxNodes?: number;
       introspection: boolean;
       maskInternalErrors: boolean;
       formatError?: (error: unknown) => unknown;
@@ -136,6 +144,25 @@ export class GraphqlService implements IGraphqlService {
     this.#documentCache = new DocumentCache(options.documentCacheSize);
     this.#customValidationRules = options.validationRules;
     this.#maxDepth = options.maxDepth;
+    // Validated here rather than in the plugin factory so BOTH documented
+    // entry points are guarded: `GraphqlService` is barrel-exported and an
+    // application may construct it directly. `NaN` is the input that matters —
+    // every comparison against it is `false`, so `count > NaN` never reports and
+    // the breadth limit is silently INERT while reading as configured. That is
+    // what `Number(env.GRAPHQL_MAX_NODES)` yields for an unset or misspelled
+    // variable, so it is a plausible value rather than a hypothetical one.
+    // `0` disables the rule deliberately and is accepted.
+    if (
+      options.maxNodes !== undefined &&
+      (!Number.isSafeInteger(options.maxNodes) || options.maxNodes < 0)
+    ) {
+      throw new Error(
+        `GraphqlService: maxNodes must be a non-negative integer, received ` +
+          `${String(options.maxNodes)}. Use 0 (or omit it) to disable the ` +
+          `breadth limit.`,
+      );
+    }
+    this.#maxNodes = options.maxNodes ?? 0;
     this.#introspection = options.introspection;
     this.#maskInternalErrors = options.maskInternalErrors;
     // formatError is only used when masking errors; default to identity when not masking
@@ -339,6 +366,12 @@ export class GraphqlService implements IGraphqlService {
     if (this.#maxDepth > 0) {
       // createDepthLimitRule returns a validation rule function (receives context, returns visitor)
       rules.push(createDepthLimitRule(this.#maxDepth, this.#runtime.GraphQLError));
+    }
+
+    // Add breadth limit rule — a different dimension from depth, so both are
+    // consulted independently.
+    if (this.#maxNodes > 0) {
+      rules.push(createMaxNodesRule(this.#maxNodes, this.#runtime.GraphQLError));
     }
 
     // Add introspection rule if disabled

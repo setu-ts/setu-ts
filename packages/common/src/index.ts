@@ -27,6 +27,8 @@ export type {
   ErrorResponseInit,
   IErrorResponder,
 } from './errors/error-responder.ts';
+export { respondWithAuthorizationFailure } from './errors/authorization-responder.ts';
+export type { AuthorizationFailure } from './errors/authorization-responder.ts';
 // Error serialization for structured logging (M70f, X2-5)
 export { serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
@@ -74,6 +76,10 @@ export type {
 // Request identity and cross-package state keys
 export { replacePrincipal, replaceTenant, sealRequestIdentity } from './request-identity.ts';
 export { CLIENT_IP_STATE_KEY } from './state-keys.ts';
+
+// Path-exclusion matcher (M90a) — the one matcher four middlewares share
+export { createPathMatcher } from './path-matcher.ts';
+export type { PathPattern } from './path-matcher.ts';
 
 // W3C trace context codec
 export {

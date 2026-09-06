@@ -372,3 +372,27 @@ describe('runtime-plugin | bun platform factory', () => {
     expect(runtime.platform()).toBe('bun');
   });
 });
+
+describe('runtime-plugin | maxBodyBytes option domain', () => {
+  // Refused at FACTORY time, before any application exists. The `NaN` case is
+  // the one that matters: `total + n > NaN` is always `false`, so a NaN cap
+  // accepts every chunk and the body bound silently never fires — fail-OPEN in a
+  // size limit. `Number()` of an unset or misspelled env var is exactly `NaN`,
+  // which is how this option's value is supplied in a real deployment.
+  for (const bad of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) {
+    it(`refuses maxBodyBytes: ${String(bad)} by name`, () => {
+      expect(() => RuntimePlugin({ platform: 'deno', maxBodyBytes: bad }))
+        .toThrow(/maxBodyBytes must be a non-negative integer/);
+    });
+  }
+
+  for (const good of [0, 1, 1_048_576]) {
+    it(`accepts maxBodyBytes: ${good}`, () => {
+      expect(() => RuntimePlugin({ platform: 'deno', maxBodyBytes: good })).not.toThrow();
+    });
+  }
+
+  it('omitting the option is accepted and means unbounded', () => {
+    expect(() => RuntimePlugin({ platform: 'deno' })).not.toThrow();
+  });
+});

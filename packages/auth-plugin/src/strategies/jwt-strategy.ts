@@ -5,6 +5,7 @@
  */
 
 import type { IAuthStrategy, IJwtService, IPrincipal, IRequest } from '@setu-ts/common';
+import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 
 /**
  * JWT strategy options.
@@ -13,6 +14,7 @@ export interface JwtStrategyOptions {
   readonly jwtService: IJwtService;
   readonly header?: string;
   readonly scheme?: string;
+  readonly accessTokenRevocationStore?: IAccessTokenRevocationStore;
 }
 
 /**
@@ -23,11 +25,13 @@ export class JwtStrategy implements IAuthStrategy {
   private readonly jwtService: IJwtService;
   private readonly header: string;
   private readonly scheme: string;
+  private readonly accessTokenRevocationStore: IAccessTokenRevocationStore | undefined;
 
   constructor(options: JwtStrategyOptions) {
     this.jwtService = options.jwtService;
     this.header = options.header ?? 'authorization';
     this.scheme = options.scheme ?? 'bearer';
+    this.accessTokenRevocationStore = options.accessTokenRevocationStore;
   }
 
   /**
@@ -52,6 +56,17 @@ export class JwtStrategy implements IAuthStrategy {
 
     try {
       const payload = await this.jwtService.verify<Record<string, unknown>>(token);
+      if (payload.type === 'refresh') {
+        return null;
+      }
+      if (
+        payload.type === 'access' &&
+        typeof payload.jti === 'string' &&
+        this.accessTokenRevocationStore !== undefined &&
+        await this.accessTokenRevocationStore.isRevoked(payload.jti)
+      ) {
+        return null;
+      }
 
       // Map JWT claims to IPrincipal (conditionally include optional fields
       // via spread to satisfy exactOptionalPropertyTypes)
@@ -100,7 +115,18 @@ export class JwtStrategy implements IAuthStrategy {
    * Build claims object from payload (excluding standard claims).
    */
   private buildClaims(payload: Record<string, unknown>): Record<string, unknown> | undefined {
-    const standardClaims = ['sub', 'roles', 'permissions', 'iat', 'exp', 'nbf', 'aud', 'iss'];
+    const standardClaims = [
+      'sub',
+      'roles',
+      'permissions',
+      'iat',
+      'exp',
+      'nbf',
+      'aud',
+      'iss',
+      'type',
+      'jti',
+    ];
     const claims: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(payload)) {

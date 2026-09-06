@@ -113,7 +113,7 @@ describe('decorated @Roles enforced through a real kernel app (X18-3)', () => {
       expect(body.type).toBe('about:blank');
       expect(body.title).toBe('Forbidden');
       expect(body.status).toBe(403);
-      expect(body.detail).toBe('Role "admin" is required');
+      expect(body.detail).toBe('Insufficient privileges');
       expect('message' in body).toBe(false);
 
       const admitted = await app.inject({
@@ -230,7 +230,7 @@ describe('decorated @Roles enforced through a real kernel app (X18-3)', () => {
         type: 'about:blank',
         title: 'Forbidden',
         status: 403,
-        detail: 'Role "admin" is required',
+        detail: 'Insufficient privileges',
         instance: '/short-circuit/restricted',
       });
       expect(interceptorRan).toBe(false);

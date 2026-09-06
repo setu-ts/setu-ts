@@ -16,6 +16,7 @@ import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
 import { rateLimitMiddleware } from '../../src/middleware/rate-limit-middleware.ts';
 import { RefreshTokenService } from '../../src/services/refresh-token-service.ts';
 import { MemoryRefreshTokenStore } from '../../src/stores/refresh-token-store.ts';
+import { MemoryAccessTokenRevocationStore } from '../../src/stores/access-token-revocation-store.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   HandlerResult,
@@ -32,7 +33,10 @@ import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 type FakeRuntime = ReturnType<typeof createFakeRuntime>;
 
 /** Register AuthPlugin against a minimal fake plugin context. */
-function registerAuthPlugin(runtime: FakeRuntime): Map<string, unknown> {
+function registerAuthPlugin(
+  runtime: FakeRuntime,
+  accessTokenRevocationStore?: MemoryAccessTokenRevocationStore,
+): Map<string, unknown> {
   const registered = new Map<string, unknown>();
 
   const ctx = {
@@ -86,7 +90,10 @@ function registerAuthPlugin(runtime: FakeRuntime): Map<string, unknown> {
   } as unknown as IPluginContext;
 
   AuthPlugin({
-    jwt: { secret: 'integration-secret' },
+    jwt: {
+      secret: 'integration-secret',
+      ...(accessTokenRevocationStore === undefined ? {} : { accessTokenRevocationStore }),
+    },
     rbac: { roles: { admin: { permissions: ['*'] } } },
   }).register(ctx);
   return registered;
@@ -216,6 +223,34 @@ describe('M16b integration — refresh rotation + rate limiting', () => {
 
     expect(await service.revoke(pair.refreshToken)).toBe(true);
     expect(await service.refresh(pair.refreshToken)).toBeNull();
+  });
+
+  it('shared access revocation rejects a logged-out access token through auth middleware', async () => {
+    const accessTokenRevocationStore = new MemoryAccessTokenRevocationStore(runtime);
+    const revocationRegistered = registerAuthPlugin(runtime, accessTokenRevocationStore);
+    const revocationJwt = revocationRegistered.get(CAPABILITIES.JWT) as IJwtService;
+    const service = new RefreshTokenService({
+      jwt: revocationJwt,
+      store: new MemoryRefreshTokenStore(runtime),
+      runtime,
+      accessToken: { expiresIn: '1h' },
+      accessTokenRevocationStore,
+    });
+    const pair = await service.issue({ id: 'user-42' });
+    const beforeLogout = createRequestContext(revocationRegistered, runtime, {
+      authToken: pair.accessToken,
+    });
+
+    await authMiddleware()(beforeLogout.ctx, () => Promise.resolve());
+    expect(beforeLogout.ctx.request.user?.id).toBe('user-42');
+
+    expect(await service.revoke(pair.refreshToken)).toBe(true);
+    const afterLogout = createRequestContext(revocationRegistered, runtime, {
+      authToken: pair.accessToken,
+    });
+    await authMiddleware()(afterLogout.ctx, () => Promise.resolve());
+
+    expect(afterLogout.ctx.request.user).toBeUndefined();
   });
 
   it('rate limiting: max requests pass, the max+1-th 429s without reaching the handler', async () => {

@@ -106,6 +106,39 @@ describe('GraphqlService', () => {
       toAST: () => ({}),
     }) as GraphqlSchemaLike;
 
+  describe('maxNodes option domain (M90a review)', () => {
+    const build = (maxNodes: number) =>
+      new GraphqlService(createFakeRuntime(), createFakeSchema(), {
+        serviceRegistry: mockServiceRegistry,
+        endpoint: '/graphql',
+        documentCacheSize: 100,
+        maxDepth: 10,
+        maxNodes,
+        introspection: true,
+        maskInternalErrors: true,
+      });
+
+    // `NaN` is the one that matters: `maxNodes <= 0` is false so the rule is
+    // built, then `count > NaN` is false for every document, so the breadth
+    // limit reads as configured and enforces nothing. `Number()` of an unset
+    // env var is exactly `NaN`. Validated in the SERVICE rather than the plugin
+    // factory because `GraphqlService` is barrel-exported and both entry points
+    // must agree.
+    for (const bad of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) {
+      it(`refuses maxNodes: ${String(bad)} by name`, () => {
+        expect(() => build(bad)).toThrow(/maxNodes must be a non-negative integer/);
+      });
+    }
+
+    it('accepts 0 — the documented way to disable the breadth limit', () => {
+      expect(() => build(0)).not.toThrow();
+    });
+
+    it('accepts a positive budget', () => {
+      expect(() => build(500)).not.toThrow();
+    });
+  });
+
   it('has endpoint property', () => {
     const service = new GraphqlService(createFakeRuntime(), createFakeSchema(), {
       serviceRegistry: mockServiceRegistry,

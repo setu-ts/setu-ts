@@ -221,6 +221,7 @@ describe('requireRole', () => {
     const nt = createNext();
     await guard(ctx, nt.next);
     expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ detail: 'Insufficient privileges' });
     expect(nt.calls).toBe(0);
   });
 });
@@ -256,6 +257,7 @@ describe('requirePermission', () => {
     const nt = createNext();
     await guard(ctx, nt.next);
     expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ detail: 'Insufficient privileges' });
     expect(nt.calls).toBe(0);
   });
 });
@@ -282,6 +284,7 @@ describe('requireAnyRole', () => {
     const nt = createNext();
     await guard(ctx, nt.next);
     expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ detail: 'Insufficient privileges' });
     expect(nt.calls).toBe(0);
   });
 
@@ -318,6 +321,7 @@ describe('requireAllPermissions', () => {
     const nt = createNext();
     await guard(ctx, nt.next);
     expect(response.status).toBe(403);
+    expect(response.body).toMatchObject({ detail: 'Insufficient privileges' });
     expect(nt.calls).toBe(0);
   });
 

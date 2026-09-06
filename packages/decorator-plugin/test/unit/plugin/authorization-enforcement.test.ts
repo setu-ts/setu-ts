@@ -1,6 +1,7 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
+import { requireRole } from '@setu-ts/auth-plugin';
 import type {
   IAuthorizationService,
   IPrincipal,
@@ -116,22 +117,25 @@ describe('authorization middleware refusals', () => {
     ]);
   });
 
-  it('answers 403 naming the single required role, byte-identical with requireRole', async () => {
+  it('answers generic 403 detail, byte-identical with requireRole', async () => {
     const middleware = createRolesMiddleware(['admin']);
-    const { ctx, response } = fakeRequestContext({
+    const decorator = fakeRequestContext({
+      user: { id: 'u1', roles: ['viewer'] },
+      authorization: fakeAuthorization(['viewer']),
+    });
+    const guard = fakeRequestContext({
       user: { id: 'u1', roles: ['viewer'] },
       authorization: fakeAuthorization(['viewer']),
     });
 
-    await middleware(ctx, next);
+    await middleware(decorator.ctx, next);
+    await requireRole('admin')(guard.ctx, next);
 
-    expect(response.statuses).toEqual([403]);
-    expect(response.bodies).toEqual([
-      { error: 'Forbidden', detail: 'Role "admin" is required' },
-    ]);
+    expect(decorator.response.statuses).toEqual(guard.response.statuses);
+    expect(decorator.response.bodies).toEqual(guard.response.bodies);
   });
 
-  it('answers 403 naming every role when several are declared', async () => {
+  it('answers generic 403 detail when several roles are declared', async () => {
     const middleware = createRolesMiddleware(['admin', 'owner']);
     const { ctx, response } = fakeRequestContext({
       user: { id: 'u1', roles: ['viewer'] },
@@ -142,7 +146,7 @@ describe('authorization middleware refusals', () => {
 
     expect(response.statuses).toEqual([403]);
     expect(response.bodies).toEqual([
-      { error: 'Forbidden', detail: 'One of these roles is required: admin, owner' },
+      { error: 'Forbidden', detail: 'Insufficient privileges' },
     ]);
   });
 
@@ -183,7 +187,7 @@ describe('authorization middleware refusals', () => {
     expect(failing.response.bodies).toEqual([
       {
         error: 'Forbidden',
-        detail: 'One of these permissions is required: billing:write, billing:admin',
+        detail: 'Insufficient privileges',
       },
     ]);
   });

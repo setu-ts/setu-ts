@@ -8871,7 +8871,7 @@ their own exercises rather than chores belonging to any one of them.
 
 | Letter   | Shape                                              | Findings | High | Packages                                                               |
 | -------- | -------------------------------------------------- | -------- | ---- | ---------------------------------------------------------------------- |
-| **M90a** | Abuse control that actually protects               | 6        | 3    | auth, http-security, graphql                                           |
+| **M90a** | Abuse control that actually protects               | 6        | 3    | common, auth, http-security, runtime, graphql, logger, metrics, kernel |
 | **M90b** | Health that tells the truth, bounded               | 7        | 4    | secrets, cache, realtime-backplane, messaging, health, queue, database |
 | **M90c** | Credential revocation and token type               | 4        | 2    | auth                                                                   |
 | **M90d** | The two brokers that cannot start                  | 4        | 2    | messaging                                                              |
@@ -8908,7 +8908,21 @@ folded into a letter later if a second instance turns up.
 
 ### Milestone 90a: Abuse Control That Actually Protects
 
-**Package(s):** `packages/auth-plugin`, `packages/http-security-plugin`, `packages/graphql-plugin`
+**Package(s):** `packages/common`, `packages/auth-plugin`, `packages/http-security-plugin`,
+`packages/runtime`, `packages/graphql-plugin`, `packages/logger-plugin`, `packages/metrics-plugin`,
+`packages/kernel`
+
+**Corrected from the three this section originally named** (the M70b / M70g / M70h / M70k precedent
+— the list is corrected in the plan when source-checking contradicts it). Two rows do not live where
+the section assumed. X32-4's body read is `packages/runtime/src/adapters/shared/fetch-mapping.ts`,
+so it is not implementable in `http-security-plugin` at all: the middleware has no access to the
+read, and because M87 made the body lazy the read happens _after_ middleware has returned. And
+X32-1's fix needs a path-exclusion matcher, which three packages already carry a private copy of —
+so the matcher is promoted to `common` and `logger-plugin` / `metrics-plugin` adopt it, which
+DELETES two duplicates rather than creating a fifth (§11.1). `packages/kernel` joined during code
+review: the new body cap makes the kernel's RFC 6455 upgrade-body guard able to REJECT rather than
+only return, which leaked the WebSocket connection slot the router reserved at accept time — so an
+unauthenticated client could exhaust `maxConnections` with that many malformed requests.
 
 **Objective:** Make the three rate/size/breadth limiters bound what they claim to bound. X32-1 (the
 exhausted limiter answers `429` to `/live` and `/ready`, so a burst of abuse takes the pod out of
@@ -9097,140 +9111,140 @@ fields (`code` first) read through the same guard, plus
 
 ## Progress Tracking
 
-| Milestone | Status | Package                                             |
-| --------- | ------ | --------------------------------------------------- |
-| 0         | ✅     | Monorepo Foundation                                 |
-| 1         | ✅     | common                                              |
-| 2         | ✅     | kernel                                              |
-| 3         | ✅     | runtime                                             |
-| 4         | ✅     | logger-plugin                                       |
-| 5         | ✅     | config-plugin                                       |
-| 6         | ✅     | validation-plugin                                   |
-| 7         | ✅     | exceptions                                          |
-| 8         | ✅     | di-plugin                                           |
-| 9         | ✅     | decorator-plugin                                    |
-| 10        | ✅     | database-plugin                                     |
-| 11        | ✅     | cache-plugin                                        |
-| 12        | ✅     | events-plugin                                       |
-| 13        | ✅     | cqrs-plugin                                         |
-| 14        | ✅     | messaging-plugin                                    |
-| 14b       | ✅     | messaging-plugin                                    |
-| 14c       | ✅     | messaging-plugin                                    |
-| 14d       | ✅     | messaging-plugin                                    |
-| 15        | ✅     | queue-plugin                                        |
-| 15b       | ✅     | queue-plugin                                        |
-| 16        | ✅     | auth-plugin                                         |
-| 16b       | ✅     | auth-plugin                                         |
-| 17        | ✅     | http-security-plugin                                |
-| 18        | ✅     | scheduler-plugin                                    |
-| 19        | ✅     | metrics-plugin                                      |
-| 20        | ✅     | health-plugin                                       |
-| 21        | ✅     | openapi-plugin                                      |
-| 22        | ✅     | kernel-on-hono                                      |
-| 23        | ✅     | runtime-serve-hono                                  |
-| 24        | ✅     | telemetry-plugin                                    |
-| 24b       | ✅     | telemetry-plugin                                    |
-| 24c       | ✅     | telemetry-collector                                 |
-| 25        | ✅     | secrets-plugin                                      |
-| 26        | ✅     | audit-plugin                                        |
-| 27        | ✅     | resilience-plugin                                   |
-| 28        | ✅     | storage-plugin                                      |
-| 29        | ✅     | mail-plugin                                         |
-| 30        | ✅     | notification-plugin                                 |
-| 30b       | ✅     | notification-plugin                                 |
-| 31        | ✅     | feature-flags-plugin                                |
-| 32        | ✅     | multi-tenancy-plugin                                |
-| 33        | ✅     | testing                                             |
-| 34        | ✅     | cli                                                 |
-| 34b       | ✅     | cli                                                 |
-| 35        | ✅     | sdk                                                 |
-| 36        | ✅     | starters                                            |
-| 36b       | ✅     | starters + decorator-plugin + cli                   |
-| 36c       | ✅     | cli + starters + config + runtime                   |
-| 37        | ✅     | examples                                            |
-| 37b       | ✅     | examples + Redis startup fix                        |
-| 37c       | ✅     | full-stack example (apps/full-stack)                |
-| 38        | ✅     | documentation                                       |
-| 39        | ✅     | docker/k8s                                          |
-| 40        | ⬜     | final release                                       |
-| 58        | ✅     | cli (domain module scaffolding)                     |
-| 59        | ✅     | cloudflare-plugin (workers messaging)               |
-| 60        | ✅     | cli (wire generated artifacts)                      |
-| 61        | ✅     | cli (decorator/DI opt-in)                           |
-| 62        | ✅     | cli (monorepo support)                              |
-| 41        | ✅     | http-adapters                                       |
-| 42        | ✅     | streaming-response                                  |
-| 43        | ✅     | sse-plugin                                          |
-| 44        | ✅     | react-router-plugin                                 |
-| 45        | ✅     | worker-pool-plugin                                  |
-| 45b       | ✅     | worker-pool-plugin (metrics)                        |
-| 46        | ✅     | websocket-plugin                                    |
-| 47        | ✅     | alpha-3 limitations                                 |
-| 48        | ✅     | session-plugin                                      |
-| 49        | ✅     | grpc-plugin                                         |
-| 50        | ✅     | service-discovery-plugin                            |
-| 50b       | ✅     | cli (microservice template wiring)                  |
-| 51        | ✅     | graphql-plugin                                      |
-| 51b       | ✅     | graphql-plugin (subscriptions)                      |
-| 52        | ✅     | cloudflare-plugin                                   |
-| 52b       | ✅     | cloudflare-plugin (queues/cron/cache)               |
-| 52c       | ✅     | cloudflare-plugin (D1 + common)                     |
-| 52d       | ✅     | cloudflare-plugin (durable objects)                 |
-| 53        | ✅     | real-backend CI (examples gate)                     |
-| 54        | ✅     | messaging-plugin (cloud brokers)                    |
-| 55        | ✅     | static-plugin                                       |
-| 56        | ✅     | rfc9457 problem details                             |
-| 57        | ✅     | derived openapi security                            |
-| 63        | ✅     | cli (scaffold repairs)                              |
-| 64        | ✅     | decorator-plugin (`@Ctx()`)                         |
-| 65        | ✅     | cli (functional default, two worlds)                |
-| 66        | ✅     | database-plugin (prisma v7, drizzle)                |
-| 67        | ✅     | cli + starters (scaffold defaults)                  |
-| 68        | ✅     | common + kernel (contract gaps)                     |
-| 69        | ✅     | database-plugin (drizzle query seam)                |
-| 70        | ✅     | alpha-9 defect closeout (umbrella)                  |
-| 70a       | ✅     | pipeline bypass (security)                          |
-| 70b       | ✅     | tenant isolation, data exposure (sec)               |
-| 70c       | ✅     | health-signal sweep (6 packages)                    |
-| 70d       | ✅     | no-argument registration seams                      |
-| 70e       | ✅     | default branches of injectable seams                |
-| 70f       | ✅     | error format and error visibility                   |
-| 70g       | ✅     | routing collisions                                  |
-| 70h       | ✅     | cli scaffold batch                                  |
-| 70i       | ✅     | grpc and graphql viability                          |
-| 70j       | ✅     | database adapter correctness                        |
-| 70k       | ✅     | storage, queue, worker operability                  |
-| 70l       | ✅     | deployment and operations                           |
-| 70m       | ✅     | sdk and openapi                                     |
-| 70n       | ✅     | decorators, validation, closeout                    |
-| 71        | ✅     | kernel + contract boundary hardening (PR #190)      |
-| 72        | ✅     | cli (transports + interactive, PR #191)             |
-| 73        | ✅     | realtime authentication (PR #197)                   |
-| 74        | ✅     | realtime reads + sse contract (PR #196)             |
-| 75        | ✅     | broker trace propagation (PR #201)                  |
-| 76        | ✅     | standard decorators / experimentalDecorators        |
-| 77        | ✅     | executable prose assertions                         |
-| 78        | ✅     | document-database backends (Mongo adapter, PR #208) |
-| 79        | ✅     | portable data-access contract                       |
-| 80        | ✅     | dynamodb backend                                    |
-| 81        | ✅     | cosmos db backend                                   |
-| 82        | ✅     | cloud bigtable backend (PR #222)                    |
-| 83        | ✅     | module declarations + functional example            |
-| 84        | ✅     | realtime client consumption (sdk + cli)             |
-| 85        | ✅     | cli (workspace full-stack gRPC, PR #215)            |
-| 86        | ✅     | non-http ingress registration + pipeline            |
-| 87        | ✅     | request-path performance (kernel/runtime/common)    |
-| 88        | ✅     | response-path performance (kernel/runtime/common)   |
-| 89a       | ✅     | declarations that enforce nothing (X18-3/5/4/1)     |
-| 89b       | ✅     | caller errors read as server faults (X18-2, X19-1)  |
-| 89c       | ✅     | 0.3.0 ingress surface (X16-1, X16-2)                |
-| 90a       | ⬜     | abuse control that actually protects                |
-| 90b       | ✅     | health that tells the truth, bounded                |
-| 90c       | ⬜     | credential revocation and token type                |
-| 90d       | ⬜     | the two brokers that cannot start                   |
-| 90e       | ⬜     | static delivery correctness                         |
-| 90f       | ⬜     | caller errors reach the client correctly            |
-| 90g       | ⬜     | concurrency loses work silently                     |
-| 90h       | ⬜     | documentation that survives contact                 |
-| 90i       | ⬜     | observability that joins up                         |
-| 90j       | ⬜     | operator diagnostics survive to the operator        |
+| Milestone | Status | Package                                                                                    |
+| --------- | ------ | ------------------------------------------------------------------------------------------ |
+| 0         | ✅     | Monorepo Foundation                                                                        |
+| 1         | ✅     | common                                                                                     |
+| 2         | ✅     | kernel                                                                                     |
+| 3         | ✅     | runtime                                                                                    |
+| 4         | ✅     | logger-plugin                                                                              |
+| 5         | ✅     | config-plugin                                                                              |
+| 6         | ✅     | validation-plugin                                                                          |
+| 7         | ✅     | exceptions                                                                                 |
+| 8         | ✅     | di-plugin                                                                                  |
+| 9         | ✅     | decorator-plugin                                                                           |
+| 10        | ✅     | database-plugin                                                                            |
+| 11        | ✅     | cache-plugin                                                                               |
+| 12        | ✅     | events-plugin                                                                              |
+| 13        | ✅     | cqrs-plugin                                                                                |
+| 14        | ✅     | messaging-plugin                                                                           |
+| 14b       | ✅     | messaging-plugin                                                                           |
+| 14c       | ✅     | messaging-plugin                                                                           |
+| 14d       | ✅     | messaging-plugin                                                                           |
+| 15        | ✅     | queue-plugin                                                                               |
+| 15b       | ✅     | queue-plugin                                                                               |
+| 16        | ✅     | auth-plugin                                                                                |
+| 16b       | ✅     | auth-plugin                                                                                |
+| 17        | ✅     | http-security-plugin                                                                       |
+| 18        | ✅     | scheduler-plugin                                                                           |
+| 19        | ✅     | metrics-plugin                                                                             |
+| 20        | ✅     | health-plugin                                                                              |
+| 21        | ✅     | openapi-plugin                                                                             |
+| 22        | ✅     | kernel-on-hono                                                                             |
+| 23        | ✅     | runtime-serve-hono                                                                         |
+| 24        | ✅     | telemetry-plugin                                                                           |
+| 24b       | ✅     | telemetry-plugin                                                                           |
+| 24c       | ✅     | telemetry-collector                                                                        |
+| 25        | ✅     | secrets-plugin                                                                             |
+| 26        | ✅     | audit-plugin                                                                               |
+| 27        | ✅     | resilience-plugin                                                                          |
+| 28        | ✅     | storage-plugin                                                                             |
+| 29        | ✅     | mail-plugin                                                                                |
+| 30        | ✅     | notification-plugin                                                                        |
+| 30b       | ✅     | notification-plugin                                                                        |
+| 31        | ✅     | feature-flags-plugin                                                                       |
+| 32        | ✅     | multi-tenancy-plugin                                                                       |
+| 33        | ✅     | testing                                                                                    |
+| 34        | ✅     | cli                                                                                        |
+| 34b       | ✅     | cli                                                                                        |
+| 35        | ✅     | sdk                                                                                        |
+| 36        | ✅     | starters                                                                                   |
+| 36b       | ✅     | starters + decorator-plugin + cli                                                          |
+| 36c       | ✅     | cli + starters + config + runtime                                                          |
+| 37        | ✅     | examples                                                                                   |
+| 37b       | ✅     | examples + Redis startup fix                                                               |
+| 37c       | ✅     | full-stack example (apps/full-stack)                                                       |
+| 38        | ✅     | documentation                                                                              |
+| 39        | ✅     | docker/k8s                                                                                 |
+| 40        | ⬜     | final release                                                                              |
+| 58        | ✅     | cli (domain module scaffolding)                                                            |
+| 59        | ✅     | cloudflare-plugin (workers messaging)                                                      |
+| 60        | ✅     | cli (wire generated artifacts)                                                             |
+| 61        | ✅     | cli (decorator/DI opt-in)                                                                  |
+| 62        | ✅     | cli (monorepo support)                                                                     |
+| 41        | ✅     | http-adapters                                                                              |
+| 42        | ✅     | streaming-response                                                                         |
+| 43        | ✅     | sse-plugin                                                                                 |
+| 44        | ✅     | react-router-plugin                                                                        |
+| 45        | ✅     | worker-pool-plugin                                                                         |
+| 45b       | ✅     | worker-pool-plugin (metrics)                                                               |
+| 46        | ✅     | websocket-plugin                                                                           |
+| 47        | ✅     | alpha-3 limitations                                                                        |
+| 48        | ✅     | session-plugin                                                                             |
+| 49        | ✅     | grpc-plugin                                                                                |
+| 50        | ✅     | service-discovery-plugin                                                                   |
+| 50b       | ✅     | cli (microservice template wiring)                                                         |
+| 51        | ✅     | graphql-plugin                                                                             |
+| 51b       | ✅     | graphql-plugin (subscriptions)                                                             |
+| 52        | ✅     | cloudflare-plugin                                                                          |
+| 52b       | ✅     | cloudflare-plugin (queues/cron/cache)                                                      |
+| 52c       | ✅     | cloudflare-plugin (D1 + common)                                                            |
+| 52d       | ✅     | cloudflare-plugin (durable objects)                                                        |
+| 53        | ✅     | real-backend CI (examples gate)                                                            |
+| 54        | ✅     | messaging-plugin (cloud brokers)                                                           |
+| 55        | ✅     | static-plugin                                                                              |
+| 56        | ✅     | rfc9457 problem details                                                                    |
+| 57        | ✅     | derived openapi security                                                                   |
+| 63        | ✅     | cli (scaffold repairs)                                                                     |
+| 64        | ✅     | decorator-plugin (`@Ctx()`)                                                                |
+| 65        | ✅     | cli (functional default, two worlds)                                                       |
+| 66        | ✅     | database-plugin (prisma v7, drizzle)                                                       |
+| 67        | ✅     | cli + starters (scaffold defaults)                                                         |
+| 68        | ✅     | common + kernel (contract gaps)                                                            |
+| 69        | ✅     | database-plugin (drizzle query seam)                                                       |
+| 70        | ✅     | alpha-9 defect closeout (umbrella)                                                         |
+| 70a       | ✅     | pipeline bypass (security)                                                                 |
+| 70b       | ✅     | tenant isolation, data exposure (sec)                                                      |
+| 70c       | ✅     | health-signal sweep (6 packages)                                                           |
+| 70d       | ✅     | no-argument registration seams                                                             |
+| 70e       | ✅     | default branches of injectable seams                                                       |
+| 70f       | ✅     | error format and error visibility                                                          |
+| 70g       | ✅     | routing collisions                                                                         |
+| 70h       | ✅     | cli scaffold batch                                                                         |
+| 70i       | ✅     | grpc and graphql viability                                                                 |
+| 70j       | ✅     | database adapter correctness                                                               |
+| 70k       | ✅     | storage, queue, worker operability                                                         |
+| 70l       | ✅     | deployment and operations                                                                  |
+| 70m       | ✅     | sdk and openapi                                                                            |
+| 70n       | ✅     | decorators, validation, closeout                                                           |
+| 71        | ✅     | kernel + contract boundary hardening (PR #190)                                             |
+| 72        | ✅     | cli (transports + interactive, PR #191)                                                    |
+| 73        | ✅     | realtime authentication (PR #197)                                                          |
+| 74        | ✅     | realtime reads + sse contract (PR #196)                                                    |
+| 75        | ✅     | broker trace propagation (PR #201)                                                         |
+| 76        | ✅     | standard decorators / experimentalDecorators                                               |
+| 77        | ✅     | executable prose assertions                                                                |
+| 78        | ✅     | document-database backends (Mongo adapter, PR #208)                                        |
+| 79        | ✅     | portable data-access contract                                                              |
+| 80        | ✅     | dynamodb backend                                                                           |
+| 81        | ✅     | cosmos db backend                                                                          |
+| 82        | ✅     | cloud bigtable backend (PR #222)                                                           |
+| 83        | ✅     | module declarations + functional example                                                   |
+| 84        | ✅     | realtime client consumption (sdk + cli)                                                    |
+| 85        | ✅     | cli (workspace full-stack gRPC, PR #215)                                                   |
+| 86        | ✅     | non-http ingress registration + pipeline                                                   |
+| 87        | ✅     | request-path performance (kernel/runtime/common)                                           |
+| 88        | ✅     | response-path performance (kernel/runtime/common)                                          |
+| 89a       | ✅     | declarations that enforce nothing (X18-3/5/4/1)                                            |
+| 89b       | ✅     | caller errors read as server faults (X18-2, X19-1)                                         |
+| 89c       | ✅     | 0.3.0 ingress surface (X16-1, X16-2)                                                       |
+| 90a       | ✅     | abuse control that actually protects                                                       |
+| 90b       | ✅     | health that tells the truth, bounded                                                       |
+| 90c       | ✅     | credential revocation and token type ([#248](https://github.com/setu-ts/setu-ts/pull/248)) |
+| 90d       | ⬜     | the two brokers that cannot start                                                          |
+| 90e       | ⬜     | static delivery correctness                                                                |
+| 90f       | ⬜     | caller errors reach the client correctly                                                   |
+| 90g       | ⬜     | concurrency loses work silently                                                            |
+| 90h       | ⬜     | documentation that survives contact                                                        |
+| 90i       | ⬜     | observability that joins up                                                                |
+| 90j       | ⬜     | operator diagnostics survive to the operator                                               |

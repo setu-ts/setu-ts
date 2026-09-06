@@ -26,6 +26,7 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { NodeIncomingMessage, RawUpgradeSocket, WsModuleLike } from './node-ws-upgrader.ts';
@@ -115,9 +116,11 @@ export class NodeHttpServerHandle {
   #server: NodeServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
   readonly #coordinator: NodeUpgradeCoordinator;
+  readonly #maxBodyBytes: number | undefined;
 
-  constructor(wsModule?: WsModuleLike) {
+  constructor(wsModule?: WsModuleLike, maxBodyBytes?: number) {
     this.#coordinator = new NodeUpgradeCoordinator(wsModule);
+    this.#maxBodyBytes = maxBodyBytes;
   }
 
   /**
@@ -185,7 +188,7 @@ export class NodeHttpServerHandle {
     head: unknown,
   ): Promise<void> {
     const request = createUpgradeRequest(incoming);
-    const frameworkRequest = mapWebRequestToFrameworkRequest(request);
+    const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
     return this.#handleUpgradePipeline(incoming, frameworkRequest, socket, head);
   }
 
@@ -263,7 +266,7 @@ export class NodeHttpServerHandle {
    */
   createFetchHandler(): (request: Request) => Response | Promise<Response> {
     return (request: Request): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -339,14 +342,20 @@ export function isNodeHttpServerHandle(handle: ServerHandle): handle is NodeHttp
  * Node HTTP adapter implementation.
  *
  * @param host - Injected Node serve host (defaults to lazy @hono/node-server)
+ * @param wsModule - Injected `ws` module (defaults to a lazy `npm:ws` import)
+ * @param options - Adapter options; `maxBodyBytes` bounds the body read
  */
 export class NodeHttpAdapter implements IHttpAdapter {
   #host: NodeServeHost;
   #handle: NodeHttpServerHandle;
 
-  constructor(host?: NodeServeHost, wsModule?: WsModuleLike) {
+  constructor(
+    host?: NodeServeHost,
+    wsModule?: WsModuleLike,
+    options?: HttpAdapterOptions,
+  ) {
     this.#host = host ?? defaultNodeServeHost;
-    this.#handle = new NodeHttpServerHandle(wsModule);
+    this.#handle = new NodeHttpServerHandle(wsModule, options?.maxBodyBytes);
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {

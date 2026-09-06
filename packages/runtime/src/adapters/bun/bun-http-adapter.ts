@@ -24,6 +24,7 @@ import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
 } from '../shared/fetch-mapping.ts';
+import type { HttpAdapterOptions } from '../shared/adapter-options.ts';
 import { UpgradeRouterStore } from '../shared/upgrade-router-store.ts';
 import { ABNORMAL_CLOSURE } from '../shared/web-socket-transport.ts';
 import type { BunSocketData, BunWebSocketHandlers } from './bun-ws-upgrader.ts';
@@ -106,6 +107,14 @@ export class BunHttpServerHandle {
   #handler: ((request: IRequest) => IResponse | Promise<IResponse>) | null = null;
   #server: BunServer | null = null;
   readonly #upgrades = new UpgradeRouterStore();
+  readonly #maxBodyBytes: number | undefined;
+
+  /**
+   * @param maxBodyBytes - Optional cap on the request-body read
+   */
+  constructor(maxBodyBytes?: number) {
+    this.#maxBodyBytes = maxBodyBytes;
+  }
 
   /**
    * Stores the handler set by `setHandler`.
@@ -153,7 +162,7 @@ export class BunHttpServerHandle {
    */
   createFetchHandler(): (request: Request) => Response | Promise<Response> {
     return (request: Request): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -196,7 +205,7 @@ export class BunHttpServerHandle {
       request: Request,
       server: BunServer,
     ): Response | undefined | Promise<Response | undefined> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -284,9 +293,9 @@ export class BunHttpAdapter implements IHttpAdapter {
   #host: BunServeHost;
   #handle: BunHttpServerHandle;
 
-  constructor(host?: BunServeHost) {
+  constructor(host?: BunServeHost, options?: HttpAdapterOptions) {
     this.#host = host ?? defaultBunServeHost;
-    this.#handle = new BunHttpServerHandle();
+    this.#handle = new BunHttpServerHandle(options?.maxBodyBytes);
   }
 
   setHandler(handler: (request: IRequest) => IResponse | Promise<IResponse>): void {

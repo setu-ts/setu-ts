@@ -196,6 +196,41 @@ but unreachable is `down` (or `degraded` for the backplane, whose local delivery
 `up`. The full classification of every indicator in the framework is in
 [health-indicators.md](health-indicators.md).
 
+### Nothing in the request pipeline may refuse a probe
+
+A probe reaches the process through the **same middleware pipeline** as ordinary traffic, so any
+global middleware that can short-circuit can fail a probe — and a failed liveness probe is a
+container restart, not a dropped request. The consequence is asymmetric: an overloaded replica that
+answers `/live` keeps serving, while one that refuses it is killed and restarted straight back into
+the same load.
+
+Two first-party middlewares therefore exempt the operational paths **by default**, and both defaults
+are the same six — `/live`, `/ready`, `/health`, `/metrics`, `/openapi.json`, `/docs`:
+
+| Middleware                                  | Option    | Why it would otherwise refuse a probe                                                                                            |
+| ------------------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `rateLimitMiddleware` (`auth-plugin`)       | `exclude` | An exhausted bucket answers `429` — including to the kubelet, which restarts a container whose only fault is load (M90a, X32-1). |
+| `tenantMiddleware` (`multi-tenancy-plugin`) | `exclude` | With `required: true` a probe carries no tenant header, so the replica never becomes ready (M70b, X4-2).                         |
+
+A caller-supplied list **replaces** those defaults rather than extending them, so spread the
+exported constant to keep them:
+
+```typescript
+import { DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, rateLimitMiddleware } from '@setu-ts/auth-plugin';
+
+app.middleware.add(rateLimitMiddleware({
+  windowMs: 60_000,
+  max: 100,
+  exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
+}));
+```
+
+If you move the probes (`HealthPlugin({ endpoints })`) or add your own operational routes, add the
+new paths to every exclusion list that governs them — and to the `livenessProbe`/`readinessProbe`
+paths in the manifest, which must agree. Any other global middleware that can short-circuit — an IP
+allowlist, a CSRF check, an auth guard added at the pipeline level — needs the same exemption; only
+these two carry it by default.
+
 ### Security context
 
 The chart sets `runAsNonRoot: true`, `readOnlyRootFilesystem: true`, drops all capabilities, and

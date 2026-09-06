@@ -5,9 +5,10 @@
  */
 
 import type { IJwtService, IPrincipal, IRuntimeServices } from '@setu-ts/common';
-import { encodeBase64Url } from '../utils/base64url.ts';
+import { decodeBase64Url, encodeBase64Url } from '../utils/base64url.ts';
 import { parseDuration } from '../utils/duration.ts';
-import type { RefreshTokenStore } from '../stores/refresh-token-store.ts';
+import type { RefreshTokenRecord, RefreshTokenStore } from '../stores/refresh-token-store.ts';
+import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 
 /**
  * Options for constructing a RefreshTokenService.
@@ -27,6 +28,12 @@ export interface RefreshTokenOptions {
   };
   /** Refresh token lifetime (default: '7d'). */
   readonly refreshTokenExpiresIn?: string;
+  /**
+   * Optional shared store for invalidating paired access tokens at logout or
+   * refresh-token replay. Requires `accessToken.expiresIn` so entries remain
+   * bounded.
+   */
+  readonly accessTokenRevocationStore?: IAccessTokenRevocationStore;
 }
 
 /**
@@ -57,6 +64,8 @@ export class RefreshTokenService {
   } | undefined;
   private readonly refreshTokenExpiresIn: string;
   private readonly refreshTokenExpiresInMs: number;
+  private readonly accessTokenRevocationStore: IAccessTokenRevocationStore | undefined;
+  private readonly accessTokenExpiresInMs: number | undefined;
 
   constructor(options: RefreshTokenOptions) {
     this.jwt = options.jwt;
@@ -67,13 +76,39 @@ export class RefreshTokenService {
     }
     this.refreshTokenExpiresIn = options.refreshTokenExpiresIn ?? '7d';
     this.refreshTokenExpiresInMs = parseDuration(this.refreshTokenExpiresIn);
+    this.accessTokenRevocationStore = options.accessTokenRevocationStore;
+    if (this.accessTokenRevocationStore !== undefined) {
+      if (this.accessTokenOptions?.expiresIn === undefined) {
+        throw new Error(
+          'RefreshTokenService requires accessToken.expiresIn when accessTokenRevocationStore is configured',
+        );
+      }
+      this.accessTokenExpiresInMs = parseDuration(this.accessTokenOptions.expiresIn);
+    }
   }
 
   /**
    * Issue a new access + refresh token pair for the given principal.
    */
-  async issue(principal: IPrincipal): Promise<TokenPair> {
-    const jti = encodeBase64Url(this.runtime.randomBytes(16));
+  issue(principal: IPrincipal): Promise<TokenPair> {
+    const familyId = encodeBase64Url(this.runtime.randomBytes(16));
+    return this.issueForFamily(principal, familyId);
+  }
+
+  /** Issue a token pair in a known refresh-token family. */
+  private async issueForFamily(principal: IPrincipal, familyId: string): Promise<TokenPair> {
+    const issued = await this.createPair(principal, familyId);
+    await this.store.save(issued.record);
+    return issued.pair;
+  }
+
+  /** Create a pair and its refresh-store record without persisting either. */
+  private async createPair(
+    principal: IPrincipal,
+    familyId: string,
+  ): Promise<{ readonly pair: TokenPair; readonly record: RefreshTokenRecord }> {
+    const refreshTokenJti = encodeBase64Url(this.runtime.randomBytes(16));
+    const accessTokenJti = encodeBase64Url(this.runtime.randomBytes(16));
     const now = this.runtime.now();
     const expiresAt = now + this.refreshTokenExpiresInMs;
 
@@ -84,6 +119,8 @@ export class RefreshTokenService {
         roles: principal.roles,
         permissions: principal.permissions,
         claims: principal.claims,
+        type: 'access',
+        jti: accessTokenJti,
       },
       this.accessTokenOptions,
     );
@@ -104,20 +141,27 @@ export class RefreshTokenService {
       refreshOptions.issuer = this.accessTokenOptions.issuer;
     }
     const refreshToken = await this.jwt.sign(
-      { sub: principal.id, type: 'refresh', jti },
+      { sub: principal.id, type: 'refresh', jti: refreshTokenJti },
       refreshOptions,
     );
 
-    // Store the refresh token record
-    await this.store.save({
-      jti,
+    const record: RefreshTokenRecord = {
+      jti: refreshTokenJti,
       principalId: principal.id,
       principal,
       expiresAt,
       revoked: false,
-    });
+      familyId,
+      accessTokenJti,
+      ...(this.accessTokenExpiresInMs === undefined ? {} : {
+        accessTokenExpiresAt: accessTokenRevocationExpiry(
+          accessToken,
+          this.runtime.now() + this.accessTokenExpiresInMs + 1_000,
+        ),
+      }),
+    };
 
-    return { accessToken, refreshToken };
+    return { pair: { accessToken, refreshToken }, record };
   }
 
   /**
@@ -143,16 +187,25 @@ export class RefreshTokenService {
 
     const record = await this.store.get(payload.jti);
 
-    if (record === null || record.revoked) {
-      // Token not found, expired, or replayed after rotation
+    if (record === null) {
+      return null;
+    }
+    if (record.revoked) {
+      await this.revokeFamilyAccessTokens(payload.jti);
       return null;
     }
 
-    // Rotate: revoke the presented jti
-    await this.store.revoke(payload.jti);
+    const issued = await this.createPair(record.principal, record.familyId ?? record.jti);
+    const rotation = await this.store.rotate(payload.jti, issued.record);
+    if (!rotation.rotated) {
+      if (rotation.record !== null) {
+        await this.revokeFamilyAccessTokens(payload.jti);
+      }
+      return null;
+    }
+    await this.revokeAccessToken(rotation.record);
 
-    // Issue a fresh pair from the stored principal snapshot
-    return this.issue(record.principal);
+    return issued.pair;
   }
 
   /**
@@ -161,23 +214,78 @@ export class RefreshTokenService {
    * exists (missing, expired, or already revoked).
    */
   async revoke(refreshToken: string): Promise<boolean> {
-    let payload: { jti?: string };
+    let payload: { type?: string; jti?: string };
     try {
-      payload = await this.jwt.verify<{ jti?: string }>(refreshToken);
+      payload = await this.jwt.verify<{ type?: string; jti?: string }>(refreshToken);
     } catch {
       return false;
     }
 
-    if (payload.jti === undefined) {
+    if (payload.type !== 'refresh' || payload.jti === undefined) {
       return false;
     }
 
     const record = await this.store.get(payload.jti);
-    if (record === null || record.revoked) {
+    if (record === null) {
       return false;
     }
 
-    await this.store.revoke(payload.jti);
-    return true;
+    const wasLive = !record.revoked;
+    await this.revokeFamilyAccessTokens(payload.jti);
+    return wasLive;
   }
+
+  /** Revoke one access credential when ordinary refresh rotation replaces it. */
+  private revokeAccessToken(record: {
+    readonly accessTokenJti?: string;
+    readonly accessTokenExpiresAt?: number;
+  }): Promise<void> {
+    if (
+      this.accessTokenRevocationStore === undefined ||
+      record.accessTokenJti === undefined ||
+      record.accessTokenExpiresAt === undefined
+    ) {
+      return Promise.resolve();
+    }
+    return this.accessTokenRevocationStore.revoke(
+      record.accessTokenJti,
+      record.accessTokenExpiresAt,
+    );
+  }
+
+  /** Revoke every paired access credential after logout or refresh-token replay. */
+  private async revokeFamilyAccessTokens(jti: string): Promise<void> {
+    const records = await this.store.revokeFamily(jti);
+    for (const record of records) {
+      await this.revokeAccessToken(record);
+    }
+  }
+}
+
+/**
+ * Return the instant at which JwtService will reject a token with this `exp`.
+ *
+ * JwtService accepts `exp === floor(now / 1000)`, so revocation must remain
+ * active until the next whole second. A custom signer that omits `exp` falls
+ * back to the conservative lifetime calculated after signing.
+ */
+function accessTokenRevocationExpiry(token: string, fallback: number): number {
+  const encodedPayload = token.split('.')[1];
+  if (encodedPayload === undefined) {
+    return fallback;
+  }
+  try {
+    const payload: unknown = JSON.parse(new TextDecoder().decode(decodeBase64Url(encodedPayload)));
+    if (
+      typeof payload === 'object' &&
+      payload !== null &&
+      typeof (payload as { exp?: unknown }).exp === 'number' &&
+      Number.isFinite((payload as { exp: number }).exp)
+    ) {
+      return ((payload as { exp: number }).exp + 1) * 1_000;
+    }
+  } catch {
+    // The signer returned an opaque token; retain the conservative fallback.
+  }
+  return fallback;
 }
