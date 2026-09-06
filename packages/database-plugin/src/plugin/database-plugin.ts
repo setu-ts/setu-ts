@@ -139,13 +139,16 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 
       // Register health indicator. M90b: the LIFECYCLE gate is uncached, so
       // a closed service reads down immediately — never from an outcome
-      // cached before close. The cached, bounded probe (5-second TTL on the
-      // runtime's monotonic clock, 2-second bound on the runtime's timers)
-      // bounds the same question for adapters whose readiness performs I/O
-      // and coalesces concurrent polls, so a hung driver cannot hold
-      // `/health` past the bound. A Drizzle registration with `poolStats`
-      // publishes the application-supplied capacity snapshot — data, never
-      // a threshold.
+      // cached before close. It reads `service.isClosed`, which reaches no
+      // adapter: gating on `isHealthy()` also called `IDatabaseAdapter
+      // .isReady()`, so the one read deliberately OUTSIDE the bound was an
+      // adapter call, and every poll paid for two readiness reads. The
+      // cached, bounded probe (5-second TTL on the runtime's monotonic
+      // clock, 2-second bound on the runtime's timers) now owns every
+      // adapter call and coalesces concurrent polls, so a driver that
+      // answers readiness slowly cannot hold `/health` past the bound. A
+      // Drizzle registration with `poolStats` publishes the
+      // application-supplied capacity snapshot — data, never a threshold.
       const probe = createCachedProbe({
         probe: () => service.isHealthy(),
         ttlMs: PROBE_TTL_MS,
@@ -162,7 +165,7 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           name: connectionName,
           ...(capacity !== undefined && { capacity }),
         };
-        if (!(await service.isHealthy())) {
+        if (service.isClosed) {
           return { status: 'down', data };
         }
         const healthy = await probe();

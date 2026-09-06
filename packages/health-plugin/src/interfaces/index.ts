@@ -81,7 +81,9 @@ export interface HealthPluginOptions {
   /**
    * Deadline applied independently to every selected indicator, in
    * milliseconds (M90b). Must be a positive finite number; anything else —
-   * zero, negative, `NaN`, `Infinity` — throws at plugin construction.
+   * zero, negative, `NaN`, `Infinity` — throws at plugin construction. The
+   * identical check runs in the barrel-exported `HealthService` constructor,
+   * so constructing the service directly cannot bypass it.
    *
    * An indicator that has not settled within the deadline is recorded as
    * `{ status: 'down', data: { reason: 'timeout' } }`; one that rejects is

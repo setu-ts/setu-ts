@@ -20,7 +20,7 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES, resolveRegistryEntry } from '@setu-ts/common';
 import type { HealthIndicatorEntry, HealthPluginOptions } from '../interfaces/index.ts';
-import { HealthService } from '../services/health-service.ts';
+import { HealthService, resolveIndicatorTimeout } from '../services/health-service.ts';
 import { createSelfIndicator } from '../indicators/self-indicator.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -141,30 +141,6 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       });
     },
   };
-}
-
-/** Default per-indicator deadline (M90b), in milliseconds. */
-const DEFAULT_INDICATOR_TIMEOUT_MS = 5000;
-
-/**
- * Validates the per-indicator deadline (M90b).
- *
- * @param raw - The configured value, or `undefined` for the default
- * @returns The validated deadline in milliseconds
- * @throws {Error} When the value is not a positive finite number
- */
-function resolveIndicatorTimeout(raw: number | undefined): number {
-  if (raw === undefined) {
-    return DEFAULT_INDICATOR_TIMEOUT_MS;
-  }
-  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
-    throw new Error(
-      `HealthPlugin({ indicatorTimeoutMs }) must be a positive finite number of milliseconds, received ${
-        String(raw)
-      }`,
-    );
-  }
-  return raw;
 }
 
 /**

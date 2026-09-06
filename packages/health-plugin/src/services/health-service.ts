@@ -33,6 +33,39 @@ const STATUS_RANK: Readonly<Record<HealthStatus, number>> = {
 const DEFAULT_INDICATOR_TIMEOUT_MS = 5000;
 
 /**
+ * Validates the per-indicator deadline (M90b).
+ *
+ * Lives here, beside the only reader of the value, because there are TWO
+ * entry points to it — `HealthPlugin({ indicatorTimeoutMs })` and direct
+ * `new HealthService(runtime, { indicatorTimeoutMs })`, which is barrel-
+ * exported — and both must honour the same rule. A plugin-side check alone
+ * left the exported class storing `0`, a negative, `NaN` or `Infinity` and
+ * passing it to `IRuntimeServices.setTimeout`: a non-positive deadline
+ * times an unsettled indicator out on the next timer turn, and a non-finite
+ * one is not the documented positive finite bound at all.
+ *
+ * Not barrel-exported — internal to the package.
+ *
+ * @param raw - The configured value, or `undefined` for the default
+ * @returns The validated deadline in milliseconds
+ * @throws {Error} When the value is not a positive finite number
+ * @internal
+ */
+export function resolveIndicatorTimeout(raw: number | undefined): number {
+  if (raw === undefined) {
+    return DEFAULT_INDICATOR_TIMEOUT_MS;
+  }
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
+    throw new Error(
+      `indicatorTimeoutMs must be a positive finite number of milliseconds, received ${
+        String(raw)
+      }`,
+    );
+  }
+  return raw;
+}
+
+/**
  * Default implementation of {@linkcode IHealthService}.
  *
  * Manages indicator registration and aggregation for health checks.
@@ -62,11 +95,15 @@ export class HealthService implements IHealthService {
    * @param runtime - Runtime services for time and diagnostics
    * @param options - Aggregation options
    * @param options.indicatorTimeoutMs - Per-indicator deadline in ms
-   *   (default 5,000)
+   *   (default 5,000). Must be a positive finite number.
+   * @throws {Error} When `indicatorTimeoutMs` is not a positive finite number
    */
   constructor(runtime: IRuntimeServices, options?: { indicatorTimeoutMs?: number }) {
     this.#runtime = runtime;
-    this.#indicatorTimeoutMs = options?.indicatorTimeoutMs ?? DEFAULT_INDICATOR_TIMEOUT_MS;
+    // Validated HERE, not only in `HealthPlugin`: this class is barrel-
+    // exported, so a caller can construct it directly and bypass the
+    // plugin's check entirely.
+    this.#indicatorTimeoutMs = resolveIndicatorTimeout(options?.indicatorTimeoutMs);
   }
 
   /**

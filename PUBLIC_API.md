@@ -1116,10 +1116,16 @@ service or Unit of Work not created by this package throws
 ### Health status
 
 Since **M90b** the `database` indicator gates on the service's lifecycle FIRST, uncached — a closed
-database reads `down` immediately, never from an outcome cached before close. Behind that gate the
-same question runs through a cached, bounded probe — 5-second TTL, 2-second bound, built on
-`createCachedProbe` — so an adapter whose readiness performs I/O cannot hang `/health` past the
-bound and repeated polls cost at most one round trip per TTL. A Drizzle registration that supplies
+database reads `down` immediately, never from an outcome cached before close. That gate reads
+`DatabaseService.isClosed`, a lifecycle-only member that reaches no adapter, so **every**
+`IDatabaseAdapter.isReady()` call happens behind it, inside a cached, bounded probe — 5-second TTL,
+2-second bound, built on `createCachedProbe` — and an adapter whose readiness performs I/O cannot
+hang `/health` past the bound. Repeated polls cost at most one readiness read per TTL; gating on
+`isHealthy()` instead read the adapter on the one path deliberately outside that bound, and cost two
+reads per poll. The consequence is the ordinary TTL trade-off, and it is the same one every other
+M90b indicator makes: closing the database reads `down` on the very next poll, while an adapter that
+loses readiness on its own — a pool that ends itself — is served from the cache for up to the TTL
+before the indicator reports it. A Drizzle registration that supplies
 `DrizzleAdapterOptions.poolStats` — an application-owned callback reading the driver's own
 documented pool API — also publishes the returned `DatabasePoolCapacity` snapshot
 (`{ total, idle, waiting }`) under `data.capacity`. Omitted, the payload carries no capacity fields.
@@ -1154,6 +1160,10 @@ interface IRepository<Entity, Id extends EntityKey = string> {
   count(options?: CountOptions): Promise<number>;
 }
 ```
+
+The concrete `DatabaseService` additionally exposes `readonly isClosed: boolean` (**since 0.5.0**) —
+a lifecycle-only read that reaches no adapter, added for the health indicator's uncached gate.
+`isHealthy()` answers lifecycle AND adapter readiness together; `isClosed` answers lifecycle alone.
 
 `query()` is the existing backend-specific raw-SQL escape hatch. It requires a configured Drizzle
 instance with `execute()`; typed builders obtained through the Drizzle accessors do not.
@@ -5850,9 +5860,11 @@ one the health service measured.
 
 Since **M90b** the selected indicators run **concurrently**, each raced against a per-indicator
 deadline (`indicatorTimeoutMs`, default 5,000 — a positive finite number of milliseconds; anything
-else throws at plugin construction). Sequential awaiting multiplied outage latency — a 2-second
-outage across six dependency indicators held `/health` for 12+ seconds — and one never-settling
-indicator left the whole endpoint pending forever. A timeout is recorded as
+else — zero, negative, `NaN`, `Infinity` — throws. `HealthService` is barrel-exported, so the same
+validation runs in its constructor as in `HealthPlugin`: constructing the service directly cannot
+bypass the check and store a value the deadline timer cannot honour). Sequential awaiting multiplied
+outage latency — a 2-second outage across six dependency indicators held `/health` for 12+ seconds —
+and one never-settling indicator left the whole endpoint pending forever. A timeout is recorded as
 `{ status: 'down', data: { reason: 'timeout' } }` and a rejection as
 `{ status: 'down', data: { reason: 'error' } }` with the thrown value never serialized into the
 report; each indicator's `latencyMs` is measured individually; and `checks` keeps registration

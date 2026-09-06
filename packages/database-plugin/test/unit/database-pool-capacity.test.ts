@@ -30,6 +30,8 @@ import type { DatabasePoolCapacity, DrizzleAdapterOptions } from '../../src/inte
 /** A minimal backend carrying (or not carrying) the capacity seam. */
 class FakeAdapter implements IDatabaseAdapter {
   #ready = false;
+  /** Counts readiness reads, so a test can prove WHICH path reaches the adapter. */
+  readyCalls = 0;
 
   constructor(capacity?: (() => unknown) | undefined) {
     if (capacity !== undefined) {
@@ -48,6 +50,7 @@ class FakeAdapter implements IDatabaseAdapter {
   }
 
   isReady(): boolean {
+    this.readyCalls++;
     return this.#ready;
   }
 
@@ -244,6 +247,26 @@ describe('database indicator capacity data (M90b)', () => {
     const health = await indicator();
     expect(health.status).toBe('up');
     expect(health.data).toEqual({ adapter: 'custom', name: 'default' });
+  });
+
+  it('makes every adapter readiness read go through the bounded probe', async () => {
+    // The uncached gate is a LIFECYCLE read (`service.isClosed`) and reaches
+    // no adapter. Gating on `isHealthy()` also called `isReady()`, so the
+    // one read deliberately outside the probe's 2-second bound was an
+    // adapter call, and each poll paid for two readiness reads. With the
+    // fixture's frozen `hrtime`, the probe's TTL never expires — so a second
+    // poll must cost ZERO adapter calls, which it could not while the gate
+    // read the adapter itself.
+    const adapter = new FakeAdapter();
+    await adapter.connect();
+    const { indicator } = await registerIndicator(adapter);
+    adapter.readyCalls = 0;
+
+    expect((await indicator()).status).toBe('up');
+    expect(adapter.readyCalls).toBe(1);
+
+    expect((await indicator()).status).toBe('up');
+    expect(adapter.readyCalls).toBe(1);
   });
 
   it('reads down after close — the lifecycle gate is uncached', async () => {

@@ -23,12 +23,20 @@ All notable changes to this project are documented here. The format follows
   deadline; the service runs selected indicators concurrently, records each latency individually,
   maps a timeout to `{ status: 'down', data: { reason: 'timeout' } }` and a rejection to
   `{ status: 'down', data: { reason: 'error' } }` without serializing the thrown value, and keeps
-  `checks` in registration order. See **Changed** for the behavior change to timing.
+  `checks` in registration order. The deadline is validated by ONE check shared by both entry
+  points: `HealthService` is barrel-exported, so
+  `new HealthService(runtime, { indicatorTimeoutMs })` refuses zero, a negative, `NaN` and
+  `Infinity` exactly as `HealthPlugin` does rather than storing a value the deadline timer cannot
+  honour. See **Changed** for the behavior change to timing.
 
 - **`@setu-ts/database-plugin` — pool capacity as data.** New `DatabasePoolCapacity` type (exported)
   and `DrizzleAdapterOptions.poolStats` — an application-owned callback reading the driver's own
   pool API. The adapter publishes the snapshot to the `database` indicator under `data.capacity`;
-  omitted, no capacity fields appear. No threshold is applied.
+  omitted, no capacity fields appear. No threshold is applied. `DatabaseService` also gains
+  `readonly isClosed: boolean` — a lifecycle-only read that reaches no adapter — which is what the
+  indicator's uncached gate now reads: gating on `isHealthy()` called `IDatabaseAdapter.isReady()`
+  on the one path deliberately outside the probe's 2-second bound, and cost two readiness reads per
+  poll. Every adapter readiness call now happens inside the bounded, cached probe.
 
 - **`@setu-ts/cache-plugin`, `@setu-ts/secrets-plugin` — truthful reachability.** The `cache` and
   `secrets` indicators now report `reachable` (`true`/`false`/`'unknown'`) beside lifecycle, through

@@ -536,6 +536,28 @@ describe('HealthService', () => {
       // Settled exactly at 5,000 — the default deadline.
     });
 
+    it('refuses a non-positive or non-finite deadline on DIRECT construction', () => {
+      // `HealthService` is barrel-exported, so a caller can reach it without
+      // `HealthPlugin` and its validation. Before the shared validator, `0`,
+      // a negative, `NaN` and `Infinity` were all stored and handed to
+      // `IRuntimeServices.setTimeout` — a non-positive deadline times an
+      // unsettled indicator out on the next timer turn, and a non-finite one
+      // is not the documented bound at all.
+      const runtime = createFakeRuntime();
+      for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+        expect(() => new HealthService(runtime, { indicatorTimeoutMs: bad })).toThrow(
+          /indicatorTimeoutMs/,
+        );
+      }
+    });
+
+    it('accepts an omitted deadline and a positive finite one on direct construction', () => {
+      const runtime = createFakeRuntime();
+      expect(() => new HealthService(runtime)).not.toThrow();
+      expect(() => new HealthService(runtime, {})).not.toThrow();
+      expect(() => new HealthService(runtime, { indicatorTimeoutMs: 1 })).not.toThrow();
+    });
+
     it('measures each indicator latency individually', async () => {
       const manual = createManualRuntime();
       const service = new HealthService(manual.runtime);
