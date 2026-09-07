@@ -182,6 +182,53 @@ function mapRefs(node: unknown, map: (ref: string) => string): unknown {
 }
 
 /**
+ * Keywords whose value IS a schema. `items` is listed here because 2020-12
+ * makes it a single schema; a pre-2020-12 document spelling it as a list is
+ * still handled, so an adapted document never depends on the draft.
+ */
+const SUBSCHEMA_KEYWORDS: ReadonlySet<string> = new Set([
+  'additionalItems',
+  'additionalProperties',
+  'contains',
+  'contentSchema',
+  'else',
+  'if',
+  'items',
+  'not',
+  'propertyNames',
+  'then',
+  'unevaluatedItems',
+  'unevaluatedProperties',
+]);
+
+/** Keywords whose value is a LIST of schemas. */
+const SUBSCHEMA_LIST_KEYWORDS: ReadonlySet<string> = new Set([
+  'allOf',
+  'anyOf',
+  'oneOf',
+  'prefixItems',
+]);
+
+/** Keywords whose value maps author-chosen NAMES to schemas. */
+const SUBSCHEMA_MAP_KEYWORDS: ReadonlySet<string> = new Set([
+  '$defs',
+  'definitions',
+  'dependentSchemas',
+  'patternProperties',
+  'properties',
+]);
+
+/**
+ * Whether a value can be walked as a name-to-schema map.
+ *
+ * @param value - The value found under a map-valued keyword
+ * @returns `true` for a plain object whose values are worth visiting
+ */
+function isSchemaMap(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
  * Rewrites every collapsed `type` array into this transformer's canonical
  * `anyOf` spelling, in place and at any depth.
  *
@@ -216,26 +263,53 @@ function mapRefs(node: unknown, map: (ref: string) => string): unknown {
  * @param node - The generated JSON-Schema tree, mutated in place
  */
 function expandTypeUnions(node: unknown): void {
-  if (Array.isArray(node)) {
-    for (const item of node) expandTypeUnions(item);
-    return;
-  }
-  if (node === null || typeof node !== 'object') return;
+  if (node === null || typeof node !== 'object' || Array.isArray(node)) return;
   const record = node as Record<string, unknown>;
-  for (const value of Object.values(record)) expandTypeUnions(value);
+
+  // Descend ONLY into schema positions. A JSON Schema node mixes subschemas
+  // with arbitrary instance data — `default`, `const`, `enum`, `examples` and
+  // any vendor extension hold VALUES, not schemas — and walking those rewrote
+  // application data: `z.object({ type: z.array(z.string()) }).default(…)`
+  // emits `default: { type: ['primary', 'secondary'] }`, whose `type` key is a
+  // field name holding a list of strings, not a type union. Recursing into it
+  // replaced the user's default with `{ anyOf: [{ type: 'primary' }, … ] }`.
+  for (const [keyword, value] of Object.entries(record)) {
+    if (SUBSCHEMA_KEYWORDS.has(keyword)) {
+      // `items` is one schema in 2020-12 and a list in older drafts.
+      if (Array.isArray(value)) { for (const item of value) expandTypeUnions(item); }
+      else expandTypeUnions(value);
+    } else if (SUBSCHEMA_LIST_KEYWORDS.has(keyword) && Array.isArray(value)) {
+      for (const item of value) expandTypeUnions(item);
+    } else if (SUBSCHEMA_MAP_KEYWORDS.has(keyword) && isSchemaMap(value)) {
+      // Keys here are author-chosen names, so every VALUE is a schema — a
+      // property may legitimately be called `properties` or `type`.
+      for (const item of Object.values(value)) expandTypeUnions(item);
+    }
+  }
 
   const type = record.type;
   if (!Array.isArray(type)) return;
   delete record.type;
   if (type.length === 1) {
     // A one-member union is a plain type, and `anyOf: [{ type: 'string' }]`
-    // would be a noisier way to say `type: 'string'`.
+    // would be a noisier way to say `type: 'string'`. A sibling `anyOf` is no
+    // problem here: a scalar `type` and an `anyOf` already conjoin.
     record.type = type[0];
     return;
   }
   // A zero-member union matches nothing, which is what the v3 path already
   // spells `anyOf: []` for an empty `z.union([])` — so the two agree here too.
-  record.anyOf = type.map((member) => ({ type: member }));
+  const arms = type.map((member) => ({ type: member }));
+  if (record.anyOf === undefined) {
+    record.anyOf = arms;
+    return;
+  }
+  // `type` and a sibling `anyOf` are INDEPENDENT assertions over the same
+  // instance, so the union cannot just take the `anyOf` key — that silently
+  // drops the sibling. `allOf` is the keyword that conjoins, so the union
+  // moves there and both survive.
+  const existing = Array.isArray(record.allOf) ? record.allOf : [];
+  record.allOf = [...existing, { anyOf: arms }];
 }
 
 /**

@@ -337,6 +337,117 @@ describe('ZodToOpenApi — collapsed `type` arrays (issue #253)', () => {
     expect(result.properties?.a).toEqual({ $ref: '#/components/schemas/Component-__schema0' });
   });
 
+  it('never rewrites instance data — a `default` is an application value, not a schema', () => {
+    // A JSON Schema node mixes subschemas with arbitrary instance data. This
+    // is reachable from ORDINARY zod: an object with a `type: string[]` field
+    // and a default emits `default: { type: [...] }`, where `type` is a field
+    // NAME holding a list of strings. Walking every value rewrote the user's
+    // default into `{ anyOf: [{ type: 'primary' }, …] }` — data corruption in
+    // a published document.
+    const result = new ZodToOpenApi().transform(
+      zod4Like({
+        type: 'object',
+        properties: { type: { type: 'array', items: { type: ['string', 'null'] } } },
+        default: { type: ['primary', 'secondary'], name: 'unnamed' },
+        const: { type: ['a', 'b'] },
+        enum: [{ type: ['x'] }],
+        examples: [{ type: ['y', 'z'] }],
+        'x-vendor': { type: ['keep', 'me'] },
+      }),
+    ) as OpenApiSchemaObject & Record<string, unknown>;
+
+    expect(result.default).toEqual({ type: ['primary', 'secondary'], name: 'unnamed' });
+    expect(result.const).toEqual({ type: ['a', 'b'] });
+    expect(result.enum).toEqual([{ type: ['x'] }]);
+    expect(result.examples).toEqual([{ type: ['y', 'z'] }]);
+    expect(result['x-vendor']).toEqual({ type: ['keep', 'me'] });
+    // The real subschema beside them is still normalized, so restricting the
+    // walk did not simply stop it working.
+    expect(result.properties?.type.items).toEqual({
+      anyOf: [{ type: 'string' }, { type: 'null' }],
+    });
+  });
+
+  it('normalizes a property whose NAME collides with a schema keyword', () => {
+    // Under `properties` the keys are author-chosen, so a field may be called
+    // `properties`, `items` or `enum`. Those values ARE schemas and must be
+    // walked, which is why the map keywords recurse over values rather than
+    // matching keys.
+    const result = new ZodToOpenApi().transform(
+      zod4Like({
+        type: 'object',
+        properties: {
+          enum: { type: ['string', 'null'] },
+          items: { type: ['number', 'null'] },
+          properties: { type: ['boolean', 'null'] },
+        },
+      }),
+    ) as OpenApiSchemaObject;
+
+    const properties = result.properties ?? {};
+    expect(properties.enum).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }] });
+    expect(properties.items).toEqual({ anyOf: [{ type: 'number' }, { type: 'null' }] });
+    expect(properties.properties).toEqual({ anyOf: [{ type: 'boolean' }, { type: 'null' }] });
+  });
+
+  it('walks a pre-2020-12 `items` list, so the rewrite does not depend on the draft', () => {
+    const result = new ZodToOpenApi().transform(
+      zod4Like({ type: 'array', items: [{ type: ['string', 'null'] }, { type: 'number' }] }),
+    ) as OpenApiSchemaObject & { items?: readonly OpenApiSchemaObject[] };
+
+    expect(result.items?.[0]).toEqual({ anyOf: [{ type: 'string' }, { type: 'null' }] });
+    expect(result.items?.[1]).toEqual({ type: 'number' });
+  });
+
+  it('ignores a schema-keyword value of the wrong shape instead of throwing', () => {
+    // A malformed document must degrade, never throw — this transformer's
+    // stated contract for anything it cannot represent.
+    const result = new ZodToOpenApi().transform(
+      zod4Like({ type: ['string', 'null'], properties: 'not-a-map', anyOf: 'not-a-list' }),
+    ) as OpenApiSchemaObject & Record<string, unknown>;
+
+    expect(result.properties).toBe('not-a-map');
+    // `anyOf` is present but not a list, so it is left exactly as found and
+    // the union conjoins through `allOf` rather than replacing it.
+    expect(result.anyOf).toBe('not-a-list');
+    expect(result.allOf).toEqual([{ anyOf: [{ type: 'string' }, { type: 'null' }] }]);
+  });
+
+  it('preserves a sibling `anyOf` by conjoining through `allOf`', () => {
+    // `type` and `anyOf` are independent assertions over the same instance, so
+    // taking the `anyOf` key would silently drop the sibling constraint.
+    const result = new ZodToOpenApi().transform(
+      zod4Like({ type: ['string', 'null'], anyOf: [{ const: 'x' }] }),
+    ) as OpenApiSchemaObject;
+
+    expect(result.anyOf).toEqual([{ const: 'x' }]);
+    expect(result.allOf).toEqual([{ anyOf: [{ type: 'string' }, { type: 'null' }] }]);
+  });
+
+  it('appends to an existing `allOf` rather than replacing it', () => {
+    const result = new ZodToOpenApi().transform(
+      zod4Like({
+        type: ['string', 'null'],
+        anyOf: [{ const: 'x' }],
+        allOf: [{ minLength: 1 }],
+      }),
+    ) as OpenApiSchemaObject;
+
+    expect(result.allOf).toEqual([
+      { minLength: 1 },
+      { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    ]);
+  });
+
+  it('leaves a one-member array beside an `anyOf` as a plain type', () => {
+    // A scalar `type` and an `anyOf` already conjoin, so this needs no `allOf`.
+    const result = new ZodToOpenApi().transform(
+      zod4Like({ type: ['string'], anyOf: [{ const: 'x' }] }),
+    ) as OpenApiSchemaObject;
+
+    expect(result).toEqual({ type: 'string', anyOf: [{ const: 'x' }] });
+  });
+
   it('leaves a schema that already spells its union as `anyOf` untouched', () => {
     const already = { anyOf: [{ type: 'string' }, { type: 'null' }] };
 

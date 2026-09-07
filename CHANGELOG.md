@@ -260,7 +260,10 @@ All notable changes to this project are documented here. The format follows
   constraint to the `null` arm. No public type changed and no consumer call site breaks. Reached the
   weekly dependency-drift gate rather than a pull request because the committed lockfile resolved
   4.4.3; it now resolves 4.5.4, and a pinned `npm:zod@4.5.4` case asserts the behaviour against a
-  version that really collapses, so a later lockfile move cannot make it vacuous.
+  version that really collapses, so a later lockfile move cannot make it vacuous. The rewrite
+  descends only into schema positions, so a `default`, `const`, `enum`, example or vendor-extension
+  value keeps its own `type` key verbatim, and a node already asserting `anyOf` keeps it — the
+  normalized union is conjoined through `allOf`.
 
 ## [0.4.0] — 2026-09-05
 

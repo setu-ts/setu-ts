@@ -6486,7 +6486,11 @@ presence marks a v4 schema; the plugin imports neither major.
   array is not legal). Sibling keywords stay beside the `anyOf` rather than being distributed into
   its arms — `{ "type": ["string", "null"], "minLength": 2 }` becomes
   `{ "minLength": 2, "anyOf": [{ "type": "string" }, { "type": "null" }] }`, which asserts the same
-  thing without applying a string constraint to the `null` arm. A union whose arms carry anything
+  thing without applying a string constraint to the `null` arm. Only schema positions are rewritten:
+  a `default`, `const`, `enum`, example or vendor-extension value is instance DATA and is preserved
+  verbatim, even when it happens to carry its own `type` key. And where a node already asserts
+  `anyOf`, the normalized union is conjoined through `allOf` rather than taking the `anyOf` key,
+  since the two are independent assertions over the same instance. A union whose arms carry anything
   beyond a bare type (a constraint, a `format`, a `const`, an `items`) is emitted as `anyOf` by zod
   itself and passes through untouched.
 - **Unrepresentable nodes degrade, never throw.** A type zod cannot represent in JSON Schema
