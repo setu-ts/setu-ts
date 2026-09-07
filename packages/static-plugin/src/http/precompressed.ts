@@ -25,6 +25,17 @@ export const CONTENT_ENCODINGS: Record<string, string> = {
 };
 
 /**
+ * Converts a sidecar filename format to its HTTP Content-Encoding token.
+ *
+ * @param format - The sidecar filename format
+ * @returns The HTTP Content-Encoding token
+ * @since 0.4.0
+ */
+export function contentEncodingFor(format: string): string {
+  return CONTENT_ENCODINGS[format] ?? format;
+}
+
+/**
  * Options for precompressed sidecar negotiation.
  *
  * @since 0.1.0
@@ -84,7 +95,7 @@ export function parseAcceptEncoding(
  * @since 0.1.0
  */
 export function isEncodingAcceptable(acceptEncoding: string, format: string): boolean {
-  const encoding = CONTENT_ENCODINGS[format] ?? format;
+  const encoding = contentEncodingFor(format);
   const parsed = parseAcceptEncoding(acceptEncoding);
 
   // An explicit entry for this encoding always wins over the wildcard, whatever

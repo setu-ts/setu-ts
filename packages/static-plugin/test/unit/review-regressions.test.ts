@@ -193,6 +193,28 @@ describe('review regression — Cache-Control follows the original resource', ()
     expect(captured.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 
+  it('keeps immutable on 304 for both compressed sidecars', async () => {
+    for (const [format, encoding] of [['br', 'br'], ['gz', 'gzip']] as const) {
+      const counters = { opened: 0, cancelled: 0, stats: 0 };
+      const handler = createStaticHandler({
+        fs: makeFs({ [HASHED]: { size: 10 }, [`${HASHED}.${format}`]: { size: 5 } }, counters),
+        root: '/srv',
+        urlPrefix: '/',
+        index: 'index.html',
+      });
+      const { ctx, captured } = makeCtx('GET', '/index-a1b2c3d4.js', {
+        'Accept-Encoding': encoding,
+        'If-None-Match': 'W/"5"',
+      });
+
+      await handler(ctx);
+
+      expect(captured.status).toBe(304);
+      expect(captured.headers.get('Content-Encoding')).toBe(encoding);
+      expect(captured.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+    }
+  });
+
   it('agrees with the identity response for the same asset', async () => {
     const counters = { opened: 0, cancelled: 0, stats: 0 };
     const handler = createStaticHandler({

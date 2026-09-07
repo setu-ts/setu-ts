@@ -10927,7 +10927,9 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
   to a **weak** size-only validator when it does not. This matters for resumption: `If-Range` MUST
   be ignored for a weak validator (RFC 9110 §13.1.5), so an interrupted download resumes only
   against the strong form. `size`+`mtime` is what nginx and Apache emit as strong for static files
-- Precompressed sidecars: `.br` preferred over `.gz`, ETag from sidecar stat
+- Precompressed sidecars: `.br` preferred over `.gz`, sent as `Content-Encoding: br` and
+  `Content-Encoding: gzip` respectively; ETag and conditional evaluation use the selected sidecar
+  stat rather than the uncompressed source representation
 - `Cache-Control` is resolved from the **original root-relative request path with a leading slash**,
   never the absolute filesystem path and never the `.br`/`.gz` sidecar path — so a content-hashed
   asset keeps its `immutable` policy whichever encoding is negotiated. A `cacheControl` function
