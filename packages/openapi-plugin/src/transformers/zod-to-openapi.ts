@@ -182,6 +182,63 @@ function mapRefs(node: unknown, map: (ref: string) => string): unknown {
 }
 
 /**
+ * Rewrites every collapsed `type` array into this transformer's canonical
+ * `anyOf` spelling, in place and at any depth.
+ *
+ * Draft 2020-12 — and therefore OpenAPI 3.1 — permits both spellings of a
+ * type union, and zod's public `toJSONSchema` changed which one it emits
+ * WITHIN the declared `>=4.4.0 <5` support range: through 4.4 every union
+ * became `anyOf: [{ type: 'string' }, { type: 'null' }]`, and from 4.5 a
+ * union whose every arm is a bare `{ type: X }` collapses to
+ * `type: ['string', 'null']`. Measured on 4.4.3 against 4.5.4; an arm
+ * carrying anything else (a constraint, a `format`, a `const`, an `items`)
+ * keeps the `anyOf` spelling in both.
+ *
+ * Normalizing rather than passing the collapse through buys three things.
+ * The zod v3 path emits `anyOf` for a nullable (see `transformNullable`), so
+ * both paths keep describing one schema identically. {@linkcode
+ * OpenApiSchemaObject.type} stays a single type name, which is only true
+ * because nothing downstream of here can see an array. And `anyOf` is the
+ * spelling OpenAPI 3.0 downgrade tooling understands, where a `type` array
+ * is 3.1-only. Without it an application's zod PATCH version silently
+ * decided whether a primitive union earned a `components/schemas` entry
+ * (`isStructuralShape` keys on `anyOf`), so a regenerated SDK client changed
+ * shape for no API reason — which is how this reached the weekly
+ * dependency-drift gate (issue #253) rather than a pull request.
+ *
+ * The rewrite is lossless for ANY sibling set, including one no measured zod
+ * version produces: sibling keywords stay on the outer object rather than
+ * being distributed into the arms, and `anyOf` and (say) `minLength` are
+ * independent assertions over the same instance exactly as `type` and
+ * `minLength` were. Distributing them would instead apply a string
+ * constraint to the `null` arm.
+ *
+ * @param node - The generated JSON-Schema tree, mutated in place
+ */
+function expandTypeUnions(node: unknown): void {
+  if (Array.isArray(node)) {
+    for (const item of node) expandTypeUnions(item);
+    return;
+  }
+  if (node === null || typeof node !== 'object') return;
+  const record = node as Record<string, unknown>;
+  for (const value of Object.values(record)) expandTypeUnions(value);
+
+  const type = record.type;
+  if (!Array.isArray(type)) return;
+  delete record.type;
+  if (type.length === 1) {
+    // A one-member union is a plain type, and `anyOf: [{ type: 'string' }]`
+    // would be a noisier way to say `type: 'string'`.
+    record.type = type[0];
+    return;
+  }
+  // A zero-member union matches nothing, which is what the v3 path already
+  // spells `anyOf: []` for an empty `z.union([])` — so the two agree here too.
+  record.anyOf = type.map((member) => ({ type: member }));
+}
+
+/**
  * Which side of a schema a document site is describing.
  *
  * A zod schema has two shapes, and for anything carrying a `.default()`, a
@@ -424,12 +481,13 @@ export class ZodToOpenApi {
    * Adapts a draft-2020-12 document to OpenAPI 3.1 (design rows R1–R10).
    *
    * OpenAPI 3.1's Schema Object IS draft 2020-12, so everything except the
-   * dialect key, the `$defs` section and root-cycle pointers passes through
-   * verbatim. With definition channels attached, surviving `$defs` are
-   * hoisted into `components/schemas` through the channels and their pointers
-   * rewritten; a `$def` that a hook splice already turned into a bare alias
-   * `$ref` is REMAPPED to its target and dropped rather than delivered as a
-   * pointless one-key component. Without channels the `$defs` stay inline,
+   * dialect key, collapsed `type` arrays, the `$defs` section and root-cycle
+   * pointers passes through verbatim. With definition channels attached,
+   * surviving `$defs` are hoisted into `components/schemas` through the
+   * channels and their pointers rewritten; a `$def` that a hook splice already
+   * turned into a bare alias `$ref` is REMAPPED to its target and dropped
+   * rather than delivered as a pointless one-key component. Without channels
+   * the `$defs` stay inline,
    * which is self-contained only while the caller keeps the whole returned
    * tree intact — see the {@linkcode ZodToOpenApi} constructor note. The
    * document generator always attaches channels (both its deduplicating and
@@ -447,6 +505,11 @@ export class ZodToOpenApi {
     // R1: the document declares `openapi: '3.1.0'`; a per-node dialect key is
     // noise some tooling mis-nests.
     delete root.$schema;
+
+    // Before the channel branch and before `$defs` is detached, so the one
+    // walk reaches the main tree AND every definition — and both return
+    // paths, the plain one and the hoisting one, are normalized.
+    expandTypeUnions(root);
 
     const claim = this.#channels?.onDefinitionClaim;
     const deliver = this.#channels?.onDefinition;

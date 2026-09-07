@@ -240,6 +240,28 @@ All notable changes to this project are documented here. The format follows
   are orphaned, so the blast radius is one window — they are TTL-bounded and expire on their own.
   Pass `keyPrefix: ''` for the previous keys byte for byte.
 
+### Fixed
+
+- **`@setu-ts/openapi-plugin` — a type union is spelled `anyOf` on every supported zod v4, not
+  whichever spelling the installed patch version chose** (issue #253). Draft 2020-12 permits both
+  spellings, and zod's public `toJSONSchema()` changed which one it emits INSIDE the declared
+  `>=4.4.0 <5` support range: through 4.4 a union of bare types emitted
+  `anyOf: [{ type: 'string' }, { type: 'null' }]`, and from 4.5 it collapses to
+  `type: ['string', 'null']`. The transformer passed that through, so an application's zod PATCH
+  version decided the document's shape — `isStructuralShape` keys on `anyOf`, so a nullable or
+  primitive union silently stopped earning a `components/schemas` entry and a regenerated
+  `@setu-ts/sdk` client changed shape for no API reason. It also produced a value the published
+  `OpenApiSchemaObject.type` cannot express (a single type name, not an array), so a consumer
+  switching on it got no compiler warning, and a `type` array is 3.1-only where `anyOf` converts
+  down to OpenAPI 3.0. `#adaptDocument` now normalizes the collapsed form back at any depth, on both
+  the plain and the component-hoisting path, keeping the v4 path in agreement with the v3 path —
+  measured: one schema now yields byte-identical documents under 4.4.3 and 4.5.4. Sibling keywords
+  stay beside the `anyOf` instead of being distributed into its arms, which would apply a string
+  constraint to the `null` arm. No public type changed and no consumer call site breaks. Reached the
+  weekly dependency-drift gate rather than a pull request because the committed lockfile resolved
+  4.4.3; it now resolves 4.5.4, and a pinned `npm:zod@4.5.4` case asserts the behaviour against a
+  version that really collapses, so a later lockfile move cannot make it vacuous.
+
 ## [0.4.0] — 2026-09-05
 
 **A declaration that enforced nothing now enforces, and a caller's mistake stops reading as a server
