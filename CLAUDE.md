@@ -3777,8 +3777,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `'column-per-tenant'`). X18-4: a `register()` warning fires whenever the RESOLVED chain contains a
   `JwtResolver` (including the bare-instance spelling the plugin's own pre-check missed), with the
   unverified-claim caveat moved to where the choice is made. X18-1: `setu add` refuses extra
-  positionals (`exit 2`, nothing written) instead of silently discarding them) — complete (PR
-  pending).
+  positionals (`exit 2`, nothing written) instead of silently discarding them) — complete (PR #235).
 - **Milestone 79** (`common` + `database-plugin` + `cloudflare-plugin` — portable data-access
   contract: composite keys, nested field paths and keyset cursor pagination, implemented across all
   **five** shipped adapters. The ROADMAP scoped four; `MongoAdapter` shipped in M78, so the in-scope
@@ -4468,15 +4467,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   access-token JTI through `IAccessTokenRevocationStore`; and policy failures disclose no role or
   permission name. Rotation is atomic at the refresh-store boundary, so concurrent requests cannot
   mint two descendants.
-- **Next milestone** — **M40** (final release), the only open row in Progress Tracking: the 1.0 gate
-  named in README's Versioning section — benchmarks, a security audit, and the Node/Bun compat
-  suites as release gates. The `smoke/` programme's X16–X19 exercises against published `0.3.0`
-  produced **8 findings, 4 High**, all now closed as M89a (declarations that enforce nothing), M89b
-  (caller errors that read as server faults), and M89c (the ingress surface above) — grouped by
-  defect **shape** rather than by package, the M70a–M70n precedent. The X20–X38 register that
-  follows it is being closed the same way: M90a (abuse control), M90b (health truth bounded, PR
-  pending), M90c (credential revocation and token type), and M90e (static delivery correctness, PR
-  pending) are complete; M90d and M90f remain open.
+- **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
+  the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
+  compat suites as release gates. The `smoke/` programme's X16–X19 exercises against published
+  `0.3.0` produced **8 findings, 4 High**, all now closed as M89a (declarations that enforce
+  nothing), M89b (caller errors that read as server faults), and M89c (the ingress surface above) —
+  grouped by defect **shape** rather than by package, the M70a–M70n precedent. The X20–X38 register
+  that follows it is being closed the same way: M90a (abuse control), M90b (health truth bounded, PR
+  #249), M90c (credential revocation and token type), and M90e (static delivery correctness, PR
+  #252) are complete; M90d and M90f through M90j remain open.
 
 ## Verification (run before declaring any work done)
 

@@ -265,6 +265,14 @@ All notable changes to this project are documented here. The format follows
   value keeps its own `type` key verbatim, and a node already asserting `anyOf` keeps it — the
   normalized union is conjoined through `allOf`.
 
+- **`@setu-ts/static-plugin` — gzip sidecars now use the registered `gzip` content-coding token.** A
+  `.gz` sidecar was sent as `Content-Encoding: gz`, which standard clients cannot decode and a
+  shared cache could retain after the origin was corrected. Purge affected cached variants to
+  recover immediately. Conditional evaluation now runs after content negotiation, so an
+  `If-None-Match` validator for the uncompressed source cannot incorrectly return `304` for a
+  selected compressed sidecar. On runtimes without a filesystem, the registered `IStaticFiles`
+  service now returns `404` as documented rather than throwing when an application calls `serve()`.
+
 ## [0.4.0] — 2026-09-05
 
 **A declaration that enforced nothing now enforces, and a caller's mistake stops reading as a server
@@ -450,14 +458,6 @@ live — see [Versioning](README.md#versioning).
   class is exported, so an application constructing it directly gets a compile error.
 
 ### Fixed
-
-- **`@setu-ts/static-plugin` — gzip sidecars now use the registered `gzip` content-coding token.** A
-  `.gz` sidecar was sent as `Content-Encoding: gz`, which standard clients cannot decode and a
-  shared cache could retain after the origin was corrected. Purge affected cached variants to
-  recover immediately. Conditional evaluation now runs after content negotiation, so an
-  `If-None-Match` validator for the uncompressed source cannot incorrectly return `304` for a
-  selected compressed sidecar. On runtimes without a filesystem, the registered `IStaticFiles`
-  service now returns `404` as documented rather than throwing when an application calls `serve()`.
 
 - **`@setu-ts/common` / `@setu-ts/exceptions` — an unserveable status no longer makes the error path
   itself the fault.** `respondWithError` and `createErrorResponder`'s responder passed
