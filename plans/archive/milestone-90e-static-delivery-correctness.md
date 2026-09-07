@@ -1,7 +1,8 @@
 # Milestone 90e — Static Delivery Correctness (`@setu-ts/static-plugin`)
 
-> **Status:** Planning. Branch: `feat/m90e-static-delivery-correctness`. `main` is protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Branch: `feat/m90e-static-delivery-correctness`. `main` is
+> protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> single PR.
 
 ## 0. Objective & scope
 

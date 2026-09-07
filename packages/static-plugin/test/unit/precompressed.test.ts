@@ -1,11 +1,20 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
+  contentEncodingFor,
   findPrecompressedSidecar,
   getOriginalContentType,
   isEncodingAcceptable,
   parseAcceptEncoding,
 } from '../../src/http/precompressed.ts';
+
+describe('contentEncodingFor', () => {
+  it('translates filename formats to HTTP content-coding tokens', () => {
+    expect(contentEncodingFor('gz')).toBe('gzip');
+    expect(contentEncodingFor('br')).toBe('br');
+    expect(contentEncodingFor('custom')).toBe('custom');
+  });
+});
 
 describe('isEncodingAcceptable', () => {
   it('should accept br when present', () => {

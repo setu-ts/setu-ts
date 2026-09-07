@@ -30,10 +30,21 @@ describe('StaticFilesService', () => {
     expect(typeof service.serve).toBe('function');
   });
 
-  it('should return a Promise from serve', async () => {
-    const result = service.serve({} as never);
+  it('should return 404 rather than throw when no filesystem is available', async () => {
+    const response = {
+      statusCode: 200,
+      status(statusCode: number) {
+        this.statusCode = statusCode;
+        return this;
+      },
+      send() {
+        return undefined;
+      },
+    };
+    const result = service.serve({ response } as never);
     expect(result).toBeInstanceOf(Promise);
-    await expect(result).rejects.toThrow();
+    await result;
+    expect(response.statusCode).toBe(404);
   });
 
   it('should pass the real filesystem to the handler', () => {
