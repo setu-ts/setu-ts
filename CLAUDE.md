@@ -4468,7 +4468,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   permission name. Rotation is atomic at the refresh-store boundary, so concurrent requests cannot
   mint two descendants.
 - **Milestone 90d** (`packages/messaging-plugin` — the two brokers that cannot start) — complete (PR
-  pending). X28-1: the Kafka broker attached the uppercase KEYS of kafkajs's `producer.events` where
+  #256). X28-1: the Kafka broker attached the uppercase KEYS of kafkajs's `producer.events` where
   the wire VALUES are required, so `register()` threw and `broker: 'kafka'` never booted — now two
   declared wire-value constants, pinned against real kafkajs by a guarded real-import test that also
   proves the keys are rejected. X28-2/X28-3: the NATS stream-creation catch-all (`subjects: ['>']`)
@@ -4503,7 +4503,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   grouped by defect **shape** rather than by package, the M70a–M70n precedent. The X20–X38 register
   that follows it is being closed the same way: M90a (abuse control), M90b (health truth bounded, PR
   #249), M90c (credential revocation and token type), M90d (the two brokers that cannot start, PR
-  pending), and M90e (static delivery correctness, PR #252) are complete; M90f through M90j remain
+  #256), and M90e (static delivery correctness, PR #252) are complete; M90f through M90j remain
   open.
 
 ## Verification (run before declaring any work done)
