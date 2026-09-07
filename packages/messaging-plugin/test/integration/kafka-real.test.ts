@@ -15,7 +15,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IMessageBroker } from '@setu-ts/common';
+import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -106,8 +106,10 @@ describe({
         // a broker defect; the round trip therefore RETRIES the publish until
         // delivery, bounded, rather than racing the rebalance.
         const received: Array<{ id: number }> = [];
-        await broker!.subscribe(topic, (message: { id: number }) => {
+        let deliveredMetadata: MessageMetadata | undefined;
+        await broker!.subscribe(topic, (message: { id: number }, metadata) => {
           received.push(message);
+          deliveredMetadata = metadata;
         });
         const published: Array<{ id: number }> = [];
         for (let attempt = 1; attempt <= 8 && received.length === 0; attempt++) {
@@ -123,6 +125,18 @@ describe({
           published.some((p) => p.id === received[0]?.id),
           `delivered ${JSON.stringify(received[0])} vs published ${JSON.stringify(published)}`,
         ).toBe(true);
+
+        // The documented message identity is `partition:offset`, and the
+        // partition comes from the OUTER eachMessage payload — real kafkajs
+        // never puts it on the message record. Pre-fix the broker read
+        // `message.partition` and delivered `"undefined:<offset>"` (90d
+        // verification Finding 1), colliding across partitions and breaking
+        // the de-duplication use the identity exists for. Pinned here against
+        // the real broker, where no fake can echo the wrong shape.
+        expect(
+          deliveredMetadata?.messageId,
+          `metadata ${JSON.stringify(deliveredMetadata)}`,
+        ).toMatch(/^\d+:\d+$/);
 
         // Request/reply round trip — implemented in M14d and never exercised
         // against a real broker, because the broker could not boot. The same

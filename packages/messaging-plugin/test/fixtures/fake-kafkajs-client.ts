@@ -33,10 +33,17 @@ export interface FakeKafkaOptions {
 
 /**
  * Fake Kafka message.
+ *
+ * Corrected (90d verification, Finding 1): this double used to carry a public
+ * `partition` getter, but real kafkajs's `KafkaMessage` has NO `partition` —
+ * the partition arrives on the OUTER `eachMessage` payload, not on the record.
+ * The getter masked a real defect (the broker read `message.partition` and
+ * produced `"undefined:<offset>"` message ids). The message now models the
+ * real record shape; the partition travels with the consumer's delivery call
+ * (the consumer's assignment is what knows it), never on the message.
  */
 export class FakeKafkaMessage {
   #value: Uint8Array;
-  #partition: number;
   #offset: string;
   #timestamp: string;
   #headers: Record<string, KafkaHeaderValue>;
@@ -44,14 +51,12 @@ export class FakeKafkaMessage {
 
   constructor(
     value: string,
-    partition: number,
     offset: string,
     timestamp: string,
     headers: Record<string, KafkaHeaderValue>,
     key: string | null = null,
   ) {
     this.#value = new TextEncoder().encode(value);
-    this.#partition = partition;
     this.#offset = offset;
     this.#timestamp = timestamp;
     this.#headers = Object.fromEntries(
@@ -76,10 +81,6 @@ export class FakeKafkaMessage {
 
   get headers(): Record<string, KafkaHeaderValue> {
     return { ...this.#headers };
-  }
-
-  get partition(): number {
-    return this.#partition;
   }
 
   get offset(): string {
@@ -153,13 +154,21 @@ export class FakeKafkaConsumer {
    * Runs one message through `eachMessage`, modelling kafkajs auto-commit:
    * commit the offset only when `eachMessage` resolves; on rejection, do not
    * commit (and swallow so there is no unhandled rejection).
+   *
+   * `partition` is the partition the record was fetched from — the OUTER
+   * `eachMessage` argument, exactly as real kafkajs delivers it. It can never
+   * come off the message record, which has no such member.
    */
-  async #deliverAndTrack(topic: string, message: FakeKafkaMessage): Promise<void> {
+  async #deliverAndTrack(
+    topic: string,
+    partition: number,
+    message: FakeKafkaMessage,
+  ): Promise<void> {
     if (!this.#runOptions) {
       return;
     }
     try {
-      await this.#runOptions.eachMessage({ topic, partition: message.partition, message });
+      await this.#runOptions.eachMessage({ topic, partition, message });
       this.#committedOffsets.push(message.offset);
     } catch {
       // eachMessage rejected → kafkajs does NOT commit the offset (redelivery).
@@ -188,11 +197,14 @@ export class FakeKafkaConsumer {
     this.#runOptions = options;
     this.#running = true;
     // Auto-deliver seeded messages to the handler, tracking commit-on-resolve.
+    // The seeded record's partition feeds the OUTER eachMessage payload, the
+    // way a real consumer reports the partition it fetched from.
     for (const msg of this.#seededMessages) {
       if (this.#subscribedTopics.includes(msg.topic)) {
         void this.#deliverAndTrack(
           msg.topic,
-          new FakeKafkaMessage(msg.value, msg.partition, msg.offset, msg.timestamp, msg.headers),
+          msg.partition,
+          new FakeKafkaMessage(msg.value, msg.offset, msg.timestamp, msg.headers),
         );
       }
     }
@@ -214,10 +226,14 @@ export class FakeKafkaConsumer {
     return Promise.resolve();
   }
 
-  /** Deliver a seeded message to the eachMessage handler (tracks commit-on-resolve). */
-  async deliver(topic: string, message: FakeKafkaMessage): Promise<void> {
+  /**
+   * Deliver a seeded message to the eachMessage handler (tracks commit-on-
+   * resolve). `partition` defaults to 0 and is delivered as the OUTER
+   * `eachMessage` argument, not on the message.
+   */
+  async deliver(topic: string, message: FakeKafkaMessage, partition = 0): Promise<void> {
     if (this.#running && this.#runOptions) {
-      await this.#deliverAndTrack(topic, message);
+      await this.#deliverAndTrack(topic, partition, message);
     }
   }
 }
@@ -376,7 +392,6 @@ export class FakeKafkaFactory {
   async route(topic: string, value: string): Promise<void> {
     const message = new FakeKafkaMessage(
       value,
-      0,
       String(this.#offset++),
       '0',
       {},
@@ -386,7 +401,7 @@ export class FakeKafkaFactory {
         c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === topic
       );
       if (subscribed) {
-        await consumer.deliver(topic, message);
+        await consumer.deliver(topic, message, 0);
       }
     }
   }
@@ -413,7 +428,6 @@ export class FakeKafkaFactory {
     for (const seeded of this.#options.seededMessages) {
       const message = new FakeKafkaMessage(
         seeded.value,
-        seeded.partition,
         seeded.offset,
         seeded.timestamp,
         seeded.headers,
@@ -424,7 +438,7 @@ export class FakeKafkaFactory {
             c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === seeded.topic
           )
         ) {
-          await consumer.deliver(seeded.topic, message);
+          await consumer.deliver(seeded.topic, message, seeded.partition);
         }
       }
     }

@@ -427,9 +427,16 @@ export class KafkaBroker implements MessageBrokerAdapter {
     };
     this.#activeConsumers.set(subscriptionId, activeConsumer);
 
-    // Run consumer with eachMessage handler
+    // Run consumer with eachMessage handler.
+    //
+    // `partition` MUST come from the outer eachMessage payload (kafkajs's
+    // `EachMessagePayload`), never off the message record: real `KafkaMessage`
+    // carries no `partition`, so reading it there yields `undefined` and the
+    // documented `partition:offset` identity degrades to `"undefined:<offset>"`
+    // — colliding across partitions and breaking the de-duplication the
+    // identity exists for (90d verification, Finding 1).
     consumerTyped.run({
-      eachMessage: async ({ message }) => {
+      eachMessage: async ({ partition, message }) => {
         const msgTyped = message as unknown as {
           key: Uint8Array | null;
           value: Uint8Array | null;
@@ -438,7 +445,6 @@ export class KafkaBroker implements MessageBrokerAdapter {
             string,
             Uint8Array | string | readonly (Uint8Array | string)[] | undefined
           >;
-          partition: number;
           offset: string;
         };
 
@@ -448,7 +454,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
         const metadata: MessageMetadata = {
           topic,
-          messageId: `${msgTyped.partition}:${msgTyped.offset}`,
+          messageId: `${partition}:${msgTyped.offset}`,
           timestamp: new Date(parseInt(msgTyped.timestamp, 10)),
           // Dropping an undecodable value rather than throwing is load-bearing
           // here: this runs inside `eachMessage`, where a throw prevents the
