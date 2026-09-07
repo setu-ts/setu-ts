@@ -523,6 +523,50 @@ describe('createStaticHandler', () => {
     expect(ctx.response._headers.get('Vary')).toBe('Accept-Encoding');
   });
 
+  it('should use the selected gzip sidecar validator and content-coding token', async () => {
+    await fs.writeFile('/root/test.txt', new TextEncoder().encode('hello world'));
+    await fs.writeFile('/root/test.txt.gz', new TextEncoder().encode('compressed'));
+    fs.stats.set('/root/test.txt', { isFile: true, isDirectory: false, size: 11 });
+    fs.stats.set('/root/test.txt.gz', { isFile: true, isDirectory: false, size: 10 });
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Accept-Encoding', 'gzip');
+    ctx.request.headers.set('If-None-Match', 'W/"11"');
+    await handler(ctx as never);
+
+    expect(ctx.response._status).toBe(200);
+    expect(ctx.response._headers.get('Content-Encoding')).toBe('gzip');
+  });
+
+  it('should match weak and comma-separated sidecar validators', async () => {
+    await fs.writeFile('/root/test.txt', new TextEncoder().encode('hello world'));
+    await fs.writeFile('/root/test.txt.gz', new TextEncoder().encode('compressed'));
+    fs.stats.set('/root/test.txt', { isFile: true, isDirectory: false, size: 11 });
+    fs.stats.set('/root/test.txt.gz', { isFile: true, isDirectory: false, size: 10 });
+
+    const handler = createStaticHandler({
+      fs,
+      root: '/root',
+      urlPrefix: '/',
+      index: 'index.html',
+    }) as RouteHandler;
+
+    ctx.request.path = '/test.txt';
+    ctx.request.headers.set('Accept-Encoding', 'gzip');
+    ctx.request.headers.set('If-None-Match', '"stale", W/"10"');
+    await handler(ctx as never);
+
+    expect(ctx.response._status).toBe(304);
+    expect(ctx.response._headers.get('Content-Encoding')).toBe('gzip');
+  });
+
   it('should serve full file when If-Range does not match ETag', async () => {
     const content = new TextEncoder().encode('hello world');
     await fs.writeFile('/root/test.txt', content);

@@ -428,6 +428,13 @@ live — see [Versioning](README.md#versioning).
 
 ### Fixed
 
+- **`@setu-ts/static-plugin` — gzip sidecars now use the registered `gzip` content-coding token.** A
+  `.gz` sidecar was sent as `Content-Encoding: gz`, which standard clients cannot decode and a
+  shared cache could retain after the origin was corrected. Purge affected cached variants to
+  recover immediately. Conditional evaluation now runs after content negotiation, so an
+  `If-None-Match` validator for the uncompressed source cannot incorrectly return `304` for a
+  selected compressed sidecar.
+
 - **`@setu-ts/common` / `@setu-ts/exceptions` — an unserveable status no longer makes the error path
   itself the fault.** `respondWithError` and `createErrorResponder`'s responder passed
   `ErrorResponseInit.status` straight to `response.status(...)`. The web `Response` constructor

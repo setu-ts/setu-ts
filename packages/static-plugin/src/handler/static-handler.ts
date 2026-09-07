@@ -14,7 +14,11 @@ import {
   parseRange,
   shouldHonourRange,
 } from '../http/range.ts';
-import { findPrecompressedSidecar, getOriginalContentType } from '../http/precompressed.ts';
+import {
+  contentEncodingFor,
+  findPrecompressedSidecar,
+  getOriginalContentType,
+} from '../http/precompressed.ts';
 
 /**
  * Options for creating a static handler.
@@ -244,30 +248,14 @@ async function serveFile(
     maxBufferBytes = 1_048_576,
   } = options;
 
-  // Compute ETag
-  const etagValue = etag ? computeETag(stat) : undefined;
+  let selected = {
+    path: fullPath,
+    stat,
+    contentEncoding: undefined as string | undefined,
+  };
 
-  // Check conditional request
-  if (etag && etagValue) {
-    const ifNoneMatch = ctx.request.headers.get('If-None-Match') ?? undefined;
-    const ifModifiedSince = ctx.request.headers.get('If-Modified-Since') ?? undefined;
-
-    if (shouldReturn304({ etag: true, stat, ifNoneMatch, ifModifiedSince })) {
-      const response = ctx.response.status(304).header(
-        'Cache-Control',
-        resolveCacheControl(relativePath, { cacheControl }),
-      ).header('Vary', 'Accept-Encoding');
-      if (etagValue) {
-        response.header('ETag', etagValue);
-      }
-      if (stat.mtime) {
-        response.header('Last-Modified', formatHttpDate(stat.mtime));
-      }
-      return response.send();
-    }
-  }
-
-  // Check precompressed sidecar
+  // Select the representation before evaluating conditionals. RFC 9110 requires
+  // validators to be compared with the selected representation, not its source.
   if (compressed) {
     const acceptEncoding = ctx.request.headers.get('Accept-Encoding') ?? undefined;
     const sidecar = await findPrecompressedSidecar({
@@ -280,44 +268,44 @@ async function serveFile(
     if (sidecar) {
       // `findPrecompressedSidecar` already stat'ed it; re-statting would cost a
       // second filesystem round trip per compressed request.
-      const sidecarStat = sidecar.stat;
-      const sidecarEtag = etag ? computeETag(sidecarStat) : undefined;
-
-      // Re-check conditional with sidecar ETag
-      if (etag && sidecarEtag) {
-        const ifNoneMatch = ctx.request.headers.get('If-None-Match') ?? undefined;
-        if (ifNoneMatch === sidecarEtag || ifNoneMatch === '*') {
-          const response = ctx.response
-            .status(304)
-            .header('Cache-Control', resolveCacheControl(relativePath, { cacheControl }))
-            .header('Vary', 'Accept-Encoding');
-          response.header('ETag', sidecarEtag);
-          response.header('Content-Encoding', sidecar.format);
-          return response.send();
-        }
-      }
-
-      return serveCompressedFile(ctx, fs, sidecar.path, sidecarStat, sidecar.format, {
-        cacheControl,
-        // The ORIGINAL path, so a hashed asset keeps `immutable` when the
-        // brotli variant is negotiated. The sidecar path (`app-a1b2c3d4.js.br`)
-        // never matches the content-hash pattern.
-        relativePath,
-        etag,
-        ranges,
-        maxBufferBytes,
-        contentType: getOriginalContentType(fullPath),
-      });
+      selected = {
+        path: sidecar.path,
+        stat: sidecar.stat,
+        contentEncoding: contentEncodingFor(sidecar.format),
+      };
     }
   }
 
-  // Normal file serving
-  return serveCompressedFile(ctx, fs, fullPath, stat, undefined, {
+  if (etag) {
+    const ifNoneMatch = ctx.request.headers.get('If-None-Match') ?? undefined;
+    const ifModifiedSince = ctx.request.headers.get('If-Modified-Since') ?? undefined;
+
+    if (shouldReturn304({ etag: true, stat: selected.stat, ifNoneMatch, ifModifiedSince })) {
+      const response = ctx.response.status(304).header(
+        'Cache-Control',
+        resolveCacheControl(relativePath, { cacheControl }),
+      ).header('Vary', 'Accept-Encoding');
+      const etagValue = computeETag(selected.stat);
+      response.header('ETag', etagValue);
+      if (selected.stat.mtime) {
+        response.header('Last-Modified', formatHttpDate(selected.stat.mtime));
+      }
+      if (selected.contentEncoding) {
+        response.header('Content-Encoding', selected.contentEncoding);
+      }
+      return response.send();
+    }
+  }
+
+  return serveCompressedFile(ctx, fs, selected.path, selected.stat, selected.contentEncoding, {
     cacheControl,
+    // The ORIGINAL path, so a hashed asset keeps `immutable` when a sidecar is
+    // negotiated. The sidecar path never matches the content-hash pattern.
     relativePath,
     etag,
     ranges,
     maxBufferBytes,
+    contentType: selected.contentEncoding ? getOriginalContentType(fullPath) : undefined,
   });
 }
 
