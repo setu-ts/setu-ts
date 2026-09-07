@@ -151,10 +151,12 @@ All notable changes to this project are documented here. The format follows
   EMPTY assignment, so the previously shared `messaging-consumers` group silently stopped ALL
   delivery the moment an application subscribed two topics (including request-reply, whose responder
   subscribes the derived `rr.req.<topic>` channel). A subscription with no `queue` now uses
-  `<defaultQueue>-<topic>`; same topic across instances still load-balances, different topics never
-  share a group, and a caller-supplied `queue` still names the group itself. Migration: tooling
-  keyed on the literal `messaging-consumers` group reads the derived `<defaultQueue>-<topic>` names
-  now.
+  `<defaultQueue>:<topic>`; same topic across instances still load-balances, different topics never
+  share a group, and a caller-supplied `queue` still names the group itself. The separator is a
+  colon because `-` is not injective — `'orders-eu'` + `created` and `'orders'` + `eu-created` both
+  yield `orders-eu-created`, restoring the same failure — and a Kafka topic name may not contain `:`
+  (probed: the broker refuses one) while a group id may. Migration: tooling keyed on the literal
+  `messaging-consumers` group reads the derived `<defaultQueue>:<topic>` names now.
 
 - **BREAKING — `@setu-ts/cache-plugin` — `IRedisClient` gains a required `ping()`.** The Redis
   store's reachability probe invokes it. Migration: an injected client structurally typed as
@@ -328,8 +330,9 @@ All notable changes to this project are documented here. The format follows
 
 - **`@setu-ts/messaging-plugin` — the NATS broker fails startup with a name, not a bare platform
   error (M90d / X28-3).** See **Added**: `JetStreamUnavailableError` and `JetStreamStreamError`
-  replace the raw `503` and the catch-all-refusal text at both `connect()` failure sites, each
-  carrying the platform error as `cause`.
+  replace the raw `503` and the catch-all-refusal text at both `connect()` failure sites, carrying
+  the platform error as `cause` wherever the platform produced one. The absent-stream refusal is the
+  one arm with no `cause`: no platform call failed, the broker declines to invent a subject set.
 
 ## [0.4.0] — 2026-09-05
 

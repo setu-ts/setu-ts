@@ -4085,7 +4085,7 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
   clientId?: string;
   /**
    * Prefix of the derived default consumer group. Since M90d a subscription
-   * with no `queue` uses `<defaultQueue>-<topic>`: members of one consumer
+   * with no `queue` uses `<defaultQueue>:<topic>`: members of one consumer
    * group must subscribe the same topics, so the previously shared group
    * collapsed to empty assignments (nothing delivered) the moment an
    * application subscribed two topics. Same topic across instances still
@@ -4338,8 +4338,9 @@ for `instanceof` handling):
 | `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
 | `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
 
-Two more error classes are exported for the NATS broker's startup prerequisites (M90d / X28-3), both
-carrying the platform error as `cause`:
+Two more error classes are exported for the NATS broker's startup prerequisites (M90d / X28-3). Each
+carries the platform error as `cause` **when there is one** — the absent-stream refusal below is a
+configuration verdict this broker reaches on its own, so that one arm has no `cause`:
 
 | Error                       | Thrown when                                                                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |

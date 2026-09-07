@@ -111,6 +111,37 @@ interface ActiveConsumer {
 }
 
 /**
+ * Derives the per-topic default consumer group for a subscription that names
+ * no `queue`.
+ *
+ * **Why per topic (M90d / X28, measured against a real broker):** a consumer
+ * group's members must subscribe the SAME topics. When they differ, kafkajs
+ * logs "Consumer group received unsubscribed topics" and BOTH members end
+ * with an EMPTY assignment — so the single shared default group silently
+ * stopped ALL delivery for any application subscribed to two topics,
+ * including RPC, whose responder subscribes the derived `rr.req.<topic>`
+ * channel. The same topic across instances still load-balances, because the
+ * derived name is identical.
+ *
+ * **Why a colon (M90d review):** `${prefix}-${topic}` is not injective —
+ * `('orders-eu', 'created')` and `('orders', 'eu-created')` both yield
+ * `orders-eu-created`, which puts two differently-subscribed consumers back
+ * into one group and restores the very failure above. Probed against a real
+ * broker: a topic name containing `:` is REFUSED at creation, while a group
+ * id containing `:` is accepted and reaches `Stable`. So the pair is
+ * recoverable by splitting at the last colon, no two distinct pairs with
+ * legal topic names can collide, and the name stays readable in
+ * `kafka-consumer-groups.sh` output.
+ *
+ * @param defaultQueue - The configured group prefix
+ * @param topic - The topic being subscribed
+ * @returns The derived group id
+ */
+function deriveDefaultGroupId(defaultQueue: string, topic: string): string {
+  return `${defaultQueue}:${topic}`;
+}
+
+/**
  * Kafka message broker implementation.
  *
  * @since 0.1.0
@@ -386,16 +417,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     }
 
     const subscriptionId = this.#runtime.uuid();
-    // M90d, measured against a real broker: a consumer group's members must
-    // subscribe the SAME topics — kafkajs logs "Consumer group received
-    // unsubscribed topics" and BOTH members end with an EMPTY assignment when
-    // they differ, so the shared default group silently stopped ALL delivery
-    // for any application subscribed to two topics (including RPC, whose
-    // responder subscribes the derived `rr.req.<topic>` channel). Derive the
-    // group per topic: same topic across instances still load-balances (the
-    // derived name is identical), different topics never share a group. A
-    // caller-supplied `queue` still names the group explicitly.
-    const groupId = options?.queue ?? `${this.#defaultQueue}-${topic}`;
+    const groupId = options?.queue ?? deriveDefaultGroupId(this.#defaultQueue, topic);
 
     // Create consumer unconditionally from the resolved factory
     const realFactory = this.#factory as unknown as {

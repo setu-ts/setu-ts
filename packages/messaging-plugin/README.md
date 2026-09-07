@@ -174,9 +174,16 @@ An existing stream is never touched, with or without `streamSubjects`.
 ### Kafka consumer groups
 
 When `queue` is not supplied, each subscription's consumer group is derived per topic —
-`<defaultQueue>-<topic>` — because members of one Kafka group must subscribe the same topics: shared
+`<defaultQueue>:<topic>` — because members of one Kafka group must subscribe the same topics: shared
 groups collapse to empty assignments and stop delivering entirely. A caller-supplied `queue` names
 the group itself, so competing consumers of one topic keep load-balancing.
+
+The separator is a colon rather than a hyphen so the derivation cannot collide. A Kafka topic name
+may not contain `:` (the broker refuses one at creation), while a group id may, so the
+`(defaultQueue, topic)` pair is recoverable by splitting at the last colon. With a hyphen,
+`defaultQueue: 'orders-eu'` + topic `created` and `defaultQueue: 'orders'` + topic `eu-created` both
+produce `orders-eu-created`, putting two differently-subscribed consumers into one group and
+restoring the empty-assignment failure this derivation exists to prevent.
 
 ## Request-reply
 

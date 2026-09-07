@@ -57,8 +57,17 @@ export interface PubSubSdkModule {
             nack: () => void;
             data: Uint8Array;
             id: string;
-            /** The server-assigned publish time (RFC 3339), as the SDK delivers it. */
-            publishTime?: string;
+            /**
+             * The server-assigned publish time, as the SDK delivers it.
+             *
+             * Typed `Date` rather than `string` (M90d review, read off the
+             * locked `@google-cloud/pubsub@6.0.0` `subscriber.d.ts`): the real
+             * `Message.publishTime` is a `PreciseDate`, a `Date` subclass, so
+             * `Date` is the correct structural supertype and the full SDK
+             * `Message` type stays unimported. The previous `string` made the
+             * fixture model a value production never sends.
+             */
+            publishTime?: Date;
             attributes?: Record<string, string>;
           },
         ) => void,

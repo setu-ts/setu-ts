@@ -132,12 +132,17 @@ describe('adaptPubSubModule', () => {
     // A variable, not a literal, so the extra `publishTime` field (which the
     // real SDK message carries and the fake's structural type now models)
     // passes without excess-property checking.
+    //
+    // A `Date`, not an RFC 3339 string (M90d review): the locked
+    // `@google-cloud/pubsub@6.0.0` delivers `publishTime` as a `PreciseDate`,
+    // which extends `Date`. The string this used to send is a value the SDK
+    // never produces, so the fixture was modelling a shape production has not.
     const raw = {
       data: new TextEncoder().encode('hello'),
       ack: () => {},
       nack: () => {},
       id: 'pubsub-msg-9',
-      publishTime: '2025-03-04T05:06:07.000Z',
+      publishTime: new Date('2025-03-04T05:06:07.000Z'),
     };
     sdk.topics.get('test-topic')!.subscriptions.get('sub-meta')!.onMessage!(raw);
 

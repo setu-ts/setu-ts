@@ -167,5 +167,54 @@ describe({
         await jsmConn.close();
       }
     });
+
+    it('re-subscribes the same queue on the same topic without an error (M90d review)', async () => {
+      // Review asked whether the duplicate-durable filter in `subscribe()`
+      // should also match JetStream's "consumer name already in use". Probed
+      // against the real server (nats-server v2.14.6): re-adding a durable
+      // consumer with an IDENTICAL configuration is idempotent and rejects
+      // nothing, so the ordinary repeat-subscribe path never reaches that
+      // filter at all. A genuine configuration CONFLICT under the same durable
+      // name answers "consumer already exists" and must keep propagating —
+      // widening the filter to swallow it would hide a real misconfiguration.
+      // This pins the behaviour so the filter is not "fixed" on the assumption
+      // that a repeat subscribe fails.
+      const nats = await import('npm:nats@2.x');
+      const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+      const streamName = `M90D_DUP_${suffix}`;
+      const subjectScope = `m90ddup.${suffix}`;
+      const topic = `${subjectScope}.orders`;
+      const queue = `m90d_dup_${suffix}`;
+
+      const jsmConn = await nats.connect({ servers: url });
+      const jsm = await jsmConn.jetstreamManager();
+      await jsm.streams.add({ name: streamName, subjects: [`${subjectScope}.>`] });
+
+      let broker: IMessageBroker | undefined;
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({ broker: 'nats', url, streamName }),
+          brokerProbe((b) => {
+            broker = b;
+          }),
+        ],
+      });
+
+      try {
+        await app.start();
+        const first = await broker!.subscribe(topic, () => {}, { queue });
+        // The same queue on the same topic: an identical durable config, which
+        // the server accepts again rather than refusing.
+        const second = await broker!.subscribe(topic, () => {}, { queue });
+        expect(second).toBeDefined();
+        await first.unsubscribe();
+        await second.unsubscribe();
+      } finally {
+        await app.stop();
+        await jsm.streams.delete(streamName).catch(() => {});
+        await jsmConn.close();
+      }
+    });
   },
 });

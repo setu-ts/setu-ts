@@ -168,13 +168,49 @@ describe('KafkaBroker', () => {
     await broker.subscribe('orders', () => {}, { queue: 'explicit-group' });
 
     const groups = fakeFactory.groupIds;
-    expect(groups).toContain('messaging-consumers-orders');
-    expect(groups).toContain('messaging-consumers-billing');
+    expect(groups).toContain('messaging-consumers:orders');
+    expect(groups).toContain('messaging-consumers:billing');
     expect(groups).toContain('explicit-group');
     // Different topics never share a group.
-    expect(groups.filter((g) => g === 'messaging-consumers-orders')).toHaveLength(1);
+    expect(groups.filter((g) => g === 'messaging-consumers:orders')).toHaveLength(1);
 
     await broker.disconnect();
+  });
+
+  it('derives groups that cannot collide across prefix/topic pairs (M90d review)', async () => {
+    // `${prefix}-${topic}` is not injective: ('orders-eu', 'created') and
+    // ('orders', 'eu-created') both yield `orders-eu-created`, which puts two
+    // consumers subscribing DIFFERENT topics into one group — the exact empty-
+    // assignment failure the per-topic derivation exists to prevent. A Kafka
+    // topic name may not contain `:` (probed: the broker refuses one at
+    // creation) while a group id may, so the pair is recoverable and the two
+    // configurations below must land in different groups.
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+
+    const splitA = new FakeKafkaFactory();
+    const brokerA = new KafkaBroker(runtime, serializer, {
+      client: splitA,
+      defaultQueue: 'orders-eu',
+    });
+    await brokerA.connect();
+    await brokerA.subscribe('created', () => {});
+    await brokerA.disconnect();
+
+    const splitB = new FakeKafkaFactory();
+    const brokerB = new KafkaBroker(runtime, serializer, {
+      client: splitB,
+      defaultQueue: 'orders',
+    });
+    await brokerB.connect();
+    await brokerB.subscribe('eu-created', () => {});
+    await brokerB.disconnect();
+
+    const [groupA] = splitA.groupIds;
+    const [groupB] = splitB.groupIds;
+    expect(groupA).toBe('orders-eu:created');
+    expect(groupB).toBe('orders:eu-created');
+    expect(groupA).not.toBe(groupB);
   });
 
   it('attaches the producer events by their WIRE values, recorded by the fake (X28-1)', async () => {
@@ -408,8 +444,8 @@ describe('KafkaBroker', () => {
     await sub.unsubscribe();
 
     // Verify stop was called on the consumer. The default group is derived
-    // per topic (M90d): `messaging-consumers-<topic>`.
-    const consumer = fakeFactory.consumer({ groupId: 'messaging-consumers-test.topic' });
+    // per topic (M90d): `messaging-consumers:<topic>`.
+    const consumer = fakeFactory.consumer({ groupId: 'messaging-consumers:test.topic' });
     const calls = consumer.calls;
     const stopCall = calls.find((c) => c.method === 'stop');
     expect(stopCall).toBeDefined();

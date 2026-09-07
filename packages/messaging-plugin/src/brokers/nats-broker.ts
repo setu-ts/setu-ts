@@ -210,6 +210,34 @@ export class NatsBroker implements MessageBrokerAdapter {
     // An explicitly supplied factory wins; the module's own is the fallback.
     this.#headersFactory ??= resolved.headersFactory;
 
+    // Every startup check below can throw, and `MessagingPlugin` awaits
+    // `connect()` BEFORE it installs `ctx.lifecycle.onClose` — so a failure
+    // that escapes here leaves the connection this method just opened live,
+    // with nothing left holding a reference that could close it. The absent-
+    // stream arm makes that reachable on ordinary misconfiguration, so the
+    // socket is released before the startup error is rethrown unchanged.
+    try {
+      await this.#establishJetStream();
+    } catch (err) {
+      this.#closeQuietly(resolved.connection);
+      throw err;
+    }
+    this.#ready = true;
+    this.#supervisor.start();
+  }
+
+  /**
+   * Runs the JetStream startup prerequisites against the open connection.
+   *
+   * Extracted from {@linkcode NatsBroker.connect} so ONE `catch` releases the
+   * connection for every failure path rather than each throw site repeating
+   * the cleanup — a new prerequisite added later cannot forget it.
+   *
+   * @throws {JetStreamUnavailableError} When the server has no JetStream
+   * @throws {JetStreamStreamError} When the stream is absent without
+   *   {@linkcode NatsOptions.streamSubjects}, or the platform refuses it
+   */
+  async #establishJetStream(): Promise<void> {
     // X28-3: the JetStream probe is INSIDE the try so a server without
     // JetStream rejects as a named `JetStreamUnavailableError` rather than a
     // bare `NatsError: 503` (`NO_RESPONDERS` for the `$JS.API` subjects).
@@ -268,8 +296,33 @@ export class NatsBroker implements MessageBrokerAdapter {
     // Get JetStream instance unconditionally
     const realConn2 = this.#connection as unknown as { jetstream(): unknown };
     this.#js = realConn2.jetstream();
-    this.#ready = true;
-    this.#supervisor.start();
+  }
+
+  /**
+   * Closes and clears a partially initialized connection, swallowing any
+   * close failure so the ORIGINAL startup error is what the caller sees.
+   *
+   * Takes the connection as a parameter rather than reading the field: the
+   * only caller has it in hand, so there is no reachable null case to guard.
+   *
+   * @param connection - The connection {@linkcode NatsBroker.connect} opened
+   */
+  #closeQuietly(connection: unknown): void {
+    this.#connection = null;
+    this.#js = null;
+    const conn = connection as { close(): unknown };
+    try {
+      const closed = conn.close();
+      if (closed instanceof Promise) {
+        // The real `NatsConnection.close()` returns `Promise<void>`, resolving
+        // after the socket drains. Nothing awaits this method — a rejection
+        // must not replace the startup error, and must not surface as an
+        // unhandled rejection either.
+        closed.catch(() => {});
+      }
+    } catch {
+      // Already closing, or an injected client with no usable `close`.
+    }
   }
 
   /**
@@ -281,11 +334,14 @@ export class NatsBroker implements MessageBrokerAdapter {
   async disconnect(): Promise<void> {
     this.#supervisor.stop();
     await this.#rr.close();
-    // Stop all active consumers
+    // Stop all active consumers. `stop()` is a `ConsumerMessages` member, so
+    // the SUBSCRIPTION handle is what carries it — the `Consumer` this used to
+    // call it on has only `info`/`delete`/`next`/`fetch`/`consume`, so every
+    // shutdown raised a swallowed `TypeError` and left the callbacks running.
     for (const consumer of this.#activeConsumers.values()) {
       try {
-        const realConsumer = consumer.consumer as unknown as { stop(): void };
-        realConsumer.stop();
+        const realSub = consumer.subscription as unknown as { stop(): void };
+        realSub.stop();
       } catch {
         // Ignore errors during shutdown
       }
@@ -484,11 +540,18 @@ export class NatsBroker implements MessageBrokerAdapter {
 
     // Get consumer and start consuming
     const consumer = await realJsTyped.consumers.get(this.#streamName, consumerName);
+    // M90d review, probed against the shipped nats 2.29.3 `.d.ts`:
+    // `Consumer.consume(opts?): Promise<ConsumerMessages>` — it RESOLVES to
+    // the stoppable handle. Storing the promise itself made `unsubscribe()`
+    // call `.stop()` on a `Promise` (a `TypeError` its `catch` swallowed), so
+    // the consumer callback stayed active after a caller cancelled it. `stop()`
+    // lives on `ConsumerMessages` (via `QueuedIterator`) and NOT on `Consumer`,
+    // which is why `disconnect()` stops this handle too.
     const consumerTyped = consumer as unknown as {
-      consume(options: { callback: (msg: unknown) => void }): unknown;
+      consume(options: { callback: (msg: unknown) => void }): Promise<unknown>;
     };
 
-    const subscription = consumerTyped.consume({
+    const subscription = await consumerTyped.consume({
       callback: (msg) => {
         const msgTyped = msg as unknown as {
           data: Uint8Array;
