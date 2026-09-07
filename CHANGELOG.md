@@ -433,7 +433,8 @@ live — see [Versioning](README.md#versioning).
   shared cache could retain after the origin was corrected. Purge affected cached variants to
   recover immediately. Conditional evaluation now runs after content negotiation, so an
   `If-None-Match` validator for the uncompressed source cannot incorrectly return `304` for a
-  selected compressed sidecar.
+  selected compressed sidecar. On runtimes without a filesystem, the registered `IStaticFiles`
+  service now returns `404` as documented rather than throwing when an application calls `serve()`.
 
 - **`@setu-ts/common` / `@setu-ts/exceptions` — an unserveable status no longer makes the error path
   itself the fault.** `respondWithError` and `createErrorResponder`'s responder passed

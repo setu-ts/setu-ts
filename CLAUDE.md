@@ -4475,7 +4475,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (caller errors that read as server faults), and M89c (the ingress surface above) — grouped by
   defect **shape** rather than by package, the M70a–M70n precedent. The X20–X38 register that
   follows it is being closed the same way: M90a (abuse control), M90b (health truth bounded, PR
-  pending), and M90c (credential revocation and token type) are complete; M90d–M90f remain open.
+  pending), M90c (credential revocation and token type), and M90e (static delivery correctness, PR
+  pending) are complete; M90d and M90f remain open.
 
 ## Verification (run before declaring any work done)
 

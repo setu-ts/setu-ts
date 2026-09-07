@@ -9242,7 +9242,7 @@ fields (`code` first) read through the same guard, plus
 | 90b       | ✅     | health that tells the truth, bounded                                                       |
 | 90c       | ✅     | credential revocation and token type ([#248](https://github.com/setu-ts/setu-ts/pull/248)) |
 | 90d       | ⬜     | the two brokers that cannot start                                                          |
-| 90e       | ⬜     | static delivery correctness                                                                |
+| 90e       | ✅     | static delivery correctness (PR pending)                                                   |
 | 90f       | ⬜     | caller errors reach the client correctly                                                   |
 | 90g       | ⬜     | concurrency loses work silently                                                            |
 | 90h       | ⬜     | documentation that survives contact                                                        |

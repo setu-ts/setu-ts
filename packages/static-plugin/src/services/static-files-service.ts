@@ -14,7 +14,7 @@ import { createStaticHandler } from '../handler/static-handler.ts';
  * @since 0.1.0
  */
 export class StaticFilesService implements IStaticFiles {
-  private readonly handler: ReturnType<typeof createStaticHandler>;
+  private readonly handler?: ReturnType<typeof createStaticHandler>;
 
   /**
    * Creates a new StaticFilesService.
@@ -22,18 +22,20 @@ export class StaticFilesService implements IStaticFiles {
    * @param options - Plugin options including the filesystem
    */
   constructor(options: StaticPluginOptions) {
-    this.handler = createStaticHandler({
-      fs: options.fs!,
-      root: options.root,
-      urlPrefix: options.urlPrefix ?? '/',
-      index: options.index ?? 'index.html',
-      fallback: options.fallback,
-      cacheControl: options.cacheControl,
-      etag: options.etag ?? true,
-      ranges: options.ranges ?? true,
-      compressed: options.compressed ?? true,
-      maxBufferBytes: options.maxBufferBytes ?? 1_048_576,
-    });
+    if (options.fs) {
+      this.handler = createStaticHandler({
+        fs: options.fs,
+        root: options.root,
+        urlPrefix: options.urlPrefix ?? '/',
+        index: options.index ?? 'index.html',
+        fallback: options.fallback,
+        cacheControl: options.cacheControl,
+        etag: options.etag ?? true,
+        ranges: options.ranges ?? true,
+        compressed: options.compressed ?? true,
+        maxBufferBytes: options.maxBufferBytes ?? 1_048_576,
+      });
+    }
   }
 
   /**
@@ -47,6 +49,9 @@ export class StaticFilesService implements IStaticFiles {
    * @since 0.1.0
    */
   serve(ctx: IRequestContext): Promise<HandlerResult> {
+    if (!this.handler) {
+      return Promise.resolve(ctx.response.status(404).send());
+    }
     return Promise.resolve(this.handler(ctx));
   }
 }
