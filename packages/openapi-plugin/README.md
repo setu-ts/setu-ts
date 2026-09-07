@@ -15,6 +15,12 @@ declared major independently.
   which OpenAPI 3.1 speaks natively) and adapted: the dialect `$schema` key is dropped, reused
   schemas land in `components/schemas` with their pointers rewritten, and a recursive schema's
   root-cycle pointer forces the schema into `components` so no bare `#` ref survives.
+- **A type union is always `anyOf`, on both majors and every supported zod v4.** Draft 2020-12
+  permits two spellings and zod changed which one it emits inside the supported range — 4.5
+  collapses a union of bare types to `"type": ["string", "null"]` where 4.4 emitted `anyOf` — so the
+  transformer normalizes the collapsed form back. One schema therefore yields one document whichever
+  in-range zod the application installs, and the result still converts down to OpenAPI 3.0, where a
+  `type` array is not legal.
 - **Unrepresentable nodes degrade, never throw.** A type zod cannot represent in JSON Schema
   (`z.date()`, `z.bigint()`, …) becomes an empty schema, and the operation that owns it carries a
   machine-readable `x-setu-unrepresentable` extension naming the operation and the reason:
