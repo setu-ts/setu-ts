@@ -73,6 +73,76 @@ All notable changes to this project are documented here. The format follows
   least one depth read succeeded: the sum of each successful name's `ready + processing`,
   deliberately excluding terminal `dead`. A fact, not a threshold.
 
+- **`@setu-ts/common` — `createPathMatcher(patterns)` and `PathPattern`**, the one path-exclusion
+  matcher. Three middlewares already carried a private copy of the matching loop and X32-1's fix
+  would have made a fourth (§11.1). The copies disagreed: two matched literals only, one accepted a
+  `RegExp` but ran an O(n) `typeof` branch per request, and exactly one of the three reset
+  `lastIndex` before `.test` — which is the difference between a `g`-flagged pattern matching every
+  request and matching every other request. The list is partitioned ONCE at construction, literals
+  into a `Set` and patterns into an array walked only on a literal miss, so an all-literal list
+  (every default in this framework) costs the same hash lookup the hand-rolled copies did, and
+  `tenantMiddleware` gets faster than its previous per-entry loop. `RateLimitOptions.exclude`,
+  `MultiTenancyPluginOptions.exclude`, `RequestLoggerOptions.excludePaths` and
+  `MetricsPluginOptions.excludePaths` all read it. Those last two widen from `readonly string[]` to
+  `readonly PathPattern[]`: source-compatible for callers, and breaking only for a consumer
+  EXTRACTING the option type into a narrower one.
+
+- **`@setu-ts/runtime` — `RuntimeOptions.maxBodyBytes` and `RequestBodyTooLargeError`**, the request
+  body bound no header can switch off (X32-4). `requestSizeMiddleware` refuses on a declared
+  `Content-Length`; a chunked request declares none, and since M87 made the body read lazy the read
+  happens inside the handler, after every middleware has returned — so the middleware could not
+  close the bypass at all, and `Request.arrayBuffer()` buffered a body of any size. The read now
+  streams with a byte cap, comparing the running total before a chunk is retained and cancelling the
+  source on refusal rather than abandoning it. Omitted, the read is unbounded and the uncapped
+  branch keeps `arrayBuffer()` verbatim, so an application that configures no limit runs the
+  previous code exactly. The refusal is branded with a `413` status hint, so an application running
+  `errorHandler` answers `413 Payload Too Large` in its configured format. There are deliberately
+  TWO knobs for one concern — the mapping runs before any plugin and no channel exists between them
+  — and the docs say which is load-bearing: a reader who sets only `maxBodySize` keeps the previous
+  behaviour rather than getting a silent regression. `HttpAdapterFactories`' members now take an
+  optional `HttpAdapterOptions`, which keeps a zero-argument injected fake assignable.
+
+- **`@setu-ts/http-security-plugin` — `IpSecurityOptions.trustedProxies` and `proxyHops`**,
+  resolving the client from the RIGHT of a proxy header (X32-3). `trustProxy: true` took the
+  LEFTMOST entry, which is safe only behind a proxy that overwrites the header — and the standard
+  nginx idiom (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`) APPENDS, so a request
+  arriving with a forged `X-Forwarded-For: 7.7.7.7` reached the application as
+  `7.7.7.7, 198.51.100.9` and the leftmost entry was the value the caller chose. Anything keyed on
+  `CLIENT_IP_STATE_KEY` — including `defaultRateLimitKey` — was then keyed on attacker input.
+  `trustedProxies` walks right to left and returns the first entry that is not a trusted proxy;
+  `proxyHops` returns the nth from the right for proxies with no fixed address, and a header shorter
+  than the declared chain resolves `undefined` rather than falling back to a guess. The two are
+  mutually exclusive and supplying both throws at middleware construction, as does a
+  `trustedProxies` entry whose CIDR width is not plain digits (`Number('')` is `0`, so `'10.0.0.1/'`
+  would compile to a `/0` matcher trusting every IPv4 address, and a chain whose leftmost entry is
+  IPv6 would then return that caller-supplied value as the client) and a `proxyHops` that is not a
+  non-negative integer (`0` is the rightmost entry): without that guard it resolves `undefined` for
+  every caller and silently degrades a rate limiter keyed on the client IP to one shared bucket.
+  **With neither supplied resolution stays leftmost, unchanged** — X32-3 requires the operator to
+  have opted into `trustProxy`, so a silent default flip would be a larger change than the finding.
+  Only IPv4 CIDR is expanded numerically; every other form is compared as a case-insensitive
+  literal, deliberately, since a wrong expansion would silently TRUST an untrusted hop.
+
+- **`@setu-ts/graphql-plugin` — `GraphqlPluginOptions.maxNodes`**, a query-breadth budget (X32-6).
+  `maxDepth` was the only query-cost control and it bounds NESTING: a document two levels deep can
+  still ask for a hundred thousand fields, because every alias is a separate field. Measured, one
+  such request produced a ~5 MB response and **+822 MB RSS** with `maxDepth: 5` configured and
+  unable to see it, and the only thing bounding it was the request-body size. `maxNodes` counts the
+  fields a document would resolve — aliases separately, and each fragment spread costing its
+  definition at EVERY spread site, so defining a hundred fields once and spreading them a thousand
+  times counts as a hundred thousand rather than eleven hundred. Expansion is memoized, so a deep
+  fragment graph reports a large count in time linear in the document's own size; without that the
+  counter would itself be the denial of service. **Off by default (`0`)**, so no released
+  application starts refusing a document it used to serve. A document's cost is its **largest
+  operation**, not the sum of all of them — only the operation `operationName` selects is ever
+  executed, so summing refused a bundled document whose selected operation was within budget, and
+  the sibling `maxDepth` was already per-operation. A value that is not a non-negative integer
+  throws at construction, for the same reason `maxBodyBytes` does: `maxNodes <= 0` is `false` for
+  `NaN`, so the rule would be built and then never report, silently enforcing nothing while reading
+  as configured. The rule itself is deliberately NOT exported: it is configured through `maxNodes`,
+  nothing outside the package constructs it, and exporting it would leak the plugin's private
+  graphql facades into the published surface — which `deno doc --lint` reports (the M82 precedent).
+
 ### Changed
 
 - **BREAKING — `@setu-ts/messaging-plugin` — the Kafka default consumer group is derived per topic
@@ -203,79 +273,38 @@ All notable changes to this project are documented here. The format follows
   are orphaned, so the blast radius is one window — they are TTL-bounded and expire on their own.
   Pass `keyPrefix: ''` for the previous keys byte for byte.
 
-### Added
-
-- **`@setu-ts/common` — `createPathMatcher(patterns)` and `PathPattern`**, the one path-exclusion
-  matcher. Three middlewares already carried a private copy of the matching loop and X32-1's fix
-  would have made a fourth (§11.1). The copies disagreed: two matched literals only, one accepted a
-  `RegExp` but ran an O(n) `typeof` branch per request, and exactly one of the three reset
-  `lastIndex` before `.test` — which is the difference between a `g`-flagged pattern matching every
-  request and matching every other request. The list is partitioned ONCE at construction, literals
-  into a `Set` and patterns into an array walked only on a literal miss, so an all-literal list
-  (every default in this framework) costs the same hash lookup the hand-rolled copies did, and
-  `tenantMiddleware` gets faster than its previous per-entry loop. `RateLimitOptions.exclude`,
-  `MultiTenancyPluginOptions.exclude`, `RequestLoggerOptions.excludePaths` and
-  `MetricsPluginOptions.excludePaths` all read it. Those last two widen from `readonly string[]` to
-  `readonly PathPattern[]`: source-compatible for callers, and breaking only for a consumer
-  EXTRACTING the option type into a narrower one.
-
-- **`@setu-ts/runtime` — `RuntimeOptions.maxBodyBytes` and `RequestBodyTooLargeError`**, the request
-  body bound no header can switch off (X32-4). `requestSizeMiddleware` refuses on a declared
-  `Content-Length`; a chunked request declares none, and since M87 made the body read lazy the read
-  happens inside the handler, after every middleware has returned — so the middleware could not
-  close the bypass at all, and `Request.arrayBuffer()` buffered a body of any size. The read now
-  streams with a byte cap, comparing the running total before a chunk is retained and cancelling the
-  source on refusal rather than abandoning it. Omitted, the read is unbounded and the uncapped
-  branch keeps `arrayBuffer()` verbatim, so an application that configures no limit runs the
-  previous code exactly. The refusal is branded with a `413` status hint, so an application running
-  `errorHandler` answers `413 Payload Too Large` in its configured format. There are deliberately
-  TWO knobs for one concern — the mapping runs before any plugin and no channel exists between them
-  — and the docs say which is load-bearing: a reader who sets only `maxBodySize` keeps the previous
-  behaviour rather than getting a silent regression. `HttpAdapterFactories`' members now take an
-  optional `HttpAdapterOptions`, which keeps a zero-argument injected fake assignable.
-
-- **`@setu-ts/http-security-plugin` — `IpSecurityOptions.trustedProxies` and `proxyHops`**,
-  resolving the client from the RIGHT of a proxy header (X32-3). `trustProxy: true` took the
-  LEFTMOST entry, which is safe only behind a proxy that overwrites the header — and the standard
-  nginx idiom (`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`) APPENDS, so a request
-  arriving with a forged `X-Forwarded-For: 7.7.7.7` reached the application as
-  `7.7.7.7, 198.51.100.9` and the leftmost entry was the value the caller chose. Anything keyed on
-  `CLIENT_IP_STATE_KEY` — including `defaultRateLimitKey` — was then keyed on attacker input.
-  `trustedProxies` walks right to left and returns the first entry that is not a trusted proxy;
-  `proxyHops` returns the nth from the right for proxies with no fixed address, and a header shorter
-  than the declared chain resolves `undefined` rather than falling back to a guess. The two are
-  mutually exclusive and supplying both throws at middleware construction, as does a
-  `trustedProxies` entry whose CIDR width is not plain digits (`Number('')` is `0`, so `'10.0.0.1/'`
-  would compile to a `/0` matcher trusting every IPv4 address, and a chain whose leftmost entry is
-  IPv6 would then return that caller-supplied value as the client) and a `proxyHops` that is not a
-  non-negative integer (`0` is the rightmost entry): without that guard it resolves `undefined` for
-  every caller and silently degrades a rate limiter keyed on the client IP to one shared bucket.
-  **With neither supplied resolution stays leftmost, unchanged** — X32-3 requires the operator to
-  have opted into `trustProxy`, so a silent default flip would be a larger change than the finding.
-  Only IPv4 CIDR is expanded numerically; every other form is compared as a case-insensitive
-  literal, deliberately, since a wrong expansion would silently TRUST an untrusted hop.
-
-- **`@setu-ts/graphql-plugin` — `GraphqlPluginOptions.maxNodes`**, a query-breadth budget (X32-6).
-  `maxDepth` was the only query-cost control and it bounds NESTING: a document two levels deep can
-  still ask for a hundred thousand fields, because every alias is a separate field. Measured, one
-  such request produced a ~5 MB response and **+822 MB RSS** with `maxDepth: 5` configured and
-  unable to see it, and the only thing bounding it was the request-body size. `maxNodes` counts the
-  fields a document would resolve — aliases separately, and each fragment spread costing its
-  definition at EVERY spread site, so defining a hundred fields once and spreading them a thousand
-  times counts as a hundred thousand rather than eleven hundred. Expansion is memoized, so a deep
-  fragment graph reports a large count in time linear in the document's own size; without that the
-  counter would itself be the denial of service. **Off by default (`0`)**, so no released
-  application starts refusing a document it used to serve. A document's cost is its **largest
-  operation**, not the sum of all of them — only the operation `operationName` selects is ever
-  executed, so summing refused a bundled document whose selected operation was within budget, and
-  the sibling `maxDepth` was already per-operation. A value that is not a non-negative integer
-  throws at construction, for the same reason `maxBodyBytes` does: `maxNodes <= 0` is `false` for
-  `NaN`, so the rule would be built and then never report, silently enforcing nothing while reading
-  as configured. The rule itself is deliberately NOT exported: it is configured through `maxNodes`,
-  nothing outside the package constructs it, and exporting it would leak the plugin's private
-  graphql facades into the published surface — which `deno doc --lint` reports (the M82 precedent).
-
 ### Fixed
+
+- **`@setu-ts/openapi-plugin` — a type union is spelled `anyOf` on every supported zod v4, not
+  whichever spelling the installed patch version chose** (issue #253). Draft 2020-12 permits both
+  spellings, and zod's public `toJSONSchema()` changed which one it emits INSIDE the declared
+  `>=4.4.0 <5` support range: through 4.4 a union of bare types emitted
+  `anyOf: [{ type: 'string' }, { type: 'null' }]`, and from 4.5 it collapses to
+  `type: ['string', 'null']`. The transformer passed that through, so an application's zod PATCH
+  version decided the document's shape — `isStructuralShape` keys on `anyOf`, so a nullable or
+  primitive union silently stopped earning a `components/schemas` entry and a regenerated
+  `@setu-ts/sdk` client changed shape for no API reason. It also produced a value the published
+  `OpenApiSchemaObject.type` cannot express (a single type name, not an array), so a consumer
+  switching on it got no compiler warning, and a `type` array is 3.1-only where `anyOf` converts
+  down to OpenAPI 3.0. `#adaptDocument` now normalizes the collapsed form back at any depth, on both
+  the plain and the component-hoisting path, keeping the v4 path in agreement with the v3 path —
+  measured: one schema now yields byte-identical documents under 4.4.3 and 4.5.4. Sibling keywords
+  stay beside the `anyOf` instead of being distributed into its arms, which would apply a string
+  constraint to the `null` arm. No public type changed and no consumer call site breaks. Reached the
+  weekly dependency-drift gate rather than a pull request because the committed lockfile resolved
+  4.4.3; it now resolves 4.5.4, and a pinned `npm:zod@4.5.4` case asserts the behaviour against a
+  version that really collapses, so a later lockfile move cannot make it vacuous. The rewrite
+  descends only into schema positions, so a `default`, `const`, `enum`, example or vendor-extension
+  value keeps its own `type` key verbatim, and a node already asserting `anyOf` keeps it — the
+  normalized union is conjoined through `allOf`.
+
+- **`@setu-ts/static-plugin` — gzip sidecars now use the registered `gzip` content-coding token.** A
+  `.gz` sidecar was sent as `Content-Encoding: gz`, which standard clients cannot decode and a
+  shared cache could retain after the origin was corrected. Purge affected cached variants to
+  recover immediately. Conditional evaluation now runs after content negotiation, so an
+  `If-None-Match` validator for the uncompressed source cannot incorrectly return `304` for a
+  selected compressed sidecar. On runtimes without a filesystem, the registered `IStaticFiles`
+  service now returns `404` as documented rather than throwing when an application calls `serve()`.
 
 - **`@setu-ts/messaging-plugin` — the Kafka broker starts (M90d / X28-1).** `KafkaBroker` wired its
   reconnect supervisor with the uppercase KEYS of kafkajs's `producer.events`

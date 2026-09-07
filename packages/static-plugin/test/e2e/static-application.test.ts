@@ -7,6 +7,7 @@ import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
+import { gzipSync } from 'node:zlib';
 
 describe('StaticPlugin e2e', () => {
   let tmpDir: string;
@@ -74,6 +75,27 @@ describe('StaticPlugin e2e', () => {
 
     const body = await response.text();
     expect(body).toBe('');
+  });
+
+  it('should serve a gzip-only sidecar with a decodable content-coding token', async () => {
+    const source = 'gzip-only asset content';
+    await writeFile(join(tmpDir, 'gzip-only.js'), source);
+    await writeFile(join(tmpDir, 'gzip-only.js.gz'), gzipSync(source));
+
+    await app.start({ port: 0 });
+
+    const response = await app.fetch(
+      new Request('http://localhost/gzip-only.js', {
+        headers: { 'Accept-Encoding': 'gzip, deflate, br' },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Encoding')).toBe('gzip');
+
+    const decoded = await new Response(
+      response.body!.pipeThrough(new DecompressionStream('gzip')),
+    ).text();
+    expect(decoded).toBe(source);
   });
 
   it('should return 416 for unsatisfiable range', async () => {

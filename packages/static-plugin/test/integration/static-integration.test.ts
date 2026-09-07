@@ -5,6 +5,8 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { StaticPlugin } from '../../src/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import { StaticFilesService } from '../../src/services/static-files-service.ts';
+import { rm, writeFile } from 'node:fs/promises';
+import { gzipSync } from 'node:zlib';
 
 describe('StaticPlugin integration', () => {
   let app: ReturnType<typeof createApplication>;
@@ -70,6 +72,33 @@ describe('StaticPlugin integration', () => {
     expect(response2.headers.get('Cache-Control')).toBeDefined();
 
     await app.stop();
+  });
+
+  it('should evaluate If-None-Match against the selected compressed representation', async () => {
+    const fixturePath = new URL('../../test/fixtures/test.txt.gz', import.meta.url).pathname;
+    await writeFile(fixturePath, gzipSync('hello world'));
+
+    try {
+      await app.start({ port: 0 });
+      const plain = await app.fetch(new Request('http://localhost/test.txt'));
+      const plainEtag = plain.headers.get('ETag');
+      expect(plain.status).toBe(200);
+      expect(plainEtag).toBeDefined();
+
+      const compressed = await app.fetch(
+        new Request('http://localhost/test.txt', {
+          headers: {
+            'Accept-Encoding': 'gzip',
+            'If-None-Match': plainEtag!,
+          },
+        }),
+      );
+      expect(compressed.status).toBe(200);
+      expect(compressed.headers.get('Content-Encoding')).toBe('gzip');
+    } finally {
+      await app.stop();
+      await rm(fixturePath, { force: true });
+    }
   });
 
   it('should support Range requests', async () => {

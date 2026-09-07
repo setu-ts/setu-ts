@@ -119,7 +119,9 @@ for:
 1. `/app.js.br` (Brotli) — preferred
 2. `/app.js.gz` (Gzip) — fallback
 
-The `Content-Encoding` and `Vary: Accept-Encoding` headers are set appropriately.
+The selected `.br` sidecar is sent with `Content-Encoding: br`; the selected `.gz` sidecar is sent
+with `Content-Encoding: gzip`. Every variant sends `Vary: Accept-Encoding`. Conditional requests are
+evaluated after negotiation, against the selected representation's ETag.
 
 ## Health Indicator
 
