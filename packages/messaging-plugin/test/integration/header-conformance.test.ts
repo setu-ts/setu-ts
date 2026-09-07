@@ -35,8 +35,19 @@ const TRACEPARENT = '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01';
 const TOPIC = 'orders';
 
 /**
+ * A seeded delivery: headers plus the platform identity (X28-4). `undefined`
+ * means "the transport carried no headers at all" — the `{}`-vs-`undefined`
+ * arm below.
+ */
+interface Delivery {
+  headers?: Readonly<Record<string, string>>;
+  messageId?: string;
+  timestamp?: Date;
+}
+
+/**
  * One broker under test: how to build it, how to read what it put on the wire,
- * and how to build a second instance that will deliver a seeded header.
+ * and how to build a second instance that will deliver a seeded delivery.
  */
 interface BrokerCase {
   readonly name: string;
@@ -46,10 +57,8 @@ interface BrokerCase {
     /** The header names/values the transport actually received. */
     sentHeaders: () => Readonly<Record<string, string>>;
   }>;
-  /** A broker that will deliver one message carrying `headers`. */
-  readonly deliverer: (
-    headers: Readonly<Record<string, string>> | undefined,
-  ) => Promise<MessageBrokerAdapter>;
+  /** A broker that will deliver one message carrying the seeded delivery. */
+  readonly deliverer: (delivery: Delivery | undefined) => Promise<MessageBrokerAdapter>;
 }
 
 /** Collects the flat XADD field list a Redis publish produced. */
@@ -90,12 +99,12 @@ const CASES: readonly BrokerCase[] = [
       await broker.connect();
       return { broker, sentHeaders: () => redisSentHeaders(client) };
     },
-    deliverer: async (headers) => {
+    deliverer: async (delivery) => {
       const client = new FakeRedisStreamsClient({
         seededMessages: [{
           id: '1-0',
           payload: '{"id":1}',
-          ...(headers ? { fields: headers } : {}),
+          ...(delivery?.headers ? { fields: delivery.headers } : {}),
         }],
       });
       const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
@@ -127,13 +136,13 @@ const CASES: readonly BrokerCase[] = [
         },
       };
     },
-    deliverer: async (headers) => {
+    deliverer: async (delivery) => {
       const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
         client: new FakeAmqpConnection({
           seededMessages: [{
             topic: TOPIC,
             content: '{"id":1}',
-            properties: headers ? { headers } : {},
+            properties: delivery?.headers ? { headers: delivery.headers } : {},
           }],
         }),
       });
@@ -156,18 +165,18 @@ const CASES: readonly BrokerCase[] = [
       await broker.connect();
       return { broker, sentHeaders: () => Object.fromEntries(values) };
     },
-    deliverer: async (headers) => {
-      const values = new Map(Object.entries(headers ?? {}));
+    deliverer: async (delivery) => {
+      const values = new Map(Object.entries(delivery?.headers ?? {}));
       const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
         client: new FakeNatsConnection({
           seededMessages: [{
             subject: TOPIC,
             data: '{"id":1}',
             seq: 1,
-            timestamp: '2025-01-01T00:00:00.000Z',
+            timestampNanos: 1735689600000000000,
             // A real MsgHdrs answers keys()/get(); `undefined` models a message
             // published without any headers at all.
-            ...(headers
+            ...(delivery?.headers
               ? { headers: { keys: () => values.keys(), get: (k: string) => values.get(k) } }
               : {}),
           }],
@@ -196,7 +205,7 @@ const CASES: readonly BrokerCase[] = [
         },
       };
     },
-    deliverer: async (headers) => {
+    deliverer: async (delivery) => {
       const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
         client: new FakeKafkaFactory({
           seededMessages: [{
@@ -205,7 +214,7 @@ const CASES: readonly BrokerCase[] = [
             partition: 0,
             offset: '0',
             timestamp: '1700000000000',
-            headers: headers ?? {},
+            headers: delivery?.headers ?? {},
           }],
         }),
       });
@@ -234,7 +243,7 @@ const CASES: readonly BrokerCase[] = [
       await broker.connect();
       return { broker, sentHeaders: () => sent };
     },
-    deliverer: async (headers) => {
+    deliverer: async (delivery) => {
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: (_topic, _sub, onMessage) => {
@@ -242,7 +251,9 @@ const CASES: readonly BrokerCase[] = [
             payload: '{"id":1}',
             ack: () => {},
             nack: () => {},
-            ...(headers ? { attributes: headers } : {}),
+            ...(delivery?.headers ? { attributes: delivery.headers } : {}),
+            ...(delivery?.messageId !== undefined ? { messageId: delivery.messageId } : {}),
+            ...(delivery?.timestamp !== undefined ? { timestamp: delivery.timestamp } : {}),
           });
           return Promise.resolve({ close: () => Promise.resolve() });
         },
@@ -279,7 +290,7 @@ const CASES: readonly BrokerCase[] = [
       await broker.connect();
       return { broker, sentHeaders: () => sent };
     },
-    deliverer: async (headers) => {
+    deliverer: async (delivery) => {
       const transport: IServiceBusTransport = {
         send: () => Promise.resolve(),
         open: (_topic, _sub, onMessage) => {
@@ -287,7 +298,9 @@ const CASES: readonly BrokerCase[] = [
             payload: '{"id":1}',
             ack: () => {},
             nack: () => {},
-            ...(headers ? { applicationProperties: headers } : {}),
+            ...(delivery?.headers ? { applicationProperties: delivery.headers } : {}),
+            ...(delivery?.messageId !== undefined ? { messageId: delivery.messageId } : {}),
+            ...(delivery?.timestamp !== undefined ? { timestamp: delivery.timestamp } : {}),
           });
           return Promise.resolve({ close: () => Promise.resolve() });
         },
@@ -345,7 +358,7 @@ describe('broker header conformance', () => {
       });
 
       it('surfaces delivered headers on MessageMetadata', async () => {
-        const broker = await testCase.deliverer({ traceparent: TRACEPARENT });
+        const broker = await testCase.deliverer({ headers: { traceparent: TRACEPARENT } });
         const seen: MessageMetadata[] = [];
         await broker.subscribeWithHeaders(TOPIC, (_m, metadata) => {
           seen.push(metadata);
@@ -376,6 +389,67 @@ describe('broker header conformance', () => {
         expect(seen[0]?.headers).toEqual({});
         await broker.disconnect();
       });
+
+      it('surfaces the platform messageId and timestamp on MessageMetadata (X28-4)', async () => {
+        // One table over all seven, same reason as the header rows: a broker
+        // that stops populating them fails HERE rather than in one file.
+        const broker = await testCase.deliverer({
+          headers: {},
+          messageId: 'meta-id-1',
+          timestamp: new Date(1_700_000_000_000),
+        });
+        const seen: MessageMetadata[] = [];
+        await broker.subscribeWithHeaders(TOPIC, (_m, metadata) => {
+          seen.push(metadata);
+        });
+        if (testCase.name === 'memory') {
+          await broker.publish(TOPIC, { id: 1 });
+        }
+        await waitFor(() => seen.length > 0, `${testCase.name} metadata delivery`);
+
+        const metadata = seen[0]!;
+        // Presence, not truthiness — the only check that separates absent
+        // from undefined.
+        expect('messageId' in metadata).toBe(true);
+        expect('timestamp' in metadata).toBe(true);
+        expect(metadata.timestamp).toBeInstanceOf(Date);
+        expect(metadata.timestamp?.getTime()).not.toBeNaN();
+        // The two cloud brokers pass the seeded identity straight through.
+        if (testCase.name === 'pubsub' || testCase.name === 'service-bus') {
+          expect(metadata.messageId).toBe('meta-id-1');
+          expect(metadata.timestamp?.getTime()).toBe(1_700_000_000_000);
+        }
+        await broker.disconnect();
+      });
     });
   }
+
+  it('keeps the widened transport ports source-compatible for two-parameter implementations', () => {
+    // §8 mitigation, as a compile-time pin: a transport predating X28-4
+    // (omitting `messageId`/`timestamp` from the delivered shape) stays
+    // assignable to the public port. Making either member REQUIRED fails
+    // `deno check` here rather than in a consumer's project.
+    const pubsub: IPubSubTransport = {
+      publish: () => Promise.resolve(),
+      open: (_topic, _sub, onMessage) => {
+        void onMessage({ payload: '', ack: () => {}, nack: () => {} });
+        return Promise.resolve({ close: () => Promise.resolve() });
+      },
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const serviceBus: IServiceBusTransport = {
+      send: () => Promise.resolve(),
+      open: (_topic, _sub, onMessage) => {
+        void onMessage({ payload: '', ack: () => {}, nack: () => {} });
+        return Promise.resolve({ close: () => Promise.resolve() });
+      },
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: (_topic: string, _sub: string) => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    expect(pubsub.open).toBeDefined();
+    expect(serviceBus.open).toBeDefined();
+  });
 });

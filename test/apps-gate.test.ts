@@ -282,6 +282,11 @@ describe('real-backend CI wiring', () => {
           'localhost:5673',
           '127.0.0.1:8085',
           'localhost:8085',
+          // M90d §3.5: the NATS and Kafka real-backend suites.
+          '127.0.0.1:4222',
+          'localhost:4222',
+          '127.0.0.1:9092',
+          'localhost:9092',
         ]);
       } else {
         expect(config.test?.permissions?.net).toEqual(['127.0.0.1:6379', 'localhost:6379']);
@@ -329,6 +334,46 @@ describe('real-backend CI wiring', () => {
       expect(text).toContain('- 1025:1025');
       expect(text).toContain('SMTP_URL: smtp://localhost:1025');
     }
+  });
+
+  it('starts the NATS and Kafka backends and declares their endpoints and grants (M90d §3.5)', async () => {
+    // The M90d real-backend suites (nats-real / kafka-real) guard on NATS_URL
+    // / KAFKA_BROKERS via `ignore:` — a skipped suite is visible, but a DROPPED
+    // service still turns the proof into a permanent skip while CI stays
+    // green. These pins keep both backends, their port mappings, their env
+    // vars and their manifest grants from drifting.
+    for (const workflow of ['.github/workflows/ci.yml', '.github/workflows/release.yml']) {
+      const text = await Deno.readTextFile(workflow);
+      // Steps, not `services:` blocks — JetStream is enabled by the `-js`
+      // command-line flag, and a service block has no way to set one (the
+      // Bigtable precedent, measured in M82).
+      expect(text).toContain('Start the NATS server (JetStream)');
+      expect(text).toContain(
+        'docker run -d --name m90d-nats -p 127.0.0.1:4222:4222 nats:2-alpine -js',
+      );
+      // The readiness wait is load-bearing: nats-server binds 4222 only once
+      // serving, but a `-js`-less server STILL opens the port — the suite, not
+      // the probe, is what proves JetStream is on.
+      expect(text).toContain('nc -z 127.0.0.1 4222');
+      expect(text).toContain('NATS_URL: nats://127.0.0.1:4222');
+      expect(text).toContain('Start Kafka (KRaft single-node)');
+      expect(text).toContain(
+        'docker run -d --name m90d-kafka -p 127.0.0.1:9092:9092 apache/kafka:4.0.0',
+      );
+      // Kafka readiness must mean more than an open port: the image takes ~10s
+      // to become a real group member, and
+      // kafka-broker-api-versions.sh answers only once the broker serves
+      // metadata.
+      expect(text).toContain('kafka-broker-api-versions.sh');
+      expect(text).toContain('KAFKA_BROKERS: 127.0.0.1:9092');
+    }
+    const config = await readJson<{
+      readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };
+    }>('packages/messaging-plugin/deno.json');
+    expect(config.test?.permissions?.net).toContain('127.0.0.1:4222');
+    expect(config.test?.permissions?.net).toContain('localhost:4222');
+    expect(config.test?.permissions?.net).toContain('127.0.0.1:9092');
+    expect(config.test?.permissions?.net).toContain('localhost:9092');
   });
 
   it('does not exempt the full-stack example from the smoke gate', async () => {

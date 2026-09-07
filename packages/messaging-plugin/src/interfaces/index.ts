@@ -154,9 +154,14 @@ export interface IKafkaFactory {
  * Structural type for a kafkajs consumer or producer instance (M70c).
  *
  * kafkajs instances expose an `on(event, listener)` surface emitting
- * `CONNECT`, `DISCONNECT`, and `CRASH` (consumer) events. The broker's
- * reconnect supervisor tracks those so `isHealthy` is truthful while the
- * client self-heals.
+ * `producer.connect`, `producer.disconnect` (producer) and `consumer.crash`
+ * (consumer) events — the VALUES of the module's `events` map. The map's
+ * UPPERCASE KEYS (`CONNECT`, `DISCONNECT`, `CRASH`) are not accepted listener
+ * names: kafkajs validates the string and throws
+ * `KafkaJSNonRetriableError: Event name should be one of producer.events.*`
+ * for a key (X28-1 — passing the keys is the defect that stopped the Kafka
+ * broker starting at all). The broker's reconnect supervisor tracks the wire
+ * values so `isHealthy` is truthful while the client self-heals.
  *
  * @since 0.1.0
  */
@@ -164,7 +169,9 @@ export interface IKafkaEventEmitter {
   /**
    * Registers an event listener.
    *
-   * @param event - Event name (`'CONNECT'`, `'DISCONNECT'`, `'CRASH'`, …)
+   * @param event - The wire event value (`'producer.connect'`,
+   *   `'producer.disconnect'`, `'consumer.crash'`, …) — NOT the uppercase
+   *   `events` map key
    * @param listener - Invoked when the event fires
    */
   on(event: string, listener: (...args: unknown[]) => void): void;
@@ -402,6 +409,29 @@ export interface NatsMessagingOptions extends MessagingCommonOptions {
    */
   headersFactory?: () => INatsHeaders;
   streamName?: string;
+  /**
+   * Subjects the broker may create {@link streamName} with when the stream is
+   * absent on the server.
+   *
+   * There is deliberately NO default and no catch-all: NATS refuses a stream
+   * capturing every subject unless it is created with `no_ack: true`, and
+   * `no_ack` makes every JetStream publish reject unobserved (X28-2). Supplied
+   * and the stream is absent → the broker creates it with exactly these
+   * subjects. Absent and the stream is absent → startup rejects with
+   * `JetStreamStreamError`, naming the stream and both remedies (create the
+   * stream out of band, or supply this option). An existing stream is never
+   * touched either way.
+   *
+   * @since 0.5.0
+   * @example
+   * ```typescript
+   * MessagingPlugin({
+   *   broker: 'nats',
+   *   streamSubjects: ['orders.>', 'billing.>'],
+   * });
+   * ```
+   */
+  streamSubjects?: readonly string[];
   defaultQueue?: string;
 }
 
@@ -634,6 +664,15 @@ export interface NatsOptions {
   headersFactory?: () => INatsHeaders;
   /** JetStream stream name (default: 'MESSAGING'). */
   streamName?: string;
+  /**
+   * Subjects the broker may create the stream with when it is absent (X28-2).
+   * No default: with the stream absent and this unset, `connect()` throws
+   * `JetStreamStreamError` naming both remedies. See
+   * {@linkcode NatsMessagingOptions.streamSubjects} for the full behavior.
+   *
+   * @since 0.5.0
+   */
+  streamSubjects?: readonly string[];
   /** Default consumer group name. */
   defaultQueue?: string;
   /** Optional logger for error reporting. */

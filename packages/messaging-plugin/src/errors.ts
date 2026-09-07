@@ -135,3 +135,72 @@ export class ChainGateTimeoutError extends Error {
     this.timeoutMs = timeoutMs;
   }
 }
+
+/**
+ * Thrown by {@linkcode NatsBroker.connect} when the NATS server rejects the
+ * JetStream manager probe — the server does not have JetStream enabled, which
+ * the nats broker requires. The platform's own error (typically the raw
+ * `503` / `NO_RESPONDERS` reply for the `$JS.API` subjects) is carried as
+ * {@linkcode cause}.
+ *
+ * Remedies: start the server with the `-js` flag, or enable `jetstream` in
+ * its configuration file.
+ *
+ * @since 0.5.0
+ */
+export class JetStreamUnavailableError extends Error {
+  /**
+   * Creates the error reported when JetStream cannot be probed at all.
+   *
+   * @param cause - The platform error the probe rejected with
+   */
+  constructor(cause: unknown) {
+    super(
+      'The NATS server has no JetStream enabled, which the nats broker ' +
+        'requires. Start the server with the `-js` flag (or set `jetstream` ' +
+        'in its configuration).',
+      { cause },
+    );
+    this.name = 'JetStreamUnavailableError';
+  }
+}
+
+/**
+ * Thrown by {@linkcode NatsBroker.connect} when the JetStream stream could
+ * not be ensured: the stream is absent and `NatsOptions.streamSubjects` was
+ * not supplied, or the platform refused the stream read/create. The platform's
+ * own error is carried as {@linkcode cause} when there is one.
+ *
+ * The message names both remedies: create the stream out of band (for example
+ * `nats stream add <name>`), or supply `NatsOptions.streamSubjects` so the
+ * broker can create it with explicit subjects. The broker deliberately sends
+ * no catch-all subject: NATS refuses `subjects: ['>']` without `no_ack`, and
+ * with `no_ack` every publish would reject unobserved — so a subject set must
+ * come from the application.
+ *
+ * @since 0.5.0
+ */
+export class JetStreamStreamError extends Error {
+  /** The stream name the broker tried to ensure. */
+  readonly stream: string;
+
+  /**
+   * Creates the error reported when the stream could not be ensured.
+   *
+   * @param stream - The JetStream stream name
+   * @param cause - The platform error, when the stream read/create was
+   *   attempted and rejected; omitted when the stream is simply absent and no
+   *   subject set was configured
+   */
+  constructor(stream: string, cause?: unknown) {
+    super(
+      `JetStream stream "${stream}" could not be ensured. Create the stream ` +
+        'out of band (for example `nats stream add ' + stream + '`), or supply ' +
+        'NatsOptions.streamSubjects so the broker can create it with explicit ' +
+        'subjects — a catch-all subject is refused by the server.',
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = 'JetStreamStreamError';
+    this.stream = stream;
+  }
+}

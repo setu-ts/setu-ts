@@ -164,7 +164,6 @@ package fits the plugin architecture.
 | `normalizeFrame`                       | function  |
 | `rejectRawUpgrade`                     | function  |
 | `RuntimePlugin`                        | function  |
-| `RequestBodyTooLargeError`             | class     |
 | `toReadyState`                         | function  |
 | `toTransportError`                     | function  |
 | `toWsReadyState`                       | function  |
@@ -173,6 +172,7 @@ package fits the plugin architecture.
 | `DenoHttpAdapter`                      | class     |
 | `NodeHttpAdapter`                      | class     |
 | `NodeUpgradeCoordinator`               | class     |
+| `RequestBodyTooLargeError`             | class     |
 | `RpcInterceptorStore`                  | class     |
 | `BunFileInfo`                          | interface |
 | `BunHost`                              | interface |
@@ -199,6 +199,7 @@ package fits the plugin architecture.
 | `DenoWebSocketUpgrade`                 | interface |
 | `GlobalScope`                          | interface |
 | `HttpAdapterFactories`                 | interface |
+| `HttpAdapterOptions`                   | interface |
 | `NodeDnsModule`                        | interface |
 | `NodeFsInfo`                           | interface |
 | `NodeHost`                             | interface |
@@ -209,7 +210,6 @@ package fits the plugin architecture.
 | `NodeWorkerLike`                       | interface |
 | `NodeWorkerModules`                    | interface |
 | `RawUpgradeSocket`                     | interface |
-| `HttpAdapterOptions`                   | interface |
 | `RuntimeAdapterFactories`              | interface |
 | `RuntimeOptions`                       | interface |
 | `UpgradeEmitter`                       | interface |

@@ -11,11 +11,31 @@ export interface FakeNatsOptions {
     subject: string;
     data: string;
     seq: number;
-    timestamp: string;
+    /**
+     * Delivery timestamp in epoch NANOSECONDS — the field a real nats 2.29
+     * `ConsumerMsg.info` carries (`timestampNanos`), which the pre-M90d fake
+     * mis-modeled as a `timestamp` string and so hid the Invalid Date defect.
+     */
+    timestampNanos: number;
     headers?: { keys(): Iterable<string>; get(key: string): string | undefined };
   }>;
   /** Whether streams.info should throw a generic error (not 'stream not found'). */
   rejectStreamInfo?: boolean;
+  /**
+   * Whether `jetstreamManager()` itself rejects — a server without JetStream
+   * (X28-3). Real nats rejects the probe with a raw `503`.
+   */
+  rejectJetstreamManager?: boolean;
+  /** Whether `streams.add` rejects (a restrictive stream policy, X28-3). */
+  rejectStreamAdd?: boolean;
+  /**
+   * Streams that already exist on the server. Defaults to `['MESSAGING']` —
+   * the common real-world shape X28-2 records: every working NATS
+   * installation declares its stream out of band, so the default models a
+   * working server. Pass `existingStreams: []` to model a fresh server where
+   * the broker's stream-creation path runs.
+   */
+  existingStreams?: readonly string[];
 }
 
 /**
@@ -24,7 +44,7 @@ export interface FakeNatsOptions {
 export class FakeNatsMessage {
   #data: Uint8Array;
   #seq: number;
-  #timestamp: string;
+  #timestampNanos: number;
   #subject: string;
   #headers: unknown;
   #acked = false;
@@ -33,13 +53,13 @@ export class FakeNatsMessage {
   constructor(
     data: string,
     seq: number,
-    timestamp: string,
+    timestampNanos: number,
     subject: string,
     headers?: { keys(): Iterable<string>; get(key: string): string | undefined },
   ) {
     this.#data = new TextEncoder().encode(data);
     this.#seq = seq;
-    this.#timestamp = timestamp;
+    this.#timestampNanos = timestampNanos;
     this.#subject = subject;
     this.#headers = headers;
   }
@@ -56,8 +76,9 @@ export class FakeNatsMessage {
     return this.#subject;
   }
 
-  get info(): { timestamp: string } {
-    return { timestamp: this.#timestamp };
+  /** Matches the real `ConsumerMsg.info`: `timestampNanos`, not `timestamp`. */
+  get info(): { timestampNanos: number } {
+    return { timestampNanos: this.#timestampNanos };
   }
 
   get headers(): unknown {
@@ -126,12 +147,22 @@ export class FakeNatsJetStreamManager {
   #consumers: Map<string, Set<string>>; // stream -> consumer names
   #calls: Array<{ method: string; args: unknown[] }>;
   #rejectStreamInfo: boolean;
+  #rejectStreamAdd: boolean;
 
-  constructor(rejectStreamInfo: boolean = false) {
-    this.#streams = new Set();
+  constructor(
+    options: {
+      rejectStreamInfo?: boolean;
+      rejectStreamAdd?: boolean;
+      existingStreams?: readonly string[];
+    } = {},
+  ) {
+    // Default `MESSAGING`: the working-server shape X28-2 records — every
+    // working NATS installation declares its stream out of band.
+    this.#streams = new Set(options.existingStreams ?? ['MESSAGING']);
     this.#consumers = new Map();
     this.#calls = [];
-    this.#rejectStreamInfo = rejectStreamInfo;
+    this.#rejectStreamInfo = options.rejectStreamInfo ?? false;
+    this.#rejectStreamAdd = options.rejectStreamAdd ?? false;
   }
 
   #record(method: string, args: unknown[]): void {
@@ -160,6 +191,16 @@ export class FakeNatsJetStreamManager {
     },
     add: (config: { name: string; subjects: string[] }): Promise<{ name: string }> => {
       this.#record('streams.add', [config]);
+      // Corrected (X28-2): reject what the REAL server refuses. The broker
+      // used to send `subjects: ['>']` — a catch-all that NATS answers with
+      // exactly this sentence unless the stream carries `no_ack`, and a fake
+      // that accepted any config is why the defect shipped and stayed.
+      if (config.subjects?.includes('>') && (config as { no_ack?: boolean }).no_ack !== true) {
+        return Promise.reject(new Error('capturing all subjects requires no-ack to be true'));
+      }
+      if (this.#rejectStreamAdd) {
+        return Promise.reject(new Error('stream create refused by server policy'));
+      }
       this.#streams.add(config.name);
       this.#consumers.set(config.name, new Set());
       return Promise.resolve({ name: config.name });
@@ -215,7 +256,7 @@ export class FakeNatsJetStream {
       subject: string;
       data: string;
       seq: number;
-      timestamp: string;
+      timestampNanos: number;
       headers?: { keys(): Iterable<string>; get(key: string): string | undefined };
     }>,
   ) {
@@ -226,7 +267,7 @@ export class FakeNatsJetStream {
         this.#seededMessages.set(msg.subject, []);
       }
       this.#seededMessages.get(msg.subject)!.push(
-        new FakeNatsMessage(msg.data, msg.seq, msg.timestamp, msg.subject, msg.headers),
+        new FakeNatsMessage(msg.data, msg.seq, msg.timestampNanos, msg.subject, msg.headers),
       );
     }
   }
@@ -303,8 +344,25 @@ export class FakeNatsConnection {
     if (this.#closed) {
       return Promise.reject(new Error('Connection closed'));
     }
+    // X28-3: a server without JetStream rejects the manager probe itself —
+    // the broker must name that (`JetStreamUnavailableError`) rather than
+    // leak the raw rejection.
+    if (this.#options.rejectJetstreamManager) {
+      return Promise.reject(new Error('503'));
+    }
     if (!this.#jsm) {
-      this.#jsm = new FakeNatsJetStreamManager(this.#options.rejectStreamInfo);
+      // exactOptionalPropertyTypes: omit each member rather than assign undefined.
+      this.#jsm = new FakeNatsJetStreamManager({
+        ...(this.#options.rejectStreamInfo !== undefined
+          ? { rejectStreamInfo: this.#options.rejectStreamInfo }
+          : {}),
+        ...(this.#options.rejectStreamAdd !== undefined
+          ? { rejectStreamAdd: this.#options.rejectStreamAdd }
+          : {}),
+        ...(this.#options.existingStreams !== undefined
+          ? { existingStreams: this.#options.existingStreams }
+          : {}),
+      });
     }
     return Promise.resolve(this.#jsm);
   }

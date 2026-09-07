@@ -8,6 +8,28 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/messaging-plugin` — named NATS JetStream startup errors and an explicit subject set
+  (M90d / X28-2, X28-3).** `NatsOptions.streamSubjects` (and the same member on the public `nats`
+  arm) supplies the subjects the broker may create the configured stream with when it is absent on
+  the server. There is deliberately no default and no catch-all: NATS refuses `subjects: ['>']`
+  without `no_ack`, and `no_ack` makes every JetStream publish reject unobserved (the rejected
+  design, measured against a real server). Supplied and the stream is absent, the broker creates it
+  with exactly those subjects; an existing stream is never touched; absent with the stream absent,
+  `connect()` rejects with the new exported `JetStreamStreamError`, naming the stream and both
+  remedies. A JetStream-less server now rejects with the new exported `JetStreamUnavailableError`
+  (the raw `503` carried as `cause`) instead of surfacing a bare platform error. The
+  messaging-plugin CI suite also gained two real-backend suites (`nats-real`, `kafka-real`) against
+  `nats:2-alpine -js` and `apache/kafka:4.0.0`, started by both workflows; the package manifest's
+  scoped `net` grant gained `4222` and `9092`.
+
+- **`@setu-ts/messaging-plugin` — `messageId`/`timestamp` on the cloud brokers' metadata (M90d /
+  X28-4).** `IPubSubTransport.open` and `IServiceBusTransport.open` delivered-message callbacks gain
+  optional `messageId`/`timestamp` members (source-compatible for existing transports — a two-member
+  implementation stays assignable), the real adapters read `message.id`/`message.publishTime` and
+  `message.messageId`/`message.enqueuedTimeUtc`, and both brokers copy them onto `MessageMetadata`
+  only when the transport carried them, so an absent member means "none delivered" rather than "did
+  not look". All seven first-party brokers now populate both members.
+
 - **`@setu-ts/messaging-plugin` — Service Bus transport reachability and a retry budget (M90b /
   X28-5, X28-6).** The adapted `ServiceBusSdkModule` administration client gains an optional
   `getNamespaceProperties()` and the adapted transport now implements the documented `isHealthy()`
@@ -52,6 +74,17 @@ All notable changes to this project are documented here. The format follows
   deliberately excluding terminal `dead`. A fact, not a threshold.
 
 ### Changed
+
+- **BREAKING — `@setu-ts/messaging-plugin` — the Kafka default consumer group is derived per topic
+  (M90d).** Measured against a real broker: members of one consumer group must subscribe the SAME
+  topics — kafkajs logs "Consumer group received unsubscribed topics" and every member ends with an
+  EMPTY assignment, so the previously shared `messaging-consumers` group silently stopped ALL
+  delivery the moment an application subscribed two topics (including request-reply, whose responder
+  subscribes the derived `rr.req.<topic>` channel). A subscription with no `queue` now uses
+  `<defaultQueue>-<topic>`; same topic across instances still load-balances, different topics never
+  share a group, and a caller-supplied `queue` still names the group itself. Migration: tooling
+  keyed on the literal `messaging-consumers` group reads the derived `<defaultQueue>-<topic>` names
+  now.
 
 - **BREAKING — `@setu-ts/cache-plugin` — `IRedisClient` gains a required `ping()`.** The Redis
   store's reachability probe invokes it. Migration: an injected client structurally typed as
@@ -241,6 +274,33 @@ All notable changes to this project are documented here. The format follows
   as configured. The rule itself is deliberately NOT exported: it is configured through `maxNodes`,
   nothing outside the package constructs it, and exporting it would leak the plugin's private
   graphql facades into the published surface — which `deno doc --lint` reports (the M82 precedent).
+
+### Fixed
+
+- **`@setu-ts/messaging-plugin` — the Kafka broker starts (M90d / X28-1).** `KafkaBroker` wired its
+  reconnect supervisor with the uppercase KEYS of kafkajs's `producer.events`
+  (`'CONNECT'`/`'DISCONNECT'`) where the wire VALUES are required
+  (`producer.connect`/`producer.disconnect`); kafkajs validates the name and threw
+  `KafkaJSNonRetriableError` inside `register()`, so an application configured with
+  `broker: 'kafka'` never bound a socket. The broker now attaches two declared wire-value constants;
+  a guarded real-import test pins them against the real module's own `events` map and proves the
+  uppercase keys are rejected by real kafkajs. The corrected event names also fix the JSDoc that
+  documented the keys as the accepted names (C1).
+
+- **`@setu-ts/messaging-plugin` — the NATS broker delivers (M90d, found by the new real-backend
+  suite).** Two delivery-path defects no injected fake could see, both probed against
+  `npm:nats@2.29`: `subscribe()` created the durable consumer through `js.consumers.add`, which the
+  JetStream client does not expose (consumer creation is a management operation on
+  `jsm.consumers.add`), so every real subscribe threw a bare `TypeError`; and the delivery cast read
+  `info.timestamp`, which nats 2.29 spells `info.timestampNanos` — an integer above the float
+  safe-integer range — so every real delivery carried an Invalid Date. Consumer creation now goes
+  through the manager and the timestamp is converted from nanoseconds through BigInt; the test
+  fixture models the real `timestampNanos` field rather than the string it claimed.
+
+- **`@setu-ts/messaging-plugin` — the NATS broker fails startup with a name, not a bare platform
+  error (M90d / X28-3).** See **Added**: `JetStreamUnavailableError` and `JetStreamStreamError`
+  replace the raw `503` and the catch-all-refusal text at both `connect()` failure sites, each
+  carrying the platform error as `cause`.
 
 ## [0.4.0] — 2026-09-05
 

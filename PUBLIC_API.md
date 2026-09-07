@@ -4059,6 +4059,17 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
   headersFactory?: () => INatsHeaders;
   /** JetStream stream name. @defaultValue 'MESSAGING' */
   streamName?: string;
+  /**
+   * Subjects the broker may create the stream with when the stream is absent.
+   * No default and no catch-all: NATS refuses `subjects: ['>']` without
+   * `no_ack`, and `no_ack` makes every JetStream publish reject unobserved
+   * (M90d / X28-2). Supplied and the stream is absent → the broker creates it
+   * with exactly these subjects. Absent and the stream is absent → startup
+   * rejects with `JetStreamStreamError`, naming the stream and both remedies.
+   * An existing stream is never touched either way.
+   * @since 0.5.0
+   */
+  streamSubjects?: readonly string[];
   /** Default consumer group / queue name. */
   defaultQueue?: string;
 }
@@ -4072,7 +4083,15 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
   client?: IKafkaFactory;
   /** Kafka client ID. @defaultValue 'messaging-client' */
   clientId?: string;
-  /** Default consumer group name. */
+  /**
+   * Prefix of the derived default consumer group. Since M90d a subscription
+   * with no `queue` uses `<defaultQueue>-<topic>`: members of one consumer
+   * group must subscribe the same topics, so the previously shared group
+   * collapsed to empty assignments (nothing delivered) the moment an
+   * application subscribed two topics. Same topic across instances still
+   * load-balances; a caller-supplied `queue` names the group itself.
+   * @defaultValue 'messaging-consumers'
+   */
   defaultQueue?: string;
   /** Request-reply topic; must already exist on the broker. @defaultValue 'messaging.replies' */
   replyTopic?: string;
@@ -4319,6 +4338,14 @@ for `instanceof` handling):
 | `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
 | `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
 
+Two more error classes are exported for the NATS broker's startup prerequisites (M90d / X28-3), both
+carrying the platform error as `cause`:
+
+| Error                       | Thrown when                                                                                                                                                      |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `JetStreamUnavailableError` | `connect()` finds no JetStream on the server — start it with the `-js` flag. The raw `503` the server answered is the `cause`.                                   |
+| `JetStreamStreamError`      | The stream is absent and `streamSubjects` was not supplied (the message names both remedies), or the server refused the stream read/create (`cause` carries it). |
+
 > **Broker support.** Request-reply is available on **all supported broker types** — in-memory,
 > Redis Streams, RabbitMQ, NATS, Kafka, GCP Pub/Sub, Azure Service Bus, and `custom` (which
 > delegates to the injected `IMessageBroker`).
@@ -4401,10 +4428,12 @@ export type { PubSubSdkModule, ServiceBusSdkModule } from '@setu-ts/messaging-pl
 export { JsonSerializer } from '@setu-ts/messaging-plugin';
 export type { ISerializer } from '@setu-ts/messaging-plugin';
 
-// Request-reply and gate error classes
+// Request-reply, gate, and NATS-prerequisite error classes
 export {
   ChainGateTimeoutError,
   CloudBrokerUnavailableError,
+  JetStreamStreamError,
+  JetStreamUnavailableError,
   MessagingNotSupportedError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
@@ -4504,6 +4533,21 @@ Two cases drop the header rather than propagating, both by construction:
   `IPubSubTransport.publish` and `IServiceBusTransport.send` gained an optional third parameter
   (`attributes` / `applicationProperties`), and their delivered-message callbacks gained a matching
   optional member. A two-parameter implementation stays assignable and simply ignores the header.
+  M90d widened the delivered callbacks further with optional `messageId` and `timestamp` members
+  (X28-4); the same assignability holds — an implementation supplying neither simply produces
+  metadata without them.
+
+### Message identity on the metadata
+
+Every first-party broker populates `MessageMetadata.messageId` and `.timestamp` from what its
+transport actually assigns (M90d / X28-4 closed the two cloud brokers that were not reading them):
+in-memory assigns `runtime.uuid()` and `runtime.now()`; Redis Streams uses the entry id and its
+timestamp; RabbitMQ uses `properties.messageId`/`properties.timestamp` (assigned on publish when the
+producer did not); NATS uses the JetStream stream sequence and the delivery's `info.timestampNanos`;
+Kafka uses `partition:offset` and the record timestamp; Pub/Sub reads
+`message.id`/`message.publishTime`; Service Bus reads `message.messageId`/`message.enqueuedTimeUtc`.
+An absent member means the transport carried none — never "the adapter did not look" — so a
+de-duplication read of `metadata.messageId` is meaningful on all seven.
 
 ---
 

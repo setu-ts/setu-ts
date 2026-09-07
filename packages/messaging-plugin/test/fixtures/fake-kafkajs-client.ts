@@ -228,6 +228,19 @@ export class FakeKafkaConsumer {
 export class FakeKafkaProducer {
   #calls: Array<{ method: string; args: unknown[] }>;
   #route: ((topic: string, value: string) => Promise<void>) | null;
+  #listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+
+  /**
+   * The `producer.events` map, keyed as real kafkajs keys it. The VALUES are
+   * the only accepted listener names (X28-1).
+   */
+  readonly events = {
+    CONNECT: 'producer.connect',
+    DISCONNECT: 'producer.disconnect',
+    REQUEST: 'producer.network.request',
+    REQUEST_TIMEOUT: 'producer.network.request_timeout',
+    REQUEST_QUEUE_SIZE: 'producer.network.request_queue_size',
+  } as const;
 
   /**
    * @param route - Delivers a produced message to every consumer subscribed to
@@ -247,6 +260,42 @@ export class FakeKafkaProducer {
   /** All recorded method calls. */
   get calls(): Array<{ method: string; args: unknown[] }> {
     return [...this.#calls];
+  }
+
+  /**
+   * Registers an event listener, RECORDING the name and rejecting the names
+   * the real kafkajs rejects.
+   *
+   * Corrected (X28-1): this fake used to have no `on` at all, so the broker's
+   * wrong event name reached nothing and the no-op guard branch hid the
+   * defect. kafkajs validates the string against the VALUES of
+   * `producer.events` and throws `KafkaJSNonRetriableError` for a key — this
+   * double now does the same, so a wrong name fails the tests instead of
+   * passing through silently.
+   *
+   * @param event - A wire value of {@linkcode events}, NOT its uppercase key
+   */
+  on(event: string, listener: (...args: unknown[]) => void): void {
+    this.#record('on', [event, listener]);
+    const accepted = Object.values(this.events) as readonly string[];
+    if (!accepted.includes(event)) {
+      throw new Error(
+        `Event name should be one of ${
+          accepted.map((name) => `producer.events.${name}`).join(', ')
+        }`,
+      );
+    }
+    const set = this.#listeners.get(event) ?? new Set();
+    set.add(listener);
+    this.#listeners.set(event, set);
+  }
+
+  /**
+   * Removes a listener. Real kafkajs `off` does not validate the name.
+   */
+  off(event: string, listener: (...args: unknown[]) => void): void {
+    this.#record('off', [event, listener]);
+    this.#listeners.get(event)?.delete(listener);
   }
 
   connect(): Promise<void> {

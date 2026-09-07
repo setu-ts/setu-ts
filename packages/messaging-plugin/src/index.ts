@@ -58,10 +58,13 @@ export type { ServiceBusSdkModule } from './brokers/service-bus-broker.ts';
 export { JsonSerializer } from './serializers/json-serializer.ts';
 export type { ISerializer } from './serializers/serializer.ts';
 
-// Request-reply and gate error classes (for consumer `instanceof` handling)
+// Request-reply, gate, and NATS-prerequisite error classes (for consumer
+// `instanceof` handling)
 export {
   ChainGateTimeoutError,
   CloudBrokerUnavailableError,
+  JetStreamStreamError,
+  JetStreamUnavailableError,
   MessagingNotSupportedError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,

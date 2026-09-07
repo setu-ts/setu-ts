@@ -300,8 +300,8 @@ package fits the plugin architecture.
 | `Ok`                              | interface |
 | `PageResult`                      | interface |
 | `PickOptions`                     | interface |
-| `ProcessOptions`                  | interface |
 | `ProbeTiming`                     | interface |
+| `ProcessOptions`                  | interface |
 | `ProviderOptions`                 | interface |
 | `PutObjectOptions`                | interface |
 | `RbacConfig`                      | interface |
@@ -350,8 +350,8 @@ package fits the plugin architecture.
 | `WorkerTaskReply`                 | interface |
 | `WorkerTaskRequest`               | interface |
 | `WrapOptions`                     | interface |
-| `BackoffStrategy`                 | type      |
 | `AuthorizationFailure`            | type      |
+| `BackoffStrategy`                 | type      |
 | `CapabilityToken`                 | type      |
 | `ChannelSendResult`               | type      |
 | `CircuitState`                    | type      |

@@ -57,6 +57,8 @@ export interface PubSubSdkModule {
             nack: () => void;
             data: Uint8Array;
             id: string;
+            /** The server-assigned publish time (RFC 3339), as the SDK delivers it. */
+            publishTime?: string;
             attributes?: Record<string, string>;
           },
         ) => void,
@@ -93,6 +95,10 @@ export interface IPubSubTransport {
         ack: () => void;
         nack: () => void;
         attributes?: Readonly<Record<string, string>>;
+        /** The platform-assigned message id, when the transport carried one (X28-4). */
+        messageId?: string;
+        /** The platform-assigned publish time, when the transport carried one (X28-4). */
+        timestamp?: Date;
       },
     ) => void,
   ): Promise<IPubSubSubscription>;
@@ -183,6 +189,8 @@ export function adaptPubSubModule(
           ack: () => void;
           nack: () => void;
           attributes?: Readonly<Record<string, string>>;
+          messageId?: string;
+          timestamp?: Date;
         },
       ) => void,
     ): Promise<IPubSubSubscription> => {
@@ -209,11 +217,17 @@ export function adaptPubSubModule(
 
       sub.on('message', (raw) => {
         const text = new TextDecoder().decode(raw.data);
+        // X28-4: the platform assigns both fields, so the adapter reads them
+        // rather than dropping them. Omitted — never assigned `undefined` —
+        // when the transport carries none, so `'messageId' in metadata`
+        // separates "no id" from "did not look".
         onMessage({
           payload: text,
           ack: () => raw.ack(),
           nack: () => raw.nack(),
           attributes: raw.attributes ?? {},
+          ...(raw.id !== undefined && raw.id !== '' ? { messageId: raw.id } : {}),
+          ...(raw.publishTime !== undefined ? { timestamp: new Date(raw.publishTime) } : {}),
         });
       });
 
@@ -460,9 +474,14 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
         let handlerError: Error | null = null;
         try {
           const deserialized = this.#serializer.deserialize<T>(msg.payload);
+          // X28-4: copy the platform identity onto the metadata ONLY when the
+          // transport carried it, so an absent member means "none delivered"
+          // (exactOptionalPropertyTypes also forbids assigning undefined).
           const metadata: MessageMetadata = {
             topic,
             headers: msg.attributes ?? {},
+            ...(msg.messageId !== undefined ? { messageId: msg.messageId } : {}),
+            ...(msg.timestamp !== undefined ? { timestamp: msg.timestamp } : {}),
           };
           await handler(deserialized, metadata);
         } catch (err) {

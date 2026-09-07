@@ -63,6 +63,11 @@ jobs:
       # every tag run while passing on every PR.
       DYNAMODB_ENDPOINT: http://127.0.0.1:8000
       BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086
+      # M90d §3.5: same real-backend NATS and Kafka endpoints as ci.yml — the
+      # release job re-runs the same suite, and test/apps-gate.test.ts pins the
+      # wiring on both workflows.
+      NATS_URL: nats://127.0.0.1:4222
+      KAFKA_BROKERS: 127.0.0.1:9092
     services:
       mongo:
         image: mongo:8
@@ -209,6 +214,43 @@ jobs:
           done
           echo 'bigtable emulator did not become ready'
           docker logs bigtable-emulator
+          exit 1
+
+      # M90d §3.5: the NATS server cannot be a `services:` container —
+      # JetStream is enabled by the `-js` COMMAND-LINE flag, and a service
+      # block has no way to set one (`options` reaches `docker create` before
+      # the image while the command comes after it). Readiness is a port check:
+      # nats-server binds 4222 only once it is serving, and the SUITE is what
+      # proves JetStream is actually on (a `-js`-less server still opens the
+      # port, and every stream operation would answer the raw `503` X28-3
+      # names).
+      - name: Start the NATS server (JetStream)
+        run: |
+          docker run -d --name m90d-nats -p 127.0.0.1:4222:4222 nats:2-alpine -js
+          for _ in $(seq 1 60); do
+            if docker exec m90d-nats nc -z 127.0.0.1 4222 2>/dev/null; then
+              echo 'nats ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'nats server did not become ready'
+          docker logs m90d-nats
+          exit 1
+
+      - name: Start Kafka (KRaft single-node)
+        run: |
+          docker run -d --name m90d-kafka -p 127.0.0.1:9092:9092 apache/kafka:4.0.0
+          for _ in $(seq 1 90); do
+            if docker exec m90d-kafka /opt/kafka/bin/kafka-broker-api-versions.sh \
+              --bootstrap-server localhost:9092 > /dev/null 2>&1; then
+              echo 'kafka ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'kafka did not become ready'
+          docker logs m90d-kafka
           exit 1
 
       - name: Format check
