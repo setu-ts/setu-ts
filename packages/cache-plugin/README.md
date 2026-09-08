@@ -16,7 +16,7 @@ import { CachePlugin } from '@setu-ts/cache-plugin';
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { cacheMiddleware, CachePlugin } from '@setu-ts/cache-plugin';
+import { cacheMiddleware, CachePlugin, CacheService } from '@setu-ts/cache-plugin';
 import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
 
 const app = createApplication({
@@ -30,6 +30,12 @@ await app.start({ port: 3000 });
 const cache = app.services.get<ICacheStore>(CAPABILITIES.CACHE);
 await cache.set('user:1', { name: 'Ada' }, 60);
 const user = await cache.get<{ name: string }>('user:1');
+
+// CacheService adds coalesced read-through for one cache key.
+const readThroughCache = app.services.get<CacheService>(CAPABILITIES.CACHE);
+const profile = await readThroughCache.getOrSet('profile:1', async () => {
+  return await loadProfile('1');
+}, 60);
 ```
 
 ## Options
@@ -48,6 +54,13 @@ can coexist in one application.
 `cacheMiddleware(options)` transparently caches responses. Streaming responses are skipped — a live
 `ReadableStream` cannot be replayed from a cache, so those requests are marked `X-Cache: MISS` and
 pass straight through.
+
+Concurrent misses for the same key are coalesced within one process: one request reaches a
+cacheable, buffered origin response and waiters replay it with `X-Cache: COALESCED`. A failed,
+streaming, or otherwise uncacheable leader is not replayed; every waiter runs the origin itself.
+Separate processes do not coordinate, so one overlapping successful batch can produce at most one
+origin call per process. `CacheService.getOrSet()` applies the same per-store coalescing to
+programmatic read-through calls.
 
 ## Exports
 

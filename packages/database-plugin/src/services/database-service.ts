@@ -17,7 +17,13 @@ import type { IUnitOfWork } from '../interfaces/index.ts';
 import { BaseRepository, type DataSource } from '../repositories/base-repository.ts';
 import { UnitOfWork } from '../unitOfWork/unit-of-work.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
-import type { EntityKey, IDatabaseAdapter, NormalizedQuery, PageResult } from '@setu-ts/common';
+import type {
+  EntityKey,
+  IDatabaseAdapter,
+  NormalizedQuery,
+  PageResult,
+  TransactionOptions,
+} from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
@@ -28,6 +34,7 @@ import type { IDynamoAccessPathReportingDataSource } from '../adapters/dynamo/dy
 import {
   DatabaseUnavailableError,
   SerializationConflictError,
+  UnsupportedIsolationLevelError,
   UnsupportedMigrationError,
   UnsupportedRawQueryError,
 } from '../errors.ts';
@@ -138,16 +145,25 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /** @inheritdoc */
-  async transaction<T>(work: (uow: IUnitOfWork) => Promise<T>): Promise<T> {
+  async transaction<T>(
+    work: (uow: IUnitOfWork) => Promise<T>,
+    options?: TransactionOptions,
+  ): Promise<T> {
     if (this._closed) {
       throw new Error('DatabaseService is closed');
+    }
+    if (
+      options?.isolation !== undefined &&
+      !this._adapter.transactionIsolationLevels?.includes(options.isolation)
+    ) {
+      throw new UnsupportedIsolationLevelError(this._adapterType, options.isolation);
     }
 
     // X35-2 (M90f): the acquisition sits OUTSIDE the try below, so a
     // connection-pool timeout — raised exactly here — never reached that
     // catch, and a classifier placed only there would leave the headline
     // row unfixed. The acquisition is classified itself.
-    const txn = await this._adapter.beginTransaction().catch((error: unknown): never => {
+    const txn = await this._adapter.beginTransaction(options).catch((error: unknown): never => {
       throw classifiedOrOriginal(error);
     });
     try {

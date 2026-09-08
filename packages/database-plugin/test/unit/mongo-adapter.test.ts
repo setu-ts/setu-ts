@@ -13,7 +13,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MongoAdapter, parseDatabaseFromUrl } from '../../src/adapters/mongo/mongo-adapter.ts';
 import type { MongoAdapterOptions } from '../../src/interfaces/index.ts';
-import { MongoTransactionUnavailableError } from '../../src/errors.ts';
+import {
+  MongoTransactionUnavailableError,
+  UnsupportedIsolationLevelError,
+} from '../../src/errors.ts';
 import {
   FakeMongoClient,
   fakeObjectIdCtor,
@@ -183,6 +186,20 @@ describe('MongoAdapter — transactions', () => {
     await tx.commit();
     expect(session.calls).toContain('commitTransaction');
     expect(session.calls).toContain('endSession');
+  });
+
+  it('refuses portable isolation levels rather than mislabelling snapshot isolation', async () => {
+    const session = new FakeSession();
+    const client = new FakeSessionClient(session);
+    const adapter = new MongoAdapter({
+      url: 'mongodb://localhost:27017/db',
+      client,
+      objectIdCtor: fakeObjectIdCtor,
+    });
+    await adapter.connect();
+    await expect(adapter.beginTransaction({ isolation: 'serializable' }))
+      .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+    expect(session.started).toBe(false);
   });
 
   it('wraps a startTransaction failure in MongoTransactionUnavailableError', async () => {

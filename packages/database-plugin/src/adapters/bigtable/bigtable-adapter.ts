@@ -21,9 +21,15 @@
  *
  * @module
  */
-import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@setu-ts/common';
+import type {
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  IDataSource,
+  TransactionIsolationLevel,
+  TransactionOptions,
+} from '@setu-ts/common';
 import type { BigtableAdapterOptions } from '../../interfaces/index.ts';
-import { UnsupportedRawQueryError } from '../../errors.ts';
+import { UnsupportedIsolationLevelError, UnsupportedRawQueryError } from '../../errors.ts';
 import type { IBigtableClient, IBigtableInstance } from './bigtable-client-types.ts';
 import {
   type BigtableClientLoader,
@@ -63,6 +69,8 @@ import { BigtableTransaction } from './bigtable-transaction.ts';
  * @since 0.2.0
  */
 export class BigtableAdapter implements IDatabaseAdapter {
+  /** Bigtable exposes no portable transaction-isolation selector. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = [];
   readonly #options: BigtableAdapterOptions;
   readonly #mapping: Readonly<Record<string, BigtableEntityMapping>> | undefined;
   readonly #loader: BigtableClientLoader;
@@ -220,11 +228,14 @@ export class BigtableAdapter implements IDatabaseAdapter {
    *
    * @inheritdoc
    */
-  beginTransaction(): Promise<IAdapterTransaction> {
+  beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     // REJECTS rather than throwing synchronously: this method is typed
     // `Promise<…>`, and a synchronous throw bypasses a caller using `.catch()`.
     if (!this.#connected) {
       return Promise.reject(new Error('BigtableAdapter is not connected — call connect() first'));
+    }
+    if (options?.isolation !== undefined) {
+      return Promise.reject(new UnsupportedIsolationLevelError('bigtable', options.isolation));
     }
     const maxPageFetches = this.#options.maxPageFetches;
     return Promise.resolve(

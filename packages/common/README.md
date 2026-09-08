@@ -215,6 +215,7 @@ package fits the plugin architecture.
 | `ICounter`                        | interface |
 | `ICqrsFacade`                     | interface |
 | `IDatabaseAdapter`                | interface |
+| `ITransactionIsolationSupport`    | interface |
 | `IDataSource`                     | interface |
 | `IDecoratorApi`                   | interface |
 | `IDnsResolver`                    | interface |
@@ -337,6 +338,7 @@ package fits the plugin architecture.
 | `SubscribeOptions`                | interface |
 | `TaskPoolStats`                   | interface |
 | `TelemetryContext`                | interface |
+| `TransactionOptions`              | interface |
 | `ValidationIssue`                 | interface |
 | `ValueProvider`                   | interface |
 | `WebSocketCloseEvent`             | interface |
@@ -414,6 +416,7 @@ package fits the plugin architecture.
 | `SpanStatus`                      | type      |
 | `StandardCapability`              | type      |
 | `TimerHandle`                     | type      |
+| `TransactionIsolationLevel`       | type      |
 | `Unsubscribe`                     | type      |
 | `ValidationTarget`                | type      |
 | `WebSocketGuardDecision`          | type      |

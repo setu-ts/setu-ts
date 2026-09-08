@@ -126,6 +126,18 @@ describe('DatabaseService', () => {
   });
 
   describe('transaction', () => {
+    it('passes requested transaction options to the adapter', async () => {
+      let received: unknown;
+      const original = adapter.beginTransaction.bind(adapter);
+      adapter.beginTransaction = (options) => {
+        received = options;
+        return original(options);
+      };
+
+      await service.transaction(async () => 'done', { isolation: 'serializable' });
+      expect(received).toEqual({ isolation: 'serializable' });
+    });
+
     it('commits on success', async () => {
       const result = await service.transaction(async (uow) => {
         const repo = uow.getRepository('User');

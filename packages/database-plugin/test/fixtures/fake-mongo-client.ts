@@ -391,6 +391,7 @@ export class FakeMongoClient implements IMongoClient {
 /** A session that records the transaction lifecycle the adapter drives. */
 export class FakeSession implements IMongoSession {
   readonly calls: string[] = [];
+  startTransactionOptions: Record<string, unknown> | undefined;
   #started = false;
   readonly #throwOnStart: boolean;
 
@@ -404,6 +405,7 @@ export class FakeSession implements IMongoSession {
       throw new Error('not allowed on a standalone mongod');
     }
     this.calls.push('startTransaction');
+    this.startTransactionOptions = _options;
     this.#started = true;
   }
 

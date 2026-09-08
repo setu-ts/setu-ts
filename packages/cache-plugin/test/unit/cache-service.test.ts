@@ -111,4 +111,87 @@ describe('CacheService', () => {
       expect(calls.at(-1)?.args[0]).toBe('bare-key');
     });
   });
+
+  describe('getOrSet', () => {
+    it('coalesces concurrent cache misses into one factory call and stores the result', async () => {
+      const { backend, calls } = createFakeBackend();
+      const svc = new CacheService(backend, 'app:', 300);
+      let callsToFactory = 0;
+      let release: (() => void) | undefined;
+      const pending = new Promise<string>((resolve) => {
+        release = (): void => resolve('loaded');
+      });
+      const factory = async (): Promise<string> => {
+        callsToFactory++;
+        return await pending;
+      };
+
+      const first = svc.getOrSet('key', factory);
+      const second = svc.getOrSet('key', factory);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(callsToFactory).toBe(1);
+
+      release?.();
+      await expect(first).resolves.toBe('loaded');
+      await expect(second).resolves.toBe('loaded');
+      expect(calls.filter((call) => call.method === 'set')).toHaveLength(1);
+      expect(calls.at(-1)?.args).toEqual(['app:key', 'loaded', 300]);
+    });
+
+    it('uses the cached value without calling the factory', async () => {
+      const { backend } = createFakeBackend();
+      backend.get = async <T>(): Promise<T | null> => 'cached' as T;
+      const svc = new CacheService(backend, '');
+      let callsToFactory = 0;
+
+      await expect(svc.getOrSet('key', async (): Promise<string> => {
+        callsToFactory++;
+        return 'loaded';
+      })).resolves.toBe('cached');
+      expect(callsToFactory).toBe(0);
+    });
+
+    it('clears a rejected load so a later caller can retry', async () => {
+      const { backend } = createFakeBackend();
+      const svc = new CacheService(backend, '');
+      let callsToFactory = 0;
+
+      await expect(svc.getOrSet('key', async (): Promise<string> => {
+        callsToFactory++;
+        throw new Error('origin unavailable');
+      })).rejects.toThrow('origin unavailable');
+
+      await expect(svc.getOrSet('key', async (): Promise<string> => {
+        callsToFactory++;
+        return 'recovered';
+      })).resolves.toBe('recovered');
+      expect(callsToFactory).toBe(2);
+    });
+
+    it('coalesces services that share a backend and a fully-prefixed key', async () => {
+      const { backend } = createFakeBackend();
+      const first = new CacheService(backend, 'app:');
+      const second = new CacheService(backend, 'app:');
+      let callsToFactory = 0;
+      let release: (() => void) | undefined;
+      const pending = new Promise<string>((resolve) => {
+        release = (): void => resolve('loaded');
+      });
+
+      const one = first.getOrSet('key', async () => {
+        callsToFactory++;
+        return await pending;
+      });
+      const two = second.getOrSet('key', async () => {
+        callsToFactory++;
+        return await pending;
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(callsToFactory).toBe(1);
+      release?.();
+      await expect(Promise.all([one, two])).resolves.toEqual(['loaded', 'loaded']);
+    });
+  });
 });

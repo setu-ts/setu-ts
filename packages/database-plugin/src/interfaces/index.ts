@@ -6,7 +6,7 @@
  *
  * @module
  */
-import type { EntityKey, IDatabaseAdapter } from '@setu-ts/common';
+import type { EntityKey, IDatabaseAdapter, TransactionOptions } from '@setu-ts/common';
 import type { DrizzleDatabaseIdentity } from '../query/drizzle-database.ts';
 import type { CountOptions, FindOptions, Page, PageOptions } from '../query/find-options.ts';
 import type { SqlJsonDialect } from '../query/json-path.ts';
@@ -204,11 +204,15 @@ export interface IDatabaseService {
    *
    * @typeParam T - Return type of the work callback
    * @param work - Function receiving a transaction-scoped Unit of Work
+   * @param options - Optional transaction settings, including requested isolation
    * @returns The result of the `work` callback
    * @throws {Error} If the work callback throws — transaction is rolled back
    * @since 0.1.0
    */
-  transaction<T>(work: (uow: IUnitOfWork) => Promise<T>): Promise<T>;
+  transaction<T>(
+    work: (uow: IUnitOfWork) => Promise<T>,
+    options?: TransactionOptions,
+  ): Promise<T>;
 
   /**
    * Execute a raw SQL query and return results.

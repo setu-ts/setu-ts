@@ -15,7 +15,7 @@ import type {
   DrizzleTransaction,
 } from './drizzle-database.ts';
 
-export { createDrizzleDatabase } from './drizzle-database.ts';
+export { createDrizzleDatabase, withIsolationSupport } from './drizzle-database.ts';
 export type {
   DrizzleDatabase,
   DrizzleDatabaseIdentity,

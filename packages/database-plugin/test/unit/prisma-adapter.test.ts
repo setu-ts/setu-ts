@@ -14,7 +14,11 @@
 import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createPrismaDataSource, PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
-import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import {
+  UnsupportedFilterOperatorError,
+  UnsupportedIsolationLevelError,
+  UnsupportedQueryFeatureError,
+} from '../../src/errors.ts';
 import { PageNormalizationError } from '../../src/query/query-builder.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
@@ -117,6 +121,43 @@ describe('PrismaAdapter', () => {
       // IAdapterTransaction has createDataSource
       const adapterTxn = txn as IAdapterTransaction;
       expect(typeof adapterTxn.createDataSource).toBe('function');
+    });
+
+    it('translates the portable isolation spelling for Prisma', async () => {
+      await adapter.connect();
+      const transaction = await adapter.beginTransaction({ isolation: 'repeatable-read' });
+
+      expect(fakeClient.transactionOptions?.isolationLevel).toBe('RepeatableRead');
+      await transaction.commit();
+    });
+
+    it('refuses levels the resolved connector cannot honour', async () => {
+      const sqliteAdapter = new PrismaAdapter({
+        prismaClient: createFakePrismaClient({ activeProvider: 'sqlite' }),
+      });
+      await sqliteAdapter.connect();
+
+      await expect(sqliteAdapter.beginTransaction({ isolation: 'read-committed' }))
+        .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+      const sqliteTransaction = await sqliteAdapter.beginTransaction({ isolation: 'serializable' });
+      await sqliteTransaction.commit();
+
+      const mongoAdapter = new PrismaAdapter({
+        prismaClient: createFakePrismaClient({ activeProvider: 'mongodb' }),
+      });
+      await mongoAdapter.connect();
+      await expect(mongoAdapter.beginTransaction({ isolation: 'serializable' }))
+        .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+    });
+
+    it('refuses requested isolation when the provider cannot be determined', async () => {
+      const unknownProviderAdapter = new PrismaAdapter({
+        prismaClient: createRejectingClient(new Error('unused')),
+      });
+      await unknownProviderAdapter.connect();
+
+      await expect(unknownProviderAdapter.beginTransaction({ isolation: 'serializable' }))
+        .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
     });
 
     it('commit resolves', async () => {

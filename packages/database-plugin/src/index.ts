@@ -104,6 +104,7 @@ export {
   MongoTransactionUnavailableError,
   SerializationConflictError,
   UnsupportedFilterOperatorError,
+  UnsupportedIsolationLevelError,
   UnsupportedMigrationError,
   UnsupportedQueryFeatureError,
   UnsupportedRawQueryError,
@@ -124,6 +125,8 @@ export type {
   IDataSource,
   NormalizedQuery,
   PageResult,
+  TransactionIsolationLevel,
+  TransactionOptions,
 } from '@setu-ts/common';
 export { decodeCursor, encodeCursor, keysetPredicate } from '@setu-ts/common';
 
@@ -135,6 +138,7 @@ export {
   createDrizzleDatabase,
   getDrizzleDatabase,
   getDrizzleTransaction,
+  withIsolationSupport,
 } from './query/drizzle-query.ts';
 export type {
   DrizzleDatabase,

@@ -297,6 +297,45 @@ export interface IAdapterTransaction extends ITransaction {
 }
 
 /**
+ * Portable transaction isolation levels.
+ *
+ * An adapter must honour a requested level or refuse it by name; it must never
+ * silently use its default isolation instead. Individual adapter support is
+ * documented by `@setu-ts/database-plugin`.
+ *
+ * @since 0.5.0
+ */
+export type TransactionIsolationLevel =
+  | 'read-uncommitted'
+  | 'read-committed'
+  | 'repeatable-read'
+  | 'serializable';
+
+/**
+ * Optional controls for opening a transaction.
+ *
+ * @since 0.5.0
+ */
+export interface TransactionOptions {
+  /** Requested isolation level; omitted preserves the adapter default. */
+  readonly isolation?: TransactionIsolationLevel;
+}
+
+/**
+ * An adapter's explicit declaration of portable transaction isolation support.
+ *
+ * This keeps existing adapters source-compatible while allowing the database
+ * plugin to refuse an isolation request from an external adapter that has not
+ * opted in, rather than silently falling back to a backend default.
+ *
+ * @since 0.5.0
+ */
+export interface ITransactionIsolationSupport {
+  /** The portable isolation levels this adapter honours. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[];
+}
+
+/**
  * The full database backend port: lifecycle plus data access.
  *
  * This is the seam an application implements to plug a database the framework
@@ -316,13 +355,16 @@ export interface IAdapterTransaction extends ITransaction {
  *   disconnect(): Promise<void> { return Promise.resolve(); }
  *   isReady(): boolean { return true; }
  *   createDataSource(entity: string): IDataSource { return makeSource(entity); }
- *   beginTransaction(): Promise<IAdapterTransaction> { return openTx(); }
+ *   transactionIsolationLevels = ['serializable'] as const;
+ *   beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
+ *     return openTx(options);
+ *   }
  *   rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> { return run(sql, params); }
  * }
  * ```
  * @since 0.2.0
  */
-export interface IDatabaseAdapter extends IOrmAdapter {
+export interface IDatabaseAdapter extends IOrmAdapter, Partial<ITransactionIsolationSupport> {
   /**
    * Open a non-transactional data source for the named entity.
    *
@@ -335,9 +377,10 @@ export interface IDatabaseAdapter extends IOrmAdapter {
    * Begin a transaction, returning a handle that can open transaction-scoped
    * data sources as well as commit and roll back.
    *
+   * @param options - Optional transaction settings; omitted preserves the backend default
    * @returns The transaction handle
    */
-  beginTransaction(): Promise<IAdapterTransaction>;
+  beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction>;
 
   /**
    * Execute a raw query in the backend's own dialect.

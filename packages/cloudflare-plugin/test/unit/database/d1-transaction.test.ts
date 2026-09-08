@@ -23,6 +23,13 @@ async function connected(): Promise<{ db: SqliteD1; adapter: D1Adapter }> {
 }
 
 describe('D1Adapter transactions — commit', () => {
+  it('refuses every requested isolation level instead of silently ignoring it', async () => {
+    const { adapter } = await connected();
+
+    await expect(adapter.beginTransaction({ isolation: 'serializable' }))
+      .rejects.toThrow("D1 does not support 'serializable' transaction isolation");
+  });
+
   it('flushes every buffered write as ONE batch, in order', async () => {
     const { db, adapter } = await connected();
     const txn = await adapter.beginTransaction();

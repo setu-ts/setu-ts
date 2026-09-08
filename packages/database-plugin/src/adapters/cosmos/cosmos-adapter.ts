@@ -20,9 +20,15 @@
  *
  * @module
  */
-import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@setu-ts/common';
+import type {
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  IDataSource,
+  TransactionIsolationLevel,
+  TransactionOptions,
+} from '@setu-ts/common';
 import type { CosmosAdapterOptions } from '../../interfaces/index.ts';
-import { UnsupportedRawQueryError } from '../../errors.ts';
+import { UnsupportedIsolationLevelError, UnsupportedRawQueryError } from '../../errors.ts';
 import type { ICosmosClient, ICosmosDatabase } from './cosmos-client-types.ts';
 import {
   type CosmosClientLoader,
@@ -57,6 +63,8 @@ import { CosmosTransaction, createCosmosDataSource } from './cosmos-data-source.
  * @since 0.2.0
  */
 export class CosmosAdapter implements IDatabaseAdapter {
+  /** Cosmos DB exposes no portable transaction-isolation selector. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = [];
   readonly #options: CosmosAdapterOptions;
   readonly #mapping: Readonly<Record<string, CosmosEntityMapping>> | undefined;
   #client: ICosmosClient | null = null;
@@ -220,13 +228,16 @@ export class CosmosAdapter implements IDatabaseAdapter {
    *
    * @inheritdoc
    */
-  beginTransaction(): Promise<IAdapterTransaction> {
+  beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     // The not-connected refusal REJECTS rather than throwing synchronously:
     // this method is typed `Promise<…>`, and a synchronous throw bypasses any
     // caller using `.catch()`. `createDataSource` returns its value
     // synchronously, so its own throw is correct as it stands.
     if (!this.#connected) {
       return Promise.reject(new Error('CosmosAdapter is not connected — call connect() first'));
+    }
+    if (options?.isolation !== undefined) {
+      return Promise.reject(new UnsupportedIsolationLevelError('cosmos', options.isolation));
     }
     return Promise.resolve(
       new CosmosTransaction(

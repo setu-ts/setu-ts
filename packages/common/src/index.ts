@@ -223,9 +223,12 @@ export type {
   IDataSource,
   IOrmAdapter,
   ITransaction,
+  ITransactionIsolationSupport,
   NormalizedQuery,
   OrderDirection,
   PageResult,
+  TransactionIsolationLevel,
+  TransactionOptions,
 } from './services/database.ts';
 // Portable keyset-cursor codec + predicate (§3.8). Pure and zero-dependency, so
 // it lives in `common` and is reached by every adapter — including
