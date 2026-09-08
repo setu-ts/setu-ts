@@ -131,29 +131,52 @@ export function classifyDriverError(error: unknown): DriverErrorClass | null {
   }
 
   const visited = new Set<unknown>();
+  const candidates: DriverErrorMembers[] = [];
   let current: unknown = error;
   for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
-    if (typeof current !== 'object' || current === null) return null;
-    if (visited.has(current)) return null; // cyclic cause chain
+    if (typeof current !== 'object' || current === null) break;
+    if (visited.has(current)) break; // cyclic cause chain
     visited.add(current);
-    const matched = classifyOne(current);
-    if (matched !== null) return matched;
+    const members = safeMembers(current);
+    if (members !== undefined) {
+      candidates.push(members);
+    }
     current = causeOf(current);
+  }
+
+  // A code or label supplied by a driver is more authoritative than a
+  // generic wrapper name or message. Search every cause first: an ORM may
+  // wrap a SQLSTATE `40001` in an error named `TimeoutError`, and returning
+  // 503 from that outer name would turn a retryable conflict into the wrong
+  // caller contract.
+  for (const members of candidates) {
+    const matched = classifyStructured(members);
+    if (matched !== null) return matched;
+  }
+  for (const members of candidates) {
+    const matched = classifyFallback(members);
+    if (matched !== null) return matched;
   }
   return null;
 }
 
 /**
- * Classifies ONE object in the chain from its own members.
- *
- * Every read is guarded: a driver error is a foreign object, and a throwing
- * getter must read as "no signal", never escape into the containing catch.
+ * The classifier fields read from one driver error.
  */
-function classifyOne(value: object): DriverErrorClass | null {
-  const members = safeMembers(value);
-  if (members === undefined) return null;
-  const { code, name, labels, message } = members;
+type DriverErrorMembers = {
+  code: unknown;
+  name: unknown;
+  labels: readonly unknown[] | undefined;
+  message: unknown;
+};
 
+/**
+ * Classifies machine-readable driver signals.
+ *
+ * A code or Mongo label is a driver-supplied classifier, so it outranks names
+ * and messages from wrappers elsewhere in the cause chain.
+ */
+function classifyStructured({ code, labels }: DriverErrorMembers): DriverErrorClass | null {
   // 1. A numeric code — gRPC (Bigtable) or the Cosmos HTTP status. Measured
   //    on a real server: a MongoServerError ALSO carries a numeric `code`
   //    (`112` WriteConflict) alongside its label, so an UNMATCHED numeric
@@ -184,7 +207,15 @@ function classifyOne(value: object): DriverErrorClass | null {
   //    errorLabels=["TransientTransactionError"]`.
   if (labels?.includes(MONGO_TRANSIENT_TRANSACTION_ERROR)) return 'conflict';
 
-  // 4. Driver error names, for the signals no code is carried on. These are
+  return null;
+}
+
+/**
+ * Classifies fallback signals from errors that carried no machine-readable
+ * driver signal anywhere in their cause chain.
+ */
+function classifyFallback({ name, message }: DriverErrorMembers): DriverErrorClass | null {
+  // Driver error names, for the signals no code is carried on. These are
   //    `name` STRINGS, deliberately — the classifier sees foreign objects,
   //    not classes it could `instanceof`.
   if (typeof name === 'string') {
@@ -197,7 +228,7 @@ function classifyOne(value: object): DriverErrorClass | null {
     if (name === 'TimeoutError' || name === 'NetworkingError') return 'unavailable';
   }
 
-  // 5. The one message anchor — node-postgres pool exhaustion, which carries
+  // The one message anchor — node-postgres pool exhaustion, which carries
   //    no code at all. Reached last, only after every structured signal
   //    missed; pinned by a live-backend test.
   if (typeof message === 'string' && message.includes(PG_POOL_TIMEOUT_ANCHOR)) {
@@ -216,7 +247,7 @@ function classifyOne(value: object): DriverErrorClass | null {
 function safeMembers(
   value: object,
 ):
-  | { code: unknown; name: unknown; labels: readonly unknown[] | undefined; message: unknown }
+  | DriverErrorMembers
   | undefined {
   try {
     const candidate = value as {

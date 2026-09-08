@@ -108,6 +108,7 @@ describe('classifyDriverError — the walk', () => {
     const top = new Error('Failed query: …', {
       cause: { code: '40001', name: 'SomethingElse' },
     });
+    top.name = 'TimeoutError';
     expect(classifyDriverError(top)).toBe('conflict');
   });
 
