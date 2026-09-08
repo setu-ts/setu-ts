@@ -152,6 +152,104 @@ describe('KafkaBroker', () => {
     ).rejects.toThrow('KafkaBroker is not connected');
   });
 
+  it('derives a per-topic consumer group when no queue is supplied (M90d)', async () => {
+    // Measured against a real broker: members of ONE group subscribing
+    // DIFFERENT topics end with empty assignments and neither receives
+    // anything. The default group is therefore derived per topic; an explicit
+    // `queue` still names the group itself.
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeFactory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
+
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+    await broker.subscribe('billing', () => {});
+    await broker.subscribe('orders', () => {}, { queue: 'explicit-group' });
+
+    const groups = fakeFactory.groupIds;
+    expect(groups).toContain('messaging-consumers:orders');
+    expect(groups).toContain('messaging-consumers:billing');
+    expect(groups).toContain('explicit-group');
+    // Different topics never share a group.
+    expect(groups.filter((g) => g === 'messaging-consumers:orders')).toHaveLength(1);
+
+    await broker.disconnect();
+  });
+
+  it('derives groups that cannot collide across prefix/topic pairs (M90d review)', async () => {
+    // `${prefix}-${topic}` is not injective: ('orders-eu', 'created') and
+    // ('orders', 'eu-created') both yield `orders-eu-created`, which puts two
+    // consumers subscribing DIFFERENT topics into one group — the exact empty-
+    // assignment failure the per-topic derivation exists to prevent. A Kafka
+    // topic name may not contain `:` (probed: the broker refuses one at
+    // creation) while a group id may, so the pair is recoverable and the two
+    // configurations below must land in different groups.
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+
+    const splitA = new FakeKafkaFactory();
+    const brokerA = new KafkaBroker(runtime, serializer, {
+      client: splitA,
+      defaultQueue: 'orders-eu',
+    });
+    await brokerA.connect();
+    await brokerA.subscribe('created', () => {});
+    await brokerA.disconnect();
+
+    const splitB = new FakeKafkaFactory();
+    const brokerB = new KafkaBroker(runtime, serializer, {
+      client: splitB,
+      defaultQueue: 'orders',
+    });
+    await brokerB.connect();
+    await brokerB.subscribe('eu-created', () => {});
+    await brokerB.disconnect();
+
+    const [groupA] = splitA.groupIds;
+    const [groupB] = splitB.groupIds;
+    expect(groupA).toBe('orders-eu:created');
+    expect(groupB).toBe('orders:eu-created');
+    expect(groupA).not.toBe(groupB);
+  });
+
+  it('attaches the producer events by their WIRE values, recorded by the fake (X28-1)', async () => {
+    // The corrected fake RECORDS every `on(event, …)` name and rejects the
+    // ones real kafkajs rejects, so this asserts the constant and not a fake's
+    // willingness to accept any string — the exact shape that hid the defect
+    // for four releases.
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeFactory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
+
+    await broker.connect();
+
+    const producer = fakeFactory.producer();
+    const attached = producer.calls
+      .filter((c) => c.method === 'on')
+      .map((c) => c.args[0] as string)
+      .sort();
+    expect(attached).toEqual(['producer.connect', 'producer.disconnect']);
+
+    await broker.disconnect();
+  });
+
+  it('the producer disposer removes the listener through the event surface', async () => {
+    // disconnect() stops the supervisor, which invokes the disposers — the
+    // `off` path the no-op-guard used to swallow entirely.
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeFactory = new FakeKafkaFactory();
+    const broker = new KafkaBroker(runtime, serializer, { client: fakeFactory });
+
+    await broker.connect();
+    await broker.disconnect();
+
+    const producer = fakeFactory.producer();
+    expect(producer.calls.some((c) => c.method === 'off')).toBe(true);
+  });
+
   it('isReady returns false before connect', () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
@@ -345,8 +443,9 @@ describe('KafkaBroker', () => {
 
     await sub.unsubscribe();
 
-    // Verify stop was called on consumer
-    const consumer = fakeFactory.consumer({ groupId: 'messaging-consumers' });
+    // Verify stop was called on the consumer. The default group is derived
+    // per topic (M90d): `messaging-consumers:<topic>`.
+    const consumer = fakeFactory.consumer({ groupId: 'messaging-consumers:test.topic' });
     const calls = consumer.calls;
     const stopCall = calls.find((c) => c.method === 'stop');
     expect(stopCall).toBeDefined();

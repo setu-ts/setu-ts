@@ -153,6 +153,10 @@ export interface IServiceBusTransport {
         ack: () => void;
         nack: () => void;
         applicationProperties?: Readonly<Record<string, string>>;
+        /** The platform-assigned message id, when the transport carried one (X28-4). */
+        messageId?: string;
+        /** The platform-assigned enqueue time, when the transport carried one (X28-4). */
+        timestamp?: Date;
       },
     ) => void | Promise<void>,
   ): Promise<IServiceBusSubscription>;
@@ -337,6 +341,8 @@ export function adaptServiceBusModule(
           ack: () => void;
           nack: () => void;
           applicationProperties?: Readonly<Record<string, string>>;
+          messageId?: string;
+          timestamp?: Date;
         },
       ) => void | Promise<void>,
     ): Promise<IServiceBusSubscription> => {
@@ -350,6 +356,10 @@ export function adaptServiceBusModule(
               body?: unknown;
               // The SDK types this `number | boolean | string | Date | null`.
               applicationProperties?: Readonly<Record<string, TransportHeaderValue>>;
+              // The SDK's own field names (X28-4). The real
+              // `ServiceBusReceivedMessage` carries both as core properties.
+              messageId?: string;
+              enqueuedTimeUtc?: Date;
             };
             const body = typeof msg.body === 'string' ? msg.body : String(msg.body ?? '');
 
@@ -368,6 +378,10 @@ export function adaptServiceBusModule(
               ack,
               nack,
               applicationProperties: normalizeTransportHeaders(msg.applicationProperties),
+              // X28-4: read the platform identity rather than dropping it;
+              // omitted — never `undefined` — when the transport carries none.
+              ...(msg.messageId !== undefined ? { messageId: msg.messageId } : {}),
+              ...(msg.enqueuedTimeUtc !== undefined ? { timestamp: msg.enqueuedTimeUtc } : {}),
             });
           },
           processError: (args: IServiceBusProcessErrorArgs) =>
@@ -698,9 +712,13 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       let handlerError: Error | null = null;
       try {
         const deserialized = this.#serializer.deserialize<T>(msg.payload);
+        // X28-4: copy the platform identity onto the metadata ONLY when the
+        // transport carried it, so an absent member means "none delivered".
         const metadata: MessageMetadata = {
           topic,
           headers: msg.applicationProperties ?? {},
+          ...(msg.messageId !== undefined ? { messageId: msg.messageId } : {}),
+          ...(msg.timestamp !== undefined ? { timestamp: msg.timestamp } : {}),
         };
         await handler(deserialized, metadata);
       } catch (err) {

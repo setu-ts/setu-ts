@@ -58,6 +58,22 @@ describe('barrel exports', () => {
     // PipelinedBroker and caught by consumer instanceof checks.
     expect(messaging.ChainGateTimeoutError).toBeDefined();
     expect(typeof messaging.ChainGateTimeoutError).toBe('function');
+
+    // M90d: the two named NATS JetStream prerequisite errors, thrown by
+    // NatsBroker.connect and caught by consumer instanceof checks.
+    expect(messaging.JetStreamUnavailableError).toBeDefined();
+    expect(typeof messaging.JetStreamUnavailableError).toBe('function');
+    expect(messaging.JetStreamStreamError).toBeDefined();
+    expect(typeof messaging.JetStreamStreamError).toBe('function');
+  });
+
+  it('gains nothing else on the value surface (M90d pin)', () => {
+    // The M56 defect class in reverse: this file pins what JOINED so the
+    // surface cannot drift. The two M90d error classes are the only additions;
+    // anything else new must be a deliberate PUBLIC_API decision.
+    const surface = messaging as unknown as Record<string, unknown>;
+    expect(Object.keys(surface).sort()).toContain('JetStreamStreamError');
+    expect(Object.keys(surface).sort()).toContain('JetStreamUnavailableError');
   });
 
   it('type exports', () => {

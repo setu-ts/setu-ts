@@ -124,20 +124,66 @@ handler. With no behaviours configured, no `PipelinedBroker` decorator is applie
 
 ## Brokers
 
-| `broker`          | Backing client             | Request-reply |
-| ----------------- | -------------------------- | ------------- |
-| `'memory'`        | none                       | yes           |
-| `'redis-streams'` | `npm:ioredis`              | yes           |
-| `'rabbitmq'`      | `npm:amqplib`              | yes           |
-| `'nats'`          | NATS JetStream client      | yes           |
-| `'kafka'`         | `npm:kafkajs`              | yes¹          |
-| `'pubsub'`        | `npm:@google-cloud/pubsub` | yes²          |
-| `'service-bus'`   | `npm:@azure/service-bus`   | yes²          |
-| `'custom'`        | injected `IMessageBroker`  | yes³          |
+| `broker`          | Backing client             | Request-reply | Driven against a real backend in CI |
+| ----------------- | -------------------------- | ------------- | ----------------------------------- |
+| `'memory'`        | none                       | yes           | — (in-process; no backend)          |
+| `'redis-streams'` | `npm:ioredis`              | yes           | yes — Redis 7 (`redis-real` suites) |
+| `'rabbitmq'`      | `npm:amqplib`              | yes           | yes — RabbitMQ 4 (outage suite)     |
+| `'nats'`          | NATS JetStream client      | yes           | yes — `nats:2-alpine -js` (M90d)    |
+| `'kafka'`         | `npm:kafkajs`              | yes¹          | yes — `apache/kafka:4.0.0` (M90d)   |
+| `'pubsub'`        | `npm:@google-cloud/pubsub` | yes²          | no — emulator suite is local-only   |
+| `'service-bus'`   | `npm:@azure/service-bus`   | yes²          | no — emulator suite is local-only   |
+| `'custom'`        | injected `IMessageBroker`  | yes³          | — (whatever the adapter provides)   |
 
 ¹ Kafka needs its reply topic to exist — see below. ² Cloud brokers need their reply topic to
 pre-exist (GCP) or require `Manage` right for admin (Azure). ³ Custom brokers carry whatever RPC
 capability their adapter provides.
+
+"Supported" for `'nats'` and `'kafka'` meant "shipped" for four releases while neither could start
+against its real backend — both were driven for the first time in M90d, which is why the column
+above is stated per broker rather than left implied.
+
+### NATS prerequisites
+
+The nats broker **requires a JetStream-enabled server** — start it with the `-js` flag (or set
+`jetstream` in its configuration). `connect()` fails with a named error rather than a bare platform
+code:
+
+- `JetStreamUnavailableError` — the server has no JetStream; the raw `503` the server answered is
+  carried as the error's `cause`.
+- `JetStreamStreamError` — the configured `streamName` does not exist on the server and no
+  `streamSubjects` was supplied (the message names both remedies: create the stream out of band, or
+  supply `streamSubjects`), or the server refused the stream read/create (the platform error is
+  carried as `cause`).
+
+The broker never creates a stream with a catch-all subject: NATS refuses `subjects: ['>']` without
+`no_ack`, and `no_ack` makes every JetStream publish reject unobserved. Supply explicit subjects
+when you want the broker to create the stream:
+
+```typescript
+import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+
+MessagingPlugin({
+  broker: 'nats',
+  streamSubjects: ['orders.>', 'billing.>'], // used only when the stream is absent
+});
+```
+
+An existing stream is never touched, with or without `streamSubjects`.
+
+### Kafka consumer groups
+
+When `queue` is not supplied, each subscription's consumer group is derived per topic —
+`<defaultQueue>:<topic>` — because members of one Kafka group must subscribe the same topics: shared
+groups collapse to empty assignments and stop delivering entirely. A caller-supplied `queue` names
+the group itself, so competing consumers of one topic keep load-balancing.
+
+The separator is a colon rather than a hyphen so the derivation cannot collide. A Kafka topic name
+may not contain `:` (the broker refuses one at creation), while a group id may, so the
+`(defaultQueue, topic)` pair is recoverable by splitting at the last colon. With a hyphen,
+`defaultQueue: 'orders-eu'` + topic `created` and `defaultQueue: 'orders'` + topic `eu-created` both
+produce `orders-eu-created`, putting two differently-subscribed consumers into one group and
+restoring the empty-assignment failure this derivation exists to prevent.
 
 ## Request-reply
 
@@ -185,6 +231,26 @@ With `TelemetryPlugin` registered and tracing enabled, every first-party broker 
 producer and `receive <topic>` consumer spans. `MessageMetadata.headers` is always an object for the
 first-party transports (`{}` when the message has no headers); custom brokers retain their own
 metadata behavior. An injected NATS client must supply `headersFactory` to construct NATS headers.
+
+## Message identity
+
+Every first-party broker populates `MessageMetadata.messageId` and `.timestamp` from what its
+transport actually assigns — read the delivered metadata, not a per-broker guess:
+
+| `broker`          | `messageId`                                  | `timestamp`                                |
+| ----------------- | -------------------------------------------- | ------------------------------------------ |
+| `'memory'`        | `runtime.uuid()`                             | publish time (`runtime.now()`)             |
+| `'redis-streams'` | stream entry id                              | entry timestamp                            |
+| `'rabbitmq'`      | `properties.messageId` / assigned on publish | `properties.timestamp`                     |
+| `'nats'`          | JetStream stream sequence                    | `info.timestampNanos` (server assign time) |
+| `'kafka'`         | `partition:offset`                           | record timestamp                           |
+| `'pubsub'`        | platform `message.id`                        | platform `message.publishTime`             |
+| `'service-bus'`   | platform `message.messageId`                 | platform `message.enqueuedTimeUtc`         |
+
+An absent member means the transport carried none — never "the adapter did not look" (M90d / X28-4
+closed the two cloud brokers that were not reading what their platforms assign). A consumer reading
+`metadata.messageId` for de-duplication on an at-least-once transport gets a value on every
+first-party broker.
 
 ## Bridging in-process events
 
@@ -237,6 +303,8 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 | `CloudBrokerUnavailableError`  | class     |
 | `GcpPubSubBroker`              | class     |
 | `InMemoryBroker`               | class     |
+| `JetStreamStreamError`         | class     |
+| `JetStreamUnavailableError`    | class     |
 | `JsonSerializer`               | class     |
 | `KafkaBroker`                  | class     |
 | `MessagingNotSupportedError`   | class     |

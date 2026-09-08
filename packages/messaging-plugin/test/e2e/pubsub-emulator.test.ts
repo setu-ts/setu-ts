@@ -24,7 +24,7 @@ import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMessageBroker } from '@setu-ts/common';
+import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import { MessagingPlugin } from '../../src/index.ts';
 
 const emulatorHost = Deno.env.get('PUBSUB_EMULATOR_HOST');
@@ -92,6 +92,42 @@ describe('GcpPubSubBroker — Pub/Sub emulator E2E', { ignore: !emulatorHost }, 
     await app.stop();
 
     expect(received).toEqual([{ id: 42 }]);
+  });
+
+  it('delivers the platform messageId and publishTime on the metadata (X28-4)', async () => {
+    // The emulator assigns both fields, so the metadata must carry the same
+    // four-member set the working brokers report in X28 — this is the
+    // emulator-backed proof of the adapter read the fakes cannot decide.
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MessagingPlugin({ broker: 'pubsub', projectId, replyTopic: REPLY_TOPIC }),
+      ],
+    });
+    await app.start();
+    const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+
+    const seen: MessageMetadata[] = [];
+    await broker.subscribe(TOPIC, (_message, metadata) => {
+      seen.push(metadata);
+    }, { queue: `meta-${runId}` });
+
+    await broker.publish(TOPIC, { id: 1 });
+    await until(() => seen.length > 0);
+
+    await app.stop();
+
+    const metadata = seen[0]!;
+    expect(Object.keys(metadata).sort()).toEqual([
+      'headers',
+      'messageId',
+      'timestamp',
+      'topic',
+    ]);
+    expect(typeof metadata.messageId).toBe('string');
+    expect((metadata.messageId ?? '').length).toBeGreaterThan(0);
+    expect(metadata.timestamp).toBeInstanceOf(Date);
+    expect(metadata.timestamp!.getTime()).not.toBeNaN();
   });
 
   it('nacks a message whose handler throws, and the platform redelivers it', async () => {

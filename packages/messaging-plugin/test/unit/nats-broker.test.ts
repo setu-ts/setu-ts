@@ -4,7 +4,12 @@ import { NatsBroker, validateClient } from '../../src/brokers/nats-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeNatsConnection } from '../fixtures/fake-nats-client.ts';
-import { RequestTimeoutError } from '../../src/errors.ts';
+import type { FakeNatsOptions } from '../fixtures/fake-nats-client.ts';
+import {
+  JetStreamStreamError,
+  JetStreamUnavailableError,
+  RequestTimeoutError,
+} from '../../src/errors.ts';
 
 /**
  * NatsBroker unit tests.
@@ -115,7 +120,7 @@ describe('NatsBroker', () => {
           subject: 'orders',
           data: '{"id":"1"}',
           seq: 1,
-          timestamp: '2025-01-01T00:00:00.000Z',
+          timestampNanos: 1735689600000000000,
           headers: { keys: () => values.keys(), get: (key) => values.get(key) },
         }],
       }),
@@ -140,13 +145,15 @@ describe('NatsBroker', () => {
     // Subscribe
     await broker.subscribe('test.subject', () => {}, { queue: 'my-consumer' });
 
-    const js = fakeConnection.jetstream();
-    const calls = js.calls;
-
-    // Should have called consumers.add
-    const consumersAddCall = calls.find((c) => c.method === 'consumers.add');
-
+    // M90d: creation is a management operation — it must reach the JetStream
+    // MANAGER (`jsm.consumers.add`), not the client, which exposes no `add`
+    // against nats 2.29.
+    const jsm = await fakeConnection.jetstreamManager();
+    const consumersAddCall = jsm.calls.find((c) => c.method === 'consumers.add');
     expect(consumersAddCall).toBeDefined();
+    const config = consumersAddCall?.args[1] as { name: string; durable_name: string };
+    expect(config.name).toBe('my-consumer');
+    expect(config.durable_name).toBe('my-consumer');
 
     await broker.disconnect();
   });
@@ -271,26 +278,302 @@ describe('NatsBroker', () => {
     expect(validateClient(true)).toBe(false);
   });
 
-  it('custom streamName is used', async () => {
+  it('creates an absent custom stream from the supplied streamSubjects', async () => {
+    // X28-2: creation is reached only when the stream is ABSENT, so this test
+    // models a fresh server (`existingStreams: []`). The corrected fake
+    // rejects the catch-all the real server refuses, so the subjects asserted
+    // here are what actually reached `streams.add`.
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
-    const fakeConnection = new FakeNatsConnection();
+    const fakeConnection = new FakeNatsConnection({ existingStreams: [] });
     const broker = new NatsBroker(runtime, serializer, {
       client: fakeConnection,
       streamName: 'CUSTOM-STREAM',
+      streamSubjects: ['custom.a.>', 'custom.b.>'],
     });
 
     await broker.connect();
 
     const jsm = await fakeConnection.jetstreamManager();
-    const calls = jsm.calls;
-    const streamsAddCall = calls.find((c) => c.method === 'streams.add');
-
-    if (streamsAddCall) {
-      expect((streamsAddCall?.args[0] as { name: string }).name).toBe('CUSTOM-STREAM');
-    }
+    const streamsAddCall = jsm.calls.find((c) => c.method === 'streams.add');
+    expect(streamsAddCall).toBeDefined();
+    const config = streamsAddCall?.args[0] as { name: string; subjects: string[] };
+    expect(config.name).toBe('CUSTOM-STREAM');
+    expect(config.subjects).toEqual(['custom.a.>', 'custom.b.>']);
+    // The catch-all carried `no_ack` only in the REVERSED design; the fix
+    // sends neither a catch-all nor a no_ack key.
+    expect('no_ack' in config).toBe(false);
 
     await broker.disconnect();
+  });
+
+  it('releases the connection when a startup prerequisite fails (M90d review)', async () => {
+    // `MessagingPlugin` awaits `connect()` BEFORE it installs
+    // `ctx.lifecycle.onClose`, so an error escaping `connect()` leaves the
+    // connection it opened live with nothing left to close it. All four
+    // failure arms are covered, because the absent-stream one is reachable on
+    // ordinary misconfiguration and the others share the code path.
+    const arms: Array<{ label: string; options: FakeNatsOptions; subjects?: string[] }> = [
+      { label: 'no JetStream on the server', options: { rejectJetstreamManager: true } },
+      { label: 'stream read refused', options: { rejectStreamInfo: true } },
+      { label: 'absent stream, no streamSubjects', options: { existingStreams: [] } },
+      {
+        label: 'stream create refused',
+        options: { existingStreams: [], rejectStreamAdd: true },
+        subjects: ['app.>'],
+      },
+    ];
+
+    for (const arm of arms) {
+      const client = new FakeNatsConnection(arm.options);
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client,
+        streamName: 'MESSAGING',
+        ...(arm.subjects !== undefined ? { streamSubjects: arm.subjects } : {}),
+      });
+
+      await expect(broker.connect()).rejects.toThrow();
+      expect(client.isClosed()).toBe(true);
+      // A failed startup must not report itself connected either.
+      expect(broker.isReady()).toBe(false);
+    }
+  });
+
+  it('reports the startup error even when releasing the connection fails', async () => {
+    // The release is best-effort: `close()` on a connection whose startup just
+    // failed can itself throw or reject, and neither may reach the caller in
+    // place of the error that actually stopped startup.
+    for (const closeFailure of ['throw', 'reject'] as const) {
+      const client = new FakeNatsConnection({ existingStreams: [], closeFailure });
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client,
+        streamName: 'MESSAGING',
+      });
+
+      const error = await broker.connect().then(
+        () => {
+          throw new Error('connect should have rejected');
+        },
+        (e: unknown) => e,
+      );
+      // The startup verdict, not the close failure.
+      expect(error).toBeInstanceOf(JetStreamStreamError);
+      expect((error as Error).message).not.toContain('close failed');
+      expect(client.isClosed()).toBe(true);
+    }
+  });
+
+  it('releases an injected client whose close() returns void', async () => {
+    // `INatsConnection.close(): void` is the documented injected shape, while
+    // the real nats connection returns `Promise<void>` — the return type
+    // accepts both, so the release path must handle either.
+    let closed = 0;
+    const client = {
+      jetstream: () => ({}),
+      jetstreamManager: () => Promise.reject(new Error('503')),
+      close: (): void => {
+        closed += 1;
+      },
+    };
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      streamName: 'MESSAGING',
+    });
+
+    await expect(broker.connect()).rejects.toBeInstanceOf(JetStreamUnavailableError);
+    expect(closed).toBe(1);
+  });
+
+  it('stops the consume handle on unsubscribe, not the promise (M90d review)', async () => {
+    // The real `Consumer.consume(opts?)` resolves to `ConsumerMessages`, and
+    // `stop()` is a member of THAT (via `QueuedIterator`) — not of `Consumer`.
+    // Storing the un-awaited promise made `unsubscribe()` call `.stop()` on a
+    // `Promise`, a `TypeError` its `catch` swallowed, leaving the consumer
+    // callback active after the caller cancelled it.
+    const client = new FakeNatsConnection({
+      seededMessages: [
+        { subject: 'orders', data: '{"id":1}', seq: 1, timestampNanos: 1_700_000_000_000_000_000 },
+      ],
+    });
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      streamName: 'MESSAGING',
+    });
+    await broker.connect();
+
+    const subscription = await broker.subscribe('orders', () => {});
+    const js = client.jetstream();
+    const [handed] = js.handedOutConsumers;
+    expect(handed).toBeDefined();
+    expect(handed.isStopped()).toBe(false);
+
+    await subscription.unsubscribe();
+
+    // The handle the broker stored is the one that got stopped. Without the
+    // `await`, `stop()` lands on a `Promise`, the `TypeError` is swallowed,
+    // and this stays `false`.
+    expect(handed.isStopped()).toBe(true);
+    await broker.disconnect();
+  });
+
+  it('delivers only the subscribed subject (M90d review)', async () => {
+    // The broker creates its consumer on the MANAGER and reads it back off the
+    // JetStream CLIENT, which resolves `filter_subject` from the shared record.
+    // The manager was recording only locally, so that lookup came back empty,
+    // the fake fell through to "no filter", and every seeded subject was
+    // delivered — which is why no existing assertion could see the filter.
+    const client = new FakeNatsConnection({
+      seededMessages: [
+        { subject: 'orders', data: '{"id":1}', seq: 1, timestampNanos: 1_700_000_000_000_000_000 },
+        { subject: 'billing', data: '{"id":2}', seq: 2, timestampNanos: 1_700_000_000_000_000_000 },
+      ],
+    });
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      streamName: 'MESSAGING',
+    });
+    await broker.connect();
+
+    const seen: Array<string | undefined> = [];
+    await broker.subscribe<{ id: number }>('orders', (_msg, metadata) => {
+      seen.push(metadata.messageId);
+    });
+
+    // Exactly the `orders` message (seq 1). Without the shared record the
+    // `billing` message (seq 2) arrives here too.
+    expect(seen).toEqual(['1']);
+
+    await broker.disconnect();
+  });
+
+  it("keeps stopping consumers when one handle's stop() throws", async () => {
+    // Shutdown is best-effort per consumer: a handle that refuses to stop must
+    // not strand the ones after it in the map, or a single bad consumer keeps
+    // the whole application's callbacks running.
+    const client = new FakeNatsConnection({
+      seededMessages: [
+        { subject: 'a', data: '{"n":1}', seq: 1, timestampNanos: 1_700_000_000_000_000_000 },
+        { subject: 'b', data: '{"n":2}', seq: 2, timestampNanos: 1_700_000_000_000_000_000 },
+      ],
+    });
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      streamName: 'MESSAGING',
+    });
+    await broker.connect();
+    await broker.subscribe('a', () => {});
+    await broker.subscribe('b', () => {});
+
+    const js = client.jetstream();
+    const [first, second] = js.handedOutConsumers;
+    first.failNextStop();
+
+    await broker.disconnect();
+
+    // The refusing handle stayed unstopped; the next one still stopped.
+    expect(first.isStopped()).toBe(false);
+    expect(second.isStopped()).toBe(true);
+  });
+
+  it('stops every consume handle on disconnect (M90d review)', async () => {
+    // `disconnect()` used to call `stop()` on the `Consumer`, which has no
+    // such member — so every shutdown raised a swallowed `TypeError` and left
+    // the callbacks running. The handle is what carries `stop()`.
+    const client = new FakeNatsConnection({
+      seededMessages: [
+        { subject: 'orders', data: '{"id":1}', seq: 1, timestampNanos: 1_700_000_000_000_000_000 },
+      ],
+    });
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      streamName: 'MESSAGING',
+    });
+    await broker.connect();
+    await broker.subscribe('orders', () => {});
+
+    const js = client.jetstream();
+    const [handed] = js.handedOutConsumers;
+    expect(handed.isStopped()).toBe(false);
+
+    await broker.disconnect();
+    expect(handed.isStopped()).toBe(true);
+  });
+
+  it('throws JetStreamStreamError when the stream is absent and no subjects are supplied', async () => {
+    // X28-2/X28-3: the refusal names the stream and both remedies rather than
+    // shipping a doomed catch-all subject.
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeNatsConnection({ existingStreams: [] }),
+      streamName: 'MESSAGING',
+    });
+
+    const error = await broker.connect().then(
+      () => {
+        throw new Error('connect should have rejected');
+      },
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(JetStreamStreamError);
+    const streamError = error as JetStreamStreamError;
+    expect(streamError.message).toContain('MESSAGING');
+    expect(streamError.message).toContain('streamSubjects');
+    expect(streamError.message).toContain('out of band');
+    await broker.disconnect();
+  });
+
+  it('connects without creating anything when the stream already exists and no subjects are supplied', async () => {
+    // The default fixture models a working server: the stream pre-exists, so
+    // the info path connects and `streams.add` is never called (X28-2 — the
+    // add is reached ONLY from the absence arm).
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeNatsConnection();
+    const broker = new NatsBroker(runtime, serializer, { client: fakeConnection });
+
+    await broker.connect();
+    expect(broker.isReady()).toBe(true);
+
+    const jsm = await fakeConnection.jetstreamManager();
+    expect(jsm.calls.some((c) => c.method === 'streams.add')).toBe(false);
+
+    await broker.disconnect();
+  });
+
+  it('throws JetStreamUnavailableError with the platform error as cause when JetStream is absent', async () => {
+    // X28-3: the JetStream probe sits INSIDE the try, so a raw `503` becomes
+    // a named error carrying the platform error as `cause`.
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeNatsConnection({ rejectJetstreamManager: true }),
+    });
+
+    const error = await broker.connect().then(
+      () => {
+        throw new Error('connect should have rejected');
+      },
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(JetStreamUnavailableError);
+    expect((error as JetStreamUnavailableError).message).toContain('-js');
+    const cause = (error as JetStreamUnavailableError).cause as Error;
+    expect(cause.message).toBe('503');
+  });
+
+  it('throws JetStreamStreamError with cause when the stream create is refused', async () => {
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: new FakeNatsConnection({ existingStreams: [], rejectStreamAdd: true }),
+      streamSubjects: ['orders.>'],
+    });
+
+    const error = await broker.connect().then(
+      () => {
+        throw new Error('connect should have rejected');
+      },
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(JetStreamStreamError);
+    expect(((error as JetStreamStreamError).cause as Error).message).toContain(
+      'stream create refused',
+    );
   });
 
   // Guarded real-import test - exercises the lazy-load path
@@ -320,7 +603,7 @@ describe('NatsBroker', () => {
           subject: 'test.subject',
           data: JSON.stringify({ x: 1 }),
           seq: 7,
-          timestamp: new Date().toISOString(),
+          timestampNanos: new Date().getTime() * 1_000_000,
         },
       ],
     });
@@ -362,7 +645,7 @@ describe('NatsBroker', () => {
           subject: 'test.subject',
           data: JSON.stringify({ x: 1 }),
           seq: 8,
-          timestamp: new Date().toISOString(),
+          timestampNanos: new Date().getTime() * 1_000_000,
         },
       ],
     });
@@ -390,7 +673,7 @@ describe('NatsBroker', () => {
           subject: 'test.subject',
           data: JSON.stringify({ x: 2 }),
           seq: 9,
-          timestamp: new Date().toISOString(),
+          timestampNanos: new Date().getTime() * 1_000_000,
         },
       ],
     });
@@ -425,8 +708,8 @@ describe('NatsBroker', () => {
     await broker.disconnect();
   });
 
-  // N5: non stream-not-found rethrow
-  it('connect rethrows a non stream-not-found jsm error', async () => {
+  // N5: non stream-not-found rethrow — now named (X28-3)
+  it('rethrows a non stream-not-found jsm error as JetStreamStreamError', async () => {
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
     const fakeConnection = new FakeNatsConnection({
@@ -434,8 +717,14 @@ describe('NatsBroker', () => {
     });
     const broker = new NatsBroker(runtime, serializer, { client: fakeConnection });
 
-    // Should reject with the generic error
-    await expect(broker.connect()).rejects.toThrow('generic error');
+    const error = await broker.connect().then(
+      () => {
+        throw new Error('connect should have rejected');
+      },
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(JetStreamStreamError);
+    expect(((error as JetStreamStreamError).cause as Error).message).toContain('generic error');
   });
 
   // N6: already-exists consumer ignore
@@ -480,7 +769,7 @@ describe('NatsBroker', () => {
           subject: 'test.subject',
           data: JSON.stringify({ x: 1 }),
           seq: 1,
-          timestamp: new Date().toISOString(),
+          timestampNanos: new Date().getTime() * 1_000_000,
         },
       ],
     });
@@ -523,7 +812,7 @@ describe('NatsBroker', () => {
           subject: 'test.subject',
           data: JSON.stringify({ x: 1 }),
           seq: 1,
-          timestamp: new Date().toISOString(),
+          timestampNanos: new Date().getTime() * 1_000_000,
         },
       ],
     });

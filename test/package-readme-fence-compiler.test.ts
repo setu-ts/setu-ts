@@ -54,7 +54,7 @@ const SCRATCH_DIR = '.tmp/package-readme-fences';
  */
 const READMES: Readonly<Record<string, number>> = {
   'packages/storage-plugin/README.md': 3,
-  'packages/messaging-plugin/README.md': 5,
+  'packages/messaging-plugin/README.md': 6,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
   'packages/multi-tenancy-plugin/README.md': 3,

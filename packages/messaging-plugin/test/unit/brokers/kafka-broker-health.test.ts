@@ -76,18 +76,21 @@ describe('KafkaBroker health (M70c)', () => {
     expect(await broker.isHealthy()).toBe(true);
   });
 
-  it('reports down during a DISCONNECT fault window, up after CONNECT', async () => {
+  it('reports down during a producer.disconnect fault window, up after producer.connect', async () => {
+    // The WIRE values (X28-1): firing the uppercase keys here is what the
+    // defect shipped — the broker registered under the values, so a test
+    // firing the keys fired nothing and could not see the fault window at all.
     const { client, fire } = makeKafka(true);
     const broker = makeBroker(client);
     await broker.connect();
     expect(await broker.reachability()).toBe(true);
-    // A DISCONNECT event opens the fault window: isHealthy false, isReady true.
-    fire('DISCONNECT');
+    // A producer.disconnect event opens the fault window: isHealthy false, isReady true.
+    fire('producer.disconnect');
     expect(broker.isReady()).toBe(true);
     expect(await broker.reachability()).toBe(false);
     expect(await broker.isHealthy()).toBe(false);
-    // A CONNECT event closes the window.
-    fire('CONNECT');
+    // A producer.connect event closes the window.
+    fire('producer.connect');
     expect(await broker.reachability()).toBe(true);
     expect(await broker.isHealthy()).toBe(true);
   });

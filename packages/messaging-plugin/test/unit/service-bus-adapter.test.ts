@@ -1105,3 +1105,94 @@ describe('adaptServiceBusModule', () => {
     });
   });
 });
+
+// X28-4: the real `ServiceBusReceivedMessage` carries `messageId` and
+// `enqueuedTimeUtc` as core properties — the adapter must read them.
+describe('adaptServiceBusModule — delivered metadata (X28-4)', () => {
+  function createDeliveryModule(): {
+    mod: ServiceBusSdkModule;
+    deliver: (raw: Record<string, unknown>) => void;
+  } {
+    let processMessageFn: ((message: unknown) => Promise<void>) | null = null;
+    const mod = {} as ServiceBusSdkModule;
+    mod.RetryMode = { Exponential: 1, Fixed: 0 };
+    mod.ServiceBusClient = class {
+      createSender() {
+        return {
+          sendMessages: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        };
+      }
+      createReceiver() {
+        return {
+          subscribe(handlers: { processMessage: (message: unknown) => Promise<void> }) {
+            processMessageFn = handlers.processMessage;
+            return { close: () => Promise.resolve() };
+          },
+          completeMessage: () => Promise.resolve(),
+          abandonMessage: () => Promise.resolve(),
+          close: () => Promise.resolve(),
+        };
+      }
+      close() {
+        return Promise.resolve();
+      }
+    } as unknown as ServiceBusSdkModule['ServiceBusClient'];
+    mod.ServiceBusAdministrationClient = class {
+      createSubscription: () => Promise<unknown> = () => Promise.resolve();
+      deleteSubscription: () => Promise<unknown> = () => Promise.resolve();
+    } as unknown as ServiceBusSdkModule['ServiceBusAdministrationClient'];
+
+    return {
+      mod,
+      deliver: (raw) => {
+        void processMessageFn!(raw);
+      },
+    };
+  }
+
+  it('maps messageId and enqueuedTimeUtc onto the delivery', async () => {
+    const { mod, deliver } = createDeliveryModule();
+    const transport = adaptServiceBusModule(mod, {
+      connectionString: 'Endpoint=sb://demo/',
+      adminConnectionString: 'Endpoint=sb://demo/',
+    });
+
+    let received: Record<string, unknown> | null = null;
+    await transport.open('orders', 'sub', (msg) => {
+      received = msg as unknown as Record<string, unknown>;
+    });
+
+    deliver({
+      body: 'hello',
+      messageId: 'sb-msg-7',
+      enqueuedTimeUtc: new Date('2025-07-08T09:10:11.000Z'),
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(received).not.toBeNull();
+    expect(received!.messageId).toBe('sb-msg-7');
+    expect(received!.timestamp).toBeInstanceOf(Date);
+    expect((received!.timestamp as Date).toISOString()).toBe('2025-07-08T09:10:11.000Z');
+  });
+
+  it('omits both members when the raw message carries neither', async () => {
+    const { mod, deliver } = createDeliveryModule();
+    const transport = adaptServiceBusModule(mod, {
+      connectionString: 'Endpoint=sb://demo/',
+      adminConnectionString: 'Endpoint=sb://demo/',
+    });
+
+    let received: Record<string, unknown> | null = null;
+    await transport.open('orders', 'sub', (msg) => {
+      received = msg as unknown as Record<string, unknown>;
+    });
+
+    deliver({ body: 'hello' });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const delivered = received as unknown as Record<string, unknown>;
+    expect('messageId' in delivered).toBe(false);
+    expect('timestamp' in delivered).toBe(false);
+  });
+});

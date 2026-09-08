@@ -761,6 +761,9 @@ describe('MessagingPlugin', () => {
       client: fakeClient as unknown as INatsConnection,
       url: 'nats://localhost:4222',
       streamName: 'CUSTOM-STREAM',
+      // X28-2: a fresh fake server has no CUSTOM-STREAM, so creation needs an
+      // explicit subject set — also proving the plugin threads the option.
+      streamSubjects: ['custom.>'],
       defaultQueue: 'custom-queue',
     });
 

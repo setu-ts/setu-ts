@@ -21,7 +21,7 @@ import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IMessageBroker } from '@setu-ts/common';
+import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import { MessagingPlugin, ReplyInboxUnavailableError } from '../../src/index.ts';
 
 const connectionString = Deno.env.get('SERVICEBUS_CONNECTION_STRING');
@@ -87,6 +87,32 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { ignore: !connectionS
       await until(() => received.length > 0);
 
       expect(received).toEqual([{ id: 42 }]);
+    });
+  });
+
+  it('delivers the platform messageId and enqueue time on the metadata (X28-4)', async () => {
+    // The emulator assigns both fields, so the metadata must carry the same
+    // four-member set the working brokers report in X28 — the emulator-backed
+    // proof of the adapter read the fakes cannot decide.
+    await withBroker(async (broker) => {
+      const seen: MessageMetadata[] = [];
+      await broker.subscribe(ROUNDTRIP_TOPIC, (_message, metadata) => {
+        seen.push(metadata);
+      }, { queue: SUBSCRIPTION });
+
+      await broker.publish(ROUNDTRIP_TOPIC, { id: 1 });
+      await until(() => seen.length > 0);
+
+      const metadata = seen[0]!;
+      expect(Object.keys(metadata).sort()).toEqual([
+        'headers',
+        'messageId',
+        'timestamp',
+        'topic',
+      ]);
+      expect((metadata.messageId ?? '').length).toBeGreaterThan(0);
+      expect(metadata.timestamp).toBeInstanceOf(Date);
+      expect(metadata.timestamp!.getTime()).not.toBeNaN();
     });
   });
 

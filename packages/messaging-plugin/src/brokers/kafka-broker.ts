@@ -19,6 +19,24 @@ import type { IKafkaEventEmitter, IKafkaFactory, KafkaOptions } from '../interfa
 const DEFAULT_REPLY_TOPIC = 'messaging.replies';
 
 /**
+ * The wire value of kafkajs's `producer.events.DISCONNECT`. The `events` map's
+ * KEYS (`CONNECT`, `DISCONNECT`, …) are not valid listener names — kafkajs
+ * validates the string against the values and throws
+ * `KafkaJSNonRetriableError: Event name should be one of producer.events.*`
+ * for a key (X28-1). Declared as a literal, not read off `producer.events`
+ * with a `??` fallback, so a fake that does not model `events` cannot satisfy
+ * the assertion silently: `test/unit/kafka-real-import.test.ts` pins the
+ * literal against the real module's own map.
+ */
+export const KAFKA_PRODUCER_DISCONNECT = 'producer.disconnect';
+
+/**
+ * The wire value of kafkajs's `producer.events.CONNECT`. See
+ * {@linkcode KAFKA_PRODUCER_DISCONNECT} for why this is a literal.
+ */
+export const KAFKA_PRODUCER_CONNECT = 'producer.connect';
+
+/**
  * Consumer-group prefix for reply inboxes. Each broker instance derives a
  * unique group from it so replies are delivered to every instance rather than
  * load-balanced across the shared default group.
@@ -93,6 +111,37 @@ interface ActiveConsumer {
 }
 
 /**
+ * Derives the per-topic default consumer group for a subscription that names
+ * no `queue`.
+ *
+ * **Why per topic (M90d / X28, measured against a real broker):** a consumer
+ * group's members must subscribe the SAME topics. When they differ, kafkajs
+ * logs "Consumer group received unsubscribed topics" and BOTH members end
+ * with an EMPTY assignment — so the single shared default group silently
+ * stopped ALL delivery for any application subscribed to two topics,
+ * including RPC, whose responder subscribes the derived `rr.req.<topic>`
+ * channel. The same topic across instances still load-balances, because the
+ * derived name is identical.
+ *
+ * **Why a colon (M90d review):** `${prefix}-${topic}` is not injective —
+ * `('orders-eu', 'created')` and `('orders', 'eu-created')` both yield
+ * `orders-eu-created`, which puts two differently-subscribed consumers back
+ * into one group and restores the very failure above. Probed against a real
+ * broker: a topic name containing `:` is REFUSED at creation, while a group
+ * id containing `:` is accepted and reaches `Stable`. So the pair is
+ * recoverable by splitting at the last colon, no two distinct pairs with
+ * legal topic names can collide, and the name stays readable in
+ * `kafka-consumer-groups.sh` output.
+ *
+ * @param defaultQueue - The configured group prefix
+ * @param topic - The topic being subscribed
+ * @returns The derived group id
+ */
+function deriveDefaultGroupId(defaultQueue: string, topic: string): string {
+  return `${defaultQueue}:${topic}`;
+}
+
+/**
  * Kafka message broker implementation.
  *
  * @since 0.1.0
@@ -143,8 +192,10 @@ export class KafkaBroker implements MessageBrokerAdapter {
     this.#supervisor = new ReconnectSupervisor({
       runtime,
       mode: 'observe',
-      attachFaultListener: (onFault) => this.#attachProducerEvent('DISCONNECT', onFault),
-      attachRecoveryListener: (onRecovered) => this.#attachProducerEvent('CONNECT', onRecovered),
+      attachFaultListener: (onFault) =>
+        this.#attachProducerEvent(KAFKA_PRODUCER_DISCONNECT, onFault),
+      attachRecoveryListener: (onRecovered) =>
+        this.#attachProducerEvent(KAFKA_PRODUCER_CONNECT, onRecovered),
     });
   }
 
@@ -246,11 +297,14 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * Tri-state backend reachability (M70c).
    *
    * kafkajs retries internally, so the broker runs the supervisor in
-   * **observe** mode: the producer's `DISCONNECT`/`CONNECT` events mark the
-   * fault window (`CRASH` with `restart: false` is terminal and surfaces as a
-   * `DISCONNECT` the client does not recover from). `false` while the window
-   * is active, `true` otherwise, `undefined` when the producer exposes no
-   * event surface (a minimal fake) — the indicator then reports
+   * **observe** mode: the producer's `producer.disconnect`/`producer.connect`
+   * events (the VALUES of kafkajs's `producer.events.DISCONNECT` /
+   * `producer.events.CONNECT` — the uppercase KEYS are not accepted listener
+   * names and kafkajs throws for them, X28-1) mark the fault window
+   * (`consumer.crash` with `restart: false` is terminal and surfaces as a
+   * `producer.disconnect` the client does not recover from). `false` while the
+   * window is active, `true` otherwise, `undefined` when the producer exposes
+   * no event surface (a minimal fake) — the indicator then reports
    * `reachable: 'unknown'`.
    *
    * @returns `true`/`false`/`undefined` as described
@@ -363,7 +417,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     }
 
     const subscriptionId = this.#runtime.uuid();
-    const groupId = options?.queue ?? this.#defaultQueue;
+    const groupId = options?.queue ?? deriveDefaultGroupId(this.#defaultQueue, topic);
 
     // Create consumer unconditionally from the resolved factory
     const realFactory = this.#factory as unknown as {
@@ -395,9 +449,16 @@ export class KafkaBroker implements MessageBrokerAdapter {
     };
     this.#activeConsumers.set(subscriptionId, activeConsumer);
 
-    // Run consumer with eachMessage handler
+    // Run consumer with eachMessage handler.
+    //
+    // `partition` MUST come from the outer eachMessage payload (kafkajs's
+    // `EachMessagePayload`), never off the message record: real `KafkaMessage`
+    // carries no `partition`, so reading it there yields `undefined` and the
+    // documented `partition:offset` identity degrades to `"undefined:<offset>"`
+    // — colliding across partitions and breaking the de-duplication the
+    // identity exists for (90d verification, Finding 1).
     consumerTyped.run({
-      eachMessage: async ({ message }) => {
+      eachMessage: async ({ partition, message }) => {
         const msgTyped = message as unknown as {
           key: Uint8Array | null;
           value: Uint8Array | null;
@@ -406,7 +467,6 @@ export class KafkaBroker implements MessageBrokerAdapter {
             string,
             Uint8Array | string | readonly (Uint8Array | string)[] | undefined
           >;
-          partition: number;
           offset: string;
         };
 
@@ -416,7 +476,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
         const metadata: MessageMetadata = {
           topic,
-          messageId: `${msgTyped.partition}:${msgTyped.offset}`,
+          messageId: `${partition}:${msgTyped.offset}`,
           timestamp: new Date(parseInt(msgTyped.timestamp, 10)),
           // Dropping an undecodable value rather than throwing is load-bearing
           // here: this runs inside `eachMessage`, where a throw prevents the

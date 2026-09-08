@@ -117,6 +117,64 @@ describe('adaptPubSubModule', () => {
     expect(topic!.messages[0].data).toEqual(bytes);
   });
 
+  it('maps the SDK message id and publishTime onto the delivery (X28-4)', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    let received: {
+      messageId?: string;
+      timestamp?: Date;
+    } | null = null;
+    await transport.open('test-topic', 'sub-meta', (msg) => {
+      received = msg;
+    });
+
+    // A variable, not a literal, so the extra `publishTime` field (which the
+    // real SDK message carries and the fake's structural type now models)
+    // passes without excess-property checking.
+    //
+    // A `Date`, not an RFC 3339 string (M90d review): the locked
+    // `@google-cloud/pubsub@6.0.0` delivers `publishTime` as a `PreciseDate`,
+    // which extends `Date`. The string this used to send is a value the SDK
+    // never produces, so the fixture was modelling a shape production has not.
+    const raw = {
+      data: new TextEncoder().encode('hello'),
+      ack: () => {},
+      nack: () => {},
+      id: 'pubsub-msg-9',
+      publishTime: new Date('2025-03-04T05:06:07.000Z'),
+    };
+    sdk.topics.get('test-topic')!.subscriptions.get('sub-meta')!.onMessage!(raw);
+
+    expect(received).not.toBeNull();
+    expect(received!.messageId).toBe('pubsub-msg-9');
+    expect(received!.timestamp).toBeInstanceOf(Date);
+    expect(received!.timestamp!.toISOString()).toBe('2025-03-04T05:06:07.000Z');
+  });
+
+  it('omits messageId and timestamp when the SDK message carries neither', async () => {
+    const sdk = createFakeSdkModule();
+    const transport = adaptPubSubModule(sdk, { projectId: 'demo' });
+
+    let received: Record<string, unknown> | null = null;
+    await transport.open('test-topic', 'sub-absent', (msg) => {
+      received = msg as unknown as Record<string, unknown>;
+    });
+
+    sdk.topics.get('test-topic')!.subscriptions.get('sub-absent')!.onMessage!({
+      data: new TextEncoder().encode('hello'),
+      ack: () => {},
+      nack: () => {},
+      id: '',
+    });
+
+    // Presence, not truthiness — an empty-string id and an absent publishTime
+    // must both arrive as ABSENT members.
+    const delivered = received as unknown as Record<string, unknown>;
+    expect('messageId' in delivered).toBe(false);
+    expect('timestamp' in delivered).toBe(false);
+  });
+
   it('encodes non-ASCII payload correctly', async () => {
     const sdk = createFakeSdkModule();
     const transport = adaptPubSubModule(sdk, { projectId: 'demo' });

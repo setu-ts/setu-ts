@@ -276,6 +276,7 @@ export function MessagingPlugin(
           url?: string;
           client?: INatsConnection;
           streamName?: string;
+          streamSubjects?: NatsOptions['streamSubjects'];
           defaultQueue?: string;
           headersFactory?: NatsOptions['headersFactory'];
         };
@@ -283,6 +284,7 @@ export function MessagingPlugin(
         if (opts.url !== undefined) natsOptions.url = opts.url;
         if (opts.client !== undefined) natsOptions.client = opts.client;
         if (opts.streamName !== undefined) natsOptions.streamName = opts.streamName;
+        if (opts.streamSubjects !== undefined) natsOptions.streamSubjects = opts.streamSubjects;
         if (opts.defaultQueue !== undefined) natsOptions.defaultQueue = opts.defaultQueue;
         if (opts.headersFactory !== undefined) natsOptions.headersFactory = opts.headersFactory;
         if (logger !== undefined) natsOptions.logger = logger;

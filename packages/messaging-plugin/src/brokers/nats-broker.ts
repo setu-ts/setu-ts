@@ -14,6 +14,7 @@ import { createTopicInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
+import { JetStreamStreamError, JetStreamUnavailableError } from '../errors.ts';
 
 /**
  * Lazily load nats at runtime.
@@ -111,6 +112,7 @@ export class NatsBroker implements MessageBrokerAdapter {
   #url: string;
   #injectedClient: INatsConnection | undefined;
   #streamName: string;
+  #streamSubjects: readonly string[] | undefined;
   #headersFactory: (() => INatsHeaders) | undefined;
   #logger: { error: (msg: string) => void } | undefined;
   /** Guards the no-header-channel report so it is emitted once, not per publish. */
@@ -140,6 +142,7 @@ export class NatsBroker implements MessageBrokerAdapter {
     this.#url = options?.url ?? 'nats://localhost:4222';
     this.#injectedClient = options?.client;
     this.#streamName = options?.streamName ?? 'MESSAGING';
+    this.#streamSubjects = options?.streamSubjects;
     this.#headersFactory = options?.headersFactory;
     this.#logger = options?.logger;
     this.#activeConsumers = new Map();
@@ -188,9 +191,14 @@ export class NatsBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Connects to NATS and ensures JetStream stream exists.
+   * Connects to NATS and ensures the JetStream stream exists.
    *
    * @returns Resolves when connected
+   * @throws {JetStreamUnavailableError} When the server has no JetStream
+   *   enabled (start it with the `-js` flag)
+   * @throws {JetStreamStreamError} When the stream is absent and
+   *   {@linkcode NatsOptions.streamSubjects} was not supplied, or when the
+   *   platform refuses the stream read/create
    * @since 0.1.0
    */
   async connect(): Promise<void> {
@@ -202,39 +210,119 @@ export class NatsBroker implements MessageBrokerAdapter {
     // An explicitly supplied factory wins; the module's own is the fallback.
     this.#headersFactory ??= resolved.headersFactory;
 
-    // Ensure stream exists (unconditional for both injected and real connections)
-    const realConn = this.#connection as unknown as { jetstreamManager(): Promise<unknown> };
-    const jsm = await realConn.jetstreamManager();
+    // Every startup check below can throw, and `MessagingPlugin` awaits
+    // `connect()` BEFORE it installs `ctx.lifecycle.onClose` — so a failure
+    // that escapes here leaves the connection this method just opened live,
+    // with nothing left holding a reference that could close it. The absent-
+    // stream arm makes that reachable on ordinary misconfiguration, so the
+    // socket is released before the startup error is rethrown unchanged.
     try {
-      const jsmTyped = jsm as unknown as {
-        streams: {
-          info(name: string): Promise<unknown>;
-          add(config: { name: string; subjects: string[] }): Promise<unknown>;
-        };
+      await this.#establishJetStream();
+    } catch (err) {
+      this.#closeQuietly(resolved.connection);
+      throw err;
+    }
+    this.#ready = true;
+    this.#supervisor.start();
+  }
+
+  /**
+   * Runs the JetStream startup prerequisites against the open connection.
+   *
+   * Extracted from {@linkcode NatsBroker.connect} so ONE `catch` releases the
+   * connection for every failure path rather than each throw site repeating
+   * the cleanup — a new prerequisite added later cannot forget it.
+   *
+   * @throws {JetStreamUnavailableError} When the server has no JetStream
+   * @throws {JetStreamStreamError} When the stream is absent without
+   *   {@linkcode NatsOptions.streamSubjects}, or the platform refuses it
+   */
+  async #establishJetStream(): Promise<void> {
+    // X28-3: the JetStream probe is INSIDE the try so a server without
+    // JetStream rejects as a named `JetStreamUnavailableError` rather than a
+    // bare `NatsError: 503` (`NO_RESPONDERS` for the `$JS.API` subjects).
+    const realConn = this.#connection as unknown as { jetstreamManager(): Promise<unknown> };
+    let jsm: unknown;
+    try {
+      jsm = await realConn.jetstreamManager();
+    } catch (err) {
+      throw new JetStreamUnavailableError(err);
+    }
+
+    const jsmTyped = jsm as unknown as {
+      streams: {
+        info(name: string): Promise<unknown>;
+        add(config: { name: string; subjects: string[] }): Promise<unknown>;
       };
+    };
+
+    // Ensure the stream exists. An existing stream is never touched — the
+    // `add` here is reached ONLY from the absence arm, so a suite that reuses
+    // a warm server exercises nothing (X28-2: that is how the catch-all
+    // subject shipped and stayed).
+    let streamExists = false;
+    try {
       await jsmTyped.streams.info(this.#streamName);
+      streamExists = true;
     } catch (err) {
       const e = err as Error;
-      if (e.message.includes('stream not found')) {
-        const jsmTyped = jsm as unknown as {
-          streams: {
-            add(config: { name: string; subjects: string[] }): Promise<unknown>;
-          };
-        };
+      // A rejection that is not "absent" is a real fault — rethrow it named,
+      // with the platform's own sentence as `cause`, rather than bare.
+      if (!e.message.includes('stream not found')) {
+        throw new JetStreamStreamError(this.#streamName, err);
+      }
+    }
+    if (!streamExists) {
+      // X28-2: NATS refuses a stream capturing every subject unless it is
+      // created with `no_ack: true` — and `no_ack` makes `js.publish()`
+      // REJECT with TIMEOUT on every publish, because the server is
+      // configured never to answer an ack. This broker does not await that
+      // promise, so the catch-all is unusable in BOTH forms. A subject set
+      // must therefore come from the application; with none configured the
+      // refusal is named rather than retried with a doomed default.
+      if (this.#streamSubjects === undefined) {
+        throw new JetStreamStreamError(this.#streamName);
+      }
+      try {
         await jsmTyped.streams.add({
           name: this.#streamName,
-          subjects: ['>'],
+          subjects: [...this.#streamSubjects],
         });
-      } else {
-        throw e;
+      } catch (err) {
+        throw new JetStreamStreamError(this.#streamName, err);
       }
     }
 
     // Get JetStream instance unconditionally
     const realConn2 = this.#connection as unknown as { jetstream(): unknown };
     this.#js = realConn2.jetstream();
-    this.#ready = true;
-    this.#supervisor.start();
+  }
+
+  /**
+   * Closes and clears a partially initialized connection, swallowing any
+   * close failure so the ORIGINAL startup error is what the caller sees.
+   *
+   * Takes the connection as a parameter rather than reading the field: the
+   * only caller has it in hand, so there is no reachable null case to guard.
+   *
+   * @param connection - The connection {@linkcode NatsBroker.connect} opened
+   */
+  #closeQuietly(connection: unknown): void {
+    this.#connection = null;
+    this.#js = null;
+    const conn = connection as { close(): unknown };
+    try {
+      const closed = conn.close();
+      if (closed instanceof Promise) {
+        // The real `NatsConnection.close()` returns `Promise<void>`, resolving
+        // after the socket drains. Nothing awaits this method — a rejection
+        // must not replace the startup error, and must not surface as an
+        // unhandled rejection either.
+        closed.catch(() => {});
+      }
+    } catch {
+      // Already closing, or an injected client with no usable `close`.
+    }
   }
 
   /**
@@ -246,11 +334,14 @@ export class NatsBroker implements MessageBrokerAdapter {
   async disconnect(): Promise<void> {
     this.#supervisor.stop();
     await this.#rr.close();
-    // Stop all active consumers
+    // Stop all active consumers. `stop()` is a `ConsumerMessages` member, so
+    // the SUBSCRIPTION handle is what carries it — the `Consumer` this used to
+    // call it on has only `info`/`delete`/`next`/`fetch`/`consume`, so every
+    // shutdown raised a swallowed `TypeError` and left the callbacks running.
     for (const consumer of this.#activeConsumers.values()) {
       try {
-        const realConsumer = consumer.consumer as unknown as { stop(): void };
-        realConsumer.stop();
+        const realSub = consumer.subscription as unknown as { stop(): void };
+        realSub.stop();
       } catch {
         // Ignore errors during shutdown
       }
@@ -407,16 +498,24 @@ export class NatsBroker implements MessageBrokerAdapter {
 
     const realJs = this.#js!;
 
-    const realJsTyped = realJs as unknown as {
+    // M90d, probed against nats 2.29: consumer CREATION is a management
+    // operation on the JetStream MANAGER (`jsm.consumers.add`); the JetStream
+    // CLIENT exposes only `get`/`ordered` — `js.consumers.add` is undefined.
+    // The pre-M90d code called it, so every real subscribe failed with
+    // `TypeError: realJsTyped.consumers.add is not a function` — invisible to
+    // any injected fake that modeled `add` on the client (X28's question: does
+    // the adapter read what its transport actually says).
+    const realConn = this.#connection as unknown as { jetstreamManager(): Promise<unknown> };
+    const jsm = await realConn.jetstreamManager();
+    const jsmTyped = jsm as unknown as {
       consumers: {
         add(stream: string, config: unknown): Promise<unknown>;
-        get(stream: string, consumer: string): Promise<unknown>;
       };
     };
 
     // Ensure durable consumer exists
     try {
-      await realJsTyped.consumers.add(this.#streamName, {
+      await jsmTyped.consumers.add(this.#streamName, {
         name: consumerName,
         filter_subject: topic,
         durable_name: consumerName,
@@ -433,18 +532,35 @@ export class NatsBroker implements MessageBrokerAdapter {
       }
     }
 
-    // Get consumer and start consuming
-    const consumer = await realJsTyped.consumers.get(this.#streamName, consumerName);
-    const consumerTyped = consumer as unknown as {
-      consume(options: { callback: (msg: unknown) => void }): unknown;
+    const realJsTyped = realJs as unknown as {
+      consumers: {
+        get(stream: string, consumer: string): Promise<unknown>;
+      };
     };
 
-    const subscription = consumerTyped.consume({
+    // Get consumer and start consuming
+    const consumer = await realJsTyped.consumers.get(this.#streamName, consumerName);
+    // M90d review, probed against the shipped nats 2.29.3 `.d.ts`:
+    // `Consumer.consume(opts?): Promise<ConsumerMessages>` — it RESOLVES to
+    // the stoppable handle. Storing the promise itself made `unsubscribe()`
+    // call `.stop()` on a `Promise` (a `TypeError` its `catch` swallowed), so
+    // the consumer callback stayed active after a caller cancelled it. `stop()`
+    // lives on `ConsumerMessages` (via `QueuedIterator`) and NOT on `Consumer`,
+    // which is why `disconnect()` stops this handle too.
+    const consumerTyped = consumer as unknown as {
+      consume(options: { callback: (msg: unknown) => void }): Promise<unknown>;
+    };
+
+    const subscription = await consumerTyped.consume({
       callback: (msg) => {
         const msgTyped = msg as unknown as {
           data: Uint8Array;
           seq: number;
-          info: { timestamp: string };
+          // M90d, probed against nats 2.29: a real delivery's `info` carries
+          // `timestampNanos` (integer ns, above Number.MAX_SAFE_INTEGER) —
+          // NOT the `timestamp` string this cast claimed before, which turned
+          // every real delivery into `new Date(undefined)`, an Invalid Date.
+          info: { timestampNanos?: number | bigint };
           headers: unknown;
           ack(): void;
           nak(): void;
@@ -453,10 +569,16 @@ export class NatsBroker implements MessageBrokerAdapter {
         const content = new TextDecoder().decode(msgTyped.data);
         const deserialized = this.#serializer.deserialize<T>(content);
 
+        const nanos = msgTyped.info?.timestampNanos;
         const metadata: MessageMetadata = {
           topic,
           messageId: String(msgTyped.seq),
-          timestamp: new Date(msgTyped.info.timestamp),
+          // Divide through BigInt: the nanosecond epoch exceeds the float
+          // safe-integer range, and an Invalid Date must never reach a
+          // handler as `metadata.timestamp`.
+          ...(nanos !== undefined
+            ? { timestamp: new Date(Number(BigInt(nanos) / 1_000_000n)) }
+            : {}),
           headers: toHeaderRecord(msgTyped.headers),
         };
 

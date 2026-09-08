@@ -1391,3 +1391,72 @@ describe('ServiceBusBroker — missing credentials', () => {
     await expect(broker.connect()).rejects.toThrow(/requires a connectionString/);
   });
 });
+
+// X28-4: the platform assigns `messageId`/`enqueuedTimeUtc` on every received
+// message, so the metadata must carry them — and absence must mean "the
+// transport carried none", never "the adapter did not look".
+describe('ServiceBusBroker — delivered metadata (X28-4)', () => {
+  function brokerWithDelivery(
+    delivery: Record<string, unknown> | null,
+  ): { broker: ServiceBusBroker; seen: unknown[]; deliver: () => void } {
+    let onMessageCb: ((msg: Record<string, unknown>) => void | Promise<void>) | null = null;
+    const transport: IServiceBusTransport = {
+      send: () => Promise.resolve(),
+      open: (_t, _s, cb) => {
+        onMessageCb = cb as unknown as (msg: Record<string, unknown>) => void;
+        return Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription);
+      },
+      createSubscription: () => Promise.resolve(),
+      deleteSubscription: (_topic: string, _sub: string) => Promise.resolve(),
+      close: () => Promise.resolve(),
+    };
+    const broker = new ServiceBusBroker(createRuntime(), {
+      serialize: (v) => JSON.stringify(v),
+      deserialize: (s) => JSON.parse(s),
+    }, { client: transport });
+    const seen: unknown[] = [];
+    return { broker, seen, deliver: () => void onMessageCb!(delivery ?? {}) };
+  }
+
+  it('copies messageId and timestamp onto MessageMetadata when the transport supplies them', async () => {
+    const context = brokerWithDelivery({
+      payload: '{"id":1}',
+      ack: () => Promise.resolve(),
+      nack: () => Promise.resolve(),
+      applicationProperties: {},
+      messageId: 'sb-id-1',
+      timestamp: new Date('2025-06-01T12:00:00.000Z'),
+    });
+    await context.broker.connect();
+    await context.broker.subscribe('orders', (_message, metadata) => {
+      context.seen.push(metadata);
+    });
+    context.deliver();
+    await new Promise((r) => setTimeout(r, 5));
+
+    const metadata = context.seen[0] as { messageId?: string; timestamp?: Date };
+    expect(metadata.messageId).toBe('sb-id-1');
+    expect(metadata.timestamp).toBeInstanceOf(Date);
+    expect(metadata.timestamp?.toISOString()).toBe('2025-06-01T12:00:00.000Z');
+  });
+
+  it('leaves both members ABSENT when the transport supplies neither', async () => {
+    const context = brokerWithDelivery({
+      payload: '{"id":1}',
+      ack: () => Promise.resolve(),
+      nack: () => Promise.resolve(),
+    });
+    await context.broker.connect();
+    await context.broker.subscribe('orders', (_message, metadata) => {
+      context.seen.push(metadata);
+    });
+    context.deliver();
+    await new Promise((r) => setTimeout(r, 5));
+
+    const metadata = context.seen[0] as Record<string, unknown>;
+    // Presence, not truthiness — the only check that separates absent from
+    // undefined.
+    expect('messageId' in metadata).toBe(false);
+    expect('timestamp' in metadata).toBe(false);
+  });
+});
