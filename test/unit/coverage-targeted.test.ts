@@ -8,6 +8,7 @@ import {
   parseChangedPaths,
   parseMemberTable,
   readWorkspaceMembers,
+  renderProbeModule,
   resolveMembers,
 } from '../../scripts/coverage-targeted.ts';
 
@@ -222,5 +223,34 @@ describe('parseChangedPaths', () => {
 
   it('drops blank lines from both sources', () => {
     expect(parseChangedPaths('\n\n', '   \n')).toEqual([]);
+  });
+});
+
+describe('renderProbeModule', () => {
+  it('derives the ../ depth from the probe directory so specifiers resolve', () => {
+    const module = renderProbeModule(
+      ['packages/exceptions/src/zz.ts'],
+      '.coverage/targeted',
+    );
+    expect(module).toContain("await import('../../packages/exceptions/src/zz.ts');");
+  });
+
+  it('reflects a different probe depth rather than hardcoding two levels', () => {
+    expect(renderProbeModule(['packages/a/src/b.ts'], 'tmp'))
+      .toContain("await import('../packages/a/src/b.ts');");
+  });
+
+  it('declares a test, without which deno test reports the module as failed', () => {
+    // A module registering no tests exits non-zero, so the probe could never
+    // classify anything (verified: "0 passed | 1 failed").
+    expect(renderProbeModule(['packages/a/src/b.ts'], 'tmp')).toContain('Deno.test(');
+  });
+
+  it('loads every file it is given', () => {
+    const module = renderProbeModule(
+      ['packages/a/src/one.ts', 'packages/a/src/two.ts'],
+      '.coverage/targeted',
+    );
+    expect(module.match(/await import\(/g)).toHaveLength(2);
   });
 });

@@ -24,10 +24,13 @@
  *     covered by a dependent package's tests. Confirm with the full run before
  *     writing tests for them.
  *
- * A third limit is inherent to `deno coverage` and shared with the full run: a
- * module no test LOADED has no row at all rather than a 0% row, so it is
- * listed under "produced no coverage row" rather than failed — see
- * `findUnreportedFiles` for why that cannot be made fatal here.
+ * `deno coverage` reports only modules that were LOADED, so a `src` file no
+ * test imports would have no row at all rather than a 0% row. Those files are
+ * classified rather than assumed: `probeUnreported` loads them and re-reports,
+ * after which a module with runtime code carries a row (at 0%, so it fails the
+ * bar) and a type-only module still carries none. So a PASS means every `src`
+ * file of the selected members was measured and cleared the bar, or provably
+ * emits no runtime code to measure.
  *
  * A `--with-dependents` flag was built and CUT: the transitive dependents of
  * every member measured here close over the ENTIRE workspace (47 of 47, for
@@ -202,15 +205,16 @@ export function belowBar(
  * that reads only the rows it was given used to claim
  * `all 9 file(s) meet the ≥90% bar` while saying nothing about it.
  *
- * The result is REPORTED, never fatal, because the two causes are
- * indistinguishable without a TypeScript parser this script does not have: a
- * module nothing loaded, and a TYPE-ONLY module that is erased at compile time
- * and therefore absent from every report including the full run's. A
- * source-level classifier was attempted and rejected — over the 742 `src`
- * files it misclassified 47 as type-only that the full run had measured,
- * because a barrel carrying both `export { … }` and `export type { … }`
- * defeats whole-file token matching, and a wrong answer in that direction
- * would silently skip a real file.
+ * An absent row has two causes, and they must be told apart: a module nothing
+ * loaded (a real gap) and a TYPE-ONLY module, erased at compile time and so
+ * absent from every report including the full run's. `probeUnreported` settles
+ * it by asking the compiler — see there.
+ *
+ * A source-level classifier was attempted first and rejected: over the 742
+ * `src` files in `packages/` it misclassified 47 as type-only that the full run
+ * had measured, because a barrel carrying both `export { … }` and
+ * `export type { … }` defeats whole-file token matching, and a wrong answer in
+ * that direction silently skips a real file.
  *
  * Rows are matched by path SUFFIX because `deno coverage` prints each path
  * relative to the common root of the files it reported — `index.ts` for a
@@ -340,6 +344,69 @@ async function listSourceFiles(member: string): Promise<readonly string[]> {
   return found.sort();
 }
 
+/**
+ * Renders the probe module that loads the unreported files.
+ *
+ * The specifiers are STATIC and relative to the probe's own directory, so Deno
+ * resolves them into the module graph at load time rather than needing runtime
+ * read permission per target; the `../` depth therefore has to match where the
+ * probe is written, which is what this derives from `coverageDir` instead of
+ * hardcoding.
+ */
+export function renderProbeModule(
+  files: readonly string[],
+  coverageDir: string,
+): string {
+  const toRoot = '../'.repeat(coverageDir.split('/').length);
+  const imports = files
+    .map((file) => `  await import('${toRoot}${file}');`)
+    .join('\n');
+  return `Deno.test('coverage-targeted: classify unreported modules', async () => {\n${imports}\n});\n`;
+}
+
+/**
+ * Loads modules that produced no coverage row, so `deno coverage` can classify
+ * them, then reports whether the probe ran.
+ *
+ * This asks the COMPILER rather than guessing from source text, which is what
+ * makes the classification sound. Measured on a scratch project: after
+ * importing a type-only module and an unexercised runtime module in one test
+ * run, `deno coverage` emitted a row for the runtime module — at 0% function
+ * and line, so it fails the bar — and NO row for the type-only one, whose raw
+ * entry exists but whose emitted output has nothing to measure.
+ *
+ * The probe emits STATIC relative specifiers because Deno resolves those into
+ * the module graph at load time; a computed `new URL(...).href` needs runtime
+ * read permission for every target instead. It runs `--no-check`: types are
+ * already the business of `deno task check`, and this run only needs the
+ * modules loaded.
+ *
+ * The generated file is removed afterwards, and it lives under the gitignored
+ * coverage directory, which `deno fmt` and `deno lint` skip (verified — a
+ * deliberately misformatted file there left `fmt:check` clean).
+ */
+async function probeUnreported(
+  files: readonly string[],
+): Promise<{ readonly ok: boolean; readonly stderr: string }> {
+  const probePath = `${COVERAGE_DIR}/unreported.probe.test.ts`;
+  await Deno.writeTextFile(probePath, renderProbeModule(files, COVERAGE_DIR));
+
+  try {
+    const probe = await run('deno', [
+      'test',
+      '--quiet',
+      '--no-check',
+      ...TEST_FLAGS,
+      probePath,
+      `--coverage=${COVERAGE_DIR}`,
+      '--coverage-raw-data-only',
+    ], false);
+    return { ok: probe.success, stderr: probe.stderr };
+  } finally {
+    await Deno.remove(probePath).catch(() => {});
+  }
+}
+
 function formatRow(row: CoverageRow, pass: boolean): string {
   return `| ${row.file.padEnd(58)} | ${row.branchPct.toFixed(1).padStart(8)} | ${
     row.functionPct.toFixed(1).padStart(10)
@@ -398,20 +465,22 @@ async function main(): Promise<void> {
   // gated by its own package's run, and including it would report a partial
   // number as though it were that package's coverage.
   const include = `--include=/(${gated.join('|')})/src/`;
-  const report = await run('deno', [
-    'coverage',
-    COVERAGE_DIR,
-    include,
-    '--exclude=/test/',
-    '--exclude=/scripts/',
-  ], false);
+  const report = async (): Promise<readonly CoverageRow[]> => {
+    const result = await run('deno', [
+      'coverage',
+      COVERAGE_DIR,
+      include,
+      '--exclude=/test/',
+      '--exclude=/scripts/',
+    ], false);
+    if (!result.success) {
+      console.error(result.stderr);
+      Deno.exit(result.code === 0 ? 1 : result.code);
+    }
+    return parseMemberTable(result.stdout);
+  };
 
-  if (!report.success) {
-    console.error(report.stderr);
-    Deno.exit(report.code === 0 ? 1 : report.code);
-  }
-
-  const rows = parseMemberTable(report.stdout);
+  let rows = await report();
   if (rows.length === 0) {
     console.error(
       'coverage-targeted: no src rows measured — the selected members have no ' +
@@ -423,7 +492,21 @@ async function main(): Promise<void> {
   // Completeness before thresholds: an absent row is not a passing row.
   const expected: string[] = [];
   for (const member of gated) expected.push(...await listSourceFiles(member));
-  const unreported = findUnreportedFiles(expected, rows);
+  let unreported = findUnreportedFiles(expected, rows);
+  if (unreported.length > 0) {
+    const probe = await probeUnreported(unreported);
+    if (!probe.ok) {
+      console.error(
+        `\ncoverage-targeted: could not load ${unreported.length} src file(s) that ` +
+          'produced no coverage row, so their coverage is unknown:',
+      );
+      for (const file of unreported) console.error(`  - ${file}`);
+      console.error(probe.stderr.trim());
+      Deno.exit(1);
+    }
+    rows = await report();
+    unreported = findUnreportedFiles(expected, rows);
+  }
 
   const failing = belowBar(rows);
   console.log(`Per-file coverage (≥${THRESHOLD}% branch/function/line required):`);
@@ -437,9 +520,8 @@ async function main(): Promise<void> {
   if (unreported.length > 0) {
     console.log(
       `\ncoverage-targeted: ${unreported.length} of ${expected.length} src file(s) ` +
-        'produced no coverage row. Each is either type-only (erased at compile ' +
-        "time, so absent from every report including the full run's) or was " +
-        'loaded by no test in these members — read the file to tell which:',
+        'emit no runtime code (type-only, erased at compile time), so there is ' +
+        'nothing to measure in them:',
     );
     for (const file of unreported) console.log(`  - ${file}`);
   }
@@ -458,7 +540,9 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `\ncoverage-targeted: all ${rows.length} measured file(s) meet the ≥${THRESHOLD}% bar.`,
+    `\ncoverage-targeted: all ${expected.length} src file(s) accounted for — ` +
+      `${rows.length} measured and ≥${THRESHOLD}% on all three, ` +
+      `${unreported.length} with no runtime code.`,
   );
   console.log('Milestone hand-off still requires the full `deno task test:coverage`.');
 }
