@@ -4,13 +4,21 @@
  *
  * @module
  */
-import type { ILogger, IPlugin, IPluginContext, IRuntimeServices, LogLevel } from '@setu-ts/common';
+import type {
+  ILogger,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+  ITelemetryService,
+  LogLevel,
+} from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { ConsoleLogger } from '../loggers/console-logger.ts';
 import { NoopLogger } from '../loggers/noop-logger.ts';
 import { PinoLogger } from '../loggers/pino-logger.ts';
 import type { PinoFactory, PinoLoggerOptions } from '../loggers/pino-logger.ts';
+import { TraceEnrichedLogger } from '../loggers/trace-enriched-logger.ts';
 import { createRequestLoggerMiddleware } from '../middleware/request-logger.ts';
 import type { RequestLoggerOptions } from '../middleware/request-logger.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -102,7 +110,29 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
       const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
       const logger = await createLogger(transport, level, runtime, options);
 
-      ctx.services.register<ILogger>(CAPABILITIES.LOGGER, logger);
+      // X34-2: every record names the trace it was emitted in, so an operator
+      // holding a trace id can find the log lines and vice versa.
+      //
+      // The telemetry capability is resolved at CALL time, never here, and that
+      // is forced rather than merely careful: `TelemetryPlugin` declares
+      // `CAPABILITIES.LOGGER` in its own `optionalDependencies`, so the kernel
+      // orders THIS plugin first and telemetry is guaranteed absent right now.
+      // Declaring the reverse edge to fix the ordering is not available either
+      // — the two together are a cycle `resolvePluginOrder` refuses, which
+      // would fail `start()` for every application registering both plugins.
+      //
+      // Absent telemetry the decorator is transparent: `activeSpanContext`
+      // reports nothing and the record is byte-identical to an undecorated one.
+      ctx.services.register<ILogger>(
+        CAPABILITIES.LOGGER,
+        new TraceEnrichedLogger(
+          logger,
+          () =>
+            ctx.services.has(CAPABILITIES.TELEMETRY)
+              ? ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY)
+              : undefined,
+        ),
+      );
 
       if (requestLogging) {
         const middlewareOptions: RequestLoggerOptions = buildRequestLoggerOptions(options);

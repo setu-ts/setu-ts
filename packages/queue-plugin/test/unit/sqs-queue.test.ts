@@ -3,6 +3,7 @@ import { expect } from '@std/expect';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
 import type { ISqsTransport } from '../../src/adapters/sqs-queue.ts';
+import { FakeSqsTransport } from '../fixtures/fake-sqs-transport.ts';
 import {
   QueueBackendUnavailableError,
   SqsDelayTooLongError,
@@ -813,6 +814,128 @@ describe('SqsQueue', () => {
       const jobs = await queue.reserve('jobs', 1, 1000000);
       expect(jobs).toHaveLength(0);
       expect(logged).toContain('no ReceiptHandle');
+    });
+  });
+
+  describe('the header channel (M90i / X34-1)', () => {
+    /** Builds an SQS queue whose one message carries `headers` verbatim. */
+    function queueDelivering(headers: unknown, log?: (m: string) => void) {
+      const envelope: Record<string, unknown> = {
+        v: 1,
+        id: 'j1',
+        name: 'jobs',
+        data: {},
+        maxAttempts: 3,
+      };
+      if (headers !== undefined) {
+        envelope.headers = headers;
+      }
+      const transport: ISqsTransport = {
+        send: () => Promise.resolve(),
+        receive: () =>
+          Promise.resolve([{
+            body: JSON.stringify(envelope),
+            receiptHandle: 'handle-j1',
+            approximateReceiveCount: '1',
+          }]),
+        delete: () => Promise.resolve(),
+        changeVisibility: () => Promise.resolve(),
+        close: () => Promise.resolve(),
+      };
+      return new SqsQueue(
+        createRuntime(),
+        { queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' }, client: transport },
+        log === undefined ? undefined : { error: log },
+      );
+    }
+
+    it('delivers a well-formed header map', async () => {
+      const queue = queueDelivering({ traceparent: 'tp', 'x-tenant': 't1' });
+      await queue.connect();
+      const [job] = await queue.reserve('jobs', 1, 1000000);
+      expect(job?.headers).toEqual({ traceparent: 'tp', 'x-tenant': 't1' });
+    });
+
+    it('leaves the member absent when the envelope carried none', async () => {
+      const queue = queueDelivering(undefined);
+      await queue.connect();
+      const [job] = await queue.reserve('jobs', 1, 1000000);
+      expect(job).toBeDefined();
+      expect('headers' in (job as object)).toBe(false);
+    });
+
+    for (
+      const [label, value] of [
+        ['a non-object', 'not-a-map'],
+        ['null', null],
+        ['an array', ['traceparent', 'tp']],
+        ['a map with a non-string value', { traceparent: 'tp', depth: 3 }],
+      ] as const
+    ) {
+      it(`DROPS ${label} and still runs the job`, async () => {
+        // Losing the work in order to protect the record of it is the inversion
+        // this package rejects elsewhere: the job runs, untraced, and the drop
+        // is reported.
+        let logged = '';
+        const queue = queueDelivering(value, (m) => {
+          logged = m;
+        });
+        await queue.connect();
+
+        const [job] = await queue.reserve('jobs', 1, 1000000);
+        expect(job).toBeDefined();
+        expect('headers' in (job as object)).toBe(false);
+        expect(logged).toContain('malformed headers dropped');
+        expect(logged).toContain('j1');
+      });
+    }
+
+    it('drops a malformed map silently when no logger is configured', async () => {
+      const queue = queueDelivering('not-a-map');
+      await queue.connect();
+      const [job] = await queue.reserve('jobs', 1, 1000000);
+      expect(job).toBeDefined();
+      expect('headers' in (job as object)).toBe(false);
+    });
+
+    it('round-trips an enqueued header map through the envelope', async () => {
+      const transport = new FakeSqsTransport();
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+      await queue.enqueue({
+        id: 'j1',
+        name: 'jobs',
+        data: {},
+        attempts: 0,
+        maxAttempts: 3,
+        availableAtMs: 0,
+        headers: { traceparent: 'tp' },
+      });
+
+      // The map is on the WIRE, not merely in memory.
+      expect(JSON.parse(transport.sent[0]?.body ?? '{}').headers).toEqual({ traceparent: 'tp' });
+    });
+
+    it('writes NO headers key for a job that carried none', async () => {
+      const transport = new FakeSqsTransport();
+      const queue = new SqsQueue(createRuntime(), {
+        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+        client: transport,
+      });
+      await queue.connect();
+      await queue.enqueue({
+        id: 'j1',
+        name: 'jobs',
+        data: {},
+        attempts: 0,
+        maxAttempts: 3,
+        availableAtMs: 0,
+      });
+
+      expect('headers' in JSON.parse(transport.sent[0]?.body ?? '{}')).toBe(false);
     });
   });
 

@@ -14,6 +14,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { LoggerPlugin } from '../../src/plugin/logger-plugin.ts';
 import { NoopLogger } from '../../src/loggers/noop-logger.ts';
 import { ConsoleLogger } from '../../src/loggers/console-logger.ts';
+import { TraceEnrichedLogger } from '../../src/loggers/trace-enriched-logger.ts';
 import type { PinoFactory } from '../../src/loggers/pino-logger.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import manifest from '../../deno.json' with { type: 'json' };
@@ -135,7 +136,11 @@ describe('LoggerPlugin (integration)', () => {
     await plugin.register(ctx);
 
     const logger = getLogger(registeredServices);
-    expect(logger).toBeInstanceOf(NoopLogger);
+    // M90i: the plugin registers a trace-enriching decorator, so the concrete
+    // transport is one level in. Unwrapped rather than dropped: what this test
+    // exists to verify is which transport the plugin BUILT.
+    expect(logger).toBeInstanceOf(TraceEnrichedLogger);
+    expect((logger as TraceEnrichedLogger).inner).toBeInstanceOf(NoopLogger);
   });
 
   it('registers a ConsoleLogger when transport is console (default)', async () => {
@@ -144,7 +149,8 @@ describe('LoggerPlugin (integration)', () => {
     await plugin.register(ctx);
 
     const logger = getLogger(registeredServices);
-    expect(logger).toBeInstanceOf(ConsoleLogger);
+    expect(logger).toBeInstanceOf(TraceEnrichedLogger);
+    expect((logger as TraceEnrichedLogger).inner).toBeInstanceOf(ConsoleLogger);
   });
 
   it('passes level option to the logger', async () => {
@@ -167,7 +173,8 @@ describe('LoggerPlugin (integration)', () => {
     await plugin.register(ctx);
 
     const logger = getLogger(registeredServices);
-    expect(logger).toBeInstanceOf(ConsoleLogger);
+    expect((logger as TraceEnrichedLogger).inner).toBeInstanceOf(ConsoleLogger);
+    // `level` passes through the decorator unchanged.
     expect(logger.level).toBe('debug');
   });
 

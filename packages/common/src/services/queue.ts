@@ -20,6 +20,26 @@ export interface IJob<T = unknown> {
   readonly data: T;
   /** How many times this job has been attempted (1 on first delivery). */
   readonly attempts: number;
+  /**
+   * Transport headers carried with the job, mirroring
+   * `MessageMetadata.headers` so the two ingresses cannot drift on
+   * meaning: `{}` means the channel was read and carried nothing; **absent**
+   * means there was no channel.
+   *
+   * This is the queue's half of trace propagation. A framework with a
+   * `CAPABILITIES.TELEMETRY` provider writes a W3C `traceparent` here when the
+   * job is enqueued, so the processor's work joins the trace of the request
+   * that caused it; without one, the map holds only what the caller passed in
+   * {@linkcode AddJobOptions.headers}.
+   *
+   * Absent is a real answer and never substituted with `{}`: an `IQueue`
+   * implementation whose transport cannot carry a header omits the member
+   * rather than reporting an empty one, so "this queue has no channel" stays
+   * distinguishable from "the channel was empty".
+   *
+   * @since 0.5.0
+   */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -41,6 +61,19 @@ export interface AddJobOptions {
   readonly delayMs?: number;
   /** Maximum attempts before the job is dead-lettered. */
   readonly maxAttempts?: number;
+  /**
+   * Transport headers to carry with the job, delivered to the processor as
+   * {@linkcode IJob.headers}.
+   *
+   * Delivery does NOT depend on which capabilities are registered: a map
+   * passed here reaches the processor whether or not telemetry is present.
+   * With a `CAPABILITIES.TELEMETRY` provider the framework ADDS a W3C
+   * `traceparent` to whatever the caller supplied, so an enqueued job joins
+   * the trace of the request that enqueued it.
+   *
+   * @since 0.5.0
+   */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /**

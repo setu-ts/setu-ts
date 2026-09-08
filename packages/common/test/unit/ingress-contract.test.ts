@@ -187,3 +187,51 @@ describe('Behaviour contracts satisfy BehaviorLike structurally (M86 §3.1–§3
     expect(acceptsIngressBehavior(behavior)).toBe(behavior);
   });
 });
+
+describe('IngressContext.headers — which arms carry a channel (M90i §3.3, §3.7)', () => {
+  it('carries headers on the queue arm', () => {
+    // New in M90i: `IJob.headers` gave the queue a channel, so the envelope
+    // stops being messaging-only.
+    const ctx: IngressContext = {
+      kind: 'queue',
+      name: 'orders',
+      payload: null,
+      attempt: 1,
+      headers: { traceparent: 'tp' },
+    };
+    expect(ctx.headers?.traceparent).toBe('tp');
+  });
+
+  it('carries headers on the messaging arm', () => {
+    const ctx: IngressContext = {
+      kind: 'messaging',
+      name: 'order.created',
+      payload: null,
+      headers: {},
+    };
+    expect(ctx.headers).toEqual({});
+  });
+
+  it('leaves the scheduler arm with NO headers, deliberately', () => {
+    // X34 records the scheduler's fresh trace root as CORRECT: a tick has no
+    // upstream request, so there is nothing to carry and nothing to join.
+    // Adding the member "for symmetry" would erase the distinction the three
+    // states exist for — an operator could no longer tell "this work had no
+    // cause" from "the cause was lost".
+    const ctx: IngressContext = {
+      kind: 'scheduler',
+      name: 'nightly',
+      payload: null,
+      attempt: 1,
+    };
+    expect('headers' in ctx).toBe(false);
+  });
+
+  it('separates an absent channel from an empty one', () => {
+    const absent: IngressContext = { kind: 'queue', name: 'n', payload: null };
+    const empty: IngressContext = { kind: 'queue', name: 'n', payload: null, headers: {} };
+    // `ctx.headers === undefined` is satisfied by both; only presence separates.
+    expect('headers' in absent).toBe(false);
+    expect('headers' in empty).toBe(true);
+  });
+});

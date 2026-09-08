@@ -89,6 +89,11 @@ export async function runJob<T>(
     name: storedJob.name,
     data: storedJob.data,
     attempts: storedJob.attempts,
+    // Conditional spread, never `headers: storedJob.headers`: the plain
+    // assignment would create an own property whose value is `undefined`, so a
+    // consumer testing presence (`'headers' in job`) would see a channel that
+    // does not exist — the exact inversion of the contract's three states.
+    ...(storedJob.headers === undefined ? {} : { headers: storedJob.headers }),
   };
 
   // The claim token identifies THIS delivery, so an adapter can reject a settle
@@ -200,7 +205,18 @@ export function withIngressBehaviors<T>(
     }
 
     return composeBehaviorChain<IngressContext<IJob<T>>, void>(
-      { kind: 'queue', name: job.name, payload: job, attempt: job.attempts },
+      {
+        kind: 'queue',
+        name: job.name,
+        payload: job,
+        attempt: job.attempts,
+        // Same conditional spread, for the same reason: `IngressContext.headers`
+        // documents ABSENT as "there was no channel", so a queue job that
+        // carried none must leave the member off rather than present-and-
+        // `undefined`. A behaviour reads the queue arm exactly as it reads the
+        // messaging one.
+        ...(job.headers === undefined ? {} : { headers: job.headers }),
+      },
       behaviors,
       () => Promise.resolve(processor(job)),
     );

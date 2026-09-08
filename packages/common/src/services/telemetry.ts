@@ -191,4 +191,35 @@ export interface ITelemetryService {
     fn: (span: ISpan) => Promise<T>,
     options?: SpanOptions,
   ): Promise<T>;
+
+  /**
+   * Reports the identifiers of the span that is active RIGHT NOW, so a signal
+   * emitted outside any span-creating call — a log record, most of all — can
+   * name the trace it belongs to.
+   *
+   * This is the read that joins a log line to a span. {@linkcode withSpan}
+   * hands its own span to its callback and nothing else, so without this a
+   * consumer that is merely *running inside* a span has no way to ask which
+   * one; every signal the framework emits is individually good and mutually
+   * unjoinable.
+   *
+   * Optional, and its ABSENCE is reported rather than substituted. A service
+   * that cannot see an active span omits the method, and a consumer then
+   * enriches nothing rather than emitting empty identifiers that would join a
+   * record to a trace that does not exist. Returning `undefined` from an
+   * implemented method is the narrower answer: "I can see, and nothing is
+   * running".
+   *
+   * Implementations must not throw: a caller on the logging path cannot
+   * usefully handle a failure to describe the trace, and turning the
+   * observability read into an availability fault is strictly worse than
+   * emitting an unjoined record. Callers guard anyway (a replaceable
+   * capability can be anything), but the contract is no-throw.
+   *
+   * @returns The active span's identifiers, or `undefined` when no span is
+   * active — including when span activation is switched off
+   * (`contextPropagation: false`), since nothing is then active to report
+   * @since 0.5.0
+   */
+  activeSpanContext?(): SpanContext | undefined;
 }

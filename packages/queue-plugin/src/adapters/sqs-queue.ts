@@ -333,12 +333,20 @@ export class SqsQueue implements QueueAdapter {
       }
     }
 
+    // SQS is the ONE adapter that names each member: memory spreads the job
+    // object and redis/rabbitmq serialize it whole, so all three carry a new
+    // member for free while this envelope must list it explicitly and validate
+    // it back on `reserve`.
     const body = JSON.stringify({
       v: 1,
       id: job.id,
       name: job.name,
       data: job.data,
       maxAttempts: job.maxAttempts,
+      // Omitted when the job carried no channel, so the round trip preserves
+      // ABSENT rather than turning it into `{}` — the distinction `IJob.headers`
+      // documents.
+      ...(job.headers === undefined ? {} : { headers: job.headers }),
     });
 
     await this.#transport.send(queueUrl, body, delaySeconds);
@@ -398,6 +406,7 @@ export class SqsQueue implements QueueAdapter {
         name: string;
         data: T;
         maxAttempts: number;
+        headers?: unknown;
       };
 
       // Attempts come from the platform's ApproximateReceiveCount.
@@ -416,6 +425,19 @@ export class SqsQueue implements QueueAdapter {
         attempts = count;
       } else {
         attempts = 1;
+      }
+
+      // A header map that is not a flat string map is DROPPED and reported, and
+      // the job still runs: the envelope validator above skips a malformed
+      // message, and applying that to an observability field would lose the
+      // work in order to protect the record of it. The job is then simply
+      // untraced, which is exactly what a job enqueued before this channel
+      // existed is.
+      const headers = readStringMap(envelope.headers);
+      if (envelope.headers !== undefined && headers === undefined && this.#logger) {
+        this.#logger.error(
+          `SQS reserve: malformed headers dropped on "${name}" job "${envelope.id}" — job runs untraced`,
+        );
       }
 
       // Generate a unique claim token for this reservation.
@@ -443,6 +465,7 @@ export class SqsQueue implements QueueAdapter {
         availableAtMs: nowMs,
         // Pass the claim token through for settlement operations
         claimToken,
+        ...(headers === undefined ? {} : { headers }),
       });
     }
 
@@ -638,6 +661,14 @@ export class SqsQueue implements QueueAdapter {
       return false;
     }
 
+    // `headers` is deliberately NOT validated here, and its absence from this
+    // function is the decision rather than an omission: this validator's
+    // failure mode is SKIPPING the message, and refusing to run a job because
+    // its observability field is malformed would lose the work to protect the
+    // record of it. That is the inversion this package already rejects
+    // elsewhere ("losing the job as well as the notification would be strictly
+    // worse than losing the notification" — `notifyFailed`). A malformed map is
+    // dropped in `reserve` instead, and the job runs untraced.
     return true;
   }
 
@@ -668,4 +699,35 @@ export class SqsQueue implements QueueAdapter {
     }
     return entry.claimToken === claimToken;
   }
+}
+
+/**
+ * Narrows an envelope's `headers` to a flat string map, or reports `undefined`
+ * when it is absent or malformed.
+ *
+ * SQS bodies are arbitrary JSON written by whoever holds the queue URL, so the
+ * value arrives as `unknown` and cannot be trusted to be the shape
+ * `IJob.headers` promises its consumers. One non-string value is enough to
+ * reject the whole map: a partially-typed map would hand a processor a
+ * `Record<string, string>` containing something that is not a string, which is
+ * the kind of lie a type assertion exists to prevent.
+ *
+ * Absent and malformed deliberately collapse to the same answer HERE — both
+ * mean "no usable channel" — while the caller keeps them apart for reporting,
+ * because only the second is worth an operator's attention.
+ *
+ * @param value - The envelope's raw `headers` member
+ * @returns The map when every value is a string, otherwise `undefined`
+ */
+function readStringMap(value: unknown): Readonly<Record<string, string>> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  for (const [, entry] of entries) {
+    if (typeof entry !== 'string') {
+      return undefined;
+    }
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
 }

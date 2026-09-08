@@ -53,6 +53,35 @@ a console-logging application never pulls it in. You may also inject a pre-built
 `createRequestLoggerMiddleware(options)` logs each request and its outcome. Durations are computed
 from the monotonic clock (`runtime.hrtime()`), never from a wall-clock epoch.
 
+## Trace correlation
+
+With a `CAPABILITIES.TELEMETRY` provider registered, every record carries the active span's
+`trace_id` and `span_id`, so an operator holding a trace id can find the log lines and one holding a
+log line can find the trace.
+
+```json
+{
+  "level": "info",
+  "msg": "order created",
+  "trace_id": "0af7651916cd43dd8448eb211c80319c",
+  "span_id": "b7ad6b7169203331"
+}
+```
+
+The names are snake_case rather than this framework's usual camelCase, deliberately: they exist to
+be read by a log backend, and the OpenTelemetry log-correlation convention Loki, Elastic and the
+collector's own processors key on is snake_case.
+
+Enrichment covers every level and child loggers, so `logger.child({ requestId })` still carries
+them. Your own `trace_id` in the metadata wins. **Without telemetry, or outside any span, the record
+is byte-identical to before** — as it is when the telemetry service cannot report an active span, or
+when reading it throws: the read is guarded end to end, because an observability enrichment must
+never turn logging into the fault.
+
+> The value registered under `CAPABILITIES.LOGGER` is an internal decorator wrapping the configured
+> transport, so `instanceof ConsoleLogger` on the resolved capability does not hold. `ILogger` is
+> the contract.
+
 ## Exports
 
 | Export                          | Kind      |

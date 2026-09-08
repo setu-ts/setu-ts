@@ -5,7 +5,7 @@
  * @since 0.2.0
  */
 
-import type { TelemetryContext } from '@setu-ts/common';
+import type { SpanContext, TelemetryContext } from '@setu-ts/common';
 
 /**
  * The key used to store the active span on `ctx.state`.
@@ -75,6 +75,24 @@ export interface TracerHost {
   ): unknown;
   /** Runs work with the supplied span as the active OTel span, when supported. */
   activate?<T>(span: unknown, fn: () => Promise<T>): Promise<T>;
+  /**
+   * Reports the identifiers of the span the OTel context currently holds
+   * active, or `undefined` when nothing is active.
+   *
+   * This is the read that lets a signal emitted OUTSIDE a `withSpan` call — a
+   * log record, above all — name the trace it belongs to (X34-2). It cannot be
+   * answered from `ITelemetryService` alone, which hands its span only to its
+   * own callback, so the host is where it lives.
+   *
+   * Optional, and paired with {@linkcode activate}: a host with no registered
+   * context manager never has an active span, so it omits this member rather
+   * than answering `undefined` forever. Omitted means "this host cannot see";
+   * `undefined` from an implemented member means "nothing is running".
+   *
+   * @returns The active span's identifiers, or `undefined`
+   * @since 0.5.0
+   */
+  activeSpanContext?(): SpanContext | undefined;
   /** Extracts a context from incoming headers (for traceparent propagation). */
   extractContext(headers: Headers): TelemetryContext;
   /** Injects a context into outgoing headers. */
