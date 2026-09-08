@@ -257,3 +257,24 @@ describe('@setu-ts/common barrel — M90a path matcher', () => {
     expect(isExcluded('/orders')).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// M90f — the shared JSON-body parse and its 400-branded error
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M90f malformed body', () => {
+  it('exports parseJsonBody, which runtime, kernel and testing each import', () => {
+    // Pinned against the BARREL: all three `IRequest.json()` producers
+    // resolve it by name from here (the M56 defect class).
+    expect(typeof common.parseJsonBody).toBe('function');
+    expect(common.parseJsonBody('{"a":1}')).toEqual({ a: 1 });
+    expect(() => common.parseJsonBody('{nope')).toThrow(common.MalformedRequestBodyError);
+  });
+
+  it('exports MalformedRequestBodyError, branded 400 at construction', () => {
+    const error = new common.MalformedRequestBodyError(new SyntaxError('at position 0'));
+    expect(error.name).toBe('MalformedRequestBodyError');
+    expect(common.httpStatusHintOf(error)?.status).toBe(400);
+    expect(common.httpStatusHintOf(error)?.title).toBe('Bad Request');
+  });
+});

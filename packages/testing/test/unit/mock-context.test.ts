@@ -2,6 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { _getDefaults, createTestContext, MockResponse } from '../../src/mock-context.ts';
 import { MockServiceRegistry } from '../../src/mock-registry.ts';
+import { httpStatusHintOf, MalformedRequestBodyError } from '@setu-ts/common';
 import type { IRuntimeServices, IServiceRegistry } from '@setu-ts/common';
 
 // Build a runtime fake where every accessor is verified individually.
@@ -195,6 +196,23 @@ describe('createTestContext', () => {
     expect(await ctx.request.text()).toBe('');
     expect(await ctx.request.bytes()).toEqual(new Uint8Array(0));
     expect(await ctx.request.json()).toEqual({});
+  });
+
+  // X37-1 (M90f): the double must reject a malformed body with the same
+  // `400`-branded class the served path and `inject()` reject with — a
+  // double that matched the real producers in success but not in failure
+  // would let a suite prove the opposite of production.
+  it('MockRequest.json() rejects a malformed body with the 400-branded class', async () => {
+    const ctx = createTestContext({ body: '{not-json' });
+    try {
+      await ctx.request.json();
+      throw new Error('json() should have rejected');
+    } catch (error) {
+      expect(error).toBeInstanceOf(MalformedRequestBodyError);
+      const hint = httpStatusHintOf(error);
+      expect(hint?.status).toBe(400);
+      expect((error as MalformedRequestBodyError).cause).toBeInstanceOf(SyntaxError);
+    }
   });
 
   it('request.path defaults to pathname from url', () => {

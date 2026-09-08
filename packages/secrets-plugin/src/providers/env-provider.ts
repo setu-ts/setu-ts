@@ -1,11 +1,13 @@
 /**
  * EnvProvider — reads secrets from environment variables exposed through
  * `IRuntimeServices.env`. Zero-dependency and available on every runtime
- * (Node/Deno/Bun/Workers). Read-only: `set` throws.
+ * (Node/Deno/Bun/Workers). Read-only: `set` rejects with
+ * {@linkcode ReadOnlySecretProviderError}, branded `501` (X20-2, M90f).
  *
  * @module
  */
 import type { SecretProvider } from '../interfaces/index.ts';
+import { ReadOnlySecretProviderError } from '../errors.ts';
 
 /**
  * Maps a secret name/path to an environment-variable key: prepends the prefix,
@@ -76,15 +78,23 @@ export class EnvProvider implements SecretProvider {
   }
 
   /**
-   * Always throws — environment variables are immutable at runtime.
+   * Always rejects — environment variables are immutable at runtime.
+   *
+   * The rejection is branded with a `501` HTTP status hint (X20-2, M90f), so
+   * an application running `errorHandler` answers the write attempt with
+   * `501 Not Implemented` in its configured format rather than the masked
+   * `500` an unbranded rejection from this depth would produce. It
+   * REJECTS — never throws synchronously — so a caller using `.catch()`
+   * observes it either way.
+   *
+   * `SecretsService.rotate()` reaches this same site by delegating to `set`,
+   * which is what makes both public write operations answer identically.
    *
    * @param _name - Secret name (unused)
    * @param _value - New value (unused)
-   * @throws {Error} Always, because `EnvProvider` is read-only
+   * @returns A rejected promise carrying {@linkcode ReadOnlySecretProviderError}
    */
   set(_name: string, _value: string): Promise<void> {
-    return Promise.reject(
-      new Error('EnvProvider is read-only; environment secrets cannot be rotated at runtime'),
-    );
+    return Promise.reject(new ReadOnlySecretProviderError('EnvProvider'));
   }
 }

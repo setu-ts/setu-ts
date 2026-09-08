@@ -131,6 +131,7 @@ package fits the plugin architecture.
 | `none`                            | function  |
 | `ok`                              | function  |
 | `parseCookie`                     | function  |
+| `parseJsonBody`                   | function  |
 | `parseTraceparentToContext`       | function  |
 | `replacePrincipal`                | function  |
 | `replaceTenant`                   | function  |
@@ -155,6 +156,7 @@ package fits the plugin architecture.
 | `withHttpStatusHint`              | function  |
 | `withSecurityMetadata`            | function  |
 | `withValidationMetadata`          | function  |
+| `MalformedRequestBodyError`       | class     |
 | `CAPABILITIES`                    | const     |
 | `CLIENT_IP_STATE_KEY`             | const     |
 | `ERROR_RESPONDER_BRAND`           | const     |

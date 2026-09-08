@@ -49,7 +49,20 @@ mistake, not a silent no-op.
 
 ## Errors
 
-`TimeoutError`, `BulkheadFullError`, and `CircuitOpenError` are exported for `instanceof` handling.
+`TimeoutError`, `BulkheadFullError`, and `CircuitOpenError` are exported for `instanceof` handling,
+and each carries an HTTP status an application running `errorHandler` answers with. Shedding is the
+bulkhead's purpose, so the status is part of the contract rather than an implementation detail:
+
+| Error               | Served status | The condition the caller can act on                             |
+| ------------------- | ------------- | --------------------------------------------------------------- |
+| `BulkheadFullError` | `503`         | The bulkhead is at capacity and shed the call — back off.       |
+| `CircuitOpenError`  | `503`         | The breaker is failing fast on a failing dependency — back off. |
+| `TimeoutError`      | `504`         | The protected call did not answer within its deadline.          |
+
+**None of them carries `Retry-After`.** The bulkhead's queue drains on the order of one protected
+call's latency, which the framework does not measure, so it holds no honest value to state; `503` is
+itself the retryable signal (RFC 9110). The rate limiter's `Retry-After` is the deliberate asymmetry
+— a fixed window genuinely knows when it resets.
 
 ## Semantics
 

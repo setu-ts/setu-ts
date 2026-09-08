@@ -657,6 +657,23 @@ projecting one silently changes the response shape.
 Uniqueness and types are outside what any schema-less store can do. **Use the Memory adapter for
 development and tests, and run integration tests against the backend you deploy on.**
 
+## What a driver condition returns to the client
+
+Two driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
+answered as the package's own errors, so a caller can `instanceof` them instead of matching message
+text:
+
+| Condition                                                                                                                                                                                                                                           | Thrown as                    | Served status |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------- |
+| The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                          | `SerializationConflictError` | `409`         |
+| The database, its pool, or its network is temporarily unreachable (SQLSTATE class `08`, `57P03`, the pg pool timeout, `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net errno `ECONNREFUSED` family) | `DatabaseUnavailableError`   | `503`         |
+
+Both carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
+reachable for the log (M90j) — and neither serves driver text: the body's `detail` is a fixed
+sentence. **No classified answer carries `Retry-After`**: the hint channel has no header, and the
+framework holds no honest horizon for a pool's saturation. Catch-then-throw sites and the typed
+Drizzle builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's row.
+
 ## What a refused query returns to the client
 
 The three query-shape refusals — `UnsupportedQueryFeatureError`, `UnsupportedFilterOperatorError`
@@ -739,6 +756,7 @@ imperative begin/commit.
 | `CosmosConcurrentModificationError`       | class     |
 | `CosmosTransactionScopeError`             | class     |
 | `DatabaseService`                         | class     |
+| `DatabaseUnavailableError`                | class     |
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
 | `DynamoAdapter`                           | class     |
@@ -747,6 +765,7 @@ imperative begin/commit.
 | `MongoTransactionUnavailableError`        | class     |
 | `PrismaAdapter`                           | class     |
 | `PrismaRepository`                        | class     |
+| `SerializationConflictError`              | class     |
 | `UnitOfWork`                              | class     |
 | `UnsupportedFilterOperatorError`          | class     |
 | `UnsupportedMigrationError`               | class     |

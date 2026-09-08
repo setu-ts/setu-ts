@@ -14,7 +14,7 @@
  */
 
 import type { HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
-import { withHttpStatusHint } from '@setu-ts/common';
+import { parseJsonBody, withHttpStatusHint } from '@setu-ts/common';
 
 // Hoisted TextDecoder — avoids per-call allocation (A1 — no slice needed).
 const decoder = new TextDecoder();
@@ -162,9 +162,17 @@ class FrameworkRequest implements IRequest {
     return decoder.decode(await this.bytes());
   }
 
-  /** Reads and parses the body as JSON. Idempotent. */
+  /**
+   * Reads and parses the body as JSON. Idempotent.
+   *
+   * The parse is the shared `parseJsonBody` (X37-1): a malformed body rejects
+   * with the `400`-branded `MalformedRequestBodyError` instead of the bare
+   * `SyntaxError` that reached `errorHandler` as a masked `500`. The
+   * rejection is cached like any body outcome — the body is one-shot, so a
+   * second reader must observe the same failure, not a different one.
+   */
   async json<T = unknown>(): Promise<T> {
-    return JSON.parse(await this.text()) as T;
+    return parseJsonBody(await this.text()) as T;
   }
 
   /**

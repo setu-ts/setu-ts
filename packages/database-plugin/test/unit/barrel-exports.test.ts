@@ -75,6 +75,32 @@ import type {
   SqlJsonDialect,
 } from '../../src/index.ts';
 
+describe('database-plugin barrel exports — M90f driver classifications', () => {
+  it('exports SerializationConflictError and DatabaseUnavailableError', () => {
+    // Pinned against the BARREL: an application's retry loop reaches these
+    // by `instanceof` from `@setu-ts/database-plugin`, and dropping the
+    // re-export leaves the errors unit tests green (the M56 defect class).
+    expect(typeof database.SerializationConflictError).toBe('function');
+    expect(typeof database.DatabaseUnavailableError).toBe('function');
+
+    const conflict = new database.SerializationConflictError('diagnostic', {
+      cause: { code: '40001' },
+    });
+    expect(conflict.name).toBe('SerializationConflictError');
+    expect(common.httpStatusHintOf(conflict)?.status).toBe(409);
+
+    const unavailable = new database.DatabaseUnavailableError('diagnostic', {
+      cause: new Error('timeout exceeded when trying to connect'),
+    });
+    expect(unavailable.name).toBe('DatabaseUnavailableError');
+    expect(common.httpStatusHintOf(unavailable)?.status).toBe(503);
+  });
+
+  it('keeps the classifier INTERNAL — classifyDriverError is not public surface', () => {
+    expect(Object.hasOwn(database, 'classifyDriverError')).toBe(false);
+  });
+});
+
 describe('database-plugin barrel exports', () => {
   it('exports the typed Drizzle seam without leaking internal symbols', () => {
     expect(typeof database.createDrizzleDatabase).toBe('function');

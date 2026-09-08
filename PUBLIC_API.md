@@ -1856,6 +1856,7 @@ injection seam, so an application implementing its own facade can name every sig
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                            |
 | `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                            |
 | `UnsupportedFilterOperatorError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                                                               | classes                            |
+| `SerializationConflictError`, `DatabaseUnavailableError`                                                                                                                                                                                                                                                                | classes                            |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                              |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                              |
 | `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                                                                                                                                                                                                                   | types                              |
@@ -1913,6 +1914,29 @@ The served `detail` is composed from this package's own structured fields (`feat
 is reachable only in the log, and is what `errorHandler` records. So the response gains a status and
 a sentence without gaining a disclosure channel; a hinted error is exempt from `maskInternalErrors`
 precisely because there is no driver output in its body to mask.
+
+**Driver conditions answer their classified status (M90f, X38-1/X35-2).** `DatabaseService`
+classifies a driver rejection at its four interception sites (the repository wrappers, the
+`beginTransaction()` acquisition, the transaction catch, and `query()`) and throws
+`SerializationConflictError` — answered **`409 Conflict`**, the canonical retry-me signal, for a
+backend-reported write conflict (PostgreSQL SQLSTATE class `40` including `40001`, Prisma's `P2034`
+mapping of it, MongoDB's `TransientTransactionError` label, DynamoDB's
+`TransactionConflictException` name, Bigtable's gRPC `ABORTED`, Cosmos `449`) — or
+`DatabaseUnavailableError` — answered **`503 Service Unavailable`** — for a transiently unreachable
+backend (SQLSTATE class `08`, `57P03`, the node-postgres pool timeout,
+`MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, and the net
+errno `ECONNREFUSED` family the AWS SDK surfaces as a bare error). Both carry the original driver
+error as `cause` — the SQLSTATE and the failing statement stay reachable for the log — and serve a
+fixed sentence, so the masking exemption stays narrow. **Neither carries `Retry-After`**:
+`ErrorResponseInit` has no header channel, and the framework holds no honest horizon for a pool's
+saturation — `503` is itself the retryable signal (RFC 9110). The rate limiter's `Retry-After` is
+the deliberate asymmetry (a fixed window genuinely knows when it resets). An unrecognised error
+keeps the masked `500`, and an already-classified error is passed through untouched rather than
+wrapped twice. MongoDB's conflict mapping is verified against a real replica set and PostgreSQL's
+against a real server (SQLSTATE `40001` through Drizzle and Prisma's `P2034` alike); **DynamoDB's
+`TransactionConflictException` and Cosmos's `449` are documented-unverified** — neither was
+reproducible against DynamoDB Local or the local emulator, and Cosmos's connect refusal is a startup
+failure that never reaches a client.
 
 **Programmatic migrations answer `501 Not Implemented` too.** `UnsupportedMigrationError` names a
 distinct framework-capability refusal rather than pretending a migration is a raw query or a query
@@ -2209,7 +2233,11 @@ on 429; with `standardHeaders` (default `true`) also `RateLimit-Limit`, `RateLim
 resets (IETF draft semantics), never epoch timestamps. The default store is an in-memory
 fixed-window counter (single-process); pass `store: new RedisRateLimitStore({ url, runtime })` for
 multi-instance deployments (ioredis is inject-or-lazy: pass `client` to inject, otherwise
-`npm:ioredis@5.x` is lazily imported on first use).
+`npm:ioredis@5.x` is lazily imported on first use). This limiter's `Retry-After` is the honest case
+for the header — a fixed window genuinely knows when it resets — which is why the framework's other
+backpressure statuses (the resilience shedding errors, X32-7; the database classifications, M90f)
+deliberately carry none: no component there holds an honest horizon, and the asymmetry is recorded
+beside each.
 
 The 429 body is written through `respondWithError`, so it uses the application's configured error
 format — including Problem Details under `errorHandler({ format: 'rfc9457' })` — just like a guard
@@ -3689,6 +3717,12 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 - `SecretsService` — the `ISecretManager` implementation (provider + read cache).
 - `EnvProvider`, `AwsKmsProvider`, `GcpSecretManagerProvider`, `AzureKeyVaultProvider`,
   `HashiCorpVaultProvider` — provider classes.
+- `ReadOnlySecretProviderError` — the read-only refusal, answered **`501 Not Implemented`** (X20-2).
+  Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
+  write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write
+  paths answer identically. Nothing is wrong with the caller — the configured provider cannot store
+  or rotate secrets, permanently — which is what `501` states. Whether `set` CREATES on a provider
+  that can write is a different question the ROADMAP tracks separately (X20-3).
 - `SecretsServiceOptions`, `SecretsPluginOptions`, `SecretsProviderType`, `SecretsProviderOptions`,
   `AwsKmsProviderOptions`, `GcpSecretManagerProviderOptions`, `AzureKeyVaultProviderOptions`,
   `HashiCorpVaultProviderOptions` — option types.
@@ -5107,9 +5141,21 @@ breaker state across instances.
 - **`ResiliencePlugin`** — Plugin factory registering the resilience service
 - **`ResiliencePluginOptions`** — Plugin configuration: `defaultCircuitBreaker?`, `defaultRetry?`,
   `defaultBulkhead?`, each consumed when a `wrap` sets the matching field to `true`
-- **`TimeoutError`** — Thrown when a call exceeds its per-attempt timeout deadline
-- **`BulkheadFullError`** — Thrown when a bulkhead sheds a call (concurrency saturated, queue full)
-- **`CircuitOpenError`** — Thrown when an open circuit breaker fails fast without invoking the call
+- **`TimeoutError`** — Thrown when a call exceeds its per-attempt timeout deadline; answered
+  **`504 Gateway Timeout`** — the framework acted as an intermediary to a protected call that did
+  not answer in time
+- **`BulkheadFullError`** — Thrown when a bulkhead sheds a call (concurrency saturated, queue full);
+  answered **`503 Service Unavailable`** — shedding is the bulkhead's purpose
+- **`CircuitOpenError`** — Thrown when an open circuit breaker fails fast without invoking the call;
+  answered **`503 Service Unavailable`** — the same load-shedding semantics on behalf of a failing
+  dependency
+
+The three statuses are part of the contract (X32-7), and **none of the three carries
+`Retry-After`**: the hint channel (`ErrorResponseInit`) has no header, the bulkhead's queue drains
+on the order of one protected call's latency — which the framework does not measure — and `503` is
+itself the retryable signal (RFC 9110). The rate limiter's `Retry-After` is the deliberate
+asymmetry: a fixed window genuinely knows when it resets.
+
 - **`IResilienceService`** — Resilience service interface (re-exported from `@setu-ts/common`)
 - **`WrapOptions`** — Pattern-selection options for `wrap` (re-exported)
 - **`CircuitBreakerPolicy`** — `threshold`, `timeout` (rolling failure window ms), `resetTimeout`
@@ -8714,6 +8760,8 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | `isSome(o)` / `isNone(o)`                       | function | `Option` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `fromNullable(v)`                               | function | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `serializeError(value)`                         | function | Serializes any thrown value into a plain `SerializedError` (`{ name, message, stack?, cause? }`) with the `cause` chain followed to a bounded depth; a non-`Error` value yields `{ name: 'Error', message: String(value) }`. Pure — no runtime-specific APIs. Here so the logger plugin (metadata normalization), the kernel (fallback-500 logging), `exceptions`, `grpc-plugin`, and `notification-plugin` can all serialize without importing one another.                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `parseJsonBody(text)`                           | function | Parses one request-body text as JSON — the ONE parse all three `IRequest.json()` implementations (`@setu-ts/runtime`'s served HTTP path, the kernel's `inject()`, `@setu-ts/testing`'s `MockRequest`) share, so a malformed body answers `400` at every producer rather than a masked `500` on the served path while the test path answered `400` (X37-1). Throws `MalformedRequestBodyError`, carrying the platform `SyntaxError` as `cause` (M90f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `MalformedRequestBodyError`                     | class    | The malformed request body rejection, branded `400 Bad Request` at construction with the fixed detail "The request body could not be parsed as JSON." The `cause` is the platform `SyntaxError` — kept for the log, never served (M90f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `resolveResponseStatus(status, target)`         | function | Returns a status the web `Response` constructor accepts, clamping anything outside `[200, 599]`, any non-integer, and the null-body statuses `204`/`205`/`304` (in range, but the Fetch standard forbids the body every path here writes — unclamped, the runtime mapper would drop that body and serve a bodiless `204`, discarding the error) to `500` and reporting it through the logger capability when the target carries one. Applied by `respondWithError` before it delegates, and by `createErrorResponder`'s responder before it builds the error, so the formatted body's status member and the written status cannot disagree. Exists because three shipped call sites take a status the APPLICATION authors (`FlagGuardOptions.statusCode`, the multi-tenancy `rejectionStatus`, a `WebSocketGuardDecision.status`), so a typo such as `4004` for `404` otherwise threw `RangeError` out of the error path itself. |
 | `respondWithError(ctx, init)`                   | function | Writes an error response through the request's published `IErrorResponder` (the application's configured format), falling back to `{ error, detail? }` when `errorHandler` has not published one. The seam that lets a package that produces error responses but may not import `@setu-ts/exceptions` answer in the configured format (M70f).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `respondWithAuthorizationFailure(ctx, failure)` | function | Writes the standard 401, 403, or 501 authorization refusal through `respondWithError`, so independent authorization entry points retain identical configured formatting.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -8856,6 +8904,12 @@ Contract notes:
   by REFERENCE — a reader transforms it with whatever schema support it has, and identity is what
   the OpenAPI generator's deduplication keys on. A foreign value under the same global symbol reads
   as absent rather than being trusted.
+- `IRequest.json()` rejects with `MalformedRequestBodyError` — branded `400` — when the body is not
+  valid JSON (X37-1). The read is lazy (M87) and happens inside the handler, so the rejection
+  reaches `errorHandler` through the ordinary throw path and is answered `400` in the configured
+  format; a handler that CATCHES its own `json()` rejection keeps full control of what is served.
+  The same rejection comes from all three producers, so an in-process `inject()` observes exactly
+  what a served request observes. Added in Milestone 90f.
 - `IRequest.raw?: Request` and `IRequestContext.raw?: Request` carry the **undisturbed** web
   `Request` the HTTP adapter received, alongside the mapped framework request whose body has already
   been buffered. The kernel terminal handler reads it to decide a WebSocket upgrade (which needs the

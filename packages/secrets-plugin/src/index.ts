@@ -29,6 +29,7 @@ export type { SecretsServiceOptions } from './services/secrets-service.ts';
 // ── Provider implementations ────────────────────────────────────────────────
 
 /** Environment-variable provider (default). */
+export { ReadOnlySecretProviderError } from './errors.ts';
 export { EnvProvider } from './providers/env-provider.ts';
 
 /** AWS Secrets Manager (KMS-backed) provider. */

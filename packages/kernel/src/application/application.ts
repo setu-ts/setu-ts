@@ -10,6 +10,7 @@ import {
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
   isPromiseLike,
+  parseJsonBody,
   respondWithError,
   serializeError,
   setUpgradeIntent,
@@ -537,7 +538,12 @@ class Application implements IKernelApplication {
       headers,
       ...(raw !== undefined ? { raw } : {}),
       json<T>(): Promise<T> {
-        return Promise.resolve(JSON.parse(bodyStr ?? '{}'));
+        // The shared parse (X37-1): a malformed body rejects with the
+        // `400`-branded MalformedRequestBodyError, so `inject()` observes the
+        // same failure the served path produces. The empty-body arm keeps its
+        // `{}` default — an in-process inject that sent no body is not a
+        // malformed body.
+        return Promise.resolve(parseJsonBody(bodyStr ?? '{}') as T);
       },
       text(): Promise<string> {
         return Promise.resolve(bodyStr ?? '');

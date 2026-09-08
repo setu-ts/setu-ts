@@ -8992,21 +8992,25 @@ expires. X31-2 (a cross-variant `If-None-Match` returns `304`) is the same famil
 
 ### Milestone 90f: Caller Errors Reach the Client Correctly
 
-**Package(s):** `packages/secrets-plugin`, `packages/resilience-plugin`, `packages/auth-plugin`,
-`packages/database-plugin`, `packages/kernel`, `packages/exceptions`
+**Package(s):** `packages/common`, `packages/runtime`, `packages/kernel`, `packages/testing`,
+`packages/database-plugin`, `packages/secrets-plugin`, `packages/resilience-plugin` — corrected at
+plan time from the six originally listed (`auth-plugin` had no row in this letter; `exceptions`
+needed no `src` change, because M89b already taught `errorHandler` to read the hint; `runtime`,
+`testing` and `common` are where X37-1 actually lives — `IRequest.json()` has THREE producers and
+§11.1 forbids fixing one of three).
 
 **Objective:** One rule, applied consistently: _a condition the caller caused, or can act on, must
 not arrive as `500`._ M89b built the mechanism (`withHttpStatusHint`) and closed two instances; this
-is six more, in five packages, **three of them found in a single block**:
+is five more, **three of them found in a single block**:
 
-| Finding | Condition                                     | Correct answer                                                                                 |
-| ------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `X38-1` | SQLSTATE `40001` `could not serialize access` | `409` — the canonical _retry me_ signal, converted to _do not retry_                           |
-| `X35-2` | connection-pool timeout                       | `503` + `Retry-After` — transient backpressure                                                 |
-| `X37-1` | malformed JSON request body                   | `400` — and `ValidationPlugin` already answers `400` for a body that parses but fails a schema |
-| `X20-2` | `rotate()` on a read-only secrets provider    | `501`                                                                                          |
-| `X32-7` | `BulkheadFullError`                           | `503`                                                                                          |
-| `X19-1` | (closed in M89b — listed for the shape)       | —                                                                                              |
+| Finding | Condition                                                 | Correct answer                                                                                     |
+| ------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `X38-1` | SQLSTATE `40001` `could not serialize access`             | `409` — the canonical _retry me_ signal, converted to _do not retry_                               |
+| `X35-2` | connection-pool timeout                                   | `503` — no `Retry-After`: the hint channel has no header, and no component holds an honest horizon |
+| `X37-1` | malformed JSON request body                               | `400` — and `ValidationPlugin` already answers `400` for a body that parses but fails a schema     |
+| `X20-2` | `rotate()` on a read-only secrets provider                | `501`                                                                                              |
+| `X32-7` | `BulkheadFullError` / `CircuitOpenError` / `TimeoutError` | `503` / `503` / `504` — shedding is the bulkhead's purpose; a timeout is a gateway timeout         |
+| `X19-1` | (closed in M89b — listed for the shape)                   | —                                                                                                  |
 
 X38-1 is the sharpest: the database supplies a machine-readable retry classifier and the framework
 converts it into a permanent-fault status, which makes optimistic concurrency — the standard answer
@@ -9243,7 +9247,7 @@ fields (`code` first) read through the same guard, plus
 | 90c       | ✅     | credential revocation and token type ([#248](https://github.com/setu-ts/setu-ts/pull/248)) |
 | 90d       | ✅     | the two brokers that cannot start ([#256](https://github.com/setu-ts/setu-ts/pull/256))    |
 | 90e       | ✅     | static delivery correctness ([#252](https://github.com/setu-ts/setu-ts/pull/252))          |
-| 90f       | ⬜     | caller errors reach the client correctly                                                   |
+| 90f       | ✅     | caller errors reach the client correctly (PR pending)                                      |
 | 90g       | ⬜     | concurrency loses work silently                                                            |
 | 90h       | ⬜     | documentation that survives contact                                                        |
 | 90i       | ⬜     | observability that joins up                                                                |

@@ -161,9 +161,12 @@ describe('real-backend CI wiring', () => {
     // (guarded on POSTGRES_URL); M80 added `127.0.0.1:8000` for the DynamoDB
     // emulator suite guarded on DYNAMODB_ENDPOINT (pinned in the test below),
     // and M81 added `127.0.0.1:8082` for the guarded Cosmos emulator suite —
-    // M82 added `127.0.0.1:8086` for the Bigtable emulator suite — all
-    // endpoint-scoped in the manifest, because a CLI `--allow-net` would
-    // REPLACE this block rather than union with it.
+    // M82 added `127.0.0.1:8086` for the Bigtable emulator suite — M90f added
+    // `127.0.0.1:1`, a deliberately CLOSED port the Mongo and DynamoDB
+    // unguarded connect-refusal cases point at (the signal is the driver's
+    // refusal, which needs no backend). All endpoint-scoped in the manifest,
+    // because a CLI `--allow-net` would REPLACE this block rather than union
+    // with it.
     expect(config.test?.permissions?.net).toEqual([
       '127.0.0.1:27017',
       'localhost:27017',
@@ -171,6 +174,7 @@ describe('real-backend CI wiring', () => {
       '127.0.0.1:8000',
       '127.0.0.1:8082',
       '127.0.0.1:8086',
+      '127.0.0.1:1',
     ]);
   });
 
