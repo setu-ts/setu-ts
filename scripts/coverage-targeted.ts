@@ -197,15 +197,33 @@ export function belowBar(
   );
 }
 
+/** Parses the `SF:` records of an lcov report into the measured file paths. */
+export function parseMeasuredFiles(lcov: string): readonly string[] {
+  return lcov
+    .split('\n')
+    .filter((line) => line.startsWith('SF:'))
+    .map((line) => line.slice('SF:'.length).trim())
+    .filter((path) => path !== '');
+}
+
 /**
- * Returns the expected source files that `deno coverage` reported no row for.
+ * Returns the expected source files that `deno coverage` measured no lines for.
  *
- * `deno coverage` reports only modules that were LOADED, so a `src` file no
- * test imports is absent from the table rather than present at 0% — and a run
- * that reads only the rows it was given used to claim
- * `all 9 file(s) meet the ≥90% bar` while saying nothing about it.
+ * Matching is against lcov `SF:` records rather than the printed table, and
+ * that is a correctness requirement rather than a preference. `deno coverage`
+ * prints each table path relative to the common root of the files it reported,
+ * so a member whose only measured file is `src/index.ts` yields the row
+ * `index.ts` — which a suffix test also accepts for
+ * `src/internal/index.ts`, marking an untested runtime module as measured and
+ * skipping it. Observed live before this change: a single-member run reported
+ * `9 measured … 0 with no runtime code` for a member holding 10 src files.
  *
- * An absent row has two causes, and they must be told apart: a module nothing
+ * `SF:` carries the absolute path with no prefix stripping, so the comparison
+ * is against the full repo-relative path, which is unique across the
+ * workspace. The `/`-boundary form absorbs the checkout location without
+ * needing `Deno.cwd()`, which a scoped read grant may refuse.
+ *
+ * An absent file has two causes, and they must be told apart: a module nothing
  * loaded (a real gap) and a TYPE-ONLY module, erased at compile time and so
  * absent from every report including the full run's. `probeUnreported` settles
  * it by asking the compiler — see there.
@@ -215,20 +233,13 @@ export function belowBar(
  * had measured, because a barrel carrying both `export { … }` and
  * `export type { … }` defeats whole-file token matching, and a wrong answer in
  * that direction silently skips a real file.
- *
- * Rows are matched by path SUFFIX because `deno coverage` prints each path
- * relative to the common root of the files it reported — `index.ts` for a
- * single member, `exceptions/src/index.ts` for two — so reconstructing that
- * prefix would duplicate a rule this tool does not own. The match requires a
- * `/` boundary (or full equality) so a row for `index.ts` cannot claim
- * `my-index.ts`.
  */
 export function findUnreportedFiles(
   expected: readonly string[],
-  rows: readonly CoverageRow[],
+  measured: readonly string[],
 ): readonly string[] {
   return expected.filter((file) =>
-    !rows.some((row) => file === row.file || file.endsWith(`/${row.file}`))
+    !measured.some((path) => path === file || path.endsWith(`/${file}`))
   );
 }
 
@@ -321,23 +332,45 @@ async function changedPaths(base: string): Promise<readonly string[]> {
   return parseChangedPaths(diff.stdout, status.stdout);
 }
 
+/** Reports whether a member declares at least one `*.test.ts` module. */
+async function hasTestModules(member: string): Promise<boolean> {
+  // `Deno.readDir` yields its error on the FIRST PULL, not on the call, so the
+  // guard has to wrap the iteration — a `try` around `readDir(dir)` alone lets
+  // a missing directory escape as an uncaught rejection.
+  const walk = async (dir: string): Promise<boolean> => {
+    try {
+      for await (const entry of Deno.readDir(dir)) {
+        if (entry.isDirectory) {
+          if (await walk(`${dir}/${entry.name}`)) return true;
+        } else if (/\.test\.(ts|tsx|mts)$/.test(entry.name)) {
+          return true;
+        }
+      }
+    } catch {
+      return false; // No such directory: the member declares no tests there.
+    }
+    return false;
+  };
+  return await walk(`${member}/test`);
+}
+
 /** Lists a member's `src` files, repo-relative, for the completeness check. */
 async function listSourceFiles(member: string): Promise<readonly string[]> {
   const found: string[] = [];
+  // Same lazy-error caveat as `hasTestModules`: guard the iteration, not the
+  // `readDir` call, or a member with no `src` crashes the run.
   const walk = async (dir: string): Promise<void> => {
-    let entries: AsyncIterable<Deno.DirEntry>;
     try {
-      entries = Deno.readDir(dir);
+      for await (const entry of Deno.readDir(dir)) {
+        const path = `${dir}/${entry.name}`;
+        if (entry.isDirectory) {
+          await walk(path);
+        } else if (/\.(ts|tsx|mts)$/.test(entry.name)) {
+          found.push(path);
+        }
+      }
     } catch {
       return; // A member with no `src` contributes nothing to measure.
-    }
-    for await (const entry of entries) {
-      const path = `${dir}/${entry.name}`;
-      if (entry.isDirectory) {
-        await walk(path);
-      } else if (/\.(ts|tsx|mts)$/.test(entry.name)) {
-        found.push(path);
-      }
     }
   };
   await walk(`${member}/src`);
@@ -448,16 +481,30 @@ async function main(): Promise<void> {
 
   await Deno.remove(COVERAGE_DIR, { recursive: true }).catch(() => {});
 
-  const test = await run('deno', [
-    'test',
-    ...TEST_FLAGS,
-    ...gated,
-    `--coverage=${COVERAGE_DIR}`,
-    '--coverage-raw-data-only',
-  ], true);
-  if (!test.success) {
-    console.error('\ncoverage-targeted: tests failed — coverage not reported.');
-    Deno.exit(test.code);
+  // `deno test` fails outright with "No test modules found" when a selected
+  // member declares none, and the run inherits stdio, so that stderr cannot be
+  // inspected here. Checking first turns it into a measurable state instead:
+  // with no tests, nothing is measured, and the probe below classifies every
+  // src file — type-only ones pass, runtime ones report 0% and fail the bar.
+  const testModules = await Promise.all(gated.map(hasTestModules));
+  if (!testModules.some((present) => present)) {
+    console.log(
+      'coverage-targeted: the selected member(s) declare no test modules, so ' +
+        'nothing measured their source.\n',
+    );
+    await Deno.mkdir(COVERAGE_DIR, { recursive: true });
+  } else {
+    const test = await run('deno', [
+      'test',
+      ...TEST_FLAGS,
+      ...gated,
+      `--coverage=${COVERAGE_DIR}`,
+      '--coverage-raw-data-only',
+    ], true);
+    if (!test.success) {
+      console.error('\ncoverage-targeted: tests failed — coverage not reported.');
+      Deno.exit(test.code);
+    }
   }
 
   // Report ONLY the selected members' src. Every other file the tests executed
@@ -465,34 +512,46 @@ async function main(): Promise<void> {
   // gated by its own package's run, and including it would report a partial
   // number as though it were that package's coverage.
   const include = `--include=/(${gated.join('|')})/src/`;
-  const report = async (): Promise<readonly CoverageRow[]> => {
-    const result = await run('deno', [
-      'coverage',
-      COVERAGE_DIR,
-      include,
-      '--exclude=/test/',
-      '--exclude=/scripts/',
-    ], false);
-    if (!result.success) {
-      console.error(result.stderr);
-      Deno.exit(result.code === 0 ? 1 : result.code);
+  const coverageFlags = [COVERAGE_DIR, include, '--exclude=/test/', '--exclude=/scripts/'];
+
+  // `deno coverage` EXITS NON-ZERO in two states that are legitimate before the
+  // probe has run: the filter matched nothing (a member whose `src` is entirely
+  // type-only) and the directory holds no data at all (a member declaring no
+  // tests). Both are observed, and neither is a fault — `scripts/coverage.ts`
+  // special-cases the first string for the same reason.
+  const nothingMeasured = (stderr: string): boolean =>
+    stderr.includes('No covered files included in the report') ||
+    stderr.includes('No coverage files found');
+
+  const read = async (): Promise<{ rows: readonly CoverageRow[]; measured: readonly string[] }> => {
+    const table = await run('deno', ['coverage', ...coverageFlags], false);
+    if (!table.success && !nothingMeasured(table.stderr)) {
+      console.error(table.stderr);
+      Deno.exit(table.code === 0 ? 1 : table.code);
     }
-    return parseMemberTable(result.stdout);
+    const lcov = await run('deno', ['coverage', ...coverageFlags, '--lcov'], false);
+    if (!lcov.success && !nothingMeasured(lcov.stderr)) {
+      console.error(lcov.stderr);
+      Deno.exit(lcov.code === 0 ? 1 : lcov.code);
+    }
+    return {
+      rows: parseMemberTable(table.stdout),
+      measured: parseMeasuredFiles(lcov.stdout),
+    };
   };
 
-  let rows = await report();
-  if (rows.length === 0) {
-    console.error(
-      'coverage-targeted: no src rows measured — the selected members have no ' +
-        'covered source. Check the member selection.',
-    );
-    Deno.exit(1);
-  }
-
-  // Completeness before thresholds: an absent row is not a passing row.
+  // Enumerate BEFORE reading coverage: an empty report is a state the probe has
+  // to be allowed to explain, not a failure to exit on (a member whose `src` is
+  // all type-only measures nothing and is not a fault).
   const expected: string[] = [];
   for (const member of gated) expected.push(...await listSourceFiles(member));
-  let unreported = findUnreportedFiles(expected, rows);
+  if (expected.length === 0) {
+    console.log('coverage-targeted: the selected member(s) have no src files to measure.');
+    Deno.exit(0);
+  }
+
+  let { rows, measured } = await read();
+  let unreported = findUnreportedFiles(expected, measured);
   if (unreported.length > 0) {
     const probe = await probeUnreported(unreported);
     if (!probe.ok) {
@@ -504,8 +563,20 @@ async function main(): Promise<void> {
       console.error(probe.stderr.trim());
       Deno.exit(1);
     }
-    rows = await report();
-    unreported = findUnreportedFiles(expected, rows);
+    ({ rows, measured } = await read());
+    unreported = findUnreportedFiles(expected, measured);
+  }
+
+  // Every src file is now either measured or provably type-only. A disagreement
+  // means the identity matching is wrong — the defect this replaced — so it is
+  // reported rather than absorbed into a pass.
+  if (rows.length + unreported.length !== expected.length) {
+    console.error(
+      `coverage-targeted: accounting mismatch — ${rows.length} measured + ` +
+        `${unreported.length} unmeasured != ${expected.length} src file(s). ` +
+        'Coverage identity matching is unsound; do not trust this result.',
+    );
+    Deno.exit(1);
   }
 
   const failing = belowBar(rows);

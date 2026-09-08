@@ -6,6 +6,7 @@ import {
   findUnreportedFiles,
   parseArgs,
   parseChangedPaths,
+  parseMeasuredFiles,
   parseMemberTable,
   readWorkspaceMembers,
   renderProbeModule,
@@ -160,46 +161,65 @@ describe('parseArgs', () => {
   });
 });
 
+describe('parseMeasuredFiles', () => {
+  it('reads the SF records and ignores every other lcov line', () => {
+    const lcov = [
+      'SF:/repo/packages/exceptions/src/index.ts',
+      'FNF:3',
+      'FNH:3',
+      'DA:1,1',
+      'end_of_record',
+      'SF:/repo/packages/exceptions/src/errors/http-error.ts',
+      'end_of_record',
+    ].join('\n');
+    expect(parseMeasuredFiles(lcov)).toEqual([
+      '/repo/packages/exceptions/src/index.ts',
+      '/repo/packages/exceptions/src/errors/http-error.ts',
+    ]);
+  });
+
+  it('returns nothing for a report with no records', () => {
+    expect(parseMeasuredFiles('')).toEqual([]);
+  });
+});
+
 describe('findUnreportedFiles', () => {
-  const row = (file: string): CoverageRow => ({
-    file,
-    branchPct: 100,
-    functionPct: 100,
-    linePct: 100,
-  });
-
-  it('reports a src file that has no coverage row even when every reported file passes', () => {
-    // `deno coverage` omits a module nothing loaded, so a passing table used to
-    // say nothing about it. The caller reports this rather than failing — a
-    // type-only module is absent for the same reason.
+  it('does not let a measured index.ts claim a nested one', () => {
+    // The defect this replaced: `deno coverage`'s TABLE prints the only
+    // measured file as `index.ts`, and a suffix test then accepted it for
+    // `internal/index.ts` too — skipping an untested runtime module. Matching
+    // full lcov paths makes the two distinct. Observed live: a single-member
+    // run reported `9 measured … 0 with no runtime code` over 10 src files.
     const expected = [
       'packages/exceptions/src/index.ts',
-      'packages/exceptions/src/never-loaded.ts',
+      'packages/exceptions/src/internal/index.ts',
     ];
-    expect(findUnreportedFiles(expected, [row('index.ts')])).toEqual([
-      'packages/exceptions/src/never-loaded.ts',
+    const measured = ['/repo/packages/exceptions/src/index.ts'];
+    expect(findUnreportedFiles(expected, measured)).toEqual([
+      'packages/exceptions/src/internal/index.ts',
     ]);
   });
 
-  it('matches a row printed relative to a multi-member common root', () => {
-    const expected = [
-      'packages/exceptions/src/index.ts',
-      'packages/resilience-plugin/src/index.ts',
-    ];
-    const rows = [row('exceptions/src/index.ts'), row('resilience-plugin/src/index.ts')];
-    expect(findUnreportedFiles(expected, rows)).toEqual([]);
-  });
-
-  it('requires a path boundary, so a row cannot claim a same-suffixed sibling', () => {
-    const expected = ['packages/exceptions/src/my-index.ts'];
-    expect(findUnreportedFiles(expected, [row('index.ts')])).toEqual([
-      'packages/exceptions/src/my-index.ts',
-    ]);
-  });
-
-  it('reports nothing when every expected file was measured', () => {
+  it('matches an absolute measured path against a repo-relative expectation', () => {
     const expected = ['packages/exceptions/src/index.ts'];
-    expect(findUnreportedFiles(expected, [row('index.ts')])).toEqual([]);
+    const measured = ['/home/someone/checkout/packages/exceptions/src/index.ts'];
+    expect(findUnreportedFiles(expected, measured)).toEqual([]);
+  });
+
+  it('accepts an already-relative measured path', () => {
+    expect(findUnreportedFiles(['packages/a/src/b.ts'], ['packages/a/src/b.ts'])).toEqual([]);
+  });
+
+  it('reports every expected file when nothing was measured', () => {
+    const expected = ['packages/a/src/one.ts', 'packages/a/src/two.ts'];
+    expect(findUnreportedFiles(expected, [])).toEqual(expected);
+  });
+
+  it('does not match on a partial segment', () => {
+    const expected = ['packages/a/src/my-index.ts'];
+    expect(findUnreportedFiles(expected, ['/repo/packages/a/src/index.ts'])).toEqual([
+      'packages/a/src/my-index.ts',
+    ]);
   });
 });
 
