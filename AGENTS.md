@@ -61,6 +61,12 @@ deno task release:verify <version>
 `deno task test:coverage` exits 0 with a file under the bar. Read the per-file table yourself and
 confirm every `src` file is ≥90% on branch, function, AND line.
 
+`deno task test:coverage:pkg [members…]` runs and measures only the named workspace members —
+seconds rather than minutes — and it DOES enforce the bar. It is an edit-loop tool: a targeted PASS
+implies the full run passes for those files; a targeted FAIL does not, because another package's
+tests may cover those lines. It never substitutes for `deno task test:coverage` as milestone
+evidence.
+
 ## Paths are workspace-relative — never absolute
 
 Every path in these rules, in `CLAUDE.md`, and in any subtask instruction is relative to the

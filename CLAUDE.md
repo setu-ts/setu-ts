@@ -4546,7 +4546,10 @@ deno task check
 deno task test
 ```
 
-All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`).
+All four must pass. A milestone also requires 90%+ coverage (`deno task test:coverage`). During the
+edit loop, `deno task test:coverage:pkg <members…>` measures only the packages you name and enforces
+the same per-file bar in seconds — but a targeted FAIL is not authoritative (another package's tests
+may cover those lines), and a targeted run is never the coverage evidence a milestone hands back.
 
 **A milestone that changes what `packages/cli` GENERATES ALSO boots a scaffolded project — the gates
 above type-check generated output and stop there.** M63 repaired four defects that every one of the

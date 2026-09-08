@@ -79,6 +79,10 @@ ANSI and read the per-file table yourself:
 deno task test:coverage 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep -E "<package>|File|---"
 ```
 
+Coverage evidence for this step comes from `deno task test:coverage` only.
+`deno task test:coverage:pkg` measures a subset of the suite, so its table cannot support a verified
+verdict — even when it reports every changed file above the bar.
+
 Every file under the package's `src/` must be **≥90% on branch, function, AND line** — all three,
 per file, not aggregate. Files under `test/` (fixtures) are excluded from the bar. A file at exactly
 90 has no margin — flag it. Paste the table in the report.
