@@ -4579,7 +4579,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   span, because M86's chain is applied by a `QueueService` SUBCLASS and is therefore outermost at
   dispatch, while messaging composes `PipelinedBroker(TracedBroker(...))` and runs behaviours inside
   it. Closing that means converting a shipped milestone's subclass into a wrapper (§16.4), and X34's
-  own "Still to run" defers the behaviour hop) — complete (PR pending)
+  own "Still to run" defers the behaviour hop) — complete (PR #260)
 - **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
   the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
   compat suites as release gates. The `smoke/` programme's X16–X19 exercises against published
@@ -4589,7 +4589,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   that follows it is being closed the same way: M90a (abuse control), M90b (health truth bounded, PR
   #249), M90c (credential revocation and token type), M90d (the two brokers that cannot start, PR
   #256), M90e (static delivery correctness, PR #252), M90f (caller errors reach the client
-  correctly, PR pending) and M90i (observability that joins up, PR pending) are complete; M90g, M90h
+  correctly, PR pending) and M90i (observability that joins up, PR #260) are complete; M90g, M90h
   and M90j remain open.
 
 ## Verification (run before declaring any work done)
