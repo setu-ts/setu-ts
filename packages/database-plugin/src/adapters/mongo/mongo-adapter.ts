@@ -16,7 +16,12 @@
  *
  * @module
  */
-import type { IAdapterTransaction, IDatabaseAdapter, TransactionOptions } from '@setu-ts/common';
+import type {
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  TransactionIsolationLevel,
+  TransactionOptions,
+} from '@setu-ts/common';
 import type { MongoAdapterOptions } from '../../interfaces/index.ts';
 import {
   MongoTransactionUnavailableError,
@@ -50,8 +55,8 @@ import type { MongoTarget } from './mongo-mapping.ts';
  * @since 0.1.0
  */
 export class MongoAdapter implements IDatabaseAdapter {
-  /** Portable isolation levels this adapter can honestly provide. */
-  readonly transactionIsolationLevels = ['serializable'] as const;
+  /** MongoDB snapshot isolation is not the portable serializable guarantee. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = [];
   #client: IMongoClient | null = null;
   /** The in-flight `connect()`, so concurrent callers share one attempt. */
   #connecting: Promise<void> | null = null;
@@ -174,17 +179,13 @@ export class MongoAdapter implements IDatabaseAdapter {
    */
   async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     this.assertConnected();
-    if (options?.isolation !== undefined && options.isolation !== 'serializable') {
+    if (options?.isolation !== undefined) {
       throw new UnsupportedIsolationLevelError('mongodb', options.isolation);
     }
     const client = this.#client as IMongoClient;
     const session = client.startSession();
     try {
-      await session.startTransaction(
-        options?.isolation === 'serializable'
-          ? { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } }
-          : undefined,
-      );
+      await session.startTransaction();
     } catch (error) {
       await session.endSession();
       throw new MongoTransactionUnavailableError(

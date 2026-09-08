@@ -1055,13 +1055,13 @@ downgraded. Database-plugin adapters throw the caller-safe `501` `UnsupportedIso
 D1 throws its own `CloudflareUnsupportedError`, since the Cloudflare plugin cannot depend on another
 plugin's error class.
 
-| Adapter                           | Honoured levels                                                                                                      |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Prisma                            | PostgreSQL, MySQL, and SQL Server: all four; CockroachDB and SQLite: `serializable`; MongoDB: none                   |
-| Drizzle                           | all four only when the application wraps its bridge with `withIsolationSupport()`                                    |
-| Memory                            | `serializable` (one process only)                                                                                    |
-| MongoDB                           | `serializable` mapped to snapshot reads plus majority writes; this prevents lost updates but is not SQL SERIALIZABLE |
-| D1, DynamoDB, Cosmos DB, Bigtable | none                                                                                                                 |
+| Adapter                           | Honoured levels                                                                                    |
+| --------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Prisma                            | PostgreSQL, MySQL, and SQL Server: all four; CockroachDB and SQLite: `serializable`; MongoDB: none |
+| Drizzle                           | all four only when the application wraps its bridge with `withIsolationSupport()`                  |
+| Memory                            | `serializable` (one process only)                                                                  |
+| MongoDB                           | none                                                                                               |
+| D1, DynamoDB, Cosmos DB, Bigtable | none                                                                                               |
 
 `withIsolationSupport()` is an application declaration that its bridge forwards options. The type
 system cannot verify its body uses them; an unbranded bridge refuses every requested level rather

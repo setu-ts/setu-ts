@@ -81,6 +81,22 @@ describe('MemoryAdapter transaction isolation', () => {
     await laterDefault.commit();
   });
 
+  it('rejects queued work and invalidates active transactions on disconnect', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+
+    const active = await adapter.beginTransaction({ isolation: 'serializable' });
+    await active.createDataSource('Counter').create({ id: 'stale', value: 1 });
+    const queued = adapter.beginTransaction();
+
+    await adapter.disconnect();
+    await expect(queued).rejects.toThrow('disconnected before the transaction could begin');
+
+    await adapter.connect();
+    expect(() => active.commit()).toThrow('transaction is no longer active');
+    await expect(adapter.createDataSource('Counter').findById('stale')).resolves.toBeNull();
+  });
+
   it('refuses levels the memory adapter cannot honour', async () => {
     const adapter = new MemoryAdapter();
     await adapter.connect();

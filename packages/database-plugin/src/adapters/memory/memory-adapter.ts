@@ -86,7 +86,9 @@ interface TxOverlay {
 /** One waiting transaction in the process-local admission queue. */
 interface TransactionAdmission {
   readonly exclusive: boolean;
+  readonly generation: number;
   readonly grant: () => void;
+  readonly reject: (error: Error) => void;
 }
 
 /**
@@ -223,6 +225,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
   private _activeExclusiveTransaction = false;
   /** FIFO work waiting behind an active or queued serializable transaction. */
   private readonly _transactionAdmissions: TransactionAdmission[] = [];
+  /** Invalidates outstanding transaction handles at each disconnect. */
+  private _transactionGeneration = 0;
 
   /** @inheritdoc */
   connect(): Promise<void> {
@@ -235,6 +239,13 @@ export class MemoryAdapter implements IDatabaseAdapter {
   disconnect(): Promise<void> {
     this._connected = false;
     this._closed = true;
+    this._transactionGeneration += 1;
+    const disconnected = new Error('MemoryAdapter disconnected before the transaction could begin');
+    for (const admission of this._transactionAdmissions.splice(0)) {
+      admission.reject(disconnected);
+    }
+    this._activeSharedTransactions = 0;
+    this._activeExclusiveTransaction = false;
     this._stores.clear();
     return Promise.resolve();
   }
@@ -257,13 +268,17 @@ export class MemoryAdapter implements IDatabaseAdapter {
     }
 
     const exclusive = options?.isolation === 'serializable';
-    return this.acquireTransactionSlot(exclusive).then((release) =>
-      this.createTransaction(release)
+    const generation = this._transactionGeneration;
+    return this.acquireTransactionSlot(exclusive, generation).then((release) =>
+      this.createTransaction(release, generation)
     );
   }
 
   /** Builds one transaction handle after any requested serializable slot is acquired. */
-  private createTransaction(release?: () => void): IAdapterTransaction {
+  private createTransaction(
+    release: (() => void) | undefined,
+    generation: number,
+  ): IAdapterTransaction {
     const overlay: TxOverlay = {
       creates: [],
       shadows: new Map(),
@@ -280,15 +295,23 @@ export class MemoryAdapter implements IDatabaseAdapter {
         release?.();
       }
     };
+    const assertActiveGeneration = (): void => {
+      if (generation !== this._transactionGeneration || !this.isReady()) {
+        throw new Error('MemoryAdapter transaction is no longer active');
+      }
+    };
 
     return {
-      createDataSource: (entity: string): DataSource =>
-        this.createOverlayDataSource(entity, overlay),
+      createDataSource: (entity: string): DataSource => {
+        assertActiveGeneration();
+        return this.createOverlayDataSource(entity, overlay, assertActiveGeneration);
+      },
 
       commit: (): Promise<void> => {
         if (committed || rolledBack) {
           throw new Error('Transaction already finalized');
         }
+        assertActiveGeneration();
         committed = true;
         try {
           // Flush creates
@@ -339,23 +362,29 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * queued, later defaults wait behind it; serializable work therefore begins
    * only after earlier defaults finish and excludes every other transaction.
    */
-  private acquireTransactionSlot(exclusive: boolean): Promise<() => void> {
+  private acquireTransactionSlot(exclusive: boolean, generation: number): Promise<() => void> {
     if (
       !this._activeExclusiveTransaction &&
       this._transactionAdmissions.length === 0 &&
       (!exclusive || this._activeSharedTransactions === 0)
     ) {
       this.activateTransaction(exclusive);
-      return Promise.resolve(this.releaseTransaction.bind(this, exclusive));
+      return Promise.resolve(this.releaseTransaction.bind(this, exclusive, generation));
     }
 
-    return new Promise<() => void>((resolve) => {
+    return new Promise<() => void>((resolve, reject) => {
       this._transactionAdmissions.push({
         exclusive,
+        generation,
         grant: (): void => {
+          if (generation !== this._transactionGeneration || !this.isReady()) {
+            reject(new Error('MemoryAdapter disconnected before the transaction could begin'));
+            return;
+          }
           this.activateTransaction(exclusive);
-          resolve(this.releaseTransaction.bind(this, exclusive));
+          resolve(this.releaseTransaction.bind(this, exclusive, generation));
         },
+        reject,
       });
     });
   }
@@ -370,7 +399,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
   }
 
   /** Releases one completed transaction and grants the next compatible work. */
-  private releaseTransaction(exclusive: boolean): void {
+  private releaseTransaction(exclusive: boolean, generation: number): void {
+    if (generation !== this._transactionGeneration) return;
     if (exclusive) {
       this._activeExclusiveTransaction = false;
     } else {
@@ -408,6 +438,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
   private createOverlayDataSource(
     entity: string,
     overlay: TxOverlay,
+    assertActiveGeneration: () => void,
   ): DataSource {
     /**
      * Resolve the effective records for a transaction read: committed rows
@@ -415,6 +446,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
      * appended.
      */
     const effectiveRecords = (): Record<string, unknown>[] => {
+      assertActiveGeneration();
       const store = this.getStore(entity);
       // The overlay's own key for a row, derived from the row's key columns.
       const keyOf = (row: Record<string, unknown>): string => {
@@ -482,6 +514,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       },
 
       create: (data) => {
+        assertActiveGeneration();
         const store = this.getStore(entity);
         const record: Record<string, unknown> = { ...data };
         // Generate missing key columns.
@@ -495,6 +528,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       },
 
       update: (id, data) => {
+        assertActiveGeneration();
         const store = this.getStore(entity);
         // Find in effective records
         const effective = effectiveRecords();
@@ -512,6 +546,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       },
 
       delete: (id) => {
+        assertActiveGeneration();
         const store = this.getStore(entity);
         const effective = effectiveRecords();
         const targetIndex = findRecordIndexForRecords(effective, store, id);

@@ -13,7 +13,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MongoAdapter, parseDatabaseFromUrl } from '../../src/adapters/mongo/mongo-adapter.ts';
 import type { MongoAdapterOptions } from '../../src/interfaces/index.ts';
-import { MongoTransactionUnavailableError } from '../../src/errors.ts';
+import {
+  MongoTransactionUnavailableError,
+  UnsupportedIsolationLevelError,
+} from '../../src/errors.ts';
 import {
   FakeMongoClient,
   fakeObjectIdCtor,
@@ -185,7 +188,7 @@ describe('MongoAdapter — transactions', () => {
     expect(session.calls).toContain('endSession');
   });
 
-  it('maps serializable to Mongo snapshot reads and majority writes', async () => {
+  it('refuses portable isolation levels rather than mislabelling snapshot isolation', async () => {
     const session = new FakeSession();
     const client = new FakeSessionClient(session);
     const adapter = new MongoAdapter({
@@ -194,13 +197,9 @@ describe('MongoAdapter — transactions', () => {
       objectIdCtor: fakeObjectIdCtor,
     });
     await adapter.connect();
-    const transaction = await adapter.beginTransaction({ isolation: 'serializable' });
-
-    expect(session.startTransactionOptions).toEqual({
-      readConcern: { level: 'snapshot' },
-      writeConcern: { w: 'majority' },
-    });
-    await transaction.rollback();
+    await expect(adapter.beginTransaction({ isolation: 'serializable' }))
+      .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+    expect(session.started).toBe(false);
   });
 
   it('wraps a startTransaction failure in MongoTransactionUnavailableError', async () => {

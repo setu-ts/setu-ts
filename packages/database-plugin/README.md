@@ -75,13 +75,13 @@ Omitting the option preserves each adapter's current default. A requested level 
 downgraded: this package's adapters throw `UnsupportedIsolationLevelError`; D1 throws its own
 `CloudflareUnsupportedError` because plugins must not depend on one another.
 
-| Adapter                           | Supported isolation                                                                                            |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Prisma                            | PostgreSQL, MySQL, and SQL Server: all four; CockroachDB and SQLite: `serializable`; MongoDB: none             |
-| Drizzle                           | All four, when its bridge is explicitly wrapped with `withIsolationSupport()`                                  |
-| Memory                            | `serializable`, process-local only                                                                             |
-| MongoDB                           | `serializable` as snapshot isolation with majority writes (prevents lost updates, but is not SQL SERIALIZABLE) |
-| D1, DynamoDB, Cosmos DB, Bigtable | None; their transactional primitives are not levelled                                                          |
+| Adapter                           | Supported isolation                                                                                |
+| --------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Prisma                            | PostgreSQL, MySQL, and SQL Server: all four; CockroachDB and SQLite: `serializable`; MongoDB: none |
+| Drizzle                           | All four, when its bridge is explicitly wrapped with `withIsolationSupport()`                      |
+| Memory                            | `serializable`, process-local only                                                                 |
+| MongoDB                           | None                                                                                               |
+| D1, DynamoDB, Cosmos DB, Bigtable | None; their transactional primitives are not levelled                                              |
 
 A custom `IDatabaseAdapter` must declare `transactionIsolationLevels` before callers can request
 isolation through the database service; an omitted declaration is refused rather than silently using

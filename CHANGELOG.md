@@ -11,10 +11,9 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/common`, `@setu-ts/database-plugin` — explicit transaction isolation (M90g / X24-2,
   X38-3).** `TransactionOptions.isolation` carries one of the four portable isolation names through
   `IDatabaseService.transaction()` to the adapter. Prisma honours all four; an explicitly branded
-  Drizzle bridge may honour all four; Memory serializes process-local transactions; and MongoDB maps
-  `serializable` to snapshot reads with majority writes (which prevents the measured lost update but
-  is not SQL SERIALIZABLE). A backend that cannot honour a requested level refuses it by name rather
-  than silently using its default.
+  Drizzle bridge may honour all four; and Memory serializes process-local transactions. MongoDB
+  snapshot isolation is not labelled as portable `serializable`, so MongoDB refuses every requested
+  portable level by name rather than silently using its default.
 
 - **`@setu-ts/session-plugin` — documented snapshot-commit concurrency limit (M90g / X22-6).**
   Cookie and store sessions each commit their complete payload snapshot, so overlapping requests
