@@ -29,6 +29,7 @@ import type {
   IAdapterTransaction,
   IDatabaseAdapter,
   IDataSource,
+  TransactionIsolationLevel,
   TransactionOptions,
 } from '@setu-ts/common';
 import type { DynamoAdapterOptions } from '../../interfaces/index.ts';
@@ -71,6 +72,8 @@ const CLIENT_MEMBERS = [
  * @since 0.1.0
  */
 export class DynamoAdapter implements IDatabaseAdapter {
+  /** DynamoDB exposes no portable transaction-isolation selector. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = [];
   #client: IDynamoClient | null = null;
   /** The in-flight `connect()`, so concurrent callers share one attempt. */
   #connecting: Promise<void> | null = null;

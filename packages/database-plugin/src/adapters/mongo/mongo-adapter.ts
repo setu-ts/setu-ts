@@ -50,6 +50,8 @@ import type { MongoTarget } from './mongo-mapping.ts';
  * @since 0.1.0
  */
 export class MongoAdapter implements IDatabaseAdapter {
+  /** Portable isolation levels this adapter can honestly provide. */
+  readonly transactionIsolationLevels = ['serializable'] as const;
   #client: IMongoClient | null = null;
   /** The in-flight `connect()`, so concurrent callers share one attempt. */
   #connecting: Promise<void> | null = null;

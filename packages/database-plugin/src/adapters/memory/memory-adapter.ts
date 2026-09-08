@@ -19,6 +19,7 @@ import type {
   IAdapterTransaction,
   IDatabaseAdapter,
   PageResult,
+  TransactionIsolationLevel,
   TransactionOptions,
 } from '@setu-ts/common';
 import {
@@ -80,6 +81,12 @@ interface TxOverlay {
   creates: Array<{ entity: string; record: Record<string, unknown> }>;
   shadows: Map<string, { entity: string; id: EntityKey; record: Record<string, unknown> }>;
   tombstones: Map<string, { entity: string; id: EntityKey }>;
+}
+
+/** One waiting transaction in the process-local admission queue. */
+interface TransactionAdmission {
+  readonly exclusive: boolean;
+  readonly grant: () => void;
 }
 
 /**
@@ -208,8 +215,14 @@ export class MemoryAdapter implements IDatabaseAdapter {
   private readonly _stores = new Map<string, EntityStore>();
   private _connected = false;
   private _closed = false;
-  /** Tail of the process-local serializable transaction queue. */
-  private _serializableTail: Promise<void> = Promise.resolve();
+  /** Portable isolation levels this adapter can honestly provide. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = ['serializable'];
+  /** Number of active default (shared) transactions. */
+  private _activeSharedTransactions = 0;
+  /** Whether a serializable (exclusive) transaction is active. */
+  private _activeExclusiveTransaction = false;
+  /** FIFO work waiting behind an active or queued serializable transaction. */
+  private readonly _transactionAdmissions: TransactionAdmission[] = [];
 
   /** @inheritdoc */
   connect(): Promise<void> {
@@ -236,14 +249,17 @@ export class MemoryAdapter implements IDatabaseAdapter {
     if (!this.isReady()) {
       throw new Error('MemoryAdapter is not connected — call connect() first');
     }
-    if (options?.isolation !== undefined && options.isolation !== 'serializable') {
+    if (
+      options?.isolation !== undefined &&
+      !this.transactionIsolationLevels.includes(options.isolation)
+    ) {
       return Promise.reject(new UnsupportedIsolationLevelError('memory', options.isolation));
     }
 
-    if (options?.isolation === 'serializable') {
-      return this.acquireSerializableSlot().then((release) => this.createTransaction(release));
-    }
-    return Promise.resolve(this.createTransaction());
+    const exclusive = options?.isolation === 'serializable';
+    return this.acquireTransactionSlot(exclusive).then((release) =>
+      this.createTransaction(release)
+    );
   }
 
   /** Builds one transaction handle after any requested serializable slot is acquired. */
@@ -316,16 +332,69 @@ export class MemoryAdapter implements IDatabaseAdapter {
     };
   }
 
-  /** Acquires the process-local mutex used by serializable transactions. */
-  private async acquireSerializableSlot(): Promise<() => void> {
-    const previous = this._serializableTail;
-    let release: (() => void) | undefined;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
+  /**
+   * Acquires one transaction slot from a FIFO shared/exclusive queue.
+   *
+   * Existing default transactions share a slot. Once serializable work is
+   * queued, later defaults wait behind it; serializable work therefore begins
+   * only after earlier defaults finish and excludes every other transaction.
+   */
+  private acquireTransactionSlot(exclusive: boolean): Promise<() => void> {
+    if (
+      !this._activeExclusiveTransaction &&
+      this._transactionAdmissions.length === 0 &&
+      (!exclusive || this._activeSharedTransactions === 0)
+    ) {
+      this.activateTransaction(exclusive);
+      return Promise.resolve(this.releaseTransaction.bind(this, exclusive));
+    }
+
+    return new Promise<() => void>((resolve) => {
+      this._transactionAdmissions.push({
+        exclusive,
+        grant: (): void => {
+          this.activateTransaction(exclusive);
+          resolve(this.releaseTransaction.bind(this, exclusive));
+        },
+      });
     });
-    this._serializableTail = previous.then(() => gate);
-    await previous;
-    return (): void => release?.();
+  }
+
+  /** Marks one admitted transaction active. */
+  private activateTransaction(exclusive: boolean): void {
+    if (exclusive) {
+      this._activeExclusiveTransaction = true;
+    } else {
+      this._activeSharedTransactions += 1;
+    }
+  }
+
+  /** Releases one completed transaction and grants the next compatible work. */
+  private releaseTransaction(exclusive: boolean): void {
+    if (exclusive) {
+      this._activeExclusiveTransaction = false;
+    } else {
+      this._activeSharedTransactions -= 1;
+    }
+    this.grantWaitingTransactions();
+  }
+
+  /** Grants one exclusive waiter or the contiguous shared waiters at the head. */
+  private grantWaitingTransactions(): void {
+    if (
+      this._activeExclusiveTransaction ||
+      this._activeSharedTransactions > 0 ||
+      this._transactionAdmissions.length === 0
+    ) return;
+
+    const first = this._transactionAdmissions.shift();
+    if (first === undefined) return;
+    first.grant();
+    if (first.exclusive) return;
+
+    while (this._transactionAdmissions[0]?.exclusive === false) {
+      this._transactionAdmissions.shift()?.grant();
+    }
   }
 
   /**

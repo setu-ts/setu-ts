@@ -24,6 +24,7 @@ import type {
   IAdapterTransaction,
   IDatabaseAdapter,
   IDataSource,
+  TransactionIsolationLevel,
   TransactionOptions,
 } from '@setu-ts/common';
 import type { CosmosAdapterOptions } from '../../interfaces/index.ts';
@@ -62,6 +63,8 @@ import { CosmosTransaction, createCosmosDataSource } from './cosmos-data-source.
  * @since 0.2.0
  */
 export class CosmosAdapter implements IDatabaseAdapter {
+  /** Cosmos DB exposes no portable transaction-isolation selector. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = [];
   readonly #options: CosmosAdapterOptions;
   readonly #mapping: Readonly<Record<string, CosmosEntityMapping>> | undefined;
   #client: ICosmosClient | null = null;

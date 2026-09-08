@@ -24,6 +24,7 @@ import type {
   IDatabaseAdapter,
   NormalizedQuery,
   PageResult,
+  TransactionIsolationLevel,
 } from '@setu-ts/common';
 import {
   decodeCursor,
@@ -192,6 +193,16 @@ export type DrizzleOperators = {
  * @since 0.1.0
  */
 export class DrizzleAdapter implements IDatabaseAdapter {
+  /**
+   * The branded transaction bridge either accepts every portable level or no
+   * isolation request at all; it is the application's explicit guarantee.
+   */
+  get transactionIsolationLevels(): readonly TransactionIsolationLevel[] {
+    return this._supportsIsolation
+      ? ['read-uncommitted', 'read-committed', 'repeatable-read', 'serializable']
+      : [];
+  }
+
   /**
    * Internal capacity-reader seam (M90b). Attached in the constructor ONLY
    * when `poolStats` is configured; `DatabasePlugin` feature-detects it, and

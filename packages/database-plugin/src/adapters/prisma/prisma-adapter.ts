@@ -34,7 +34,11 @@ import {
   sortFingerprint,
 } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
-import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../errors.ts';
+import {
+  UnsupportedFilterOperatorError,
+  UnsupportedIsolationLevelError,
+  UnsupportedQueryFeatureError,
+} from '../../errors.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
 import { jsonPathString } from '../../query/json-path.ts';
 import { keyValues } from '../../query/key-target.ts';
@@ -91,6 +95,15 @@ function prismaIsolationLevel(
       return undefined;
   }
 }
+
+const PRISMA_ALL_ISOLATION_LEVELS: readonly TransactionIsolationLevel[] = [
+  'read-uncommitted',
+  'read-committed',
+  'repeatable-read',
+  'serializable',
+];
+const PRISMA_SERIALIZABLE_ONLY: readonly TransactionIsolationLevel[] = ['serializable'];
+const PRISMA_NO_ISOLATION_LEVELS: readonly TransactionIsolationLevel[] = [];
 
 // ---------------------------------------------------------------------------
 // Prisma client type — resolved from the application at connect() time.
@@ -199,6 +212,17 @@ export class PrismaAdapter implements IDatabaseAdapter {
   /** The resolved connector, or `undefined` when it could not be determined. */
   private _provider: PrismaSqlProvider | undefined;
 
+  /** Portable levels available from the resolved Prisma connector. */
+  get transactionIsolationLevels(): readonly TransactionIsolationLevel[] {
+    if (this._provider === 'sqlite' || this._provider === 'cockroachdb') {
+      return PRISMA_SERIALIZABLE_ONLY;
+    }
+    if (this._provider === 'mongodb' || this._provider === undefined) {
+      return PRISMA_NO_ISOLATION_LEVELS;
+    }
+    return PRISMA_ALL_ISOLATION_LEVELS;
+  }
+
   constructor(options?: DatabaseAdapterOptions) {
     this._options = options ?? undefined;
   }
@@ -243,6 +267,12 @@ export class PrismaAdapter implements IDatabaseAdapter {
   async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     if (!this.isReady()) {
       throw new Error('PrismaAdapter is not connected — call connect() first');
+    }
+    if (
+      options?.isolation !== undefined &&
+      !this.transactionIsolationLevels.includes(options.isolation)
+    ) {
+      throw new UnsupportedIsolationLevelError('prisma', options.isolation);
     }
     const client = this._client!;
     // Capture for the returned transaction's data-source factory, whose `this`

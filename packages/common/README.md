@@ -213,6 +213,7 @@ package fits the plugin architecture.
 | `ICounter`                        | interface |
 | `ICqrsFacade`                     | interface |
 | `IDatabaseAdapter`                | interface |
+| `ITransactionIsolationSupport`    | interface |
 | `IDataSource`                     | interface |
 | `IDecoratorApi`                   | interface |
 | `IDnsResolver`                    | interface |

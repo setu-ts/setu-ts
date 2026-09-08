@@ -22,7 +22,7 @@ import type {
 } from '@setu-ts/common';
 
 import { DatabasePlugin } from '../../src/index.ts';
-import type { IDatabaseService } from '../../src/index.ts';
+import { type IDatabaseService, UnsupportedIsolationLevelError } from '../../src/index.ts';
 
 /** A backend that records what the plugin and service asked of it. */
 class RecordingAdapter implements IDatabaseAdapter {
@@ -30,6 +30,7 @@ class RecordingAdapter implements IDatabaseAdapter {
   disconnects = 0;
   readonly rawQueries: { sql: string; params?: unknown[] }[] = [];
   readonly entities: string[] = [];
+  transactionStarts = 0;
   #ready = false;
 
   connect(): Promise<void> {
@@ -54,6 +55,7 @@ class RecordingAdapter implements IDatabaseAdapter {
   }
 
   beginTransaction(): Promise<IAdapterTransaction> {
+    this.transactionStarts += 1;
     return Promise.resolve({
       createDataSource: () => emptySource(),
       commit: () => Promise.resolve(),
@@ -64,6 +66,19 @@ class RecordingAdapter implements IDatabaseAdapter {
   rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {
     this.rawQueries.push(params === undefined ? { sql } : { sql, params });
     return Promise.resolve([]);
+  }
+}
+
+/** A custom adapter that explicitly opts in to serializable transactions. */
+class IsolationRecordingAdapter extends RecordingAdapter {
+  readonly transactionIsolationLevels = ['serializable'] as const;
+  receivedTransactionOptions: unknown;
+
+  override beginTransaction(
+    options?: import('@setu-ts/common').TransactionOptions,
+  ): Promise<IAdapterTransaction> {
+    this.receivedTransactionOptions = options;
+    return super.beginTransaction();
   }
 }
 
@@ -147,6 +162,33 @@ describe('DatabasePlugin — the custom arm', () => {
     await db.query('SELECT 1', [7]);
 
     expect(adapter.rawQueries).toEqual([{ sql: 'SELECT 1', params: [7] }]);
+    await app.stop();
+  });
+
+  it('refuses requested isolation when a custom adapter has not opted in', async () => {
+    const adapter = new RecordingAdapter();
+    const app = createApplication({
+      plugins: [RuntimePlugin(), DatabasePlugin({ type: 'custom', adapter })],
+    });
+    await app.start();
+
+    const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    await expect(db.transaction(() => Promise.resolve('done'), { isolation: 'serializable' }))
+      .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+    expect(adapter.transactionStarts).toBe(0);
+    await app.stop();
+  });
+
+  it('forwards requested isolation after a custom adapter explicitly opts in', async () => {
+    const adapter = new IsolationRecordingAdapter();
+    const app = createApplication({
+      plugins: [RuntimePlugin(), DatabasePlugin({ type: 'custom', adapter })],
+    });
+    await app.start();
+
+    const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+    await db.transaction(() => Promise.resolve('done'), { isolation: 'serializable' });
+    expect(adapter.receivedTransactionOptions).toEqual({ isolation: 'serializable' });
     await app.stop();
   });
 

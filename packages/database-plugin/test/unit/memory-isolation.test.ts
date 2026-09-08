@@ -49,6 +49,38 @@ describe('MemoryAdapter transaction isolation', () => {
     await expect(source.findById('counter')).resolves.toMatchObject({ value: 80 });
   });
 
+  it('prevents default transactions from bypassing active or queued serializable work', async () => {
+    const adapter = new MemoryAdapter();
+    await adapter.connect();
+
+    const initialDefault = await adapter.beginTransaction();
+    let serializable: Awaited<ReturnType<typeof adapter.beginTransaction>> | undefined;
+    const waitingSerializable = adapter.beginTransaction({ isolation: 'serializable' }).then(
+      (tx) => {
+        serializable = tx;
+      },
+    );
+    let laterDefaultStarted = false;
+    const waitingDefault = adapter.beginTransaction().then((tx) => {
+      laterDefaultStarted = true;
+      return tx;
+    });
+
+    await Promise.resolve();
+    expect(serializable).toBeUndefined();
+    expect(laterDefaultStarted).toBe(false);
+
+    await initialDefault.commit();
+    await waitingSerializable;
+    expect(serializable).toBeDefined();
+    expect(laterDefaultStarted).toBe(false);
+
+    await serializable?.commit();
+    const laterDefault = await waitingDefault;
+    expect(laterDefaultStarted).toBe(true);
+    await laterDefault.commit();
+  });
+
   it('refuses levels the memory adapter cannot honour', async () => {
     const adapter = new MemoryAdapter();
     await adapter.connect();

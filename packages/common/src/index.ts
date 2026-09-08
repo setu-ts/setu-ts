@@ -219,6 +219,7 @@ export type {
   IDataSource,
   IOrmAdapter,
   ITransaction,
+  ITransactionIsolationSupport,
   NormalizedQuery,
   OrderDirection,
   PageResult,

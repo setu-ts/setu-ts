@@ -322,6 +322,20 @@ export interface TransactionOptions {
 }
 
 /**
+ * An adapter's explicit declaration of portable transaction isolation support.
+ *
+ * This keeps existing adapters source-compatible while allowing the database
+ * plugin to refuse an isolation request from an external adapter that has not
+ * opted in, rather than silently falling back to a backend default.
+ *
+ * @since 0.5.0
+ */
+export interface ITransactionIsolationSupport {
+  /** The portable isolation levels this adapter honours. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[];
+}
+
+/**
  * The full database backend port: lifecycle plus data access.
  *
  * This is the seam an application implements to plug a database the framework
@@ -341,13 +355,16 @@ export interface TransactionOptions {
  *   disconnect(): Promise<void> { return Promise.resolve(); }
  *   isReady(): boolean { return true; }
  *   createDataSource(entity: string): IDataSource { return makeSource(entity); }
- *   beginTransaction(): Promise<IAdapterTransaction> { return openTx(); }
+ *   transactionIsolationLevels = ['serializable'] as const;
+ *   beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
+ *     return openTx(options);
+ *   }
  *   rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> { return run(sql, params); }
  * }
  * ```
  * @since 0.2.0
  */
-export interface IDatabaseAdapter extends IOrmAdapter {
+export interface IDatabaseAdapter extends IOrmAdapter, Partial<ITransactionIsolationSupport> {
   /**
    * Open a non-transactional data source for the named entity.
    *

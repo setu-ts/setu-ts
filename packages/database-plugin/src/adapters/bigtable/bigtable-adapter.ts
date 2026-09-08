@@ -25,6 +25,7 @@ import type {
   IAdapterTransaction,
   IDatabaseAdapter,
   IDataSource,
+  TransactionIsolationLevel,
   TransactionOptions,
 } from '@setu-ts/common';
 import type { BigtableAdapterOptions } from '../../interfaces/index.ts';
@@ -68,6 +69,8 @@ import { BigtableTransaction } from './bigtable-transaction.ts';
  * @since 0.2.0
  */
 export class BigtableAdapter implements IDatabaseAdapter {
+  /** Bigtable exposes no portable transaction-isolation selector. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = [];
   readonly #options: BigtableAdapterOptions;
   readonly #mapping: Readonly<Record<string, BigtableEntityMapping>> | undefined;
   readonly #loader: BigtableClientLoader;

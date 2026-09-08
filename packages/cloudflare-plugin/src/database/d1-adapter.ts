@@ -14,6 +14,7 @@ import type {
   IAdapterTransaction,
   IDatabaseAdapter,
   IDataSource,
+  TransactionIsolationLevel,
   TransactionOptions,
 } from '@setu-ts/common';
 import type { ID1Database } from '../bindings/facades.ts';
@@ -150,6 +151,8 @@ export interface D1AdapterOptions {
  * @since 0.2.0
  */
 export class D1Adapter implements IDatabaseAdapter {
+  /** D1's deferred batch transaction has no isolation-level surface. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = [];
   readonly #db: ID1Database;
   readonly #tables: Readonly<Record<string, D1EntityMapping>>;
   #ready = false;

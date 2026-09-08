@@ -31,7 +31,11 @@ import {
   readDrizzleQueryHandle,
 } from '../query/drizzle-query.ts';
 import type { IDynamoAccessPathReportingDataSource } from '../adapters/dynamo/dynamo-data-source.ts';
-import { UnsupportedMigrationError, UnsupportedRawQueryError } from '../errors.ts';
+import {
+  UnsupportedIsolationLevelError,
+  UnsupportedMigrationError,
+  UnsupportedRawQueryError,
+} from '../errors.ts';
 
 /**
  * Reads DynamoDB's optional access-path diagnostic without widening the
@@ -118,6 +122,12 @@ export class DatabaseService implements IDatabaseService {
   ): Promise<T> {
     if (this._closed) {
       throw new Error('DatabaseService is closed');
+    }
+    if (
+      options?.isolation !== undefined &&
+      !this._adapter.transactionIsolationLevels?.includes(options.isolation)
+    ) {
+      throw new UnsupportedIsolationLevelError(this._adapterType, options.isolation);
     }
 
     const txn = await this._adapter.beginTransaction(options);

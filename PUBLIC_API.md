@@ -941,17 +941,19 @@ compiles to a `$regex` match, where `%` and `_` are already literal so escaping 
 wrong), and refused on SQLite (see the `contains` note above). When omitted, the adapter reads the
 client's active provider structurally at `connect()` time; if it cannot be determined, a `contains`
 filter throws `UnsupportedFilterOperatorError` naming this option, so pass it explicitly in that
-case. Drizzle requires both `options.drizzleInstance` and `options.drizzleTables`. The instance is a
-opaque `DrizzleDatabase<T>` configuration created by
-`createDrizzleDatabase(database, transactionBridge)`; the registry's tables must carry an `id`
-column and the adapter translates every repository field to a real Drizzle column. Drizzle `create`,
-`update`, and `delete` require a driver with `RETURNING` support so their results are actual driver
-rows; an unsupported dialect throws a descriptive error. Promise-aware SQLite Proxy and
-libsql-shaped Drizzle instances without `execute()` are accepted for repository, transaction, and
-typed-builder use. Calling `IDatabaseService.query()` on such an instance rejects with guidance to
-use Drizzle's typed query builder. That refusal is permanent rather than pending: those drivers do
-expose `all()`, but on a raw statement the proxy protocol answers with **positional** rows, because
-Drizzle has no field map for a statement it did not build — and `query<T>()` promises row objects.
+case. Transaction isolation is connector-specific too: when the provider cannot be determined, a
+requested isolation level is refused by name, so pass `provider` explicitly. Drizzle requires both
+`options.drizzleInstance` and `options.drizzleTables`. The instance is a opaque `DrizzleDatabase<T>`
+configuration created by `createDrizzleDatabase(database, transactionBridge)`; the registry's tables
+must carry an `id` column and the adapter translates every repository field to a real Drizzle
+column. Drizzle `create`, `update`, and `delete` require a driver with `RETURNING` support so their
+results are actual driver rows; an unsupported dialect throws a descriptive error. Promise-aware
+SQLite Proxy and libsql-shaped Drizzle instances without `execute()` are accepted for repository,
+transaction, and typed-builder use. Calling `IDatabaseService.query()` on such an instance rejects
+with guidance to use Drizzle's typed query builder. That refusal is permanent rather than pending:
+those drivers do expose `all()`, but on a raw statement the proxy protocol answers with
+**positional** rows, because Drizzle has no field map for a statement it did not build — and
+`query<T>()` promises row objects.
 
 Synchronous callback drivers (`better-sqlite3`, Bun SQLite, Expo SQLite, and OP SQLite) are
 unsupported: their native transaction closes when the callback returns, before awaited UoW work can
@@ -1055,7 +1057,7 @@ plugin's error class.
 
 | Adapter                           | Honoured levels                                                                                                      |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Prisma                            | all four                                                                                                             |
+| Prisma                            | PostgreSQL, MySQL, and SQL Server: all four; CockroachDB and SQLite: `serializable`; MongoDB: none                   |
 | Drizzle                           | all four only when the application wraps its bridge with `withIsolationSupport()`                                    |
 | Memory                            | `serializable` (one process only)                                                                                    |
 | MongoDB                           | `serializable` mapped to snapshot reads plus majority writes; this prevents lost updates but is not SQL SERIALIZABLE |
@@ -1064,6 +1066,10 @@ plugin's error class.
 `withIsolationSupport()` is an application declaration that its bridge forwards options. The type
 system cannot verify its body uses them; an unbranded bridge refuses every requested level rather
 than silently dropping it.
+
+For a custom adapter, declare `transactionIsolationLevels` on `IDatabaseAdapter`; without that
+explicit capability the database service refuses every requested isolation level rather than
+assuming a zero-argument `beginTransaction()` honours it.
 
 ### Typed Drizzle queries
 
@@ -1280,8 +1286,9 @@ The port to implement:
 
 ```typescript
 interface IDatabaseAdapter extends IOrmAdapter {
+  transactionIsolationLevels?: readonly TransactionIsolationLevel[];
   createDataSource(entity: string): IDataSource;
-  beginTransaction(): Promise<IAdapterTransaction>;
+  beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction>;
   rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]>;
 }
 
