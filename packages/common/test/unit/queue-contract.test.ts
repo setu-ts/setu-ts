@@ -30,18 +30,27 @@ import type { MessageMetadata } from '../../src/services/messaging.ts';
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true
   : false;
 
-/** Compile-time assertion helper. */
-function assertType<T extends true>(_value?: T): void {}
-
 // The channel is spelled IDENTICALLY on both ingresses, so the two cannot drift
 // on meaning — which is the whole reason X34-1 asks for a mirror of
-// `MessageMetadata.headers` rather than a new shape.
-assertType<Equals<IJob['headers'], MessageMetadata['headers']>>();
-assertType<Equals<AddJobOptions['headers'], MessageMetadata['headers']>>();
+// `MessageMetadata.headers` rather than a new shape. Each `const` below is the
+// assertion: its declared type resolves to `false` if the shapes diverge, and
+// `= true` then stops the file compiling. Same idiom as
+// `ingress-contract.test.ts`, so the two contract files read alike.
+const jobHeadersMirrorMessageMetadata: Equals<IJob['headers'], MessageMetadata['headers']> = true;
+const addOptionsHeadersMirrorMessageMetadata: Equals<
+  AddJobOptions['headers'],
+  MessageMetadata['headers']
+> = true;
 
 // Both are OPTIONAL and READONLY.
-assertType<Equals<IJob['headers'], Readonly<Record<string, string>> | undefined>>();
-assertType<Equals<AddJobOptions['headers'], Readonly<Record<string, string>> | undefined>>();
+const jobHeadersOptionalReadonly: Equals<
+  IJob['headers'],
+  Readonly<Record<string, string>> | undefined
+> = true;
+const addOptionsHeadersOptionalReadonly: Equals<
+  AddJobOptions['headers'],
+  Readonly<Record<string, string>> | undefined
+> = true;
 
 // An implementation predating the channel still satisfies the contract: no
 // member became required (the M42 `signal?` / M44 `fs?` precedent).
@@ -73,6 +82,15 @@ const withChannel: IJob<{ id: number }> = {
 };
 
 describe('IJob / AddJobOptions header channel', () => {
+  it('pins the contract shape at compile time', () => {
+    // The assertions above are decided by `deno task check`; reading them here
+    // makes the file fail loudly under `deno task test` too.
+    expect(jobHeadersMirrorMessageMetadata).toBe(true);
+    expect(addOptionsHeadersMirrorMessageMetadata).toBe(true);
+    expect(jobHeadersOptionalReadonly).toBe(true);
+    expect(addOptionsHeadersOptionalReadonly).toBe(true);
+  });
+
   it('is optional on both types', () => {
     expect(withoutChannel.headers).toBeUndefined();
     expect('headers' in withoutChannel).toBe(false);

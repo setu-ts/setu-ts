@@ -4526,20 +4526,21 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `src` change; `runtime`/`testing`/`common` joined for X37-1. All five changed barrels carry
   barrel-exports assertions; the classifier stays internal, pinned by a negative test — complete (PR
   pending)
-- **Milestone 90i** (`common` + `queue-plugin` + `telemetry-plugin` + `logger-plugin` —
-  observability that joins up. Three findings, one question: can an operator follow a single request
-  through the system? X34 answered the positive half — the broker hop carries the trace across a
-  process boundary with an unbroken parent chain, demonstrably via the header rather than ambient
-  context — so what was missing was a **channel** on one ingress and a **bridge** to one sink.
-  **X34-1/X29-3:** `AddJobOptions.headers?` + `IJob.headers?` mirror `MessageMetadata.headers`
-  exactly. This was a **designed capability gap**, not an adapter declining to read something —
-  `grep -c headers` over `common/src/services/queue.ts` was `0` — which is what makes it a `common`
-  widening rather than a bug fix. An internal `TracedQueue` decorator (the `TracedBroker` shape, a
-  different LAYER: the `QueueAdapter` seam takes an already-built `StoredJob` and never invokes a
-  processor, so a decorator there could inject nothing and open no consumer span). **X34-2:**
-  optional `ITelemetryService.activeSpanContext?()` + `TracerHost.activeSpanContext?()` and an
-  internal `TraceEnrichedLogger`, emitting OTel-convention snake_case `trace_id`/`span_id`.
-  `src/index.ts` is unchanged in all three plugins, pinned by barrel-exports tests.
+- **Milestone 90i** (`common` + `queue-plugin` + `telemetry-plugin` + `logger-plugin` +
+  `cloudflare-plugin` — observability that joins up. Three findings, one question: can an operator
+  follow a single request through the system? X34 answered the positive half — the broker hop
+  carries the trace across a process boundary with an unbroken parent chain, demonstrably via the
+  header rather than ambient context — so what was missing was a **channel** on one ingress and a
+  **bridge** to one sink. **X34-1/X29-3:** `AddJobOptions.headers?` + `IJob.headers?` mirror
+  `MessageMetadata.headers` exactly. This was a **designed capability gap**, not an adapter
+  declining to read something — `grep -c headers` over `common/src/services/queue.ts` was `0` —
+  which is what makes it a `common` widening rather than a bug fix. An internal `TracedQueue`
+  decorator (the `TracedBroker` shape, a different LAYER: the `QueueAdapter` seam takes an
+  already-built `StoredJob` and never invokes a processor, so a decorator there could inject nothing
+  and open no consumer span). **X34-2:** optional `ITelemetryService.activeSpanContext?()` +
+  `TracerHost.activeSpanContext?()` and an internal `TraceEnrichedLogger`, emitting OTel-convention
+  snake_case `trace_id`/`span_id`. `src/index.ts` is unchanged in all three plugins, pinned by
+  barrel-exports tests.
 
   **Four plan claims did not survive source-checking, and two would have shipped broken.** (P1) The
   plan had `LoggerPlugin` gain `optionalDependencies: [CAPABILITIES.TELEMETRY]`. `TelemetryPlugin`
@@ -4579,7 +4580,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   span, because M86's chain is applied by a `QueueService` SUBCLASS and is therefore outermost at
   dispatch, while messaging composes `PipelinedBroker(TracedBroker(...))` and runs behaviours inside
   it. Closing that means converting a shipped milestone's subclass into a wrapper (§16.4), and X34's
-  own "Still to run" defers the behaviour hop) — complete (PR #260)
+  own "Still to run" defers the behaviour hop.
+
+  **Automated PR review then found two real defects, and the package list is corrected from four to
+  five (the M70b precedent).** The plan's §9 scoped `cloudflare-plugin`'s `WorkersQueue` OUT on the
+  grounds that widening its envelope is "a deployment-coupled change"; that did not survive being
+  challenged — an OPTIONAL field on a JSON envelope is safe in BOTH directions across a version
+  skew, so no version bump is needed and the exclusion was costing a silent data loss. It accepted
+  the widened `AddJobOptions` and DROPPED `headers`, so a caller's map and any propagated
+  `traceparent` vanished — the repo's own dead-option class ("accepts an option with no observable
+  effect"), on a contract that says a supplied map reaches the processor. And
+  `TracerHost.activeSpanContext` rejected only EMPTY identifiers while `contextToTraceparent`, the
+  codec the producer side writes with, also refuses malformed and W3C all-zero ids — so an INVALID
+  OTel span context would have been refused by the queue and copied into every log record by the
+  logger. It now reuses the codec itself rather than restating the rule, which is what makes the two
+  paths provably agree. A third finding — that the new signature breaks the doc-lint ratchet — was
+  **refuted by measurement**: 496 on `main` and 496 on the branch, because the ratchet lints every
+  package entrypoint TOGETHER, where `SpanContext` is public from `common`'s barrel; linting the
+  telemetry barrel alone reports three diagnostics that the gate never sees) — complete (PR #260)
 - **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
   the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
   compat suites as release gates. The `smoke/` programme's X16–X19 exercises against published

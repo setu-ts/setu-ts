@@ -42,7 +42,12 @@ function build(): {
 function delivered(
   name: string,
   data: unknown,
-  options?: { readonly id?: string; readonly attempts?: number; readonly maxAttempts?: number },
+  options?: {
+    readonly id?: string;
+    readonly attempts?: number;
+    readonly maxAttempts?: number;
+    readonly headers?: unknown;
+  },
 ): FakeQueueMessage {
   return new FakeQueueMessage(
     `cf-${options?.id ?? 'id-1'}`,
@@ -52,6 +57,7 @@ function delivered(
       id: options?.id ?? 'id-1',
       data,
       ...(options?.maxAttempts === undefined ? {} : { maxAttempts: options.maxAttempts }),
+      ...(options?.headers === undefined ? {} : { headers: options.headers }),
     },
     options?.attempts ?? 1,
   );
@@ -409,5 +415,90 @@ describe('WorkersQueue.dispatch', () => {
     expect(typeof port.add).toBe('function');
     expect(typeof port.process).toBe('function');
     expect(typeof port.addRecurring).toBe('function');
+  });
+});
+
+describe('WorkersQueue header channel (M90i)', () => {
+  it('sends the caller-supplied headers on the envelope', async () => {
+    const { queue, producer } = build();
+    await queue.add('mail', { to: 'a@b.c' }, {
+      headers: { traceparent: 'tp', 'x-tenant': 't-1' },
+    });
+
+    expect(producer.sends).toHaveLength(1);
+    const sent = producer.sends[0]!.body as { headers?: unknown };
+    expect(sent.headers).toEqual({ traceparent: 'tp', 'x-tenant': 't-1' });
+  });
+
+  it('omits headers when the caller supplied none', async () => {
+    const { queue, producer } = build();
+    await queue.add('mail', { to: 'a@b.c' });
+
+    expect(producer.sends).toHaveLength(1);
+    expect(Object.hasOwn(producer.sends[0]!.body as object, 'headers')).toBe(false);
+  });
+
+  it('delivers the headers to the processor as IJob.headers', async () => {
+    // The whole point of the channel: what `add` accepted must reach the
+    // handler. Before M90i this queue accepted `headers` and discarded them.
+    const { queue } = build();
+    let seen: IJob | undefined;
+    queue.process('mail', (job) => {
+      seen = job;
+    });
+
+    await queue.dispatch(
+      new FakeQueueBatch('q', [delivered('mail', {}, { headers: { traceparent: 'tp' } })]),
+    );
+
+    expect(seen?.headers).toEqual({ traceparent: 'tp' });
+  });
+
+  it('leaves the member ABSENT for a job that carried no channel', async () => {
+    const { queue } = build();
+    let seen: IJob | undefined;
+    queue.process('mail', (job) => {
+      seen = job;
+    });
+
+    await queue.dispatch(new FakeQueueBatch('q', [delivered('mail', {})]));
+
+    expect(seen).toBeDefined();
+    expect('headers' in (seen as object)).toBe(false);
+  });
+
+  it('DROPS a malformed header map and still runs the job', async () => {
+    // The envelope guard retries what it refuses, so refusing a job over its
+    // observability field would lose the work to protect the record of it.
+    const { queue } = build();
+    let seen: IJob | undefined;
+    queue.process('mail', (job) => {
+      seen = job;
+    });
+
+    await queue.dispatch(
+      new FakeQueueBatch('q', [delivered('mail', {}, { headers: { traceparent: 7 } })]),
+    );
+
+    expect(seen).toBeDefined();
+    expect('headers' in (seen as object)).toBe(false);
+  });
+
+  it('round-trips add() -> dispatch through the real envelope', async () => {
+    const { queue, producer } = build();
+    let seen: IJob | undefined;
+    queue.process('mail', (job) => {
+      seen = job;
+    });
+
+    const id = await queue.add('mail', { to: 'a@b.c' }, { headers: { traceparent: 'tp' } });
+    // Feed the producer's OWN body back through dispatch, so the two halves are
+    // checked against each other rather than against a hand-written envelope.
+    await queue.dispatch(
+      new FakeQueueBatch('q', [new FakeQueueMessage(`cf-${id}`, producer.sends[0]?.body, 1)]),
+    );
+
+    expect(seen?.id).toBe(id);
+    expect(seen?.headers).toEqual({ traceparent: 'tp' });
   });
 });

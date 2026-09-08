@@ -192,6 +192,15 @@ All notable changes to this project are documented here. The format follows
   the CALLER passed is delivered either way, since it is a public option whose delivery must not
   depend on which capabilities are registered.
 
+- **`@setu-ts/cloudflare-plugin` — `WorkersQueue` carries the queue header channel (M90i, review
+  finding).** The Cloudflare queue accepted the widened `AddJobOptions` and dropped `headers` on the
+  floor, so a caller-supplied map — and any propagated `traceparent` — was silently lost, while the
+  contract says a supplied map reaches the processor. The `{ v, name, id, data }` envelope gains an
+  OPTIONAL `headers`, so the version is deliberately NOT bumped: an older consumer ignores the field
+  and a newer consumer reads an older message as carrying no channel, which is what absent means. A
+  malformed map is dropped and the job runs untraced rather than being refused, because the envelope
+  guard RETRIES what it rejects and losing the work to protect the record of it is the worse trade.
+
 - **`@setu-ts/common`, `@setu-ts/telemetry-plugin`, `@setu-ts/logger-plugin` — log records name
   their trace (M90i / X34-2).** `trace_id`/`span_id` appeared in `common` and `telemetry-plugin` and
   in no logger, formatter or transport, so every signal the framework emits was individually good
@@ -201,7 +210,11 @@ All notable changes to this project are documented here. The format follows
   every record, at every level and through `child()`, when a telemetry capability is registered. The
   field names are snake_case to match the OpenTelemetry log-correlation convention that log backends
   key on. `NoopTelemetryService` omits the member, and a service that cannot report an active span
-  enriches nothing rather than emitting empty identifiers.
+  enriches nothing rather than emitting empty identifiers. Validity is decided by the SHARED trace-
+  context codec rather than a rule spelled out twice, so the read path and the propagation path
+  cannot disagree about which contexts are real: an empty, malformed or W3C all-zero identifier —
+  what OTel reports for an INVALID span context — is reported as no active span, and never reaches a
+  log record as a trace nothing else could carry.
 
 ### Changed
 

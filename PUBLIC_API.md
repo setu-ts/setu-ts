@@ -10743,7 +10743,10 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   `AddJobOptions.delayMs` is converted to the platform's whole-second `delaySeconds` **rounded up**
   (so a job is never delivered early) and refused above `maxDelaySeconds`, while
   `ProcessOptions.concurrency` bounds how many of one batch's messages for that name run at a time —
-  per name, so one processor's limit never throttles another's.
+  per name, so one processor's limit never throttles another's. `AddJobOptions.headers` travels in
+  the envelope and is delivered as `IJob.headers`, so a job enqueued on Workers joins a trace
+  exactly as one on the other adapters does; a malformed map is dropped and the job runs untraced
+  rather than being retried until the queue discards it.
 - **A job's id comes from this package, not the platform.** `producer.send()` resolves to `void`, so
   the id `add` returns is minted from `runtime.uuid()` and travels inside a `{ v, name, id, data }`
   envelope — which is also what carries the job **name**, since a Cloudflare message body is

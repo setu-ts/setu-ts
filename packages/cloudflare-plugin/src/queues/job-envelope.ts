@@ -35,6 +35,18 @@ export interface JobEnvelope<T = unknown> {
   readonly data: T;
   /** Attempts allowed before the job is dropped, when the caller set one. */
   readonly maxAttempts?: number;
+  /**
+   * Transport headers the caller passed to {@linkcode IQueue.add}, delivered
+   * back as {@linkcode IJob.headers}.
+   *
+   * Additive and OPTIONAL, so the envelope version is NOT bumped: a consumer
+   * running older code ignores the field, and a consumer running newer code
+   * reads an older message as carrying no channel — which is exactly what
+   * absent means on the committed contract. Both directions are safe across a
+   * mid-deploy version skew, which is the only reason this could be added
+   * without a breaking wire change.
+   */
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -45,6 +57,7 @@ export interface JobEnvelope<T = unknown> {
  * @param id - The id handed back to the enqueuing caller
  * @param data - The caller's payload
  * @param maxAttempts - Attempt cap, when the caller set one
+ * @param headers - Transport headers the caller supplied, when any
  * @returns The envelope to send as the message body
  * @internal
  */
@@ -53,17 +66,38 @@ export function encodeJobEnvelope<T>(
   id: string,
   data: T,
   maxAttempts?: number,
+  headers?: Readonly<Record<string, string>>,
 ): JobEnvelope<T> {
   return {
     v: ENVELOPE_VERSION,
     name,
     id,
     data,
-    // Never assigned as `undefined`: `exactOptionalPropertyTypes` is on.
+    // Never assigned as `undefined`: `exactOptionalPropertyTypes` is on, and
+    // ABSENT is a meaningful state on `IJob.headers` — it reports that the job
+    // carried no channel, which a present-but-undefined property would deny.
     ...(maxAttempts === undefined ? {} : { maxAttempts }),
+    ...(headers === undefined ? {} : { headers }),
   };
 }
 
+/**
+ * Narrows an envelope's `headers` to a flat string map, or reports `undefined`
+ * when it is absent or malformed.
+ *
+ * Deliberately NOT folded into {@linkcode isJobEnvelope}: that guard's failure
+ * mode is RETRYING the message, so refusing a job because its observability
+ * field is malformed would retry it until the queue's `max_retries` discards it
+ * — losing the work to protect the record of it. A malformed map is dropped
+ * here instead and the job runs untraced, which is the same disposition
+ * `queue-plugin`'s SQS adapter reaches. That adapter holds its own copy of this
+ * guard because AI_GUIDELINES §2.2 forbids a plugin importing another plugin
+ * (the M30b `pemToDer` precedent).
+ *
+ * @param value - The envelope's raw `headers` member
+ * @returns The map when every value is a string, otherwise `undefined`
+ * @internal
+ */
 /**
  * Reports whether a message body is an envelope this version understands.
  *
@@ -76,6 +110,19 @@ export function encodeJobEnvelope<T>(
  * @returns `true` when the body carries a readable envelope
  * @internal
  */
+export function readEnvelopeHeaders(
+  value: unknown,
+): Readonly<Record<string, string>> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  for (const [, entry] of entries) {
+    if (typeof entry !== 'string') return undefined;
+  }
+  return Object.fromEntries(entries) as Record<string, string>;
+}
+
 export function isJobEnvelope(body: unknown): body is JobEnvelope {
   if (typeof body !== 'object' || body === null) return false;
   const record = body as Record<string, unknown>;

@@ -9,6 +9,7 @@
  */
 import { afterEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { contextToTraceparent, TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
 
 import { TelemetryService } from '../../src/services/telemetry-service.ts';
 import { buildTracerHost, setOtelApi } from '../../src/tracing/tracer.ts';
@@ -127,6 +128,54 @@ describe('TracerHost.activeSpanContext', () => {
   it('treats a missing traceId as nothing active', () => {
     installApi({ spanContext: () => ({ spanId: 'b'.repeat(16), traceFlags: '01' }) });
     expect(host().activeSpanContext?.()).toBeUndefined();
+  });
+
+  it('treats a W3C ALL-ZERO trace id as nothing active', () => {
+    // `00000000000000000000000000000000` is what OTel reports for an INVALID
+    // span context. The shared codec refuses to format it, so the producer side
+    // propagates nothing; returning it here would let a log record name a trace
+    // that no other signal can carry.
+    installApi({
+      spanContext: () => ({ traceId: '0'.repeat(32), spanId: 'b'.repeat(16), traceFlags: '01' }),
+    });
+    expect(host().activeSpanContext?.()).toBeUndefined();
+  });
+
+  it('treats a W3C all-zero SPAN id as nothing active', () => {
+    installApi({
+      spanContext: () => ({ traceId: 'a'.repeat(32), spanId: '0'.repeat(16), traceFlags: '01' }),
+    });
+    expect(host().activeSpanContext?.()).toBeUndefined();
+  });
+
+  it('treats a malformed (wrong-length) trace id as nothing active', () => {
+    installApi({
+      spanContext: () => ({ traceId: 'abc', spanId: 'b'.repeat(16), traceFlags: '01' }),
+    });
+    expect(host().activeSpanContext?.()).toBeUndefined();
+  });
+
+  it('treats a non-hex trace id as nothing active', () => {
+    installApi({
+      spanContext: () => ({ traceId: 'z'.repeat(32), spanId: 'b'.repeat(16), traceFlags: '01' }),
+    });
+    expect(host().activeSpanContext?.()).toBeUndefined();
+  });
+
+  it('accepts exactly what the producer side would propagate', () => {
+    // The read path and the write path must agree on which contexts are real:
+    // anything this returns must be formattable by the codec the queue uses.
+    const context = {
+      traceId: '0af7651916cd43dd8448eb211c80319c',
+      spanId: 'b7ad6b7169203331',
+      traceFlags: '01',
+    };
+    installApi({ spanContext: () => context });
+    const read = host().activeSpanContext?.();
+    expect(read).toEqual(context);
+    expect(
+      contextToTraceparent({ _opaque: TELEMETRY_CONTEXT_OPAQUE, ...read! }),
+    ).toBe('00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01');
   });
 
   it('defaults unreadable traceFlags to "00" rather than dropping the span', () => {

@@ -915,8 +915,10 @@ describe('SqsQueue', () => {
         headers: { traceparent: 'tp' },
       });
 
-      // The map is on the WIRE, not merely in memory.
-      expect(JSON.parse(transport.sent[0]?.body ?? '{}').headers).toEqual({ traceparent: 'tp' });
+      // The map is on the WIRE, not merely in memory. The send is asserted
+      // first so neither of these can pass for a message that never left.
+      expect(transport.sent).toHaveLength(1);
+      expect(JSON.parse(transport.sent[0]!.body).headers).toEqual({ traceparent: 'tp' });
     });
 
     it('writes NO headers key for a job that carried none', async () => {
@@ -935,7 +937,10 @@ describe('SqsQueue', () => {
         availableAtMs: 0,
       });
 
-      expect('headers' in JSON.parse(transport.sent[0]?.body ?? '{}')).toBe(false);
+      // `?? '{}'` here would be a vacuity hole: `'headers' in {}` is already
+      // false, so the assertion would pass for a message that was never sent.
+      expect(transport.sent).toHaveLength(1);
+      expect('headers' in JSON.parse(transport.sent[0]!.body)).toBe(false);
     });
   });
 

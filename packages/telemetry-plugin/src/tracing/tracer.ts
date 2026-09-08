@@ -5,6 +5,7 @@
  * @since 0.2.0
  */
 
+import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
 import type { SpanContext } from '@setu-ts/common';
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
 import { normalizeTraceFlags } from './trace-flags.ts';
@@ -339,15 +340,26 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
             spanId?: unknown;
             traceFlags?: unknown;
           };
-          const traceId = String(raw.traceId ?? '');
-          const spanId = String(raw.spanId ?? '');
-          // An all-empty context is what a non-recording span reports; treated
-          // as "nothing active" so a consumer never enriches a record with
-          // identifiers that join it to no trace at all.
-          if (traceId === '' || spanId === '') {
-            return undefined;
-          }
-          return { traceId, spanId, traceFlags: normalizeTraceFlags(raw.traceFlags) };
+          const candidate: SpanContext = {
+            traceId: String(raw.traceId ?? ''),
+            spanId: String(raw.spanId ?? ''),
+            traceFlags: normalizeTraceFlags(raw.traceFlags),
+          };
+          // Validity is decided by the SHARED CODEC, not by a rule spelled out
+          // again here. `contextToTraceparent` already refuses an id that is
+          // empty, malformed, or W3C all-zero (the identifiers OTel uses for an
+          // INVALID span context), and it is what the producer side writes with
+          // — so reusing it is what stops the read path and the write path from
+          // disagreeing about which contexts are real. Checking only for `''`
+          // let an all-zero context through here while the queue refused to
+          // propagate it, and a log record would then name a trace nothing else
+          // could ever carry.
+          return contextToTraceparent({
+              _opaque: TELEMETRY_CONTEXT_OPAQUE,
+              ...candidate,
+            }) === null
+            ? undefined
+            : candidate;
         },
       }
       : {}),
