@@ -19,6 +19,7 @@ import {
   CosmosTransactionScopeError,
   MongoTransactionUnavailableError,
   UnsupportedFilterOperatorError,
+  UnsupportedIsolationLevelError,
   UnsupportedMigrationError,
   UnsupportedQueryFeatureError,
   UnsupportedRawQueryError,
@@ -33,6 +34,12 @@ const DIAGNOSTIC = "SELECT * FROM users WHERE ssn = $1 -- ['SECRET-123']";
 
 /** The query and framework-capability refusals that are safe to serve as 501s. */
 const BRANDED: readonly { name: string; error: Error; detail: string }[] = [
+  {
+    name: 'UnsupportedIsolationLevelError',
+    error: new UnsupportedIsolationLevelError('memory', 'read-committed'),
+    detail:
+      "Transaction isolation 'read-committed' is not supported by the 'memory' database adapter.",
+  },
   {
     name: 'UnsupportedQueryFeatureError',
     error: new UnsupportedQueryFeatureError('order-by', 'dynamodb', DIAGNOSTIC),
@@ -108,6 +115,10 @@ describe('database error status hints', () => {
     // The brand adds a caller-facing sentence; it must not replace the
     // operator-facing one, which `errorHandler` logs.
     for (const { name, error } of BRANDED) {
+      // Isolation errors have no driver diagnostic: their message is a
+      // package-owned description of the requested level. The query refusal
+      // errors below deliberately retain the diagnostic for operator logs.
+      if (name === 'UnsupportedIsolationLevelError') continue;
       expect(error.message, name).toBe(DIAGNOSTIC);
     }
   });

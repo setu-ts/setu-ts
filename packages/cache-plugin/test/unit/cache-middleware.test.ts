@@ -284,6 +284,72 @@ describe('cacheMiddleware', () => {
   });
 
   describe('MISS path', () => {
+    it('coalesces concurrent cacheable misses and replays the leader response for waiters', async () => {
+      const { store } = createFakeStore();
+      const first = createContext(store);
+      const second = createContext(store);
+      const middleware = cacheMiddleware();
+      let originCalls = 0;
+      let release: (() => void) | undefined;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      const leader = middleware(first.ctx, async () => {
+        originCalls++;
+        await pending;
+        first.ctx.response.status(200);
+        first.ctx.response.text('{"leader":true}');
+      });
+      const waiter = middleware(second.ctx, async () => {
+        originCalls++;
+        second.ctx.response.status(200);
+        second.ctx.response.text('{"waiter":true}');
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      release?.();
+      await Promise.all([leader, waiter]);
+
+      expect(originCalls).toBe(1);
+      expect(first.responseHeaders.get('x-cache')).toBe('MISS');
+      expect(second.responseHeaders.get('x-cache')).toBe('COALESCED');
+      expect(second.responseBody()).toBe('{"leader":true}');
+    });
+
+    it('runs the waiters origin after its leader fails', async () => {
+      const { store } = createFakeStore();
+      const first = createContext(store);
+      const second = createContext(store);
+      const middleware = cacheMiddleware();
+      let releaseFailure: (() => void) | undefined;
+      const pendingFailure = new Promise<void>((resolve) => {
+        releaseFailure = resolve;
+      });
+      let waiterCalls = 0;
+
+      const leader = middleware(first.ctx, async () => {
+        await pendingFailure;
+        throw new Error('origin failed');
+      });
+      const waiter = middleware(second.ctx, async () => {
+        waiterCalls++;
+        second.ctx.response.status(200);
+        second.ctx.response.text('{"recovered":true}');
+      });
+
+      await Promise.resolve();
+      await Promise.resolve();
+      releaseFailure?.();
+      await expect(leader).rejects.toThrow('origin failed');
+      await waiter;
+
+      expect(waiterCalls).toBe(1);
+      expect(second.responseHeaders.get('x-cache')).toBe('MISS');
+      expect(second.responseBody()).toBe('{"recovered":true}');
+    });
+
     it('calls next() and stores response on 200', async () => {
       const { store, calls } = createFakeStore();
       const { ctx, nextCalled, responseHeaders } = createContext(store);

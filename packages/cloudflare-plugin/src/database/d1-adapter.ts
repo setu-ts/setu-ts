@@ -10,7 +10,12 @@
  * @module
  */
 
-import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@setu-ts/common';
+import type {
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  IDataSource,
+  TransactionOptions,
+} from '@setu-ts/common';
 import type { ID1Database } from '../bindings/facades.ts';
 import { isD1Database } from '../bindings/facades.ts';
 import { CloudflareBindingMissingError, CloudflareUnsupportedError } from '../errors.ts';
@@ -207,8 +212,14 @@ export class D1Adapter implements IDatabaseAdapter {
    * See the transaction discussion on {@linkcode D1Adapter}.
    */
   // deno-lint-ignore require-await -- must reject, not throw synchronously
-  async beginTransaction(): Promise<IAdapterTransaction> {
+  async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     this.assertReady();
+    if (options?.isolation !== undefined) {
+      throw new CloudflareUnsupportedError(
+        `D1 does not support '${options.isolation}' transaction isolation. ` +
+          'Its deferred batch transaction has no isolation-level surface.',
+      );
+    }
     const db = this.#db;
     const buffer = new D1TransactionBuffer();
 

@@ -2,10 +2,10 @@
  * Errors the database plugin throws, exported so consumers can branch on them
  * with `instanceof` rather than matching message text.
  *
- * Four of them additionally carry an `HttpStatusHint` from `@setu-ts/common`,
+ * Five of them additionally carry an `HttpStatusHint` from `@setu-ts/common`,
  * so `errorHandler` answers a safe, permanent refusal `501 Not Implemented`
  * with a caller-safe sentence instead of a masked `500` (M89b, X19-1):
- * {@linkcode UnsupportedFilterOperatorError} and
+ * {@linkcode UnsupportedIsolationLevelError}, {@linkcode UnsupportedFilterOperatorError} and
  * {@linkcode UnsupportedRawQueryError} always, and
  * {@linkcode UnsupportedMigrationError}, and
  * {@linkcode UnsupportedQueryFeatureError} for the `feature` values in
@@ -34,6 +34,27 @@ import { withHttpStatusHint } from '@setu-ts/common';
  * not-implemented response consistent.
  */
 const NOT_IMPLEMENTED = { status: 501, title: 'Not Implemented' } as const;
+
+/**
+ * Thrown when a database adapter cannot honour a requested transaction
+ * isolation level.
+ *
+ * @since 0.5.0
+ */
+export class UnsupportedIsolationLevelError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'UnsupportedIsolationLevelError';
+
+  /** Creates a named, caller-safe isolation refusal. */
+  constructor(readonly adapter: string, readonly level: string) {
+    super(`The '${adapter}' database adapter does not support '${level}' transaction isolation.`);
+    withHttpStatusHint(this, {
+      ...NOT_IMPLEMENTED,
+      detail:
+        `Transaction isolation '${level}' is not supported by the '${adapter}' database adapter.`,
+    });
+  }
+}
 
 /**
  * The {@linkcode UnsupportedQueryFeatureError} `feature` values that name a

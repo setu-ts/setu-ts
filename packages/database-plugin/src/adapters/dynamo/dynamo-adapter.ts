@@ -25,9 +25,14 @@
  *
  * @module
  */
-import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@setu-ts/common';
+import type {
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  IDataSource,
+  TransactionOptions,
+} from '@setu-ts/common';
 import type { DynamoAdapterOptions } from '../../interfaces/index.ts';
-import { UnsupportedRawQueryError } from '../../errors.ts';
+import { UnsupportedIsolationLevelError, UnsupportedRawQueryError } from '../../errors.ts';
 import { createInjectedDynamoLoader, createLazyDynamoLoader } from './dynamo-client.ts';
 import type { DynamoClientConfiguration } from './dynamo-client.ts';
 import type { IDynamoClient } from './dynamo-client-types.ts';
@@ -230,8 +235,11 @@ export class DynamoAdapter implements IDatabaseAdapter {
    * @inheritdoc
    */
   // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
-  async beginTransaction(): Promise<IAdapterTransaction> {
+  async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     this.#assertConnected();
+    if (options?.isolation !== undefined) {
+      throw new UnsupportedIsolationLevelError('dynamodb', options.isolation);
+    }
     const client = this.#client as IDynamoClient;
     return new DynamoTransaction(
       client,

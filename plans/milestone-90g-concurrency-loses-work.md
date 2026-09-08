@@ -1,6 +1,6 @@
 # Milestone 90g — Concurrency Loses Work Silently (`@setu-ts/common`, `@setu-ts/database-plugin`, `@setu-ts/cache-plugin`, `@setu-ts/session-plugin`)
 
-> **Status:** Planning. Branch: `feat/m90g-concurrency-loses-work`. `main` is protected — all work
+> **Status:** Complete. Branch: `feat/m90g-concurrency-loses-work`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope

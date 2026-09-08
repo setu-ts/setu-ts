@@ -1044,6 +1044,27 @@ app.router.post('/orders', async (ctx) => {
 });
 ```
 
+#### Isolation
+
+`transaction(work, options?)` accepts `TransactionOptions`, whose optional `isolation` is one of
+`'read-uncommitted'`, `'read-committed'`, `'repeatable-read'`, or `'serializable'`. Omission keeps
+the adapter default. A requested level is honoured or refused by name; it is never silently
+downgraded. Database-plugin adapters throw the caller-safe `501` `UnsupportedIsolationLevelError`.
+D1 throws its own `CloudflareUnsupportedError`, since the Cloudflare plugin cannot depend on another
+plugin's error class.
+
+| Adapter                           | Honoured levels                                                                                                      |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Prisma                            | all four                                                                                                             |
+| Drizzle                           | all four only when the application wraps its bridge with `withIsolationSupport()`                                    |
+| Memory                            | `serializable` (one process only)                                                                                    |
+| MongoDB                           | `serializable` mapped to snapshot reads plus majority writes; this prevents lost updates but is not SQL SERIALIZABLE |
+| D1, DynamoDB, Cosmos DB, Bigtable | none                                                                                                                 |
+
+`withIsolationSupport()` is an application declaration that its bridge forwards options. The type
+system cannot verify its body uses them; an unbranded bridge refuses every requested level rather
+than silently dropping it.
+
 ### Typed Drizzle queries
 
 ```typescript
@@ -1855,7 +1876,7 @@ injection seam, so an application implementing its own facade can name every sig
 | `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                            |
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                            |
 | `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                            |
-| `UnsupportedFilterOperatorError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                                                               | classes                            |
+| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                             | classes                            |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                              |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                              |
 | `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                                                                                                                                                                                                                   | types                              |
@@ -1869,7 +1890,7 @@ injection seam, so an application implementing its own facade can name every sig
 | `CosmosItemResponse`, `CosmosFeedResponse`, `CosmosRequestOptions`, `CosmosAccessCondition`, `CosmosPatchOperation`, `CosmosBatchOperation`, `CosmosBatchInsertOperation`, `CosmosBatchReplaceOperation`, `CosmosBatchPatchOperation`, `CosmosBatchDeleteOperation`, `CosmosBatchResponse`, `CosmosContainerDefinition` | interfaces (Cosmos operation seam) |
 | `PrismaSqlProvider`                                                                                                                                                                                                                                                                                                     | type                               |
 | `SqlJsonDialect`                                                                                                                                                                                                                                                                                                        | type                               |
-| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction`                                                                                                                                                                                             | functions                          |
+| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction`, `withIsolationSupport`                                                                                                                                                                     | functions                          |
 | `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                                                                                                                                                                                                                          | types                              |
 | `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                                                                                                                                                                                                                        | interfaces                         |
 | `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                                                                                                                                                                                                                 | types                              |
@@ -1878,7 +1899,7 @@ injection seam, so an application implementing its own facade can name every sig
 | `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                                                                                                                                                                                                                         | interfaces                         |
 | `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                                                                                                                                                                                                                         | types                              |
 | `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                                                                                                                                                                                                               | types                              |
-| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`                                                                                                                                                                                                                                             | re-exports from `common`           |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `TransactionIsolationLevel`, `TransactionOptions`                                                                                                                                                                                          | re-exports from `common`           |
 | `DataSource`                                                                                                                                                                                                                                                                                                            | deprecated alias of `IDataSource`  |
 | `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                                                                                                                                                                                                               | interfaces (Mongo injection seam)  |
 | `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`                                                                                                                                                                                                      | interfaces (Mongo collection seam) |
@@ -2466,7 +2487,8 @@ present. The fallback is retained for a custom `IHttpAdapter` that does set it.
 ## CachePlugin() (`@setu-ts/cache-plugin`)
 
 Provides caching with multiple stores (Memory, Redis, Noop) and a transparent response-caching
-middleware.
+middleware. `CacheService.getOrSet()` offers coalesced programmatic read-through for callers that
+resolve the concrete exported service.
 
 Registers `ICacheStore` under `CAPABILITIES.CACHE`.
 
@@ -2510,6 +2532,7 @@ app.register(CachePlugin({ name: 'session', options: { maxSize: 500 } }));
 
 ```typescript
 import type { ICacheStore } from '@setu-ts/common';
+import { CacheService } from '@setu-ts/cache-plugin';
 
 app.router.get('/users/:id', async (ctx) => {
   const cache = ctx.services.get<ICacheStore>('cache');
@@ -2529,6 +2552,15 @@ app.router.get('/users/:id', async (ctx) => {
 
   return ctx.response.json(user);
 });
+```
+
+For a programmatic read-through, resolve the exported `CacheService` and use `getOrSet()`.
+Concurrent cold reads for the same key share one factory invocation; a rejected leader leaves no
+in-flight entry, so each joined caller retries its own factory.
+
+```typescript
+const cache = app.services.get<CacheService>('cache');
+const user = await cache.getOrSet(`user:${id}`, async () => await getUser(id), 3600);
 ```
 
 ### Health status
@@ -2551,7 +2583,11 @@ absent capability stays explicitly `'unknown'`.
 ### Cache Middleware
 
 Transparent response-caching middleware that stores full HTTP responses (status, headers, body) and
-replays them on cache HIT without invoking the handler.
+replays them on cache HIT without invoking the handler. Concurrent misses for one key coalesce
+within one process: the leader answers `X-Cache: MISS` and waiters replay a cacheable buffered
+response with `X-Cache: COALESCED`. A failed, streaming, or uncacheable leader is never replayed, so
+each waiter runs the origin itself. Multiple processes do not coordinate; an overlapping successful
+batch produces at most one origin call per process.
 
 ```typescript
 import { cacheMiddleware } from '@setu-ts/cache-plugin';
@@ -3241,6 +3277,10 @@ app.router.post('/login', (ctx) => {
   clone — cloning would collapse repeated `Set-Cookie` values into one comma-joined header.
 - **A request that throws is not committed.** The error handler is about to replace the response,
   and persisting a half-applied mutation from a failed request is worse than dropping it.
+- **Concurrent writes are last-snapshot-wins on both strategies.** Two overlapping requests each
+  load a complete session snapshot and commit a complete replacement. A server-side store makes
+  revocation immediate, but does not merge independently changed keys. Keep session writes to one
+  request and put concurrently updated state behind a store with an explicit concurrency strategy.
 - **`mode: 'sign'` does not hide its payload.** It protects integrity only; anyone holding the
   cookie can read its claims. It exists to pair with the store strategy, where the cookie carries
   nothing but an opaque id. `'encrypt'` is the default so the exposing choice is never accidental.

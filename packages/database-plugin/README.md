@@ -61,6 +61,28 @@ await db.transaction(async (uow) => {
 });
 ```
 
+## Transaction isolation
+
+Pass an isolation level when a read-modify-write needs an explicit concurrency guarantee:
+
+```typescript
+await db.transaction(async (uow) => {
+  // Read and update through transaction-scoped repositories.
+}, { isolation: 'serializable' });
+```
+
+Omitting the option preserves each adapter's current default. A requested level is never silently
+downgraded: this package's adapters throw `UnsupportedIsolationLevelError`; D1 throws its own
+`CloudflareUnsupportedError` because plugins must not depend on one another.
+
+| Adapter                           | Supported isolation                                                                                            |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Prisma                            | All four levels                                                                                                |
+| Drizzle                           | All four, when its bridge is explicitly wrapped with `withIsolationSupport()`                                  |
+| Memory                            | `serializable`, process-local only                                                                             |
+| MongoDB                           | `serializable` as snapshot isolation with majority writes (prevents lost updates, but is not SQL SERIALIZABLE) |
+| D1, DynamoDB, Cosmos DB, Bigtable | None; their transactional primitives are not levelled                                                          |
+
 ## Options
 
 | Option    | Type                                                                                                 | Default     | Description                              |
@@ -732,6 +754,7 @@ imperative begin/commit.
 | `getDrizzleDatabase`                      | function  |
 | `getDrizzleTransaction`                   | function  |
 | `keysetPredicate`                         | function  |
+| `withIsolationSupport`                    | function  |
 | `BaseRepository`                          | class     |
 | `BigtableAdapter`                         | class     |
 | `BigtableTransactionScopeError`           | class     |
@@ -749,6 +772,7 @@ imperative begin/commit.
 | `PrismaRepository`                        | class     |
 | `UnitOfWork`                              | class     |
 | `UnsupportedFilterOperatorError`          | class     |
+| `UnsupportedIsolationLevelError`          | class     |
 | `UnsupportedMigrationError`               | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
@@ -856,6 +880,7 @@ imperative begin/commit.
 | `PrismaAdapterOptions`                    | interface |
 | `PrismaCompositeKeyOptions`               | interface |
 | `PrismaDatabaseOptions`                   | interface |
+| `TransactionOptions`                      | interface |
 | `BigtableAdapterOptions`                  | type      |
 | `BigtableFilter`                          | type      |
 | `BigtableMutation`                        | type      |
@@ -887,6 +912,7 @@ imperative begin/commit.
 | `PageOptions`                             | type      |
 | `PrismaSqlProvider`                       | type      |
 | `SqlJsonDialect`                          | type      |
+| `TransactionIsolationLevel`               | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

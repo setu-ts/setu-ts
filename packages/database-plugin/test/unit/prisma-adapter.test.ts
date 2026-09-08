@@ -119,6 +119,14 @@ describe('PrismaAdapter', () => {
       expect(typeof adapterTxn.createDataSource).toBe('function');
     });
 
+    it('translates the portable isolation spelling for Prisma', async () => {
+      await adapter.connect();
+      const transaction = await adapter.beginTransaction({ isolation: 'repeatable-read' });
+
+      expect(fakeClient.transactionOptions?.isolationLevel).toBe('RepeatableRead');
+      await transaction.commit();
+    });
+
     it('commit resolves', async () => {
       await adapter.connect();
       const txn = await adapter.beginTransaction();

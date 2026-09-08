@@ -297,6 +297,31 @@ export interface IAdapterTransaction extends ITransaction {
 }
 
 /**
+ * Portable transaction isolation levels.
+ *
+ * An adapter must honour a requested level or refuse it by name; it must never
+ * silently use its default isolation instead. Individual adapter support is
+ * documented by `@setu-ts/database-plugin`.
+ *
+ * @since 0.5.0
+ */
+export type TransactionIsolationLevel =
+  | 'read-uncommitted'
+  | 'read-committed'
+  | 'repeatable-read'
+  | 'serializable';
+
+/**
+ * Optional controls for opening a transaction.
+ *
+ * @since 0.5.0
+ */
+export interface TransactionOptions {
+  /** Requested isolation level; omitted preserves the adapter default. */
+  readonly isolation?: TransactionIsolationLevel;
+}
+
+/**
  * The full database backend port: lifecycle plus data access.
  *
  * This is the seam an application implements to plug a database the framework
@@ -335,9 +360,10 @@ export interface IDatabaseAdapter extends IOrmAdapter {
    * Begin a transaction, returning a handle that can open transaction-scoped
    * data sources as well as commit and roll back.
    *
+   * @param options - Optional transaction settings; omitted preserves the backend default
    * @returns The transaction handle
    */
-  beginTransaction(): Promise<IAdapterTransaction>;
+  beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction>;
 
   /**
    * Execute a raw query in the backend's own dialect.

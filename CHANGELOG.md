@@ -8,6 +8,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common`, `@setu-ts/database-plugin` — explicit transaction isolation (M90g / X24-2,
+  X38-3).** `TransactionOptions.isolation` carries one of the four portable isolation names through
+  `IDatabaseService.transaction()` to the adapter. Prisma honours all four; an explicitly branded
+  Drizzle bridge may honour all four; Memory serializes process-local transactions; and MongoDB maps
+  `serializable` to snapshot reads with majority writes (which prevents the measured lost update but
+  is not SQL SERIALIZABLE). A backend that cannot honour a requested level refuses it by name rather
+  than silently using its default.
+
+- **`@setu-ts/session-plugin` — documented snapshot-commit concurrency limit (M90g / X22-6).**
+  Cookie and store sessions each commit their complete payload snapshot, so overlapping requests
+  that update different keys remain last-writer-wins. The README and public API now name this
+  explicitly, with short-lived sessions and an application-level serialized or optimistic write path
+  as remedies.
+
+- **`@setu-ts/cache-plugin` — in-process cache-miss coalescing (M90g / X24-1).**
+  `CacheService.getOrSet(key, factory, ttlSeconds?)` shares one cold read per key and resolved
+  store, stores its successful result with the explicit or configured default TTL, and clears a
+  failed load so every waiter can retry its own factory. `cacheMiddleware` uses the same per-process
+  mechanism and report successful waiters as `X-Cache: COALESCED`; streaming, uncacheable, and
+  failed leaders are never replayed. Separate processes do not coordinate.
+
 - **`@setu-ts/messaging-plugin` — named NATS JetStream startup errors and an explicit subject set
   (M90d / X28-2, X28-3).** `NatsOptions.streamSubjects` (and the same member on the public `nats`
   arm) supplies the subjects the broker may create the configured stream with when it is absent on

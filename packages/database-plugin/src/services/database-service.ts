@@ -17,7 +17,13 @@ import type { IUnitOfWork } from '../interfaces/index.ts';
 import { BaseRepository, type DataSource } from '../repositories/base-repository.ts';
 import { UnitOfWork } from '../unitOfWork/unit-of-work.ts';
 import type { DatabaseAdapterType } from '../interfaces/index.ts';
-import type { EntityKey, IDatabaseAdapter, NormalizedQuery, PageResult } from '@setu-ts/common';
+import type {
+  EntityKey,
+  IDatabaseAdapter,
+  NormalizedQuery,
+  PageResult,
+  TransactionOptions,
+} from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
@@ -106,12 +112,15 @@ export class DatabaseService implements IDatabaseService {
   }
 
   /** @inheritdoc */
-  async transaction<T>(work: (uow: IUnitOfWork) => Promise<T>): Promise<T> {
+  async transaction<T>(
+    work: (uow: IUnitOfWork) => Promise<T>,
+    options?: TransactionOptions,
+  ): Promise<T> {
     if (this._closed) {
       throw new Error('DatabaseService is closed');
     }
 
-    const txn = await this._adapter.beginTransaction();
+    const txn = await this._adapter.beginTransaction(options);
     try {
       const uow = new UnitOfWork(
         txn,

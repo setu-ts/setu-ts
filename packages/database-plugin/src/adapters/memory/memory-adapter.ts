@@ -19,6 +19,7 @@ import type {
   IAdapterTransaction,
   IDatabaseAdapter,
   PageResult,
+  TransactionOptions,
 } from '@setu-ts/common';
 import {
   decodeCursor,
@@ -38,7 +39,11 @@ import {
 } from '../../query/query-builder.ts';
 import { resolveKeyColumns } from '../../query/key-target.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
-import { UnsupportedQueryFeatureError, UnsupportedRawQueryError } from '../../errors.ts';
+import {
+  UnsupportedIsolationLevelError,
+  UnsupportedQueryFeatureError,
+  UnsupportedRawQueryError,
+} from '../../errors.ts';
 
 /**
  * A single in-memory entity store keyed by entity name.
@@ -203,6 +208,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
   private readonly _stores = new Map<string, EntityStore>();
   private _connected = false;
   private _closed = false;
+  /** Tail of the process-local serializable transaction queue. */
+  private _serializableTail: Promise<void> = Promise.resolve();
 
   /** @inheritdoc */
   connect(): Promise<void> {
@@ -225,11 +232,22 @@ export class MemoryAdapter implements IDatabaseAdapter {
   }
 
   /** @inheritdoc */
-  beginTransaction(): Promise<IAdapterTransaction> {
+  beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     if (!this.isReady()) {
       throw new Error('MemoryAdapter is not connected — call connect() first');
     }
+    if (options?.isolation !== undefined && options.isolation !== 'serializable') {
+      return Promise.reject(new UnsupportedIsolationLevelError('memory', options.isolation));
+    }
 
+    if (options?.isolation === 'serializable') {
+      return this.acquireSerializableSlot().then((release) => this.createTransaction(release));
+    }
+    return Promise.resolve(this.createTransaction());
+  }
+
+  /** Builds one transaction handle after any requested serializable slot is acquired. */
+  private createTransaction(release?: () => void): IAdapterTransaction {
     const overlay: TxOverlay = {
       creates: [],
       shadows: new Map(),
@@ -239,7 +257,15 @@ export class MemoryAdapter implements IDatabaseAdapter {
     let committed = false;
     let rolledBack = false;
 
-    return Promise.resolve({
+    let released = false;
+    const releaseOnce = (): void => {
+      if (!released) {
+        released = true;
+        release?.();
+      }
+    };
+
+    return {
       createDataSource: (entity: string): DataSource =>
         this.createOverlayDataSource(entity, overlay),
 
@@ -248,30 +274,34 @@ export class MemoryAdapter implements IDatabaseAdapter {
           throw new Error('Transaction already finalized');
         }
         committed = true;
-        // Flush creates
-        for (const entry of overlay.creates) {
-          const store = this.getStore(entry.entity);
-          store.records.push({ ...entry.record });
-        }
-        // Flush update shadows
-        for (const shadow of overlay.shadows.values()) {
-          const store = this.getStore(shadow.entity);
-          const idx = findRecordIndex(store, shadow.id);
-          if (idx !== -1) {
-            store.records[idx] = { ...shadow.record };
+        try {
+          // Flush creates
+          for (const entry of overlay.creates) {
+            const store = this.getStore(entry.entity);
+            store.records.push({ ...entry.record });
           }
-        }
-        // Flush delete tombstones. The ORIGINAL key object is replayed, never
-        // a value parsed back out of the overlay's map key: that parser
-        // coerced any numeric-looking segment with `Number()`, so a string key
-        // such as '42' or '0042' came back as a number and matched no record —
-        // the delete then survived commit, or removed the wrong row.
-        for (const { entity: ent, id } of overlay.tombstones.values()) {
-          const store = this.getStore(ent);
-          const idx = findRecordIndex(store, id);
-          if (idx !== -1) {
-            store.records.splice(idx, 1);
+          // Flush update shadows
+          for (const shadow of overlay.shadows.values()) {
+            const store = this.getStore(shadow.entity);
+            const idx = findRecordIndex(store, shadow.id);
+            if (idx !== -1) {
+              store.records[idx] = { ...shadow.record };
+            }
           }
+          // Flush delete tombstones. The ORIGINAL key object is replayed, never
+          // a value parsed back out of the overlay's map key: that parser
+          // coerced any numeric-looking segment with `Number()`, so a string key
+          // such as '42' or '0042' came back as a number and matched no record —
+          // the delete then survived commit, or removed the wrong row.
+          for (const { entity: ent, id } of overlay.tombstones.values()) {
+            const store = this.getStore(ent);
+            const idx = findRecordIndex(store, id);
+            if (idx !== -1) {
+              store.records.splice(idx, 1);
+            }
+          }
+        } finally {
+          releaseOnce();
         }
         return Promise.resolve();
       },
@@ -280,9 +310,22 @@ export class MemoryAdapter implements IDatabaseAdapter {
         if (committed || rolledBack) return Promise.resolve();
         rolledBack = true;
         // Discard overlay — committed store untouched.
+        releaseOnce();
         return Promise.resolve();
       },
+    };
+  }
+
+  /** Acquires the process-local mutex used by serializable transactions. */
+  private async acquireSerializableSlot(): Promise<() => void> {
+    const previous = this._serializableTail;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
     });
+    this._serializableTail = previous.then(() => gate);
+    await previous;
+    return (): void => release?.();
   }
 
   /**

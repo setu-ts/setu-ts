@@ -23,6 +23,8 @@ import type {
   NormalizedQuery,
   OrderDirection,
   PageResult,
+  TransactionIsolationLevel,
+  TransactionOptions,
 } from '@setu-ts/common';
 import {
   decodeCursor,
@@ -73,6 +75,23 @@ const PROVIDERS: ReadonlySet<string> = new Set<string>([
   'sqlite',
 ]);
 
+function prismaIsolationLevel(
+  level: TransactionIsolationLevel | undefined,
+): 'ReadUncommitted' | 'ReadCommitted' | 'RepeatableRead' | 'Serializable' | undefined {
+  switch (level) {
+    case 'read-uncommitted':
+      return 'ReadUncommitted';
+    case 'read-committed':
+      return 'ReadCommitted';
+    case 'repeatable-read':
+      return 'RepeatableRead';
+    case 'serializable':
+      return 'Serializable';
+    case undefined:
+      return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Prisma client type — resolved from the application at connect() time.
 // ---------------------------------------------------------------------------
@@ -89,7 +108,11 @@ type PrismaClient = {
   $disconnect(): Promise<void>;
   $transaction<T>(
     fn: (tx: PrismaClient) => Promise<T>,
-    options?: { maxWait?: number; timeout?: number },
+    options?: {
+      maxWait?: number;
+      timeout?: number;
+      isolationLevel?: 'ReadUncommitted' | 'ReadCommitted' | 'RepeatableRead' | 'Serializable';
+    },
   ): Promise<T>;
   $queryRawUnsafe<T>(sql: string, ...params: unknown[]): Promise<T[]>;
 };
@@ -217,7 +240,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
    * holds the callback open for the entire Unit of Work. A custom timeout can
    * be passed through `options.transactionTimeout`.
    */
-  async beginTransaction(): Promise<IAdapterTransaction> {
+  async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     if (!this.isReady()) {
       throw new Error('PrismaAdapter is not connected — call connect() first');
     }
@@ -229,6 +252,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
 
     const txReady = new Deferred<PrismaClient>();
     const hold = new Deferred<void>();
+    const isolationLevel = prismaIsolationLevel(options?.isolation);
     const outer = client.$transaction(
       async (tx) => {
         txReady.resolve(tx);
@@ -237,6 +261,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
       {
         maxWait: 2000,
         timeout: this._options?.transactionTimeout ?? 30_000,
+        ...(isolationLevel === undefined ? {} : { isolationLevel }),
       },
     );
     // If $transaction rejects before handing back `tx` (e.g. it fails to open

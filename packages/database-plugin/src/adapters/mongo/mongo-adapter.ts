@@ -16,9 +16,13 @@
  *
  * @module
  */
-import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type { IAdapterTransaction, IDatabaseAdapter, TransactionOptions } from '@setu-ts/common';
 import type { MongoAdapterOptions } from '../../interfaces/index.ts';
-import { MongoTransactionUnavailableError, UnsupportedRawQueryError } from '../../errors.ts';
+import {
+  MongoTransactionUnavailableError,
+  UnsupportedIsolationLevelError,
+  UnsupportedRawQueryError,
+} from '../../errors.ts';
 import {
   createInjectedClientLoader,
   createLazyClientLoader,
@@ -166,12 +170,19 @@ export class MongoAdapter implements IDatabaseAdapter {
    *
    * @inheritdoc
    */
-  async beginTransaction(): Promise<IAdapterTransaction> {
+  async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     this.assertConnected();
+    if (options?.isolation !== undefined && options.isolation !== 'serializable') {
+      throw new UnsupportedIsolationLevelError('mongodb', options.isolation);
+    }
     const client = this.#client as IMongoClient;
     const session = client.startSession();
     try {
-      await session.startTransaction();
+      await session.startTransaction(
+        options?.isolation === 'serializable'
+          ? { readConcern: { level: 'snapshot' }, writeConcern: { w: 'majority' } }
+          : undefined,
+      );
     } catch (error) {
       await session.endSession();
       throw new MongoTransactionUnavailableError(

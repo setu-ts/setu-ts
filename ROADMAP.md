@@ -9028,10 +9028,11 @@ documents that cliff. X22-6 (concurrent session writes lose one on both strategi
 cache-miss coalescing — 100 of 100 concurrent misses reached the origin) are the same shape in two
 more packages.
 
-Suggested contract: an optional `transaction(work, { isolation })` translated per adapter and
-refused by name where unsupported — the `UnsupportedFilterOperatorError` precedent. It does not make
-`FOR UPDATE` portable, but paired with M90f's retryable status it makes the _optimistic_ strategy
-portable, which is the one that generalises.
+Suggested contract: `IDatabaseService.transaction(work, { isolation })` (owned by `database-plugin`)
+passes the optional level to `IDatabaseAdapter.beginTransaction(options?)` (owned by `common`),
+translated per adapter and refused by name where unsupported — the `UnsupportedFilterOperatorError`
+precedent. It does not make `FOR UPDATE` portable, but paired with M90f's retryable status it makes
+the _optimistic_ strategy portable, which is the one that generalises.
 
 ### Milestone 90h: Documentation That Survives Contact
 
@@ -9244,7 +9245,7 @@ fields (`code` first) read through the same guard, plus
 | 90d       | ✅     | the two brokers that cannot start ([#256](https://github.com/setu-ts/setu-ts/pull/256))    |
 | 90e       | ✅     | static delivery correctness ([#252](https://github.com/setu-ts/setu-ts/pull/252))          |
 | 90f       | ⬜     | caller errors reach the client correctly                                                   |
-| 90g       | ⬜     | concurrency loses work silently                                                            |
+| 90g       | ✅     | concurrency loses work silently                                                            |
 | 90h       | ⬜     | documentation that survives contact                                                        |
 | 90i       | ⬜     | observability that joins up                                                                |
 | 90j       | ⬜     | operator diagnostics survive to the operator                                               |

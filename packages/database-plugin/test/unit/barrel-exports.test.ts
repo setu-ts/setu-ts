@@ -78,11 +78,19 @@ import type {
 describe('database-plugin barrel exports', () => {
   it('exports the typed Drizzle seam without leaking internal symbols', () => {
     expect(typeof database.createDrizzleDatabase).toBe('function');
+    expect(typeof database.withIsolationSupport).toBe('function');
     expect(typeof database.getDrizzleDatabase).toBe('function');
     expect(typeof database.getDrizzleTransaction).toBe('function');
     expect(Object.hasOwn(database, 'DRIZZLE_DATABASE')).toBe(false);
     expect(Object.hasOwn(database, 'DRIZZLE_QUERY_HANDLE')).toBe(false);
     expect(Object.hasOwn(database, 'DrizzleInstance')).toBe(false);
+  });
+
+  it('re-exports transaction isolation types and its named refusal', () => {
+    const level: import('../../src/index.ts').TransactionIsolationLevel = 'serializable';
+    const options: import('../../src/index.ts').TransactionOptions = { isolation: level };
+    expect(options.isolation).toBe('serializable');
+    expect(typeof database.UnsupportedIsolationLevelError).toBe('function');
   });
 
   it('retains the established runtime exports', () => {

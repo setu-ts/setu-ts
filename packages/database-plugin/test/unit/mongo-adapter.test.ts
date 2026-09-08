@@ -185,6 +185,24 @@ describe('MongoAdapter — transactions', () => {
     expect(session.calls).toContain('endSession');
   });
 
+  it('maps serializable to Mongo snapshot reads and majority writes', async () => {
+    const session = new FakeSession();
+    const client = new FakeSessionClient(session);
+    const adapter = new MongoAdapter({
+      url: 'mongodb://localhost:27017/db',
+      client,
+      objectIdCtor: fakeObjectIdCtor,
+    });
+    await adapter.connect();
+    const transaction = await adapter.beginTransaction({ isolation: 'serializable' });
+
+    expect(session.startTransactionOptions).toEqual({
+      readConcern: { level: 'snapshot' },
+      writeConcern: { w: 'majority' },
+    });
+    await transaction.rollback();
+  });
+
   it('wraps a startTransaction failure in MongoTransactionUnavailableError', async () => {
     const failingSession = new FakeSession(true);
     const client = new FakeSessionClient(failingSession);

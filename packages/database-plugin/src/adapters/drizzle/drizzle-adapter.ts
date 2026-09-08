@@ -8,7 +8,7 @@
  * @module
  */
 import type { DatabaseAdapterOptions, DrizzleAdapterOptions } from '../../interfaces/index.ts';
-import type { FilterComparison } from '@setu-ts/common';
+import type { FilterComparison, TransactionOptions } from '@setu-ts/common';
 import { escapeLikePattern } from '../../query/like-escape.ts';
 import {
   dialectFromDrizzleClassName,
@@ -36,7 +36,7 @@ import { DATABASE_POOL_CAPACITY } from '../../health/database-capacity.ts';
 import type { DatabasePoolCapacity } from '../../interfaces/index.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
-import { UnsupportedQueryFeatureError } from '../../errors.ts';
+import { UnsupportedIsolationLevelError, UnsupportedQueryFeatureError } from '../../errors.ts';
 import {
   normalizePageQuery,
   PageNormalizationError,
@@ -203,8 +203,12 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   private _db: DrizzleInstance | null = null;
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
   private _transactionBridge:
-    | ((work: (transaction: unknown) => Promise<void>) => Promise<void>)
+    | ((
+      work: (transaction: unknown) => Promise<void>,
+      options?: TransactionOptions,
+    ) => Promise<void>)
     | null = null;
+  private _supportsIsolation = false;
   private _connected = false;
   private readonly _options: DatabaseAdapterOptions | undefined;
   private _operators: DrizzleOperators | null = null;
@@ -225,6 +229,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     this._db = configured.database;
     this._configuredDatabase = configured.configured;
     this._transactionBridge = configured.transaction;
+    this._supportsIsolation = configured.supportsIsolation;
 
     try {
       const orm = await import('npm:drizzle-orm@0.45.2');
@@ -338,12 +343,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    *
    * Uses the same two-deferred bridge pattern as Prisma.
    */
-  async beginTransaction(): Promise<IAdapterTransaction> {
+  async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     if (!this.isReady()) {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
     const configuredDatabase = this._configuredDatabase!;
     const transactionBridge = this._transactionBridge!;
+    if (options?.isolation !== undefined && !this._supportsIsolation) {
+      throw new UnsupportedIsolationLevelError('drizzle', options.isolation);
+    }
 
     const txReady = new Deferred<DrizzleInstance>();
     const hold = new Deferred<void>();
@@ -354,7 +362,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const outer = transactionBridge(async (tx) => {
       txReady.resolve(this.validateInstance(tx));
       await hold.promise;
-    });
+    }, options);
     // If the transaction rejects before handing back `tx` (e.g. the driver
     // fails to open it), unblock the waiter so beginTransaction rejects
     // instead of hanging on a promise that never settles.
@@ -479,7 +487,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   private resolveDb(): {
     readonly database: DrizzleInstance;
     readonly configured: DrizzleDatabaseIdentity;
-    readonly transaction: (work: (transaction: unknown) => Promise<void>) => Promise<void>;
+    readonly transaction: (
+      work: (transaction: unknown) => Promise<void>,
+      options?: TransactionOptions,
+    ) => Promise<void>;
+    readonly supportsIsolation: boolean;
   } {
     // Prefer injected instance.
     if (this._options?.drizzleInstance) {
@@ -489,6 +501,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
         database: this.validateInstance(configured.database),
         configured: witness,
         transaction: configured.transaction,
+        supportsIsolation: configured.supportsIsolation,
       };
     }
 
