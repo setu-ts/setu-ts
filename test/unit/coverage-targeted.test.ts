@@ -3,7 +3,9 @@ import { expect } from '@std/expect';
 import {
   belowBar,
   type CoverageRow,
+  findUnreportedFiles,
   parseArgs,
+  parseChangedPaths,
   parseMemberTable,
   readWorkspaceMembers,
   resolveMembers,
@@ -154,5 +156,71 @@ describe('parseArgs', () => {
     const parsed = parseArgs([]);
     expect(parsed.base).toBe('main');
     expect(parsed.selectors).toEqual([]);
+  });
+});
+
+describe('findUnreportedFiles', () => {
+  const row = (file: string): CoverageRow => ({
+    file,
+    branchPct: 100,
+    functionPct: 100,
+    linePct: 100,
+  });
+
+  it('reports a src file that has no coverage row even when every reported file passes', () => {
+    // `deno coverage` omits a module nothing loaded, so a passing table used to
+    // say nothing about it. The caller reports this rather than failing — a
+    // type-only module is absent for the same reason.
+    const expected = [
+      'packages/exceptions/src/index.ts',
+      'packages/exceptions/src/never-loaded.ts',
+    ];
+    expect(findUnreportedFiles(expected, [row('index.ts')])).toEqual([
+      'packages/exceptions/src/never-loaded.ts',
+    ]);
+  });
+
+  it('matches a row printed relative to a multi-member common root', () => {
+    const expected = [
+      'packages/exceptions/src/index.ts',
+      'packages/resilience-plugin/src/index.ts',
+    ];
+    const rows = [row('exceptions/src/index.ts'), row('resilience-plugin/src/index.ts')];
+    expect(findUnreportedFiles(expected, rows)).toEqual([]);
+  });
+
+  it('requires a path boundary, so a row cannot claim a same-suffixed sibling', () => {
+    const expected = ['packages/exceptions/src/my-index.ts'];
+    expect(findUnreportedFiles(expected, [row('index.ts')])).toEqual([
+      'packages/exceptions/src/my-index.ts',
+    ]);
+  });
+
+  it('reports nothing when every expected file was measured', () => {
+    const expected = ['packages/exceptions/src/index.ts'];
+    expect(findUnreportedFiles(expected, [row('index.ts')])).toEqual([]);
+  });
+});
+
+describe('parseChangedPaths', () => {
+  it('combines committed paths with the working tree', () => {
+    const paths = parseChangedPaths(
+      'packages/kernel/src/router.ts\n',
+      ' M packages/common/src/http.ts\n?? packages/sdk/src/new.ts\n',
+    );
+    expect(paths).toEqual([
+      'packages/kernel/src/router.ts',
+      'packages/common/src/http.ts',
+      'packages/sdk/src/new.ts',
+    ]);
+  });
+
+  it('takes the destination of a rename', () => {
+    expect(parseChangedPaths('', 'R  packages/a/src/old.ts -> packages/a/src/new.ts\n'))
+      .toEqual(['packages/a/src/new.ts']);
+  });
+
+  it('drops blank lines from both sources', () => {
+    expect(parseChangedPaths('\n\n', '   \n')).toEqual([]);
   });
 });

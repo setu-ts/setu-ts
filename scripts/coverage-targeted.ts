@@ -24,6 +24,11 @@
  *     covered by a dependent package's tests. Confirm with the full run before
  *     writing tests for them.
  *
+ * A third limit is inherent to `deno coverage` and shared with the full run: a
+ * module no test LOADED has no row at all rather than a 0% row, so it is
+ * listed under "produced no coverage row" rather than failed — see
+ * `findUnreportedFiles` for why that cannot be made fatal here.
+ *
  * A `--with-dependents` flag was built and CUT: the transitive dependents of
  * every member measured here close over the ENTIRE workspace (47 of 47, for
  * `common`, `kernel`, `exceptions`, `static-plugin`, `cache-plugin` and
@@ -190,6 +195,58 @@ export function belowBar(
 }
 
 /**
+ * Returns the expected source files that `deno coverage` reported no row for.
+ *
+ * `deno coverage` reports only modules that were LOADED, so a `src` file no
+ * test imports is absent from the table rather than present at 0% — and a run
+ * that reads only the rows it was given used to claim
+ * `all 9 file(s) meet the ≥90% bar` while saying nothing about it.
+ *
+ * The result is REPORTED, never fatal, because the two causes are
+ * indistinguishable without a TypeScript parser this script does not have: a
+ * module nothing loaded, and a TYPE-ONLY module that is erased at compile time
+ * and therefore absent from every report including the full run's. A
+ * source-level classifier was attempted and rejected — over the 742 `src`
+ * files it misclassified 47 as type-only that the full run had measured,
+ * because a barrel carrying both `export { … }` and `export type { … }`
+ * defeats whole-file token matching, and a wrong answer in that direction
+ * would silently skip a real file.
+ *
+ * Rows are matched by path SUFFIX because `deno coverage` prints each path
+ * relative to the common root of the files it reported — `index.ts` for a
+ * single member, `exceptions/src/index.ts` for two — so reconstructing that
+ * prefix would duplicate a rule this tool does not own. The match requires a
+ * `/` boundary (or full equality) so a row for `index.ts` cannot claim
+ * `my-index.ts`.
+ */
+export function findUnreportedFiles(
+  expected: readonly string[],
+  rows: readonly CoverageRow[],
+): readonly string[] {
+  return expected.filter((file) =>
+    !rows.some((row) => file === row.file || file.endsWith(`/${row.file}`))
+  );
+}
+
+/**
+ * Splits the two change-discovery command outputs into candidate paths.
+ *
+ * A `git status --porcelain` rename reads `old -> new`; the destination is the
+ * path that exists, so that is the one taken.
+ */
+export function parseChangedPaths(
+  diffStdout: string,
+  statusStdout: string,
+): readonly string[] {
+  const fromStatus = statusStdout
+    .split('\n')
+    .map((line) => line.slice(3).trim())
+    .filter((line) => line !== '')
+    .map((line) => line.includes(' -> ') ? line.split(' -> ')[1] as string : line);
+  return [...diffStdout.split('\n'), ...fromStatus].filter((path) => path.trim() !== '');
+}
+
+/**
  * Splits argv into flags and positional member selectors.
  */
 export function parseArgs(
@@ -228,17 +285,59 @@ async function run(
   };
 }
 
-/** Collects changed paths: committed against `base`, plus the working tree. */
+/**
+ * Collects changed paths: committed against `base`, plus the working tree.
+ *
+ * A failing command EXITS rather than reporting no changes. `git diff` answers
+ * a misspelled `--base`, an absent default ref, or a missing merge base with a
+ * non-zero status and empty stdout, which on a clean tree is indistinguishable
+ * from "nothing changed" — so the gate would skip itself and exit 0. Verified:
+ * `--base=does-not-exist-ref` reported `nothing to measure` before this check.
+ */
 async function changedPaths(base: string): Promise<readonly string[]> {
   const diff = await run('git', ['diff', '--name-only', `${base}...HEAD`], false);
+  if (!diff.success) {
+    console.error(
+      `coverage-targeted: git diff against '${base}' failed — cannot infer the ` +
+        'changed members. Name them explicitly, or pass a valid --base.',
+    );
+    console.error(diff.stderr.trim());
+    Deno.exit(diff.code === 0 ? 1 : diff.code);
+  }
+
   const status = await run('git', ['status', '--porcelain'], false);
-  const fromStatus = status.stdout
-    .split('\n')
-    .map((line) => line.slice(3).trim())
-    .filter((line) => line !== '')
-    // A rename reads `old -> new`; take the destination.
-    .map((line) => line.includes(' -> ') ? line.split(' -> ')[1] as string : line);
-  return [...diff.stdout.split('\n'), ...fromStatus].filter((p) => p.trim() !== '');
+  if (!status.success) {
+    console.error(
+      'coverage-targeted: git status failed — cannot infer the changed members.',
+    );
+    console.error(status.stderr.trim());
+    Deno.exit(status.code === 0 ? 1 : status.code);
+  }
+
+  return parseChangedPaths(diff.stdout, status.stdout);
+}
+
+/** Lists a member's `src` files, repo-relative, for the completeness check. */
+async function listSourceFiles(member: string): Promise<readonly string[]> {
+  const found: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries: AsyncIterable<Deno.DirEntry>;
+    try {
+      entries = Deno.readDir(dir);
+    } catch {
+      return; // A member with no `src` contributes nothing to measure.
+    }
+    for await (const entry of entries) {
+      const path = `${dir}/${entry.name}`;
+      if (entry.isDirectory) {
+        await walk(path);
+      } else if (/\.(ts|tsx|mts)$/.test(entry.name)) {
+        found.push(path);
+      }
+    }
+  };
+  await walk(`${member}/src`);
+  return found.sort();
 }
 
 function formatRow(row: CoverageRow, pass: boolean): string {
@@ -321,6 +420,11 @@ async function main(): Promise<void> {
     Deno.exit(1);
   }
 
+  // Completeness before thresholds: an absent row is not a passing row.
+  const expected: string[] = [];
+  for (const member of gated) expected.push(...await listSourceFiles(member));
+  const unreported = findUnreportedFiles(expected, rows);
+
   const failing = belowBar(rows);
   console.log(`Per-file coverage (≥${THRESHOLD}% branch/function/line required):`);
   console.log(
@@ -329,6 +433,16 @@ async function main(): Promise<void> {
   console.log(`| ${'-'.repeat(58)} | -------- | ---------- | ------ |`);
   const failingSet = new Set(failing.map((row) => row.file));
   for (const row of rows) console.log(formatRow(row, !failingSet.has(row.file)));
+
+  if (unreported.length > 0) {
+    console.log(
+      `\ncoverage-targeted: ${unreported.length} of ${expected.length} src file(s) ` +
+        'produced no coverage row. Each is either type-only (erased at compile ' +
+        "time, so absent from every report including the full run's) or was " +
+        'loaded by no test in these members — read the file to tell which:',
+    );
+    for (const file of unreported) console.log(`  - ${file}`);
+  }
 
   if (failing.length > 0) {
     console.error(
@@ -343,7 +457,9 @@ async function main(): Promise<void> {
     Deno.exit(1);
   }
 
-  console.log(`\ncoverage-targeted: all ${rows.length} file(s) meet the ≥${THRESHOLD}% bar.`);
+  console.log(
+    `\ncoverage-targeted: all ${rows.length} measured file(s) meet the ≥${THRESHOLD}% bar.`,
+  );
   console.log('Milestone hand-off still requires the full `deno task test:coverage`.');
 }
 
