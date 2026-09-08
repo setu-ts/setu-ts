@@ -22,14 +22,13 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   HandlerResult,
-  IAdapterTransaction,
   IDatabaseAdapter,
   IDataSource,
   IRequestContext,
 } from '@setu-ts/common';
 import { type ErrorFormat, errorHandler } from '@setu-ts/exceptions';
 
-import { DatabasePlugin, MemoryAdapter } from '../../src/index.ts';
+import { DatabasePlugin, type IBigtableClient, MemoryAdapter } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/index.ts';
 import { DynamoAdapter } from '../../src/adapters/dynamo/dynamo-adapter.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
@@ -102,6 +101,32 @@ function bootBigtableApp() {
     },
   });
   return app;
+}
+
+/**
+ * Builds a Bigtable client whose commit RPC loses its acknowledgement after a
+ * buffered write. The numeric gRPC code is deliberately retained: the
+ * transaction service must still mask it because a commit outcome is unknown.
+ */
+function commitAcknowledgementLostBigtableClient(): IBigtableClient {
+  const client = createFakeBigtableClient(new FakeBigtableStore());
+  return {
+    instance: (instanceId) => {
+      const instance = client.instance(instanceId);
+      return {
+        table: (tableId) => {
+          const table = instance.table(tableId);
+          return {
+            readRows: (options) => table.readRows(options),
+            row: () => ({
+              conditionalMutate: () => Promise.reject({ code: 10, details: 'ABORTED' }),
+            }),
+          };
+        },
+      };
+    },
+    close: () => client.close(),
+  };
 }
 
 /** Builds a memory-backed app through either its built-in or custom arm. */
@@ -507,28 +532,35 @@ describe('driver conditions answer their classified status (X38-1/X35-2)', () =>
 
   it('masks a commit failure whose outcome is unknown', async () => {
     // A lost commit acknowledgement can follow a successful write. Even a
-    // recognizable driver code must not advertise the retry-safe contract.
-    const tx: IAdapterTransaction = {
-      commit: () => Promise.reject({ code: 10, details: 'ABORTED' }),
-      rollback: () => Promise.resolve(),
-      createDataSource: (_entity: string) => refusingDataSource(new Error('not reached')),
-    };
-    const adapter: IDatabaseAdapter = {
-      connect: () => Promise.resolve(),
-      disconnect: () => Promise.resolve(),
-      isReady: () => true,
-      createDataSource: (_entity: string) => refusingDataSource(new Error('not reached')),
-      beginTransaction: () => Promise.resolve(tx),
-      rawQuery: <T>(): Promise<T[]> => Promise.reject(new Error('not reached')),
-    };
+    // recognizable Bigtable gRPC code must not advertise the retry-safe
+    // contract. This uses the built-in Bigtable arm so code 10 reaches the
+    // classifier-enabled path rather than the unclassified custom arm.
     const app = createApplication({
-      plugins: [RuntimePlugin(), DatabasePlugin({ type: 'custom', adapter })],
+      plugins: [
+        RuntimePlugin(),
+        DatabasePlugin({
+          type: 'bigtable',
+          options: {
+            client: commitAcknowledgementLostBigtableClient(),
+            instance: 'test-instance',
+            tables: {
+              Event: {
+                table: 'events',
+                rowKey: { fields: ['tenantId', 'eventId'], separator: '#' },
+                columnFamily: 'cf',
+              },
+            },
+          },
+        }),
+      ],
     });
     app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
     app.router.post('/commit-only', {
       handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
         const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-        await db.transaction(async () => {});
+        await db.transaction(async (uow) => {
+          await uow.getRepository('Event').create({ tenantId: 't1', eventId: 'e1' });
+        });
         return ctx.response.json({});
       },
     });
