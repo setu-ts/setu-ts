@@ -16,9 +16,18 @@
  *
  * @module
  */
-import type { IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
+import type {
+  IAdapterTransaction,
+  IDatabaseAdapter,
+  TransactionIsolationLevel,
+  TransactionOptions,
+} from '@setu-ts/common';
 import type { MongoAdapterOptions } from '../../interfaces/index.ts';
-import { MongoTransactionUnavailableError, UnsupportedRawQueryError } from '../../errors.ts';
+import {
+  MongoTransactionUnavailableError,
+  UnsupportedIsolationLevelError,
+  UnsupportedRawQueryError,
+} from '../../errors.ts';
 import {
   createInjectedClientLoader,
   createLazyClientLoader,
@@ -46,6 +55,8 @@ import type { MongoTarget } from './mongo-mapping.ts';
  * @since 0.1.0
  */
 export class MongoAdapter implements IDatabaseAdapter {
+  /** MongoDB snapshot isolation is not the portable serializable guarantee. */
+  readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = [];
   #client: IMongoClient | null = null;
   /** The in-flight `connect()`, so concurrent callers share one attempt. */
   #connecting: Promise<void> | null = null;
@@ -166,8 +177,11 @@ export class MongoAdapter implements IDatabaseAdapter {
    *
    * @inheritdoc
    */
-  async beginTransaction(): Promise<IAdapterTransaction> {
+  async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     this.assertConnected();
+    if (options?.isolation !== undefined) {
+      throw new UnsupportedIsolationLevelError('mongodb', options.isolation);
+    }
     const client = this.#client as IMongoClient;
     const session = client.startSession();
     try {

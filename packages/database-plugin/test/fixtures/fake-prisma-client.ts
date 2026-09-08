@@ -391,11 +391,12 @@ export function createFakePrismaClient(
   $disconnect: () => Promise<void>;
   $transaction: <T>(
     fn: (client: ReturnType<typeof createFakePrismaClient>) => Promise<T>,
-    options?: { maxWait?: number; timeout?: number },
+    options?: { maxWait?: number; timeout?: number; isolationLevel?: string },
   ) => Promise<T>;
   $queryRawUnsafe: <T>(sql: string, ...params: unknown[]) => Promise<T[]>;
   connected: boolean;
   disconnected: boolean;
+  transactionOptions: { maxWait?: number; timeout?: number; isolationLevel?: string } | undefined;
   // The active connector, mirroring the real client's underscore-private
   // `_activeProvider` field that the adapter's structural detection reads.
   // Defaults to `'postgresql'` (an escaping connector) so a `contains` filter
@@ -415,6 +416,9 @@ export function createFakePrismaClient(
 } {
   let connected = false;
   let disconnected = false;
+  let transactionOptions:
+    | { maxWait?: number; timeout?: number; isolationLevel?: string }
+    | undefined;
   const recordedCalls: RecordedCall[] = [];
   const activeProvider = options.activeProvider ?? 'postgresql';
   const stores: Record<string, Store> = {
@@ -430,6 +434,9 @@ export function createFakePrismaClient(
     },
     get disconnected() {
       return disconnected;
+    },
+    get transactionOptions() {
+      return transactionOptions;
     },
     get recordedCalls() {
       return recordedCalls;
@@ -447,8 +454,9 @@ export function createFakePrismaClient(
     },
     async $transaction<T>(
       fn: (tx: FakePrismaClient) => Promise<T>,
-      _options?: { maxWait?: number; timeout?: number },
+      options?: { maxWait?: number; timeout?: number; isolationLevel?: string },
     ): Promise<T> {
+      transactionOptions = options;
       // Pass the same client as the tx handle (real Prisma does this)
       return fn(client);
     },

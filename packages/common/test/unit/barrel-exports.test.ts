@@ -113,6 +113,9 @@ describe('@setu-ts/common barrel — M79 portable data-access contract', () => {
     const _cursorValue: import('../../src/index.ts').CursorValue = new Date(
       '2026-08-31T00:00:00.000Z',
     );
+    const _isolation: import('../../src/index.ts').TransactionOptions = {
+      isolation: 'serializable',
+    };
     expect(typeof common.encodeCursor).toBe('function');
     expect(typeof common.decodeCursor).toBe('function');
     expect(typeof common.keysetPredicate).toBe('function');
@@ -120,6 +123,7 @@ describe('@setu-ts/common barrel — M79 portable data-access contract', () => {
     expect(_pageResult.rows).toEqual([]);
     expect(_cursorPayload.orderedValues).toEqual([1]);
     expect(_cursorValue).toBeInstanceOf(Date);
+    expect(_isolation.isolation).toBe('serializable');
   });
 });
 

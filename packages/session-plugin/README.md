@@ -55,6 +55,12 @@ The cookie strategy's trade-off is real and worth stating plainly: a stolen cook
 it expires, because nothing server-side is consulted. If you need to log a specific user out right
 now, use a store.
 
+Sessions also use whole-payload snapshot commits. Two overlapping requests that each change session
+state can therefore lose one change on both the cookie and store strategies; a store improves
+revocation, not concurrent-write merging. Keep writes to one session in one request, and keep state
+that must be concurrently updated out of the session (for example, in a database with an explicit
+concurrency strategy).
+
 ```typescript
 SessionPlugin({ secret, store: 'memory' }); // single process, dev
 SessionPlugin({ secret, store: 'cache' }); // over CAPABILITIES.CACHE

@@ -10,6 +10,7 @@
 import type { ICacheStore, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { CachedResponsePayload, CacheMiddlewareOptions } from '../interfaces/index.ts';
+import { cacheCoalescer } from '../services/coalescer.ts';
 import { composeCacheKey } from '../utils/cache-key.ts';
 import { decodePayload, encodePayload } from '../utils/cache-payload.ts';
 
@@ -27,6 +28,14 @@ const HOP_BY_HOP_HEADERS = new Set([
   'transfer-encoding',
   'upgrade',
 ]);
+
+/** Result of one origin execution as observed by cache middleware. */
+type CacheOriginOutcome = {
+  readonly replayable: true;
+  readonly payload: CachedResponsePayload;
+} | {
+  readonly replayable: false;
+};
 
 /**
  * Create a caching middleware function.
@@ -68,79 +77,97 @@ export function cacheMiddleware(
     const cached = await store.get<CachedResponsePayload>(key);
 
     if (cached !== null) {
-      // HIT — replay cached response and short-circuit.
-      const decoded = decodePayload(cached);
-
-      // Set status.
-      ctx.response.status(decoded.status);
-
-      // Copy headers, stripping hop-by-hop.
-      for (const [name, value] of decoded.headers) {
-        if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) {
-          ctx.response.header(name, value);
-        }
-      }
-
-      // Mark as cache HIT.
-      ctx.response.header('X-Cache', 'HIT');
-
-      // Replay body preserving type so the kernel transport can surface it.
-      // String bodies must use text() — the kernel's inject() only surfaces
-      // STRING bodies (see application.ts:387). After text() sets
-      // text/plain, re-assert the cached content-type header so the correct
-      // type is returned.
-      if (decoded.bodyBytes instanceof Uint8Array) {
-        // Binary payload (base64-encoded in cache). send(bytes) is correct.
-        // For binary, inject().body === null is an inherent inject limitation
-        // until M39 HTTP adapters; acceptable.
-        ctx.response.send(decoded.bodyBytes);
-      } else if (typeof decoded.bodyBytes === 'string') {
-        // String payload — use text() so snapshot.body is a string.
-        ctx.response.text(decoded.bodyBytes);
-        // text() sets text/plain; re-assert the cached content-type.
-        const cachedCT = decoded.headers.find(
-          ([name]) => name.toLowerCase() === 'content-type',
-        );
-        if (cachedCT !== undefined) {
-          ctx.response.header('content-type', cachedCT[1]);
-        }
-      } else {
-        // Null/empty body — call a terminal method so the response is ended.
-        ctx.response.send();
-      }
-
-      // Short-circuit — do NOT call next().
+      replayCachedResponse(ctx, cached, 'HIT');
       return;
     }
 
-    // MISS — invoke handler chain.
-    await next();
+    const coalesced = await cacheCoalescer.run(
+      store,
+      key,
+      async (): Promise<CacheOriginOutcome> => {
+        return await captureOrigin(ctx, next, store, key, ttlSeconds, cacheableStatuses);
+      },
+    );
 
-    // Read the response snapshot after the handler wrote to ctx.response.
-    const snapshot = ctx.response.snapshot();
-
-    // M42 streaming guard: a live stream is not cacheable and must not be
-    // drained by an observer. Because snapshot() is a discriminated union,
-    // this branch narrows snapshot to the `streaming: false` arm for the
-    // rest of the function, so encodePayload(type-checks against its
-    // `body: Uint8Array | string | null` parameter with no cast.
-    if (snapshot.streaming) {
+    if (!coalesced.ok) {
+      if (!coalesced.joined) {
+        throw coalesced.error;
+      }
+      await captureOrigin(ctx, next, store, key, ttlSeconds, cacheableStatuses);
       ctx.response.header('X-Cache', 'MISS');
       return;
     }
 
-    // Store only if cacheable and no Set-Cookie.
-    if (
-      cacheableStatuses.includes(snapshot.status) &&
-      !hasSetCookie(snapshot.headers)
-    ) {
-      const payload = encodePayload(snapshot);
-      await store.set<CachedResponsePayload>(key, payload, ttlSeconds);
+    if (coalesced.joined) {
+      if (coalesced.value.replayable) {
+        replayCachedResponse(ctx, coalesced.value.payload, 'COALESCED');
+        return;
+      }
+      // A streaming, non-cacheable, or Set-Cookie leader cannot be replayed.
+      // This request gets its own origin execution, as it did before coalescing.
+      await captureOrigin(ctx, next, store, key, ttlSeconds, cacheableStatuses);
     }
 
-    // Mark as cache MISS.
     ctx.response.header('X-Cache', 'MISS');
   };
+}
+
+/**
+ * Runs the route chain and captures a replayable response only when safe.
+ */
+async function captureOrigin(
+  ctx: IRequestContext,
+  next: () => Promise<void>,
+  store: ICacheStore,
+  key: string,
+  ttlSeconds: number | undefined,
+  cacheableStatuses: readonly number[],
+): Promise<CacheOriginOutcome> {
+  await next();
+  const snapshot = ctx.response.snapshot();
+  if (
+    snapshot.streaming ||
+    !cacheableStatuses.includes(snapshot.status) ||
+    hasSetCookie(snapshot.headers)
+  ) {
+    return { replayable: false };
+  }
+
+  const payload = encodePayload(snapshot);
+  await store.set<CachedResponsePayload>(key, payload, ttlSeconds);
+  return { replayable: true, payload };
+}
+
+/**
+ * Applies one cached response to the current request context.
+ */
+function replayCachedResponse(
+  ctx: IRequestContext,
+  payload: CachedResponsePayload,
+  cacheStatus: 'HIT' | 'COALESCED',
+): void {
+  const decoded = decodePayload(payload);
+  ctx.response.status(decoded.status);
+  for (const [name, value] of decoded.headers) {
+    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) {
+      ctx.response.header(name, value);
+    }
+  }
+  ctx.response.header('X-Cache', cacheStatus);
+
+  if (decoded.bodyBytes instanceof Uint8Array) {
+    ctx.response.send(decoded.bodyBytes);
+  } else if (typeof decoded.bodyBytes === 'string') {
+    ctx.response.text(decoded.bodyBytes);
+    const cachedCT = decoded.headers.find(
+      ([name]) => name.toLowerCase() === 'content-type',
+    );
+    if (cachedCT !== undefined) {
+      ctx.response.header('content-type', cachedCT[1]);
+    }
+  } else {
+    ctx.response.send();
+  }
 }
 
 /**

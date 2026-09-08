@@ -23,6 +23,8 @@ import type {
   NormalizedQuery,
   OrderDirection,
   PageResult,
+  TransactionIsolationLevel,
+  TransactionOptions,
 } from '@setu-ts/common';
 import {
   decodeCursor,
@@ -32,7 +34,11 @@ import {
   sortFingerprint,
 } from '@setu-ts/common';
 import type { DataSource } from '../../repositories/base-repository.ts';
-import { UnsupportedFilterOperatorError, UnsupportedQueryFeatureError } from '../../errors.ts';
+import {
+  UnsupportedFilterOperatorError,
+  UnsupportedIsolationLevelError,
+  UnsupportedQueryFeatureError,
+} from '../../errors.ts';
 import { escapeLikePattern } from '../../query/like-escape.ts';
 import { jsonPathString } from '../../query/json-path.ts';
 import { keyValues } from '../../query/key-target.ts';
@@ -73,6 +79,32 @@ const PROVIDERS: ReadonlySet<string> = new Set<string>([
   'sqlite',
 ]);
 
+function prismaIsolationLevel(
+  level: TransactionIsolationLevel | undefined,
+): 'ReadUncommitted' | 'ReadCommitted' | 'RepeatableRead' | 'Serializable' | undefined {
+  switch (level) {
+    case 'read-uncommitted':
+      return 'ReadUncommitted';
+    case 'read-committed':
+      return 'ReadCommitted';
+    case 'repeatable-read':
+      return 'RepeatableRead';
+    case 'serializable':
+      return 'Serializable';
+    case undefined:
+      return undefined;
+  }
+}
+
+const PRISMA_ALL_ISOLATION_LEVELS: readonly TransactionIsolationLevel[] = [
+  'read-uncommitted',
+  'read-committed',
+  'repeatable-read',
+  'serializable',
+];
+const PRISMA_SERIALIZABLE_ONLY: readonly TransactionIsolationLevel[] = ['serializable'];
+const PRISMA_NO_ISOLATION_LEVELS: readonly TransactionIsolationLevel[] = [];
+
 // ---------------------------------------------------------------------------
 // Prisma client type — resolved from the application at connect() time.
 // ---------------------------------------------------------------------------
@@ -89,7 +121,11 @@ type PrismaClient = {
   $disconnect(): Promise<void>;
   $transaction<T>(
     fn: (tx: PrismaClient) => Promise<T>,
-    options?: { maxWait?: number; timeout?: number },
+    options?: {
+      maxWait?: number;
+      timeout?: number;
+      isolationLevel?: 'ReadUncommitted' | 'ReadCommitted' | 'RepeatableRead' | 'Serializable';
+    },
   ): Promise<T>;
   $queryRawUnsafe<T>(sql: string, ...params: unknown[]): Promise<T[]>;
 };
@@ -176,6 +212,17 @@ export class PrismaAdapter implements IDatabaseAdapter {
   /** The resolved connector, or `undefined` when it could not be determined. */
   private _provider: PrismaSqlProvider | undefined;
 
+  /** Portable levels available from the resolved Prisma connector. */
+  get transactionIsolationLevels(): readonly TransactionIsolationLevel[] {
+    if (this._provider === 'sqlite' || this._provider === 'cockroachdb') {
+      return PRISMA_SERIALIZABLE_ONLY;
+    }
+    if (this._provider === 'mongodb' || this._provider === undefined) {
+      return PRISMA_NO_ISOLATION_LEVELS;
+    }
+    return PRISMA_ALL_ISOLATION_LEVELS;
+  }
+
   constructor(options?: DatabaseAdapterOptions) {
     this._options = options ?? undefined;
   }
@@ -217,9 +264,15 @@ export class PrismaAdapter implements IDatabaseAdapter {
    * holds the callback open for the entire Unit of Work. A custom timeout can
    * be passed through `options.transactionTimeout`.
    */
-  async beginTransaction(): Promise<IAdapterTransaction> {
+  async beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     if (!this.isReady()) {
       throw new Error('PrismaAdapter is not connected — call connect() first');
+    }
+    if (
+      options?.isolation !== undefined &&
+      !this.transactionIsolationLevels.includes(options.isolation)
+    ) {
+      throw new UnsupportedIsolationLevelError('prisma', options.isolation);
     }
     const client = this._client!;
     // Capture for the returned transaction's data-source factory, whose `this`
@@ -229,6 +282,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
 
     const txReady = new Deferred<PrismaClient>();
     const hold = new Deferred<void>();
+    const isolationLevel = prismaIsolationLevel(options?.isolation);
     const outer = client.$transaction(
       async (tx) => {
         txReady.resolve(tx);
@@ -237,6 +291,7 @@ export class PrismaAdapter implements IDatabaseAdapter {
       {
         maxWait: 2000,
         timeout: this._options?.transactionTimeout ?? 30_000,
+        ...(isolationLevel === undefined ? {} : { isolationLevel }),
       },
     );
     // If $transaction rejects before handing back `tx` (e.g. it fails to open

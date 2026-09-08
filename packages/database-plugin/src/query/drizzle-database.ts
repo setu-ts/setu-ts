@@ -23,6 +23,7 @@
 export type DrizzleTransactionBridge<TDatabase extends object> = <T>(
   database: TDatabase,
   work: (transaction: DrizzleTransaction<TDatabase>) => Promise<T>,
+  options?: import('@setu-ts/common').TransactionOptions,
 ) => Promise<T>;
 
 /**
@@ -48,7 +49,33 @@ export type DrizzleTransaction<TDatabase extends object> = TDatabase extends
 /** Internal private state for one package-created opaque configuration. */
 interface DrizzleDatabaseState {
   readonly database: object;
-  readonly transaction: (work: (transaction: unknown) => Promise<void>) => Promise<void>;
+  readonly transaction: (
+    work: (transaction: unknown) => Promise<void>,
+    options?: import('@setu-ts/common').TransactionOptions,
+  ) => Promise<void>;
+  readonly supportsIsolation: boolean;
+}
+
+const ISOLATION_SUPPORT = Symbol.for('@setu-ts/database-plugin/drizzle-isolation-support');
+
+/**
+ * Declares that an application-owned Drizzle bridge forwards transaction
+ * options to its driver.
+ *
+ * The declaration cannot prove the bridge uses `options`; callers must make
+ * that assertion explicitly rather than letting an unbranded bridge silently
+ * ignore an isolation request.
+ *
+ * @typeParam TDatabase - Exact configured Drizzle database type
+ * @param bridge - Promise-aware bridge that honours its optional options
+ * @returns The same bridge, branded for `createDrizzleDatabase`
+ * @since 0.5.0
+ */
+export function withIsolationSupport<TDatabase extends object>(
+  bridge: DrizzleTransactionBridge<TDatabase>,
+): DrizzleTransactionBridge<TDatabase> {
+  Object.defineProperty(bridge, ISOLATION_SUPPORT, { value: true });
+  return bridge;
 }
 
 /** Compile-only brands that cannot be named or copied by public consumers. */
@@ -127,7 +154,9 @@ export function createDrizzleDatabase<const TDatabase extends object>(
   const configured = Object.freeze(Object.create(null)) as DrizzleDatabase<TDatabase>;
   DRIZZLE_DATABASES.set(configured, {
     database,
-    transaction: (work) => transaction(database, async (tx) => await work(tx)),
+    transaction: (work, options) => transaction(database, async (tx) => await work(tx), options),
+    supportsIsolation:
+      (transaction as unknown as Record<PropertyKey, unknown>)[ISOLATION_SUPPORT] === true,
   });
   return configured;
 }
