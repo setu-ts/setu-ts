@@ -382,9 +382,9 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     let tx: DrizzleInstance;
     try {
       tx = await txReady.promise;
-    } catch {
+    } catch (error) {
       await outer.catch(() => {});
-      throw new Error('Drizzle transaction failed to start');
+      throw error;
     }
 
     const rollbackSentinel = { code: 'ROLLBACK_SENTINEL' };

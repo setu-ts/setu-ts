@@ -20,10 +20,15 @@ import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { HandlerResult, IRequestContext } from '@setu-ts/common';
+import type {
+  HandlerResult,
+  IDatabaseAdapter,
+  IDataSource,
+  IRequestContext,
+} from '@setu-ts/common';
 import { type ErrorFormat, errorHandler } from '@setu-ts/exceptions';
 
-import { DatabasePlugin, MemoryAdapter } from '../../src/index.ts';
+import { DatabasePlugin, type IBigtableClient, MemoryAdapter } from '../../src/index.ts';
 import type { IDatabaseService } from '../../src/index.ts';
 import { DynamoAdapter } from '../../src/adapters/dynamo/dynamo-adapter.ts';
 import { BigtableAdapter } from '../../src/adapters/bigtable/bigtable-adapter.ts';
@@ -96,6 +101,32 @@ function bootBigtableApp() {
     },
   });
   return app;
+}
+
+/**
+ * Builds a Bigtable client whose commit RPC loses its acknowledgement after a
+ * buffered write. The numeric gRPC code is deliberately retained: the
+ * transaction service must still mask it because a commit outcome is unknown.
+ */
+function commitAcknowledgementLostBigtableClient(): IBigtableClient {
+  const client = createFakeBigtableClient(new FakeBigtableStore());
+  return {
+    instance: (instanceId) => {
+      const instance = client.instance(instanceId);
+      return {
+        table: (tableId) => {
+          const table = instance.table(tableId);
+          return {
+            readRows: (options) => table.readRows(options),
+            row: () => ({
+              conditionalMutate: () => Promise.reject({ code: 10, details: 'ABORTED' }),
+            }),
+          };
+        },
+      };
+    },
+    close: () => client.close(),
+  };
 }
 
 /** Builds a memory-backed app through either its built-in or custom arm. */
@@ -309,5 +340,272 @@ describe('query refusals answer 501 through a real application', () => {
     expect(serialized).not.toContain('SECRET');
 
     await app.stop();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M90f (X38-1/X35-2): driver conditions reach the client as their classified
+// status. The stub adapter drives the REAL DatabaseService interception sites
+// (the `wrapDataSource` wrappers, the `beginTransaction()` acquisition, the
+// transaction catch, `query()`) — the same path a driver failure takes — and
+// the guarded live suites (`real-*.test.ts`) prove the drivers emit the
+// signals these stubs imitate.
+// ---------------------------------------------------------------------------
+
+/** The measured X38-1 cause chain: drizzle's wrapper, then the pg error. */
+function drizzleSerializationFailure(): Error {
+  return new Error(
+    'Failed query: update "account" set "balance" = $1 where "id" = $2 -- [400, 7]',
+    {
+      cause: {
+        code: '40001',
+        message: 'could not serialize access due to concurrent update',
+      },
+    },
+  );
+}
+
+function refusingDataSource(rejection: unknown): IDataSource {
+  return {
+    findAll: () => Promise.reject(rejection),
+    findById: () => Promise.reject(rejection),
+    create: () => Promise.reject(rejection),
+    update: () => Promise.reject(rejection),
+    delete: () => Promise.reject(rejection),
+    count: () => Promise.reject(rejection),
+  };
+}
+
+interface StubAdapterOptions {
+  source?: IDataSource;
+  beginRejection?: unknown;
+  rawRejection?: unknown;
+  rollbackRejection?: unknown;
+}
+
+function stubAdapter(options: StubAdapterOptions): IDatabaseAdapter {
+  const source: IDataSource = options.source ?? refusingDataSource(new Error('not reached'));
+  return {
+    connect: () => Promise.resolve(),
+    disconnect: () => Promise.resolve(),
+    isReady: () => true,
+    createDataSource: () => source,
+    beginTransaction: () =>
+      options.beginRejection === undefined
+        // The in-transaction conflict case: the acquisition SUCCEEDS so the
+        // work runs and hits the refusing data source; commit/rollback are
+        // inert — the framework rolls back in the same catch that classifies.
+        ? Promise.resolve({
+          commit: () => Promise.resolve(),
+          rollback: () =>
+            options.rollbackRejection === undefined
+              ? Promise.resolve()
+              : Promise.reject(options.rollbackRejection),
+          createDataSource: () => source,
+        })
+        : Promise.reject(options.beginRejection),
+    rawQuery: <T>(_sql: string, _params?: unknown[]): Promise<T[]> =>
+      options.rawRejection === undefined
+        ? Promise.reject(new Error('not reached'))
+        : Promise.reject(options.rawRejection),
+  };
+}
+
+function bootStubApp(adapter: IDatabaseAdapter): ReturnType<typeof createApplication> {
+  const app = createApplication({
+    plugins: [RuntimePlugin(), DatabasePlugin({ type: 'custom', adapter })],
+  });
+  app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
+  app.router.get('/transfer', {
+    handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const repo = db.getRepository<Record<string, unknown>>('Account');
+      return ctx.response.json(await repo.findAll({ where: { id: 7 } }));
+    },
+  });
+  app.router.get('/raw', {
+    handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      return ctx.response.json(await db.query('SELECT * FROM account'));
+    },
+  });
+  app.router.post('/tx', {
+    handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      // The work itself conflicts INSIDE the transaction: the scoped
+      // repository classifies, `transaction()` rethrows verbatim.
+      await db.transaction(async (uow) => {
+        await uow.getRepository('Account').findAll({ where: { id: 7 } });
+      });
+      return ctx.response.json({});
+    },
+  });
+  app.router.post('/pool', {
+    handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      await db.transaction(async () => {});
+      return ctx.response.json({});
+    },
+  });
+  return app;
+}
+
+describe('driver conditions answer their classified status (X38-1/X35-2)', () => {
+  it('answers a SQLSTATE 40001 from a real cause chain with 409, field by field', async () => {
+    const app = bootStubApp(
+      stubAdapter({ source: refusingDataSource(drizzleSerializationFailure()) }),
+    );
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'GET', url: 'http://localhost/transfer' });
+      expect(response.statusCode).toBe(409);
+      expect(response.headers.get('content-type')).toContain('application/problem+json');
+      expect(response.json()).toEqual({
+        type: 'about:blank',
+        title: 'Conflict',
+        status: 409,
+        detail:
+          'The write conflicted with a concurrent transaction and was rolled back. It is safe to retry.',
+        instance: '/transfer',
+      });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('the 409 body carries neither the statement text nor a bound parameter', async () => {
+    // §3.7: the wrapper's `cause` keeps the driver diagnostic reachable for
+    // the log; the body keeps it out. The stub's message deliberately quotes
+    // the failing statement and its values.
+    const app = bootStubApp(
+      stubAdapter({ source: refusingDataSource(drizzleSerializationFailure()) }),
+    );
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'GET', url: 'http://localhost/transfer' });
+      const serialized = JSON.stringify(response.json());
+      expect(serialized).not.toContain('Failed query');
+      expect(serialized).not.toContain('balance');
+      expect(serialized).not.toContain('account');
+      expect(serialized).not.toContain('concurrent update');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('a conflict inside a transaction answers 409 even when rollback fails', async () => {
+    // The scoped repository classifies; `transaction()`'s catch passes the
+    // package-owned error through untouched. Re-wrapping there would put the
+    // first wrapper into the caller's cause chain.
+    const app = bootStubApp(
+      stubAdapter({
+        source: refusingDataSource(drizzleSerializationFailure()),
+        rollbackRejection: new Error('connection lost during rollback'),
+      }),
+    );
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'POST', url: 'http://localhost/tx' });
+      expect(response.statusCode).toBe(409);
+      const body = response.json<{ detail: string }>();
+      expect(body.detail)
+        .toBe(
+          'The write conflicted with a concurrent transaction and was rolled back. It is safe to retry.',
+        );
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('answers a raw-query conflict with 409 at the query() site', async () => {
+    const app = bootStubApp(stubAdapter({ rawRejection: drizzleSerializationFailure() }));
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'GET', url: 'http://localhost/raw' });
+      expect(response.statusCode).toBe(409);
+      const serialized = JSON.stringify(response.json());
+      expect(serialized).not.toContain('SELECT');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('masks a commit failure whose outcome is unknown', async () => {
+    // A lost commit acknowledgement can follow a successful write. Even a
+    // recognizable Bigtable gRPC code must not advertise the retry-safe
+    // contract. This uses the built-in Bigtable arm so code 10 reaches the
+    // classifier-enabled path rather than the unclassified custom arm.
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DatabasePlugin({
+          type: 'bigtable',
+          options: {
+            client: commitAcknowledgementLostBigtableClient(),
+            instance: 'test-instance',
+            tables: {
+              Event: {
+                table: 'events',
+                rowKey: { fields: ['tenantId', 'eventId'], separator: '#' },
+                columnFamily: 'cf',
+              },
+            },
+          },
+        }),
+      ],
+    });
+    app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
+    app.router.post('/commit-only', {
+      handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
+        const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+        await db.transaction(async (uow) => {
+          await uow.getRepository('Event').create({ tenantId: 't1', eventId: 'e1' });
+        });
+        return ctx.response.json({});
+      },
+    });
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'POST', url: 'http://localhost/commit-only' });
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({
+        type: 'about:blank',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: 'Internal Server Error',
+        instance: '/commit-only',
+      });
+      // The driver `details` text stays out of the body.
+      expect(JSON.stringify(response.json())).not.toContain('ABORTED');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('answers a pool-acquisition timeout with 503 and no Retry-After', async () => {
+    // X35-2: the acquisition sits OUTSIDE the transaction's try, so the
+    // refusal is classified at the acquisition itself. And per C1, no hinted
+    // answer carries `Retry-After`: the hint channel has no header, and the
+    // framework holds no honest value for a pool's horizon.
+    const app = bootStubApp(
+      stubAdapter({ beginRejection: new Error('timeout exceeded when trying to connect') }),
+    );
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'POST', url: 'http://localhost/pool' });
+      expect(response.statusCode).toBe(503);
+      expect(response.headers.get('retry-after')).toBe(null);
+      expect(response.json()).toEqual({
+        type: 'about:blank',
+        title: 'Service Unavailable',
+        status: 503,
+        detail: 'The database is temporarily unavailable. The request was not applied.',
+        instance: '/pool',
+      });
+      // The driver's own words stay out of the body (they reached the log).
+      expect(JSON.stringify(response.json())).not.toContain('timeout exceeded');
+    } finally {
+      await app.stop();
+    }
   });
 });

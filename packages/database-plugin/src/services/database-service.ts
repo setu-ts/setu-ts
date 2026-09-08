@@ -32,10 +32,13 @@ import {
 } from '../query/drizzle-query.ts';
 import type { IDynamoAccessPathReportingDataSource } from '../adapters/dynamo/dynamo-data-source.ts';
 import {
+  DatabaseUnavailableError,
+  SerializationConflictError,
   UnsupportedIsolationLevelError,
   UnsupportedMigrationError,
   UnsupportedRawQueryError,
 } from '../errors.ts';
+import { classifyDriverError } from '../errors/classify.ts';
 
 /**
  * Reads DynamoDB's optional access-path diagnostic without widening the
@@ -44,6 +47,32 @@ import {
 function accessPathOf(dataSource: DataSource): string | undefined {
   const reporter = dataSource as DataSource & Partial<IDynamoAccessPathReportingDataSource>;
   return reporter.getLastAccessPath?.();
+}
+
+/**
+ * Maps a driver rejection onto the package-owned classified error
+ * (X38-1/X35-2, M90f), or returns the ORIGINAL when no signal matches.
+ *
+ * The classifier returns a KIND; the caller-facing object is built HERE,
+ * carrying the driver error as `cause` so the operator's diagnostic — the
+ * SQLSTATE, the statement — stays reachable for the log while the served
+ * `detail` stays the class's fixed sentence.
+ */
+function classifiedOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
+  const kind = classifyDriverError(error, adapterType);
+  if (kind === 'conflict') {
+    return new SerializationConflictError(
+      'The database rejected the write because a concurrent transaction changed the same data.',
+      { cause: error },
+    );
+  }
+  if (kind === 'unavailable') {
+    return new DatabaseUnavailableError(
+      'The database or its connection pool is temporarily unavailable.',
+      { cause: error },
+    );
+  }
+  return error;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +159,14 @@ export class DatabaseService implements IDatabaseService {
       throw new UnsupportedIsolationLevelError(this._adapterType, options.isolation);
     }
 
-    const txn = await this._adapter.beginTransaction(options);
+    // X35-2 (M90f): the acquisition sits OUTSIDE the try below, so a
+    // connection-pool timeout — raised exactly here — never reached that
+    // catch, and a classifier placed only there would leave the headline
+    // row unfixed. The acquisition is classified itself.
+    const txn = await this._adapter.beginTransaction(options).catch((error: unknown): never => {
+      throw classifiedOrOriginal(error, this._adapterType);
+    });
+    let committing = false;
     try {
       const uow = new UnitOfWork(
         txn,
@@ -141,11 +177,24 @@ export class DatabaseService implements IDatabaseService {
         this._adapterType,
       );
       const result = await work(uow);
+      committing = true;
       await txn.commit();
       return result;
     } catch (error) {
-      await txn.rollback();
-      throw error;
+      // The primary operation error determines the client response. A lost
+      // connection commonly makes rollback fail too; that secondary failure
+      // must not replace the classified cause.
+      await txn.rollback().catch(() => {});
+      // A commit rejection can mean the server applied the write before its
+      // acknowledgement was lost. Its outcome is unknown, so never advertise
+      // the retry-safe contract reserved for definitely rejected operations.
+      if (committing) throw error;
+      // X38-1 (M90f): a conflict surfaced inside a repository call was
+      // already classified by the `wrapDataSource` wrapper, and
+      // `classifyDriverError` returns `null` for a package-owned error — so
+      // it is rethrown verbatim and the caller's `cause` stays the driver
+      // error, never the first wrapper.
+      throw classifiedOrOriginal(error, this._adapterType);
     }
   }
 
@@ -165,7 +214,11 @@ export class DatabaseService implements IDatabaseService {
         ),
       );
     }
-    return this._adapter.rawQuery<T>(sql, params);
+    // X38-1/X35-2 (M90f): a raw statement reaches the driver with no
+    // wrapper around it — the fourth interception site.
+    return this._adapter.rawQuery<T>(sql, params).catch((error: unknown): never => {
+      throw classifiedOrOriginal(error, this._adapterType);
+    });
   }
 
   /** @inheritdoc */
@@ -212,20 +265,25 @@ export class DatabaseService implements IDatabaseService {
 
   /**
    * Wrap a data-source so that every CRUD op is logged with entity, operation,
-   * and monotonic duration when `logQueries` is enabled.
+   * and monotonic duration when `logQueries` is enabled, and every driver
+   * rejection is classified onto a caller-actionable package error (M90f,
+   * X38-1/X35-2) — ALWAYS, not only when logging is on.
    *
-   * When disabled or no logger available, returns the original data source.
+   * The classification is not a logging feature: the default configuration
+   * has `logQueries` off, and a conflict that only became a `409` with
+   * verbose logging on would be the defect X38-1 files, reintroduced by an
+   * option. So the wrapper is installed unconditionally; only the log line
+   * is conditional.
    *
    * @param entity - Entity name
    * @param ds - Underlying data source
-   * @returns Wrapped (or original) data source
+   * @returns Wrapped data source
    */
   private wrapDataSource(entity: string, ds: DataSource): DataSource {
     const enabled = this._options?.logQueries === true && this._logger !== undefined;
-    if (!enabled) return ds;
-
     const logger = this._logger;
     const now = this._now;
+    const adapterType = this._adapterType;
 
     // `findPage` is OPTIONAL on `IDataSource` and is bound here, before the
     // spread, for two reasons. (1) The spread below carries only OWN ENUMERABLE
@@ -265,64 +323,118 @@ export class DatabaseService implements IDatabaseService {
       ...(findPageImpl === undefined ? {} : {
         async findPage(query: NormalizedQuery): Promise<PageResult> {
           const start = now();
-          const result = await findPageImpl(query);
-          const accessPath = accessPathOf(ds);
-          logger.debug(`[${entity}] findPage`, {
-            operation: 'findPage',
-            durationMs: now() - start,
-            ...(accessPath === undefined ? {} : { accessPath }),
-          });
-          return result;
+          try {
+            const result = await findPageImpl(query);
+            if (enabled && logger !== undefined) {
+              const accessPath = accessPathOf(ds);
+              logger.debug(`[${entity}] findPage`, {
+                operation: 'findPage',
+                durationMs: now() - start,
+                ...(accessPath === undefined ? {} : { accessPath }),
+              });
+            }
+            return result;
+          } catch (error) {
+            throw classifiedOrOriginal(error, adapterType);
+          }
         },
       }),
       async findAll(query) {
         const start = now();
-        const result = await ds.findAll(query);
-        const accessPath = accessPathOf(ds);
-        logger.debug(`[${entity}] findAll`, {
-          operation: 'findAll',
-          durationMs: now() - start,
-          ...(accessPath === undefined ? {} : { accessPath }),
-        });
-        return result;
+        try {
+          const result = await ds.findAll(query);
+          if (enabled && logger !== undefined) {
+            const accessPath = accessPathOf(ds);
+            logger.debug(`[${entity}] findAll`, {
+              operation: 'findAll',
+              durationMs: now() - start,
+              ...(accessPath === undefined ? {} : { accessPath }),
+            });
+          }
+          return result;
+        } catch (error) {
+          throw classifiedOrOriginal(error, adapterType);
+        }
       },
       async findById(id) {
         const start = now();
-        const result = await ds.findById(id);
-        logger.debug(`[${entity}] findById`, { operation: 'findById', durationMs: now() - start });
-        return result;
+        try {
+          const result = await ds.findById(id);
+          if (enabled && logger !== undefined) {
+            logger.debug(`[${entity}] findById`, {
+              operation: 'findById',
+              durationMs: now() - start,
+            });
+          }
+          return result;
+        } catch (error) {
+          throw classifiedOrOriginal(error, adapterType);
+        }
       },
       async create(data) {
         const start = now();
-        const result = await ds.create(data);
-        logger.debug(`[${entity}] create`, { operation: 'create', durationMs: now() - start });
-        return result;
+        try {
+          const result = await ds.create(data);
+          if (enabled && logger !== undefined) {
+            logger.debug(`[${entity}] create`, {
+              operation: 'create',
+              durationMs: now() - start,
+            });
+          }
+          return result;
+        } catch (error) {
+          throw classifiedOrOriginal(error, adapterType);
+        }
       },
       async update(id, data) {
         const start = now();
-        const result = await ds.update(id, data);
-        logger.debug(`[${entity}] update`, { operation: 'update', durationMs: now() - start });
-        return result;
+        try {
+          const result = await ds.update(id, data);
+          if (enabled && logger !== undefined) {
+            logger.debug(`[${entity}] update`, {
+              operation: 'update',
+              durationMs: now() - start,
+            });
+          }
+          return result;
+        } catch (error) {
+          throw classifiedOrOriginal(error, adapterType);
+        }
       },
       async delete(id) {
         const start = now();
-        const result = await ds.delete(id);
-        logger.debug(`[${entity}] delete`, { operation: 'delete', durationMs: now() - start });
-        return result;
+        try {
+          const result = await ds.delete(id);
+          if (enabled && logger !== undefined) {
+            logger.debug(`[${entity}] delete`, {
+              operation: 'delete',
+              durationMs: now() - start,
+            });
+          }
+          return result;
+        } catch (error) {
+          throw classifiedOrOriginal(error, adapterType);
+        }
       },
       // BOTH parameters are forwarded. Taking only `where` dropped the
       // portable `filter` argument, so `repo.count({ filter })` answered a
       // different number with `logQueries: true` than with it off.
       async count(where, filter) {
         const start = now();
-        const result = await ds.count(where, filter);
-        const accessPath = accessPathOf(ds);
-        logger.debug(`[${entity}] count`, {
-          operation: 'count',
-          durationMs: now() - start,
-          ...(accessPath === undefined ? {} : { accessPath }),
-        });
-        return result;
+        try {
+          const result = await ds.count(where, filter);
+          if (enabled && logger !== undefined) {
+            const accessPath = accessPathOf(ds);
+            logger.debug(`[${entity}] count`, {
+              operation: 'count',
+              durationMs: now() - start,
+              ...(accessPath === undefined ? {} : { accessPath }),
+            });
+          }
+          return result;
+        } catch (error) {
+          throw classifiedOrOriginal(error, adapterType);
+        }
       },
     };
   }

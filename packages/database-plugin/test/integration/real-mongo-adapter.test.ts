@@ -16,6 +16,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
+import { DatabaseService } from '../../src/index.ts';
+import { classifyDriverError } from '../../src/errors/classify.ts';
+import { SerializationConflictError } from '../../src/errors.ts';
 import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 
 /** `MONGO_URL` is the §7 gate variable; `MONGODB_URI` is the CI's name. */
@@ -569,6 +572,76 @@ describe('MongoAdapter against a real MongoDB server (guarded)', () => {
       expect(ids.filter((id) => !seen.includes(id)).length).toBe(2);
     } finally {
       await adapter.disconnect();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M90f (X38-1/X35-2) — the classified statuses come from REAL driver signals.
+// The closed-port case needs only the driver (its lazy import resolves on
+// every machine), so it is UNGUARDED; the conflict case needs a replica set
+// and is `ignore:`-guarded on the §7 gate variables like every live case.
+// ---------------------------------------------------------------------------
+
+describe('MongoAdapter — classified statuses (X38-1/X35-2)', () => {
+  it('a client pointed at a CLOSED port emits the signal the classifier reads', async () => {
+    const closed = new MongoAdapter({
+      url: 'mongodb://127.0.0.1:1/?serverSelectionTimeoutMS=600&connectTimeoutMS=300',
+      database: 'setu_x90f',
+      collections: { Widget: { collection: 'x90f_closed' } },
+    });
+    let thrown: unknown = undefined;
+    try {
+      await closed.connect();
+    } catch (error) {
+      thrown = error;
+    } finally {
+      await closed.disconnect().catch(() => {/* never connected */});
+    }
+    // Measured: the driver answers `MongoServerSelectionError`, the name the
+    // `unavailable` arm reads. A bare `Error` here would mean the driver
+    // changed its shape and the signal is lost.
+    expect((thrown as Error).name).toBe('MongoServerSelectionError');
+    expect(classifyDriverError(thrown)).toBe('unavailable');
+  });
+
+  it('a WriteConflict inside a real transaction reaches the caller as SerializationConflictError', {
+    ignore: skipTx,
+  }, async () => {
+    const collection = `x90f_conflict_${crypto.randomUUID().replaceAll('-', '')}`;
+    const adapter = new MongoAdapter({
+      url,
+      database: 'setu_x90f',
+      collections: { Widget: { collection } },
+    });
+    await adapter.connect();
+    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'mongodb');
+    await service.getRepository('Widget').create({ id: 'doc1', n: 0 });
+
+    try {
+      // Both transactions read before either writes, so the second write
+      // conflicts: measured `MongoServerError code=112 codeName=WriteConflict,
+      // errorLabels=["TransientTransactionError"]`.
+      const conflict = (): Promise<unknown> =>
+        service.transaction(async (uow) => {
+          const repo = uow.getRepository('Widget');
+          const row = await repo.findById('doc1');
+          await new Promise((resolve) => setTimeout(resolve, 300));
+          await repo.update('doc1', { n: ((row as { n: number }).n ?? 0) + 1 });
+        });
+
+      const first = conflict();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const second = conflict();
+      const results = await Promise.allSettled([first, second]);
+
+      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      expect(rejected.length).toBeGreaterThanOrEqual(1);
+      for (const rejection of rejected) {
+        expect(rejection.reason).toBeInstanceOf(SerializationConflictError);
+      }
+    } finally {
+      await service.close();
     }
   });
 });

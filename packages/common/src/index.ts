@@ -32,6 +32,9 @@ export type { AuthorizationFailure } from './errors/authorization-responder.ts';
 // Error serialization for structured logging (M70f, X2-5)
 export { serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
+// Malformed request body (M90f, X37-1) — the one 400-branded parse failure
+// every `IRequest.json()` producer rejects with
+export { MalformedRequestBodyError } from './errors/malformed-body.ts';
 // HTTP status hint (M89b, X19-1) — how a package that cannot import
 // `@setu-ts/exceptions` states the status its own error should be answered with
 export { HTTP_STATUS_HINT, httpStatusHintOf, withHttpStatusHint } from './errors/status-hint.ts';
@@ -112,6 +115,7 @@ export type {
 export {
   isPromiseLike,
   isWebSocketUpgradeRequest,
+  parseJsonBody,
   SECURITY_METADATA,
   securityMetadataOf,
   setUpgradeIntent,

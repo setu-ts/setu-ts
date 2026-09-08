@@ -13,10 +13,16 @@
  * refusals AND by configuration refusals, so branding it unconditionally
  * turned a misconfigured deployment into a caller-facing `501`.
  *
- * The transaction and concurrency errors below are deliberately NOT branded:
- * they may legitimately quote backend state, and a concurrency conflict is
- * transient rather than permanent, so both keep the masked `500` that stops a
- * driver diagnostic reaching a caller (X12-3).
+ * Two more — {@linkcode SerializationConflictError} and
+ * {@linkcode DatabaseUnavailableError} (M90f, X38-1/X35-2) — carry `409` and
+ * `503` hints: TRANSIENT conditions the caller can act on by retrying, where
+ * the `501` refusals above are permanent. Both wrap the original driver error
+ * as `cause`, produced by `classifyDriverError` (`errors/classify.ts`) at
+ * `DatabaseService`'s interception sites.
+ *
+ * The pre-existing transaction/concurrency scope errors are deliberately NOT
+ * branded: they may legitimately quote backend state, and they keep the
+ * masked `500` that stops a driver diagnostic reaching a caller (X12-3).
  *
  * The served `detail` is composed from this package's own fields or a fixed
  * framework sentence, never from the `message`, which is the operator-facing
@@ -449,5 +455,118 @@ export class BigtableTransactionScopeError extends Error {
    */
   constructor(message: string) {
     super(message);
+  }
+}
+
+/**
+ * The status every caller-actionable driver condition in this module is
+ * answered with, and its two titles.
+ *
+ * These are distinct from the `501` refusals above on purpose: a conflict or
+ * an outage is TRANSIENT and the operation may be retried, where a `501`
+ * marks a permanent capability boundary. `Retry-After` is deliberately not
+ * carried — see `DatabaseUnavailableError`.
+ */
+const CONFLICT = { status: 409, title: 'Conflict' } as const;
+const UNAVAILABLE = { status: 503, title: 'Service Unavailable' } as const;
+
+/**
+ * Thrown when the database rejected a write because a concurrent transaction
+ * changed the same data (X38-1, M90f). The operation did **not** happen and
+ * **may be retried**.
+ *
+ * The condition reaches the client as `409 Conflict` — the canonical
+ * retryable-signal status — instead of the masked `500` that told a
+ * well-behaved client to give up, silently dropping the write and making
+ * optimistic concurrency unusable. The original driver error is preserved as
+ * `cause`, so the operator's diagnostic still reaches the SQLSTATE (M90j
+ * keeps that reachable), while the served `detail` is the fixed sentence
+ * here — never the driver message, which on a pg error quotes the failing
+ * statement (X12-3 stays closed).
+ *
+ * The `detail` is also the answer to "what would a caller have been relying
+ * on before": a masked `500` carrying `Internal Server Error` and nothing
+ * else, which is not a behaviour any caller can depend on.
+ *
+ * @example
+ * ```typescript
+ * import { SerializationConflictError } from '@setu-ts/database-plugin';
+ * try {
+ *   await db.transaction(async (uow) => {
+ *     const row = await uow.getRepository('Account').findById(id);
+ *     await uow.getRepository('Account').update(id, { balance: row.balance - 10 });
+ *   });
+ * } catch (err) {
+ *   if (err instanceof SerializationConflictError) {
+ *     // Retry: the transaction rolled back without applying.
+ *   }
+ * }
+ * ```
+ * @since 0.5.0
+ */
+export class SerializationConflictError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'SerializationConflictError';
+
+  /**
+   * Creates the error. The `message` is the full diagnostic — safe to log,
+   * never to serve.
+   *
+   * @param message - The full diagnostic, safe to log
+   * @param options - The original driver error, preserved as `cause`
+   */
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    withHttpStatusHint(this, {
+      ...CONFLICT,
+      detail:
+        'The write conflicted with a concurrent transaction and was rolled back. It is safe to retry.',
+    });
+  }
+}
+
+/**
+ * Thrown when the database, its connection pool, or its network is
+ * temporarily unreachable (X35-2, M90f). The operation did **not** happen and
+ * **may be retried**.
+ *
+ * The condition reaches the client as `503 Service Unavailable` — the
+ * load-shedding status — instead of a masked `500`. **No `Retry-After` is
+ * carried, and the hint channel cannot carry one**: `ErrorResponseInit` has
+ * no header channel, and the framework holds no honest value to invent — a
+ * pool's saturation has no published horizon. `503` is itself the retryable
+ * signal (RFC 9110), and the rate limiter's `Retry-After` (which does know
+ * its reset point) is the deliberate asymmetry, recorded in `PUBLIC_API.md`.
+ *
+ * @example
+ * ```typescript
+ * import { DatabaseUnavailableError } from '@setu-ts/database-plugin';
+ * try {
+ *   await repo.findAll(query);
+ * } catch (err) {
+ *   if (err instanceof DatabaseUnavailableError) {
+ *     // Back off and retry: the pool or connection is saturated.
+ *   }
+ * }
+ * ```
+ * @since 0.5.0
+ */
+export class DatabaseUnavailableError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'DatabaseUnavailableError';
+
+  /**
+   * Creates the error. The `message` is the full diagnostic — safe to log,
+   * never to serve.
+   *
+   * @param message - The full diagnostic, safe to log
+   * @param options - The original driver error, preserved as `cause`
+   */
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    withHttpStatusHint(this, {
+      ...UNAVAILABLE,
+      detail: 'The database is temporarily unavailable. The request was not applied.',
+    });
   }
 }

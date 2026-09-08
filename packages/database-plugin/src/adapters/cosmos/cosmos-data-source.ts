@@ -726,6 +726,21 @@ export async function mapMissing(
 }
 
 /**
+ * A failed Cosmos transactional batch with its machine-readable failure code.
+ *
+ * Kept internal: callers receive the classified package error at the service
+ * boundary, while this preserves the backend's code for that classifier and
+ * the operator-facing message for logs.
+ */
+class CosmosTransactionBatchError extends Error {
+  override readonly name = 'CosmosTransactionBatchError';
+
+  constructor(readonly code: number, message: string) {
+    super(message);
+  }
+}
+
+/**
  * The transaction handle: a deferred-write Unit of Work whose buffer is
  * flushed as ONE transactional batch at commit.
  *
@@ -795,8 +810,14 @@ export class CosmosTransaction implements IAdapterTransaction {
     // `>= 300` threshold would report a rolled-back batch as committed.
     const code = response.code ?? 200;
     if (code !== 200) {
-      const statuses = (response.result ?? []).map((entry) => entry.statusCode).join(', ');
-      throw new Error(
+      const operationStatuses = (response.result ?? []).map((entry) => entry.statusCode);
+      // A 207 batch lists the actual refusal beside the dependent 424s. Keep
+      // that root status rather than losing it to the aggregate response.
+      const failureCode = operationStatuses.find((status) => status >= 300 && status !== 424) ??
+        code;
+      const statuses = operationStatuses.join(', ');
+      throw new CosmosTransactionBatchError(
+        failureCode,
         `CosmosAdapter: the transactional batch on '${containerName}' failed with status ${code} ` +
           `(per-operation: ${statuses}). The batch is atomic, so no operation was applied.`,
       );

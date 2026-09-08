@@ -2,10 +2,10 @@
  * Which of this package's errors carry an `HttpStatusHint`, and which
  * deliberately do not (M89b, X19-1).
  *
- * Table-driven on purpose: an eighth error class added later shows up here as
- * a missing row rather than silently inheriting — or silently missing — the
- * `501`. The split is a decision, not an oversight, and each row states which
- * side it is on and why.
+ * Table-driven on purpose: an exported error class added later shows up here
+ * as a missing row rather than silently inheriting — or silently missing — a
+ * caller-facing status. The split is a decision, not an oversight, and each
+ * row states which side it is on and why.
  *
  * @module
  */
@@ -17,7 +17,9 @@ import {
   BigtableTransactionScopeError,
   CosmosConcurrentModificationError,
   CosmosTransactionScopeError,
+  DatabaseUnavailableError,
   MongoTransactionUnavailableError,
+  SerializationConflictError,
   UnsupportedFilterOperatorError,
   UnsupportedIsolationLevelError,
   UnsupportedMigrationError,
@@ -32,37 +34,70 @@ import {
  */
 const DIAGNOSTIC = "SELECT * FROM users WHERE ssn = $1 -- ['SECRET-123']";
 
-/** The query and framework-capability refusals that are safe to serve as 501s. */
-const BRANDED: readonly { name: string; error: Error; detail: string }[] = [
+/** The caller-safe errors and their explicitly chosen HTTP contracts. */
+const BRANDED: readonly {
+  name: string;
+  error: Error;
+  status: number;
+  title: string;
+  detail: string;
+}[] = [
+  {
+    name: 'SerializationConflictError',
+    error: new SerializationConflictError(DIAGNOSTIC),
+    status: 409,
+    title: 'Conflict',
+    detail:
+      'The write conflicted with a concurrent transaction and was rolled back. It is safe to retry.',
+  },
+  {
+    name: 'DatabaseUnavailableError',
+    error: new DatabaseUnavailableError(DIAGNOSTIC),
+    status: 503,
+    title: 'Service Unavailable',
+    detail: 'The database is temporarily unavailable. The request was not applied.',
+  },
   {
     name: 'UnsupportedIsolationLevelError',
     error: new UnsupportedIsolationLevelError('memory', 'read-committed'),
+    status: 501,
+    title: 'Not Implemented',
     detail:
       "Transaction isolation 'read-committed' is not supported by the 'memory' database adapter.",
   },
   {
     name: 'UnsupportedQueryFeatureError',
     error: new UnsupportedQueryFeatureError('order-by', 'dynamodb', DIAGNOSTIC),
+    status: 501,
+    title: 'Not Implemented',
     detail: "Query feature 'order-by' is not supported by the 'dynamodb' database adapter.",
   },
   {
     name: 'UnsupportedFilterOperatorError (connector known)',
     error: new UnsupportedFilterOperatorError('contains', 'sqlite', DIAGNOSTIC),
+    status: 501,
+    title: 'Not Implemented',
     detail: "Filter operator 'contains' is not supported on the 'sqlite' connector.",
   },
   {
     name: 'UnsupportedFilterOperatorError (connector undetermined)',
     error: new UnsupportedFilterOperatorError('contains', undefined, DIAGNOSTIC),
+    status: 501,
+    title: 'Not Implemented',
     detail: "Filter operator 'contains' is not supported by the active database connector.",
   },
   {
     name: 'UnsupportedRawQueryError',
     error: new UnsupportedRawQueryError('mongodb', DIAGNOSTIC),
+    status: 501,
+    title: 'Not Implemented',
     detail: "Raw queries are not supported by the 'mongodb' database adapter.",
   },
   {
     name: 'UnsupportedMigrationError',
     error: new UnsupportedMigrationError(DIAGNOSTIC),
+    status: 501,
+    title: 'Not Implemented',
     detail: 'Programmatic migrations are not supported by the current database adapters.',
   },
 ];
@@ -89,12 +124,12 @@ const UNBRANDED: readonly { name: string; error: Error }[] = [
 ];
 
 describe('database error status hints', () => {
-  it('brands every caller-safe refusal with 501 and a caller-safe detail', () => {
-    for (const { name, error, detail } of BRANDED) {
+  it('brands every caller-safe error with its chosen status and caller-safe detail', () => {
+    for (const { name, error, status, title, detail } of BRANDED) {
       const hint = httpStatusHintOf(error);
       expect(hint, name).toBeDefined();
-      expect(hint?.status, name).toBe(501);
-      expect(hint?.title, name).toBe('Not Implemented');
+      expect(hint?.status, name).toBe(status);
+      expect(hint?.title, name).toBe(title);
       expect(hint?.detail, name).toBe(detail);
     }
   });

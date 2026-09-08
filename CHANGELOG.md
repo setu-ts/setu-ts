@@ -163,6 +163,21 @@ All notable changes to this project are documented here. The format follows
   nothing outside the package constructs it, and exporting it would leak the plugin's private
   graphql facades into the published surface — which `deno doc --lint` reports (the M82 precedent).
 
+- **`@setu-ts/common` — the shared JSON-body parse (M90f / X37-1).** `parseJsonBody(text)` and
+  `MalformedRequestBodyError` are exported so all three `IRequest.json()` implementations — the
+  served HTTP path (`@setu-ts/runtime`), the kernel's `inject()`, and `@setu-ts/testing`'s
+  `MockRequest` — reject a malformed body with the SAME `400`-branded error instead of each raising
+  its own bare `SyntaxError`. `IRequest.json()`'s contract now states the rejection.
+
+- **`@setu-ts/database-plugin` — classified driver errors (M90f / X38-1, X35-2).** New exported
+  `SerializationConflictError` and `DatabaseUnavailableError`. `DatabaseService` classifies a driver
+  rejection at its four interception sites (repository wrappers, the `beginTransaction()`
+  acquisition, the transaction catch, and `query()`), carrying the original driver error as `cause`.
+
+- **`@setu-ts/secrets-plugin` — the package's first error class (M90f / X20-2).**
+  `ReadOnlySecretProviderError`, rejected by `EnvProvider.set` — the provider's only write method —
+  so `SecretsService.rotate()` inherits the refusal from the one throw site.
+
 ### Changed
 
 - **BREAKING — `@setu-ts/messaging-plugin` — the Kafka default consumer group is derived per topic
@@ -294,6 +309,49 @@ All notable changes to this project are documented here. The format follows
   `keyPrefix` defaults to `'setu:ratelimit:'`. **Migration:** in-flight counters under the old keys
   are orphaned, so the blast radius is one window — they are TTL-bounded and expire on their own.
   Pass `keyPrefix: ''` for the previous keys byte for byte.
+
+- **BREAKING — `@setu-ts/database-plugin` — driver conflicts and outages reach the client as `409`
+  and `503` (M90f / X38-1, X35-2).** A backend-reported serialization failure (PostgreSQL SQLSTATE
+  class `40` — `40001`, `40P01` — Prisma's `P2034`, MongoDB's `TransientTransactionError` label,
+  Bigtable's gRPC `ABORTED`, Cosmos `449`) now answers `409 Conflict` through
+  `SerializationConflictError`, where it was a masked `500` that told a well-behaved client to give
+  up — silently dropping the write and making optimistic concurrency unusable. A transiently
+  unreachable backend (SQLSTATE class `08`, `57P03`, the node-postgres pool timeout,
+  `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net
+  errno `ECONNREFUSED` family) now answers `503 Service Unavailable` through
+  `DatabaseUnavailableError`. The original driver error is preserved as `cause` (the SQLSTATE stays
+  log-reachable); the served `detail` is a fixed sentence, never driver text. No classified answer
+  carries `Retry-After` — the hint channel has no header and no component holds an honest horizon.
+  **Migration:** an application branching on the masked `500` for these conditions branches on a
+  body it could never have parsed ("Internal Server Error"); `instanceof SerializationConflictError`
+  is the retry signal. The typed Drizzle builder (`getDrizzleDatabase`) bypasses the classifier, and
+  DynamoDB's `TransactionConflictException` / Cosmos's `449` are documented-unverified — neither was
+  reproducible against DynamoDB Local or the local emulator.
+
+- **BREAKING — `@setu-ts/runtime`, `@setu-ts/kernel`, `@setu-ts/testing` — a malformed JSON request
+  body answers `400` (M90f / X37-1).** `IRequest.json()` rejects with `MalformedRequestBodyError`
+  (branded `400 Bad Request`) instead of a bare `SyntaxError` that `errorHandler` masked to `500`.
+  The read stays lazy, so the `400` is produced when the handler reads, and a handler that catches
+  its own rejection keeps full control. An empty body still parses as `{}` on `inject()` and
+  `MockRequest`. **Migration:** none for well-formed callers; a `500`-matching catch for malformed
+  bodies now sees `400`.
+
+- **BREAKING — `@setu-ts/secrets-plugin` — a write against a read-only provider answers `501` (M90f
+  / X20-2).** `EnvProvider.set` (and `SecretsService.rotate()` on the `env` provider) rejects with
+  `ReadOnlySecretProviderError`, answered `501 Not Implemented` with the class's own sentence, where
+  it was a masked `500`. **Migration:** an application catching the old plain
+  `Error('EnvProvider is read-only; …')` by message still catches the new class (same message); add
+  an `instanceof` branch to distinguish it from faults.
+
+- **BREAKING — `@setu-ts/resilience-plugin` — the shedding errors answer `503`/`503`/`504` (M90f /
+  X32-7).** `BulkheadFullError` and `CircuitOpenError` are answered `503 Service
+  Unavailable` and
+  `TimeoutError` is answered `504 Gateway Timeout` under `errorHandler`, where all three were masked
+  `500`s that read as bugs in every dashboard. Shedding is the bulkhead's purpose, so the status is
+  part of the contract. None carries `Retry-After` — the hint channel has no header, and no
+  component holds an honest drain horizon; `503` is itself the retryable signal. **Migration:** an
+  application serving its own fallback for these errors is unaffected; one relying on the masked
+  `500` must match the new statuses or `instanceof` the classes.
 
 ### Fixed
 

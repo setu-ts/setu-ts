@@ -49,6 +49,7 @@ export const STATUS_TITLES: Readonly<Record<number, string>> = {
   501: 'Not Implemented',
   502: 'Bad Gateway',
   503: 'Service Unavailable',
+  504: 'Gateway Timeout',
 };
 
 /**

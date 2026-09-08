@@ -11,7 +11,7 @@ import type {
 import type { HttpMethod } from '@setu-ts/common';
 import type { IPrincipal } from '@setu-ts/common';
 import type { ITenant } from '@setu-ts/common';
-import { sealRequestIdentity } from '@setu-ts/common';
+import { parseJsonBody, sealRequestIdentity } from '@setu-ts/common';
 
 import { MockServiceRegistry } from './mock-registry.ts';
 
@@ -204,8 +204,18 @@ class MockRequest implements IRequest {
     return JSON.stringify(body);
   }
 
+  /**
+   * Reads and parses the body as JSON through the shared `parseJsonBody`
+   * (X37-1), so the double rejects with the same `400`-branded
+   * `MalformedRequestBodyError` the served path and `inject()` reject with —
+   * a test double that matched the real producers in success but not in
+   * failure would let a suite prove the opposite of production. An empty
+   * body keeps parsing as `{}`, exactly as before.
+   */
   json<T = unknown>(): Promise<T> {
-    return Promise.resolve(JSON.parse(this.#bodyText === '' ? '{}' : this.#bodyText) as T);
+    return Promise.resolve().then(
+      () => parseJsonBody(this.#bodyText === '' ? '{}' : this.#bodyText) as T,
+    );
   }
 
   text(): Promise<string> {

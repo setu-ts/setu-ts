@@ -27,11 +27,13 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import {
   DatabasePlugin,
+  DatabaseService,
   decodeCursor,
   DynamoAdapter,
   type DynamoEntityMapping,
   type IDatabaseService,
 } from '../../src/index.ts';
+import { DatabaseUnavailableError } from '../../src/errors.ts';
 
 const dynamoEndpoint = Deno.env.get('DYNAMODB_ENDPOINT');
 const skipReal = dynamoEndpoint === undefined;
@@ -547,6 +549,41 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
       expect(paths).toEqual(['Query', 'Scan']);
     } finally {
       await app.stop();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M90f (X38-1/X35-2) — the classified statuses come from REAL driver signals.
+// Measured against DynamoDB Local: a connect refusal surfaces as the BARE net
+// error (`name` still "Error", `code: "ECONNREFUSED"`), which is why the
+// classifier reads the errno string and the `TimeoutError`/`NetworkingError`
+// names are only its fallback. **`TransactionConflictException` was NOT
+// reproducible against DynamoDB Local** — two concurrent deferred commits on
+// one item resolved serially with no refusal — so the conflict arm for this
+// backend stays documented-unverified (the M30b/M52 precedent) and is not
+// asserted here.
+// ---------------------------------------------------------------------------
+
+describe('DynamoAdapter — classified statuses (X35-2)', () => {
+  it('a client pointed at a CLOSED endpoint answers DatabaseUnavailableError', async () => {
+    // Needs no backend: the driver's own connect refusal IS the signal.
+    const closed = new DynamoAdapter({
+      endpoint: 'http://127.0.0.1:1',
+      region,
+      credentials,
+      entities: { Order: { table: table('closed'), partitionKey: 'id' } },
+    });
+    await closed.connect();
+    const service = new DatabaseService(closed, (e) => closed.createDataSource(e), 'dynamodb');
+    try {
+      const error = await service.getRepository('Order').findAll({})
+        .then(() => undefined, (e: unknown) => e);
+      expect(error).toBeInstanceOf(DatabaseUnavailableError);
+      // The SDK's own diagnostic — the errno string — survives as `cause`.
+      expect((error as { cause?: { code?: string } }).cause?.code).toBe('ECONNREFUSED');
+    } finally {
+      await service.close();
     }
   });
 });

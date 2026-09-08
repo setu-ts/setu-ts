@@ -10,7 +10,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
-import { pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
+import { integer, pgTable, text } from 'npm:drizzle-orm@0.45.2/pg-core';
+import { drizzle as nodePostgresDrizzle } from 'npm:drizzle-orm@0.45.2/node-postgres';
+import { Pool } from 'npm:pg@^8.0.0';
 import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
 import {
   integer as sqliteInteger,
@@ -40,7 +42,8 @@ import {
   createDrizzleDataSource,
   DrizzleAdapter,
 } from '../../src/adapters/drizzle/drizzle-adapter.ts';
-import { createDrizzleDatabase } from '../../src/index.ts';
+import { createDrizzleDatabase, DatabaseService } from '../../src/index.ts';
+import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
 import type { DrizzleAdapterOptions } from '../../src/interfaces/index.ts';
 import type { NormalizedQuery } from '@setu-ts/common';
 
@@ -737,5 +740,135 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
         },
       })),
     ).rejects.toThrow(/not a plain JSON key/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M90f (X38-1/X35-2) — live PostgreSQL: the classified statuses come from
+// REAL driver signals, not synthetic shapes. The server is the only thing
+// that can prove node-postgres emits the signals the classifier reads.
+// Guarded on `POSTGRES_URL` with `ignore:` — never an early return, so an
+// unset variable is reported as IGNORED (the M70c trap).
+// ---------------------------------------------------------------------------
+
+const livePgUrl = Deno.env.get('POSTGRES_URL');
+const skipLivePg = livePgUrl === undefined;
+
+/** The one-row table the two live cases drive. Dropped on teardown. */
+const pgAccounts = pgTable('x90f_classified_accounts', {
+  id: text('id').primaryKey(),
+  balance: integer('balance').notNull(),
+});
+
+describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35-2)', () => {
+  it('a real SERIALIZABLE conflict reaches the caller as SerializationConflictError', {
+    ignore: skipLivePg,
+  }, async () => {
+    const pool = new Pool({ connectionString: livePgUrl!, max: 5 });
+    const db = nodePostgresDrizzle(pool);
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(
+        db,
+        (database, work) => database.transaction(work, { isolationLevel: 'serializable' }),
+      ),
+      drizzleTables: { Account: pgAccounts },
+    });
+    await adapter.connect();
+    const service = new DatabaseService(
+      adapter,
+      (entity) => adapter.createDataSource(entity),
+      'drizzle',
+    );
+    await pool.query(
+      'CREATE TABLE IF NOT EXISTS x90f_classified_accounts (id text primary key, balance integer not null)',
+    );
+    await pool.query('DELETE FROM x90f_classified_accounts');
+    await pool.query("INSERT INTO x90f_classified_accounts (id, balance) VALUES ('a1', 100)");
+
+    try {
+      // Both transactions READ the row before either WRITES, so under
+      // SERIALIZABLE the second write answers SQLSTATE 40001 — the canonical
+      // machine-readable "this did not happen, run it again".
+      const firstRead = Promise.withResolvers<void>();
+      const secondRead = Promise.withResolvers<void>();
+      const releaseWrites = Promise.withResolvers<void>();
+      let readers = 0;
+      const conflict = (): Promise<unknown> =>
+        service.transaction(async (uow) => {
+          const repo = uow.getRepository('Account');
+          const row = await repo.findById('a1');
+          readers += 1;
+          if (readers === 1) firstRead.resolve();
+          if (readers === 2) secondRead.resolve();
+          await releaseWrites.promise;
+          await repo.update('a1', { balance: (row as { balance: number }).balance - 1 });
+        });
+
+      const first = conflict();
+      await firstRead.promise;
+      const second = conflict();
+      await secondRead.promise;
+      releaseWrites.resolve();
+      const results = await Promise.allSettled([first, second]);
+
+      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      expect(rejected.length).toBe(1);
+      const error = rejected[0].reason;
+      expect(error).toBeInstanceOf(SerializationConflictError);
+      expect((error as Error).name).toBe('SerializationConflictError');
+
+      // The driver diagnostic survives the wrap — M90j's operator-facing work
+      // depends on the SQLSTATE staying reachable through `cause`.
+      let cursor: unknown = (error as { cause?: unknown }).cause;
+      let sawSqlstate40 = false;
+      for (let depth = 0; depth < 6 && cursor !== undefined && cursor !== null; depth++) {
+        const code = (cursor as { code?: unknown }).code;
+        if (code === '40001' || code === '40P01') sawSqlstate40 = true;
+        cursor = (cursor as { cause?: unknown }).cause;
+      }
+      expect(sawSqlstate40).toBe(true);
+    } finally {
+      await pool.query('DROP TABLE IF EXISTS x90f_classified_accounts');
+      await pool.end();
+      await adapter.disconnect();
+    }
+  });
+
+  it('an exhausted pool answers DatabaseUnavailableError', { ignore: skipLivePg }, async () => {
+    // X35-2: the application owns the pool, so the case is produced by a
+    // bounded `connectionTimeoutMillis` exhausted by a held connection — the
+    // exact shape a saturated deployment presents.
+    const pool = new Pool({
+      connectionString: livePgUrl!,
+      max: 1,
+      connectionTimeoutMillis: 300,
+    });
+    const holder = await pool.connect();
+    let adapter: DrizzleAdapter | undefined;
+    try {
+      const db = nodePostgresDrizzle(pool);
+      adapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+        drizzleTables: { Account: pgAccounts },
+      });
+      await adapter.connect();
+      const service = new DatabaseService(
+        adapter,
+        (entity) => adapter!.createDataSource(entity),
+        'drizzle',
+      );
+
+      const error = await service.getRepository('Account').findAll({})
+        .then(() => null, (e: unknown) => e);
+      expect(error).toBeInstanceOf(DatabaseUnavailableError);
+      expect((error as Error).name).toBe('DatabaseUnavailableError');
+      // The pool's own timeout text reaches the log (the cause), never the
+      // caller-facing sentence (the hint's fixed detail).
+      expect((error as { cause?: unknown }).cause).toBeDefined();
+    } finally {
+      holder.release();
+      await pool.end();
+      await adapter?.disconnect();
+    }
   });
 });

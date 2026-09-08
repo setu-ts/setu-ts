@@ -537,6 +537,7 @@ describe('DrizzleAdapter', () => {
         query: Record<string, unknown>;
         transaction<T>(work: (transaction: FailingDatabase) => Promise<T>): Promise<T>;
       }
+      const driverFailure = Object.assign(new Error('driver down'), { code: '08006' });
       const database: FailingDatabase = {
         select: () => ({ from: () => Promise.resolve([]) }),
         insert: () => ({ values: () => ({ execute: () => Promise.resolve([]) }) }),
@@ -546,7 +547,7 @@ describe('DrizzleAdapter', () => {
         execute: () => Promise.resolve({ rows: [] }),
         query: {},
         transaction: <T>(_work: (transaction: typeof database) => Promise<T>): Promise<T> =>
-          Promise.reject(new Error('driver down')),
+          Promise.reject(driverFailure),
       };
       const failing = new DrizzleAdapter({
         drizzleInstance: createDrizzleDatabase(
@@ -556,9 +557,7 @@ describe('DrizzleAdapter', () => {
         drizzleTables: { user: USER_TABLE },
       });
       await failing.connect();
-      await expect(failing.beginTransaction()).rejects.toThrow(
-        'Drizzle transaction failed to start',
-      );
+      await expect(failing.beginTransaction()).rejects.toBe(driverFailure);
     });
 
     it('rethrows a non-sentinel error surfaced during rollback', async () => {

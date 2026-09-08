@@ -12,6 +12,7 @@ import type { IServiceRegistry } from './registry.ts';
 import type { IPrincipal } from './services/auth.ts';
 import type { ITenant } from './services/tenancy.ts';
 import type { ValidationTarget } from './services/validation.ts';
+import { MalformedRequestBodyError } from './errors/malformed-body.ts';
 
 /**
  * Opaque marker returned by {@linkcode IResponse} terminal methods and
@@ -89,7 +90,11 @@ export interface IRequest {
    *
    * @typeParam T - The expected body shape (validate before trusting)
    * @returns The parsed body
-   * @throws {SyntaxError} If the body is not valid JSON
+   * @throws {MalformedRequestBodyError} If the body is not valid JSON. The
+   * error carries a `400` HTTP status hint, so an application running
+   * `errorHandler` answers the malformed body with `400 Bad Request` in its
+   * configured format rather than a masked `500` (X37-1). A handler that
+   * catches the rejection keeps full control of what is served.
    */
   json<T = unknown>(): Promise<T>;
   /**
@@ -104,6 +109,32 @@ export interface IRequest {
    * @returns The body bytes
    */
   bytes(): Promise<Uint8Array>;
+}
+
+/**
+ * Parses one request-body text as JSON, the ONE parse all three `IRequest`
+ * `json()` implementations share (X37-1, M90f).
+ *
+ * The served HTTP path (`@setu-ts/runtime`), the kernel's `inject()`, and
+ * `@setu-ts/testing`'s `MockRequest` each used to run their own
+ * `JSON.parse`, so fixing the malformed-body status at one of them left the
+ * other two answering a different status for the same request — and fixing
+ * only the kernel's would have made every **served** request answer `500`
+ * while the in-process test path answered `400`. One shared parse keeps the
+ * `@throws` contract on {@linkcode IRequest.json} true at every producer.
+ *
+ * @param text - The body text to parse
+ * @returns The parsed JSON value
+ * @throws {MalformedRequestBodyError} When `text` is not valid JSON; the
+ * platform `SyntaxError` is carried as `cause`
+ * @since 0.5.0
+ */
+export function parseJsonBody(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (cause) {
+    throw new MalformedRequestBodyError(cause);
+  }
 }
 
 /**

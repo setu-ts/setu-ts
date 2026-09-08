@@ -33,6 +33,7 @@ import type { FilterExpression, NormalizedQuery } from '@setu-ts/common';
 import { PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { PrismaRepository } from '../../src/adapters/prisma/prisma-repository.ts';
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import { classifyDriverError } from '../../src/errors/classify.ts';
 import type { PrismaAdapterOptions } from '../../src/interfaces/index.ts';
 
 const postgresUrl = Deno.env.get('POSTGRES_URL');
@@ -427,4 +428,76 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
       await client.$disconnect();
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// M90f (X38-1) — the conflict signal is REAL here, not synthetic: two
+// concurrent SERIALIZABLE interactive transactions race on one row and the
+// loser's rejection is what the classifier reads. Measured on Prisma 7: the
+// backend's SQLSTATE `40001` reaches the application as Prisma's own code
+// `P2034`, which is why the classifier reads that code.
+// ---------------------------------------------------------------------------
+
+/** The `$transaction` arm with the isolation level the race needs. */
+interface TransactionalPrismaClient {
+  $transaction<T>(
+    work: (tx: {
+      tenantMember: {
+        findUnique(args: {
+          where: { tenantId_userId: { tenantId: string; userId: string } };
+        }): Promise<Record<string, unknown> | null>;
+        update(args: {
+          where: { tenantId_userId: { tenantId: string; userId: string } };
+          data: { role: string };
+        }): Promise<Record<string, unknown>>;
+      };
+    }) => Promise<T>,
+    options: { isolationLevel: 'Serializable' },
+  ): Promise<T>;
+}
+
+describe('PrismaAdapter against live PostgreSQL — classified conflict (X38-1)', () => {
+  it(
+    'a real SERIALIZABLE write conflict classifies as conflict',
+    { ignore: skipReal },
+    async () => {
+      const client = await connectPrisma();
+      const transactional = client as unknown as GeneratedPrismaClient & TransactionalPrismaClient;
+      const key = { tenantId: `t-${suffix}`, userId: 'x38' };
+
+      try {
+        // Seeded through the plain delegate the existing cases use.
+        await client.tenantMember.create({
+          data: { tenantId: key.tenantId, userId: key.userId, role: 'baseline' },
+        });
+
+        // Both transactions read the row before either writes, so under
+        // SERIALIZABLE the second write must refuse — the canonical
+        // "this did not happen, run it again".
+        const race = (): Promise<unknown> =>
+          transactional.$transaction(async (tx) => {
+            // Prisma 7 hands the transaction the CLIENT — delegates hang off it.
+            const row = await tx.tenantMember.findUnique({ where: { tenantId_userId: key } });
+            await new Promise((resolve) => setTimeout(resolve, 400));
+            await tx.tenantMember.update({
+              where: { tenantId_userId: key },
+              data: { role: `after-${String(row?.role)}` },
+            });
+          }, { isolationLevel: 'Serializable' });
+
+        const first = race();
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        const second = race();
+        const results = await Promise.allSettled([first, second]);
+
+        const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+        expect(rejected.length).toBe(1);
+        const reason = rejected[0].reason as { code?: unknown };
+        expect(reason.code).toBe('P2034');
+        expect(classifyDriverError(reason)).toBe('conflict');
+      } finally {
+        await client.$disconnect();
+      }
+    },
+  );
 });

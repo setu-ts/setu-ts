@@ -112,11 +112,18 @@ SecretsPlugin({
 - `SecretsService` — the `ISecretManager` implementation (provider + read cache).
 - `EnvProvider`, `AwsKmsProvider`, `GcpSecretManagerProvider`, `AzureKeyVaultProvider`,
   `HashiCorpVaultProvider` — provider classes.
+- `ReadOnlySecretProviderError` — the read-only refusal, answered `501`.
 - `IAwsSecretsClient`, `IGcpSecretsClient`, `IAzureSecretsClient`, `IVaultHttp` — structural
   injection types.
 
-`EnvProvider` is read-only: `rotate()` (and provider `set`) throws, because environment variables
-cannot be mutated at runtime.
+`EnvProvider` is read-only: `rotate()` (and provider `set`) rejects with
+`ReadOnlySecretProviderError`, because environment variables cannot be mutated at runtime. The error
+is branded `501 Not Implemented` (X20-2): nothing is wrong with the caller — the configured provider
+cannot store or rotate secrets, permanently — so an application running `errorHandler` answers the
+write attempt with a `501` in its configured format instead of a masked `500`. Both public write
+paths inherit the refusal from the one `set` throw site, because `SecretsService.rotate()` delegates
+to `provider.set()`. What `set` MEANS per provider is the four-meanings problem the ROADMAP tracks
+separately.
 
 ## Exports
 
@@ -128,6 +135,7 @@ cannot be mutated at runtime.
 | `EnvProvider`                     | class     |
 | `GcpSecretManagerProvider`        | class     |
 | `HashiCorpVaultProvider`          | class     |
+| `ReadOnlySecretProviderError`     | class     |
 | `SecretsService`                  | class     |
 | `AwsKmsProviderOptions`           | interface |
 | `AzureKeyVaultProviderOptions`    | interface |
