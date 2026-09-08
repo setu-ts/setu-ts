@@ -204,8 +204,12 @@ describe('createTestContext', () => {
   // would let a suite prove the opposite of production.
   it('MockRequest.json() rejects a malformed body with the 400-branded class', async () => {
     const ctx = createTestContext({ body: '{not-json' });
+    let pending: Promise<unknown> | undefined;
+    expect(() => {
+      pending = ctx.request.json();
+    }).not.toThrow();
     try {
-      await ctx.request.json();
+      await pending;
       throw new Error('json() should have rejected');
     } catch (error) {
       expect(error).toBeInstanceOf(MalformedRequestBodyError);

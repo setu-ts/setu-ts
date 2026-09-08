@@ -543,7 +543,7 @@ class Application implements IKernelApplication {
         // same failure the served path produces. The empty-body arm keeps its
         // `{}` default — an in-process inject that sent no body is not a
         // malformed body.
-        return Promise.resolve(parseJsonBody(bodyStr ?? '{}') as T);
+        return Promise.resolve().then(() => parseJsonBody(bodyStr ?? '{}') as T);
       },
       text(): Promise<string> {
         return Promise.resolve(bodyStr ?? '');

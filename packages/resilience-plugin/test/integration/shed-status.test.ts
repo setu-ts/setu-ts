@@ -29,6 +29,8 @@ import { ResiliencePlugin } from '../../src/index.ts';
 
 /** Set by `boot()`; opens the bulkhead gate once every request has claimed. */
 let openGate: (() => void) | undefined;
+/** Resolves once every concurrent handler has claimed its bulkhead slot. */
+let allBulkheadClaims: Promise<void> | undefined;
 /** Set by `boot()`; releases the never-ending timeout call before stop(). */
 let releaseBlocked: (() => void) | undefined;
 
@@ -48,7 +50,10 @@ function boot(): ReturnType<typeof createApplication> {
       // Holds every admitted call until the test opens the gate, so the
       // 2+2 capacity is genuinely occupied while all ten requests arrive.
       const gate = Promise.withResolvers<void>();
+      const claims = Promise.withResolvers<void>();
+      let claimed = 0;
       openGate = gate.resolve;
+      allBulkheadClaims = claims.promise;
       const bulkheaded = resilience.wrap(
         () => gate.promise.then(() => ({ served: true })),
         { bulkhead: { maxConcurrent: 2, maxQueue: 2 } },
@@ -56,6 +61,8 @@ function boot(): ReturnType<typeof createApplication> {
 
       ctx.router.get('/bulkhead', {
         handler: async (reqCtx: IRequestContext): Promise<HandlerResult> => {
+          claimed += 1;
+          if (claimed === 10) claims.resolve();
           return reqCtx.response.json(await bulkheaded());
         },
       });
@@ -92,13 +99,13 @@ describe('load-shedding answers its contract status (X32-7)', () => {
     await app.start();
     try {
       // Fired, not awaited: each handler claims synchronously (run, queue,
-      // or shed) and the two admitted calls block on the gate, so all ten
-      // claims are settled before the gate opens.
+      // or shed) and the two admitted calls block on the gate. The explicit
+      // barrier proves all ten claims occurred before capacity is released.
       const pending = Array.from(
         { length: 10 },
         () => app.inject({ method: 'GET', url: 'http://localhost/bulkhead' }),
       );
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await allBulkheadClaims;
       openGate?.();
       const responses = await Promise.all(pending);
 
@@ -107,10 +114,13 @@ describe('load-shedding answers its contract status (X32-7)', () => {
 
       for (const response of responses) {
         if (response.statusCode !== 503) continue;
-        const body = response.json() as Record<string, unknown>;
-        expect(body.title).toBe('Service Unavailable');
-        expect(body.status).toBe(503);
-        expect(body.detail).toBe('The operation was shed because the bulkhead is at capacity.');
+        expect(response.json()).toEqual({
+          type: 'about:blank',
+          title: 'Service Unavailable',
+          status: 503,
+          detail: 'The operation was shed because the bulkhead is at capacity.',
+          instance: '/bulkhead',
+        });
         // §3.5: the framework holds no honest Retry-After for a bulkhead.
         expect(response.headers.get('retry-after')).toBe(null);
       }
@@ -128,12 +138,24 @@ describe('load-shedding answers its contract status (X32-7)', () => {
       // the exemption is for the breaker's OWN signal only).
       const first = await app.inject({ method: 'GET', url: 'http://localhost/breaker' });
       expect(first.statusCode).toBe(500);
+      expect(first.json()).toEqual({
+        type: 'about:blank',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: 'Internal Server Error',
+        instance: '/breaker',
+      });
 
       // Second call: the breaker is open and fails fast — `503`.
       const second = await app.inject({ method: 'GET', url: 'http://localhost/breaker' });
       expect(second.statusCode).toBe(503);
-      const body = second.json() as Record<string, unknown>;
-      expect(body.detail).toBe('The circuit breaker is open and the operation was not attempted.');
+      expect(second.json()).toEqual({
+        type: 'about:blank',
+        title: 'Service Unavailable',
+        status: 503,
+        detail: 'The circuit breaker is open and the operation was not attempted.',
+        instance: '/breaker',
+      });
       expect(second.headers.get('retry-after')).toBe(null);
     } finally {
       await app.stop();
@@ -146,11 +168,13 @@ describe('load-shedding answers its contract status (X32-7)', () => {
     try {
       const response = await app.inject({ method: 'GET', url: 'http://localhost/timeout' });
       expect(response.statusCode).toBe(504);
-      const body = response.json() as Record<string, unknown>;
-      expect(body.title).toBe('Gateway Timeout');
-      expect(body.detail).toBe(
-        'The protected operation did not complete within its timeout deadline.',
-      );
+      expect(response.json()).toEqual({
+        type: 'about:blank',
+        title: 'Gateway Timeout',
+        status: 504,
+        detail: 'The protected operation did not complete within its timeout deadline.',
+        instance: '/timeout',
+      });
       expect(response.headers.get('retry-after')).toBe(null);
     } finally {
       releaseBlocked?.();

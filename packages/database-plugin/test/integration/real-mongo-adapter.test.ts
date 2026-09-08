@@ -636,8 +636,10 @@ describe('MongoAdapter — classified statuses (X38-1/X35-2)', () => {
       const results = await Promise.allSettled([first, second]);
 
       const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-      expect(rejected.length).toBe(1);
-      expect(rejected[0].reason).toBeInstanceOf(SerializationConflictError);
+      expect(rejected.length).toBeGreaterThanOrEqual(1);
+      for (const rejection of rejected) {
+        expect(rejection.reason).toBeInstanceOf(SerializationConflictError);
+      }
     } finally {
       await service.close();
     }

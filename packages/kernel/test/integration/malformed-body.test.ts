@@ -52,16 +52,14 @@ function boot(): ReturnType<typeof createApplication> {
               return reqCtx.response.json(body);
             },
           });
-          // Catches the rejection and answers what IT chooses (§3.4).
+          // Catches the rejection through the Promise contract and answers
+          // what IT chooses (§3.4).
           ctx.router.post('/tolerant', {
-            handler: async (reqCtx: IRequestContext): Promise<HandlerResult> => {
-              try {
-                const body = await reqCtx.request.json<Record<string, unknown>>();
-                return reqCtx.response.json(body);
-              } catch {
-                return reqCtx.response.status(422).json({ error: 'unreadable body' });
-              }
-            },
+            handler: (reqCtx: IRequestContext): Promise<HandlerResult> =>
+              reqCtx.request.json<Record<string, unknown>>().then(
+                (body) => reqCtx.response.json(body),
+                () => reqCtx.response.status(422).json({ error: 'unreadable body' }),
+              ),
           });
         },
       },
@@ -82,9 +80,13 @@ describe('malformed JSON body through inject() (X37-1)', () => {
       });
       expect(res.statusCode).toBe(400);
       const problem = res.json() as Record<string, unknown>;
-      expect(problem.status).toBe(400);
-      expect(problem.title).toBe('Bad Request');
-      expect(problem.detail).toBe('The request body could not be parsed as JSON.');
+      expect(problem).toEqual({
+        type: 'about:blank',
+        title: 'Bad Request',
+        status: 400,
+        detail: 'The request body could not be parsed as JSON.',
+        instance: '/echo',
+      });
     } finally {
       await app.stop();
     }

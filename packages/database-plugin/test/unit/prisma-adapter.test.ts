@@ -389,18 +389,17 @@ describe('PrismaAdapter', () => {
 
   describe('transaction failure paths', () => {
     it('rejects beginTransaction when $transaction cannot open', async () => {
+      const driverFailure = Object.assign(new Error('cannot open'), { code: 'P2034' });
       const failing = new PrismaAdapter({
         prismaClient: {
           $connect: () => Promise.resolve(),
           $disconnect: () => Promise.resolve(),
-          $transaction: () => Promise.reject(new Error('cannot open')),
+          $transaction: () => Promise.reject(driverFailure),
           $queryRawUnsafe: () => Promise.resolve([]),
         },
       });
       await failing.connect();
-      await expect(failing.beginTransaction()).rejects.toThrow(
-        'Prisma transaction failed to start',
-      );
+      await expect(failing.beginTransaction()).rejects.toBe(driverFailure);
     });
 
     it('rethrows a non-sentinel error surfaced during rollback', async () => {

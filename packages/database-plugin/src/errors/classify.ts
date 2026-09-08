@@ -20,6 +20,7 @@
  * @module
  */
 import { DatabaseUnavailableError, SerializationConflictError } from '../errors.ts';
+import type { DatabaseAdapterType } from '../interfaces/index.ts';
 
 /**
  * The two caller-actionable classes a driver error can be mapped onto.
@@ -121,7 +122,10 @@ const PRISMA_WRITE_CONFLICT = 'P2034';
  * @returns The class, or `null` when no signal in the table matches
  * @since 0.5.0
  */
-export function classifyDriverError(error: unknown): DriverErrorClass | null {
+export function classifyDriverError(
+  error: unknown,
+  adapterType?: DatabaseAdapterType,
+): DriverErrorClass | null {
   // Errors this milestone already classified are final. Only the TOP-LEVEL
   // value is checked: walking INTO a classified error's cause could
   // re-classify from the driver error it wraps, which is exactly the
@@ -150,7 +154,7 @@ export function classifyDriverError(error: unknown): DriverErrorClass | null {
   // 503 from that outer name would turn a retryable conflict into the wrong
   // caller contract.
   for (const members of candidates) {
-    const matched = classifyStructured(members);
+    const matched = classifyStructured(members, adapterType);
     if (matched !== null) return matched;
   }
   for (const members of candidates) {
@@ -176,28 +180,36 @@ type DriverErrorMembers = {
  * A code or Mongo label is a driver-supplied classifier, so it outranks names
  * and messages from wrappers elsewhere in the cause chain.
  */
-function classifyStructured({ code, labels }: DriverErrorMembers): DriverErrorClass | null {
-  // 1. A numeric code — gRPC (Bigtable) or the Cosmos HTTP status. Measured
-  //    on a real server: a MongoServerError ALSO carries a numeric `code`
-  //    (`112` WriteConflict) alongside its label, so an UNMATCHED numeric
-  //    code vetoes nothing — the later structured arms still run.
+function classifyStructured(
+  { code, labels }: DriverErrorMembers,
+  adapterType: DatabaseAdapterType | undefined,
+): DriverErrorClass | null {
+  // 1. Numeric codes have backend-local namespaces: Mongo's `10` means
+  //    CannotMutateObject while Bigtable's gRPC `10` means ABORTED. Only read
+  //    them when the active adapter identifies the namespace. An unmatched
+  //    numeric code still does not veto the Mongo label below.
   if (typeof code === 'number') {
-    if (code === GRPC_ABORTED) return 'conflict';
-    if (code === GRPC_UNAVAILABLE) return 'unavailable';
-    if (code === COSMOS_RETRY_WITH) return 'conflict';
-    if (code === COSMOS_TOO_MANY_REQUESTS || code === COSMOS_UNAVAILABLE) return 'unavailable';
+    if (adapterType === 'bigtable') {
+      if (code === GRPC_ABORTED) return 'conflict';
+      if (code === GRPC_UNAVAILABLE) return 'unavailable';
+    }
+    if (adapterType === 'cosmos') {
+      if (code === COSMOS_RETRY_WITH) return 'conflict';
+      if (code === COSMOS_TOO_MANY_REQUESTS || code === COSMOS_UNAVAILABLE) return 'unavailable';
+    }
   }
 
-  // 2. A string code — SQLSTATE (or Prisma's mapping of it). Class `40` is
-  //    "Transaction Rollback": every member (40001 serialization_failure,
-  //    40P01 deadlock_detected) means the transaction rolled back and may be
-  //    retried. Class `08` is "Connection Exception"; `57P03` is the server
+  // 2. A string code — SQLSTATE (or Prisma's mapping of it). The whitelisted
+  //    `40001` and `40P01` states mean the transaction rolled back and may be
+  //    retried. Other class-40 states, including `40003` completion-unknown,
+  //    do not establish that outcome and stay masked. Class `08` is
+  //    "Connection Exception"; `57P03` is the server
   //    refusing connections. A matched string code is FINAL: SQLSTATE
   //    classes are the backend's own classifier and outrank any text.
   if (typeof code === 'string') {
     if (code === PG_CANNOT_CONNECT_NOW) return 'unavailable';
     if (code === PRISMA_WRITE_CONFLICT) return 'conflict';
-    if (code.startsWith('40')) return 'conflict';
+    if (code === '40001' || code === '40P01') return 'conflict';
     if (code.startsWith('08')) return 'unavailable';
     if (UNAVAILABLE_ERRNOS.has(code)) return 'unavailable';
   }

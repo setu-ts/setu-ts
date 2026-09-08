@@ -355,6 +355,7 @@ interface StubAdapterOptions {
   source?: IDataSource;
   beginRejection?: unknown;
   rawRejection?: unknown;
+  rollbackRejection?: unknown;
 }
 
 function stubAdapter(options: StubAdapterOptions): IDatabaseAdapter {
@@ -371,7 +372,10 @@ function stubAdapter(options: StubAdapterOptions): IDatabaseAdapter {
         // inert — the framework rolls back in the same catch that classifies.
         ? Promise.resolve({
           commit: () => Promise.resolve(),
-          rollback: () => Promise.resolve(),
+          rollback: () =>
+            options.rollbackRejection === undefined
+              ? Promise.resolve()
+              : Promise.reject(options.rollbackRejection),
           createDataSource: () => source,
         })
         : Promise.reject(options.beginRejection),
@@ -464,12 +468,15 @@ describe('driver conditions answer their classified status (X38-1/X35-2)', () =>
     }
   });
 
-  it('a conflict inside a transaction answers 409 through the rethrow, once', async () => {
+  it('a conflict inside a transaction answers 409 even when rollback fails', async () => {
     // The scoped repository classifies; `transaction()`'s catch passes the
     // package-owned error through untouched. Re-wrapping there would put the
     // first wrapper into the caller's cause chain.
     const app = bootStubApp(
-      stubAdapter({ source: refusingDataSource(drizzleSerializationFailure()) }),
+      stubAdapter({
+        source: refusingDataSource(drizzleSerializationFailure()),
+        rollbackRejection: new Error('connection lost during rollback'),
+      }),
     );
     await app.start();
     try {
@@ -498,12 +505,9 @@ describe('driver conditions answer their classified status (X38-1/X35-2)', () =>
     }
   });
 
-  it('answers a Bigtable gRPC ABORTED at commit with 409', async () => {
-    // §3.2, Bigtable row: the conflict signal is the gRPC status carried as a
-    // NUMERIC code — a different domain from SQLSTATE, read by the same
-    // classifier. Driven through the REAL DatabaseService transaction path:
-    // the commit rejects with the gRPC-shaped error, the catch classifies,
-    // and the client sees 409.
+  it('masks a commit failure whose outcome is unknown', async () => {
+    // A lost commit acknowledgement can follow a successful write. Even a
+    // recognizable driver code must not advertise the retry-safe contract.
     const tx: IAdapterTransaction = {
       commit: () => Promise.reject({ code: 10, details: 'ABORTED' }),
       rollback: () => Promise.resolve(),
@@ -531,15 +535,16 @@ describe('driver conditions answer their classified status (X38-1/X35-2)', () =>
     await app.start();
     try {
       const response = await app.inject({ method: 'POST', url: 'http://localhost/commit-only' });
-      expect(response.statusCode).toBe(409);
-      const body = response.json() as Record<string, unknown>;
-      expect(body.status).toBe(409);
-      expect(body.detail)
-        .toBe(
-          'The write conflicted with a concurrent transaction and was rolled back. It is safe to retry.',
-        );
-      // The gRPC `details` text stays out of the body.
-      expect(JSON.stringify(body)).not.toContain('ABORTED');
+      expect(response.statusCode).toBe(500);
+      expect(response.json()).toEqual({
+        type: 'about:blank',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: 'Internal Server Error',
+        instance: '/commit-only',
+      });
+      // The driver `details` text stays out of the body.
+      expect(JSON.stringify(response.json())).not.toContain('ABORTED');
     } finally {
       await app.stop();
     }

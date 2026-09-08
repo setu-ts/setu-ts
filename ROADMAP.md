@@ -9005,7 +9005,7 @@ is five more, **three of them found in a single block**:
 
 | Finding | Condition                                                 | Correct answer                                                                                     |
 | ------- | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `X38-1` | SQLSTATE `40001` `could not serialize access`             | `409` — the canonical _retry me_ signal, converted to _do not retry_                               |
+| `X38-1` | SQLSTATE `40001` `could not serialize access`             | `409` — caller-visible serialization conflict; retry policy remains caller-specific                |
 | `X35-2` | connection-pool timeout                                   | `503` — no `Retry-After`: the hint channel has no header, and no component holds an honest horizon |
 | `X37-1` | malformed JSON request body                               | `400` — and `ValidationPlugin` already answers `400` for a body that parses but fails a schema     |
 | `X20-2` | `rotate()` on a read-only secrets provider                | `501`                                                                                              |
@@ -9032,11 +9032,14 @@ documents that cliff. X22-6 (concurrent session writes lose one on both strategi
 cache-miss coalescing — 100 of 100 concurrent misses reached the origin) are the same shape in two
 more packages.
 
-Suggested contract: `IDatabaseService.transaction(work, { isolation })` (owned by `database-plugin`)
-passes the optional level to `IDatabaseAdapter.beginTransaction(options?)` (owned by `common`),
-translated per adapter and refused by name where unsupported — the `UnsupportedFilterOperatorError`
-precedent. It does not make `FOR UPDATE` portable, but paired with M90f's retryable status it makes
-the _optimistic_ strategy portable, which is the one that generalises.
+Implemented contract: `IDatabaseService.transaction(work, { isolation })` (owned by
+`database-plugin`) passes the optional level to `IDatabaseAdapter.beginTransaction(options?)` (owned
+by `common`), translated per adapter and refused by name where unsupported — the
+`UnsupportedFilterOperatorError` precedent. Drizzle, Prisma, MongoDB, DynamoDB, Cosmos, Bigtable,
+and memory declare their supported levels; the public barrel exports `TransactionOptions` and
+`TransactionIsolationLevel`; tests cover supported propagation and named refusals. It does not make
+`FOR UPDATE` portable, but paired with M90f's caller-visible conflict status it makes the
+_optimistic_ strategy portable, which is the one that generalises.
 
 ### Milestone 90h: Documentation That Survives Contact
 

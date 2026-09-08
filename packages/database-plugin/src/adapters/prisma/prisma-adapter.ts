@@ -304,9 +304,9 @@ export class PrismaAdapter implements IDatabaseAdapter {
     let tx: PrismaClient;
     try {
       tx = await txReady.promise;
-    } catch {
+    } catch (error) {
       await outer.catch(() => {}); // suppress unhandled rejection on early fail
-      throw new Error('Prisma transaction failed to start');
+      throw error;
     }
 
     // Private sentinel so rollback can swallow only its own rejection.

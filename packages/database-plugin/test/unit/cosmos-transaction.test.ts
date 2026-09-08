@@ -276,6 +276,40 @@ describe('CosmosTransaction', () => {
       .rejects.toThrow(/batch on 'orders' failed with status 207 \(per-operation: 424\)/);
   });
 
+  it('retains the root per-operation failure code for the service classifier', async () => {
+    const fake = createFakeCosmosClient({
+      containers: { orders: { partitionKeyPaths: ['/tenantId'] } },
+    });
+    const database = fake.client.database('db');
+    const refusing = {
+      read: database.read.bind(database),
+      container: (id: string) => {
+        const inner = database.container(id);
+        return {
+          ...inner,
+          items: {
+            ...inner.items,
+            batch: () =>
+              Promise.resolve({ code: 207, result: [{ statusCode: 429 }, { statusCode: 424 }] }),
+          },
+        };
+      },
+    };
+    const transaction = new CosmosTransaction(
+      refusing,
+      new PartitionKeyResolver(refusing),
+      (entity) => resolveCosmosTarget(entity, mapping),
+    );
+    await transaction.createDataSource('Order').create({ id: 'o1', tenantId: 't1' });
+    let thrown: unknown;
+    try {
+      await transaction.commit();
+    } catch (error) {
+      thrown = error;
+    }
+    expect((thrown as { code?: unknown }).code).toBe(429);
+  });
+
   it('treats a batch response carrying no code as a success', async () => {
     const fake = createFakeCosmosClient({
       containers: { orders: { partitionKeyPaths: ['/tenantId'] } },

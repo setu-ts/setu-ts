@@ -82,6 +82,7 @@ class FrameworkRequest implements IRequest {
 
   readonly #raw: Request;
   #body: Promise<Uint8Array> | undefined;
+  #json: Promise<unknown> | undefined;
   #headers: Headers | undefined;
   readonly #maxBodyBytes: number | undefined;
 
@@ -171,8 +172,8 @@ class FrameworkRequest implements IRequest {
    * rejection is cached like any body outcome — the body is one-shot, so a
    * second reader must observe the same failure, not a different one.
    */
-  async json<T = unknown>(): Promise<T> {
-    return parseJsonBody(await this.text()) as T;
+  json<T = unknown>(): Promise<T> {
+    return (this.#json ??= this.text().then((text) => parseJsonBody(text))) as Promise<T>;
   }
 
   /**

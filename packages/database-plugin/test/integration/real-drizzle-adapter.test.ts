@@ -789,17 +789,26 @@ describe('DrizzleAdapter over live PostgreSQL — classified statuses (X38-1/X35
       // Both transactions READ the row before either WRITES, so under
       // SERIALIZABLE the second write answers SQLSTATE 40001 — the canonical
       // machine-readable "this did not happen, run it again".
+      const firstRead = Promise.withResolvers<void>();
+      const secondRead = Promise.withResolvers<void>();
+      const releaseWrites = Promise.withResolvers<void>();
+      let readers = 0;
       const conflict = (): Promise<unknown> =>
         service.transaction(async (uow) => {
           const repo = uow.getRepository('Account');
           const row = await repo.findById('a1');
-          await new Promise((resolve) => setTimeout(resolve, 400));
+          readers += 1;
+          if (readers === 1) firstRead.resolve();
+          if (readers === 2) secondRead.resolve();
+          await releaseWrites.promise;
           await repo.update('a1', { balance: (row as { balance: number }).balance - 1 });
         });
 
       const first = conflict();
-      await new Promise((resolve) => setTimeout(resolve, 120));
+      await firstRead.promise;
       const second = conflict();
+      await secondRead.promise;
+      releaseWrites.resolve();
       const results = await Promise.allSettled([first, second]);
 
       const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');

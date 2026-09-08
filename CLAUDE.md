@@ -4524,8 +4524,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   deterministically produce it — a placement deviation from the plan, recorded rather than silent.
   Package-list correction (M70b precedent): `auth-plugin` had no row here and `exceptions` needed no
   `src` change; `runtime`/`testing`/`common` joined for X37-1. All five changed barrels carry
-  barrel-exports assertions; the classifier stays internal, pinned by a negative test ) — complete
-  (PR pending)
+  barrel-exports assertions; the classifier stays internal, pinned by a negative test — complete (PR
+  pending)
 - **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
   the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
   compat suites as release gates. The `smoke/` programme's X16–X19 exercises against published

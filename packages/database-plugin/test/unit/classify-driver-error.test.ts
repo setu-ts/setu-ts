@@ -35,11 +35,11 @@ describe('classifyDriverError — conflict signals (409)', () => {
   });
 
   it('Bigtable gRPC ABORTED (10)', () => {
-    expect(classifyDriverError({ code: 10 })).toBe('conflict');
+    expect(classifyDriverError({ code: 10 }, 'bigtable')).toBe('conflict');
   });
 
   it('Cosmos DB 449 Retry With', () => {
-    expect(classifyDriverError({ code: 449 })).toBe('conflict');
+    expect(classifyDriverError({ code: 449 }, 'cosmos')).toBe('conflict');
   });
 
   it('a MongoServerError with BOTH a numeric code and the label still classifies', () => {
@@ -86,12 +86,12 @@ describe('classifyDriverError — unavailable signals (503)', () => {
   });
 
   it('Bigtable gRPC UNAVAILABLE (14)', () => {
-    expect(classifyDriverError({ code: 14 })).toBe('unavailable');
+    expect(classifyDriverError({ code: 14 }, 'bigtable')).toBe('unavailable');
   });
 
   it('Cosmos DB 429 and 503', () => {
-    expect(classifyDriverError({ code: 429 })).toBe('unavailable');
-    expect(classifyDriverError({ code: 503 })).toBe('unavailable');
+    expect(classifyDriverError({ code: 429 }, 'cosmos')).toBe('unavailable');
+    expect(classifyDriverError({ code: 503 }, 'cosmos')).toBe('unavailable');
   });
 });
 
@@ -145,6 +145,13 @@ describe('classifyDriverError — the walk', () => {
   it('an unrecognised error returns null — it keeps the masked 500', () => {
     expect(classifyDriverError(new Error('something unrelated'))).toBe(null);
     expect(classifyDriverError({ code: '23505' })).toBe(null); // not class 40
+    expect(classifyDriverError({ code: '40003' })).toBe(null); // completion unknown
+  });
+
+  it('does not read backend-local numeric codes under the wrong adapter', () => {
+    expect(classifyDriverError({ code: 10 }, 'mongodb')).toBe(null);
+    expect(classifyDriverError({ code: 14 }, 'mongodb')).toBe(null);
+    expect(classifyDriverError({ code: 449 }, 'bigtable')).toBe(null);
   });
 
   it('a hostile getter reads as no signal, never throws', () => {

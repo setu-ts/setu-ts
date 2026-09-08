@@ -465,12 +465,12 @@ describe('PrismaAdapter against live PostgreSQL — classified conflict (X38-1)'
       const transactional = client as unknown as GeneratedPrismaClient & TransactionalPrismaClient;
       const key = { tenantId: `t-${suffix}`, userId: 'x38' };
 
-      // Seeded through the plain delegate the existing cases use.
-      await client.tenantMember.create({
-        data: { tenantId: key.tenantId, userId: key.userId, role: 'baseline' },
-      });
-
       try {
+        // Seeded through the plain delegate the existing cases use.
+        await client.tenantMember.create({
+          data: { tenantId: key.tenantId, userId: key.userId, role: 'baseline' },
+        });
+
         // Both transactions read the row before either writes, so under
         // SERIALIZABLE the second write must refuse — the canonical
         // "this did not happen, run it again".

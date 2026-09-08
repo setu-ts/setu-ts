@@ -58,8 +58,8 @@ function accessPathOf(dataSource: DataSource): string | undefined {
  * SQLSTATE, the statement — stays reachable for the log while the served
  * `detail` stays the class's fixed sentence.
  */
-function classifiedOrOriginal(error: unknown): unknown {
-  const kind = classifyDriverError(error);
+function classifiedOrOriginal(error: unknown, adapterType: DatabaseAdapterType): unknown {
+  const kind = classifyDriverError(error, adapterType);
   if (kind === 'conflict') {
     return new SerializationConflictError(
       'The database rejected the write because a concurrent transaction changed the same data.',
@@ -164,8 +164,9 @@ export class DatabaseService implements IDatabaseService {
     // catch, and a classifier placed only there would leave the headline
     // row unfixed. The acquisition is classified itself.
     const txn = await this._adapter.beginTransaction(options).catch((error: unknown): never => {
-      throw classifiedOrOriginal(error);
+      throw classifiedOrOriginal(error, this._adapterType);
     });
+    let committing = false;
     try {
       const uow = new UnitOfWork(
         txn,
@@ -176,16 +177,24 @@ export class DatabaseService implements IDatabaseService {
         this._adapterType,
       );
       const result = await work(uow);
+      committing = true;
       await txn.commit();
       return result;
     } catch (error) {
-      await txn.rollback();
+      // The primary operation error determines the client response. A lost
+      // connection commonly makes rollback fail too; that secondary failure
+      // must not replace the classified cause.
+      await txn.rollback().catch(() => {});
+      // A commit rejection can mean the server applied the write before its
+      // acknowledgement was lost. Its outcome is unknown, so never advertise
+      // the retry-safe contract reserved for definitely rejected operations.
+      if (committing) throw error;
       // X38-1 (M90f): a conflict surfaced inside a repository call was
       // already classified by the `wrapDataSource` wrapper, and
       // `classifyDriverError` returns `null` for a package-owned error — so
       // it is rethrown verbatim and the caller's `cause` stays the driver
       // error, never the first wrapper.
-      throw classifiedOrOriginal(error);
+      throw classifiedOrOriginal(error, this._adapterType);
     }
   }
 
@@ -208,7 +217,7 @@ export class DatabaseService implements IDatabaseService {
     // X38-1/X35-2 (M90f): a raw statement reaches the driver with no
     // wrapper around it — the fourth interception site.
     return this._adapter.rawQuery<T>(sql, params).catch((error: unknown): never => {
-      throw classifiedOrOriginal(error);
+      throw classifiedOrOriginal(error, this._adapterType);
     });
   }
 
@@ -274,6 +283,7 @@ export class DatabaseService implements IDatabaseService {
     const enabled = this._options?.logQueries === true && this._logger !== undefined;
     const logger = this._logger;
     const now = this._now;
+    const adapterType = this._adapterType;
 
     // `findPage` is OPTIONAL on `IDataSource` and is bound here, before the
     // spread, for two reasons. (1) The spread below carries only OWN ENUMERABLE
@@ -325,7 +335,7 @@ export class DatabaseService implements IDatabaseService {
             }
             return result;
           } catch (error) {
-            throw classifiedOrOriginal(error);
+            throw classifiedOrOriginal(error, adapterType);
           }
         },
       }),
@@ -343,7 +353,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error);
+          throw classifiedOrOriginal(error, adapterType);
         }
       },
       async findById(id) {
@@ -358,7 +368,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error);
+          throw classifiedOrOriginal(error, adapterType);
         }
       },
       async create(data) {
@@ -373,7 +383,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error);
+          throw classifiedOrOriginal(error, adapterType);
         }
       },
       async update(id, data) {
@@ -388,7 +398,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error);
+          throw classifiedOrOriginal(error, adapterType);
         }
       },
       async delete(id) {
@@ -403,7 +413,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error);
+          throw classifiedOrOriginal(error, adapterType);
         }
       },
       // BOTH parameters are forwarded. Taking only `where` dropped the
@@ -423,7 +433,7 @@ export class DatabaseService implements IDatabaseService {
           }
           return result;
         } catch (error) {
-          throw classifiedOrOriginal(error);
+          throw classifiedOrOriginal(error, adapterType);
         }
       },
     };

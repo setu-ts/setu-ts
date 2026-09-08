@@ -213,8 +213,8 @@ class MockRequest implements IRequest {
    * body keeps parsing as `{}`, exactly as before.
    */
   json<T = unknown>(): Promise<T> {
-    return Promise.resolve(
-      parseJsonBody(this.#bodyText === '' ? '{}' : this.#bodyText) as T,
+    return Promise.resolve().then(
+      () => parseJsonBody(this.#bodyText === '' ? '{}' : this.#bodyText) as T,
     );
   }
 
