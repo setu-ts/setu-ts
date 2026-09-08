@@ -72,6 +72,15 @@ export class TracedQueue implements IQueue {
    * The caller's own headers are preserved and the `traceparent` is merged on
    * top, so an application using the channel for its own purposes keeps it.
    *
+   * The framework's `traceparent` WINS over a caller-supplied one, which is the
+   * opposite of `logger-plugin`'s rule that a caller's own `trace_id` wins — and
+   * the asymmetry is deliberate. There, the field DESCRIBES the current span and
+   * a caller writing it knows something the framework does not. Here it is the
+   * propagation channel itself, and the enqueue span is by construction the
+   * job's immediate parent: honoring a caller's value would detach the job from
+   * the span that actually created it. An upstream context is not lost by this —
+   * it is already this span's own parent.
+   *
    * @typeParam T - The job payload type
    * @param name - Job name
    * @param data - Job payload

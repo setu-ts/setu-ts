@@ -66,6 +66,22 @@ describe('TelemetryService.activeSpanContext', () => {
     expect('activeSpanContext' in noop).toBe(false);
   });
 
+  it('reports undefined when a custom host THROWS, honoring the no-throw contract', () => {
+    // `tracerProviderFactory` is a public option, so an application can supply a
+    // host whose read throws. `ITelemetryService` documents this member as
+    // no-throw; without the guard the framework's own service breaks its own
+    // contract, and a consumer following the contract (the logger) would be the
+    // one to fall over.
+    const host = hostReporting(SPAN);
+    const throwing: TracerHost = {
+      ...host,
+      activeSpanContext: () => {
+        throw new Error('custom host exploded');
+      },
+    };
+    expect(new TelemetryService(throwing).activeSpanContext()).toBeUndefined();
+  });
+
   it('satisfies ITelemetryService with only withSpan implemented', () => {
     // Type-level: the member is optional, so every existing implementor stays
     // source-compatible (the M42 `signal?` precedent).

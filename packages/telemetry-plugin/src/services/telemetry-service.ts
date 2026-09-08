@@ -169,7 +169,21 @@ export class TelemetryService implements ITelemetryService {
    * or the host cannot report one
    */
   activeSpanContext(): SpanContext | undefined {
-    return this.#tracerHost.activeSpanContext?.();
+    // Guarded because `ITelemetryService` documents this member as no-throw and
+    // the host is an APPLICATION-SUPPLIED seam (`tracerProviderFactory` is a
+    // public option), so without this the framework's own service violates its
+    // own contract for a custom host — probed, not assumed. A host that cannot
+    // answer collapses to `undefined`, the same answer as "nothing running",
+    // because a caller has the same thing to do in both cases: enrich nothing.
+    //
+    // Nothing is reported: the only sink a telemetry service could reach is the
+    // logger, which is this member's own principal caller, so reporting would
+    // recurse through the failing read on every record.
+    try {
+      return this.#tracerHost.activeSpanContext?.();
+    } catch {
+      return undefined;
+    }
   }
 }
 
