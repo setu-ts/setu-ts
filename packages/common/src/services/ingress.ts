@@ -18,7 +18,7 @@
  * The ingress path a unit of non-HTTP work arrived on.
  *
  * A behaviour branches on this when its concern is transport-specific (e.g.
- * reading `headers` only on the `'messaging'` arm). Exhaustive over the four
+ * reading `headers`, which only the `'messaging'` and `'queue'` arms carry). Exhaustive over the four
  * ingress paths the behaviour chain wraps.
  *
  * @since 0.3.0
@@ -70,9 +70,22 @@ export interface IngressContext<TPayload = unknown> {
    */
   readonly attempt?: number;
   /**
-   * Transport headers, populated on the `'messaging'` arm only from
-   * `MessageMetadata.headers`. `{}` means the channel carried none; absent
-   * means there was no channel.
+   * Transport headers, populated on the `'messaging'` arm from
+   * `MessageMetadata.headers` and on the `'queue'` arm from `IJob.headers`.
+   * `{}` means the channel carried none; absent means there was no channel.
+   *
+   * ABSENT on `'scheduler'` deliberately, and that is a statement rather than
+   * an omission: a tick has no upstream request, so there is no header to
+   * carry and no trace to join. Adding the member "for symmetry" would erase
+   * the distinction the three states exist for — an operator could no longer
+   * tell "this work had no cause" from "the cause was lost".
+   *
+   * ABSENT on `'websocket'` for the different reason that a frame carries no
+   * per-frame headers; the upgrade request's headers are the connection's.
+   *
+   * @since 0.5.0 — the `'queue'` arm. Before that the member was populated on
+   * `'messaging'` only, because the queue contract had no header channel to
+   * read.
    */
   readonly headers?: Readonly<Record<string, string>>;
 }

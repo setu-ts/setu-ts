@@ -9085,6 +9085,24 @@ What is missing is a **channel** on one ingress and a **bridge** to one sink:
   span's `trace_id`/`span_id` when a telemetry capability is registered, read optionally exactly as
   M45b reads `CAPABILITIES.METRICS`.
 
+  **Corrected during planning.** The M45b resolution SHAPE is right and the read it names is not
+  available: `ITelemetryService` has exactly ONE member, `withSpan`, which hands its span only to
+  its own callback (`common/src/services/telemetry.ts`), so there is no way to ask which span is
+  currently running. X34-2 therefore needs a `common` widening of its own — an optional
+  `ITelemetryService.activeSpanContext?()`, plus the matching optional
+  `TracerHost.activeSpanContext?()` where the OTel context is actually reachable — not merely an
+  optional capability read.
+
+  **A second correction, established by probe rather than argument.** The optional-capability shape
+  also implies `LoggerPlugin` would declare `CAPABILITIES.TELEMETRY` in `optionalDependencies`. It
+  must NOT: `TelemetryPlugin` already declares `CAPABILITIES.LOGGER` in its own
+  (`telemetry-plugin.ts:142`), an optional dependency is a real graph edge
+  (`plugin-resolver.ts:49-53`), and the resulting cycle THROWS at `start()` — so the edge would
+  break every application registering both plugins, which is the exact composition this milestone
+  exists to serve. The capability is resolved at CALL time instead, which the same edge makes
+  mandatory: the resolver orders `LoggerPlugin` first, so telemetry is guaranteed absent at its
+  `register()`.
+
 ### Milestone 90j: The Operator's Diagnostic Survives to the Operator
 
 **Package(s):** `packages/database-plugin`, `packages/common`, `packages/messaging-plugin`
@@ -9254,5 +9272,5 @@ fields (`code` first) read through the same guard, plus
 | 90f       | ✅     | caller errors reach the client correctly ([#259](https://github.com/setu-ts/setu-ts/pull/259)) |
 | 90g       | ✅     | concurrency loses work silently                                                                |
 | 90h       | ⬜     | documentation that survives contact                                                            |
-| 90i       | ⬜     | observability that joins up                                                                    |
+| 90i       | ✅     | observability that joins up ([#260](https://github.com/setu-ts/setu-ts/pull/260))              |
 | 90j       | ⬜     | operator diagnostics survive to the operator                                                   |

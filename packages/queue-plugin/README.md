@@ -240,6 +240,56 @@ The SQS adapter includes guarded E2E tests against ElasticMQ (`SQS_ENDPOINT_URL`
 variable). These tests verify enqueue→reserve→ack round-trips, queue isolation, visibility retry
 progression, and DLQ promotion.
 
+## Trace propagation
+
+A queue job is deferred work whose whole diagnostic value is "which request caused this". With a
+`CAPABILITIES.TELEMETRY` provider registered, a job joins the trace of the request that enqueued it:
+`queue.add()` runs inside an `enqueue <name>` producer span and writes its W3C `traceparent` into
+`AddJobOptions.headers`, and every processor runs inside a `process <name>` consumer span parented
+from `IJob.headers`.
+
+Every registration route is covered — the `processors` arm, a `processors` factory, and an
+imperative `queue.process()` through the resolved capability — and all four adapters carry the map
+end to end. An M86 ingress behaviour reads it as `IngressContext.headers`, the same member the
+`'messaging'` arm uses.
+
+```typescript
+import { QueuePlugin } from '@setu-ts/queue-plugin';
+import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
+import { CAPABILITIES, type IQueue } from '@setu-ts/common';
+
+app.register(TelemetryPlugin({
+  serviceName: 'orders',
+  exporter: 'otlp',
+  endpoint: 'http://localhost:4318/v1/traces',
+}));
+app.register(QueuePlugin({ adapter: 'redis', url: 'redis://localhost:6379' }));
+
+app.router.post('/orders', async (ctx) => {
+  const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
+  // Both the enqueue and the eventual processing join THIS request's trace.
+  await queue.add('order.export', { id: 'o-1' }, { headers: { 'x-tenant': 't-1' } });
+  return ctx.response.json({ accepted: true });
+});
+```
+
+`headers` is a public option and its delivery never depends on which capabilities are registered: a
+map you pass reaches the processor with or without telemetry. What telemetry adds is the
+`traceparent` alongside it.
+
+**Semantics.** `IJob.headers` mirrors `MessageMetadata.headers` exactly — `{}` means the channel was
+read and carried nothing; **absent** means there was no channel. It is never substituted, so "this
+job had no cause recorded" stays distinguishable from "the cause was lost".
+
+**Without telemetry** nothing is injected and behaviour is byte-identical to before. A job carrying
+no `traceparent` starts a root span rather than failing. `addRecurring` is deliberately untraced: a
+recurring job fires on a schedule, so the call that registered it is not the cause of any run.
+
+**Known limitation.** With `behaviors` configured, a behaviour runs OUTSIDE the consumer span,
+because the behaviour chain is applied by a service subclass that is necessarily outermost at
+dispatch. The processor's own work is correctly parented regardless, and with no behaviours
+configured the question does not arise.
+
 ## License
 
 MIT

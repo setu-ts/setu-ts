@@ -185,6 +185,11 @@ export class QueueService implements IQueue {
       attempts: 0, // Will be 1 on first delivery (set in reserve)
       maxAttempts,
       availableAtMs,
+      // Omitted rather than assigned `undefined` (`exactOptionalPropertyTypes`),
+      // and because absent is a MEANINGFUL state on `IJob.headers`: it says the
+      // job carried no channel, which a present-but-undefined own property
+      // would contradict for anything testing presence.
+      ...(options?.headers === undefined ? {} : { headers: options.headers }),
     };
 
     await this.#adapter.enqueue(job);

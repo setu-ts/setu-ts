@@ -448,6 +448,41 @@ app.router.get('/users/:id', async (ctx) => {
 });
 ```
 
+### Trace correlation
+
+When a `CAPABILITIES.TELEMETRY` provider is registered, every record the plugin's logger emits
+carries the active span's identifiers:
+
+| Field      | Value                                     |
+| ---------- | ----------------------------------------- |
+| `trace_id` | The active span's 32-hex trace identifier |
+| `span_id`  | The active span's 16-hex span identifier  |
+
+The names are snake_case, departing from this framework's camelCase metadata convention
+(`requestId`), and the departure is deliberate: these fields exist to be read by a log backend, and
+the OpenTelemetry log-correlation convention that Loki, Elastic and the collector's own processors
+key on is snake_case. A camelCase spelling would be internally consistent and would join up in none
+of the tools the correlation exists for.
+
+Enrichment applies to every level and to child loggers, so `logger.child({ requestId })` — what the
+request-logging middleware does — still carries them. A caller's own `trace_id` in the metadata wins
+over the decorator's.
+
+**Without a telemetry capability the record is byte-identical to before**, and so it is when no span
+is active, when the telemetry service does not implement `activeSpanContext`, or when reading it
+throws. The read is guarded end to end: an observability enrichment must never turn logging into the
+fault.
+
+> The plugin does NOT declare `CAPABILITIES.TELEMETRY` in `optionalDependencies`. `TelemetryPlugin`
+> already declares `CAPABILITIES.LOGGER` in its own, and the two edges together are a cycle the
+> kernel's plugin resolver refuses at `start()`. The telemetry capability is therefore resolved at
+> CALL time, which is required rather than merely prudent: the resolver orders `LoggerPlugin` first,
+> so telemetry is guaranteed absent when the logger registers.
+>
+> One consequence is visible: the value registered under `CAPABILITIES.LOGGER` is an internal
+> decorator, not the transport instance, so `instanceof ConsoleLogger` on the resolved capability no
+> longer holds. `ILogger` is the contract; the concrete class was never part of it.
+
 ### Child Loggers
 
 ```typescript
@@ -4766,6 +4801,37 @@ app.register(QueuePlugin({
 Both arms coexist with imperative `queue.process()` calls. With no behaviours, a processor receives
 the original job directly and no chain is allocated.
 
+### Trace propagation across the queue hop
+
+A queue job is deferred work whose whole diagnostic value is "which request caused this". When a
+`CAPABILITIES.TELEMETRY` provider is registered, the plugin carries a W3C `traceparent` from the
+enqueue to the processor, so a job joins the trace of the request that enqueued it:
+
+- `queue.add()` runs inside a `enqueue <name>` producer span and writes the span's `traceparent`
+  into `AddJobOptions.headers`, merged on top of anything the caller supplied.
+- Every processor — registered through the `processors` arm, through a `processors` factory, or
+  imperatively through the resolved capability — runs inside a `process <name>` consumer span
+  parented from `IJob.headers`.
+- The map is carried end to end by all four adapters (`memory`, `redis`, `rabbitmq`, `sqs`) and is
+  exposed to an M86 ingress behaviour as `IngressContext.headers`, the same member the `'messaging'`
+  arm uses.
+
+**Without a telemetry capability nothing is injected** and behaviour is byte-identical to before: a
+job carries no framework-written header. A `headers` map the CALLER passed is still delivered — it
+is a public option on a public contract, so its delivery never depends on which capabilities happen
+to be registered.
+
+A job carrying no `traceparent` — enqueued before this channel existed, or by a non-framework
+producer — starts a root span rather than failing. `addRecurring` is deliberately untraced: a
+recurring job fires on a schedule, so the call that registered it is not the cause of any particular
+run.
+
+**Known limitation.** When `behaviors` are configured, a behaviour runs OUTSIDE the consumer span,
+because the behaviour chain is applied by a service subclass that is necessarily outermost at
+dispatch. The processor's own work is correctly parented either way, and with no behaviours
+configured the question does not arise. `messaging-plugin` composes the other way round and runs
+behaviours inside the span.
+
 ### Adding Jobs
 
 ```typescript
@@ -4868,6 +4934,10 @@ console.log(dead.length, dead[0]?.attempts); // 1 3
 interface AddJobOptions {
   readonly delayMs?: number; // Delay before job becomes available (ms)
   readonly maxAttempts?: number; // Maximum retry attempts (default: 3)
+  // Transport headers to carry with the job, delivered as `IJob.headers`.
+  // Delivered whether or not telemetry is registered; with a telemetry
+  // capability present the framework ADDS a `traceparent` alongside them.
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 // ProcessOptions
@@ -4891,6 +4961,11 @@ interface IJob<T = unknown> {
   readonly name: string;
   readonly data: T;
   readonly attempts: number;
+  // Transport headers, mirroring `MessageMetadata.headers` exactly: `{}` means
+  // the channel was read and carried nothing; ABSENT means there was no
+  // channel. Never substituted — an implementation whose transport cannot
+  // carry a header omits the member.
+  readonly headers?: Readonly<Record<string, string>>;
 }
 
 // IQueue interface
@@ -6380,17 +6455,17 @@ The telemetry contract is framework-owned and exported from `@setu-ts/common` (z
 importable without the OTel SDK installed). The telemetry-plugin translates these to OTel types at
 its implementation seam.
 
-| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                                       |
-| -------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`.                                                            |
-| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                                   |
-| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                              |
-| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                             |
-| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                             |
-| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                              |
-| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly; implicit linking depends on context activation — see note below. |
-| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                                  |
-| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                                  |
+| Export                     | Kind            | Shape / description                                                                                                                                                                                                                                                                                            |
+| -------------------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ITelemetryService`        | interface       | `withSpan<T>(name: string, fn: (span: ISpan) => Promise<T>, options?: SpanOptions): Promise<T>` — the only manual span-creation API; ends the span exactly once, even if `fn` throws. Resolved under `CAPABILITIES.TELEMETRY`. Plus the OPTIONAL `activeSpanContext?(): SpanContext \| undefined` (see below). |
+| `ISpan`                    | interface       | `setAttribute(key, value): this`, `setAttributes(attrs): this`, `setStatus(status): void`, `recordException(error): void`, `end(): void`, `spanContext(): SpanContext`.                                                                                                                                        |
+| `SpanContext`              | interface       | `{ readonly traceId: string; readonly spanId: string; readonly traceFlags: string }` — all lowercase hex (32/16/2 chars). Returned by `ISpan.spanContext()`.                                                                                                                                                   |
+| `SpanStatus`               | union           | `'ok' \| 'error' \| 'unset'` — argument to `ISpan.setStatus`.                                                                                                                                                                                                                                                  |
+| `SpanKind`                 | union           | `'internal' \| 'server' \| 'client' \| 'producer' \| 'consumer'` — `SpanOptions.kind` (default `'internal'`).                                                                                                                                                                                                  |
+| `SpanAttributeValue`       | union           | `string \| number \| boolean \| ReadonlyArray<string \| number \| boolean>`.                                                                                                                                                                                                                                   |
+| `SpanOptions`              | interface       | `{ readonly kind?: SpanKind; readonly attributes?: Readonly<Record<string, SpanAttributeValue>>; readonly parentContext?: TelemetryContext }` — 3rd arg to `withSpan`. Pass `parentContext` to parent a span explicitly; implicit linking depends on context activation — see note below.                      |
+| `TelemetryContext`         | interface       | Opaque parent-context handle carrying the extracted W3C fields (`_opaque`, optional `traceId`/`spanId`/`traceFlags`/`tracestate`). Consumers must not inspect it beyond passing it back via `SpanOptions.parentContext`.                                                                                       |
+| `TELEMETRY_CONTEXT_OPAQUE` | `unique symbol` | Brand for `TelemetryContext._opaque` (`Symbol.for('he.telemetry.context')`); prevents structural mixups.                                                                                                                                                                                                       |
 
 > **Implicit parent/child linking is conditional.** Since M75 the plugin DOES register an OTel
 > `ContextManager` — the `AsyncLocalStorageContextManager` from the optional
@@ -6404,6 +6479,25 @@ its implementation seam.
 > hold regardless of activation. The request-span middleware always passes the incoming
 > `traceparent` as the parent explicitly, so cross-process propagation (incoming header → server
 > span) works out of the box in every mode.
+
+### Joining log records to spans
+
+`ITelemetryService.activeSpanContext?(): SpanContext | undefined` reports the identifiers of the
+span that is active RIGHT NOW, so a signal emitted OUTSIDE a `withSpan` call — a log record, above
+all — can name the trace it belongs to. `withSpan` hands its span only to its own callback, so
+without this a consumer that is merely running inside a span cannot ask which one.
+
+`TracerHost` carries the matching optional `activeSpanContext?()`; it is where the read is actually
+possible, because only the host can see the OTel context. Both are OPTIONAL, so every existing
+implementor stays source-compatible, and the ABSENCE is meaningful rather than substituted: a
+service or host that cannot see an active span omits the member, and a consumer then enriches
+nothing rather than emitting empty identifiers that would join a record to no trace. `TracerHost`
+declares it only alongside `activate` — with no registered context manager nothing is ever active,
+so a host that cannot activate could only ever answer `undefined`. `NoopTelemetryService` omits it.
+
+`@setu-ts/logger-plugin` is the consumer that makes this more than a getter: with a telemetry
+capability registered it enriches every record with `trace_id` and `span_id`. See the logging
+section for the field names and the absent-telemetry behaviour.
 
 ---
 
@@ -10649,7 +10743,10 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   `AddJobOptions.delayMs` is converted to the platform's whole-second `delaySeconds` **rounded up**
   (so a job is never delivered early) and refused above `maxDelaySeconds`, while
   `ProcessOptions.concurrency` bounds how many of one batch's messages for that name run at a time —
-  per name, so one processor's limit never throttles another's.
+  per name, so one processor's limit never throttles another's. `AddJobOptions.headers` travels in
+  the envelope and is delivered as `IJob.headers`, so a job enqueued on Workers joins a trace
+  exactly as one on the other adapters does; a malformed map is dropped and the job runs untraced
+  rather than being retried until the queue discards it.
 - **A job's id comes from this package, not the platform.** `producer.send()` resolves to `void`, so
   the id `add` returns is minted from `runtime.uuid()` and travels inside a `{ v, name, id, data }`
   envelope — which is also what carries the job **name**, since a Cloudflare message body is

@@ -152,6 +152,17 @@ export interface StoredJob<T = unknown> {
    * unset and ignore the argument; `runJob` then falls back to {@link id}.
    */
   claimToken?: string;
+  /**
+   * Transport headers, carried end to end so `IJob.headers` can be delivered:
+   * `QueueService.add` copies them from `AddJobOptions`, the adapter persists
+   * them, and `runJob` copies them back onto the delivered `IJob`.
+   *
+   * Persisted as part of the job rather than beside it, which is what makes
+   * three of the four adapters need no change at all — memory spreads the job
+   * object, redis and rabbitmq serialize it whole. Only SQS builds an explicit
+   * envelope and therefore names the member itself.
+   */
+  headers?: Readonly<Record<string, string>>;
 }
 
 /**

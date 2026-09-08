@@ -178,7 +178,60 @@ All notable changes to this project are documented here. The format follows
   `ReadOnlySecretProviderError`, rejected by `EnvProvider.set` — the provider's only write method —
   so `SecretsService.rotate()` inherits the refusal from the one throw site.
 
+- **`@setu-ts/common`, `@setu-ts/queue-plugin` — the queue carries a trace (M90i / X34-1, X29-3).**
+  `AddJobOptions.headers?` and `IJob.headers?` mirror `MessageMetadata.headers` exactly, giving the
+  queue ingress the header channel it had none of — `grep -c headers` over
+  `common/src/services/queue.ts` was `0`, so this was a designed capability gap rather than an
+  adapter declining to read something. Both are OPTIONAL, so every existing `IQueue` implementor
+  stays source-compatible. With a `CAPABILITIES.TELEMETRY` provider registered, `queue.add()` now
+  runs in an `enqueue <name>` producer span that injects a W3C `traceparent`, and every processor
+  runs in a `process <name>` consumer span parented from it — through the `processors` arm, a
+  `processors` factory, and imperative `queue.process()` alike. All four adapters carry the map, and
+  an M86 ingress behaviour reads it as `IngressContext.headers`, the same member the `'messaging'`
+  arm uses. Absent telemetry nothing is injected and behaviour is byte-identical; a `headers` map
+  the CALLER passed is delivered either way, since it is a public option whose delivery must not
+  depend on which capabilities are registered.
+
+- **`@setu-ts/cloudflare-plugin` — `WorkersQueue` carries the queue header channel (M90i, review
+  finding).** The Cloudflare queue accepted the widened `AddJobOptions` and dropped `headers` on the
+  floor, so a caller-supplied map — and any propagated `traceparent` — was silently lost, while the
+  contract says a supplied map reaches the processor. The `{ v, name, id, data }` envelope gains an
+  OPTIONAL `headers`, so the version is deliberately NOT bumped: an older consumer ignores the field
+  and a newer consumer reads an older message as carrying no channel, which is what absent means. A
+  malformed map is dropped and the job runs untraced rather than being refused, because the envelope
+  guard RETRIES what it rejects and losing the work to protect the record of it is the worse trade.
+
+- **`@setu-ts/common`, `@setu-ts/telemetry-plugin`, `@setu-ts/logger-plugin` — log records name
+  their trace (M90i / X34-2).** `trace_id`/`span_id` appeared in `common` and `telemetry-plugin` and
+  in no logger, formatter or transport, so every signal the framework emits was individually good
+  and mutually unjoinable. `ITelemetryService.activeSpanContext?()` and the matching
+  `TracerHost.activeSpanContext?()` are new OPTIONAL members — the read could not be expressed
+  before, since `withSpan` hands its span only to its own callback — and `LoggerPlugin` now enriches
+  every record, at every level and through `child()`, when a telemetry capability is registered. The
+  field names are snake_case to match the OpenTelemetry log-correlation convention that log backends
+  key on. `NoopTelemetryService` omits the member, and a service that cannot report an active span
+  enriches nothing rather than emitting empty identifiers. Validity is decided by the SHARED trace-
+  context codec rather than a rule spelled out twice, so the read path and the propagation path
+  cannot disagree about which contexts are real: an empty, malformed or W3C all-zero identifier —
+  what OTel reports for an INVALID span context — is reported as no active span, and never reaches a
+  log record as a trace nothing else could carry.
+
 ### Changed
+
+- **BREAKING — `@setu-ts/logger-plugin` — the registered `ILogger` is a decorator, not the transport
+  instance (M90i / X34-2).** `CAPABILITIES.LOGGER` now resolves to an internal trace-enriching
+  wrapper around the configured `ConsoleLogger`/`PinoLogger`/`NoopLogger`, so
+  `logger instanceof ConsoleLogger` on the resolved capability no longer holds. Every `ILogger`
+  method behaves identically and `level` passes through, so code written against the contract is
+  unaffected. **Migration:** if you branch on the concrete class, branch on behaviour or on your own
+  configuration instead — `ILogger` is the contract and the concrete class was never part of it.
+
+  `LoggerPlugin` deliberately does NOT declare `CAPABILITIES.TELEMETRY` in `optionalDependencies`:
+  `TelemetryPlugin` already declares `CAPABILITIES.LOGGER` in its own, and the two edges together
+  are a cycle the kernel's plugin resolver refuses at `start()`
+  (`Circular plugin dependency detected`). The capability is resolved at call time instead, which is
+  required rather than prudent — the resolver orders `LoggerPlugin` first, so telemetry is
+  guaranteed absent when it registers.
 
 - **BREAKING — `@setu-ts/messaging-plugin` — the Kafka default consumer group is derived per topic
   (M90d).** Measured against a real broker: members of one consumer group must subscribe the SAME

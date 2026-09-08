@@ -22,4 +22,12 @@ describe('barrel exports', () => {
     expect(exports.RabbitMqQueue).toBeDefined();
     expect(typeof exports.RabbitMqQueue).toBe('function');
   });
+
+  it('does NOT export the tracing decorator', () => {
+    // M90i ships a signal, not an API. `TracedQueue` is internal exactly as
+    // `messaging-plugin`'s `TracedBroker` is, and this pins it: a re-export
+    // file is fully covered merely by being loaded, so nothing else would
+    // notice the leak (the M56 defect class).
+    expect('TracedQueue' in exports).toBe(false);
+  });
 });
