@@ -425,6 +425,22 @@ All notable changes to this project are documented here. The format follows
   application serving its own fallback for these errors is unaffected; one relying on the masked
   `500` must match the new statuses or `instanceof` the classes.
 
+### Security
+
+- **The `deno.lock` resolution of `npm:nodemailer` moves `9.0.4` → `9.1.1`
+  ([GHSA-2x7j-588g-ccc2](https://github.com/advisories/GHSA-2x7j-588g-ccc2), high).** Quadratic
+  (O(n²)) time in nodemailer's `addressparser` lets a crafted address list drive a remote denial of
+  service; the advisory was published 2026-09-08 and names `< 9.1.0`. **No source change was
+  needed** — `smtp-provider.ts` already imports `npm:nodemailer@^9`, which the patched version
+  satisfies — so this moves the resolution CI and the test suite use.
+
+  **Scope, stated precisely, because a lockfile entry is easy to over-read:** this repository's lock
+  governs its own CI and tests, not a consumer's. An application using `@setu-ts/mail-plugin`
+  resolves `npm:nodemailer@^9` against **its own** lock, so it was never pinned to `9.0.4` by us and
+  receives nothing automatically from this entry. If your lock resolves that specifier below
+  `9.1.0`, update it. Only the SMTP provider reaches nodemailer at all; every other mail backend is
+  unaffected.
+
 ### Fixed
 
 - **`@setu-ts/openapi-plugin` — a type union is spelled `anyOf` on every supported zod v4, not
