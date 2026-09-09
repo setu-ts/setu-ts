@@ -1412,9 +1412,10 @@ Nothing else here requires an application change unless it is named **Breaking**
   **No compiler option is required any more in the framework's own declaration sites.**
   `experimentalDecorators` is removed from all eight declaration sites — the `decorator-plugin`,
   `openapi-plugin` and `rest-starter` manifests, `apps/di-decorators`, the guide-snippet fixture,
-  both CLI template stamps, and the generated Node `tsconfig.json`. Do not add it back: declaring
-  **any** compiler option replaces Deno's entire default set (see M63's `full-stack` JSX failure),
-  so a project needing none should declare none. **If your project's own manifest still declares
+  both CLI template stamps, and the generated Node `tsconfig.json`. Do not add it back — and remove
+  only that key: Deno applies its own defaults to every option a manifest does not specify, so
+  declaring one option leaves the others alone (measured on Deno 2.9.6). A project needing no
+  compiler option at all should declare none. **If your project's own manifest still declares
   `experimentalDecorators` — for example a `deno.json` the alpha.8 CLI emitted — remove that key:**
   a migrated project that keeps it still compiles its decorators under the legacy semantics and
   fails `deno check` with `TS1238`/`TS1241` on every decorated member, errors that point at the

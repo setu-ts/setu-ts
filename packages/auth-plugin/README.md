@@ -325,11 +325,18 @@ prefixes its keys with `'setu:ratelimit:'` by default; set `keyPrefix` per appli
 share Redis, or `''` to keep pre-M90a keys.
 
 The default key resolves in this order: the authenticated principal, the client IP published by
-`ipSecurityMiddleware` (which needs `trustProxy` — see `http-security-plugin` — to resolve one from
-the proxy headers), `IRequest.ip`, and only then one global `'anonymous'` bucket shared by every
-unauthenticated caller. Without that middleware the limiter is a single counter across all callers,
-so the example below is **not** per IP; register `ipSecurityMiddleware` with `trustProxy` (or pass
-your own `keyGenerator`) to make it one.
+`ipSecurityMiddleware` (see `http-security-plugin`), `IRequest.ip`, and only then one global
+`'anonymous'` bucket shared by every unauthenticated caller. Without that middleware the limiter is
+a single counter across all callers, so the example below is **not** per IP.
+
+To make it per caller, register `ipSecurityMiddleware` with `trustProxy` **and** the constraint that
+matches your deployment — or pass your own `keyGenerator`. `trustProxy` on its own takes the
+forwarded header's **leftmost** entry, which is safe only behind a proxy that OVERWRITES that
+header. The standard nginx idiom **appends**, and there the leftmost entry is supplied by the
+caller: a client rotating forged `X-Forwarded-For` values would get a fresh bucket per request,
+which is a weaker position than the shared `'anonymous'` one it replaced. Supply `trustedProxies`
+(your proxies' addresses or CIDR blocks) or `proxyHops` so the header is walked right to left and
+the first entry your infrastructure did not add is the client.
 
 ```typescript
 import {

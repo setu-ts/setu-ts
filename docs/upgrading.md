@@ -33,12 +33,23 @@ class UserRepo implements IRepository<UserRow, string> {
 class UserRepo implements IRepository<UserRow, string> {
   // …
   async findPage(options: PageOptions): Promise<Page<UserRow>> {
-    // A cursor position, if present, continues from the last row the caller saw.
+    // `nextCursor` is non-null IF AND ONLY IF the page is non-terminal, and is
+    // never derived from `rows.length`: a page that returns exactly `limit`
+    // rows may still be the last one. The row-based mechanism is to fetch one
+    // more row than asked for and let the extra row be the signal.
+    const limit = options.limit ?? 50;
+    const rows = await this.load({ ...options, limit: limit + 1 });
+    return rows.length > limit
+      ? { rows: rows.slice(0, limit), nextCursor: this.cursorAfter(rows[limit - 1]) }
+      : { rows, nextCursor: null };
   }
 }
 ```
 
-The in-repo reference implementation is
+`load` and `cursorAfter` above stand for your own storage and sort key — the block is a **sketch of
+the member**, not a file that compiles on its own, which is also why the class body is elided. For
+one that does compile, and is type-checked and tested on every run, the in-repo reference
+implementation is
 [`repository-implementor.ts`](../packages/database-plugin/test/fixtures/repository-implementor.ts),
 a hand-written `IRepository` that doubles as a compile-time tripwire: adding a required member to
 the interface without updating it fails `deno check`.
@@ -66,9 +77,11 @@ TS1238  Unable to resolve signature of class decorator when called as an express
 TS1241  Unable to resolve signature of method decorator when called as an expression.
 ```
 
-Remove the key from your project's manifest and declare no compiler options at all if nothing else
-needs them — declaring **any** compiler option replaces Deno's entire default set, so a project
-needing none should declare none.
+Remove **that one key** from your project's manifest. Leave the rest of your `compilerOptions`
+alone: Deno applies its own defaults to every option you do not specify, so declaring one option
+does not disturb the others (measured on Deno 2.9.6 — a manifest declaring only
+`experimentalDecorators` still type-checks under `strict`). If `experimentalDecorators` was the only
+option you had, the whole `compilerOptions` object can go.
 
 <!-- version:history -->
 

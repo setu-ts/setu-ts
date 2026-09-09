@@ -39,10 +39,44 @@ describe('hand-written IRepository implementor (X26-2 tripwire)', () => {
     await repo.create({ name: 'alpha' });
     await repo.create({ name: 'beta' });
 
+    // `PageResult`'s guarantee: non-null IF AND ONLY IF the page is
+    // non-terminal. Two rows and `limit: 1` is a NON-terminal first page, so a
+    // `null` cursor here would tell a caller it had seen everything and lose
+    // the second row silently.
+    const first = await repo.findPage({ limit: 1 });
+    expect(first.rows).toHaveLength(1);
+    expect(first.rows[0]?.name).toBe('alpha');
+    expect(first.nextCursor).not.toBeNull();
+
+    // The walk terminates, and reaches the row the first page did not carry —
+    // asserting the cursor is non-null alone would pass for a cursor that
+    // pages forever or returns the same row again.
+    const second = await repo.findPage({ limit: 1, cursor: first.nextCursor as string });
+    expect(second.rows).toHaveLength(1);
+    expect(second.rows[0]?.name).toBe('beta');
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it('reports a page that exactly exhausts the store as terminal', async () => {
+    const repo = new InMemoryRowRepository();
+    await repo.create({ name: 'alpha' });
+
+    // The case a `rows.length < limit` heuristic gets wrong: one row and
+    // `limit: 1` fills the page exactly and is still the last page. The
+    // contract forbids deriving the cursor from `rows.length`, which is why
+    // the fixture fetches `limit + 1` instead.
     const page = await repo.findPage({ limit: 1 });
     expect(page.rows).toHaveLength(1);
-    expect(page.rows[0]?.name).toBe('alpha');
     expect(page.nextCursor).toBeNull();
+  });
+
+  it('rejects a malformed cursor rather than paging from zero', async () => {
+    const repo = new InMemoryRowRepository();
+    await repo.create({ name: 'alpha' });
+
+    await expect(repo.findPage({ limit: 1, cursor: 'not-a-cursor' })).rejects.toThrow(
+      'Malformed cursor',
+    );
   });
 
   it('refuses an update of a missing row', async () => {

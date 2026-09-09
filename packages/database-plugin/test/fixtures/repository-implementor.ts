@@ -122,12 +122,32 @@ export class InMemoryRowRepository implements IRepository<Row, string> {
   }
 
   async findPage(options: PageOptions): Promise<Page<Row>> {
-    // Cursor pagination is out of scope for the tripwire: the contract only
-    // requires the member exist and answer. A cursor position is honoured by
-    // skipping that many rows, which is enough for the behavioural assertions
-    // beside this file without pretending to be a real keyset implementation.
-    const start = options?.cursor ? Number.parseInt(options.cursor, 10) : 0;
-    const rows = await this.findAll({ ...options, offset: start });
-    return { rows, nextCursor: null };
+    // `PageResult`'s guarantee is that `nextCursor` is non-null IF AND ONLY IF
+    // the page is non-terminal, and that it is never derived from
+    // `rows.length`. This is the row-based mechanism the contract names: fetch
+    // `limit + 1` and treat the extra row as the signal, so a page that
+    // returns exactly `limit` rows and a page that exhausts the store are
+    // distinguishable. Returning a constant `null` would satisfy the types and
+    // report every page as the last one — the kind of member this fixture
+    // exists to refuse.
+    //
+    // The cursor is an offset because this store has no sort key of its own.
+    // That is a property of the fixture, NOT of the contract: a cursor is
+    // OPAQUE to callers, so a consumer must round-trip the token it was given
+    // rather than construct or parse one.
+    const start = options.cursor === undefined ? 0 : Number.parseInt(options.cursor, 10);
+    if (!Number.isSafeInteger(start) || start < 0) {
+      return Promise.reject(new Error(`Malformed cursor: ${String(options.cursor)}`));
+    }
+    const limit = options.limit;
+    const window = await this.findAll({
+      ...options,
+      offset: start,
+      ...(limit === undefined ? {} : { limit: limit + 1 }),
+    });
+    if (limit === undefined || window.length <= limit) {
+      return { rows: window, nextCursor: null };
+    }
+    return { rows: window.slice(0, limit), nextCursor: String(start + limit) };
   }
 }

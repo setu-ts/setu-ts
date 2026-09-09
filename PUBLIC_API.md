@@ -2292,10 +2292,11 @@ app.router.post('/auth/logout', async (ctx) => {
 ### Rate Limiting (M16b)
 
 `rateLimitMiddleware(options)` is a **standalone** fixed-window limiter — added via
-`app.middleware.add(...)` like `authMiddleware`, independent of `AuthPlugin` (it never reads the
-principal unless your `keyGenerator` does) and registered under **no capability token**. Requests
-are counted per key in a `windowMs` window; when the count exceeds `max` the middleware
-**short-circuits with 429** (downstream stages, including the handler, do not run) and a JSON body
+`app.middleware.add(...)` like `authMiddleware`, independent of `AuthPlugin` (it needs no plugin
+registered, though its default key reads `ctx.request.user` when something upstream has populated
+one — see the key-resolution order below) and registered under **no capability token**. Requests are
+counted per key in a `windowMs` window; when the count exceeds `max` the middleware **short-circuits
+with 429** (downstream stages, including the handler, do not run) and a JSON body
 `{ error: 'Too Many Requests', message }`. Headers: always `Retry-After` on 429; with
 `standardHeaders` (default `true`) also `RateLimit-Limit`, `RateLimit-Remaining`, and
 `RateLimit-Reset` — `RateLimit-Reset` and `Retry-After` are both **delta-seconds** until the window
@@ -2320,13 +2321,19 @@ applications sharing one Redis deployment do not count against each other. Pass 
 pre-namespacing keys.
 
 The default key is `defaultRateLimitKey`, which resolves in this order: the authenticated principal
-(`user:<id>`), the client IP published by `ipSecurityMiddleware` (`ip:<address>` — that middleware
-needs `trustProxy` to resolve one from the proxy headers), `IRequest.ip` (`ip:<address>`, set only
-by a custom `IHttpAdapter`; the first-party adapters cannot populate it, because a web `Request`
-carries no peer address), and only then one global `'anonymous'` key. So the limiter registered
-alone — the example above — is a **single counter across all unauthenticated callers**, not a per-IP
-one: register `ipSecurityMiddleware` with `trustProxy`, run the limiter after authentication, or
-pass your own `keyGenerator` to make the key per-caller.
+(`user:<id>`), the client IP published by `ipSecurityMiddleware` (`ip:<address>`), `IRequest.ip`
+(`ip:<address>`, set only by a custom `IHttpAdapter`; the first-party adapters cannot populate it,
+because a web `Request` carries no peer address), and only then one global `'anonymous'` key. So the
+limiter registered alone — the example above — is a **single counter across all unauthenticated
+callers**, not a per-IP one.
+
+To make the key per caller: run the limiter after authentication, pass your own `keyGenerator`, or
+register `ipSecurityMiddleware` with `trustProxy` **plus** `trustedProxies` or `proxyHops`. That
+last pairing is not optional. `trustProxy` alone takes the forwarded header's **leftmost** entry,
+which is caller-supplied under a proxy that appends rather than overwrites (the standard nginx
+idiom), so a client rotating forged values would earn a fresh bucket per request — a weaker position
+than the shared `'anonymous'` key. The two constraint options walk the header right to left and
+select the first entry the deployment's own proxies did not add.
 
 ```typescript
 import {
