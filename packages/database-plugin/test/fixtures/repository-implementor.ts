@@ -135,8 +135,26 @@ export class InMemoryRowRepository implements IRepository<Row, string> {
     // That is a property of the fixture, NOT of the contract: a cursor is
     // OPAQUE to callers, so a consumer must round-trip the token it was given
     // rather than construct or parse one.
-    const start = options.cursor === undefined ? 0 : Number.parseInt(options.cursor, 10);
-    if (!Number.isSafeInteger(start) || start < 0) {
+    // A cursor is opaque, so the ONLY acceptable value is one this method
+    // issued: the canonical decimal form of a non-negative safe integer.
+    //
+    // The round-trip is what does the work, and that was measured rather than
+    // assumed. `isSafeInteger` and `>= 0` alone accept `'1junk'` (because
+    // `parseInt` stops at the first non-digit), `''`, `'01'`, `'1e2'`, `'0x10'`
+    // and `' 1 '` — every one of them a value the caller was never given, and
+    // `'1junk'` pages from the wrong row while reporting success. The
+    // round-trip refuses all six. It is NOT sufficient on its own: `'-1'`,
+    // `'1.9'` and `'Infinity'` all round-trip, so `isSafeInteger` and `>= 0`
+    // are load-bearing too.
+    //
+    // `Number` rather than `Number.parseInt` is deliberate but not
+    // load-bearing — with the round-trip present both refuse the whole set
+    // (measured). It is preferred because it is the same coercion the
+    // round-trip compares against, so the pair reads as one rule.
+    const start = options.cursor === undefined ? 0 : Number(options.cursor);
+    const malformed = !Number.isSafeInteger(start) || start < 0 ||
+      (options.cursor !== undefined && String(start) !== options.cursor);
+    if (malformed) {
       return Promise.reject(new Error(`Malformed cursor: ${String(options.cursor)}`));
     }
     const limit = options.limit;

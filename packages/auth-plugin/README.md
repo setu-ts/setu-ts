@@ -326,8 +326,12 @@ share Redis, or `''` to keep pre-M90a keys.
 
 The default key resolves in this order: the authenticated principal, the client IP published by
 `ipSecurityMiddleware` (see `http-security-plugin`), `IRequest.ip`, and only then one global
-`'anonymous'` bucket shared by every unauthenticated caller. Without that middleware the limiter is
-a single counter across all callers, so the example below is **not** per IP.
+`'anonymous'` bucket — shared by every caller for whom none of the three resolved.
+
+`IRequest.ip` is the step worth knowing about: **no first-party adapter can populate it**, because a
+web `Request` carries no peer address, so it is set only by a custom `IHttpAdapter`. On the shipped
+runtimes, then, an unauthenticated request with no `ipSecurityMiddleware` reaches the shared bucket
+and the example below is **not** per IP.
 
 To make it per caller, register `ipSecurityMiddleware` with `trustProxy` **and** the constraint that
 matches your deployment — or pass your own `keyGenerator`. `trustProxy` on its own takes the
@@ -345,11 +349,13 @@ import {
   RedisRateLimitStore,
 } from '@setu-ts/auth-plugin';
 
+// Keyed by the authenticated user. Absent a principal AND a client IP, every
+// caller shares ONE 'anonymous' bucket — see the key-resolution order above.
 app.middleware.add(rateLimitMiddleware({
   windowMs: 60_000,
   max: 100,
   exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
-})); // keyed by user; anonymous callers share ONE bucket without ipSecurityMiddleware
+}));
 
 // Redis-backed, keyed by authenticated user
 rateLimitMiddleware({

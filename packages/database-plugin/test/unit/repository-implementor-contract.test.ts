@@ -70,13 +70,43 @@ describe('hand-written IRepository implementor (X26-2 tripwire)', () => {
     expect(page.nextCursor).toBeNull();
   });
 
-  it('rejects a malformed cursor rather than paging from zero', async () => {
+  it('rejects every non-canonical cursor rather than paging from the wrong row', async () => {
     const repo = new InMemoryRowRepository();
     await repo.create({ name: 'alpha' });
+    await repo.create({ name: 'beta' });
 
-    await expect(repo.findPage({ limit: 1, cursor: 'not-a-cursor' })).rejects.toThrow(
-      'Malformed cursor',
-    );
+    // A cursor is opaque: the only valid value is one the repository issued.
+    // `'1junk'` is the case a `Number.parseInt` guard lets through — it parses
+    // to `1` and pages from the wrong row while reporting success — and the
+    // rest coerce to a valid offset the caller was never given.
+    const refused = [
+      // Refused by the canonical round-trip. `'1junk'` is the sharpest: a
+      // `Number.parseInt` guard reads it as `1` and pages from the wrong row.
+      'not-a-cursor',
+      '1junk',
+      '',
+      ' 1 ',
+      '01',
+      '1e2',
+      '0x10',
+      // These three ROUND-TRIP, so they are refused by `isSafeInteger`/`>= 0`
+      // instead — which is why both checks are kept.
+      '-1',
+      '1.9',
+      'Infinity',
+    ];
+    for (const cursor of refused) {
+      await expect(
+        repo.findPage({ limit: 1, cursor }),
+        `cursor ${JSON.stringify(cursor)} must be refused`,
+      ).rejects.toThrow('Malformed cursor');
+    }
+
+    // The cursor the repository DID issue still works — without this the loop
+    // above would pass for a findPage that refuses everything.
+    const first = await repo.findPage({ limit: 1 });
+    const second = await repo.findPage({ limit: 1, cursor: first.nextCursor as string });
+    expect(second.rows[0]?.name).toBe('beta');
   });
 
   it('refuses an update of a missing row', async () => {
