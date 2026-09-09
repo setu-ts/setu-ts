@@ -128,6 +128,15 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   and every remaining difference is drift you did not intend. `apps/full-stack/deno.lock` is
   gitignored and needs nothing, and the ROOT `deno.lock` names no `@setu-ts` version at all.
 
+- **Re-render `k8s/manifests/` after bumping `k8s/chart/Chart.yaml`.** The chart is the single
+  authored source and the rendered manifests are committed beside it (M39), so bumping `appVersion`
+  without re-rendering leaves eight manifests carrying the previous `app.kubernetes.io/version`
+  label. `deno task deploy:render` rewrites them; `check:deploy` fails with
+  `k8s/manifests/ is out of date with k8s/chart/` if you forget. Nothing else sees it — the four
+  ordinary gates, both publish gates and `check:versions` all pass over the drift, because the label
+  is not an `@setu-ts` specifier and the manifests are not TypeScript. Cutting `v0.5.0` found this
+  the only way it can be found: a red **Docker / Kubernetes** job on the release PR.
+
 - **A release starting a new version LINE must widen `SHIPPED_VERSION_LINES`** in
   `scripts/check-docs.ts`. Both document version gates match against that alternation, so a new line
   it does not name makes them match nothing — every stale claim goes invisible while `check:docs`
