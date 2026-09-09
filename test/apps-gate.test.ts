@@ -56,6 +56,18 @@ describe('application gate configuration', () => {
     expect(classifySmokeExitCode({ code: 0, success: true, signal: null }))
       .toBe('passed');
   });
+
+  it('keeps docs/upgrading.md indexed in docs/README.md', async () => {
+    // M90h: the upgrade guide is the durable home for reader-side steps the
+    // CHANGELOG used to bury in feature entries. Nothing forces a new guide
+    // to be reachable, so the index entry is asserted here — dropping it
+    // orphans the guide rather than deleting it, which is the worse of the
+    // two. `check:docs` validates the link once it exists; it cannot see an
+    // entry that was never written.
+    const index = await Deno.readTextFile('docs/README.md');
+    expect(index).toContain('[Upgrading Setu-TS](./upgrading.md)');
+    await Deno.stat('docs/upgrading.md'); // throws NotFound if the link dangles
+  });
 });
 
 describe('unexpectedSkips', () => {

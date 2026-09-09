@@ -8878,7 +8878,7 @@ their own exercises rather than chores belonging to any one of them.
 | **M90e** | Static delivery correctness                        | 2        | 1    | static                                                                 |
 | **M90f** | Caller errors reach the client correctly           | 6        | 0    | secrets, resilience, auth, database, kernel, exceptions                |
 | **M90g** | Concurrency loses work silently                    | 4        | 0    | database, session, cache, common                                       |
-| **M90h** | Documentation that survives contact                | 5        | 0    | docs, database, session, http-security, scheduler                      |
+| **M90h** | Documentation that survives contact                | 5        | 0    | docs, auth, database, session, secrets                                 |
 | **M90i** | Observability that joins up                        | 3        | 0    | common, queue-plugin, logger-plugin, telemetry-plugin                  |
 | **M90j** | The operator's diagnostic survives to the operator | 3        | 0    | database-plugin, common, messaging-plugin                              |
 
@@ -9043,8 +9043,14 @@ _optimistic_ strategy portable, which is the one that generalises.
 
 ### Milestone 90h: Documentation That Survives Contact
 
-**Package(s):** docs, `packages/database-plugin`, `packages/session-plugin`,
-`packages/http-security-plugin`, `packages/scheduler-plugin`
+**Package(s):** docs, `packages/auth-plugin`, `packages/database-plugin`, `packages/session-plugin`,
+`packages/secrets-plugin`
+
+> **Package-list correction.** The register row above originally named `http-security-plugin` and
+> `scheduler-plugin`; neither owns a row here. X22-4 is the **auth** README's annotation and X20-3's
+> consequence is the **secrets** provider table, so those are the two packages, and the fix for
+> X22-4 only cross-references `ipSecurityMiddleware` rather than changing it. Corrected in the
+> milestone's own PR (the M70b/M70g/M70k precedent), not inherited.
 
 **Objective:** Five rows where a published claim does not survive being followed. X22-4 (the auth
 README's `// per IP` annotation on an example that is not per-IP), X26-2 (`IRepository.findPage`
@@ -9271,6 +9277,6 @@ fields (`code` first) read through the same guard, plus
 | 90e       | ✅     | static delivery correctness ([#252](https://github.com/setu-ts/setu-ts/pull/252))              |
 | 90f       | ✅     | caller errors reach the client correctly ([#259](https://github.com/setu-ts/setu-ts/pull/259)) |
 | 90g       | ✅     | concurrency loses work silently                                                                |
-| 90h       | ⬜     | documentation that survives contact                                                            |
+| 90h       | ✅     | documentation that survives contact ([#261](https://github.com/setu-ts/setu-ts/pull/261))      |
 | 90i       | ✅     | observability that joins up ([#260](https://github.com/setu-ts/setu-ts/pull/260))              |
 | 90j       | ⬜     | operator diagnostics survive to the operator                                                   |

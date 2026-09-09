@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Documentation — `docs/upgrading.md`, and four published claims corrected (M90h / X22-4, X26-1,
+  X26-2, X33-2, X20-3).** A new upgrade guide answers "what must I change in **my** project",
+  version by version, where the CHANGELOG answers what changed in the framework; `docs/releasing.md`
+  gains the release step that maintains it, and `docs/README.md` indexes it. No package's `src/`
+  changes. The auth README's rate-limit example no longer claims `// per IP` — the default key is
+  the literal `'anonymous'` for every unauthenticated caller unless `ipSecurityMiddleware` is
+  registered with `trustProxy` — and a new test pins the resolved key rather than the comment. The
+  session README gains the safe-request-then-mutation CSRF sequence, because its
+  `## Session
+  fixation` and `## Form CSRF` sections each compile and answer `403` when composed; a
+  new integration test drives the sequence and asserts the successful path first. The secrets README
+  and `PUBLIC_API.md` gain a per-provider `set()`/`rotate()` table — Vault and Azure create on
+  write, AWS and GCP require the secret to pre-exist, `env` refuses — each cell marked
+  verified-against-a-real-backend or not. Two published sections are corrected in place: the 0.2.0
+  entry now announces the **required** `IRepository.findPage` (announced nowhere when it shipped,
+  while its sibling `findOne` was announced twice), backed by a hand-written implementor committed
+  as a compile-time tripwire, and the 0.1.0-alpha.10 decorator entry now says that a reader's OWN
+  manifest must drop `experimentalDecorators`.
+
 - **`@setu-ts/common`, `@setu-ts/database-plugin` — explicit transaction isolation (M90g / X24-2,
   X38-3).** `TransactionOptions.isolation` carries one of the four portable isolation names through
   `IDatabaseService.transaction()` to the adapter. Prisma honours all four; an explicitly branded
@@ -405,6 +424,22 @@ All notable changes to this project are documented here. The format follows
   component holds an honest drain horizon; `503` is itself the retryable signal. **Migration:** an
   application serving its own fallback for these errors is unaffected; one relying on the masked
   `500` must match the new statuses or `instanceof` the classes.
+
+### Security
+
+- **The `deno.lock` resolution of `npm:nodemailer` moves `9.0.4` → `9.1.1`
+  ([GHSA-2x7j-588g-ccc2](https://github.com/advisories/GHSA-2x7j-588g-ccc2), high).** Quadratic
+  (O(n²)) time in nodemailer's `addressparser` lets a crafted address list drive a remote denial of
+  service; the advisory was published 2026-09-08 and names `< 9.1.0`. **No source change was
+  needed** — `smtp-provider.ts` already imports `npm:nodemailer@^9`, which the patched version
+  satisfies — so this moves the resolution CI and the test suite use.
+
+  **Scope, stated precisely, because a lockfile entry is easy to over-read:** this repository's lock
+  governs its own CI and tests, not a consumer's. An application using `@setu-ts/mail-plugin`
+  resolves `npm:nodemailer@^9` against **its own** lock, so it was never pinned to `9.0.4` by us and
+  receives nothing automatically from this entry. If your lock resolves that specifier below
+  `9.1.0`, update it. Only the SMTP provider reaches nodemailer at all; every other mail backend is
+  unaffected.
 
 ### Fixed
 
@@ -1014,7 +1049,8 @@ read the Changed section before upgrading.
   means "cannot page by cursor" and never "there are no more rows". Implemented on all five shipped
   adapters — Memory, Prisma, Drizzle, Mongo and D1. `offset` is untouched and not deprecated; a
   query carrying both a non-zero `offset` and a `cursor` is refused, because the two express
-  contradictory positions.
+  contradictory positions. Note that the repository-facing `IRepository.findPage` added in this
+  release is **required** — see the `Changed` entry below it.
 - `@setu-ts/common` gains `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue`, and the pure
   `encodeCursor`/`decodeCursor`/`keysetPredicate`/`sortFingerprint`/`mintNextCursor` codec. The
   codec lives in `common` because `cloudflare-plugin` needs the identical encoding and a plugin may
@@ -1127,6 +1163,19 @@ _implements_ `IDataSource` or declares a custom repository key type does.
   pagination over a timestamp column, and it makes a portable date-range filter expressible for the
   first time. `IRepository`'s key type parameter is now constrained to `EntityKey`, which is
   breaking only for a declaration that was never supported at runtime.
+
+- **`IRepository` gains a required `findPage` member** (M79, keyset cursor pagination). The
+  `IDataSource.findPage?(query)` the Added entry above describes is **optional** — an out-of-repo
+  adapter keeps compiling and the repository refuses by name when it is absent. That is a different
+  type: the repository-facing `IRepository.findPage(options): Promise<Page<Entity>>` is
+  **required**, so a class implementing `IRepository` directly — without extending `BaseRepository`
+  — must now implement `findPage`, which is a compile error until it does. This is the same class of
+  change as the required `IRepository.findOne` member announced in the 0.1.0-alpha.8 release, and it
+  is the member a reader searching the CHANGELOG for `findPage` most needs to find: the sibling
+  `findOne` addition was announced twice, and this one was announced nowhere. The in-repo tripwire
+  is `packages/database-plugin/test/fixtures/repository-implementor.ts`, a hand-written implementor
+  that fails `deno check` if a required member is added to `IRepository` without updating it. See
+  [docs/upgrading.md](docs/upgrading.md) for the reader-side step.
 
 ### Fixed
 
@@ -1360,12 +1409,18 @@ Nothing else here requires an application change unless it is named **Breaking**
   it would make them **unparseable**, because the Stage 3 proposal has no parameter position at all.
   The surface is therefore migrated deliberately now rather than under time pressure later.
 
-  **No compiler option is required any more, anywhere.** `experimentalDecorators` is removed from
-  all eight declaration sites — the `decorator-plugin`, `openapi-plugin` and `rest-starter`
-  manifests, `apps/di-decorators`, the guide-snippet fixture, both CLI template stamps, and the
-  generated Node `tsconfig.json`. Do not add it back: declaring **any** compiler option replaces
-  Deno's entire default set (see M63's `full-stack` JSX failure), so a project needing none should
-  declare none.
+  **No compiler option is required any more in the framework's own declaration sites.**
+  `experimentalDecorators` is removed from all eight declaration sites — the `decorator-plugin`,
+  `openapi-plugin` and `rest-starter` manifests, `apps/di-decorators`, the guide-snippet fixture,
+  both CLI template stamps, and the generated Node `tsconfig.json`. Do not add it back — and remove
+  only that key: Deno applies its own defaults to every option a manifest does not specify, so
+  declaring one option leaves the others alone (measured on Deno 2.9.6). A project needing no
+  compiler option at all should declare none. **If your project's own manifest still declares
+  `experimentalDecorators` — for example a `deno.json` the alpha.8 CLI emitted — remove that key:**
+  a migrated project that keeps it still compiles its decorators under the legacy semantics and
+  fails `deno check` with `TS1238`/`TS1241` on every decorated member, errors that point at the
+  decorators rather than the option. The full reader-side step is in
+  [docs/upgrading.md](docs/upgrading.md).
 
   **Parameter decorators become positional sources inside `@Params(...)`.** `@Body`, `@Query`,
   `@Param`, `@Header`, `@Cookie`, `@CurrentUser` and `@Ctx` keep their names but change kind, from

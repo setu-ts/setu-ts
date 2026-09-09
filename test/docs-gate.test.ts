@@ -1729,3 +1729,90 @@ describe('documentation gate — no nonexistent kernel API in package READMEs (M
     }
   });
 });
+
+/**
+ * Every reader action in `docs/upgrading.md` is filed under the release that
+ * actually shipped it.
+ *
+ * The guide's whole organizing principle is "version by version", and its first
+ * draft got two of three entries wrong: the `experimentalDecorators` step was
+ * filed under `0.2.0` when M76 shipped it in `0.1.0-alpha.10`, and the
+ * `findOne` step under `0.1.0-alpha.10` when it shipped in `0.1.0-alpha.8` —
+ * contradicting a CHANGELOG note written in the same commit. A reader on
+ * alpha.9 would have found nothing under alpha.10 but a step they had already
+ * taken, and missed the one change without which none of their decorators
+ * compile: the exact failure the guide exists to prevent, reproduced inside it.
+ *
+ * NOTHING could see it. `checkVersionClaims` compares a version string against
+ * the SHIPPING one, and every version in an upgrade guide legitimately differs
+ * from that — which is why each heading carries a `version:history` marker, and
+ * why moving the instructions out of those blocks (so the existing gate reads
+ * them) would make `check:docs` fail permanently rather than catch anything.
+ * The missing check is a different one, and this is it: a heading's subject
+ * must appear in the CHANGELOG section for the release it names.
+ *
+ * Backticked identifiers in the `###` heading are the subject. All of them must
+ * appear, not merely one — `IRepository` occurs in three release sections, so
+ * an any-token rule would have passed both misfilings on that token alone.
+ */
+describe('docs/upgrading.md release attribution', () => {
+  /** Splits the CHANGELOG into `version -> section text`. */
+  function changelogSections(source: string): Map<string, string> {
+    const sections = new Map<string, string>();
+    const lines = source.split('\n');
+    let current: string | null = null;
+    let start = 0;
+    for (const [index, line] of lines.entries()) {
+      const match = /^## \[([^\]]+)\]/.exec(line);
+      if (match === null) continue;
+      if (current !== null) sections.set(current, lines.slice(start, index).join('\n'));
+      current = match[1];
+      start = index;
+    }
+    if (current !== null) sections.set(current, lines.slice(start).join('\n'));
+    return sections;
+  }
+
+  it('files every reader action under the release that shipped it', async () => {
+    const guide = await Deno.readTextFile('docs/upgrading.md');
+    const sections = changelogSections(await Deno.readTextFile('CHANGELOG.md'));
+
+    let release: string | null = null;
+    let checked = 0;
+    for (const line of guide.split('\n')) {
+      const version = /^## (\S+)$/.exec(line);
+      if (version !== null) {
+        release = version[1];
+        expect(
+          sections.has(release),
+          `docs/upgrading.md names release ${release}, which has no ` +
+            `## [${release}] section in CHANGELOG.md`,
+        ).toBe(true);
+        continue;
+      }
+      const heading = /^### (.+)$/.exec(line);
+      if (heading === null || release === null) continue;
+
+      const section = sections.get(release) ?? '';
+      const subjects = [...heading[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+      expect(
+        subjects.length,
+        `docs/upgrading.md heading "${heading[1]}" names no backticked subject, so ` +
+          `its release attribution cannot be checked`,
+      ).toBeGreaterThan(0);
+
+      for (const subject of subjects) {
+        expect(
+          section.includes(subject),
+          `docs/upgrading.md files "${heading[1]}" under ${release}, but ` +
+            `\`${subject}\` does not appear in the CHANGELOG's ## [${release}] ` +
+            `section — the step is attributed to a release that did not ship it`,
+        ).toBe(true);
+        checked += 1;
+      }
+    }
+
+    // Guards against the whole check passing because the parse found nothing.
+    expect(checked).toBeGreaterThanOrEqual(3);
+  });
+});

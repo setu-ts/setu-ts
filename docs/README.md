@@ -50,6 +50,13 @@ building production-ready applications with our plugin-first, runtime-independen
   - Service registration patterns
   - Testing custom plugins
 
+## Version Upgrades
+
+- [Upgrading Setu-TS](./upgrading.md)
+  - Reader-side steps, version by version
+  - Removing `experimentalDecorators` from your own manifest
+  - Adding required `IRepository` members to hand-written implementors
+
 ## Migration Guides
 
 - [Migrating from NestJS](./migration-nestjs.md)

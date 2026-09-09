@@ -4526,6 +4526,55 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `src` change; `runtime`/`testing`/`common` joined for X37-1. All five changed barrels carry
   barrel-exports assertions; the classifier stays internal, pinned by a negative test — complete (PR
   pending)
+- **Milestone 90h** (docs + `packages/auth-plugin` + `packages/database-plugin` +
+  `packages/session-plugin` + `packages/secrets-plugin` — documentation that survives contact. Five
+  rows where a published claim did not survive being followed, and **no package's `src/` changes** —
+  the invariant is asserted as a command (`git diff --name-only main...HEAD -- 'packages/*/src'`
+  must be empty), because a letter that carries no behaviour is the one that can ride with any
+  other. **Package-list correction (the M70b/M70g/M70k precedent):** the register row named
+  `http-security-plugin` and `scheduler-plugin`; neither owns a row, while X22-4 is the **auth**
+  README and X20-3's consequence is the **secrets** provider table. **C1/X22-4:** the auth README
+  annotated its rate-limit example `// per IP` while `defaultRateLimitKey` resolves the literal
+  `'anonymous'` for every unauthenticated caller — three words apart in meaning, and the comment is
+  the only claim the example carries. The fence compiler already compiles that README and **cannot
+  see a comment**, so the corrected sentence is pinned by a test that registers the README's exact
+  composition (the limiter ALONE, no `ipSecurityMiddleware`) and asserts the resolved key for two
+  different claimed addresses; the remedy is deliberately not registered, since a case that did
+  would test the remedy rather than the claim. **C2/X26-2:** `IRepository.findPage` became REQUIRED
+  in 0.2.0 and was announced nowhere, while its sibling `findOne` was announced twice — so the 0.2.0
+  section gains the note, and a hand-written `IRepository` that does NOT extend `BaseRepository` is
+  committed as a **compile-time tripwire**: adding a required member to the interface without
+  updating it fails `deno check` with `TS2420` naming the member, which no reviewer has to notice.
+  **C3/X26-1:** the migration text's "no compiler option is required any more, **anywhere**" is true
+  of the framework's eight declaration sites and false of the reader's own manifest — measured,
+  removing that one key took a correctly-migrated project from **17 errors to 3**, and the errors
+  point at the decorators rather than at the option. The sentence is scoped and the reader-side step
+  moves to a new **`docs/upgrading.md`**, whose scope is "what you must change in YOUR project",
+  version by version; `docs/releasing.md` gains the step that maintains it, so the guide is kept by
+  the one process this repository reliably follows. **C4/X33-2:** the session README's
+  `## Session fixation` and `## Form CSRF` sections each compile and answer `403` when composed,
+  which is what a reader following both builds — two documented features of one plugin that do not
+  work together as written. The fix is the SEQUENCE, not an exemption (`csrfFormMiddleware`
+  verifying every unsafe method is the right design; an exemption for `/login` would be a hole), and
+  the test asserts the successful path FIRST so it cannot pass vacuously the way the exercise's own
+  harness did, where every attack was refused because the victim had never logged in. **C5/X20-3's
+  consequence:** `ISecretManager`'s one write path means four different things — Vault and Azure
+  create on write, `PutSecretValueCommand` and `addSecretVersion` require the secret to pre-exist,
+  `EnvProvider` refuses — so the README and `PUBLIC_API.md` gain a per-provider table whose every
+  cell is marked verified-against-a-real-backend or not, the M30b/M52 standard. **Verification then
+  found the milestone's own flagship artifact failing its own thesis:** `docs/upgrading.md` filed
+  **two of its three entries under the wrong release** — the `experimentalDecorators` step under
+  `0.2.0` when M76 shipped it in `0.1.0-alpha.10`, and the `findOne` step under `0.1.0-alpha.10`
+  when it shipped in `0.1.0-alpha.8`, contradicting the CHANGELOG note the same commit had just
+  written. A reader on alpha.9 would have consulted the guide, seen nothing under alpha.10 but a
+  step they did at alpha.8, and missed the one change without which none of their decorators compile
+  — exactly the failure X26-1 was filed for. Nothing could catch it: the version headings are
+  shielded by `version:history` markers, and no gate cross-checks a guide heading against the
+  section that announced the change. Also corrected: the ROADMAP row, package list and status flip
+  were absent entirely, and there was **no `Unreleased` CHANGELOG entry**, so the new guide and the
+  runbook step would have been missing from the next release's notes while two ALREADY-PUBLISHED
+  sections carried text that was never in those releases — the alpha.10/v0.4.0 failure mode, a
+  fourth time) — complete (PR #261)
 - **Milestone 90i** (`common` + `queue-plugin` + `telemetry-plugin` + `logger-plugin` +
   `cloudflare-plugin` — observability that joins up. Three findings, one question: can an operator
   follow a single request through the system? X34 answered the positive half — the broker hop
@@ -4607,8 +4656,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   that follows it is being closed the same way: M90a (abuse control), M90b (health truth bounded, PR
   #249), M90c (credential revocation and token type), M90d (the two brokers that cannot start, PR
   #256), M90e (static delivery correctness, PR #252), M90f (caller errors reach the client
-  correctly, PR pending) and M90i (observability that joins up, PR #260) are complete; M90g, M90h
-  and M90j remain open.
+  correctly, PR #259), M90g (concurrency loses work silently, PR #258), M90h (documentation that
+  survives contact, above) and M90i (observability that joins up, PR #260) are complete; M90j
+  remains open.
 
 ## Verification (run before declaring any work done)
 
