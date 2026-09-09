@@ -4664,6 +4664,78 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   **refuted by measurement**: 496 on `main` and 496 on the branch, because the ratchet lints every
   package entrypoint TOGETHER, where `SpanContext` is public from `common`'s barrel; linting the
   telemetry barrel alone reports three diagnostics that the gate never sees) — complete (PR #260)
+- **Release `v0.5.0`** — on `release/v0.5.0`, published 2026-09-09 (PR #265, tag at the merge commit
+  `c9f41a93`; CI published it, one green `Publish to JSR` job — the eighth first-try success in a
+  row). **47 packages**, list unchanged since alpha.8, so no first-time publisher and neither
+  `release:create-packages` nor `release:link-repos` was needed. Scope was M90a–M90j plus the two
+  CLI refusal fixes (#244, #245) and the zod v4 `anyOf` fix (#254). The **third minor after the
+  label drop**, and the largest breaking surface yet: two required-member additions that fail
+  `deno check` for an implementor (`IRedisClient.ping()`, `RefreshTokenStore.rotate`/`revokeFamily`)
+  and seven conditions that stop answering a masked `500` — malformed JSON `400`, serialization
+  conflict `409`, unreachable database `503`, bulkhead/circuit `503`, resilience timeout `504`,
+  read-only secret `501`, memory raw SQL and `migrate()` `501` — plus the rate limiter's `429` body
+  and Redis keys, the Kafka consumer-group derivation, the `CAPABILITIES.LOGGER` decorator, and
+  three CLI refusals. Verified after publishing by querying all 47 on the registry — every one live
+  at `0.5.0`, every one reporting `latest: 0.5.0`, none yanked — then a **bare**
+  `deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime` with no pin into a throwaway dir, which
+  emitted `^0.5.0`, resolved `common` **transitively at 0.5.0**, and served `200 {"ok":true}`. That
+  transitive resolution is the only real evidence the cross-package specifier bump landed INSIDE the
+  published tarballs. Six package pages spot-checked as serving their READMEs; the Release object
+  carries `resolved-set.json` at exactly the byte size the local pre-flight produced, flagged
+  `prerelease=true` (the `0.*` arm — drop it at 1.0).
+
+  **All three release-cutting changelog checks fired on one release, a first** — each of the
+  previous three was saved by exactly one of them. (1) `respondWithAuthorizationFailure` and
+  `AuthorizationFailure` (#248) were on `@setu-ts/common`'s published barrel and announced NOWHERE,
+  the alpha.10 (#195) and v0.4.0 (#233) failure mode a third time; found by diffing EVERY changed
+  barrel against the release section rather than by checking the one that happened to be noticed,
+  which is the check worth keeping. (2) #262 corrected a THIRD already-published section (the
+  `0.1.0-alpha.8` M63 entry) with no entry of its own, which ALSO left the M90h entry's "Two
+  published sections are corrected in place" false as it then stood — three had been. Both were
+  fixed here: the M63 correction gained its own entry, and the M90h entry now names the third as a
+  separate change, which is why the shipped text reads as consistent. (3) There was no
+  `docs/upgrading.md` entry at all — for a release carrying the breaking surface above. That guide
+  and the release step that maintains it both shipped in M90h and were skipped on their **first**
+  use, which says the step needs a gate rather than a runbook line.
+
+  **A fifth version-bump site was found, and only CI can see it.** Bumping `k8s/chart/Chart.yaml`'s
+  `appVersion` leaves the eight committed rendered manifests carrying the previous
+  `app.kubernetes.io/version` label; `check:deploy` refuses the drift, but the four ordinary gates,
+  both publish gates, `check:docs` and `check:versions` all pass over it, because the label is not
+  an `@setu-ts` specifier and the manifests are not TypeScript. `deno task deploy:render` fixes it.
+  The sites are now: the 47 manifests, the 96 cross-package specifiers, `packages/sdk/src`'s four
+  inline specifiers, the 15 tracked `apps/*/deno.lock` files, the root `deno.lock`, and these
+  manifests.
+
+  **Two runbook instructions were wrong and are corrected.** App locks must move by `sed`, NOT by
+  regeneration: `deno check` with the members bumped and the lock still naming the old version
+  rebuilds the whole file and re-resolves every third-party range, which silently moved `@hono/hono`
+  `4.13.5` → `4.13.7` plus several npm transitives across all 15 — dependency drift riding into a
+  release PR, which the weekly Dependency drift workflow exists to review separately. Rewritten in
+  place they already agree, so `deno check` accepts all 15 byte-identically. And the src grep must
+  match the SPECIFIER, never the bare version: `@since` tags legitimately name every release ever
+  shipped (1001 at `0.1.0`, 734 at `0.2.0`), so `grep -rn '<old-version>'
+  packages/*/src` was
+  already unfollowable at v0.3.0 and trains a reader to skim past the one line that matters. **Never
+  bump an `@since` tag.**
+
+  **Reading the per-file coverage table caught a defect M90j had merged** (fixed in #264, which
+  merged first): `messaging-plugin/src/brokers/describe-error.ts` shipped at **81.7% branch / 84.1%
+  line**, below the absolute 90% bar, with `deno task test:coverage` exiting 0 — the known silent
+  gate. Eleven truncation guards were unexercised because each optional member of a serialized
+  failure renders behind its own budget check and no single input reaches them all. Now 100/100/100.
+
+  **Two claims written into this release were false and source-checking caught both**, which is the
+  argument for checking rather than trusting the prose being amended. `IRefreshTokenRotation` is
+  `rotate`'s RETURN type, not the successor parameter's, and `revokeFamily` returns the records it
+  revoked rather than `void` — both were wrong in the first draft of the upgrade guide. And the
+  changelog's "Prisma honours all four" isolation levels contradicted `PUBLIC_API.md`, which is
+  correct: support is connector-dependent (`serializable` only on CockroachDB and SQLite, none on
+  MongoDB or an unresolved connector). Automated review raised five findings across both PRs; four
+  were correct and fixed, one — adding a verified-against-a-real-backend column to the isolation
+  table — was declined with cause as a research pass across eight adapters that does not belong in a
+  mechanical version bump.
+
 - **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
   the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
   compat suites as release gates. The `smoke/` programme's X16–X19 exercises against published
