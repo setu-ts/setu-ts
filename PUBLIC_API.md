@@ -6001,6 +6001,8 @@ app.router.get('/users', async (ctx) => {
 `ctx.request.tenant`. Calling `getRepository` before the middleware runs throws
 `TenantNotResolvedError`.
 
+<!-- version:history -->
+
 **Non-HTTP work uses `getRepositoryFor(tenantId, entity)`** (since `0.4.0`) — the ctx-free entry
 point, modelled on `prefixCacheKey`: a queue processor, scheduled job, or ingress behaviour holds no
 `IRequestContext`, so the tenant id comes from the work item's own payload and the repository scopes
@@ -6877,7 +6879,7 @@ Install it with an explicit binary name, because Deno's default inference would 
 package (`cli`):
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.4.0/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.5.0/main
 ```
 
 `--min-dep-age 0` because Deno refuses a dependency published within the last 24 hours, and the CLI
@@ -8990,7 +8992,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | Health              | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`, `ProbeTiming`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Metrics             | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Auth                | `IPrincipal`, `IJwtService`, `JwtSignOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first)                                                                                                                                                                                                                                                                                                                                                |
+| Database            | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection`, `TransactionOptions`, `TransactionIsolationLevel`, `ITransactionIsolationSupport` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first); the last three carry portable transaction isolation (M90g)                                                                                                                                                                                                 |
 | Cache               | `ICacheStore`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Events              | `IEventBus`, `IDomainEvent<T>`, `EventHandler<T>`, `Unsubscribe`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Messaging           | `IMessageBroker`, `ISubscription`, `MessageHandler<T>`, `MessageMetadata`, `SubscribeOptions`, `RequestOptions`, `RequestHandler<TReq, TRes>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -10055,7 +10057,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-deno add jsr:@setu-ts/sdk@^0.4.0
+deno add jsr:@setu-ts/sdk@^0.5.0
 ```
 
 ### createClient()

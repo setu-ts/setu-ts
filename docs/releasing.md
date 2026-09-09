@@ -100,7 +100,34 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   four `src/**` files rather than through an import-map alias, and its manifest maps that exact
   specifier string to a pinned version — so the range in the source and both sides of the mapping
   must move together. A missed source specifier resolves against the previous release instead of the
-  one being cut. `grep -rn '<old-version>' packages/*/src` must come back empty.
+  one being cut. Grep for the SPECIFIER, not the bare version:
+
+  ```fish
+  grep -rn 'jsr:@setu-ts/[a-z0-9-]*@\^\?<old-version>' packages/*/src
+  ```
+
+  A bare `grep -rn '<old-version>' packages/*/src` is the wrong check and always has been: `@since`
+  tags legitimately name every release the framework has shipped (measured while cutting `v0.5.0`:
+  1001 at `0.1.0`, 734 at `0.2.0`, 107 at `0.3.0`), so it reports hundreds of correct lines and
+  teaches you to skim past the one that matters. **Never bump an `@since` tag** — it records when a
+  symbol appeared, so moving it makes it a lie.
+- **Move the version in the 15 tracked `apps/*/deno.lock` files, and do it with `sed`, not by
+  regenerating.** Each records its workspace members under `workspace.links` — a site no gate sees,
+  because every example maps `@setu-ts/*` at `../../packages/<name>/src` and nothing installs from
+  these locks. Rewrite the `@setu-ts` version tokens in place (both the full `@0.4.0` and the bare
+  `@0.4` forms appear), then run the same entry points `check:apps` uses to confirm Deno accepts the
+  result **unchanged** — `main.ts smoke.ts`, plus `worker.ts` where it exists.
+
+  **Do not reach for `deno check` alone to regenerate them.** With the members bumped and the lock
+  still naming the old version, Deno rebuilds the whole file and re-resolves every third-party range
+  as well — cutting `v0.5.0` that way silently moved `@hono/hono` `4.13.5` → `4.13.7` plus several
+  npm transitives across all 15 locks. That is dependency drift riding into a release PR, which the
+  weekly **Dependency drift** workflow exists to review separately. Rewritten in place the locks
+  already agree with the tree, so `deno check` re-resolves nothing and leaves them byte-identical.
+  Prove it rather than assume it: normalise the `@setu-ts` version tokens on both sides and diff,
+  and every remaining difference is drift you did not intend. `apps/full-stack/deno.lock` is
+  gitignored and needs nothing, and the ROOT `deno.lock` names no `@setu-ts` version at all.
+
 - **A release starting a new version LINE must widen `SHIPPED_VERSION_LINES`** in
   `scripts/check-docs.ts`. Both document version gates match against that alternation, so a new line
   it does not name makes them match nothing — every stale claim goes invisible while `check:docs`

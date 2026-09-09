@@ -1360,6 +1360,36 @@ describe('documentation gate — install-snippet versions', () => {
     expect(outgoing[0]?.message).toContain('0.4.0');
   });
 
+  // Opening the 0.5 line. Same reason as 0.3 and 0.4 above, and the reason it
+  // is asserted rather than assumed: the alternation names each minor, so the
+  // release that forgets to add one turns this gate GREEN over a tree full of
+  // stale references. A silent pass, not a red run.
+  it('reads the post-alpha 0.5.x line, and still reads 0.4.x as stale beside it', () => {
+    // Stale WITHIN 0.5 — the only case that discriminates. `^0.5.0` clean at
+    // 0.5.0 passes just as well when the gate reads no 0.5 at all.
+    const withinLine = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.5.0\n'),
+      '0.5.1',
+    );
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.5.0');
+    expect(withinLine[0]?.message).toContain('0.5.1');
+
+    expect(
+      checkInstallVersions(doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.5.0\n'), '0.5.0'),
+    ).toEqual([]);
+
+    // The OUTGOING line names the references this release still has to move,
+    // so it must keep reading 0.4 after the widening.
+    const outgoing = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.4.0\n'),
+      '0.5.0',
+    );
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.4.0');
+    expect(outgoing[0]?.message).toContain('0.5.0');
+  });
+
   // SemVer permits a hyphen inside a prerelease identifier and a `+` build
   // suffix, and JSR accepts both — so a narrower class truncates a legal
   // version and reports a correct reference as stale, the same defect one
@@ -1547,6 +1577,28 @@ describe('documentation gate — bare version claims', () => {
     const fourNoise = 'bound to 127.0.4.1 and 10.0.4.2, requires foo 10.4.1, mask 192.0.4.9\n';
     expect(checkVersionClaims(doc('docs/guide.md', fourNoise), '0.4.0')).toEqual([]);
     expect(checkVersionClaims(doc('docs/guide.md', fourNoise), '0.4.1')).toEqual([]);
+  });
+
+  // The bare-claim checker reads its own copy of the alternation, so the 0.5
+  // line is unproven here until asserted here — widening one checker does not
+  // widen the other, and neither reports anything when it matches nothing.
+  it('reads the post-alpha 0.5.x line in a bare claim', () => {
+    const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.5.0`\n'), '0.5.1');
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.5.0');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.5.0`\n'), '0.5.0')).toEqual([]);
+
+    const outgoing = checkVersionClaims(doc('README.md', 'ships `v0.4.0`\n'), '0.5.0');
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.4.0');
+
+    // Every string CONTAINS `0.5.N`, so these are what the new arm could
+    // plausibly have started claiming; the boundary lookarounds reject them.
+    // The 0.3- and 0.4-era noise cases cannot cover these digits.
+    const fiveNoise = 'bound to 127.0.5.1 and 10.0.5.2, requires foo 10.5.1, mask 192.0.5.9\n';
+    expect(checkVersionClaims(doc('docs/guide.md', fiveNoise), '0.5.0')).toEqual([]);
+    expect(checkVersionClaims(doc('docs/guide.md', fiveNoise), '0.5.1')).toEqual([]);
   });
 
   // Measured against the real corpus, not guessed. A general `\d+.\d+.\d+`
