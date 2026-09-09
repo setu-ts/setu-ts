@@ -4690,11 +4690,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the alpha.10 (#195) and v0.4.0 (#233) failure mode a third time; found by diffing EVERY changed
   barrel against the release section rather than by checking the one that happened to be noticed,
   which is the check worth keeping. (2) #262 corrected a THIRD already-published section (the
-  `0.1.0-alpha.8` M63 entry) with no entry of its own, which also falsified the M90h entry's "Two
-  published sections are corrected in place". (3) There was no `docs/upgrading.md` entry at all —
-  for a release carrying the breaking surface above. That guide and the release step that maintains
-  it both shipped in M90h and were skipped on their **first** use, which says the step needs a gate
-  rather than a runbook line.
+  `0.1.0-alpha.8` M63 entry) with no entry of its own, which ALSO left the M90h entry's "Two
+  published sections are corrected in place" false as it then stood — three had been. Both were
+  fixed here: the M63 correction gained its own entry, and the M90h entry now names the third as a
+  separate change, which is why the shipped text reads as consistent. (3) There was no
+  `docs/upgrading.md` entry at all — for a release carrying the breaking surface above. That guide
+  and the release step that maintains it both shipped in M90h and were skipped on their **first**
+  use, which says the step needs a gate rather than a runbook line.
 
   **A fifth version-bump site was found, and only CI can see it.** Bumping `k8s/chart/Chart.yaml`'s
   `appVersion` leaves the eight committed rendered manifests carrying the previous
