@@ -251,3 +251,39 @@ git diff --name-only main...HEAD -- 'packages/*/src' | tee /dev/stderr | wc -l  
 - **A generated per-release upgrade note** — `docs/upgrading.md` is hand-written; deriving it from
   the CHANGELOG needs a stable machine-readable entry format, which the prose format does not carry
   (the same blocker the release-notes automation has).
+
+## 10. Corrections recorded during verification
+
+Each of these is a place where the plan as written did not survive being checked against the
+implementation or against a measurement. Recorded here rather than quietly fixed, per the repository
+convention that a plan/implementation deviation is a finding.
+
+- **§6 negative control 4 is half wrong.** It claims that removing `docs/upgrading.md` from
+  `docs/README.md` makes "`check:docs` **and** the apps-gate case fail". Measured: the apps-gate
+  case fails, and `check:docs` reports **0 findings and exits 0**. It validates a link once the link
+  exists and cannot see an entry that was never written — which is exactly what
+  `test/apps-gate.test.ts`'s own comment says, so the committed test is right and the plan is wrong.
+  The apps-gate case is therefore the ONLY thing standing between the guide and being orphaned.
+- **The ROADMAP register row's package list was wrong and is corrected in this PR.** It named
+  `http-security-plugin` and `scheduler-plugin`; neither owns a row here. X22-4 is the **auth**
+  README's annotation (the fix only cross-references `ipSecurityMiddleware`, it does not change it)
+  and X20-3's consequence is the **secrets** provider table. Corrected in the milestone's own PR
+  following the M70b/M70g/M70k precedent, not inherited.
+- **`docs/upgrading.md` filed two of its three entries under the wrong release**, found in
+  verification and fixed. The `experimentalDecorators` step was filed under `0.2.0` while M76
+  shipped it in `0.1.0-alpha.10` (`CHANGELOG.md:1219,1319,1325`, all inside the alpha.10 section),
+  and the `findOne` step was filed under `0.1.0-alpha.10` while it shipped in `0.1.0-alpha.8`
+  (`CHANGELOG.md:2774`) — contradicting the C2 note this same milestone wrote, which says "announced
+  in the 0.1.0-alpha.8 release". A reader on alpha.9 would have found nothing under alpha.10 but a
+  step they had already taken at alpha.8, and missed the one change without which none of their
+  decorators compile: the precise failure X26-1 was filed for, reproduced inside the artifact built
+  to prevent it. **Nothing could have caught it** — the version headings are shielded from
+  `checkVersionClaims` by `version:history` markers (correctly: in a version-by-version guide every
+  version string is history), and no gate cross-checks a guide heading against the CHANGELOG section
+  that announced the change. The guide now states that a heading names the release that **shipped**
+  the change, and each of its five markers was measured load-bearing individually.
+- **Two additions the plan did not specify**, both closing a claim the milestone documents and left
+  unpinned: the CSRF suite gains the README's **primary** carrier — the hidden `_csrf` form field
+  its own example renders — since §3.4's test drove only `x-csrf-token`; and the rate-limit test now
+  registers with no priority, so the only divergence from the README's `app.middleware.add(...)` is
+  the recording store the assertion requires.

@@ -116,6 +116,33 @@ describe('documented CSRF sequence (X33-2)', () => {
     }
   });
 
+  it("carries the token in the README's PRIMARY carrier, the hidden form field", async () => {
+    // The README's own `## Form CSRF` example renders
+    // `<input type="hidden" name="_csrf" value="${token}">`, so the form field
+    // — not the header — is the carrier a reader copies first. The sequence
+    // test above drives `x-csrf-token`; this drives `_csrf`, so both documented
+    // carriers are pinned rather than one standing in for the other.
+    const app = buildApp();
+    await app.start();
+    try {
+      const get = await app.inject({ method: 'GET', url: 'http://localhost/login' });
+      const { token } = get.json<{ token: string }>();
+      const cookie = cookieOf(get.headers);
+
+      const post = await app.inject({
+        method: 'POST',
+        url: 'http://localhost/login',
+        headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+        body: `_csrf=${encodeURIComponent(token)}&username=alice`,
+      });
+
+      expect(post.statusCode).toBe(200);
+      expect(post.json<{ ok: boolean }>().ok).toBe(true);
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('a bare POST /login with no prior safe request is refused 403', async () => {
     const app = buildApp();
     await app.start();

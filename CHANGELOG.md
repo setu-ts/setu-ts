@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Documentation — `docs/upgrading.md`, and four published claims corrected (M90h / X22-4, X26-1,
+  X26-2, X33-2, X20-3).** A new upgrade guide answers "what must I change in **my** project",
+  version by version, where the CHANGELOG answers what changed in the framework; `docs/releasing.md`
+  gains the release step that maintains it, and `docs/README.md` indexes it. No package's `src/`
+  changes. The auth README's rate-limit example no longer claims `// per IP` — the default key is
+  the literal `'anonymous'` for every unauthenticated caller unless `ipSecurityMiddleware` is
+  registered with `trustProxy` — and a new test pins the resolved key rather than the comment. The
+  session README gains the safe-request-then-mutation CSRF sequence, because its
+  `## Session
+  fixation` and `## Form CSRF` sections each compile and answer `403` when composed; a
+  new integration test drives the sequence and asserts the successful path first. The secrets README
+  and `PUBLIC_API.md` gain a per-provider `set()`/`rotate()` table — Vault and Azure create on
+  write, AWS and GCP require the secret to pre-exist, `env` refuses — each cell marked
+  verified-against-a-real-backend or not. Two published sections are corrected in place: the 0.2.0
+  entry now announces the **required** `IRepository.findPage` (announced nowhere when it shipped,
+  while its sibling `findOne` was announced twice), backed by a hand-written implementor committed
+  as a compile-time tripwire, and the 0.1.0-alpha.10 decorator entry now says that a reader's OWN
+  manifest must drop `experimentalDecorators`.
+
 - **`@setu-ts/common`, `@setu-ts/database-plugin` — explicit transaction isolation (M90g / X24-2,
   X38-3).** `TransactionOptions.isolation` carries one of the four portable isolation names through
   `IDatabaseService.transaction()` to the adapter. Prisma honours all four; an explicitly branded

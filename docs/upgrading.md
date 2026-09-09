@@ -4,35 +4,12 @@ The CHANGELOG answers "what changed in the framework"; this guide answers "what 
 **my** project". A release that demands reader action adds an entry here, version by version — that
 is a release step ([releasing.md](./releasing.md)), not a memory exercise.
 
+Each heading names the release that **shipped** the change, so an upgrade spanning several releases
+is the union of every section between the version you are on and the one you are moving to.
+
 <!-- version:history -->
 
 ## 0.2.0
-
-### Remove `experimentalDecorators` from your own manifest
-
-<!-- version:history -->
-
-The decorator surface moved to TC39 standard decorators and the legacy form was removed in the
-release that also dropped the prerelease suffix from the version number. The framework removed the
-option from all of **its own** declaration sites — that part is done for you. What the release entry
-does not do for you: a project scaffolded by the alpha.8 CLI still carries
-`"compilerOptions": { "experimentalDecorators": true }` in its own `deno.json` (or the equivalent in
-a generated Node `tsconfig.json`), and a migrated project that keeps it compiles its decorators
-under the **legacy** semantics and fails `deno check` with `TS1238`/`TS1241` on every decorated
-member.
-
-The errors point at the decorators, not the option, which is exactly why this step needs to be
-written down:
-
-```text
-TS1238  Unable to resolve signature of class decorator when called as an expression.
-        The runtime will invoke the decorator with 1 arguments, but the decorator expects 2.
-TS1241  Unable to resolve signature of method decorator when called as an expression.
-```
-
-Remove the key from your project's manifest and declare no compiler options at all if nothing else
-needs them — declaring **any** compiler option replaces Deno's entire default set, so a project
-needing none should declare none.
 
 ### Add `findPage` to a hand-written `IRepository`
 
@@ -70,7 +47,35 @@ the interface without updating it fails `deno check`.
 
 ## 0.1.0-alpha.10
 
+### Remove `experimentalDecorators` from your own manifest
+
+The decorator surface moved to TC39 standard decorators and the legacy form was removed. The
+framework removed the option from all of **its own** declaration sites — that part is done for you.
+What the release entry does not do for you: a project scaffolded by an earlier CLI still carries
+`"compilerOptions": { "experimentalDecorators": true }` in its own `deno.json` (or the equivalent in
+a generated Node `tsconfig.json`), and a migrated project that keeps it compiles its decorators
+under the **legacy** semantics and fails `deno check` with `TS1238`/`TS1241` on every decorated
+member.
+
+The errors point at the decorators, not the option, which is exactly why this step needs to be
+written down:
+
+```text
+TS1238  Unable to resolve signature of class decorator when called as an expression.
+        The runtime will invoke the decorator with 1 arguments, but the decorator expects 2.
+TS1241  Unable to resolve signature of method decorator when called as an expression.
+```
+
+Remove the key from your project's manifest and declare no compiler options at all if nothing else
+needs them — declaring **any** compiler option replaces Deno's entire default set, so a project
+needing none should declare none.
+
+<!-- version:history -->
+
+## 0.1.0-alpha.8
+
 ### Add `findOne` to a hand-written `IRepository`
 
-The same class of change, one release earlier: `IRepository` gained a required `findOne` member. A
-class implementing `IRepository` without extending `BaseRepository` must now implement `findOne`.
+The same class of change as `findPage` above, two releases earlier: `IRepository` gained a required
+`findOne` member. A class implementing `IRepository` without extending `BaseRepository` must now
+implement `findOne`.

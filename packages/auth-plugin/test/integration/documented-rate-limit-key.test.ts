@@ -72,8 +72,12 @@ describe('documented rate-limit key (X22-4)', () => {
           name: 'routes',
           version: '1.0.0',
           register(ctx: IPluginContext) {
-            // The README's composition, verbatim: the limiter alone, no
-            // ipSecurityMiddleware, no keyGenerator.
+            // The README's composition: the limiter alone, no
+            // ipSecurityMiddleware, no keyGenerator, and registered with no
+            // priority — exactly as the README's `app.middleware.add(...)`
+            // shows. The ONLY divergence is `store`, which has to be the
+            // recording double because the resolved key is not observable
+            // through a response otherwise.
             ctx.middleware.add(
               rateLimitMiddleware({
                 windowMs: 60_000,
@@ -84,7 +88,6 @@ describe('documented rate-limit key (X22-4)', () => {
                   ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME),
                 ),
               }),
-              { name: 'rate-limit', priority: 150 },
             );
             const ok = (reqCtx: IRequestContext): HandlerResult =>
               reqCtx.response.json({ ok: true });
