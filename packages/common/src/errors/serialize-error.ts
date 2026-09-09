@@ -135,6 +135,15 @@ function isError(value: unknown): value is Error {
   }
 }
 
+/** Answers whether an error owns the standard AggregateError member list. */
+function isAggregateError(value: Error): value is AggregateError {
+  try {
+    return value instanceof AggregateError;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Serializes any thrown value to a plain, serializable object.
  *
@@ -194,7 +203,7 @@ function serializeErrorInstance(
   const stack = readMember(error, 'stack');
   const cause = readMember(error, 'cause');
   const classifiers = serializeClassifiers(error);
-  const errors = readMember(error, 'errors');
+  const errors = isAggregateError(error) ? readMember(error, 'errors') : undefined;
 
   const out: SerializedError & {
     stack?: string;
@@ -236,7 +245,9 @@ function serializeClassifiers(
     const value = readMember(error, key);
     if (typeof value === 'string') {
       classifiers[key] = truncateClassifier(value);
-    } else if (typeof value === 'number' || typeof value === 'boolean') {
+    } else if (typeof value === 'number' && Number.isFinite(value)) {
+      classifiers[key] = value;
+    } else if (typeof value === 'boolean') {
       classifiers[key] = value;
     }
   }

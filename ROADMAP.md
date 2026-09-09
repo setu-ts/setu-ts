@@ -9118,15 +9118,11 @@ What is missing is a **channel** on one ingress and a **bridge** to one sink:
 its job. X12-3/M70b deliberately mask an internal error for the client _while the logger receives
 the real one_. In these three the real one never reaches any logger.
 
-- **X35-3** — `} catch {` with no binding, then
-  `throw new Error('Drizzle transaction failed to
-  start')` with no `cause`
-  (`drizzle-adapter.ts:350`), so node-postgres's own `timeout exceeded when trying to connect` is
-  destroyed rather than masked. Measured across the package: **7 catch-then-throw sites drop their
-  cause**, spanning every shipped adapter family (drizzle ×2, prisma, mongo, cosmos ×2, dynamo), and
-  of **162** `throw new` sites **zero** pass a cause. Two do not bind the caught value at all. The
-  consequence generalises: every transaction-start failure on Drizzle — permission, network, bad
-  search path — reduces to the same eight words.
+- **X35-3** — replacement errors must retain their caught driver failure as `cause`. The five
+  measured wrappers are the Drizzle lazy-operator load, Mongo transaction start, Cosmos database and
+  partition-key reads, and Dynamo endpoint parsing; the Drizzle and Prisma transaction bridges
+  already rethrow their original rejection. Without a cause, a driver diagnostic such as a timeout,
+  permission failure, or malformed endpoint is destroyed rather than masked.
 - **X38-2** — `SerializedError` is exactly `{ name, message, stack?, cause? }` and `readMember` is
   typed to those four keys, so pg's `code: '40001'`, `severity`, `constraint`, MongoDB's `codeName`
   and the AWS SDK's `$metadata` are all dropped. Log-based classification — alerting on a `40001`
@@ -9138,8 +9134,8 @@ the real one_. In these three the real one never reaches any logger.
 Proxy-safe and correct, and a pg error carries the failing query text and parameters — exactly what
 X12-3 exists to keep out of logs. The right shape is a small **allowlist** of standard classifier
 fields (`code` first) read through the same guard, plus
-`catch (cause) { throw new Error('…', { cause }); }` at the seven sites. Both are mechanical, and
-`serializeError` already walks a cause chain when one exists.
+`catch (cause) { throw new Error('…', { cause }); }` at the five remaining sites. Both are
+mechanical, and `serializeError` already walks a cause chain when one exists.
 
 ## Progress Tracking
 

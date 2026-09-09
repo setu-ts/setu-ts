@@ -51,6 +51,34 @@ describe('serializeError', () => {
     });
   });
 
+  it('keeps every documented classifier key', () => {
+    const error = Object.assign(new Error('driver failed'), {
+      code: '40001',
+      errno: 104,
+      syscall: 'connect',
+      severity: 'ERROR',
+      constraint: 'orders_pkey',
+      codeName: 'TransactionConflictException',
+      statusCode: 503,
+    });
+
+    expect(serializeError(error).classifiers).toEqual({
+      code: '40001',
+      errno: 104,
+      syscall: 'connect',
+      severity: 'ERROR',
+      constraint: 'orders_pkey',
+      codeName: 'TransactionConflictException',
+      statusCode: 503,
+    });
+  });
+
+  it('keeps a boolean classifier', () => {
+    const error = Object.assign(new Error('driver failed'), { code: true });
+
+    expect(serializeError(error).classifiers).toEqual({ code: true });
+  });
+
   it('drops object-valued classifiers and truncates long strings by Unicode code point', () => {
     const error = new Error('driver failed') as Error & { code?: unknown; errno?: unknown };
     error.code = { query: 'secret' };
@@ -59,6 +87,20 @@ describe('serializeError', () => {
     const out = serializeError(error);
     expect(out.classifiers?.code).toBeUndefined();
     expect(out.classifiers?.errno).toBe(`${'😀'.repeat(512)}… [truncated]`);
+  });
+
+  it('drops non-finite numeric classifiers so JSON preserves the documented scalar shape', () => {
+    const error = Object.assign(new Error('driver failed'), {
+      errno: Infinity,
+      statusCode: Number.NaN,
+      code: '40001',
+    });
+
+    const out = serializeError(error);
+    expect(out.classifiers).toEqual({ code: '40001' });
+    expect(JSON.stringify(out)).toContain('"code":"40001"');
+    expect(JSON.stringify(out)).not.toContain('"errno":null');
+    expect(JSON.stringify(out)).not.toContain('"statusCode":null');
   });
 
   it('serializes bounded AggregateError members and reports omitted entries', () => {
@@ -71,6 +113,26 @@ describe('serializeError', () => {
     expect(out.errors?.[0]?.message).toBe('member-0');
     expect(out.errors?.[7]?.message).toBe('member-7');
     expect(out.omittedErrorCount).toBe(2);
+  });
+
+  it('does not treat an ordinary Error.errors property as an AggregateError', () => {
+    const error = Object.assign(new Error('outer'), {
+      errors: [new Error('unexpected nested detail')],
+    });
+
+    expect(serializeError(error).errors).toBeUndefined();
+  });
+
+  it('does not throw when an AggregateError.errors member is malformed or hostile', () => {
+    const malformed = new AggregateError([new Error('member')]);
+    Object.defineProperty(malformed, 'errors', { value: 'not an array' });
+    expect(serializeError(malformed).errors).toBeUndefined();
+
+    const { proxy, revoke } = Proxy.revocable([new Error('member')], {});
+    revoke();
+    const hostile = new AggregateError([]);
+    Object.defineProperty(hostile, 'errors', { value: proxy });
+    expect(serializeError(hostile).errors).toBeUndefined();
   });
 
   it('caps nested aggregate trees with a shared total-node budget', () => {
@@ -211,6 +273,21 @@ describe('serializeError never throws (code review, CodeRabbit)', () => {
     const out = serializeError(hostile);
     expect(out.name).toBe('Error');
     expect(typeof out.message).toBe('string');
+  });
+
+  it('does not treat a Proxy that rejects its AggregateError check as an aggregate', () => {
+    let prototypeReads = 0;
+    const hostile = new Proxy(new AggregateError([new Error('member')]), {
+      getPrototypeOf(target) {
+        prototypeReads++;
+        if (prototypeReads === 1) return Reflect.getPrototypeOf(target);
+        throw new Error('aggregate check failed');
+      },
+    });
+
+    const out = serializeError(hostile);
+    expect(out.name).toBe('AggregateError');
+    expect(out.errors).toBeUndefined();
   });
 
   it('keeps the readable members when only one accessor is hostile', () => {

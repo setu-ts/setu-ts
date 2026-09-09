@@ -5,6 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { serializeError } from '@setu-ts/common';
 import {
   PartitionKeyResolver,
   renderPaths,
@@ -86,6 +87,7 @@ describe('PartitionKeyResolver', () => {
       /could not read container 'ghost'.*must exist before the application starts/s,
     );
     expect((failure as Error).cause).toBeInstanceOf(Error);
+    expect(serializeError(failure).cause?.message).toContain('not found');
   });
 
   it('reports a container definition carrying no partition key', async () => {

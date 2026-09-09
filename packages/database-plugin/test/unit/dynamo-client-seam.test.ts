@@ -5,6 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { serializeError } from '@setu-ts/common';
 import {
   adaptDynamoSdkModule,
   createInjectedDynamoLoader,
@@ -279,6 +280,7 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
     }
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).cause).toBeInstanceOf(TypeError);
+    expect(serializeError(failure).cause?.name).toBe('TypeError');
   });
 
   it('allows https to a remote host', () => {

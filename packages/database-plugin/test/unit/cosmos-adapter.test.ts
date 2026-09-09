@@ -5,6 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { serializeError } from '@setu-ts/common';
 import { CosmosAdapter } from '../../src/adapters/cosmos/cosmos-adapter.ts';
 import { UnsupportedRawQueryError } from '../../src/errors.ts';
 import type {
@@ -99,13 +100,14 @@ describe('CosmosAdapter lifecycle', () => {
     // a retained rejection would make one transient outage permanent.
     const healthy = fakeClient();
     const inner = healthy.client.database('db');
+    const driverFailure = Object.assign(new Error('Unauthorized'), { code: '40101' });
     let attempts = 0;
     const flaky: ICosmosClient = {
       database: () => ({
         container: (id: string) => inner.container(id),
         read: () => {
           attempts++;
-          return attempts === 1 ? Promise.reject(new Error('Unauthorized')) : inner.read();
+          return attempts === 1 ? Promise.reject(driverFailure) : inner.read();
         },
       }),
     };
@@ -117,6 +119,7 @@ describe('CosmosAdapter lifecycle', () => {
     expect(failure).toBeInstanceOf(Error);
     expect((failure as Error).message).toMatch(/could not reach database 'db'/);
     expect((failure as Error).cause).toBeInstanceOf(Error);
+    expect(serializeError(failure).cause?.classifiers?.code).toBe('40101');
     expect(adapter.isReady()).toBe(false);
     await adapter.connect();
     expect(adapter.isReady()).toBe(true);

@@ -11,6 +11,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { serializeError } from '@setu-ts/common';
 import { MongoAdapter, parseDatabaseFromUrl } from '../../src/adapters/mongo/mongo-adapter.ts';
 import type { MongoAdapterOptions } from '../../src/interfaces/index.ts';
 import {
@@ -213,6 +214,7 @@ describe('MongoAdapter — transactions', () => {
     );
     expect(failure).toBeInstanceOf(MongoTransactionUnavailableError);
     expect((failure as Error).cause).toBeInstanceOf(Error);
+    expect(serializeError(failure).cause?.message).toContain('not allowed on a standalone mongod');
     // The failed session is ended, never leaked.
     expect(failingSession.calls).toContain('endSession');
   });
