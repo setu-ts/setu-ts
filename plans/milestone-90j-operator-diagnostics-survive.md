@@ -1,6 +1,6 @@
 # Milestone 90j — The Operator's Diagnostic Survives to the Operator (`@setu-ts/common`, `@setu-ts/database-plugin`, `@setu-ts/messaging-plugin`)
 
-> **Status:** Implementation complete; verification pending. Branch:
+> **Status:** Verification complete; awaiting pull request. Branch:
 > `feat/m90j-operator-diagnostics-survive`. `main` is protected — all work (implementation + fixes)
 > stays on this one branch until it merges via a single PR.
 
