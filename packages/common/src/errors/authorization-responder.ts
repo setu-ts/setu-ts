@@ -7,7 +7,11 @@
 import { respondWithError } from './error-responder.ts';
 import type { ErrorResponderTarget } from './error-responder.ts';
 
-/** The authorization condition that determines a standard refusal response. */
+/**
+ * The authorization condition that determines a standard refusal response.
+ *
+ * @since 0.5.0
+ */
 export type AuthorizationFailure =
   | 'authentication-required'
   | 'not-configured'
@@ -17,7 +21,17 @@ export type AuthorizationFailure =
  * Write the framework-standard response for an authorization refusal.
  *
  * This keeps guards and decorator middleware byte-identical without coupling
- * either plugin to the other's implementation.
+ * either plugin to the other's implementation. Every arm writes through
+ * {@linkcode respondWithError}, so the refusal answers in whatever error format
+ * the application configured rather than a shape of this function's own.
+ *
+ * The `insufficient-privileges` detail is deliberately fixed text: naming the
+ * role or permission a caller lacks tells an unauthorized caller what to
+ * acquire.
+ *
+ * @param target - The request context or response to write the refusal to
+ * @param failure - Which refusal to write
+ * @since 0.5.0
  */
 export function respondWithAuthorizationFailure(
   target: ErrorResponderTarget,

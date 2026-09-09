@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] — 2026-09-09
 
 ### Added
 
@@ -13,6 +13,19 @@ All notable changes to this project are documented here. The format follows
   bounded, scalar-only driver classifier allowlist and `AggregateError` members; database adapter
   wrappers retain their original cause; and broker string loggers render the complete bounded
   diagnostic rather than JavaScript's lossy default error interpolation.
+
+- **Documentation — the Deno compiler-option mechanism, corrected wherever it was asserted.** Six
+  sites — the `0.1.0-alpha.8` CHANGELOG entry, three `packages/cli/src` JSDoc blocks, the M63 entry
+  in `CLAUDE.md`, and the ROADMAP record — stated that declaring **any** `compilerOptions` key in a
+  `deno.json` REPLACES Deno's entire default set, and blamed the `full-stack` template's 79 `TS2686`
+  errors on an unrelated `experimentalDecorators` entry displacing the `react-jsx` default. That
+  mechanism is false: measured on Deno 2.9.6, declaring one option leaves every other default in
+  force, and the default JSX transform is the CLASSIC one — so a React template must declare `jsx`
+  itself, and the missing `jsx` was the whole cause. The fix those sites describe is unaffected and
+  was always correct; only the stated reason was wrong, which matters because a reader who believed
+  it would avoid declaring a compiler option they need. The `0.1.0-alpha.8` section is edited in
+  place, with the superseded sentence quoted rather than deleted. No generated output changes — the
+  three CLI edits are comments only.
 
 - **Documentation — `docs/upgrading.md`, and four published claims corrected (M90h / X22-4, X26-1,
   X26-2, X33-2, X20-3).** A new upgrade guide answers "what must I change in **my** project",
@@ -31,14 +44,23 @@ All notable changes to this project are documented here. The format follows
   entry now announces the **required** `IRepository.findPage` (announced nowhere when it shipped,
   while its sibling `findOne` was announced twice), backed by a hand-written implementor committed
   as a compile-time tripwire, and the 0.1.0-alpha.10 decorator entry now says that a reader's OWN
-  manifest must drop `experimentalDecorators`.
+  manifest must drop `experimentalDecorators`. A third published section is corrected below, by a
+  separate change.
 
 - **`@setu-ts/common`, `@setu-ts/database-plugin` — explicit transaction isolation (M90g / X24-2,
-  X38-3).** `TransactionOptions.isolation` carries one of the four portable isolation names through
-  `IDatabaseService.transaction()` to the adapter. Prisma honours all four; an explicitly branded
-  Drizzle bridge may honour all four; and Memory serializes process-local transactions. MongoDB
-  snapshot isolation is not labelled as portable `serializable`, so MongoDB refuses every requested
-  portable level by name rather than silently using its default.
+  X38-3).** `TransactionOptions.isolation` carries one of the four portable isolation names — the
+  new `TransactionIsolationLevel` union, exported from `@setu-ts/common` and re-exported from
+  `@setu-ts/database-plugin` — through `IDatabaseService.transaction()` to the adapter. An adapter
+  declares what it honours through the new `ITransactionIsolationSupport` (`common`), and a level it
+  does not honour is refused with the new exported `UnsupportedIsolationLevelError`
+  (`database-plugin`), answered `501`, rather than silently downgraded. What an adapter honours is
+  **connector-dependent, not per-adapter**: Prisma honours all four on PostgreSQL, MySQL and SQL
+  Server, only `serializable` on CockroachDB and SQLite, and none on MongoDB or a connector it could
+  not resolve; a Drizzle bridge honours all four only when the application wraps it with the new
+  exported `withIsolationSupport()`, which is the declaration that its bridge forwards options; and
+  Memory serializes process-local transactions. `PUBLIC_API.md` carries the per-adapter table.
+  MongoDB snapshot isolation is not labelled as portable `serializable`, so MongoDB refuses every
+  requested portable level by name rather than silently using its default.
 
 - **`@setu-ts/session-plugin` — documented snapshot-commit concurrency limit (M90g / X22-6).**
   Cookie and store sessions each commit their complete payload snapshot, so overlapping requests
@@ -109,10 +131,12 @@ All notable changes to this project are documented here. The format follows
 
 - **`@setu-ts/cache-plugin`, `@setu-ts/secrets-plugin` — truthful reachability.** The `cache` and
   `secrets` indicators now report `reachable` (`true`/`false`/`'unknown'`) beside lifecycle, through
-  probes cached 5 s and bounded 2 s via `createCachedProbe`: Redis probes with `ping()`, Vault with
-  an unauthenticated `/v1/sys/health` request (no secret read, no token), memory/noop/env report
-  lifecycle truth, and a cloud facade without the new optional `isHealthy()` member reports
-  `'unknown'` — never a secret read standing in for a probe.
+  probes cached 5 s and bounded 2 s via `createCachedProbe` — exported from `@setu-ts/common` with
+  its `CachedProbeOptions` and `ProbeTiming` types and the `resolveProbeTiming` helper that reads a
+  runtime's clock and timers: Redis probes with `ping()`, Vault with an unauthenticated
+  `/v1/sys/health` request (no secret read, no token), memory/noop/env report lifecycle truth, and a
+  cloud facade without the new optional `isHealthy()` member reports `'unknown'` — never a secret
+  read standing in for a probe.
 
 - **`@setu-ts/queue-plugin` — `backlog` fact.** The `queue` indicator carries `backlog` whenever at
   least one depth read succeeded: the sum of each successful name's `ready + processing`,
@@ -187,6 +211,16 @@ All notable changes to this project are documented here. The format follows
   as configured. The rule itself is deliberately NOT exported: it is configured through `maxNodes`,
   nothing outside the package constructs it, and exporting it would leak the plugin's private
   graphql facades into the published surface — which `deno doc --lint` reports (the M82 precedent).
+
+- **`@setu-ts/common` — the shared authorization refusal (M90c / X18-2).**
+  `respondWithAuthorizationFailure(target, failure)` and the `AuthorizationFailure` union
+  (`'authentication-required' | 'not-configured' | 'insufficient-privileges'`) are exported so
+  `auth-plugin`'s guards and `decorator-plugin`'s `@Roles`/`@Permissions` middleware write the same
+  refusal without either plugin importing the other. Each arm writes through the existing
+  `respondWithError` seam, so all three answer in the application's configured error format:
+  `401 Unauthorized` / `Authentication required`, `501 Not Implemented` /
+  `Authorization is not configured`, and `403 Forbidden` / `Insufficient privileges`. That last
+  detail is deliberately fixed text — see **Changed** for the non-disclosure it replaces.
 
 - **`@setu-ts/common` — the shared JSON-body parse (M90f / X37-1).** `parseJsonBody(text)` and
   `MalformedRequestBodyError` are exported so all three `IRequest.json()` implementations — the
@@ -292,18 +326,22 @@ All notable changes to this project are documented here. The format follows
   broker's own probe cache rather than adding a duplicate one.
 
 - **BREAKING — `@setu-ts/auth-plugin` — refresh-token stores now revoke credential families.**
-  `RefreshTokenStore` gains required atomic `rotate(jti, successor)` and `revokeFamily(jti)`, and
-  custom implementations must persist the optional lineage fields on `RefreshTokenRecord` so a
-  replayed refresh token and logout can revoke every descendant. `MemoryRefreshTokenStore`
-  implements both. `RefreshTokenService` now issues typed, distinct access and refresh JWT
-  identifiers; bearer authentication rejects a signed `type: 'refresh'` token. For immediate
-  access-token logout, construct one `IAccessTokenRevocationStore` and pass it to both
-  `AuthPlugin({ jwt: { ... } })` and `RefreshTokenService`; the new memory implementation is
-  single-process and the refresh service requires `accessToken.expiresIn` when this option is used.
-  Policy failures still answer `403`, but their detail is now `Insufficient privileges` rather than
-  disclosing required roles or permissions. Migration: add atomic `rotate` and `revokeFamily` to
-  custom refresh stores, retain family fields, serialize family revocation with rotation, and update
-  tests that assert the old 403 detail.
+  `RefreshTokenStore` gains required atomic
+  `rotate(jti, successor: RefreshTokenRecord): Promise<IRefreshTokenRotation>` — the new exported
+  union reports whether the presented token was live when its successor was stored, so a concurrent
+  refresh cannot mint two descendants — and
+  `revokeFamily(jti): Promise<readonly RefreshTokenRecord[]>`, which returns the records it revoked
+  so their paired access-token identifiers can be revoked with them. Custom implementations must
+  persist the optional lineage fields on `RefreshTokenRecord` or `revokeFamily` has no chain to
+  walk. `MemoryRefreshTokenStore` implements both. `RefreshTokenService` now issues typed, distinct
+  access and refresh JWT identifiers; bearer authentication rejects a signed `type: 'refresh'`
+  token. For immediate access-token logout, construct one `IAccessTokenRevocationStore` and pass it
+  to both `AuthPlugin({ jwt: { ... } })` and `RefreshTokenService`; the new exported
+  `MemoryAccessTokenRevocationStore` is single-process and the refresh service requires
+  `accessToken.expiresIn` when this option is used. Policy failures still answer `403`, but their
+  detail is now `Insufficient privileges` rather than disclosing required roles or permissions.
+  Migration: add atomic `rotate` and `revokeFamily` to custom refresh stores, retain family fields,
+  serialize family revocation with rotation, and update tests that assert the old 403 detail.
 
 - **BREAKING — `@setu-ts/cli` — bare `setu generate` is informational, not an error.** With no
   schematic named it printed the available schematics through the normal output sink yet exited `2`
@@ -384,9 +422,10 @@ All notable changes to this project are documented here. The format follows
   `ip:203.0.113.7`, `user:42` — so two applications sharing one managed Redis counted against each
   other's budget, and combined with X32-1 service A's traffic would restart service B's pods. Both
   sibling Redis stores in this framework already namespace and both explain why in their own source.
-  `keyPrefix` defaults to `'setu:ratelimit:'`. **Migration:** in-flight counters under the old keys
-  are orphaned, so the blast radius is one window — they are TTL-bounded and expire on their own.
-  Pass `keyPrefix: ''` for the previous keys byte for byte.
+  `keyPrefix` defaults to `'setu:ratelimit:'`, exported as `DEFAULT_RATE_LIMIT_KEY_PREFIX`.
+  **Migration:** in-flight counters under the old keys are orphaned, so the blast radius is one
+  window — they are TTL-bounded and expire on their own. Pass `keyPrefix: ''` for the previous keys
+  byte for byte.
 
 - **BREAKING — `@setu-ts/database-plugin` — driver conflicts and outages reach the client as `409`
   and `503` (M90f / X38-1, X35-2).** A backend-reported serialization failure (PostgreSQL SQLSTATE
@@ -4748,6 +4787,7 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.5.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.5.0
 [0.4.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.4.0
 [0.3.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.3.0
 [0.2.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.2.0
