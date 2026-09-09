@@ -80,17 +80,22 @@ describe('hand-written IRepository implementor (X26-2 tripwire)', () => {
     // to `1` and pages from the wrong row while reporting success — and the
     // rest coerce to a valid offset the caller was never given.
     const refused = [
-      // Refused by the canonical round-trip. `'1junk'` is the sharpest: a
-      // `Number.parseInt` guard reads it as `1` and pages from the wrong row.
+      // Three groups, one per refusal path — measured, not assumed.
+      //
+      // Coerce to `NaN`, so either clause refuses them on its own. `'1junk'`
+      // is the sharpest value in the file: a `Number.parseInt` guard reads it
+      // as `1` and pages from the wrong row while reporting success.
       'not-a-cursor',
       '1junk',
+      // Coerce to a valid offset the caller was never given, so ONLY the
+      // canonical round-trip refuses them.
       '',
       ' 1 ',
       '01',
       '1e2',
       '0x10',
-      // These three ROUND-TRIP, so they are refused by `isSafeInteger`/`>= 0`
-      // instead — which is why both checks are kept.
+      // Round-trip cleanly, so ONLY `isSafeInteger`/`>= 0` refuses them.
+      // Groups two and three are why both clauses are kept.
       '-1',
       '1.9',
       'Infinity',

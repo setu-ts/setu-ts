@@ -138,19 +138,20 @@ export class InMemoryRowRepository implements IRepository<Row, string> {
     // A cursor is opaque, so the ONLY acceptable value is one this method
     // issued: the canonical decimal form of a non-negative safe integer.
     //
-    // The round-trip is what does the work, and that was measured rather than
-    // assumed. `isSafeInteger` and `>= 0` alone accept `'1junk'` (because
-    // `parseInt` stops at the first non-digit), `''`, `'01'`, `'1e2'`, `'0x10'`
-    // and `' 1 '` — every one of them a value the caller was never given, and
-    // `'1junk'` pages from the wrong row while reporting success. The
-    // round-trip refuses all six. It is NOT sufficient on its own: `'-1'`,
-    // `'1.9'` and `'Infinity'` all round-trip, so `isSafeInteger` and `>= 0`
-    // are load-bearing too.
+    // Both halves are load-bearing, established by dropping each one rather
+    // than by argument:
     //
-    // `Number` rather than `Number.parseInt` is deliberate but not
-    // load-bearing — with the round-trip present both refuse the whole set
-    // (measured). It is preferred because it is the same coercion the
-    // round-trip compares against, so the pair reads as one rule.
+    //   without the round-trip     → accepts '', ' 1 ', '01', '1e2', '0x10'
+    //   without isSafeInteger/>= 0 → accepts '-1', '1.9', 'Infinity'
+    //
+    // `Number` rather than `Number.parseInt` is a readability choice and not a
+    // correctness one: with the round-trip present the two refuse the same
+    // set. They differ only WITHOUT it, and in opposite directions —
+    // `parseInt('1junk', 10)` is `1`, which pages from the wrong row while
+    // reporting success, whereas `Number('1junk')` is `NaN`; `Number('')` is
+    // `0`, whereas `parseInt('', 10)` is `NaN`. `Number` is kept because it is
+    // the same coercion the round-trip compares against, so the two clauses
+    // read as one rule.
     const start = options.cursor === undefined ? 0 : Number(options.cursor);
     const malformed = !Number.isSafeInteger(start) || start < 0 ||
       (options.cursor !== undefined && String(start) !== options.cursor);
