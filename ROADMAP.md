@@ -7565,10 +7565,12 @@ it as a requirement (`ARCHITECTURE.md` §, `PUBLIC_API.md` ×3, `docs/decorators
   Deno accepts it. Also in scope: whether `emitDecoratorMetadata` — absent repo-wide and unsupported
   by Deno — changes the calculus, since without it no replacement can infer a parameter's type.
 - **Why it is not a config flip:** removing the option today makes `decorator-plugin` fail to parse,
-  not merely fail to type-check. And per M63's D3 finding, declaring **any** `compilerOptions`
-  replaces Deno's default set, so a manifest that drops this one key also drops the `react-jsx`
-  default it was silently relying on — the trap that produced 79 `TS2686` errors in a `full-stack`
-  scaffold.
+  not merely fail to type-check. (This bullet also cited M63's D3 for the claim that declaring
+  **any** `compilerOptions` replaces Deno's default set, so dropping one key would drop a
+  `react-jsx` default a manifest was silently relying on. That mechanism is false — measured in
+  M90h: Deno's default JSX transform is the classic one, a `.tsx` project must declare `jsx` itself,
+  and declaring `experimentalDecorators` replaces nothing. The parse failure above is the whole
+  reason, and it is sufficient.)
 - **Not in scope:** removing the decorator surface. M65 already made the functional style the
   default, so decorators are opt-in; this milestone keeps the opt-in working, it does not retire it.
 - **Packages:** `decorator-plugin`, `openapi-plugin`, `starters/rest-starter`, `cli`, plus
