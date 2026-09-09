@@ -4657,8 +4657,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   #249), M90c (credential revocation and token type), M90d (the two brokers that cannot start, PR
   #256), M90e (static delivery correctness, PR #252), M90f (caller errors reach the client
   correctly, PR #259), M90g (concurrency loses work silently, PR #258), M90h (documentation that
-  survives contact, above) and M90i (observability that joins up, PR #260) are complete; M90j
-  remains open.
+  survives contact, above) and M90i (observability that joins up, PR #260) are complete; M90j is
+  awaiting review (PR #263).
 
 ## Verification (run before declaring any work done)
 
