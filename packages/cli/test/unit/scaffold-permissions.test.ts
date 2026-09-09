@@ -116,8 +116,12 @@ describe('generated Deno compiler options', () => {
 
   it('omits the key entirely when a host declares none', () => {
     // An empty `compilerOptions: {}` is noise suggesting a setting was intended
-    // and lost — and a non-empty one replaces Deno's defaults, so emitting one
-    // that was never asked for is not neutral.
+    // and lost, and a non-empty one asserts a setting nothing in the project
+    // reads — so emitting one that was never asked for is not neutral.
+    //
+    // An earlier revision justified this with "a non-empty one replaces Deno's
+    // defaults". That is false (measured in M90h: declaring one option leaves
+    // every other default in place), and the assertion never depended on it.
     const { manifest: _dropped, ...bare } = MINIMAL_HOST;
     expect(compilerOptionsOf(bare)).toBeUndefined();
   });

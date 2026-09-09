@@ -1,6 +1,9 @@
 /**
- * One query, every adapter — the conformance suite that would have caught
- * X12-1.
+ * One query, every adapter but Cosmos — the conformance suite that would have
+ * caught X12-1. Cosmos is deliberately excluded and covered by a reduced table
+ * against the real service; see the paragraph below, and do not shorten this
+ * line back to "every adapter", which is the form that got the claim copied
+ * into `CLAUDE.md` overstated.
  *
  * A table of {@linkcode FilterExpression} cases (including `%`, `_`, `\`, a
  * bare `%`, and an empty `in`) is run through **every** adapter's translation.

@@ -2068,19 +2068,34 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `/health`**, the path its own generated Kubernetes probes point at, because the generated `start`
   task never requested `--allow-sys` for `selfIndicator`'s `runtime.hostname()`; the per-template
   `denoPermissions` seam already existed and simply had no entry. **D3:** every `.tsx` route in a
-  `full-stack` project failed `deno check` with 79 `TS2686`. The mechanism is sharper than the
-  obvious reading and was established only after the first negative control PASSED: a manifest with
-  NO `compilerOptions` key type-checks JSX cleanly, because Deno applies its own `react-jsx` default
-  — declaring ANY option replaces that set, so the unconditional `experimentalDecorators` was the
-  CAUSE, not a redundant extra. Compiler options are now per template (`denoCompilerOptions`), and
-  `full-stack` gains the `check:app` task that reaches route modules `deno check main.ts` never
-  sees. **D6:** a fresh workspace failed `deno fmt --check` on 62 of 74 files the CLI itself wrote —
-  no `fmt` config was emitted, and with one added the `.tsx` emitters still disagreed, so generated
-  imports are now sorted and wrapped the way `deno fmt` does and emitted JSX is single-quoted. The
-  deliverable that keeps them fixed is `test/e2e/scaffold-runs-e2e.test.ts`, which formats, lints,
-  installs, type-checks and BOOTS every template, then requests what it advertises — booting
-  deliberately without `-A`, since a forgotten permission is unobservable under a blanket grant.
-  Four negative controls were each observed failing and reverted
+  `full-stack` project failed `deno check` with 79 `TS2686`. **The mechanism recorded here was
+  wrong, and was corrected in M90h (PR #261) by measurement** — the SHIPPED FIX is unaffected and
+  correct, only its explanation was. This entry claimed that a manifest with no `compilerOptions`
+  key type-checks JSX cleanly because Deno applies a `react-jsx` default, and that declaring ANY
+  option replaces that set. Both halves are false. Measured on Deno 2.9.6 with React installed, a
+  `.tsx` file with no `import React`: **no `compilerOptions` key FAILS** (`TS2874`, "requires
+  'React' to be in scope"), so Deno's default transform is the CLASSIC one, not `react-jsx`;
+  declaring only `experimentalDecorators` fails **identically**, so it replaced no default and was
+  not the cause; and declaring `jsx: 'react-jsx'` passes cleanly, which is the control proving the
+  probe discriminates. The real cause is simply that a React project must declare `jsx` itself, and
+  the `full-stack` template does (`FULL_STACK_DENO_COMPILER_OPTIONS`) — so removing
+  `experimentalDecorators` never fixed D3; adding `jsx` did. **M76 had already reached the same
+  place and said so**: its plan's risk list records the trap as "probed here and it did not
+  reproduce on Deno 2.9.5 for the JSX default, so the mechanism recorded in M63 needs
+  re-establishing rather than trusting". Nobody re-established it, and the claim went on to
+  propagate into **nine** sites — two CLAUDE.md entries, a ROADMAP scope bullet, two published
+  CHANGELOG sections, three `packages/cli` source comments and a CLI test — because each new use
+  cited the entry rather than the measurement. A flagged-but-unverified claim spreads exactly like a
+  verified one; the flag has to be actioned or removed. Compiler options are now per template
+  (`denoCompilerOptions`), and `full-stack` gains the `check:app` task that reaches route modules
+  `deno check main.ts` never sees. **D6:** a fresh workspace failed `deno fmt --check` on 62 of 74
+  files the CLI itself wrote — no `fmt` config was emitted, and with one added the `.tsx` emitters
+  still disagreed, so generated imports are now sorted and wrapped the way `deno fmt` does and
+  emitted JSX is single-quoted. The deliverable that keeps them fixed is
+  `test/e2e/scaffold-runs-e2e.test.ts`, which formats, lints, installs, type-checks and BOOTS every
+  template, then requests what it advertises — booting deliberately without `-A`, since a forgotten
+  permission is unobservable under a blanket grant. Four negative controls were each observed
+  failing and reverted
 - **Milestone 64** (`packages/decorator-plugin` — `@Ctx()`, the built-in parameter decorator that
   resolves the live `IRequestContext`, so a decorated handler can set a status code, add a header,
   or stream without dropping the whole route down to `app.router.post(...)`. A missing export rather
@@ -3633,9 +3648,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   manifests, `apps/di-decorators`, both CLI template stamps, the generated Node `tsconfig.json`, and
   `test/fixtures/snippets/deno.json` — the last found only because it gated every guide fence.
   `deno
-  task lint` now runs the whole repo with no deprecation warning. Nothing is added back:
-  declaring ANY compiler option replaces Deno's default set (M63 D3), so a template needing none
-  declares none.
+  task lint` now runs the whole repo with no deprecation warning. Nothing is added back: a
+  template needing no compiler option declares none, because an option nothing reads is noise. (An
+  earlier revision justified this by "declaring ANY compiler option replaces Deno's default set (M63
+  D3)" — that mechanism is false and was corrected in M90h; see the M63 entry. The conclusion stands
+  on its own.)
 
   **Verified past the gates by BOOTING**, per M58's lesson that a test asserting decorator PRESENCE
   covered a controller that answered 500 on every request for five releases: a scaffolded
@@ -4811,7 +4828,18 @@ is what needs `--allow-net` (see the `alpha.2` entry above).
   PUBLIC_API.md must describe what the code actually does. "Lazily imported via `npm:pino`" on a
   function that never imports pino, or "@throws if X cannot be loaded from npm" when it throws
   because it never tries, are lies that pass every gate. When you touch a doc claim, confirm the
-  code path it describes actually executes.
+  code path it describes actually executes. **And when a comment or doc claims a SET — these inputs
+  are refused, these providers create on write, these brokers populate that field — the enumeration
+  belongs in the test as data, not in the prose as a list.** A prose list can disagree with the code
+  silently; a table the test iterates cannot. This is what the repo already does where it matters
+  (`filter-conformance.test.ts` runs one query through every adapter but Cosmos, which is excluded
+  deliberately and covered by a reduced table against the real service; M75's header-conformance
+  runs one table over all seven brokers; M90h's secrets table marks each cell verified-or-not); the
+  addition is that it applies to a COMMENT too. M90h shipped three successive comment-level
+  inaccuracies in one file, each describing a guard whose code was correct — and the last conflated
+  two variants the author had already measured correctly, so no probe-first discipline would have
+  caught it. Grouping the values by their measured behavior is what made that comment unable to
+  drift without a test failing.
 - **The principle: every symbol you declare must be read on a real code path — the same rule for an
   option, a constructor parameter, a class field, an exported function, an exported type, or a
   capability token.** If a name's only references are its declaration and its assignment, it is dead

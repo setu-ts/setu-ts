@@ -2940,10 +2940,12 @@ refuses dependencies younger than 24 hours unless you pass `--min-dep-age 0`.
     Deno gates behind `--allow-sys`, and the generated `start` task never asked for it. The
     per-template `denoPermissions` seam already existed and simply had no entry.
   - Every `.tsx` route in a `--template full-stack` project failed `deno check` with 79 `TS2686`.
-    Declaring **any** `compilerOptions` in a manifest replaces Deno's own `react-jsx` default, so
-    the unconditionally-emitted `experimentalDecorators` was the cause rather than a redundant
-    extra. Compiler options are now per template, and `full-stack` gained the `check:app` task that
-    reaches route modules `deno check main.ts` never sees.
+    Deno's default JSX transform is the CLASSIC one, so a React template must declare `jsx` itself
+    and this one did not. (This entry originally said that declaring **any** `compilerOptions`
+    replaces Deno's own `react-jsx` default, making the emitted `experimentalDecorators` the cause.
+    That mechanism is false — measured and corrected later; see the M63 entry of `CLAUDE.md`. The
+    fix below is unaffected and correct.) Compiler options are now per template, and `full-stack`
+    gained the `check:app` task that reaches route modules `deno check main.ts` never sees.
   - A fresh workspace failed `deno fmt --check` on 62 of the 74 files the CLI itself wrote: no `fmt`
     configuration was emitted at all, and with one added the `.tsx` emitters still disagreed.
     Generated imports are now sorted and wrapped the way `deno fmt` does, and emitted JSX is
