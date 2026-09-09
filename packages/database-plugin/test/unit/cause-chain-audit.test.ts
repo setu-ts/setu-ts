@@ -30,11 +30,12 @@ describe('database adapter error causes', () => {
       "catch (error) { const metadata = { cause: error }; throw new Error('replacement'); }";
     const indirectReplacement =
       "catch (error) { const replacement = new Error('replacement'); throw replacement; }";
+    const nestedCause =
+      "catch (error) { throw new Error('replacement', { metadata: { cause: error } }); }";
 
-    expect(replacementThrows(catchBlocks(unrelatedCause).next().value?.body ?? '')).toHaveLength(1);
-    expect(replacementThrows(catchBlocks(indirectReplacement).next().value?.body ?? ''))
-      .toHaveLength(1);
-    expect(forwardsCaughtValue('error', "new Error('replacement')")).toBe(false);
+    expect(hasCauseViolation(unrelatedCause)).toBe(true);
+    expect(hasCauseViolation(indirectReplacement)).toBe(true);
+    expect(hasCauseViolation(nestedCause)).toBe(true);
   });
 });
 
@@ -134,10 +135,27 @@ function forwardsCaughtValue(binding: string | undefined, replacement: string): 
   );
   const options = arguments_[arguments_.length - 1];
   if (options === undefined) return false;
-  if (identifier === 'cause') {
-    return /\{[\s\S]*?\bcause\s*(?:[,}])/.test(options);
-  }
-  return new RegExp(`\\{[\\s\\S]*?\\bcause\\s*:\\s*${identifier}\\b`).test(options);
+  const object = options.trim();
+  if (!object.startsWith('{') || !object.endsWith('}')) return false;
+  return topLevelArguments(object.slice(1, -1)).some((property) =>
+    forwardsCauseProperty(identifier, property)
+  );
+}
+
+/** Tests whether one top-level `ErrorOptions` property forwards the catch binding. */
+function forwardsCauseProperty(identifier: string, property: string): boolean {
+  const trimmed = property.trim();
+  if (identifier === 'cause') return trimmed === 'cause' || trimmed === 'cause: cause';
+  return new RegExp(`^cause\\s*:\\s*${identifier}\\s*$`).test(trimmed);
+}
+
+/** Applies the source-audit rule to one synthetic catch block. */
+function hasCauseViolation(source: string): boolean {
+  const block = catchBlocks(source).next().value;
+  if (block === undefined) throw new Error('expected a catch block');
+  return replacementThrows(block.body).some((replacement) =>
+    !forwardsCaughtValue(block.binding, replacement)
+  );
 }
 
 /** Finds the matching closing parenthesis for a constructor call. */

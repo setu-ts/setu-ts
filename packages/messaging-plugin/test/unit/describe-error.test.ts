@@ -41,4 +41,13 @@ describe('describeError', () => {
     expect(Array.from(output)).toHaveLength(8192);
     expect(output.endsWith('… [truncated]')).toBe(true);
   });
+
+  it('removes control and format characters before passing a message to the logger', () => {
+    const output = describeError(new Error('before\u001b[31m bell\u0007 format\u200C after'));
+
+    expect(DISALLOWED_LOG_CHARACTER.test(output)).toBe(false);
+    expect(output).toContain('before [31m bell format after');
+  });
 });
+
+const DISALLOWED_LOG_CHARACTER = /[\p{Cc}\p{Cf}]/u;

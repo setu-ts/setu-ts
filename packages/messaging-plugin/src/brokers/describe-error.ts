@@ -16,6 +16,9 @@ const TRUNCATION_MARKER = '… [truncated]';
 /** Reserves room for the marker inside the total description limit. */
 const MAX_DESCRIPTION_CONTENT_LENGTH = MAX_DESCRIPTION_LENGTH - TRUNCATION_MARKER.length;
 
+/** Matches whitespace and characters that must not reach a text log sink. */
+const NON_PRINTING = /[\s\p{Cc}\p{Cf}]/u;
+
 interface DescriptionBudget {
   readonly segments: string[];
   length: number;
@@ -81,7 +84,7 @@ function describeSerializedError(error: SerializedError, budget: DescriptionBudg
 /** Appends normalized text until the total description budget is spent. */
 function append(budget: DescriptionBudget, value: string): boolean {
   for (const character of value) {
-    if (/\s/u.test(character)) {
+    if (NON_PRINTING.test(character)) {
       if (budget.segments.length > 0) budget.pendingWhitespace = true;
       continue;
     }
