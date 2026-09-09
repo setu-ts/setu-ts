@@ -245,16 +245,20 @@ export interface TemplateManifest {
    * emits decorated classes needs nothing, because the decorator surface is
    * TC39 standard decorators, which Deno parses with no configuration at all.
    *
-   * **A template emitting JSX must declare `jsx` whenever it declares anything
-   * here at all.** Measured: a manifest with no `compilerOptions` key checks
-   * JSX clean, because Deno applies its own `react-jsx` default — but declaring
-   * ANY option replaces that default set, so one unrelated option silently
-   * reverts JSX to the classic transform and every `.tsx` fails with
-   * `TS2686 'React' refers to a UMD global`. That is why this is per template
-   * rather than a fixed block: a fixed `experimentalDecorators` was itself the
-   * cause of the full-stack template's 79 type errors (M63 D3), not merely a
-   * redundant extra. The same trap is why a template needing no option now
-   * declares none rather than an empty object.
+   * **A template emitting JSX must declare `jsx` and `jsxImportSource`, always
+   * and not only when it declares something else.** Deno's default transform is
+   * the CLASSIC one, so a `.tsx` file with no `import React` fails
+   * `TS2686 'React' refers to a UMD global` under a manifest declaring nothing
+   * at all — measured on 2.9.6, alongside the control that `jsx: 'react-jsx'`
+   * passes. That is the whole of the full-stack template's 79 type errors
+   * (M63 D3): the missing `jsx` was the cause, and adding it is the fix.
+   *
+   * An earlier revision of this block blamed `experimentalDecorators`, on the
+   * theory that declaring ANY option replaces Deno's default set. That is
+   * false — declaring one option leaves every other default in force — and the
+   * correction is recorded in the M63 entry of `CLAUDE.md`. The per-template
+   * design and the rule that a template needing no option declares none rather
+   * than an empty object both stand: an option nothing reads is noise.
    */
   readonly denoCompilerOptions?: Readonly<Record<string, unknown>>;
   /** Entries merged into the Deno import map, for aliases `deno check` must resolve. */

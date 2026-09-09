@@ -2079,7 +2079,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   not the cause; and declaring `jsx: 'react-jsx'` passes cleanly, which is the control proving the
   probe discriminates. The real cause is simply that a React project must declare `jsx` itself, and
   the `full-stack` template does (`FULL_STACK_DENO_COMPILER_OPTIONS`) — so removing
-  `experimentalDecorators` never fixed D3; adding `jsx` did. Compiler options are now per template
+  `experimentalDecorators` never fixed D3; adding `jsx` did. **M76 had already reached the same
+  place and said so**: its plan's risk list records the trap as "probed here and it did not
+  reproduce on Deno 2.9.5 for the JSX default, so the mechanism recorded in M63 needs
+  re-establishing rather than trusting". Nobody re-established it, and the claim went on to
+  propagate into **nine** sites — two CLAUDE.md entries, a ROADMAP scope bullet, two published
+  CHANGELOG sections, three `packages/cli` source comments and a CLI test — because each new use
+  cited the entry rather than the measurement. A flagged-but-unverified claim spreads exactly like a
+  verified one; the flag has to be actioned or removed. Compiler options are now per template
   (`denoCompilerOptions`), and `full-stack` gains the `check:app` task that reaches route modules
   `deno check main.ts` never sees. **D6:** a fresh workspace failed `deno fmt --check` on 62 of 74
   files the CLI itself wrote — no `fmt` config was emitted, and with one added the `.tsx` emitters
@@ -4825,8 +4832,9 @@ is what needs `--allow-net` (see the `alpha.2` entry above).
   are refused, these providers create on write, these brokers populate that field — the enumeration
   belongs in the test as data, not in the prose as a list.** A prose list can disagree with the code
   silently; a table the test iterates cannot. This is what the repo already does where it matters
-  (`filter-conformance.test.ts` runs one query through every adapter, M75's header-conformance runs
-  one table over all seven brokers, M90h's secrets table marks each cell verified-or-not); the
+  (`filter-conformance.test.ts` runs one query through every adapter but Cosmos, which is excluded
+  deliberately and covered by a reduced table against the real service; M75's header-conformance
+  runs one table over all seven brokers; M90h's secrets table marks each cell verified-or-not); the
   addition is that it applies to a COMMENT too. M90h shipped three successive comment-level
   inaccuracies in one file, each describing a guard whose code was correct — and the last conflated
   two variants the author had already measured correctly, so no probe-first discipline would have

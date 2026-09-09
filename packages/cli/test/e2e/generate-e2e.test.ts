@@ -53,8 +53,8 @@ describe('setu end-to-end on a real filesystem', () => {
     await run(['new', 'shop-api']);
     const manifest = JSON.parse(await Deno.readTextFile(`${root}/shop-api/deno.json`));
     expect(manifest.imports['@setu-ts/kernel']).toContain('jsr:@setu-ts/kernel@');
-    // No compiler options: standard decorators need none, and declaring any
-    // would replace Deno's default set.
+    // No compiler options: standard decorators need none, so emitting a key
+    // here would assert a setting nothing reads.
     expect(manifest.compilerOptions).toBeUndefined();
   });
 

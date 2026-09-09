@@ -996,8 +996,10 @@ function tsconfigOptions(manifest?: TemplateManifest): Record<string, unknown> {
  * and `deno task start` read this one. The options are entirely the template's
  * to declare — a template emitting JSX needs `jsx`, and one emitting decorated
  * classes needs nothing at all, because the decorator surface is TC39 standard
- * decorators. Declaring any option REPLACES Deno's default set (M63 D3), so a
- * template that needs none declares none rather than an empty object.
+ * decorators. A template that needs none declares none rather than an empty
+ * object, because an option nothing reads is noise. (An earlier revision said
+ * "declaring any option REPLACES Deno's default set (M63 D3)" — false, and
+ * corrected in the M63 entry of `CLAUDE.md`; the conclusion is unaffected.)
  *
  * @param manifest - The template's manifest contributions, when it declares them
  * @returns The compiler options, or undefined when the template declares none,
