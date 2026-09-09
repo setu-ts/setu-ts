@@ -170,13 +170,7 @@ export function serializeError(value: unknown): SerializedError {
   };
 }
 
-/**
- * Serializes an `Error`, following its `cause` chain while `depth` allows.
- *
- * @param error - The error to serialize
- * @param depth - Remaining cause-chain depth
- * @returns A plain, serializable representation
- */
+/** Serializes a thrown value while consuming the shared node budget. */
 function serializeValue(
   value: unknown,
   depth: number,
@@ -189,6 +183,7 @@ function serializeValue(
     : { name: 'Error', message: safeString(value) };
 }
 
+/** Serializes one `Error` after its guarded members have been read. */
 function serializeErrorInstance(
   error: Error,
   depth: number,
@@ -240,6 +235,7 @@ function serializeErrorInstance(
   return out;
 }
 
+/** Copies only documented scalar classifier fields from one error. */
 function serializeClassifiers(
   error: Error,
 ): Readonly<Record<string, string | number | boolean>> | undefined {
@@ -257,6 +253,7 @@ function serializeClassifiers(
   return Object.keys(classifiers).length === 0 ? undefined : classifiers;
 }
 
+/** Shortens a classifier without reading beyond the bounded Unicode prefix. */
 function truncateClassifier(value: string): string {
   let prefix = '';
   let length = 0;
@@ -268,6 +265,7 @@ function truncateClassifier(value: string): string {
   return value;
 }
 
+/** Serializes direct aggregate members while preserving readable siblings. */
 function serializeAggregateErrors(
   value: unknown,
   depth: number,
