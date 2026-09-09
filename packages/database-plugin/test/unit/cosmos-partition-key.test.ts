@@ -110,6 +110,26 @@ describe('PartitionKeyResolver', () => {
       .rejects.toThrow(/a bare string, not an Error/);
   });
 
+  it('keeps a hostile non-Error rejection as the definition-read cause', async () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    const resolver = new PartitionKeyResolver({
+      read: () => Promise.resolve({ statusCode: 200 }),
+      container: () => ({
+        items: {} as never,
+        item: () => ({}) as never,
+        read: () => Promise.reject(proxy),
+      }),
+    });
+
+    const failure = await resolver.resolve(resolveCosmosTarget('odd', undefined)).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect((failure as Error).message).toContain('[unstringifiable value]');
+    expect((failure as Error).cause).toBe(proxy);
+  });
+
   it('does NOT cache a failure, so a container created later resolves', async () => {
     const containers: Record<string, { partitionKeyPaths?: readonly string[] }> = {};
     const fake = createFakeCosmosClient({ containers });

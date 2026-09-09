@@ -139,6 +139,27 @@ describe('CosmosAdapter lifecycle', () => {
     await expect(adapter.connect()).rejects.toThrow(/a bare string, not an Error/);
   });
 
+  it('keeps a hostile non-Error rejection as the probe cause', async () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    const failing: ICosmosClient = {
+      database: () => ({
+        container: () => {
+          throw new Error('unused');
+        },
+        read: () => Promise.reject(proxy),
+      }),
+    };
+    const adapter = new CosmosAdapter({ client: failing, database: 'db' });
+
+    const failure = await adapter.connect().then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect((failure as Error).message).toContain('[unstringifiable value]');
+    expect((failure as Error).cause).toBe(proxy);
+  });
+
   it('refuses a data operation before connect', () => {
     const { client } = fakeClient();
     const adapter = new CosmosAdapter({ client, database: 'db' });

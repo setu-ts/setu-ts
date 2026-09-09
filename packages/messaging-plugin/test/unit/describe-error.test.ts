@@ -30,4 +30,15 @@ describe('describeError', () => {
 
     expect(describeError(hostile)).toContain('Error:');
   });
+
+  it('bounds an aggregate diagnostic before it reaches the logger sink', () => {
+    const error = new AggregateError(
+      Array.from({ length: 8 }, () => new Error('x'.repeat(10_000))),
+    );
+
+    const output = describeError(error);
+
+    expect(Array.from(output)).toHaveLength(8192);
+    expect(output.endsWith('… [truncated]')).toBe(true);
+  });
 });

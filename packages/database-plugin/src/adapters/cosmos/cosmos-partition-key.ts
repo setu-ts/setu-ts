@@ -15,6 +15,7 @@
  *
  * @module
  */
+import { serializeError } from '@setu-ts/common';
 import type { ICosmosDatabase } from './cosmos-client-types.ts';
 import type { CosmosTarget } from './cosmos-mapping.ts';
 import { parsePartitionKeyPath, renderPartitionKeyPath } from './cosmos-mapping.ts';
@@ -127,7 +128,7 @@ export class PartitionKeyResolver {
     } catch (error) {
       throw new Error(
         `CosmosAdapter could not read container '${target.container}': ${
-          error instanceof Error ? error.message : String(error)
+          serializeError(error).message
         }. Cosmos creates nothing implicitly — the container must exist before the application starts.`,
         { cause: error },
       );

@@ -45,7 +45,7 @@ export interface SerializedError {
  */
 const MAX_CAUSE_DEPTH = 10;
 
-/** Limits a classifier value without dropping its identifying prefix. */
+/** Limits a classifier value, including its truncation marker. */
 const MAX_CLASSIFIER_LENGTH = 512;
 
 /** Limits the direct children copied from one aggregate. */
@@ -56,6 +56,9 @@ const MAX_SERIALIZED_ERROR_NODES = 64;
 
 /** Makes a shortened classifier distinguishable from its original value. */
 const TRUNCATION_MARKER = '… [truncated]';
+
+/** Leaves room for the marker within {@linkcode MAX_CLASSIFIER_LENGTH}. */
+const MAX_CLASSIFIER_PREFIX_LENGTH = MAX_CLASSIFIER_LENGTH - TRUNCATION_MARKER.length;
 
 /** Driver-owned scalar fields that classify an error without carrying its payload. */
 const CLASSIFIER_KEYS = [
@@ -255,10 +258,14 @@ function serializeClassifiers(
 }
 
 function truncateClassifier(value: string): string {
-  const characters = Array.from(value);
-  return characters.length <= MAX_CLASSIFIER_LENGTH
-    ? value
-    : `${characters.slice(0, MAX_CLASSIFIER_LENGTH).join('')}${TRUNCATION_MARKER}`;
+  let prefix = '';
+  let length = 0;
+  for (const character of value) {
+    if (length === MAX_CLASSIFIER_PREFIX_LENGTH) return `${prefix}${TRUNCATION_MARKER}`;
+    prefix += character;
+    length++;
+  }
+  return value;
 }
 
 function serializeAggregateErrors(
@@ -273,13 +280,28 @@ function serializeAggregateErrors(
     const errors: SerializedError[] = [];
     let index = 0;
     while (index < limit && budget.remainingNodes > 0) {
-      const serialized = serializeValue(value[index], depth, budget);
-      if (serialized !== undefined) errors.push(serialized);
+      const member = readArrayMember(value, index);
+      if (member.read) {
+        const serialized = serializeValue(member.value, depth, budget);
+        if (serialized !== undefined) errors.push(serialized);
+      }
       index++;
     }
-    return { errors, omittedErrorCount: length - index };
+    return { errors, omittedErrorCount: length - errors.length };
   } catch {
     return undefined;
+  }
+}
+
+/** Reads one aggregate member without allowing one hostile index to hide its siblings. */
+function readArrayMember(
+  value: readonly unknown[],
+  index: number,
+): { read: boolean; value?: unknown } {
+  try {
+    return { read: true, value: value[index] };
+  } catch {
+    return { read: false };
   }
 }
 

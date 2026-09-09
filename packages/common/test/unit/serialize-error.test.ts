@@ -86,7 +86,21 @@ describe('serializeError', () => {
 
     const out = serializeError(error);
     expect(out.classifiers?.code).toBeUndefined();
-    expect(out.classifiers?.errno).toBe(`${'😀'.repeat(512)}… [truncated]`);
+    expect(out.classifiers?.errno).toBe(`${'😀'.repeat(499)}… [truncated]`);
+    const errno = out.classifiers?.errno;
+    expect(typeof errno).toBe('string');
+    if (typeof errno !== 'string') throw new Error('errno classifier was not a string');
+    expect(Array.from(errno)).toHaveLength(512);
+  });
+
+  it('bounds a huge classifier without materializing the whole value', () => {
+    const error = Object.assign(new Error('driver failed'), { code: 'x'.repeat(1_000_000) });
+
+    const classifier = serializeError(error).classifiers?.code;
+    expect(classifier).toBe(`${'x'.repeat(499)}… [truncated]`);
+    expect(typeof classifier).toBe('string');
+    if (typeof classifier !== 'string') throw new Error('code classifier was not a string');
+    expect(Array.from(classifier)).toHaveLength(512);
   });
 
   it('drops non-finite numeric classifiers so JSON preserves the documented scalar shape', () => {
@@ -133,6 +147,21 @@ describe('serializeError', () => {
     const hostile = new AggregateError([]);
     Object.defineProperty(hostile, 'errors', { value: proxy });
     expect(serializeError(hostile).errors).toBeUndefined();
+  });
+
+  it('keeps readable aggregate members when one indexed read is hostile', () => {
+    const members = new Proxy([new Error('first'), new Error('hidden'), new Error('last')], {
+      get(target, property, receiver) {
+        if (property === '1') throw new Error('indexed read failed');
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const aggregate = new AggregateError([]);
+    Object.defineProperty(aggregate, 'errors', { value: members });
+
+    const out = serializeError(aggregate);
+    expect(out.errors?.map((member) => member.message)).toEqual(['first', 'last']);
+    expect(out.omittedErrorCount).toBe(1);
   });
 
   it('caps nested aggregate trees with a shared total-node budget', () => {
