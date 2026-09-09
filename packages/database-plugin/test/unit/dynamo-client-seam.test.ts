@@ -5,6 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { serializeError } from '@setu-ts/common';
 import {
   adaptDynamoSdkModule,
   createInjectedDynamoLoader,
@@ -268,6 +269,18 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
         credentials,
       })
     ).toThrow(/plaintext HTTP endpoint on remote host/);
+  });
+
+  it('preserves an invalid endpoint parser failure as the refusal cause', () => {
+    let failure: unknown;
+    try {
+      createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'not a URL' });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).cause).toBeInstanceOf(TypeError);
+    expect(serializeError(failure).cause?.name).toBe('TypeError');
   });
 
   it('allows https to a remote host', () => {

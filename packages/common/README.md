@@ -89,6 +89,15 @@ the optional `attempt` and `headers` fields. Behaviours run in declared order; r
 `WebSocketUpgradeGuard` and `WebSocketGuardDecision` are the separate, route-scoped handshake guard
 types. They run before an accepted upgrade; they are not frame behaviours.
 
+### Error diagnostics
+
+`serializeError()` preserves ordinary error fields plus a deliberately small classifier allowlist:
+`code`, `errno`, `syscall`, `severity`, `constraint`, `codeName`, and `statusCode`. Only strings,
+finite numbers, and booleans are kept; objects such as driver query payloads and `$metadata` are
+omitted. Classifier strings are capped at 512 Unicode code points, aggregate errors keep at most
+eight direct members, and the complete serialized tree is bounded to 64 nodes. An aggregate that is
+truncated reports `omittedErrorCount`.
+
 See the repository's
 [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#api-reference-setu-tscommon)
 for the full API contract and

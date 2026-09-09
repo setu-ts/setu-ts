@@ -252,6 +252,7 @@ describe('ServiceBusBroker', () => {
 
     it('malformed reply is nacked exactly once', async () => {
       let nackCount = 0;
+      const logged: string[] = [];
       const opens: Array<
         { topic: string; subscription: string; cb: (...args: unknown[]) => unknown }
       > = [];
@@ -268,7 +269,10 @@ describe('ServiceBusBroker', () => {
       const broker = new ServiceBusBroker(createRuntime(), {
         serialize: (v) => JSON.stringify(v),
         deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      }, {
+        client: transport,
+        logger: { error: (message) => logged.push(message) },
+      });
 
       await broker.connect();
       await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
@@ -287,6 +291,8 @@ describe('ServiceBusBroker', () => {
       await new Promise((r) => setTimeout(r, 0));
 
       expect(nackCount).toBe(1);
+      expect(logged).toHaveLength(1);
+      expect(logged[0]).toContain('Service Bus reply deserialization error: SyntaxError:');
     });
   });
 
@@ -691,7 +697,7 @@ describe('ServiceBusBroker', () => {
   });
 
   describe('logger on handler error', () => {
-    it('calls logger.error when handler throws', async () => {
+    it('renders aggregate handler members into the string logger sink', async () => {
       let logged = '';
       let onMessageCb:
         | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
@@ -720,13 +726,14 @@ describe('ServiceBusBroker', () => {
 
       await broker.connect();
       await broker.subscribe('topic', () => {
-        throw new Error('handler-error');
+        throw new AggregateError([new Error('handler-error'), new Error('driver-error')]);
       });
 
       onMessageCb!({ payload: '{}', ack: () => {}, nack: () => {} });
       await Promise.resolve();
       await Promise.resolve();
       expect(logged).toContain('handler-error');
+      expect(logged).toContain('driver-error');
     });
   });
 
@@ -1329,7 +1336,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
     // The real SDK passes a ProcessErrorArgs object with .error field.
     await processError(
       {
-        error: new Error('receiver-link-failed'),
+        error: new AggregateError([new Error('receiver-link-failed'), new Error('receiver-reset')]),
         errorSource: 'receive',
         entityPath: 'orders',
         fullyQualifiedNamespace: 'test.servicebus.windows.net',
@@ -1337,9 +1344,9 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
       } as import('../../src/brokers/service-bus-broker.ts').IServiceBusProcessErrorArgs,
     );
 
-    expect(logged).toEqual([
-      'Service Bus receiver error: Error: receiver-link-failed',
-    ]);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain('receiver-link-failed');
+    expect(logged[0]).toContain('receiver-reset');
     await broker.disconnect();
   });
 

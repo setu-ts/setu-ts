@@ -20,6 +20,7 @@
  *
  * @module
  */
+import { serializeError } from '@setu-ts/common';
 import type {
   IAdapterTransaction,
   IDatabaseAdapter,
@@ -171,8 +172,9 @@ export class CosmosAdapter implements IDatabaseAdapter {
     } catch (error) {
       throw new Error(
         `CosmosAdapter could not reach database '${this.#options.database}': ${
-          error instanceof Error ? error.message : String(error)
+          serializeError(error).message
         }`,
+        { cause: error },
       );
     }
     // A `disconnect()` during this attempt bumped the generation, so the result

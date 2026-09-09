@@ -48,6 +48,24 @@ describe('normalizeMetadata', () => {
     expect(result.second).toEqual({ name: 'Error', message: 'second', stack: b.stack });
   });
 
+  it('preserves safe classifiers and aggregate members during normalization', () => {
+    const driver = new Error('serialization failure') as Error & { code?: string };
+    driver.code = '40001';
+    const error = new AggregateError([driver, new Error('connection reset')]);
+
+    const result = normalizeMetadata({ error });
+    const serialized = result.error as {
+      classifiers?: { code?: string };
+      errors?: readonly { message: string; classifiers?: { code?: string } }[];
+    };
+
+    expect(serialized.errors?.map((member) => member.message)).toEqual([
+      'serialization failure',
+      'connection reset',
+    ]);
+    expect(serialized.errors?.[0]?.classifiers?.code).toBe('40001');
+  });
+
   it('normalizes Errors while preserving sibling values', () => {
     const err = new TypeError('bad');
     const result = normalizeMetadata({ requestId: 'r-1', error: err, ok: false });

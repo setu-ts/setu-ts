@@ -298,6 +298,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
           error instanceof Error ? error.message : String(error)
         }. ` +
           'Install drizzle-orm alongside the injected drizzleInstance.',
+        { cause: error },
       );
     }
 

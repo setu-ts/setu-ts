@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common`, `@setu-ts/database-plugin`, `@setu-ts/messaging-plugin` — operator error
+  diagnostics survive wrapping and string logger sinks (M90j).** `serializeError` now carries a
+  bounded, scalar-only driver classifier allowlist and `AggregateError` members; database adapter
+  wrappers retain their original cause; and broker string loggers render the complete bounded
+  diagnostic rather than JavaScript's lossy default error interpolation.
+
 - **Documentation — `docs/upgrading.md`, and four published claims corrected (M90h / X22-4, X26-1,
   X26-2, X33-2, X20-3).** A new upgrade guide answers "what must I change in **my** project",
   version by version, where the CHANGELOG answers what changed in the framework; `docs/releasing.md`

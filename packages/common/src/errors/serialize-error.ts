@@ -30,6 +30,12 @@ export interface SerializedError {
   readonly stack?: string;
   /** The serialized `cause`, when the error carries one. */
   readonly cause?: SerializedError;
+  /** Safe scalar driver fields useful for error classification. */
+  readonly classifiers?: Readonly<Record<string, string | number | boolean>>;
+  /** Serialized members of an `AggregateError`, when present. */
+  readonly errors?: readonly SerializedError[];
+  /** Number of direct aggregate members omitted by the serialization budget. */
+  readonly omittedErrorCount?: number;
 }
 
 /**
@@ -38,6 +44,44 @@ export interface SerializedError {
  * further `cause`, which bounds a self-referential chain.
  */
 const MAX_CAUSE_DEPTH = 10;
+
+/** Limits a classifier value, including its truncation marker. */
+const MAX_CLASSIFIER_LENGTH = 512;
+
+/** Limits the direct children copied from one aggregate. */
+const MAX_AGGREGATE_ERRORS = 8;
+
+/** Limits every error node produced by one serialization. */
+const MAX_SERIALIZED_ERROR_NODES = 64;
+
+/** Makes a shortened classifier distinguishable from its original value. */
+const TRUNCATION_MARKER = '… [truncated]';
+
+/** Leaves room for the marker within {@linkcode MAX_CLASSIFIER_LENGTH}. */
+const MAX_CLASSIFIER_PREFIX_LENGTH = MAX_CLASSIFIER_LENGTH - TRUNCATION_MARKER.length;
+
+/** Driver-owned scalar fields that classify an error without carrying its payload. */
+const CLASSIFIER_KEYS = [
+  'code',
+  'errno',
+  'syscall',
+  'severity',
+  'constraint',
+  'codeName',
+  'statusCode',
+] as const;
+
+type ErrorMember =
+  | 'name'
+  | 'message'
+  | 'stack'
+  | 'cause'
+  | 'errors'
+  | typeof CLASSIFIER_KEYS[number];
+
+interface SerializationBudget {
+  remainingNodes: number;
+}
 
 /**
  * Stringifies any value without throwing.
@@ -94,33 +138,57 @@ function isError(value: unknown): value is Error {
   }
 }
 
+/** Answers whether an error owns the standard AggregateError member list. */
+function isAggregateError(value: Error): value is AggregateError {
+  try {
+    return value instanceof AggregateError;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Serializes any thrown value to a plain, serializable object.
  *
- * An `Error` yields `{ name, message, stack?, cause? }` with the `cause` chain
- * followed to a bounded depth. A non-`Error` value (a string, a number, a
- * plain object) yields `{ name: 'Error', message: <stringified> }` — the same
- * shape, so a caller can always read `name` and `message` without narrowing.
+ * An `Error` yields `{ name, message, stack?, cause?, classifiers?, errors? }`
+ * with the `cause` chain followed to a bounded depth. Safe scalar driver
+ * classifiers are copied from a fixed allowlist; `AggregateError` members are
+ * copied under bounded width and total-node budgets. A non-`Error` value (a
+ * string, a number, a plain object) yields `{ name: 'Error', message:
+ * <stringified> }` — the same shape, so a caller can always read `name` and
+ * `message` without narrowing.
  *
  * @param value - The thrown value
  * @returns A plain, serializable representation
  * @since 0.1.0
  */
 export function serializeError(value: unknown): SerializedError {
-  if (isError(value)) {
-    return serializeErrorInstance(value, MAX_CAUSE_DEPTH);
-  }
-  return { name: 'Error', message: safeString(value) };
+  const budget: SerializationBudget = { remainingNodes: MAX_SERIALIZED_ERROR_NODES };
+  return serializeValue(value, MAX_CAUSE_DEPTH, budget) ?? {
+    name: 'Error',
+    message: safeString(value),
+  };
 }
 
-/**
- * Serializes an `Error`, following its `cause` chain while `depth` allows.
- *
- * @param error - The error to serialize
- * @param depth - Remaining cause-chain depth
- * @returns A plain, serializable representation
- */
-function serializeErrorInstance(error: Error, depth: number): SerializedError {
+/** Serializes a thrown value while consuming the shared node budget. */
+function serializeValue(
+  value: unknown,
+  depth: number,
+  budget: SerializationBudget,
+): SerializedError | undefined {
+  if (budget.remainingNodes === 0) return undefined;
+  budget.remainingNodes--;
+  return isError(value)
+    ? serializeErrorInstance(value, depth, budget)
+    : { name: 'Error', message: safeString(value) };
+}
+
+/** Serializes one `Error` after its guarded members have been read. */
+function serializeErrorInstance(
+  error: Error,
+  depth: number,
+  budget: SerializationBudget,
+): SerializedError {
   // Every member read is guarded independently. Passing `isError` proves only
   // that the prototype chain is readable — a `Proxy` whose target is a real
   // `Error` and whose `get` trap throws satisfies `instanceof` and then rejects
@@ -132,12 +200,15 @@ function serializeErrorInstance(error: Error, depth: number): SerializedError {
   const message = readMember(error, 'message');
   const stack = readMember(error, 'stack');
   const cause = readMember(error, 'cause');
+  const classifiers = serializeClassifiers(error);
+  const errors = isAggregateError(error) ? readMember(error, 'errors') : undefined;
 
-  const out: {
-    name: string;
-    message: string;
+  const out: SerializedError & {
     stack?: string;
     cause?: SerializedError;
+    classifiers?: Readonly<Record<string, string | number | boolean>>;
+    errors?: readonly SerializedError[];
+    omittedErrorCount?: number;
   } = {
     name: typeof name === 'string' ? name : 'Error',
     // An unreadable message still describes the value it came from, so the log
@@ -147,12 +218,89 @@ function serializeErrorInstance(error: Error, depth: number): SerializedError {
   if (typeof stack === 'string') {
     out.stack = stack;
   }
+  if (classifiers !== undefined) {
+    out.classifiers = classifiers;
+  }
   if (depth > 0 && cause !== undefined) {
-    out.cause = isError(cause)
-      ? serializeErrorInstance(cause, depth - 1)
-      : { name: 'Error', message: safeString(cause) };
+    const serializedCause = serializeValue(cause, depth - 1, budget);
+    if (serializedCause !== undefined) out.cause = serializedCause;
+  }
+  if (depth > 0 && errors !== undefined) {
+    const aggregate = serializeAggregateErrors(errors, depth - 1, budget);
+    if (aggregate !== undefined) {
+      if (aggregate.errors.length > 0) out.errors = aggregate.errors;
+      if (aggregate.omittedErrorCount > 0) out.omittedErrorCount = aggregate.omittedErrorCount;
+    }
   }
   return out;
+}
+
+/** Copies only documented scalar classifier fields from one error. */
+function serializeClassifiers(
+  error: Error,
+): Readonly<Record<string, string | number | boolean>> | undefined {
+  const classifiers: Record<string, string | number | boolean> = {};
+  for (const key of CLASSIFIER_KEYS) {
+    const value = readMember(error, key);
+    if (typeof value === 'string') {
+      classifiers[key] = truncateClassifier(value);
+    } else if (typeof value === 'number' && Number.isFinite(value)) {
+      classifiers[key] = value;
+    } else if (typeof value === 'boolean') {
+      classifiers[key] = value;
+    }
+  }
+  return Object.keys(classifiers).length === 0 ? undefined : classifiers;
+}
+
+/** Shortens a classifier without reading beyond the bounded Unicode prefix. */
+function truncateClassifier(value: string): string {
+  let prefix = '';
+  let length = 0;
+  for (const character of value) {
+    if (length === MAX_CLASSIFIER_PREFIX_LENGTH) return `${prefix}${TRUNCATION_MARKER}`;
+    prefix += character;
+    length++;
+  }
+  return value;
+}
+
+/** Serializes direct aggregate members while preserving readable siblings. */
+function serializeAggregateErrors(
+  value: unknown,
+  depth: number,
+  budget: SerializationBudget,
+): { errors: SerializedError[]; omittedErrorCount: number } | undefined {
+  try {
+    if (!Array.isArray(value)) return undefined;
+    const length = value.length;
+    const limit = Math.min(length, MAX_AGGREGATE_ERRORS);
+    const errors: SerializedError[] = [];
+    let index = 0;
+    while (index < limit && budget.remainingNodes > 0) {
+      const member = readArrayMember(value, index);
+      if (member.read) {
+        const serialized = serializeValue(member.value, depth, budget);
+        if (serialized !== undefined) errors.push(serialized);
+      }
+      index++;
+    }
+    return { errors, omittedErrorCount: length - errors.length };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Reads one aggregate member without allowing one hostile index to hide its siblings. */
+function readArrayMember(
+  value: readonly unknown[],
+  index: number,
+): { read: boolean; value?: unknown } {
+  try {
+    return { read: true, value: value[index] };
+  } catch {
+    return { read: false };
+  }
 }
 
 /**
@@ -166,9 +314,9 @@ function serializeErrorInstance(error: Error, depth: number): SerializedError {
  * @param key - The member to read
  * @returns The member's value, or `undefined` when it cannot be read
  */
-function readMember(source: Error, key: 'name' | 'message' | 'stack' | 'cause'): unknown {
+function readMember(source: Error, key: ErrorMember): unknown {
   try {
-    return source[key];
+    return (source as unknown as Record<string, unknown>)[key];
   } catch {
     return undefined;
   }

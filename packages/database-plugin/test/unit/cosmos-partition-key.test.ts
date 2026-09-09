@@ -5,6 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { serializeError } from '@setu-ts/common';
 import {
   PartitionKeyResolver,
   renderPaths,
@@ -77,10 +78,16 @@ describe('PartitionKeyResolver', () => {
   it('names a container that does not exist', async () => {
     const fake = createFakeCosmosClient({ containers: {} });
     const resolver = new PartitionKeyResolver(fake.client.database('db'));
-    await expect(resolver.resolve(resolveCosmosTarget('ghost', undefined)))
-      .rejects.toThrow(
-        /could not read container 'ghost'.*must exist before the application starts/s,
-      );
+    const failure = await resolver.resolve(resolveCosmosTarget('ghost', undefined)).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(
+      /could not read container 'ghost'.*must exist before the application starts/s,
+    );
+    expect((failure as Error).cause).toBeInstanceOf(Error);
+    expect(serializeError(failure).cause?.message).toContain('not found');
   });
 
   it('reports a container definition carrying no partition key', async () => {
@@ -101,6 +108,26 @@ describe('PartitionKeyResolver', () => {
     });
     await expect(resolver.resolve(resolveCosmosTarget('odd', undefined)))
       .rejects.toThrow(/a bare string, not an Error/);
+  });
+
+  it('keeps a hostile non-Error rejection as the definition-read cause', async () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    const resolver = new PartitionKeyResolver({
+      read: () => Promise.resolve({ statusCode: 200 }),
+      container: () => ({
+        items: {} as never,
+        item: () => ({}) as never,
+        read: () => Promise.reject(proxy),
+      }),
+    });
+
+    const failure = await resolver.resolve(resolveCosmosTarget('odd', undefined)).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect((failure as Error).message).toContain('[unstringifiable value]');
+    expect((failure as Error).cause).toBe(proxy);
   });
 
   it('does NOT cache a failure, so a container created later resolves', async () => {

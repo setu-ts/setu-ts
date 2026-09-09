@@ -79,6 +79,10 @@ Every other option is arm-specific — `url`/`client` for `'redis-streams'`, cre
 arms, an injected `IMessageBroker` for `'custom'`. A missing per-arm field is a compile error rather
 than a startup throw. See [Brokers](#brokers) for the full arm list.
 
+Broker-specific `logger` options are string sinks (`{ error: (message: string) => void }`). Broker
+failures are rendered into that message with the error name, message, safe classifier fields, cause
+chain, and bounded aggregate members; the sink never receives a driver object directly.
+
 Declare subscriptions where the plugin is composed, instead of resolving the broker after `start()`:
 
 ```typescript

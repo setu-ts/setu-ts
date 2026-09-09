@@ -24,6 +24,7 @@ import type {
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { describeError } from './describe-error.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
@@ -220,7 +221,7 @@ export function adaptPubSubModule(
 
       sub.on('error', (err) => {
         if (options.logger) {
-          options.logger.error(`Pub/Sub subscription error: ${err}`);
+          options.logger.error(`Pub/Sub subscription error: ${describeError(err)}`);
         }
       });
 
@@ -339,7 +340,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
         } catch (err) {
           // Deserialization failure — nack so transport retries.
           if (this.#logger) {
-            this.#logger.error(`Pub/Sub reply deserialization error: ${err}`);
+            this.#logger.error(`Pub/Sub reply deserialization error: ${describeError(err)}`);
           }
           msg.nack();
         }
@@ -499,7 +500,7 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
 
         if (handlerError !== null) {
           if (this.#logger) {
-            this.#logger.error(`Pub/Sub handler error: ${handlerError}`);
+            this.#logger.error(`Pub/Sub handler error: ${describeError(handlerError)}`);
           }
           msg.nack();
         } else {

@@ -10,6 +10,7 @@ import type {
 import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { describeError } from './describe-error.ts';
 import { createTopicInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import type { IRedisStreamsClient, RedisStreamsOptions } from '../interfaces/index.ts';
@@ -385,12 +386,12 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
               await this.#client?.xack(topic, groupId, entryId);
             } catch (error) {
               // Handler failed - don't ACK, leave in PEL
-              this.#logger?.error(`Message handler failed: ${error}`);
+              this.#logger?.error(`Message handler failed: ${describeError(error)}`);
             }
           }
         }
       } catch (error) {
-        this.#logger?.error(`Poll error: ${error}`);
+        this.#logger?.error(`Poll error: ${describeError(error)}`);
       } finally {
         inFlight = false;
       }

@@ -191,6 +191,7 @@ export class MongoAdapter implements IDatabaseAdapter {
       throw new MongoTransactionUnavailableError(
         'Mongo transactions require a replica set (rs0); the current deployment is a standalone mongod. ' +
           (error instanceof Error ? error.message : String(error)),
+        { cause: error },
       );
     }
     return new MongoTransaction(
