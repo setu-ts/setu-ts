@@ -684,6 +684,14 @@ projecting one silently changes the response shape.
 Uniqueness and types are outside what any schema-less store can do. **Use the Memory adapter for
 development and tests, and run integration tests against the backend you deploy on.**
 
+### Development: preserve caught causes
+
+When an adapter replaces a caught error with a more actionable framework error, it forwards the
+original value through native `ErrorOptions` (`new Error(message, { cause })`). The replacement
+explains the failed framework operation; the cause preserves the driver diagnostic for logs. A catch
+that intentionally drops a cause must carry a `drops-cause: <reason>` marker and be justified in its
+test.
+
 ## What a driver condition returns to the client
 
 Two driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and

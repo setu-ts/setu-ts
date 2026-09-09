@@ -28,6 +28,7 @@ import type { ServiceBusRetryOptions } from '../interfaces/index.ts';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
+import { describeError } from './describe-error.ts';
 import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
@@ -385,7 +386,9 @@ export function adaptServiceBusModule(
             });
           },
           processError: (args: IServiceBusProcessErrorArgs) =>
-            Promise.resolve(options.logger?.error(`Service Bus receiver error: ${args.error}`)),
+            Promise.resolve(
+              options.logger?.error(`Service Bus receiver error: ${describeError(args.error)}`),
+            ),
         },
         { autoCompleteMessages: false },
       );
@@ -548,7 +551,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
           await msg.ack();
         } catch (err) {
           if (this.#logger) {
-            this.#logger.error(`Service Bus reply deserialization error: ${err}`);
+            this.#logger.error(`Service Bus reply deserialization error: ${describeError(err)}`);
           }
           await msg.nack();
         }
@@ -727,7 +730,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
 
       if (handlerError !== null) {
         if (this.#logger) {
-          this.#logger.error(`Service Bus handler error: ${handlerError}`);
+          this.#logger.error(`Service Bus handler error: ${describeError(handlerError)}`);
         }
         return msg.nack();
       }

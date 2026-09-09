@@ -9,6 +9,7 @@ import type {
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
+import { describeError } from './describe-error.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
@@ -548,7 +549,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
         } catch (error) {
           // Nack on failure without requeue
           realChannel.nack(msg, false, false);
-          this.#logger?.error(`Message handler failed: ${error}`);
+          this.#logger?.error(`Message handler failed: ${describeError(error)}`);
         }
       },
       { noAck: false },

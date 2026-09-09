@@ -129,6 +129,7 @@ export class PartitionKeyResolver {
         `CosmosAdapter could not read container '${target.container}': ${
           error instanceof Error ? error.message : String(error)
         }. Cosmos creates nothing implicitly — the container must exist before the application starts.`,
+        { cause: error },
       );
     }
     const paths = definition.resource?.partitionKey?.paths ?? [];

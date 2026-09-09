@@ -10,7 +10,12 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as common from '../../src/index.ts';
-import type { HealthCheckResult, IHealthIndicator, IServiceRegistry } from '../../src/index.ts';
+import type {
+  HealthCheckResult,
+  IHealthIndicator,
+  IServiceRegistry,
+  SerializedError,
+} from '../../src/index.ts';
 import type {
   JsonValue,
   RegistryFactory,
@@ -75,6 +80,20 @@ describe('@setu-ts/common barrel — registry factory arm', () => {
     const payload: JsonValue = { build: 412, tags: ['live'], note: undefined };
 
     expect(JSON.stringify(payload)).toBe('{"build":412,"tags":["live"]}');
+  });
+
+  it('exports the additive serialized-error diagnostics through the barrel', () => {
+    const error: SerializedError = {
+      name: 'Error',
+      message: 'transaction failed',
+      classifiers: { code: '40001' },
+      errors: [{ name: 'Error', message: 'retry exhausted' }],
+      omittedErrorCount: 2,
+    };
+
+    expect(error.classifiers?.code).toBe('40001');
+    expect(error.errors?.[0]?.message).toBe('retry exhausted');
+    expect(error.omittedErrorCount).toBe(2);
   });
 });
 

@@ -30,6 +30,63 @@ describe('serializeError', () => {
     expect(out.message).toBe('custom');
   });
 
+  it('keeps only safe scalar driver classifiers', () => {
+    const error = new Error('transaction failed') as Error & {
+      code?: unknown;
+      severity?: unknown;
+      constraint?: unknown;
+      query?: unknown;
+      parameters?: unknown;
+    };
+    error.code = '40001';
+    error.severity = 'ERROR';
+    error.constraint = 'orders_customer_id_fkey';
+    error.query = 'SELECT * FROM users WHERE password = $1';
+    error.parameters = ['secret'];
+
+    expect(serializeError(error).classifiers).toEqual({
+      code: '40001',
+      severity: 'ERROR',
+      constraint: 'orders_customer_id_fkey',
+    });
+  });
+
+  it('drops object-valued classifiers and truncates long strings by Unicode code point', () => {
+    const error = new Error('driver failed') as Error & { code?: unknown; errno?: unknown };
+    error.code = { query: 'secret' };
+    error.errno = `${'😀'.repeat(513)}suffix`;
+
+    const out = serializeError(error);
+    expect(out.classifiers?.code).toBeUndefined();
+    expect(out.classifiers?.errno).toBe(`${'😀'.repeat(512)}… [truncated]`);
+  });
+
+  it('serializes bounded AggregateError members and reports omitted entries', () => {
+    const aggregate = new AggregateError(
+      Array.from({ length: 10 }, (_, index) => new Error(`member-${index}`)),
+    );
+
+    const out = serializeError(aggregate);
+    expect(out.errors).toHaveLength(8);
+    expect(out.errors?.[0]?.message).toBe('member-0');
+    expect(out.errors?.[7]?.message).toBe('member-7');
+    expect(out.omittedErrorCount).toBe(2);
+  });
+
+  it('caps nested aggregate trees with a shared total-node budget', () => {
+    const nested = (depth: number): AggregateError =>
+      new AggregateError(
+        Array.from({ length: 8 }, () => depth === 0 ? new Error('leaf') : nested(depth - 1)),
+      );
+
+    const count = (error: SerializedError): number =>
+      1 + (error.errors?.reduce((total, member) => total + count(member), 0) ?? 0);
+
+    const out = serializeError(nested(4));
+    expect(count(out)).toBeLessThanOrEqual(64);
+    expect(out.omittedErrorCount).toBeGreaterThan(0);
+  });
+
   it('follows the cause chain recursively', () => {
     const root = new Error('root');
     const mid = new Error('mid', { cause: root });
@@ -169,6 +226,21 @@ describe('serializeError never throws (code review, CodeRabbit)', () => {
     expect(out.message).toBe('readable message');
     expect(out.name).toBe('Error');
     expect(out.stack).toBeUndefined();
+  });
+
+  it('keeps readable classifiers when one classifier accessor is hostile', () => {
+    const partial = new Error('readable message') as Error & {
+      code?: unknown;
+      severity?: unknown;
+    };
+    partial.code = '40001';
+    Object.defineProperty(partial, 'severity', {
+      get() {
+        throw new Error('severity access failed');
+      },
+    });
+
+    expect(serializeError(partial).classifiers).toEqual({ code: '40001' });
   });
 
   it('stringifies a symbol rather than treating it as hostile', () => {

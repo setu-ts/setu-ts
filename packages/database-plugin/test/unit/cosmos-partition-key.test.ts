@@ -77,10 +77,15 @@ describe('PartitionKeyResolver', () => {
   it('names a container that does not exist', async () => {
     const fake = createFakeCosmosClient({ containers: {} });
     const resolver = new PartitionKeyResolver(fake.client.database('db'));
-    await expect(resolver.resolve(resolveCosmosTarget('ghost', undefined)))
-      .rejects.toThrow(
-        /could not read container 'ghost'.*must exist before the application starts/s,
-      );
+    const failure = await resolver.resolve(resolveCosmosTarget('ghost', undefined)).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(
+      /could not read container 'ghost'.*must exist before the application starts/s,
+    );
+    expect((failure as Error).cause).toBeInstanceOf(Error);
   });
 
   it('reports a container definition carrying no partition key', async () => {

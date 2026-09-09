@@ -110,7 +110,13 @@ describe('CosmosAdapter lifecycle', () => {
       }),
     };
     const adapter = new CosmosAdapter({ client: flaky, database: 'db' });
-    await expect(adapter.connect()).rejects.toThrow(/could not reach database 'db'/);
+    const failure = await adapter.connect().then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toMatch(/could not reach database 'db'/);
+    expect((failure as Error).cause).toBeInstanceOf(Error);
     expect(adapter.isReady()).toBe(false);
     await adapter.connect();
     expect(adapter.isReady()).toBe(true);

@@ -304,9 +304,10 @@ export class UnsupportedQueryFeatureError extends Error {
    * @param feature - The query feature that is not supported
    * @param adapter - The adapter name
    * @param message - The full diagnostic, safe to log
+   * @param options - Native error options, including an underlying `cause`
    */
-  constructor(feature: string, adapter: string, message: string) {
-    super(message);
+  constructor(feature: string, adapter: string, message: string, options?: ErrorOptions) {
+    super(message, options);
     this.feature = feature;
     this.adapter = adapter;
     // Branded only for a caller-caused query shape — see
@@ -351,9 +352,10 @@ export class MongoTransactionUnavailableError extends Error {
    * Creates the error.
    *
    * @param message - The full diagnostic, safe to log
+   * @param options - Native error options, including an underlying `cause`
    */
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
   }
 }
 

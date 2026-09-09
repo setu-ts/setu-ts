@@ -270,6 +270,17 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
     ).toThrow(/plaintext HTTP endpoint on remote host/);
   });
 
+  it('preserves an invalid endpoint parser failure as the refusal cause', () => {
+    let failure: unknown;
+    try {
+      createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'not a URL' });
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).cause).toBeInstanceOf(TypeError);
+  });
+
   it('allows https to a remote host', () => {
     expect(() =>
       createLazyDynamoLoader({

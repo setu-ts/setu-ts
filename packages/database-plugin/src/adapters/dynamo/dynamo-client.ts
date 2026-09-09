@@ -149,11 +149,12 @@ function assertTransportSecurity(configuration: DynamoClientConfiguration): void
   let url: URL;
   try {
     url = new URL(endpoint);
-  } catch {
+  } catch (cause) {
     throw new UnsupportedQueryFeatureError(
       'endpoint',
       'dynamodb',
       `DynamoAdapter endpoint '${endpoint}' is not a valid URL.`,
+      { cause },
     );
   }
   if (url.protocol !== 'http:') return;

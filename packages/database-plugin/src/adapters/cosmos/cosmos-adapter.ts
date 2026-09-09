@@ -173,6 +173,7 @@ export class CosmosAdapter implements IDatabaseAdapter {
         `CosmosAdapter could not reach database '${this.#options.database}': ${
           error instanceof Error ? error.message : String(error)
         }`,
+        { cause: error },
       );
     }
     // A `disconnect()` during this attempt bumped the generation, so the result

@@ -207,9 +207,12 @@ describe('MongoAdapter — transactions', () => {
     const client = new FakeSessionClient(failingSession);
     const adapter = new MongoAdapter({ url: 'mongodb://localhost:27017/db', client });
     await adapter.connect();
-    await expect(adapter.beginTransaction()).rejects.toBeInstanceOf(
-      MongoTransactionUnavailableError,
+    const failure = await adapter.beginTransaction().then(
+      () => null,
+      (error: unknown) => error,
     );
+    expect(failure).toBeInstanceOf(MongoTransactionUnavailableError);
+    expect((failure as Error).cause).toBeInstanceOf(Error);
     // The failed session is ended, never leaked.
     expect(failingSession.calls).toContain('endSession');
   });
