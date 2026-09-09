@@ -24,7 +24,7 @@ import type { IQueueMessage, IQueueMessageBatch, IQueueProducer } from '../bindi
 import { CloudflareUnsupportedError } from '../errors.ts';
 import { runBounded } from './bounded-map.ts';
 import type { JobEnvelope } from './job-envelope.ts';
-import { encodeJobEnvelope, isJobEnvelope } from './job-envelope.ts';
+import { encodeJobEnvelope, isJobEnvelope, readEnvelopeHeaders } from './job-envelope.ts';
 
 /** The platform's maximum `delaySeconds`, and this queue's default cap. */
 const PLATFORM_MAX_DELAY_SECONDS = 86_400;
@@ -162,7 +162,7 @@ export class WorkersQueue implements IQueue {
     const sendOptions = this.#sendOptions(name, options?.delayMs);
 
     const id = this.#ids.uuid();
-    const envelope = encodeJobEnvelope(name, id, data, options?.maxAttempts);
+    const envelope = encodeJobEnvelope(name, id, data, options?.maxAttempts, options?.headers);
 
     await this.#producer.send(envelope, sendOptions);
     return id;
@@ -285,11 +285,18 @@ export class WorkersQueue implements IQueue {
       return;
     }
 
+    // A malformed header map is dropped and the job still runs, untraced: the
+    // envelope guard above RETRIES what it refuses, so rejecting here would
+    // lose the work to protect the record of it.
+    const headers = readEnvelopeHeaders(envelope.headers);
     const job: IJob = {
       id: envelope.id,
       name,
       data: envelope.data,
       attempts: message.attempts,
+      // Conditional spread: ABSENT reports "this job carried no channel", which
+      // a present-but-`undefined` own property would contradict.
+      ...(headers === undefined ? {} : { headers }),
     };
 
     try {

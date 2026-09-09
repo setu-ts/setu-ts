@@ -4575,6 +4575,78 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   runbook step would have been missing from the next release's notes while two ALREADY-PUBLISHED
   sections carried text that was never in those releases — the alpha.10/v0.4.0 failure mode, a
   fourth time) — complete (PR pending)
+- **Milestone 90i** (`common` + `queue-plugin` + `telemetry-plugin` + `logger-plugin` +
+  `cloudflare-plugin` — observability that joins up. Three findings, one question: can an operator
+  follow a single request through the system? X34 answered the positive half — the broker hop
+  carries the trace across a process boundary with an unbroken parent chain, demonstrably via the
+  header rather than ambient context — so what was missing was a **channel** on one ingress and a
+  **bridge** to one sink. **X34-1/X29-3:** `AddJobOptions.headers?` + `IJob.headers?` mirror
+  `MessageMetadata.headers` exactly. This was a **designed capability gap**, not an adapter
+  declining to read something — `grep -c headers` over `common/src/services/queue.ts` was `0` —
+  which is what makes it a `common` widening rather than a bug fix. An internal `TracedQueue`
+  decorator (the `TracedBroker` shape, a different LAYER: the `QueueAdapter` seam takes an
+  already-built `StoredJob` and never invokes a processor, so a decorator there could inject nothing
+  and open no consumer span). **X34-2:** optional `ITelemetryService.activeSpanContext?()` +
+  `TracerHost.activeSpanContext?()` and an internal `TraceEnrichedLogger`, emitting OTel-convention
+  snake_case `trace_id`/`span_id`. `src/index.ts` is unchanged in all three plugins, pinned by
+  barrel-exports tests.
+
+  **Four plan claims did not survive source-checking, and two would have shipped broken.** (P1) The
+  plan had `LoggerPlugin` gain `optionalDependencies: [CAPABILITIES.TELEMETRY]`. `TelemetryPlugin`
+  ALREADY declares `CAPABILITIES.LOGGER` in its own, an optional dependency is a real graph edge
+  (`plugin-resolver.ts:49-53`), and the cycle THROWS — probed:
+  `Circular plugin dependency detected: logger-plugin -> telemetry-plugin -> logger-plugin`, so
+  **every application registering both plugins would have failed at `start()`**, which is the exact
+  composition the milestone exists to serve. The edge is not added; the call-time thunk is the whole
+  mechanism, and the same edge makes it MANDATORY rather than prudent, since the resolver orders
+  `LoggerPlugin` first. (P2) Registering the wrapper under `CAPABILITIES.QUEUE` is not enough —
+  declared processors are registered against the SERVICE object (`queue-plugin.ts:239,288`), so the
+  entire `processors` arm, the shape a CLI-scaffolded application uses, would have been untraced.
+  Reverting this leaves the `traceparent` ON the job while the processor's span is orphaned, so the
+  job LOOKS traced and is not; the imperative path cannot see it, which is why the probe grew a
+  declared-processor case. (P3) `ILogger` also declares `child()`, and the framework's OWN request
+  logger calls it (`request-logger.ts:71`) — an undecorated child would strip `trace_id` from
+  precisely the records X34-2 most wants joined, while every unit test on the decorator passed. (P4)
+  The plan said rabbitmq and sqs both needed real work; rabbitmq serializes the whole job and is
+  free, and **only SQS** — which builds an explicit envelope and re-validates it — needed changing
+  on both sides.
+
+  **Verified end to end with the real OTel API, SDK and `AsyncLocalStorageContextManager`**, 15/15
+  checks through a real kernel app: `POST /order` → `enqueue` → `process` is ONE trace with an
+  unbroken parent chain, and log lines emitted inside it carry the same `trace_id` the exported span
+  reports. **The probe itself had two bugs that produced vacuous passes**, both worth recording:
+  omitting `exporter` puts `TelemetryPlugin` in noop mode so every span context is empty, and
+  reading spans AFTER `app.stop()` finds zero, because the plugin's `onClose` shuts the provider
+  down and `InMemorySpanExporter.shutdown()` RESETS its store — every identity assertion then
+  compares `undefined` to `undefined` and passes. Both traps are now guarded in the committed tests.
+  Six negative controls were each observed failing and reverted, including P1's, which fails by
+  refusing to boot at all.
+
+  One consequence is recorded rather than implied: the registered `ILogger` is now a decorator, so
+  `instanceof ConsoleLogger` on the resolved capability no longer holds (CHANGELOG'd as breaking;
+  three existing tests were pinning the concrete class and now unwrap). And one asymmetry is
+  documented rather than closed: with `behaviors` configured a behaviour runs OUTSIDE the consumer
+  span, because M86's chain is applied by a `QueueService` SUBCLASS and is therefore outermost at
+  dispatch, while messaging composes `PipelinedBroker(TracedBroker(...))` and runs behaviours inside
+  it. Closing that means converting a shipped milestone's subclass into a wrapper (§16.4), and X34's
+  own "Still to run" defers the behaviour hop.
+
+  **Automated PR review then found two real defects, and the package list is corrected from four to
+  five (the M70b precedent).** The plan's §9 scoped `cloudflare-plugin`'s `WorkersQueue` OUT on the
+  grounds that widening its envelope is "a deployment-coupled change"; that did not survive being
+  challenged — an OPTIONAL field on a JSON envelope is safe in BOTH directions across a version
+  skew, so no version bump is needed and the exclusion was costing a silent data loss. It accepted
+  the widened `AddJobOptions` and DROPPED `headers`, so a caller's map and any propagated
+  `traceparent` vanished — the repo's own dead-option class ("accepts an option with no observable
+  effect"), on a contract that says a supplied map reaches the processor. And
+  `TracerHost.activeSpanContext` rejected only EMPTY identifiers while `contextToTraceparent`, the
+  codec the producer side writes with, also refuses malformed and W3C all-zero ids — so an INVALID
+  OTel span context would have been refused by the queue and copied into every log record by the
+  logger. It now reuses the codec itself rather than restating the rule, which is what makes the two
+  paths provably agree. A third finding — that the new signature breaks the doc-lint ratchet — was
+  **refuted by measurement**: 496 on `main` and 496 on the branch, because the ratchet lints every
+  package entrypoint TOGETHER, where `SpanContext` is public from `common`'s barrel; linting the
+  telemetry barrel alone reports three diagnostics that the gate never sees) — complete (PR #260)
 - **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
   the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
   compat suites as release gates. The `smoke/` programme's X16–X19 exercises against published
@@ -4584,8 +4656,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   that follows it is being closed the same way: M90a (abuse control), M90b (health truth bounded, PR
   #249), M90c (credential revocation and token type), M90d (the two brokers that cannot start, PR
   #256), M90e (static delivery correctness, PR #252), M90f (caller errors reach the client
-  correctly, PR #259), M90g (concurrency loses work silently, PR #258) and M90h (documentation that
-  survives contact, above) are complete; M90i and M90j remain open.
+  correctly, PR #259), M90g (concurrency loses work silently, PR #258), M90h (documentation that
+  survives contact, above) and M90i (observability that joins up, PR #260) are complete; M90j
+  remains open.
 
 ## Verification (run before declaring any work done)
 

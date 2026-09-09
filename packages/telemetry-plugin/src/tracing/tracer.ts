@@ -5,7 +5,10 @@
  * @since 0.2.0
  */
 
+import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
+import type { SpanContext } from '@setu-ts/common';
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
+import { normalizeTraceFlags } from './trace-flags.ts';
 import {
   contextToTraceparent,
   extractContextFromHeaders,
@@ -34,6 +37,14 @@ interface OtelApi {
       ctx: { traceId: string; spanId: string; traceFlags: number; isRemote?: boolean },
     ): unknown;
     setSpan(context: unknown, span: unknown): unknown;
+    /**
+     * Reads the span the OTel context manager currently holds active — the
+     * only way to learn which span is running from outside the `withSpan` call
+     * that created it (X34-2). Returns `undefined` with no context manager
+     * registered, which is why `activeSpanContext` below is gated on
+     * `contextActivation`.
+     */
+    getActiveSpan(): { spanContext(): unknown } | undefined;
   };
   context: {
     active(): unknown;
@@ -42,8 +53,17 @@ interface OtelApi {
   };
 }
 
-// Public setter called by loadOtelTracerProvider after importing @opentelemetry/api.
-export function setOtelApi(api: OtelApi): void {
+/**
+ * Installs the loaded `@opentelemetry/api` module handle.
+ *
+ * Called by `loadOtelTracerProvider` after importing the package. Accepts
+ * `null` so a test that installs a fake can restore the module's initial state
+ * honestly, rather than casting one in.
+ *
+ * @param api - The API handle, or `null` to clear it
+ * @internal
+ */
+export function setOtelApi(api: OtelApi | null): void {
   _otelApi = api;
 }
 
@@ -298,6 +318,48 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
         activate<T>(span: unknown, fn: () => Promise<T>): Promise<T> {
           const api = getOtelApi();
           return api ? api.context.with(api.trace.setSpan(api.context.active(), span), fn) : fn();
+        },
+        /**
+         * Reports the active span's identifiers, or `undefined` when nothing
+         * is active.
+         *
+         * Declared in the SAME conditional block as `activate` on purpose:
+         * without a registered context manager nothing is ever active, so a
+         * host that cannot activate could only ever answer `undefined`. Omitting
+         * the member instead says "this host cannot see", which is the honest
+         * answer and the one a consumer can act on.
+         */
+        activeSpanContext(): SpanContext | undefined {
+          const api = getOtelApi();
+          const span = api?.trace.getActiveSpan();
+          if (span === undefined) {
+            return undefined;
+          }
+          const raw = span.spanContext() as {
+            traceId?: unknown;
+            spanId?: unknown;
+            traceFlags?: unknown;
+          };
+          const candidate: SpanContext = {
+            traceId: String(raw.traceId ?? ''),
+            spanId: String(raw.spanId ?? ''),
+            traceFlags: normalizeTraceFlags(raw.traceFlags),
+          };
+          // Validity is decided by the SHARED CODEC, not by a rule spelled out
+          // again here. `contextToTraceparent` already refuses an id that is
+          // empty, malformed, or W3C all-zero (the identifiers OTel uses for an
+          // INVALID span context), and it is what the producer side writes with
+          // — so reusing it is what stops the read path and the write path from
+          // disagreeing about which contexts are real. Checking only for `''`
+          // let an all-zero context through here while the queue refused to
+          // propagate it, and a log record would then name a trace nothing else
+          // could ever carry.
+          return contextToTraceparent({
+              _opaque: TELEMETRY_CONTEXT_OPAQUE,
+              ...candidate,
+            }) === null
+            ? undefined
+            : candidate;
         },
       }
       : {}),

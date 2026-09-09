@@ -15,6 +15,7 @@ import type {
   IPluginContext,
   IQueue,
   IRuntimeServices,
+  ITelemetryService,
   JobProcessor,
   ProcessOptions,
   RegistryFactory,
@@ -37,6 +38,7 @@ import { SqsQueue } from '../adapters/sqs-queue.ts';
 import { QueueService } from '../services/queue-service.ts';
 import { withIngressBehaviors } from '../processors/job-processor.ts';
 import { QueueCollector } from '../metrics/queue-collector.ts';
+import { TracedQueue } from '../tracing/traced-queue.ts';
 import type { QueueLogger } from '../services/queue-service.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
@@ -130,7 +132,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
     // LoggerPlugin first when installed, but remains optional. `METRICS` is
     // optional for the same reason: absent it, no collector is built and every
     // call site is optional-chained (X8-4).
-    optionalDependencies: [CAPABILITIES.LOGGER, CAPABILITIES.METRICS],
+    optionalDependencies: [CAPABILITIES.LOGGER, CAPABILITIES.METRICS, CAPABILITIES.TELEMETRY],
     priority: 100,
 
     async register(ctx) {
@@ -220,8 +222,27 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // Connect the service
       await service.connect();
 
+      // X34-1: with a telemetry capability registered, EVERY reach into the
+      // queue goes through the tracing decorator — the registered capability
+      // and both processor-registration sites below. Registering the wrapper
+      // under the token alone would leave the entire declarative `processors`
+      // arm untraced, because those entries are registered against the service
+      // object rather than resolved from the registry.
+      //
+      // Resolved HERE rather than through a call-time thunk because the
+      // decorator has to be in place before anything is registered, and the
+      // `optionalDependencies` edge above is what makes that safe: the kernel
+      // orders a telemetry provider ahead of this plugin. Absent telemetry the
+      // registrar IS the service and every path is byte-identical to before.
+      const registrar: IQueue = ctx.services.has(CAPABILITIES.TELEMETRY)
+        ? new TracedQueue(
+          service,
+          ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY),
+        )
+        : service;
+
       // Register the service
-      ctx.services.register<IQueue>(token, service);
+      ctx.services.register<IQueue>(token, registrar);
 
       // Declared processor INSTANCES register now, exactly as an imperative
       // `process()` call made before this arm existed.
@@ -242,7 +263,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       // contradicting this option's own documented last-wins contract.
       if (processorFactories.length === 0) {
         for (const definition of processorInstances) {
-          service.process(definition.name, definition.processor, definition.options);
+          registrar.process(definition.name, definition.processor, definition.options);
         }
       }
 
@@ -291,7 +312,7 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
                     `QueuePlugin({ processors })[${index}]`,
                   )
                   : entry;
-                service.process(definition.name, definition.processor, definition.options);
+                registrar.process(definition.name, definition.processor, definition.options);
               });
             }
 

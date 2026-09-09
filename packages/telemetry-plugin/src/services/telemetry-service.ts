@@ -16,6 +16,7 @@ import type {
   TelemetryContext,
 } from '@setu-ts/common';
 import type { TracerHost } from '../interfaces/index.ts';
+import { normalizeTraceFlags } from '../tracing/trace-flags.ts';
 
 /**
  * Internal span operations available on an OTel span or a fake for testing.
@@ -29,26 +30,6 @@ interface SpanHandle {
   recordException(error: Error): void;
   end(): void;
   spanContext?(): SpanContext;
-}
-
-/**
- * Normalizes `traceFlags` to a 2-character lowercase hex string, honoring the
- * `SpanContext.traceFlags: string` contract.
- *
- * OTel's `SpanContext.traceFlags` is a `number` (e.g. `1` for sampled). This
- * function converts numeric values to the W3C-required 2-hex-string format
- * (`"01"`) and pads short strings (`"1"` → `"01"`).
- *
- * @internal
- */
-function normalizeTraceFlags(flags: unknown): string {
-  if (typeof flags === 'number') {
-    return flags.toString(16).padStart(2, '0');
-  }
-  if (typeof flags === 'string') {
-    return flags.toLowerCase().padStart(2, '0');
-  }
-  return '00';
 }
 
 /**
@@ -171,6 +152,37 @@ export class TelemetryService implements ITelemetryService {
       throw error;
     } finally {
       heSpan.end();
+    }
+  }
+
+  /**
+   * Reports the active span's identifiers by asking the tracer host, which is
+   * the only layer that can see the OTel context.
+   *
+   * Declared unconditionally while the HOST's member is optional, so this
+   * returns `undefined` for a host that cannot see as well as for one that
+   * sees nothing running. The distinction is preserved where it is actionable
+   * — on `TracerHost` — and collapsed here, because a consumer holding an
+   * `ITelemetryService` has the same thing to do in both cases: enrich nothing.
+   *
+   * @returns The active span's identifiers, or `undefined` when none is active
+   * or the host cannot report one
+   */
+  activeSpanContext(): SpanContext | undefined {
+    // Guarded because `ITelemetryService` documents this member as no-throw and
+    // the host is an APPLICATION-SUPPLIED seam (`tracerProviderFactory` is a
+    // public option), so without this the framework's own service violates its
+    // own contract for a custom host — probed, not assumed. A host that cannot
+    // answer collapses to `undefined`, the same answer as "nothing running",
+    // because a caller has the same thing to do in both cases: enrich nothing.
+    //
+    // Nothing is reported: the only sink a telemetry service could reach is the
+    // logger, which is this member's own principal caller, so reporting would
+    // recurse through the failing read on every record.
+    try {
+      return this.#tracerHost.activeSpanContext?.();
+    } catch {
+      return undefined;
     }
   }
 }

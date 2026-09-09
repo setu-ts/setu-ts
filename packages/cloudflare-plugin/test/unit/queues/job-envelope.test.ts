@@ -7,7 +7,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { encodeJobEnvelope, isJobEnvelope } from '../../../src/queues/job-envelope.ts';
+import {
+  encodeJobEnvelope,
+  isJobEnvelope,
+  readEnvelopeHeaders,
+} from '../../../src/queues/job-envelope.ts';
 
 describe('encodeJobEnvelope', () => {
   it('carries the name, id and payload, and round-trips through the guard', () => {
@@ -27,6 +31,54 @@ describe('encodeJobEnvelope', () => {
     // survive JSON round-tripping as a present-but-null key on some paths.
     expect(Object.hasOwn(encodeJobEnvelope('j', 'id-1', {}), 'maxAttempts')).toBe(false);
     expect(encodeJobEnvelope('j', 'id-1', {}, 3).maxAttempts).toBe(3);
+  });
+
+  it('carries the caller-supplied header channel (M90i)', () => {
+    const envelope = encodeJobEnvelope('j', 'id-1', {}, undefined, {
+      traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+      'x-tenant': 't-1',
+    });
+    expect(envelope.headers).toEqual({
+      traceparent: '00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01',
+      'x-tenant': 't-1',
+    });
+    // Additive: an older consumer's guard still accepts it, which is what makes
+    // this safe without bumping the envelope version.
+    expect(isJobEnvelope(envelope)).toBe(true);
+  });
+
+  it('omits headers rather than setting them undefined', () => {
+    // ABSENT means "this job carried no channel" on the committed contract;
+    // a present-but-undefined key would report an empty channel instead.
+    expect(Object.hasOwn(encodeJobEnvelope('j', 'id-1', {}), 'headers')).toBe(false);
+  });
+
+  it('carries an EMPTY map as an empty map', () => {
+    expect(encodeJobEnvelope('j', 'id-1', {}, undefined, {}).headers).toEqual({});
+  });
+});
+
+describe('readEnvelopeHeaders', () => {
+  it('returns a well-formed string map', () => {
+    expect(readEnvelopeHeaders({ traceparent: 'tp', 'x-a': 'b' }))
+      .toEqual({ traceparent: 'tp', 'x-a': 'b' });
+    expect(readEnvelopeHeaders({})).toEqual({});
+  });
+
+  it('reports undefined for an absent or malformed map', () => {
+    // Absent and malformed collapse to one answer here — both mean "no usable
+    // channel" — while the caller keeps them apart for reporting.
+    expect(readEnvelopeHeaders(undefined)).toBeUndefined();
+    expect(readEnvelopeHeaders(null)).toBeUndefined();
+    expect(readEnvelopeHeaders('not-a-map')).toBeUndefined();
+    expect(readEnvelopeHeaders(['traceparent', 'tp'])).toBeUndefined();
+    expect(readEnvelopeHeaders({ traceparent: 'tp', depth: 3 })).toBeUndefined();
+  });
+
+  it('does not let a __proto__ key pollute a prototype', () => {
+    const read = readEnvelopeHeaders(JSON.parse('{"__proto__":"x","a":"b"}'));
+    expect(read?.a).toBe('b');
+    expect(Object.getPrototypeOf({} as Record<string, unknown>)).toBe(Object.prototype);
   });
 });
 

@@ -59,7 +59,8 @@ const READMES: Readonly<Record<string, number>> = {
   // fence — gated so it cannot ship uncompilable.
   'packages/multi-tenancy-plugin/README.md': 3,
   'packages/scheduler-plugin/README.md': 3,
-  'packages/queue-plugin/README.md': 8,
+  // M90i: +1 for the trace-propagation example.
+  'packages/queue-plugin/README.md': 9,
   'packages/worker-pool-plugin/README.md': 3,
   'packages/grpc-plugin/README.md': 2,
   'packages/graphql-plugin/README.md': 6,
