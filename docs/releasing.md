@@ -126,7 +126,18 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   already agree with the tree, so `deno check` re-resolves nothing and leaves them byte-identical.
   Prove it rather than assume it: normalise the `@setu-ts` version tokens on both sides and diff,
   and every remaining difference is drift you did not intend. `apps/full-stack/deno.lock` is
-  gitignored and needs nothing, and the ROOT `deno.lock` names no `@setu-ts` version at all.
+  gitignored and needs nothing.
+
+  The ROOT `deno.lock` carries them too — 96 tokens at this writing, in its workspace-member
+  dependency lists, in both the `@<minor>` and the full `@<version>` forms. Unlike the app locks it
+  is rewritten automatically by the first `deno task` you run after bumping the manifests, so it
+  usually moves without being asked; do not rely on that. Check it explicitly and commit the result:
+
+  ```fish
+  grep -oE '@setu-ts/[a-z0-9-]+@[0-9][^"]*' deno.lock | sed -E 's#@setu-ts/[a-z0-9-]+@##' | sort -u
+  ```
+
+  Every line it prints must name the version being released.
 
 - **Re-render `k8s/manifests/` after bumping `k8s/chart/Chart.yaml`.** The chart is the single
   authored source and the rendered manifests are committed beside it (M39), so bumping `appVersion`

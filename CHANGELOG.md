@@ -53,12 +53,14 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/database-plugin` — through `IDatabaseService.transaction()` to the adapter. An adapter
   declares what it honours through the new `ITransactionIsolationSupport` (`common`), and a level it
   does not honour is refused with the new exported `UnsupportedIsolationLevelError`
-  (`database-plugin`), answered `501`, rather than silently downgraded. Prisma honours all four; a
-  Drizzle bridge honours all four only when the application wraps it with the new exported
-  `withIsolationSupport()`, which is the declaration that its bridge forwards options; and Memory
-  serializes process-local transactions. MongoDB snapshot isolation is not labelled as portable
-  `serializable`, so MongoDB refuses every requested portable level by name rather than silently
-  using its default.
+  (`database-plugin`), answered `501`, rather than silently downgraded. What an adapter honours is
+  **connector-dependent, not per-adapter**: Prisma honours all four on PostgreSQL, MySQL and SQL
+  Server, only `serializable` on CockroachDB and SQLite, and none on MongoDB or a connector it could
+  not resolve; a Drizzle bridge honours all four only when the application wraps it with the new
+  exported `withIsolationSupport()`, which is the declaration that its bridge forwards options; and
+  Memory serializes process-local transactions. `PUBLIC_API.md` carries the per-adapter table.
+  MongoDB snapshot isolation is not labelled as portable `serializable`, so MongoDB refuses every
+  requested portable level by name rather than silently using its default.
 
 - **`@setu-ts/session-plugin` — documented snapshot-commit concurrency limit (M90g / X22-6).**
   Cookie and store sessions each commit their complete payload snapshot, so overlapping requests
