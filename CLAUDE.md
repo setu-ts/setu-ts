@@ -4574,7 +4574,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   were absent entirely, and there was **no `Unreleased` CHANGELOG entry**, so the new guide and the
   runbook step would have been missing from the next release's notes while two ALREADY-PUBLISHED
   sections carried text that was never in those releases — the alpha.10/v0.4.0 failure mode, a
-  fourth time) — complete (PR pending)
+  fourth time) — complete (PR #261)
 - **Milestone 90i** (`common` + `queue-plugin` + `telemetry-plugin` + `logger-plugin` +
   `cloudflare-plugin` — observability that joins up. Three findings, one question: can an operator
   follow a single request through the system? X34 answered the positive half — the broker hop

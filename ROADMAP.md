@@ -9277,6 +9277,6 @@ fields (`code` first) read through the same guard, plus
 | 90e       | ✅     | static delivery correctness ([#252](https://github.com/setu-ts/setu-ts/pull/252))              |
 | 90f       | ✅     | caller errors reach the client correctly ([#259](https://github.com/setu-ts/setu-ts/pull/259)) |
 | 90g       | ✅     | concurrency loses work silently                                                                |
-| 90h       | ✅     | documentation that survives contact                                                            |
+| 90h       | ✅     | documentation that survives contact ([#261](https://github.com/setu-ts/setu-ts/pull/261))      |
 | 90i       | ✅     | observability that joins up ([#260](https://github.com/setu-ts/setu-ts/pull/260))              |
 | 90j       | ⬜     | operator diagnostics survive to the operator                                                   |
