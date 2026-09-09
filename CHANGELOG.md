@@ -961,7 +961,8 @@ read the Changed section before upgrading.
   means "cannot page by cursor" and never "there are no more rows". Implemented on all five shipped
   adapters — Memory, Prisma, Drizzle, Mongo and D1. `offset` is untouched and not deprecated; a
   query carrying both a non-zero `offset` and a `cursor` is refused, because the two express
-  contradictory positions.
+  contradictory positions. Note that the repository-facing `IRepository.findPage` added in this
+  release is **required** — see the `Changed` entry below it.
 - `@setu-ts/common` gains `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue`, and the pure
   `encodeCursor`/`decodeCursor`/`keysetPredicate`/`sortFingerprint`/`mintNextCursor` codec. The
   codec lives in `common` because `cloudflare-plugin` needs the identical encoding and a plugin may
@@ -1074,6 +1075,19 @@ _implements_ `IDataSource` or declares a custom repository key type does.
   pagination over a timestamp column, and it makes a portable date-range filter expressible for the
   first time. `IRepository`'s key type parameter is now constrained to `EntityKey`, which is
   breaking only for a declaration that was never supported at runtime.
+
+- **`IRepository` gains a required `findPage` member** (M79, keyset cursor pagination). The
+  `IDataSource.findPage?(query)` the Added entry above describes is **optional** — an out-of-repo
+  adapter keeps compiling and the repository refuses by name when it is absent. That is a different
+  type: the repository-facing `IRepository.findPage(options): Promise<Page<Entity>>` is
+  **required**, so a class implementing `IRepository` directly — without extending `BaseRepository`
+  — must now implement `findPage`, which is a compile error until it does. This is the same class of
+  change as the required `IRepository.findOne` member announced in the 0.1.0-alpha.8 release, and it
+  is the member a reader searching the CHANGELOG for `findPage` most needs to find: the sibling
+  `findOne` addition was announced twice, and this one was announced nowhere. The in-repo tripwire
+  is `packages/database-plugin/test/fixtures/repository-implementor.ts`, a hand-written implementor
+  that fails `deno check` if a required member is added to `IRepository` without updating it. See
+  [docs/upgrading.md](docs/upgrading.md) for the reader-side step.
 
 ### Fixed
 
@@ -1307,12 +1321,17 @@ Nothing else here requires an application change unless it is named **Breaking**
   it would make them **unparseable**, because the Stage 3 proposal has no parameter position at all.
   The surface is therefore migrated deliberately now rather than under time pressure later.
 
-  **No compiler option is required any more, anywhere.** `experimentalDecorators` is removed from
-  all eight declaration sites — the `decorator-plugin`, `openapi-plugin` and `rest-starter`
-  manifests, `apps/di-decorators`, the guide-snippet fixture, both CLI template stamps, and the
-  generated Node `tsconfig.json`. Do not add it back: declaring **any** compiler option replaces
-  Deno's entire default set (see M63's `full-stack` JSX failure), so a project needing none should
-  declare none.
+  **No compiler option is required any more in the framework's own declaration sites.**
+  `experimentalDecorators` is removed from all eight declaration sites — the `decorator-plugin`,
+  `openapi-plugin` and `rest-starter` manifests, `apps/di-decorators`, the guide-snippet fixture,
+  both CLI template stamps, and the generated Node `tsconfig.json`. Do not add it back: declaring
+  **any** compiler option replaces Deno's entire default set (see M63's `full-stack` JSX failure),
+  so a project needing none should declare none. **If your project's own manifest still declares
+  `experimentalDecorators` — for example a `deno.json` the alpha.8 CLI emitted — remove that key:**
+  a migrated project that keeps it still compiles its decorators under the legacy semantics and
+  fails `deno check` with `TS1238`/`TS1241` on every decorated member, errors that point at the
+  decorators rather than the option. The full reader-side step is in
+  [docs/upgrading.md](docs/upgrading.md).
 
   **Parameter decorators become positional sources inside `@Params(...)`.** `@Body`, `@Query`,
   `@Param`, `@Header`, `@Cookie`, `@CurrentUser` and `@Ctx` keep their names but change kind, from

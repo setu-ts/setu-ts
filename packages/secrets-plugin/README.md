@@ -122,8 +122,29 @@ is branded `501 Not Implemented` (X20-2): nothing is wrong with the caller — t
 cannot store or rotate secrets, permanently — so an application running `errorHandler` answers the
 write attempt with a `501` in its configured format instead of a masked `500`. Both public write
 paths inherit the refusal from the one `set` throw site, because `SecretsService.rotate()` delegates
-to `provider.set()`. What `set` MEANS per provider is the four-meanings problem the ROADMAP tracks
-separately.
+to `provider.set()`.
+
+### What `set()` means per provider
+
+`ISecretManager` exposes one write method — `rotate()`, which delegates to the provider's `set()` —
+but the method means a different thing on every provider. A bootstrap that reads a secret, finds it
+absent, and writes a default works on some providers and fails on others, and the failure names _not
+found_ — which reads as a problem with the secret being written rather than with the API being used.
+The divergence is documented here rather than removed: making `set()` mean one thing is the
+ROADMAP's X20-3, a contract question deliberately ungrouped from this one.
+
+| Provider        | `set()` on an existing secret | `set()` on a name that does not exist                                                               | Verified against a real backend                        |
+| --------------- | ----------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `env`           | rejects                       | rejects                                                                                             | yes — `readonly-status.test.ts` pins the `501` refusal |
+| `vault` (KV v2) | writes a new version          | **creates** the secret                                                                              | yes — real HashiCorp Vault (X20)                       |
+| `aws-kms`       | writes a new version          | **refuses** — `PutSecretValueCommand` requires the secret to exist; the provider has no create path | yes — real LocalStack (X20 addendum)                   |
+| `gcp`           | adds a new version            | **refuses** — `addSecretVersion` requires the secret container to pre-exist                         | no — no local emulator; stated, not claimed            |
+| `azure`         | writes a new version          | **creates** the secret                                                                              | no — no local emulator; stated, not claimed            |
+
+The second column is the finding: an application that assumes `set()` creates is correct for `vault`
+and `azure`, and wrong for `aws-kms` and `gcp`. On those two, create the secret out of band (or
+through the provider's own client facade, which bypasses the plugin's write path) before the first
+`set()`.
 
 ## Exports
 

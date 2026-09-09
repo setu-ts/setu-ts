@@ -146,6 +146,10 @@ Otherwise a session id an attacker planted before authentication carries into th
 session. On the store strategy the superseded entry is deleted, so this is a real revocation rather
 than a rename.
 
+When `csrf` is enabled, this `POST` is itself an unsafe method and needs the form token before it
+can run — a bare `POST /login` is refused `403` before it can mint a session. See the sequence in
+[Form CSRF](#form-csrf): a safe request first, then the mutation carrying the token.
+
 ## Form CSRF
 
 This is the **synchronizer-token** strategy, and it is a _different mechanism_ from
@@ -187,6 +191,22 @@ it is **required knowledge for `multipart/form-data`**, which this package does 
 token must arrive in that header), `ignoreMethods` (default `GET`/`HEAD`/`OPTIONS`), and `exclude`
 (exact paths or regular expressions that skip form CSRF). `exclude` is only for a separately-mounted
 non-browser protocol surface such as Connect/gRPC — never use it for an application form route.
+
+### The sequence: safe request, then mutation
+
+`csrfFormMiddleware` verifies every method outside `ignoreMethods` — including the endpoint that
+establishes the session — and that is the right design: an exemption for `/login` would be a hole.
+The consequence is that the token must be minted by a **safe** request before the mutation that
+needs it:
+
+1. A safe request (the `GET /login` above) creates the session and mints the token via
+   `getCsrfToken(ctx)`; the token is committed with that response's cookie.
+2. The mutation presents the cookie **and** the token — in the form field for a `<Form>` post, or in
+   the `x-csrf-token` header for a `fetch` post.
+
+A bare `POST /login` with no prior request is refused `403` by design: the token lives in the
+session that does not exist yet. This is correct CSRF practice for a rendered form, and it is the
+sequence an API client must follow when `csrf` is enabled.
 
 To validate inside a handler or a React Router action instead of via middleware, call the same
 function the middleware uses:

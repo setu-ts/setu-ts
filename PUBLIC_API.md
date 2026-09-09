@@ -1190,6 +1190,12 @@ interface IRepository<Entity, Id extends EntityKey = string> {
 }
 ```
 
+Every member of `IRepository` is **required** — including `findPage`, which is easy to miss because
+the sibling `IDataSource.findPage?` is optional. A class implementing `IRepository` directly,
+without extending `BaseRepository`, must supply `findPage`; the in-repo reference implementor is
+`packages/database-plugin/test/fixtures/repository-implementor.ts`, and the reader-side step is in
+[docs/upgrading.md](docs/upgrading.md).
+
 The concrete `DatabaseService` additionally exposes `readonly isClosed: boolean` (**since 0.5.0**) —
 a lifecycle-only read that reaches no adapter, added for the health indicator's uncached gate.
 `isHealthy()` answers lifecycle AND adapter readiness together; `isClosed` answers lifecycle alone.
@@ -2253,10 +2259,10 @@ app.router.post('/auth/logout', async (ctx) => {
 `rateLimitMiddleware(options)` is a **standalone** fixed-window limiter — added via
 `app.middleware.add(...)` like `authMiddleware`, independent of `AuthPlugin` (it never reads the
 principal unless your `keyGenerator` does) and registered under **no capability token**. Requests
-are counted per key (default `ctx.request.ip ?? 'anonymous'`) in a `windowMs` window; when the count
-exceeds `max` the middleware **short-circuits with 429** (downstream stages, including the handler,
-do not run) and a JSON body `{ error: 'Too Many Requests', message }`. Headers: always `Retry-After`
-on 429; with `standardHeaders` (default `true`) also `RateLimit-Limit`, `RateLimit-Remaining`, and
+are counted per key in a `windowMs` window; when the count exceeds `max` the middleware
+**short-circuits with 429** (downstream stages, including the handler, do not run) and a JSON body
+`{ error: 'Too Many Requests', message }`. Headers: always `Retry-After` on 429; with
+`standardHeaders` (default `true`) also `RateLimit-Limit`, `RateLimit-Remaining`, and
 `RateLimit-Reset` — `RateLimit-Reset` and `Retry-After` are both **delta-seconds** until the window
 resets (IETF draft semantics), never epoch timestamps. The default store is an in-memory
 fixed-window counter (single-process); pass `store: new RedisRateLimitStore({ url, runtime })` for
@@ -2278,6 +2284,15 @@ nothing. Exempt paths do not increment a counter or receive `RateLimit-*` header
 applications sharing one Redis deployment do not count against each other. Pass `''` to use the
 pre-namespacing keys.
 
+The default key is `defaultRateLimitKey`, which resolves in this order: the authenticated principal
+(`user:<id>`), the client IP published by `ipSecurityMiddleware` (`ip:<address>` — that middleware
+needs `trustProxy` to resolve one from the proxy headers), `IRequest.ip` (`ip:<address>`, set only
+by a custom `IHttpAdapter`; the first-party adapters cannot populate it, because a web `Request`
+carries no peer address), and only then one global `'anonymous'` key. So the limiter registered
+alone — the example above — is a **single counter across all unauthenticated callers**, not a per-IP
+one: register `ipSecurityMiddleware` with `trustProxy`, run the limiter after authentication, or
+pass your own `keyGenerator` to make the key per-caller.
+
 ```typescript
 import {
   DEFAULT_RATE_LIMIT_EXCLUDED_PATHS,
@@ -2285,7 +2300,8 @@ import {
   RedisRateLimitStore,
 } from '@setu-ts/auth-plugin';
 
-// Global: 100 requests per minute per client IP; retain the default probe exclusions.
+// Global: 100 requests per minute; retain the default probe exclusions.
+// Keyed by authenticated user, else ONE shared 'anonymous' bucket (see above).
 app.middleware.add(rateLimitMiddleware({
   windowMs: 60_000,
   max: 100,
@@ -3244,6 +3260,13 @@ app.router.post('/login', (ctx) => {
 });
 ```
 
+With `csrf` enabled, that `POST /login` is itself an unsafe method and needs the form token before
+it can run: a bare `POST /login` is refused `403` because the token lives in the session that does
+not exist yet. The working sequence — and the one the README documents — is a **safe** request first
+(which mints the session and its token via `getCsrfToken(ctx)`), then the mutation carrying the
+token in the form field or the `x-csrf-token` header. An exemption for `/login` would be a hole, so
+the middleware verifies every method outside `ignoreMethods`.
+
 ### Options
 
 | Option               | Type                                   | Default                    | Behavior                                                                                                                                                                                               |
@@ -3768,8 +3791,23 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
   Thrown (as a rejection — never a synchronous throw) by `EnvProvider.set`, the provider's only
   write method; `SecretsService.rotate()` reaches it by delegating to `set`, so both public write
   paths answer identically. Nothing is wrong with the caller — the configured provider cannot store
-  or rotate secrets, permanently — which is what `501` states. Whether `set` CREATES on a provider
-  that can write is a different question the ROADMAP tracks separately (X20-3).
+  or rotate secrets, permanently — which is what `501` states.
+
+  **What `set()` means per provider** — one portable method, four meanings. `rotate()` delegates to
+  the provider's `set()`, so the table below describes both public write paths. The divergence is
+  documented rather than removed: making `set()` mean one thing is the ROADMAP's X20-3, a contract
+  question deliberately ungrouped.
+
+  | Provider        | `set()` on an existing secret | `set()` on a name that does not exist                                                               | Verified against a real backend                        |
+  | --------------- | ----------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+  | `env`           | rejects                       | rejects                                                                                             | yes — `readonly-status.test.ts` pins the `501` refusal |
+  | `vault` (KV v2) | writes a new version          | **creates** the secret                                                                              | yes — real HashiCorp Vault (X20)                       |
+  | `aws-kms`       | writes a new version          | **refuses** — `PutSecretValueCommand` requires the secret to exist; the provider has no create path | yes — real LocalStack (X20 addendum)                   |
+  | `gcp`           | adds a new version            | **refuses** — `addSecretVersion` requires the secret container to pre-exist                         | no — no local emulator; stated, not claimed            |
+  | `azure`         | writes a new version          | **creates** the secret                                                                              | no — no local emulator; stated, not claimed            |
+
+  A bootstrap that assumes `set()` creates is correct for `vault` and `azure`, and wrong for
+  `aws-kms` and `gcp`. On those two, create the secret out of band before the first `set()`.
 - `SecretsServiceOptions`, `SecretsPluginOptions`, `SecretsProviderType`, `SecretsProviderOptions`,
   `AwsKmsProviderOptions`, `GcpSecretManagerProviderOptions`, `AzureKeyVaultProviderOptions`,
   `HashiCorpVaultProviderOptions` — option types.

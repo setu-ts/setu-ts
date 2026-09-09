@@ -324,6 +324,13 @@ configured error format. The operational paths `/live`, `/ready`, `/health`, `/m
 prefixes its keys with `'setu:ratelimit:'` by default; set `keyPrefix` per application when several
 share Redis, or `''` to keep pre-M90a keys.
 
+The default key resolves in this order: the authenticated principal, the client IP published by
+`ipSecurityMiddleware` (which needs `trustProxy` — see `http-security-plugin` — to resolve one from
+the proxy headers), `IRequest.ip`, and only then one global `'anonymous'` bucket shared by every
+unauthenticated caller. Without that middleware the limiter is a single counter across all callers,
+so the example below is **not** per IP; register `ipSecurityMiddleware` with `trustProxy` (or pass
+your own `keyGenerator`) to make it one.
+
 ```typescript
 import {
   DEFAULT_RATE_LIMIT_EXCLUDED_PATHS,
@@ -335,7 +342,7 @@ app.middleware.add(rateLimitMiddleware({
   windowMs: 60_000,
   max: 100,
   exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
-})); // per IP
+})); // keyed by user; anonymous callers share ONE bucket without ipSecurityMiddleware
 
 // Redis-backed, keyed by authenticated user
 rateLimitMiddleware({

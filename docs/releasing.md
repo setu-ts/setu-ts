@@ -111,6 +111,12 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   separately, so each needs its own, and a widening nothing asserts can be narrowed back later
   without a single test going red.
 - Add the release's `CHANGELOG.md` entry.
+- **A release that carries reader action adds an `docs/upgrading.md` entry.** The CHANGELOG records
+  what the framework changed; the guide records what a reader must change in their own project. The
+  two answer different questions, and an entry that demands reader action — a breaking change to
+  published or generated output, a required member added to a public interface, a manifest or
+  compiler-option edit — belongs in the guide, not buried in a feature entry. A release with none
+  needs no entry.
 
 ### 2. Verify
 
