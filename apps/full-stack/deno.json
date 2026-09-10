@@ -1,7 +1,7 @@
 {
   "nodeModulesDir": "auto",
   "tasks": {
-    "install": "deno install --allow-scripts",
+    "install": "deno install --allow-scripts --min-dep-age 0",
     "build": "deno task install && deno run -A npm:@react-router/dev build",
     "check:app": "deno check app/**/*.ts app/**/*.tsx",
     "start": "deno task build && deno run --allow-net --allow-env --allow-read main.ts",

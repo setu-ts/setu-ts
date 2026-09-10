@@ -48,9 +48,11 @@ the outside world; a model is plain data shared with the browser.
 
 The frontend build is the one documented exception to this repository's Deno-only toolchain
 (AI_GUIDELINES §12.2): React Router builds through Vite on the npm package ecosystem. It does
-**not** require a Node toolchain — `deno task build` runs `deno install --allow-scripts` followed by
-the `@react-router/dev` CLI under Deno's own npm support, so CI needs no `setup-node` step and this
-example is deliberately **not** in `ALLOW_SKIP`. Its proof runs on every pull request.
+**not** require a Node toolchain — `deno task build` runs
+`deno install --allow-scripts --min-dep-age 0` followed by the `@react-router/dev` CLI under Deno's
+own npm support. The minimum-age exception prevents a fresh CI runner from rejecting an
+otherwise-resolved, just-published transitive platform package. CI needs no `setup-node` step and
+this example is deliberately **not** in `ALLOW_SKIP`. Its proof runs on every pull request.
 
 Two consequences worth knowing:
 
