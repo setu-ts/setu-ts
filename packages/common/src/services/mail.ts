@@ -58,4 +58,24 @@ export interface IMailer {
     message: Omit<MailMessage, 'html' | 'text'>,
     data: Readonly<Record<string, unknown>>,
   ): Promise<void>;
+  /**
+   * Reports whether the mail transport is REACHABLE right now, distinct from
+   * whether the mailer was constructed. Optional: a mailer whose transport
+   * exposes no side-effect-free probe omits it, and so does an implementation
+   * that does not answer the question at all.
+   *
+   * A `false` means the transport was contacted and did not answer. An
+   * `undefined` means the question could not be asked — never read it as
+   * healthy. This is the tri-state every reachability seam in the framework
+   * uses (`IRedisClient.ping`, `StorageProvider.isHealthy`,
+   * `IMessageBroker.isHealthy`), and it exists so a holder of an `IMailer` —
+   * `notification-plugin`'s email channel, an application's own health
+   * indicator — can report the transport without importing `mail-plugin`,
+   * which AI_GUIDELINES §2.2 forbids.
+   *
+   * @returns `true` reachable, `false` contacted and unreachable, `undefined`
+   * when reachability cannot be determined
+   * @since 0.6.0
+   */
+  isHealthy?(): Promise<boolean | undefined>;
 }

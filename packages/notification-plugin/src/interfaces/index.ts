@@ -50,6 +50,27 @@ export interface NotificationChannel {
    * @throws {Error} If the channel fails to deliver
    */
   send(notification: NotificationMessage): Promise<void>;
+  /**
+   * Reports whether this channel's transport is REACHABLE right now.
+   *
+   * Optional, and most channels legitimately omit it: a probe may not deliver
+   * a notification, and the send-only transports this package ships expose no
+   * side-effect-free alternative. A Slack incoming webhook has no read
+   * endpoint at all; Twilio and FCM have one, but reaching it needs a GET
+   * that {@linkcode INotificationHttp} does not expose, and a POST would
+   * deliver a real message to a real person.
+   *
+   * {@linkcode EmailChannel} is the exception, because it delegates to an
+   * `IMailer` that carries its own probe.
+   *
+   * An `undefined` means the question could not be asked — never read it as
+   * healthy.
+   *
+   * @returns `true` reachable, `false` contacted and unreachable, `undefined`
+   * when reachability cannot be determined
+   * @since 0.6.0
+   */
+  isHealthy?(): Promise<boolean | undefined>;
 }
 
 // ── Transport ports ──────────────────────────────────────────────────────────

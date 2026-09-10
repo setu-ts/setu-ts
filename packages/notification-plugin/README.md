@@ -72,6 +72,27 @@ capability throws during `register()`. See [Channels](#channels) for what each o
 - Configuring `email` without a `mail` capability registered **throws during `register`** — fail
   fast, ordered via `optionalDependencies: ['mail']`.
 
+## Health
+
+Registers a `notification` health indicator reporting `{ channels, reachable }`, where `reachable`
+maps each configured channel name to `true`, `false`, or `'unknown'`. One channel that was CONTACTED
+and did not answer takes the indicator `down`.
+
+| Channel  | Probe                                       | Reports                  |
+| -------- | ------------------------------------------- | ------------------------ |
+| `mail`   | the resolved `IMailer`'s own `isHealthy?()` | `true`/`false`/`unknown` |
+| `twilio` | none                                        | `'unknown'`              |
+| `fcm`    | none                                        | `'unknown'`              |
+| `slack`  | none                                        | `'unknown'`              |
+
+`'unknown'` for the send-only transports is the honest answer rather than a gap: a health probe may
+not deliver a notification to a real person, and none of them offers a side-effect-free alternative
+this plugin can reach. A Slack incoming webhook has no read endpoint at all; Twilio and FCM have
+one, but reaching it needs a GET that the `INotificationHttp` seam does not expose. Crucially,
+`'unknown'` never reads as healthy, where the hardcoded `up` this replaced did.
+
+Probes are cached for 5 s and bounded at 2 s on the runtime's own clock and timers.
+
 ## Push (FCM HTTP v1)
 
 `FcmProvider` speaks **FCM HTTP v1**, authenticating with a short-lived OAuth2 token minted from a

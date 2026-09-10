@@ -58,6 +58,8 @@ describe('WorkerPoolPlugin — register', () => {
     expect(indicator).toBeDefined();
     const result = await indicator?.();
     expect(result?.status).toBe('up');
+    // No `reason` key when the pool IS available: the explanation exists only
+    // to say why `available` is false, so an available pool carries none.
     expect(result?.data).toEqual({ available: true, exitDetection: false, pools: [] });
 
     // Stats appear once a pool exists.
@@ -67,12 +69,27 @@ describe('WorkerPoolPlugin — register', () => {
     expect((after?.data as { pools: unknown[] }).pools).toHaveLength(1);
   });
 
-  it('should report available:false on a runtime without workers', async () => {
+  it('reports degraded, not up, on a runtime without workers', async () => {
+    // H-70c-5 changed the STATUS this test pins, not the payload. It
+    // previously asserted `'up'` beside `available: false`, which is the
+    // defect itself written down as an expectation: every `run()` on such a
+    // runtime rejects with `WorkerPoolUnavailableError`, so the capability
+    // could not execute one task while the indicator called it healthy.
+    //
+    // `degraded` rather than `down` because M45 registers this plugin on
+    // Cloudflare Workers deliberately — `degraded` keeps `/ready` at 200
+    // there while still surfacing in the payload.
     const fake = createFakeContext(createFakeRuntime(new FakeTimers()));
     WorkerPoolPlugin().register(fake.ctx);
     const result = await fake.healthIndicators.get('worker-pool')?.();
-    expect(result?.status).toBe('up');
-    expect(result?.data).toEqual({ available: false, exitDetection: false, pools: [] });
+    expect(result?.status).toBe('degraded');
+    expect(result?.data).toEqual({
+      available: false,
+      exitDetection: false,
+      pools: [],
+      reason:
+        'this runtime provides no worker host, so every run() rejects with WorkerPoolUnavailableError',
+    });
   });
 
   it('should shut the service down via the onClose handler', async () => {

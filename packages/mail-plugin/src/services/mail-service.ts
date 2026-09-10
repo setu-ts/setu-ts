@@ -72,6 +72,28 @@ export class MailService implements IMailer {
     await this.#provider.send(this.#resolve({ ...message, ...rendered }));
   }
 
+  /**
+   * Reports whether the backing provider's transport is reachable right now.
+   *
+   * Delegates to the provider's own optional probe, which is the single
+   * implementation of this question in the package — `MailPlugin`'s health
+   * indicator reads it through here rather than reaching past the service, so
+   * the capability and the indicator cannot disagree about what `reachable`
+   * means (the one-capability-one-implementation rule).
+   *
+   * @returns `true` reachable, `false` contacted and unreachable, `undefined`
+   * when the configured provider exposes no side-effect-free probe
+   * @since 0.6.0
+   */
+  async isHealthy(): Promise<boolean | undefined> {
+    // Optional member: read it off the provider, do not assume it exists.
+    // `LogProvider` and `SendGridProvider` legitimately have no probe.
+    if (typeof this.#provider.isHealthy !== 'function') {
+      return undefined;
+    }
+    return await this.#provider.isHealthy();
+  }
+
   /** Resolves `from` and asserts a sender is present. */
   #resolve(message: MailMessage): OutgoingMail {
     const from = message.from ?? this.#defaultFrom;

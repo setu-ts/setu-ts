@@ -85,6 +85,29 @@ AuditPlugin({ storage: 'file', options: { path: './audit.log' } });
 | `options.table`  | `database` | `'audit_logs'`  | Table for `insert`/`select`.                                          |
 | `options.path`   | `file`     | `'./audit.log'` | Throws at registration when `runtime.fs` is absent (Workers/edge).    |
 
+## Health
+
+Registers an `audit` health indicator reporting `{ storage, reachable }`. It carries BOTH signals:
+`isReady()` is lifecycle (constructed and accepting writes), and a cached, bounded probe is
+reachability (the sink answers right now).
+
+| Backend    | Probe                                                              | Reports           |
+| ---------- | ------------------------------------------------------------------ | ----------------- |
+| `memory`   | none needed — an in-process array                                  | `reachable: true` |
+| `log`      | none needed — the sink is the resolved in-process `ILogger`        | `reachable: true` |
+| `database` | `select` on the primary key against a sentinel that matches no row | `true` / `false`  |
+| `file`     | the last append's outcome, then `stat` of the target directory     | `true` / `false`  |
+
+A ready backend whose sink does not answer is `down`. A backend that cannot probe reports
+`reachable: 'unknown'` — never a falsely affirmative `true`. Outcomes are cached for 5 s and each
+probe is bounded at 2 s on the runtime's own clock and timers, so scraping `/health` never turns
+into sink load.
+
+The database probe READS and never writes: an `insert` would put a fabricated record into the trail
+this plugin exists to keep trustworthy. The file probe does not write either, for the same reason —
+which leaves one gap it is honest about: a directory that is readable but not writable reports
+`true` until the first append proves otherwise, and that is why the append outcome is tracked.
+
 ## Runtime portability
 
 - `memory` and `log` run on every target, including Cloudflare Workers.

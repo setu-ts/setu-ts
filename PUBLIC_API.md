@@ -5678,6 +5678,15 @@ app.router.post('/users', async (ctx) => {
 
 ### Notes
 
+- `IMailer.isHealthy?()` (OPTIONAL, added in `0.6.0`) reports the transport's REACHABILITY, distinct
+  from whether the mailer was constructed: `true` reachable, `false` contacted and unreachable,
+  `undefined` when the question cannot be asked — never read `undefined` as healthy. `MailService`
+  implements it by delegating to the configured provider's own probe, so a provider with none
+  (`log`, `sendgrid`, an SMTP transport with no `verify`) yields `undefined`. The `mail` health
+  indicator reads reachability through this same method rather than past it to the provider, so the
+  capability and the indicator cannot disagree. It exists on `IMailer` so a HOLDER of the capability
+  can ask — `notification-plugin`'s email channel does, and AI_GUIDELINES §2.2 forbids it importing
+  `mail-plugin` to find a probe.
 - `sendTemplate`'s envelope is `Omit<MailMessage, 'html' | 'text'>` — `subject` stays REQUIRED; the
   template provides the `html`/`text` bodies only, never the subject.
 - In an HTML template, interpolated `data` values are HTML-escaped (`& < > " '`); text templates

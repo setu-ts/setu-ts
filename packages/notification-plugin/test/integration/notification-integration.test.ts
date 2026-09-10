@@ -153,9 +153,17 @@ describe('notification-plugin integration (through a real kernel app)', () => {
     const indicators = app.services.getAll<IHealthIndicator>(CAPABILITIES.HEALTH_INDICATOR);
     const notification = indicators.find((i) => i.name === 'notification');
     expect(notification).toBeDefined();
+    // H-70c-4: the payload now carries per-channel reachability. Every
+    // channel here reports `'unknown'` — the three send-only transports have
+    // no probe at all, and this app's mailer is a fake with no `isHealthy` —
+    // which is the honest answer rather than a gap: `'unknown'` never reads
+    // as healthy, where the old hardcoded `up` did.
     expect(await notification!.check()).toEqual({
       status: 'up',
-      data: { channels: ['email', 'sms', 'push', 'slack'] },
+      data: {
+        channels: ['email', 'sms', 'push', 'slack'],
+        reachable: { email: 'unknown', sms: 'unknown', push: 'unknown', slack: 'unknown' },
+      },
     });
 
     await app.stop();

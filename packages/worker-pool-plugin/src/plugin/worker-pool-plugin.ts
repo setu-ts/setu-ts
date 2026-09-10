@@ -79,12 +79,34 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
 
       warnIfDeathUndetectable(ctx, options, exitDetection, available);
 
+      // H-70c-5: this hardcoded `status: 'up'` beside a live `available`
+      // field that could read `false` — a pool with no `IWorkerHost` throws
+      // `WorkerPoolUnavailableError` from every `run()`, so the indicator
+      // reported healthy for a capability that could not execute one task.
+      //
+      // `degraded` rather than `down`, and the distinction is deliberate.
+      // M45 registers this plugin on Cloudflare Workers ON PURPOSE — the
+      // runtime has no threads, so the capability resolves and refuses — and
+      // `degraded` keeps `/ready` at 200 (`health-plugin.ts:218`) while still
+      // surfacing in the payload. Reporting `down` would 503 every Workers
+      // deployment that registers the plugin, turning an observability fix
+      // into an outage.
+      //
+      // The pool counters stay DATA, not policy: `TaskPoolStats.failed` is
+      // cumulative, so any status derived from it would need a threshold this
+      // plugin cannot choose for an application (the M45b/M90b rule that
+      // saturation is published, never judged).
       ctx.health.register(
         'worker-pool',
         (): Promise<HealthCheckResult> =>
           Promise.resolve({
-            status: 'up',
-            data: { available, exitDetection, pools: service.stats() },
+            status: available ? 'up' : 'degraded',
+            data: {
+              available,
+              exitDetection,
+              pools: service.stats(),
+              ...(available ? {} : { reason: WORKERS_UNSUPPORTED_REASON }),
+            },
           }),
       );
 
@@ -94,6 +116,13 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
     },
   };
 }
+
+/**
+ * Reported beside `available: false` so the payload says why, rather than
+ * leaving an operator to infer it from a boolean.
+ */
+const WORKERS_UNSUPPORTED_REASON =
+  'this runtime provides no worker host, so every run() rejects with WorkerPoolUnavailableError';
 
 /**
  * Warns ONCE, at registration, when this application has configured a pool with

@@ -16,6 +16,16 @@ All notable changes to this project are documented here. The format follows
   value the helper can name on its own: omitting it for, say, a `'up' | 'down'` probe would have
   resolved `false` under a signature promising it could not.
 
+- **`common`** — `IMailer.isHealthy?()` reports the mail transport's reachability: `true`, `false`,
+  or `undefined` when the question cannot be asked. OPTIONAL, so no implementor breaks.
+  `MailService` implements it by delegating to the configured provider's own probe. It exists on the
+  capability because a HOLDER of an `IMailer` could not previously ask at all — the probe lived on
+  `mail-plugin`'s internal provider port, and AI_GUIDELINES §2.2 forbids another plugin importing
+  that package to reach it.
+
+- **`audit-plugin`, `notification-plugin`** — optional `isHealthy?()` on the `IAuditStorage` and
+  `NotificationChannel` ports, so a third-party backend or channel can report reachability.
+
 ### Fixed
 
 - **`messaging-plugin`** — the Service Bus health probe reported a **live** broker as `down`. It
@@ -35,6 +45,37 @@ All notable changes to this project are documented here. The format follows
   regardless: the data client stops being ready, and the indicator checks `isReady()` before it
   consults the probe. `IServiceBusTransport.isHealthy?` widens to `Promise<boolean | undefined>`; an
   implementation resolving a plain `boolean` satisfies it unchanged.
+
+- **`audit-plugin`** — the `audit` health indicator reported `storage.isReady()` alone, which is a
+  hardcoded `true` on three of the four shipped backends, so the indicator was in practice a literal
+  `up`: a database whose connection had gone and a file path whose volume had been unmounted both
+  read healthy while every audited record was being lost (H-70c-1). It now reports reachability too
+  — the database backend by `select`ing a sentinel key that matches no row (never an `insert`, which
+  would write a fabricated record into the trail), the file backend by the last append's outcome and
+  a `stat` of the target directory — cached 5 s and bounded 2 s. **This is a behaviour change**: an
+  application whose audit sink is unreachable now fails `/ready` where it previously passed, which
+  is the point. The payload gains `{ storage, reachable }`, where `reachable` is `true`, `false`, or
+  `'unknown'`.
+
+- **`notification-plugin`** — the `notification` health indicator hardcoded `status: 'up'` beside a
+  live channel list, so a configured channel whose transport was down was invisible to `/ready`
+  (H-70c-4). The payload now carries per-channel `reachable`, and one channel that was contacted and
+  did not answer takes the indicator `down`. The email channel delegates to `IMailer.isHealthy`; the
+  send-only transports report `'unknown'`, because a probe may not deliver a notification to a real
+  person and none of them offers a side-effect-free alternative this plugin can reach — `'unknown'`
+  never reads as healthy, where the hardcoded `up` did. **This is a behaviour change** for an
+  application whose mail transport is unreachable.
+
+- **`worker-pool-plugin`** — the `worker-pool` health indicator hardcoded `status: 'up'` beside a
+  live `available` field that could read `false`, so a pool that could not execute a single task —
+  every `run()` rejecting with `WorkerPoolUnavailableError` — reported healthy (H-70c-5). The status
+  now derives from `available`, reporting `degraded` with a `reason` when no worker host is present.
+  `degraded` rather than `down` because M45 registers this plugin on Cloudflare Workers
+  deliberately; `degraded` keeps `/ready` at 200 there while still surfacing in the payload.
+
+- **`mail-plugin`** — the `mail` health indicator read the provider's probe directly, past the
+  service. It now reads it through `MailService.isHealthy()`, so the capability and the indicator
+  answer through one implementation and cannot drift. No payload change.
 
 ### Documentation
 

@@ -144,6 +144,22 @@ worker managed to report, while a thread that simply stops raises nothing at all
 Registers a `worker-pool` health indicator reporting `{ available, exitDetection, pools }`, where
 `pools` is one `{ taskModule, workers, busy, queued, completed, failed }` snapshot per pool.
 
+The status derives from `available`:
+
+| `available` | Status     | Meaning                                                                              |
+| ----------- | ---------- | ------------------------------------------------------------------------------------ |
+| `true`      | `up`       | A worker host is present, so tasks can run.                                          |
+| `false`     | `degraded` | No worker host: every `run()` rejects with `WorkerPoolUnavailableError`. The payload |
+|             |            | adds a `reason` saying so.                                                           |
+
+`degraded` rather than `down` because registering this plugin on Cloudflare Workers is deliberate —
+the runtime has no threads, the capability resolves and refuses, and `degraded` keeps `/ready` at
+200 while still surfacing in the payload. Reporting `down` would 503 every such deployment.
+
+The pool counters are DATA, never a threshold. `failed` is cumulative, so any status derived from it
+would need a failure rate this plugin cannot choose on an application's behalf; watch it through the
+metrics instead.
+
 `exitDetection` reports whether this runtime can tell the pool that a worker's thread ended — see
 the lifecycle table above. It is `false` on Deno and on any custom `IWorkerHost` that does not
 implement `reportsExit`.

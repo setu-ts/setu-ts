@@ -34,11 +34,21 @@ export function createFakeContext(services?: Readonly<Record<string, unknown>>):
   // `subtle` and `now` are real: the FCM provider signs a service-account
   // assertion with Web Crypto and expires cached tokens against the wall clock,
   // so a stub that omitted them would let a broken signing path pass.
+  //
+  // The timers are real for the same reason. `IPluginContext.runtime` is
+  // NON-OPTIONAL by contract (`common/src/plugin.ts:499`) and the health
+  // probe bounds each call on `runtime.setTimeout`, so a fake omitting them
+  // does not merely under-test — it throws `setTimeout.bind of undefined`
+  // out of `register()`, which is a defect in this double rather than in the
+  // plugin. Every member the contract declares that a caller may reach has to
+  // be here.
   const runtime = {
     env: {},
     hrtime: (): number => performance.now(),
     now: (): number => Date.now(),
     subtle: crypto.subtle,
+    setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+    clearTimeout: (handle: unknown): void => clearTimeout(handle as number),
   } as unknown as IRuntimeServices;
   registered.set(CAPABILITIES.RUNTIME, runtime);
 
