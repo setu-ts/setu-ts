@@ -29,6 +29,9 @@ All notable changes to this project are documented here. The format follows
 
 - **`audit-plugin`, `notification-plugin`** — optional `isHealthy?()` on the `IAuditStorage` and
   `NotificationChannel` ports, so a third-party backend or channel can report reachability.
+- **`common`** — optional `IGrpcService.refuses?(request)`, answered from the request HEADERS and
+  consulted by the kernel BEFORE it reads the body. Optional, so an implementor that omits it keeps
+  the previous behaviour exactly.
 
 ### Fixed
 
@@ -130,6 +133,21 @@ All notable changes to this project are documented here. The format follows
   sweep for every artifact name up to **67 characters**, which is a measured ceiling rather than a
   round number: at 68 an interface's own `readonly type: typeof …;` property is the next line the
   formatter rewrites, and the test names where the bound is so raising it is a deliberate act.
+- **`kernel`, `grpc-plugin`** — a native gRPC client hung instead of reaching the refusal. The
+  kernel buffered the whole request body before dispatching, and a client-streaming or bidirectional
+  call holds its request stream OPEN, so that read never resolved and the caller received no frames
+  at all. `grpcurl` opens a bidirectional reflection stream before anything else, so it hung on
+  every request — which is why M70i's Trailers-Only `UNIMPLEMENTED` refusal and its root base path
+  were both correct and neither helped (V5-5). A native `application/grpc` request is refused
+  whatever its body contains, so the refusal is now decided from the headers and answered before the
+  read. Probed at the HTTP/2 frame level: a dispatch-map path with the stream open produced no
+  frames, the same path with `END_STREAM` produced the correct refusal, and a non-map path answered
+  immediately — the last of those being the tell, since `claims()` rejects it before the body read.
+  Connect and gRPC-Web are untouched: the content-type set is an exact match, never a prefix, so
+  `application/grpc-web+proto` is not caught. **The `grpc-plugin` README's claim that the bidi hang
+  was "the transport reason the bidi bullet above gives, not because of this refusal" is corrected**
+  — it was the buffering, and the README now says what the buffering still costs a client that holds
+  its stream open past its last message.
 
 ### Documentation
 

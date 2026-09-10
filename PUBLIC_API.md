@@ -10508,9 +10508,13 @@ grpc.addService(AnotherDefinition, anotherImpl);
   no fetch-based server runtime exposes them to a `Response` — including Deno's `Deno.serve`,
   Node.js, and Bun. Every native request is therefore answered with a **Trailers-Only
   `UNIMPLEMENTED`** (`HTTP 200`, `content-type: application/grpc`, `grpc-status: 12`) instead of
-  half-serving the protocol. This is a deliberate design decision, not a platform bug. Connect-JSON
-  and gRPC-Web work completely on all runtimes; point native gRPC clients at a gRPC-Web-capable
-  proxy or switch them to Connect (see the CHANGELOG migration notes).
+  half-serving the protocol. This is a deliberate design decision, not a platform bug. Since `0.6.0`
+  the refusal is decided from the request HEADERS through the optional `IGrpcService.refuses?`,
+  which the kernel consults BEFORE it reads the body — without that, a client-streaming or
+  bidirectional call held its request stream open, the read never resolved, and the caller received
+  no frames at all rather than the refusal. Connect-JSON and gRPC-Web work completely on all
+  runtimes; point native gRPC clients at a gRPC-Web-capable proxy or switch them to Connect (see the
+  CHANGELOG migration notes).
 
 ---
 

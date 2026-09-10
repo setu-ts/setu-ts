@@ -25,6 +25,10 @@ import {
 } from '../transports/rpc-dispatcher.ts';
 import { buildConnectRouter, type ServiceEntry } from '../transports/connect-router-builder.ts';
 import type { EmbeddedDescriptors } from '../descriptors/embedded-descriptors.ts';
+import {
+  isNativeGrpcContentType,
+  trailersOnlyUnimplemented,
+} from '../transports/grpc-binary-refusal.ts';
 
 /** Constructor inputs for {@linkcode GrpcService}. */
 export interface GrpcServiceOptions {
@@ -154,6 +158,41 @@ export class GrpcService implements IGrpcService {
       return this.#servedPaths.has(path);
     }
     return this.#buildDispatchMap().has(path);
+  }
+
+  /**
+   * Refuses a native `application/grpc` request from its HEADERS alone.
+   *
+   * The refusal itself is M70i's and unchanged: the fetch `Response` cannot
+   * carry the HTTP/2 trailers the native wire format signals completion with,
+   * so a Trailers-Only `UNIMPLEMENTED` is the protocol's own way to say so.
+   * What changed is WHEN it is reachable.
+   *
+   * The kernel used to buffer the request body before dispatching, and a
+   * client-streaming or bidirectional call holds its request stream OPEN — so
+   * that read never resolved and the caller got no frames at all instead of
+   * the refusal (V5-5). `grpcurl` opens a bidirectional reflection stream
+   * first, which is why it hung on every request while a unary probe with the
+   * stream closed received the refusal correctly.
+   *
+   * Deciding this from headers costs nothing: the content type is all the
+   * answer depends on, and the path check is the same `claims` already made.
+   *
+   * @param request - The native fetch request, body untouched
+   * @returns The Trailers-Only refusal, or `null` to dispatch normally
+   * @since 0.6.0
+   */
+  refuses(request: Request): Response | null {
+    if (!isNativeGrpcContentType(request.headers.get('content-type'))) {
+      return null;
+    }
+    // Only a path this service actually serves. A native content type on some
+    // other path is not this service's to refuse, and at the root `claims`
+    // reports registered procedures only.
+    if (!this.claims(request)) {
+      return null;
+    }
+    return trailersOnlyUnimplemented();
   }
 
   /**
