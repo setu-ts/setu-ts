@@ -14,6 +14,7 @@ import type {
 } from '@setu-ts/common';
 import type { ApqResolver, ApqResolveResult } from '../apq/apq-resolver.ts';
 import type { GraphqlService } from '../services/graphql-service.ts';
+import { bodyRefusalOf } from './body-refusal.ts';
 import { CONTENT_TYPE_GRAPHQL, CONTENT_TYPE_JSON, negotiateMediaType } from './media-type.ts';
 import type { ParseError } from './request-parser.ts';
 import { parseGetQuery } from './request-parser.ts';
@@ -109,6 +110,19 @@ async function handleGraphqlPost(
   try {
     body = await ctx.request.json();
   } catch (e) {
+    // A REFUSED body is not a malformed one (V5-1). Since M90a this read can
+    // reject with a framework refusal carrying its own status — the
+    // `maxBodyBytes` cap rejects with a 413-hinted error — and answering the
+    // fixed `400 INVALID_JSON` below told the client its JSON was bad when the
+    // body had never been parsed at all.
+    const refusal = bodyRefusalOf(e);
+    if (refusal !== null) {
+      logger?.error('Request body refused before parsing', e);
+      return sendGraphqlError(response, refusal.status, {
+        message: refusal.message,
+        extensions: { code: refusal.code },
+      }, mediaType);
+    }
     logger?.error('Failed to parse JSON body', e);
     return sendGraphqlError(response, 400, {
       message: 'Invalid JSON body',

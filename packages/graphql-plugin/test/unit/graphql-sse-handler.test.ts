@@ -22,6 +22,7 @@ import type {
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createSseHandler } from '../../src/transports/sse/graphql-sse-handler.ts';
 import type { ApqResolver, ApqResolveResult } from '../../src/apq/apq-resolver.ts';
+import { withHttpStatusHint } from '@setu-ts/common';
 
 const decoder = new TextDecoder();
 
@@ -107,6 +108,12 @@ interface MockRequestOpts {
   query?: Record<string, string>;
   response?: IResponse;
   jsonThrows?: boolean;
+  /**
+   * The value the body read rejects with, when the test needs a specific one.
+   * Since M90a that read can reject with a framework REFUSAL carrying its own
+   * status, which is a different case from a body that was simply not JSON.
+   */
+  jsonRejectsWith?: unknown;
   signal?: AbortSignal;
 }
 
@@ -114,7 +121,9 @@ function createMockRequest(opts: MockRequestOpts = {}) {
   const q = opts.query ?? {};
   return {
     request: {
-      json: opts.jsonThrows
+      json: opts.jsonRejectsWith !== undefined
+        ? () => Promise.reject(opts.jsonRejectsWith)
+        : opts.jsonThrows
         ? () => Promise.reject(new Error('bad json'))
         : () => Promise.resolve(opts.body),
       headers: new Headers({ 'content-type': 'application/json' }),
@@ -174,6 +183,37 @@ describe('createSseHandler', () => {
       const body = decoder.decode(captures.body!);
       expect(body).toContain('Invalid JSON body');
       expect(body).toContain('INVALID_JSON');
+      expect(captures.stream).toBeUndefined();
+    });
+
+    it('body cap refusal → 413 REQUEST_BODY_TOO_LARGE, not 400 INVALID_JSON (V5-1)', async () => {
+      // `RuntimePlugin({ maxBodyBytes })` rejects the read with a 413-hinted
+      // error. Reporting it as invalid JSON names the wrong cause and the
+      // wrong remedy: the body was never parsed.
+      const service = createMockService(() => ({
+        kind: 'single',
+        status: 200,
+        result: { data: {} },
+      }));
+      const { mock, captures } = createMockResponse();
+      const refusal = withHttpStatusHint(new Error('internal diagnostic'), {
+        status: 413,
+        title: 'Payload Too Large',
+        detail: 'Request body exceeds the configured maximum of 1024 bytes.',
+      });
+      const ctx = createMockRequest({ response: mock, jsonRejectsWith: refusal });
+
+      const { post } = createSseHandler(service, createFakeRuntime().runtime);
+      await post(ctx);
+
+      expect(captures.status).toBe(413);
+      const body = decoder.decode(captures.body!);
+      expect(body).toContain('REQUEST_BODY_TOO_LARGE');
+      expect(body).toContain('1024 bytes');
+      expect(body).not.toContain('INVALID_JSON');
+      expect(body).not.toContain('internal diagnostic');
+      // Still a buffered error, never an in-stream one: the request was
+      // refused before any subscription existed.
       expect(captures.stream).toBeUndefined();
     });
 

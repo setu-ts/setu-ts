@@ -20,6 +20,7 @@ import type {
   RouteHandler,
 } from '@setu-ts/common';
 import type { ApqResolveResult, IApqResolver } from '../../apq/apq-resolver.ts';
+import { bodyRefusalOf } from '../../http/body-refusal.ts';
 import { encodeSseComment, encodeSseComplete, encodeSseEvent } from './sse-frame.ts';
 
 /**
@@ -73,11 +74,24 @@ async function handleSseRequest(
   let body: unknown;
   try {
     body = await ctx.request.json();
-  } catch {
-    // Transport failure — buffered HTTP error
+  } catch (e) {
+    // Transport failure — buffered HTTP error.
+    //
+    // A REFUSED body is reported as the refusal, not as bad JSON (V5-1):
+    // since M90a this read can reject with a framework refusal carrying its
+    // own status, and the `maxBodyBytes` cap rejects with a 413-hinted error
+    // that was being answered `400 INVALID_JSON`.
+    const encoder = new TextEncoder();
+    const refusal = bodyRefusalOf(e);
+    if (refusal !== null) {
+      response.status(refusal.status);
+      response.header('Content-Type', 'application/json');
+      return response.send(encoder.encode(JSON.stringify({
+        errors: [{ message: refusal.message, extensions: { code: refusal.code } }],
+      })));
+    }
     response.status(400);
     response.header('Content-Type', 'application/json');
-    const encoder = new TextEncoder();
     return response.send(encoder.encode(JSON.stringify({
       errors: [{ message: 'Invalid JSON body', extensions: { code: 'INVALID_JSON' } }],
     })));
