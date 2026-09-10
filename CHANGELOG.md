@@ -109,6 +109,19 @@ All notable changes to this project are documented here. The format follows
   existing code — including the shared `MalformedRequestBodyError`, which M90f made status-hinted at
   `400`, so honouring every hint blindly would have replaced the published `INVALID_JSON` code on
   the commonest failure there is.
+- **`cli`** — a generated CQRS or event handler could fail the project's own `deno fmt --check`, and
+  whether it did depended on how long the artifact's name happened to be. The three schematics
+  hand-wrapped their `implements` clause UNCONDITIONALLY, so
+  `setu generate query-handler
+  find-order` emitted a wrap the formatter immediately rejoined (92
+  characters, under the emitted `lineWidth: 100`) while `place-order` at 103 was correct (V5-3) —
+  M63's D6 and M70h's X2-4 in a third place. Every such line is now rendered from its own measured
+  length by one `renderDeclarationHeader`/`renderMethodSignature` pair, so the output no longer
+  depends on the name. Driving a REAL `deno fmt --check` over the emitted files across five name
+  lengths found three more overflows of the same class that the row did not name — the
+  `extends CqrsQuery<…>` interface header, the `handle(…)` signature, and a barrel registration
+  entry — all fixed here, because a scaffold that fails its own format check for a long name is the
+  same defect whichever line does it.
 
 ### Documentation
 

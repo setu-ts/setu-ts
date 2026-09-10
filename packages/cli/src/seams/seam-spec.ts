@@ -195,6 +195,36 @@ function fmtSortSpecifiers(symbols: readonly string[]): string[] {
  * @param entries - The rendered entries, already in source form
  * @returns The complete declaration, ending in `;`
  */
+/**
+ * Renders one object-literal registration entry for a seam barrel.
+ *
+ * {@linkcode renderExportedArray} decides whether the ARRAY fits on one line;
+ * this decides whether one ENTRY does. Both decisions are needed, and having
+ * only the first is what let a long artifact name emit
+ * `  { type: OUTBOUND_PAYMENT_RECONCILIATION_QUERY, handler: … },` at 105
+ * characters inside an already-wrapped array — under the array's own check,
+ * over the width, and rewritten by the generated project's own
+ * `deno fmt --check` (V5-3's class).
+ *
+ * The expanded form matches `deno fmt` exactly: the entry stays at its
+ * two-space indent, fields go to four, and the closing brace returns to two.
+ * An expanded entry also forces the array wide, which falls out of
+ * `renderExportedArray`'s existing length check rather than needing a second
+ * rule.
+ *
+ * @param fields - The `key: value` fields, in the order they should appear
+ * @returns The entry, without a trailing comma
+ * @since 0.6.0
+ */
+export function renderRegistrationEntry(fields: readonly string[]): string {
+  const inline = `{ ${fields.join(', ')} }`;
+  // `+ 3` for the two-space indent it lands on and its trailing comma.
+  if (inline.length + 3 <= GENERATED_LINE_WIDTH) {
+    return inline;
+  }
+  return `{\n    ${fields.join(',\n    ')},\n  }`;
+}
+
 export function renderExportedArray(
   name: string,
   elementType: string,
