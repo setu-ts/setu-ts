@@ -1160,10 +1160,12 @@ class Application implements IKernelApplication {
     const snapshot = await response.arrayBuffer();
     const builder = ctx.response as ResponseBuilder;
     builder.status(response.status);
-    // `append`, not `set`: a Trailers-Only refusal and a Connect reply can
-    // both carry repeated headers, and collapsing them would drop values.
+    // `appendHeader`, not `header`: `header` delegates to `Headers.set`, and a
+    // Trailers-Only refusal or a Connect reply can carry repeated headers —
+    // `Set-Cookie` above all, which `Headers.entries()` yields once per value
+    // rather than comma-joining. Setting per entry would keep only the last.
     for (const [key, value] of response.headers.entries()) {
-      builder.header(key, value);
+      builder.appendHeader(key, value);
     }
     builder.send(new Uint8Array(snapshot));
   }

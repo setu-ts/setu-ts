@@ -147,7 +147,15 @@ All notable changes to this project are documented here. The format follows
   `application/grpc-web+proto` is not caught. **The `grpc-plugin` README's claim that the bidi hang
   was "the transport reason the bidi bullet above gives, not because of this refusal" is corrected**
   — it was the buffering, and the README now says what the buffering still costs a client that holds
-  its stream open past its last message.
+  its stream open past its last message. A DRAINING service still answers `503` rather than the
+  header-only refusal: after `close()` the only paths it claims are the ones it served, precisely so
+  their drain answer survives, and `UNIMPLEMENTED` would tell a client to stop asking where `503`
+  tells it to retry.
+
+- **`kernel`** — an RPC response's repeated headers were collapsed when copied onto the framework
+  response. The copy used `IResponse.header`, which delegates to `Headers.set`, so a service
+  answering two `Set-Cookie` values — the one header `Headers.entries()` yields once per value
+  instead of comma-joining — kept only the last. It appends now.
 
 ### Documentation
 

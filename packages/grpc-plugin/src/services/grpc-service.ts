@@ -192,6 +192,16 @@ export class GrpcService implements IGrpcService {
     if (!this.claims(request)) {
       return null;
     }
+    // A closed service is DRAINING, and that is a different fact from "this
+    // method does not exist". `UNIMPLEMENTED` tells a client to stop asking;
+    // `503` tells it to retry, which is what a rolling deploy needs it to do.
+    // After `close()` the only paths `claims` still accepts are the ones this
+    // server served, precisely so their drain answer survives — answering the
+    // header-only refusal here would have thrown that away for exactly the
+    // clients this milestone exists to serve.
+    if (this.#closed) {
+      return new Response('Service Unavailable', { status: 503 });
+    }
     return trailersOnlyUnimplemented();
   }
 

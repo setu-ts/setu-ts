@@ -146,6 +146,64 @@ describe('native gRPC over a half-open request stream (V5-5)', () => {
     });
   });
 
+  it('preserves a repeated header when copying the RPC response across', async () => {
+    // `Headers.entries()` comma-joins most repeated headers but yields
+    // `Set-Cookie` once per value, so copying with `set` would keep only the
+    // last. The refusal path is where an RPC response reaches the kernel's
+    // copy, so a service answering two cookies is the case that sees it.
+    await withApp(async (app) => {
+      const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+      const service = grpc as unknown as {
+        refuses(request: Request): Response | null;
+      };
+      const original = service.refuses.bind(service);
+      service.refuses = (request: Request): Response | null => {
+        const answer = original(request);
+        if (answer === null) {
+          return null;
+        }
+        const headers = new Headers(answer.headers);
+        headers.append('set-cookie', 'a=1');
+        headers.append('set-cookie', 'b=2');
+        return new Response(answer.body, { status: answer.status, headers });
+      };
+
+      const request = new Request('http://localhost/example.EchoService/Echo', {
+        method: 'POST',
+        headers: { 'content-type': 'application/grpc+proto' },
+        body: new Uint8Array([0, 0, 0, 0, 0]) as unknown as BodyInit,
+      });
+
+      const response = await withDeadline(app.fetch(request), 'a native gRPC call');
+      expect(response.headers.getSetCookie()).toEqual(['a=1', 'b=2']);
+      await response.body?.cancel();
+    });
+  });
+
+  it('answers 503, not UNIMPLEMENTED, once the service is draining', async () => {
+    // The two are different instructions to a client: `UNIMPLEMENTED` says the
+    // method is not there and to stop asking, `503` says retry — which is what
+    // a rolling deploy needs. After `close()` the only paths still claimed are
+    // the ones this server served, precisely so their drain answer survives,
+    // and answering the header-only refusal for them would throw that away.
+    await withApp(async (app) => {
+      const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+      await (grpc as unknown as { close(): Promise<void> }).close();
+
+      const request = new Request('http://localhost/example.EchoService/Echo', {
+        method: 'POST',
+        headers: { 'content-type': 'application/grpc+proto' },
+        body: new Uint8Array([0, 0, 0, 0, 0]) as unknown as BodyInit,
+      });
+
+      const response = await withDeadline(app.fetch(request), 'a draining native gRPC call');
+
+      expect(response.status).toBe(503);
+      expect(response.headers.get('grpc-status')).toBeNull();
+      await response.body?.cancel();
+    });
+  });
+
   it('leaves an ordinary route alone, even under a native content type', async () => {
     // A path outside the dispatch map is not this service's to refuse.
     await withApp(async (app) => {
