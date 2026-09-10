@@ -253,6 +253,12 @@ under another client's hash. Hashing uses `IRuntimeServices.subtle`, so `apq` re
 - APQ verifies a submitted hash against the submitted document before persisting it
 - Introspection is enabled by default (disable in production if needed)
 - GraphiQL is enabled by default (disable in production with `graphiql: false`)
+- The request body itself is bounded by `RuntimePlugin({ maxBodyBytes })`, not by this plugin — a
+  document large enough to matter is refused before it is parsed, so `maxNodes` never sees it. Both
+  HTTP transports report that refusal as **`413`** with `extensions.code: 'REQUEST_BODY_TOO_LARGE'`,
+  distinct from the `400 INVALID_JSON` a body that was read and was not JSON still gets: a client
+  told its JSON is bad re-sends the same oversized document, where one told its body is too large
+  does not
 
 ## License
 

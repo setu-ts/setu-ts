@@ -95,6 +95,20 @@ All notable changes to this project are documented here. The format follows
   plain-column arm now emits `IS NULL`, which the adapter's own `in`-with-null arm and its JSON-path
   arm were already doing. No API change; a query that returned nothing now returns the NULL rows,
   which is what every other adapter already returned.
+- **`graphql-plugin`, `storage-plugin`** — a REFUSED request body was re-reported with a different,
+  misleading status. Since M90a a body read can reject rather than return —
+  `RuntimePlugin({ maxBodyBytes })` bounds it and rejects with a `413`-hinted
+  `RequestBodyTooLargeError` — and three sites wrapped that read in a `try` whose `catch` answered
+  something else: the GraphQL HTTP and SSE transports answered `400 INVALID_JSON`, and the upload
+  middleware answered `400 "Failed to parse multipart body"` (V5-1). Each named the wrong cause —
+  the body was never parsed, so it was never invalid — and the wrong remedy, since a client told its
+  payload is malformed re-sends the same oversized one. All three now read the thrower's own status
+  hint: the GraphQL transports answer `413` with `extensions.code` `REQUEST_BODY_TOO_LARGE`, and the
+  upload middleware serves the hint through `respondWithError`, so the refusal comes out in the
+  application's configured error format. A genuinely malformed body still answers `400` with its
+  existing code — including the shared `MalformedRequestBodyError`, which M90f made status-hinted at
+  `400`, so honouring every hint blindly would have replaced the published `INVALID_JSON` code on
+  the commonest failure there is.
 
 ### Documentation
 

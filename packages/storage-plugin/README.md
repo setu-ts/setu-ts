@@ -68,7 +68,9 @@ Passing `contentType` is what makes a signed URL render the image rather than do
 on `UploadedFile` is `mimeType`.
 
 Size limits answer **413**; a malformed body, a disallowed MIME type and too many files answer
-**400**.
+**400**. That includes a body the runtime refused before this middleware ran: `maxBodyBytes` on
+`RuntimePlugin` rejects the read with a `413`-hinted error, and the middleware serves that hint
+rather than reporting a malformed multipart.
 
 The multipart parser is implemented in this package — no dependency.
 

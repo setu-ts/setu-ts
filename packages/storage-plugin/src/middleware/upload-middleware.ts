@@ -5,7 +5,7 @@
  * @module
  */
 import type { ILogger, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES, respondWithError } from '@setu-ts/common';
+import { CAPABILITIES, httpStatusHintOf, respondWithError } from '@setu-ts/common';
 import type { UploadedFile, UploadMiddlewareOptions } from '../interfaces/index.ts';
 import { parseMultipart } from '../multipart/multipart-parser.ts';
 
@@ -192,6 +192,20 @@ export function createUploadMiddleware(
       // Store under state key.
       ctx.state.set(UPLOADS_STATE_KEY, uploaded);
     } catch (error) {
+      // A REFUSED body is answered as the refusal, never as a malformed one
+      // (V5-1). Since M90a the read above can reject rather than return:
+      // `RuntimePlugin({ maxBodyBytes })` bounds it and rejects with a
+      // 413-hinted `RequestBodyTooLargeError`. Reporting that as
+      // `400 Failed to parse multipart body` named the wrong cause — the body
+      // was never parsed — and the wrong remedy, since a client told its
+      // multipart is malformed will re-send the same oversized upload. The
+      // hint IS an `ErrorResponseInit`, so it is served through the same
+      // responder and comes out in the application's configured format.
+      const hint = httpStatusHintOf(error);
+      if (hint !== undefined) {
+        respondWithError(ctx, hint);
+        return;
+      }
       // A malformed multipart body → 400. The catch guards ONLY the parse and
       // validation above; `await next()` runs after it, so a downstream handler
       // failure is no longer reported as a malformed body (X8-1). A genuinely

@@ -261,6 +261,12 @@ Set both to the same value or make `maxBodyBytes` larger. Omit `maxBodyBytes` fo
 read rejects with a `RequestBodyTooLargeError` carrying a `413` status hint, so `errorHandler`
 answers `413 Payload Too Large` in its configured format.
 
+A component that wraps its own body read in a `try` must honour that hint rather than reporting its
+own status: the read can now REJECT, and a `catch` that assumes a parse failure reports the wrong
+cause and the wrong remedy. `@setu-ts/graphql-plugin`'s two HTTP transports answer `413` with
+`extensions.code: 'REQUEST_BODY_TOO_LARGE'`, and `@setu-ts/storage-plugin`'s upload middleware
+serves the hint through `respondWithError`.
+
 ### Accessing Runtime Services
 
 ```typescript
@@ -5488,7 +5494,9 @@ app.router.post('/upload', {
 ```
 
 Refusal statuses: a body or file over its limit answers **413**; a malformed body, a disallowed MIME
-type and too many files answer **400**.
+type and too many files answer **400**. A body refused by `RuntimePlugin({ maxBodyBytes })` before
+the middleware ever sees it also answers **413**, served from that refusal's own status hint — it is
+not reported as a malformed multipart, which is what a client would otherwise be told to fix.
 
 `maxBodyBytes` (default 50 MB) caps the body the middleware will PARSE, with the effective bound
 `min(maxSize * 2 + framing, maxBodyBytes)`. It does not bound the initial read — the HTTP adapter
