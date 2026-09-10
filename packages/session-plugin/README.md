@@ -212,9 +212,15 @@ deployment where a second service answers on another port of the same name. Two 
 
 - Keep every `GET` free of side effects. If one must mutate, make it a `POST` so form CSRF covers
   it, rather than adding it to a token check.
-- Do not read "`SameSite=Lax` by default" as isolation from another port. For that you need distinct
-  registrable domains, or `__Host-`/`__Secure-` cookie prefixes plus HTTPS, neither of which a port
-  alone provides.
+- Do not read "`SameSite=Lax` by default" as isolation from another port — and do not reach for a
+  cookie prefix to get it. **Cookies are not scoped by port at all** (RFC 6265 §8.5), so a service
+  on another port of the same host receives the cookie whatever attributes it carries. `__Host-` is
+  still worth setting for what it DOES do — it requires `Secure`, forbids `Domain`, and pins
+  `Path=/`, which stops a sibling SUBDOMAIN from setting or reading the cookie — but that is a
+  subdomain boundary, not a port one, and `__Secure-` is weaker still. Real separation at the host
+  level means a distinct hostname or registrable domain; short of that, only application-level
+  authorization on each request, or running the two services where they cannot share a host name,
+  keeps them apart.
 
 ### The sequence: safe request, then mutation
 
