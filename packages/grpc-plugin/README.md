@@ -137,6 +137,13 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   HTTP/2 — but note it also applies to this plugin's OWN `grpc.reflection.v1.ServerReflection`,
   whose sole method is bidi-streaming. Unary, server-streaming and client-streaming are unaffected
   on every runtime.
+
+  Separately, the kernel BUFFERS the request body before dispatching a call it will actually serve,
+  so a client that holds its request stream open past its last message stalls until it closes. A
+  Connect or gRPC-Web client that sends its messages and finishes is unaffected, which is every
+  in-repo client and every one the reference suite exercises. A native `application/grpc` call is
+  refused from its headers and never reaches the buffering — which is what a half-open stream used
+  to hang on.
 - **Application injection**: `Application.inject()` reaches gRPC handlers — the kernel dispatches
   gRPC from the service registry, not through the HTTP adapter, so an injected request is routed
   exactly like an adapter-delivered one. `app.fetch()` with a web `Request` works too, for streaming
@@ -155,15 +162,14 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   worse than refusing it cleanly: clients see an explicit, well-formed `UNIMPLEMENTED` instead of an
   opaque transport error after a successful handshake. Measured with real `grpcurl` v1.9.3: a unary
   native call reports `target server does not expose service …` and exits 1. A **bidi** native call
-  still hangs rather than reporting the refusal — including `grpcurl list`, whose reflection call is
-  bidi-streaming — for the transport reason the bidi bullet above gives, not because of this
-  refusal; it hangs identically with the refusal removed. **Use Connect or gRPC-Web instead**; both
-  work completely for unary, server-streaming and client-streaming over both HTTP/1.1 and HTTP/2;
-  bidi additionally requires HTTP/2, per the bidi bullet above. Every non-JS gRPC client can speak
-  Connect or gRPC-Web, but **not through `grpcurl`** — its `-format` flag selects the message
-  encoding (`json`/`text`), not the wire protocol, and it implements native gRPC only. Use
-  `buf curl --protocol connect` (or `--protocol grpcweb`), a generated Connect client, or a web
-  client; for an existing native-gRPC fleet, put Envoy's `grpc_web` filter in front.
+  reports the same refusal, and since `0.6.0` it does so without hanging: the refusal is decided
+  from the request HEADERS and answered before the body is read. **Use Connect or gRPC-Web
+  instead**; both work completely for unary, server-streaming and client-streaming over both
+  HTTP/1.1 and HTTP/2; bidi additionally requires HTTP/2, per the bidi bullet above. Every non-JS
+  gRPC client can speak Connect or gRPC-Web, but **not through `grpcurl`** — its `-format` flag
+  selects the message encoding (`json`/`text`), not the wire protocol, and it implements native gRPC
+  only. Use `buf curl --protocol connect` (or `--protocol grpcweb`), a generated Connect client, or
+  a web client; for an existing native-gRPC fleet, put Envoy's `grpc_web` filter in front.
 
 ## Health Indicator
 

@@ -1102,11 +1102,36 @@ class Application implements IKernelApplication {
       return false;
     }
 
-    // Reconstruct a web Request from the mapped IRequest: the original body is
-    // already consumed by `mapWebRequestToFrameworkRequest`. Cloning before the
-    // mapping would tax every request in the application to serve the gRPC
-    // minority. Trailers do not survive the round trip — M49 records that
-    // native gRPC-binary trailers work on no runtime this plugin runs on.
+    // A refusal decidable from HEADERS is answered BEFORE the body is read,
+    // and the ordering is the fix rather than an optimisation (V5-5). A
+    // native `application/grpc` request is refused whatever its body holds,
+    // but a client-streaming or bidirectional call holds its request stream
+    // OPEN — so the read below never resolves and the caller receives no
+    // frames at all instead of the refusal. `grpcurl` opens a bidirectional
+    // reflection stream first, so it hung on every request, which is why
+    // M70i's refusal being correct did not help.
+    //
+    // The kernel does not decide WHAT is refusable: the content types are the
+    // plugin's to know (an exact-match set — `startsWith('application/grpc')`
+    // would also claim `application/grpc-web+proto`, the format that works),
+    // and §2.2 forbids importing it to find out.
+    const refusal = grpcService.refuses?.(raw) ?? null;
+    if (refusal !== null) {
+      await this.#sendRpcResponse(ctx, refusal);
+      return true;
+    }
+
+    // Reconstruct a web Request from the mapped IRequest. Trailers do not
+    // survive the round trip — M49 records that native gRPC-binary trailers
+    // work on no runtime this plugin runs on.
+    //
+    // This read is what bounds the dispatch to requests whose body ENDS.
+    // Since M87 the mapping is lazy, so the body is still unread here and the
+    // buffering is this line's own doing, not something already spent — the
+    // comment that used to say otherwise predated that change. Passing `raw`
+    // straight through would preserve streaming, but only while nothing in
+    // the pipeline has read the body, and the kernel cannot see whether
+    // anything has; that is left as a named limitation rather than a guess.
     const bodyBytes = await ctx.request.bytes();
     const grpcRequest = new Request(ctx.request.url, {
       method: ctx.request.method,
@@ -1117,21 +1142,32 @@ class Application implements IKernelApplication {
     });
 
     const response = await grpcService.handleRequest(grpcRequest);
+    await this.#sendRpcResponse(ctx, response);
+    return true;
+  }
 
-    // Map the gRPC Response to the framework response
+  /**
+   * Writes an RPC {@linkcode Response} onto the framework response.
+   *
+   * One implementation for both exits — the header-only refusal and a
+   * dispatched reply — so a refusal cannot come to carry different headers or
+   * a different status mapping from an ordinary answer.
+   *
+   * @param ctx - The request context whose response is written
+   * @param response - The RPC response to copy across
+   */
+  async #sendRpcResponse(ctx: IRequestContext, response: Response): Promise<void> {
     const snapshot = await response.arrayBuffer();
-    const headers = new Headers();
-    for (const [key, value] of response.headers.entries()) {
-      headers.append(key, value);
-    }
-
     const builder = ctx.response as ResponseBuilder;
     builder.status(response.status);
-    for (const [key, value] of headers.entries()) {
-      builder.header(key, value);
+    // `appendHeader`, not `header`: `header` delegates to `Headers.set`, and a
+    // Trailers-Only refusal or a Connect reply can carry repeated headers —
+    // `Set-Cookie` above all, which `Headers.entries()` yields once per value
+    // rather than comma-joining. Setting per entry would keep only the last.
+    for (const [key, value] of response.headers.entries()) {
+      builder.appendHeader(key, value);
     }
     builder.send(new Uint8Array(snapshot));
-    return true;
   }
 
   /**

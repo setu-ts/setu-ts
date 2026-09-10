@@ -133,6 +133,34 @@ export interface IGrpcService {
   claims?(request: Request): boolean;
 
   /**
+   * Whether this service refuses the request outright, decided from its
+   * HEADERS alone.
+   *
+   * The kernel calls this immediately after {@linkcode IGrpcService.claims}
+   * and **before it reads the request body**. That ordering is the whole
+   * point. A native `application/grpc` request is refused whatever its body
+   * contains, and buffering first made the refusal unreachable for the case
+   * that needs it most: a client-streaming or bidirectional call holds its
+   * request stream OPEN, so the body read never resolves and the caller
+   * receives no frames at all rather than the refusal (V5-5). `grpcurl` opens
+   * a bidirectional reflection stream before anything else, so it hung on
+   * every request — which is why the refusal being correct (M70i) and the
+   * base path being right (M70i) neither of them helped.
+   *
+   * Returning a `Response` answers it as-is. Returning `null` means "no
+   * header-only decision", and the kernel proceeds to
+   * {@linkcode IGrpcService.handleRequest} as before.
+   *
+   * Optional for source compatibility. An implementor that omits it keeps the
+   * previous behaviour exactly, buffering included.
+   *
+   * @param request - The native fetch request, body untouched
+   * @returns The refusal to answer with, or `null` to dispatch normally
+   * @since 0.6.0
+   */
+  refuses?(request: Request): Response | null;
+
+  /**
    * Handles an incoming RPC request directly.
    *
    * Called by the kernel terminal handler after the middleware pipeline has
