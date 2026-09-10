@@ -13,6 +13,13 @@ import type {
 import { fromAuditRow, orderAndLimit, toAuditRow } from './audit-record.ts';
 
 /**
+ * Primary-key value the reachability probe selects on. Deliberately not a
+ * UUID: `AuditService` stamps every `id` with `runtime.uuid()`, so this can
+ * never collide with a real record and the probe can never return one.
+ */
+const PROBE_SENTINEL_ID = '__setu_audit_health_probe__';
+
+/**
  * Database-backed audit storage. Requires an injected {@linkcode IAuditDbClient}
  * at construction time.
  *
@@ -66,6 +73,33 @@ export class DatabaseAuditStorage implements IAuditStorage {
     }
 
     return orderAndLimit(filtered, criteria?.limit);
+  }
+
+  /**
+   * Probes the injected client with a `select` that matches nothing.
+   *
+   * `IAuditDbClient` exposes only `insert` and `select`, and an audit probe
+   * may not `insert` — it would write a fabricated record into the trail this
+   * plugin exists to keep trustworthy. So the probe reads instead, on the
+   * primary key against a sentinel that no generated `id` can equal
+   * ({@linkcode toAuditRow} writes `runtime.uuid()` there): the round trip
+   * exercises the connection and the table's existence while returning no
+   * rows, which is what keeps it cheap enough to run on a health interval.
+   *
+   * A rejection means the client was reached for and did not answer — a
+   * dropped connection, a missing table, a revoked grant — all of which mean
+   * the next `append` will be lost.
+   *
+   * @returns `true` when the client answered, `false` when it rejected
+   * @since 0.6.0
+   */
+  async isHealthy(): Promise<boolean> {
+    try {
+      await this.client.select(this.table, { id: PROBE_SENTINEL_ID });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Database storage is always ready once constructed. */

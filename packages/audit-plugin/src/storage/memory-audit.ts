@@ -32,6 +32,18 @@ export class MemoryAuditStorage implements IAuditStorage {
   }
 
   /** Always ready — in-memory storage has no external dependency. */
+  /**
+   * Lifecycle truth: an in-process array has no separate sink to reach, so
+   * reachability IS readiness — the process either holds the entries or it
+   * does not.
+   *
+   * @returns `true`
+   * @since 0.6.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(this.isReady());
+  }
+
   isReady(): boolean {
     return true;
   }

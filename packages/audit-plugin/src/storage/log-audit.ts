@@ -56,6 +56,18 @@ export class LogAuditStorage implements IAuditStorage {
     return Promise.resolve([]);
   }
 
+  /**
+   * Lifecycle truth: the sink is the resolved `ILogger`, which is in-process,
+   * so reachability IS readiness. Where that logger's own transport goes is
+   * the logger's health to report, not this backend's.
+   *
+   * @returns `true` when a logger is configured
+   * @since 0.6.0
+   */
+  isHealthy(): Promise<boolean> {
+    return Promise.resolve(this.isReady());
+  }
+
   /** Ready as long as a logger is configured. */
   isReady(): boolean {
     return this._logger !== null;

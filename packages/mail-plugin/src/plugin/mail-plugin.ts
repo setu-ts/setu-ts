@@ -5,7 +5,7 @@
  * @module
  */
 import type { HealthCheckResult, IMailer, IPlugin, IPluginContext } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY, resolveProbeTiming } from '@setu-ts/common';
 import type { MailProvider, MailProviderOptions, MailProviderType } from '../interfaces/index.ts';
 import { MailService } from '../services/mail-service.ts';
 import { TemplateEngine } from '../templates/template-engine.ts';
@@ -101,7 +101,14 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
       await provider.connect();
 
       const templates = new TemplateEngine(options?.templates);
-      const service = new MailService(provider, templates, buildServiceOptions(options));
+      // The runtime's clock and timers reach the service, which is where the
+      // reachability probe is cached and bounded: this indicator and every
+      // email channel in `notification-plugin` ask the same question, and the
+      // cache has to sit where they meet or each caller hits the transport.
+      const service = new MailService(provider, templates, {
+        ...buildServiceOptions(options),
+        probeTiming: resolveProbeTiming(ctx.runtime),
+      });
       ctx.services.register<IMailer>(CAPABILITIES.MAIL, service);
 
       ctx.logger?.debug('MailPlugin registered', { provider: providerType });
@@ -111,14 +118,20 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
       // answers right now). A ready-but-unreachable provider is `down` with
       // `data.reachable: false`. A provider that cannot probe (smtp/SES client
       // without the optional member) is `up` with `data.reachable: 'unknown'`.
+      //
+      // Reachability is read through the SERVICE, not past it to the provider.
+      // `IMailer.isHealthy` is now public, so a holder of the capability —
+      // `notification-plugin`'s email channel — asks the same question this
+      // indicator does; routing both through `MailService.isHealthy` is what
+      // stops the two answers drifting.
       const mailIndicator = async (): Promise<HealthCheckResult> => {
         if (!provider.isReady()) {
           return { status: 'down', data: { provider: providerType, reachable: false } };
         }
-        if (typeof provider.isHealthy !== 'function') {
+        const reachable = await service.isHealthy();
+        if (reachable === undefined) {
           return { status: 'up', data: { provider: providerType, reachable: 'unknown' } };
         }
-        const reachable = await provider.isHealthy();
         if (reachable === false) {
           return { status: 'down', data: { provider: providerType, reachable: false } };
         }

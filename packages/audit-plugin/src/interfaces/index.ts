@@ -80,6 +80,28 @@ export interface IAuditStorage {
   /** Whether the storage is ready to accept writes. */
   isReady(): boolean;
   /**
+   * Reports whether the audit SINK is reachable right now, distinct from
+   * whether the backend was constructed.
+   *
+   * `isReady()` cannot answer this: it is a constant `true` for the memory,
+   * database and file backends, so an indicator reading it alone reports `up`
+   * for a database whose connection is gone and a file path whose volume has
+   * been unmounted — H-70c-1.
+   *
+   * A `false` means the sink was contacted and did not answer, and an audit
+   * trail that is silently not being written is the failure this exists to
+   * surface. An `undefined` means the question could not be asked — never
+   * read it as healthy.
+   *
+   * Optional so a third-party backend need not implement it; every backend
+   * this package ships does.
+   *
+   * @returns `true` reachable, `false` contacted and unreachable, `undefined`
+   * when reachability cannot be determined
+   * @since 0.6.0
+   */
+  isHealthy?(): Promise<boolean | undefined>;
+  /**
    * Drains any in-flight writes on shutdown. Backends that complete each
    * `append` before its promise resolves (memory/log/database) are no-ops;
    * `FileAuditStorage` awaits its serialized write chain so a fire-and-forget

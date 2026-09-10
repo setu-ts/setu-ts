@@ -40,4 +40,24 @@ export class EmailChannel implements NotificationChannel {
       text: notification.body,
     });
   }
+
+  /**
+   * Reports the mail transport's reachability by asking the injected
+   * `IMailer`, which is the only channel in this package whose transport
+   * offers a side-effect-free probe.
+   *
+   * `isHealthy` is optional on `IMailer`, so an injected mailer that does not
+   * implement it — an application's own stub, or a `MailService` over a
+   * provider with no probe — yields `undefined` rather than a guess.
+   *
+   * @returns `true` reachable, `false` contacted and unreachable, `undefined`
+   * when the mailer cannot answer
+   * @since 0.6.0
+   */
+  async isHealthy(): Promise<boolean | undefined> {
+    if (typeof this.mailer.isHealthy !== 'function') {
+      return undefined;
+    }
+    return await this.mailer.isHealthy();
+  }
 }

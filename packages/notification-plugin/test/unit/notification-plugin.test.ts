@@ -84,7 +84,10 @@ describe('NotificationPlugin.register', () => {
     expect(indicator).toBeDefined();
     const result = await indicator!();
     expect(result.status).toBe('up');
-    expect(result.data).toEqual({ channels: ['email', 'slack'] });
+    expect(result.data).toEqual({
+      channels: ['email', 'slack'],
+      reachable: { email: 'unknown', slack: 'unknown' },
+    });
   });
 
   it('registers an empty channel map without touching the mail capability', () => {
