@@ -88,6 +88,13 @@ All notable changes to this project are documented here. The format follows
 - **`mail-plugin`** — the `mail` health indicator read the provider's probe directly, past the
   service. It now reads it through `MailService.isHealthy()`, so the capability and the indicator
   answer through one implementation and cannot drift. No payload change.
+- **`database-plugin`** — a `{ operator: 'eq', value: null }` filter matched **nothing** on the
+  Drizzle adapter. It rendered `col = ?` bound to `NULL`, and SQL evaluates `NULL = NULL` to
+  UNKNOWN, so `findAll`, `findOne`, `count` and `findPage` silently returned no rows where the
+  memory adapter, Prisma, MongoDB and D1 all return the rows whose column is `NULL`. The
+  plain-column arm now emits `IS NULL`, which the adapter's own `in`-with-null arm and its JSON-path
+  arm were already doing. No API change; a query that returned nothing now returns the NULL rows,
+  which is what every other adapter already returned.
 
 ### Documentation
 

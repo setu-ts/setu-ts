@@ -918,7 +918,17 @@ function filterPredicateFor(
 
   switch (filter.operator) {
     case 'eq':
-      return operators.eq(baseColumn, filter.value);
+      // `eq(col, null)` renders `col = $1` bound to NULL, and `NULL = NULL` is
+      // UNKNOWN in SQL, so the predicate matches nothing — a silent wrong
+      // answer rather than an error. Every other adapter matches the NULL
+      // rows: the memory adapter compares `=== null`, Prisma and Mongo hand
+      // the null to a driver that translates it, and D1 emits `IS NULL`. The
+      // `in` arm below already splits nulls out for exactly this reason, and
+      // so does this function's own JSON-path branch; only the plain-column
+      // `eq` was left comparing against NULL. (V5-4)
+      return filter.value === null
+        ? filterOperators.isNull(baseColumn)
+        : operators.eq(baseColumn, filter.value);
     case 'contains':
       // `ESCAPE '\'` is standard SQL and is required, not decorative: SQLite
       // defines no default escape character, so without the clause the

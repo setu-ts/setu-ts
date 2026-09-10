@@ -180,6 +180,19 @@ const CASES: Case[] = [
     filter: { type: 'comparison', field: 'name', operator: 'in', value: [null] },
   },
   {
+    // The sibling of the row above, and the one this table did NOT have.
+    //
+    // This row states the contract — every adapter must treat `eq: null` as
+    // IS NULL — and it is NOT the guard for V5-4. Measured: with the Drizzle
+    // fix reverted, all six arms still agree here, because this table
+    // compares TRANSLATED predicates and `eq(col, null)` and `isNull(col)`
+    // compare equal without an engine to run them. The discriminating test is
+    // `real-drizzle-adapter.test.ts` → 'matches the NULL rows for `eq: null`',
+    // which executes against a real SQLite engine and fails without the fix.
+    label: 'eq null (IS NULL, not `= NULL`)',
+    filter: { type: 'comparison', field: 'name', operator: 'eq', value: null },
+  },
+  {
     // A group is legal with no children and every adapter must answer with its
     // boolean identity. Mongo alone used to emit `$and: []`/`$or: []`, which
     // the server refuses outright — the divergence this table exists to catch.

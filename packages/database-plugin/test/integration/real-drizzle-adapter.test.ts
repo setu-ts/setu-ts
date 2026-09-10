@@ -317,6 +317,64 @@ describe('DrizzleAdapter with the real Drizzle SQL generator', () => {
     expect(found.map((row) => row.id)).toEqual(['u1']);
   });
 
+  it('matches the NULL rows for `eq: null`, against a real SQLite engine', async () => {
+    // V5-4: the plain-column `eq` arm bound the null, so Drizzle rendered
+    // `name = ?` with params [null]. SQL evaluates `NULL = NULL` to UNKNOWN,
+    // so the predicate matched NOTHING while the memory adapter, Prisma,
+    // Mongo and D1 all returned the NULL rows — a silent wrong answer.
+    //
+    // This has to EXECUTE. `filter-conformance.test.ts` compares translated
+    // predicates, and `eq(col, null)` and `isNull(col)` compare equal there,
+    // so that table passes with the defect present — verified by reverting
+    // the fix. Only a real engine can tell them apart.
+    const sqliteUsers = sqliteTable('users', {
+      id: sqliteText('id').primaryKey(),
+      name: sqliteText('name'),
+    });
+    const engine = new DatabaseSync(':memory:');
+    engine.exec('CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT)');
+    engine.exec("INSERT INTO users VALUES ('u1','Ada'), ('u2',NULL), ('u3',NULL)");
+
+    const statements: string[] = [];
+    const database = sqliteDrizzle((statement, params) => {
+      statements.push(statement);
+      const rows = engine.prepare(statement).all(...(params as SQLInputValue[]));
+      return Promise.resolve({ rows: rows.map((row) => Object.values(row)) });
+    });
+    const source = createDrizzleDataSource(
+      database as unknown as Parameters<typeof createDrizzleDataSource>[0],
+      'User',
+      { User: sqliteUsers },
+      {
+        eq,
+        and,
+        or,
+        gt,
+        gte,
+        lt,
+        lte,
+        inArray,
+        isNull,
+        sql,
+        asc,
+        desc,
+        count,
+      } as unknown as Parameters<typeof createDrizzleDataSource>[3],
+    );
+
+    const found = await source.findAll(query({
+      select: ['id'],
+      filter: { type: 'comparison', field: 'name', operator: 'eq', value: null },
+      orderBy: { id: 'asc' },
+    }));
+
+    expect(found.map((row) => row.id)).toEqual(['u2', 'u3']);
+    // The emitted SQL is pinned too, so a future change that happens to
+    // return the right rows by another route still has to say why.
+    expect(statements[0]).toContain('is null');
+    expect(statements[0]).not.toContain('= ?');
+  });
+
   it('runs IDatabaseService.query() through the real PostgreSQL SQL generator', async () => {
     // X12-2: the adapter used to call `execute({ sql, params })`, a shape no
     // Drizzle driver accepts — every `query()` failed with `query.getSQL is
