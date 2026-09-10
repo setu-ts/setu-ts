@@ -17,7 +17,7 @@ import type {
   ScheduleOptions,
   SchedulerJobHandler,
 } from '@setu-ts/common';
-import { resolveRegistryEntry } from '@setu-ts/common';
+import { causeMessage, resolveRegistryEntry } from '@setu-ts/common';
 import { SchedulerUnavailableError } from '../errors.ts';
 import type {
   IDistributedLock,
@@ -67,9 +67,11 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
   const jobs: readonly SchedulerJobEntry[] = options?.jobs ?? [];
   const behaviors: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[] =
     options?.behaviors ?? [];
-  const jobInstances = jobs.filter((entry): entry is SchedulerJobDefinition =>
-    typeof entry !== 'function'
-  );
+  const jobInstances = jobs
+    .map((entry, index) => ({ entry, index }))
+    .filter((slot): slot is { entry: SchedulerJobDefinition; index: number } =>
+      typeof slot.entry !== 'function'
+    );
   const jobFactories = jobs
     .map((entry, index) => ({ entry, index }))
     .filter((slot): slot is { entry: RegistryFactory<SchedulerJobDefinition>; index: number } =>
@@ -172,16 +174,17 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       // Declared job INSTANCES register now, exactly as an imperative
       // `cron()`/`every()`/`delay()` call made before this arm existed.
       //
-      // UNLESS a behaviour FACTORY is declared. Scheduling arms a timer, so a
-      // short `delay` or a due `cron` can fire before `onInit` resolved the
-      // factory behaviours — reaching the handler through a PARTIAL chain,
-      // skipping exactly the behaviours that needed a resolved capability.
-      // Deferring the whole set into the same `onInit` hook, after the chain
-      // is final, is what makes the arm's guarantee true. With no factory
-      // declared the chain is already complete here and the timing is
-      // unchanged.
-      for (const definition of jobInstances) {
-        await scheduleDefinition(service, definition);
+      // Their timing is safe even when a behaviour FACTORY is declared, and
+      // not because registration is deferred — M86's review reverted that.
+      // Scheduling arms a timer, so a short `delay` or a due `cron` could
+      // otherwise fire before `onInit` resolved the factory behaviours and
+      // reach the handler through a PARTIAL chain. What prevents it is that
+      // DELIVERY is gated: `BehaviorChainSchedulerService` holds each fire on
+      // `chainReady`, which `openChainGate` opens only once the chain is
+      // final. That gate also closes the second door a deferral could not —
+      // a later plugin resolving this service in its own `register()`.
+      for (const slot of jobInstances) {
+        await scheduleDeclaredJob(service, slot.entry, slot.index);
       }
 
       // Register health indicator
@@ -230,7 +233,7 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
                 ctx.services,
                 `SchedulerPlugin({ jobs })[${slot.index}]`,
               );
-              await scheduleDefinition(service, definition);
+              await scheduleDeclaredJob(service, definition, slot.index);
             }
 
             // LAST: the chain is final, so any fire held during startup may run.
@@ -350,6 +353,45 @@ class BehaviorChainSchedulerService extends SchedulerService {
       delayMs,
       withIngressBehaviors(handler, this.#behaviors, this.#chainReady),
       options,
+    );
+  }
+}
+
+/**
+ * Registers one entry of the declared `jobs` array, naming it if it refuses.
+ *
+ * Both arms funnel through here — an instance entry at `register()` and a
+ * factory's resolved definition at `onInit` — so an operator cannot tell the
+ * two apart from the failure, which is the point: the two arms describe the
+ * same job.
+ *
+ * @param service - The connected scheduler service
+ * @param definition - The definition to register
+ * @param index - The entry's position in the DECLARED `jobs` array, not among
+ *   entries of its own kind — the only thing that points at the failing entry
+ * @returns Resolves when the registration call completes
+ * @throws {Error} If the definition is refused; the message names the option,
+ * the declared index and the job's own `name`, with the refusal as `cause`
+ * @since 0.6.0
+ */
+async function scheduleDeclaredJob(
+  service: IScheduler,
+  definition: SchedulerJobDefinition,
+  index: number,
+): Promise<void> {
+  try {
+    await scheduleDefinition(service, definition);
+  } catch (cause) {
+    // X23-1: the underlying refusal names only what was wrong — `Invalid cron
+    // expression: not a cron` — and an application declaring several jobs is
+    // then told an expression is bad with nothing saying WHICH entry produced
+    // it. The plugin holds both the declared index and the job's own name, so
+    // it says them. This matches the label the factory arm already builds for
+    // a throwing factory, so both arms of `jobs` fail the same way.
+    throw new Error(
+      `Failed to schedule SchedulerPlugin({ jobs })[${index}] ` +
+        `(name '${definition.name}'): ${causeMessage(cause)}`,
+      { cause },
     );
   }
 }

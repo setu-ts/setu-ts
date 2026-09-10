@@ -30,7 +30,7 @@ export type {
 export { respondWithAuthorizationFailure } from './errors/authorization-responder.ts';
 export type { AuthorizationFailure } from './errors/authorization-responder.ts';
 // Error serialization for structured logging (M70f, X2-5)
-export { serializeError } from './errors/serialize-error.ts';
+export { causeMessage, serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
 // Malformed request body (M90f, X37-1) — the one 400-branded parse failure
 // every `IRequest.json()` producer rejects with

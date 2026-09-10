@@ -5,6 +5,7 @@
  *
  * @module
  */
+import { causeMessage } from './errors/serialize-error.ts';
 import type { CapabilityToken } from './tokens.ts';
 
 /**
@@ -199,14 +200,4 @@ export function resolveRegistryEntry<T>(
     }
   }
   return entry;
-}
-
-/**
- * Extracts a message from an unknown thrown value.
- *
- * @param cause - The value a factory threw
- * @returns The message, or a stable fallback when the value is not an `Error`
- */
-function causeMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }

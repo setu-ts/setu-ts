@@ -6,7 +6,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { type SerializedError, serializeError } from '../../src/errors/serialize-error.ts';
+import {
+  causeMessage,
+  type SerializedError,
+  serializeError,
+} from '../../src/errors/serialize-error.ts';
 
 describe('serializeError', () => {
   it('serializes a plain Error to { name, message, stack? }', () => {
@@ -354,5 +358,25 @@ describe('serializeError never throws (code review, CodeRabbit)', () => {
     // unlike `'' + sym`. Pinned so the guard above is never justified by a
     // claim that is not true.
     expect(serializeError(Symbol('boom')).message).toBe('Symbol(boom)');
+  });
+});
+
+describe('causeMessage', () => {
+  it("reports an Error's own message", () => {
+    expect(causeMessage(new Error('Invalid cron expression: not a cron')))
+      .toBe('Invalid cron expression: not a cron');
+  });
+
+  it('stringifies a thrown non-Error rather than reporting nothing', () => {
+    expect(causeMessage('exploded')).toBe('exploded');
+    expect(causeMessage(undefined)).toBe('undefined');
+    expect(causeMessage({ code: 7 })).toBe('[object Object]');
+  });
+
+  it('is reachable from the barrel', async () => {
+    // The M56 defect class: every test here imports the concrete module, so
+    // dropping the re-export would leave all of them green.
+    const barrel = await import('../../src/index.ts');
+    expect(barrel.causeMessage).toBe(causeMessage);
   });
 });

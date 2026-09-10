@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The format follows
   `boolean` probe and is **required** once the outcome type is wider, since `false` is the only
   value the helper can name on its own: omitting it for, say, a `'up' | 'down'` probe would have
   resolved `false` under a signature promising it could not.
+- **`common`** — `causeMessage(value)` is published: an `Error`'s own message, or `String(value)`
+  otherwise. It was a private helper with a byte-identical copy in `@setu-ts/scheduler-plugin`,
+  because the two arms of one `jobs` option have to produce the same sentence and §2.2 forbids the
+  import that would let one read the other's. One implementation now, reachable by both.
 
 - **`common`** — `IMailer.isHealthy?()` reports the mail transport's reachability: `true`, `false`,
   or `undefined` when the question cannot be asked. OPTIONAL, so no implementor breaks.
@@ -156,6 +160,18 @@ All notable changes to this project are documented here. The format follows
   response. The copy used `IResponse.header`, which delegates to `Headers.set`, so a service
   answering two `Set-Cookie` values — the one header `Headers.entries()` yields once per value
   instead of comma-joining — kept only the last. It appends now.
+- **`scheduler-plugin`** — a declared job that could not be scheduled named neither the plugin nor
+  the entry. `SchedulerPlugin({ jobs: [...] })` correctly refuses to boot on an invalid cron
+  expression, but reported only `Invalid cron expression: not a cron` — so an application declaring
+  several jobs was told an expression was bad and left to find which one, while the plugin held both
+  the declared index and the job's own `name` (X23-1). Both arms of `jobs` now fail identically,
+  through one labelled path: `Failed to schedule SchedulerPlugin({ jobs })[1] (name 'bad-expr'): …`,
+  with the original refusal retained as `cause`. The index is the entry's position in the DECLARED
+  array, not among entries of its own kind, so a factory ahead of the failing entry cannot make it
+  name a working one. This is the convention M86 already stated for a throwing factory; an instance
+  entry took a different path and got none of it. Also corrected a stale comment claiming instance
+  registration is DEFERRED into `onInit` — M86's own code review reverted that and gated delivery
+  instead.
 
 ### Documentation
 
