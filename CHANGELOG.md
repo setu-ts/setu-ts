@@ -185,6 +185,19 @@ All notable changes to this project are documented here. The format follows
   working compositions: scope the guard to the HTTP endpoint, or authenticate on the upgrade with a
   cookie through `auth-plugin`'s session strategy. No code change.
 
+- **`session-plugin`** — documented what `SameSite` does not separate. `cookie.sameSite` defaults to
+  `'lax'` and is evaluated against the SITE (scheme plus registrable domain), so **a port is not
+  part of it**: two ports on one host are same-site and the session cookie rides a subresource
+  request between them. Paired with `ignoreMethods`' correct `GET`/`HEAD`/`OPTIONS` exemption, one
+  assumption carries the weight — that `GET` handlers have no side effects — and a developer reading
+  "`SameSite=Lax` by default" reasonably concludes another port cannot reach their session.
+  Measured: the identical attack suite lands from `127.0.0.1:5301` and is blocked from
+  `localhost:5301`, changing nothing but the origin (X33-1). It also says what does NOT close the
+  gap: **cookies are not scoped by port at all** (RFC 6265 §8.5), so no cookie prefix isolates one —
+  `__Host-` is a SUBDOMAIN boundary and worth setting for that, but a service on another port of the
+  same host receives the cookie whatever attributes it carries. No code change; both defences are
+  behaving as designed.
+
 ## [0.5.0] — 2026-09-09
 
 ### Added

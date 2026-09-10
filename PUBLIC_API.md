@@ -3315,6 +3315,14 @@ not exist yet. The working sequence — and the one the README documents — is 
 token in the form field or the `x-csrf-token` header. An exemption for `/login` would be a hole, so
 the middleware verifies every method outside `ignoreMethods`.
 
+`cookie.sameSite` (default `'lax'`) is evaluated against the **site** — scheme plus registrable
+domain — and **a port is not part of a site**, so two ports on one host are same-site and the
+session cookie rides a subresource request between them. Combined with `ignoreMethods`' correct
+`GET`/`HEAD`/`OPTIONS` exemption, that leaves one assumption load-bearing: **that your `GET`
+handlers have no side effects.** A side-effecting `GET` is reachable from any co-hosted application
+through an `<img>` tag with the session cookie attached, and neither defence applies. See the
+package README's "What `SameSite` does not separate".
+
 ### Options
 
 | Option               | Type                                   | Default                    | Behavior                                                                                                                                                                                               |
