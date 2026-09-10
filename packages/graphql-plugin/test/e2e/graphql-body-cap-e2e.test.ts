@@ -36,11 +36,12 @@ interface GraphqlBody {
 
 async function withApp(
   run: (app: ReturnType<typeof createApplication>) => Promise<void>,
+  pluginOptions: Record<string, unknown> = {},
 ): Promise<void> {
   const app = createApplication({
     plugins: [
       RuntimePlugin({ maxBodyBytes: MAX_BODY_BYTES }),
-      GraphqlPlugin({ typeDefs, resolvers }),
+      GraphqlPlugin({ typeDefs, resolvers, ...pluginOptions }),
     ],
   });
   await app.start({ port: 0 });
@@ -51,8 +52,8 @@ async function withApp(
   }
 }
 
-function post(body: string): Request {
-  return new Request('http://localhost/graphql', {
+function post(body: string, path = '/graphql'): Request {
+  return new Request(`http://localhost${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body,
@@ -101,6 +102,43 @@ describe('GraphQL body cap E2E (V5-1)', () => {
 
       expect(res.status).toBe(200);
       expect(json.data?.echo).toBe('hi');
+    });
+  });
+});
+
+describe('GraphQL SSE body cap E2E (V5-1)', () => {
+  /**
+   * The SSE transport is a SECOND route with its own body read, and asserting
+   * the fix on `/graphql` alone proves nothing about it: route wiring, the
+   * streaming request mapping and the runtime cap are all separate from the
+   * buffered path. This is the same class of gap M37c recorded — a gate that
+   * only requests the paths its author already believed worked.
+   */
+  const withSse = (run: (app: ReturnType<typeof createApplication>) => Promise<void>) =>
+    withApp(run, { subscriptions: { websocket: false } });
+
+  it('answers 413 with the size code on /graphql/stream', async () => {
+    await withSse(async (app) => {
+      const oversized = JSON.stringify({
+        query: 'query ($t: String) { echo(text: $t) }',
+        variables: { t: 'x'.repeat(MAX_BODY_BYTES * 2) },
+      });
+      const res = await app.fetch(post(oversized, '/graphql/stream'));
+      const json = await res.json() as GraphqlBody;
+
+      expect(res.status).toBe(413);
+      expect(json.errors?.[0]?.extensions?.code).toBe('REQUEST_BODY_TOO_LARGE');
+      expect(json.errors?.[0]?.message).not.toContain('Invalid JSON');
+    });
+  });
+
+  it('still answers 400 INVALID_JSON on /graphql/stream for a body that is not JSON', async () => {
+    await withSse(async (app) => {
+      const res = await app.fetch(post('{ this is not json', '/graphql/stream'));
+      const json = await res.json() as GraphqlBody;
+
+      expect(res.status).toBe(400);
+      expect(json.errors?.[0]?.extensions?.code).toBe('INVALID_JSON');
     });
   });
 });

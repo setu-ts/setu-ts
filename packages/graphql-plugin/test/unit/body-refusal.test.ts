@@ -88,4 +88,37 @@ describe('bodyRefusalOf', () => {
     expect(bodyRefusalOf('nope')).toBeNull();
     expect(bodyRefusalOf(undefined)).toBeNull();
   });
+
+  it('classifies a value whose `name` getter throws, rather than throwing itself', () => {
+    // This runs inside the transports' `catch`, so an escape here replaces the
+    // refusal the caller is entitled to with the kernel's 500 — the error path
+    // becoming the fault.
+    const hostile = withHttpStatusHint(new Error('too large'), {
+      status: 413,
+      title: 'Payload Too Large',
+      detail: 'The request body exceeds the configured limit.',
+    });
+    Object.defineProperty(hostile, 'name', {
+      get() {
+        throw new Error('accessor exploded');
+      },
+    });
+    expect(bodyRefusalOf(hostile)).toEqual({
+      status: 413,
+      message: 'The request body exceeds the configured limit.',
+      code: 'REQUEST_BODY_TOO_LARGE',
+    });
+  });
+
+  it('classifies a proxy whose traps throw, rather than throwing itself', () => {
+    const hostile = new Proxy({}, {
+      get(): never {
+        throw new Error('trap exploded');
+      },
+      getPrototypeOf(): never {
+        throw new Error('trap exploded');
+      },
+    });
+    expect(bodyRefusalOf(hostile)).toBeNull();
+  });
 });

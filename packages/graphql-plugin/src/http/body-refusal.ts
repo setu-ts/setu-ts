@@ -14,6 +14,15 @@
  * handler build different response shapes but must agree on the STATUS and
  * the code, and duplicating the mapping is how they would come to disagree.
  *
+ * A refusal classified here is answered in GraphQL's own error vocabulary —
+ * `sendGraphqlError`, an `errors[]` array with an `extensions.code` — and
+ * deliberately NOT through `respondWithError`. That seam exists so one
+ * application answers in one shape, and this plugin already answers every
+ * pre-operation failure the same way: the `400 INVALID_JSON` beside these
+ * refusals predates them. Routing only the refusals through the shared
+ * responder would emit Problem Details to a client that asked for GraphQL
+ * and leave the plugin answering two shapes for one class of failure.
+ *
  * @module
  */
 import { httpStatusHintOf, MalformedRequestBodyError } from '@setu-ts/common';
@@ -84,9 +93,20 @@ export function bodyRefusalOf(error: unknown): BodyRefusal | null {
  * @returns `true` when the body simply was not JSON
  */
 function isMalformedBody(error: unknown): boolean {
-  if (error instanceof MalformedRequestBodyError) {
-    return true;
+  // Contained, because this runs INSIDE the transports' `catch`: the value is
+  // whatever a request implementation chose to reject with, and both an
+  // `instanceof` against a proxy and a `name` read through an accessor can
+  // throw. An escape here would replace the refusal the caller is entitled to
+  // with the kernel's 500 — the error path becoming the fault, which is the
+  // class M90f closed on `withHttpStatusHint`. A value this cannot classify
+  // is simply not the malformed case.
+  try {
+    if (error instanceof MalformedRequestBodyError) {
+      return true;
+    }
+    return typeof error === 'object' && error !== null &&
+      (error as { name?: unknown }).name === 'MalformedRequestBodyError';
+  } catch {
+    return false;
   }
-  return typeof error === 'object' && error !== null &&
-    (error as { name?: unknown }).name === 'MalformedRequestBodyError';
 }
