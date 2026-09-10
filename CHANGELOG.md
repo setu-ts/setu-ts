@@ -21,7 +21,11 @@ All notable changes to this project are documented here. The format follows
   `MailService` implements it by delegating to the configured provider's own probe. It exists on the
   capability because a HOLDER of an `IMailer` could not previously ask at all — the probe lived on
   `mail-plugin`'s internal provider port, and AI_GUIDELINES §2.2 forbids another plugin importing
-  that package to reach it.
+  that package to reach it. The probe is cached and bounded at that capability boundary rather than
+  in each caller: one aggregate health check asks the question once from the `mail` indicator and
+  once per configured `notification-plugin` email alias, so a cache per caller would still be one
+  transport call per caller. `MailServiceOptions.probeTiming` carries the runtime's clock and
+  timers; without it the delegation is bare, since there is no clock this package may lawfully read.
 
 - **`audit-plugin`, `notification-plugin`** — optional `isHealthy?()` on the `IAuditStorage` and
   `NotificationChannel` ports, so a third-party backend or channel can report reachability.
@@ -57,14 +61,22 @@ All notable changes to this project are documented here. The format follows
   is the point. The payload gains `{ storage, reachable }`, where `reachable` is `true`, `false`, or
   `'unknown'`.
 
+- **`audit-plugin`** — `FileAuditStorage`'s reachability probe reported a sink it cannot write to as
+  healthy. It treated any successful `stat()` of the configured file's parent as the answer, so a
+  regular file at that path — `/var/audit` when the sink is `/var/audit/trail.log` — passed while
+  `ensureDir()` and every append under it failed. It now reads `StatResult.isDirectory`.
+
 - **`notification-plugin`** — the `notification` health indicator hardcoded `status: 'up'` beside a
   live channel list, so a configured channel whose transport was down was invisible to `/ready`
   (H-70c-4). The payload now carries per-channel `reachable`, and one channel that was contacted and
   did not answer takes the indicator `down`. The email channel delegates to `IMailer.isHealthy`; the
   send-only transports report `'unknown'`, because a probe may not deliver a notification to a real
   person and none of them offers a side-effect-free alternative this plugin can reach — `'unknown'`
-  never reads as healthy, where the hardcoded `up` did. **This is a behaviour change** for an
-  application whose mail transport is unreachable.
+  never reads as healthy, where the hardcoded `up` did. Channel probes run concurrently: each may
+  consume its full bound, so awaiting them one after another let a handful of stalled channels
+  exceed the health service's own per-indicator deadline and replace every channel's outcome with a
+  generic timeout. **This is a behaviour change** for an application whose mail transport is
+  unreachable.
 
 - **`worker-pool-plugin`** — the `worker-pool` health indicator hardcoded `status: 'up'` beside a
   live `available` field that could read `false`, so a pool that could not execute a single task —

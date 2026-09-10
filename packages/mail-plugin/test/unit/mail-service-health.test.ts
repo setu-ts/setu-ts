@@ -55,6 +55,27 @@ function serviceOver(provider: MailProvider): MailService {
   return new MailService(provider, new TemplateEngine(), { defaultFrom: 'x@y.com' });
 }
 
+/** A controllable monotonic clock, so the cache TTL is driven, never waited on. */
+class Clock {
+  #ms = 0;
+  read = (): number => this.#ms;
+  advance(ms: number): void {
+    this.#ms += ms;
+  }
+}
+
+/** A service whose probe is cached and bounded on an injected fake clock. */
+function cachedServiceOver(provider: MailProvider, clock: Clock): MailService {
+  return new MailService(provider, new TemplateEngine(), {
+    defaultFrom: 'x@y.com',
+    probeTiming: {
+      hrtime: clock.read,
+      setTimer: (fn, ms) => setTimeout(fn, ms),
+      clearTimer: (h) => clearTimeout(h as number),
+    },
+  });
+}
+
 describe('MailService.isHealthy', () => {
   it('reports the provider as reachable', async () => {
     expect(await serviceOver(new ProbingProvider(true)).isHealthy()).toBe(true);
@@ -65,18 +86,56 @@ describe('MailService.isHealthy', () => {
   });
 
   it('reports undefined — not false — when the provider offers no probe', async () => {
-    // `LogProvider` and `SendGridProvider` legitimately have none. Reporting
+    // `SesProvider` with a client exposing no `isHealthy`, and `SmtpProvider`
+    // with a transport exposing no `verify()`, both delete theirs. Reporting
     // `false` would mark a working mailer down; reporting `true` would be the
     // falsely-affirmative answer. Neither is honest, so neither is given.
     expect(await serviceOver(new ProbingProvider()).isHealthy()).toBeUndefined();
   });
 
-  it('lets a rejecting probe propagate to its caller', async () => {
-    // The service adds no policy: the caller decides what a thrown probe
-    // means, and `MailPlugin`'s own indicator bounds it through the health
-    // plugin's per-indicator deadline.
+  it('lets a rejecting probe propagate when no timing is injected', async () => {
+    // With no clock there is nothing to cache or bound on, so the delegation
+    // is bare and the caller decides what a thrown probe means.
     await expect(serviceOver(new ProbingProvider(new Error('EHOSTUNREACH'))).isHealthy())
       .rejects.toThrow('EHOSTUNREACH');
+  });
+
+  it('reports a rejecting probe as unreachable once bounded', async () => {
+    // With timing injected the probe is bounded, and a bounded probe never
+    // rejects: it was reached for and did not answer, which is `false` — a
+    // different fact from `undefined`, where it could not be asked at all.
+    const service = cachedServiceOver(new ProbingProvider(new Error('EHOSTUNREACH')), new Clock());
+    expect(await service.isHealthy()).toBe(false);
+  });
+
+  it('coalesces every caller on one aggregate health check into ONE probe', async () => {
+    // The defect this closes: the `mail` indicator and one email channel per
+    // configured alias each ask this question on a single `/health` scrape.
+    // With a cache per caller that is one transport call per caller; cached at
+    // the capability boundary it is one call however many ask.
+    const provider = new ProbingProvider(true);
+    const service = cachedServiceOver(provider, new Clock());
+
+    await Promise.all([
+      service.isHealthy(),
+      service.isHealthy(),
+      service.isHealthy(),
+      service.isHealthy(),
+    ]);
+
+    expect(provider.probeCalls).toBe(1);
+  });
+
+  it('re-probes once the cache TTL has elapsed', async () => {
+    // The other half: coalescing must not become a permanently stale answer.
+    const provider = new ProbingProvider(true);
+    const clock = new Clock();
+    const service = cachedServiceOver(provider, clock);
+
+    expect(await service.isHealthy()).toBe(true);
+    clock.advance(5001);
+    expect(await service.isHealthy()).toBe(true);
+    expect(provider.probeCalls).toBe(2);
   });
 });
 

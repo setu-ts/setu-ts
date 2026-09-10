@@ -39,9 +39,17 @@ export function createFakeContext(withLogger = false): FakeContext {
   const onCloseHandlers: Array<() => Promise<void> | void> = [];
   const logs: LogCall[] = [];
 
+  // REAL timers, not omitted. `IPluginContext.runtime` is non-optional by
+  // contract and `IRuntimeServices` declares `setTimeout`/`clearTimeout` as
+  // required members, so a double that leaves them off is not standing in for
+  // a runtime — it is a shape no runtime has. `resolveProbeTiming` binds them,
+  // which is what made the omission surface as a `TypeError` rather than as a
+  // wrong answer.
   const runtime = {
     env: {},
     hrtime: (): number => performance.now(),
+    setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+    clearTimeout: (handle: unknown): void => clearTimeout(handle as number),
   } as unknown as IRuntimeServices;
   registered.set(CAPABILITIES.RUNTIME, runtime);
 

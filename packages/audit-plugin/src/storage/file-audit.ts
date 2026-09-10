@@ -150,7 +150,7 @@ export class FileAuditStorage implements IAuditStorage {
    * and is the reason the append outcome is tracked at all.
    *
    * @returns `true` when the sink looks writable, `false` when the last append
-   * failed or the directory cannot be reached
+   * failed, or the parent cannot be reached, or it is not a directory
    * @since 0.6.0
    */
   async isHealthy(): Promise<boolean> {
@@ -164,8 +164,13 @@ export class FileAuditStorage implements IAuditStorage {
       return true;
     }
     try {
-      await this.fs.stat(dir);
-      return true;
+      // `isDirectory`, not merely "the stat resolved". A regular file at the
+      // configured parent — `/var/audit` when the sink is
+      // `/var/audit/trail.log` — stats perfectly well and then makes
+      // `ensureDir()` and every append fail, so treating a successful stat as
+      // the answer publishes a sink that cannot be written to as healthy.
+      const stat = await this.fs.stat(dir);
+      return stat.isDirectory;
     } catch {
       return false;
     }

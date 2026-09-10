@@ -49,7 +49,11 @@ function fakeRuntime(fs?: IFileSystem, clock: Clock = new Clock()): IRuntimeServ
     uuid: () => crypto.randomUUID(),
     randomBytes: () => new Uint8Array(),
     subtle: {} as SubtleCrypto,
-    now: () => Date.now(),
+    // A FIXED wall-clock reading. `Date.now()` is banned outside
+    // `packages/runtime`, and a double that reaches the host clock while the
+    // probe clock is deterministic makes time-sensitive behaviour depend on
+    // when the suite happens to run. Nothing under test reads this member.
+    now: () => 1_700_000_000_000,
     hrtime: clock.read,
     setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimeout: (h: unknown) => clearTimeout(h as number),
@@ -168,7 +172,13 @@ describe('audit health — reachability (H-70c-1)', () => {
     // failed append is tracked.
     const clock = new Clock();
     const fs = {
-      stat: () => Promise.resolve({ size: 0, isFile: true } as unknown as StatResult),
+      // `isDirectory: true` — a real `StatResult` for a directory carries it,
+      // and the probe reads it. A double that omits it reports a parent that
+      // is not a directory, which is a shape no filesystem produces here.
+      stat: () =>
+        Promise.resolve(
+          { size: 0, isFile: false, isDirectory: true } as unknown as StatResult,
+        ),
       readFile: () => Promise.reject(new Error('ENOENT')),
       writeFile: () => Promise.reject(new Error('EROFS: read-only file system')),
       mkdir: () => Promise.resolve(),
@@ -188,6 +198,30 @@ describe('audit health — reachability (H-70c-1)', () => {
 
     // Past the probe's cache TTL, or the first (healthy) outcome is replayed.
     clock.advance(6_000);
+    expect(await indicator()).toEqual({
+      status: 'down',
+      data: { storage: 'file', reachable: false },
+    });
+  });
+
+  it('reports DOWN when the configured parent is a regular file, not a directory', async () => {
+    // `/srv/audit` existing as a FILE stats perfectly well, and then
+    // `ensureDir()` and every append under `/srv/audit/trail.log` fail. A
+    // probe that read only "the stat resolved" published that sink as
+    // healthy — reading `isDirectory` is what tells the two apart.
+    const fs = {
+      stat: () =>
+        Promise.resolve(
+          { size: 12, isFile: true, isDirectory: false } as unknown as StatResult,
+        ),
+      readFile: () => Promise.reject(new Error('ENOTDIR')),
+      writeFile: () => Promise.reject(new Error('ENOTDIR')),
+      mkdir: () => Promise.reject(new Error('ENOTDIR')),
+    } as unknown as IFileSystem;
+    const { indicator } = await registerAudit(
+      { storage: 'file', options: { path: '/srv/audit/trail.log' } },
+      fakeRuntime(fs),
+    );
     expect(await indicator()).toEqual({
       status: 'down',
       data: { storage: 'file', reachable: false },

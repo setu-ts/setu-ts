@@ -5,7 +5,7 @@
  * @module
  */
 import type { HealthCheckResult, IMailer, IPlugin, IPluginContext } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY, resolveProbeTiming } from '@setu-ts/common';
 import type { MailProvider, MailProviderOptions, MailProviderType } from '../interfaces/index.ts';
 import { MailService } from '../services/mail-service.ts';
 import { TemplateEngine } from '../templates/template-engine.ts';
@@ -101,7 +101,14 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
       await provider.connect();
 
       const templates = new TemplateEngine(options?.templates);
-      const service = new MailService(provider, templates, buildServiceOptions(options));
+      // The runtime's clock and timers reach the service, which is where the
+      // reachability probe is cached and bounded: this indicator and every
+      // email channel in `notification-plugin` ask the same question, and the
+      // cache has to sit where they meet or each caller hits the transport.
+      const service = new MailService(provider, templates, {
+        ...buildServiceOptions(options),
+        probeTiming: resolveProbeTiming(ctx.runtime),
+      });
       ctx.services.register<IMailer>(CAPABILITIES.MAIL, service);
 
       ctx.logger?.debug('MailPlugin registered', { provider: providerType });

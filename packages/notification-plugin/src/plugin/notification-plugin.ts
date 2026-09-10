@@ -106,14 +106,31 @@ export function NotificationPlugin(options: NotificationPluginOptions): IPlugin 
         const reachability: Record<string, boolean | 'unknown'> = {};
         let anyUnreachable = false;
 
-        for (const name of channelMap.keys()) {
+        // CONCURRENTLY, and that is a correctness requirement rather than a
+        // speed one. Each probe may consume its full `PROBE_TIMEOUT_MS`, and
+        // `HealthPluginOptions.indicatorTimeoutMs` defaults to 5000 (M90b),
+        // so awaiting them one after another means three stalled channels —
+        // an ordinary configuration, since channel names are arbitrary and
+        // several may address the same transport — blow the indicator's own
+        // deadline. The whole indicator would then be replaced by a generic
+        // `{ reason: 'timeout' }`, discarding the per-channel evidence this
+        // payload exists to carry. Started together, total latency is bounded
+        // by ONE probe timeout however many channels there are.
+        const names = Array.from(channelMap.keys());
+        const outcomes = await Promise.all(names.map((name) => {
           const probe = probes.get(name);
-          const reachable = probe === undefined ? undefined : await probe();
+          return probe === undefined ? Promise.resolve(undefined) : probe();
+        }));
+
+        // Assembled in channel-map order, so the payload's key order does not
+        // depend on which probe settled first.
+        names.forEach((name, index) => {
+          const reachable = outcomes[index];
           reachability[name] = reachable ?? 'unknown';
           if (reachable === false) {
             anyUnreachable = true;
           }
-        }
+        });
 
         return {
           status: anyUnreachable ? 'down' : 'up',
