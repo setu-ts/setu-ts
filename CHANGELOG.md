@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **`graphql-plugin`** — documented that `subscriptions.websocket.onConnect` and a pipeline guard on
+  the socket path cannot both authenticate a subscription. `connectionParams` is the protocol's auth
+  channel and `onConnect` reads it, but `connection_init` is a message on an already-open socket,
+  while since M70a a guard runs on the UPGRADE — so a guard covering the `/graphql` prefix answers
+  `GET /graphql/ws` with `401` and `onConnect` never runs. Following the README's `onConnect`
+  example and `PUBLIC_API.md`'s "Authenticating a subscription" bullet at the same time could not
+  work, and neither site mentioned the interaction M70a created (X6-8). Both now name the two
+  working compositions: scope the guard to the HTTP endpoint, or authenticate on the upgrade with a
+  cookie through `auth-plugin`'s session strategy. No code change.
+
 ## [0.5.0] — 2026-09-09
 
 ### Added

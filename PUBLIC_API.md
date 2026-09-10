@@ -11128,6 +11128,13 @@ GraphqlPlugin({ schema });
   protocol's auth channel — plus the upgrade headers and query), and closes the socket with
   `4403: Forbidden` when it returns `false`. Writing to `conn.data` there sets the `user`/`tenant`
   the default resolver context reads back. With no hook configured the socket is accepted.
+  **`onConnect` and a pipeline guard on the socket path are mutually exclusive**: `connection_init`
+  is a message on an already-open socket, and since M70a a guard runs on the upgrade itself, so a
+  guard covering the `/graphql` prefix answers `GET /graphql/ws` with `401` and `onConnect` never
+  runs. Either scope the guard to the HTTP endpoint and authenticate in `onConnect`, or authenticate
+  on the upgrade with a credential a browser can attach there — a cookie, through `auth-plugin`'s
+  session strategy. See the package README's "`onConnect` and a route guard cannot both authenticate
+  the socket".
 - **Resolver context over a socket.** A WebSocket carries no `IRequestContext`, so
   `IGraphqlService.subscribe` takes a `GraphqlOperationContext` instead. On that path `services` is
   the plugin-level `IServiceRegistry`, so a subscription resolver reaches every capability an HTTP

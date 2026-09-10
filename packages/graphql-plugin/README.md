@@ -176,6 +176,29 @@ const resolvers: ResolverMap = {
 };
 ```
 
+### `onConnect` and a route guard cannot both authenticate the socket
+
+`connectionParams` is the protocol's auth channel, and `onConnect` is where you read it — but
+`onConnect` runs on `connection_init`, which is a message on an **already-open socket**. Since M70a
+every inbound request, upgrade included, runs the middleware pipeline BEFORE the handshake, so a
+guard covering the `/graphql` prefix refuses `GET /graphql/ws` with `401` and `onConnect` never
+runs. Following this section and a pipeline guard at the same time cannot work, and the failure is
+silent from the client's side: an ordinary `401`, with nothing naming the interaction.
+
+Pick one:
+
+- **Authenticate in `onConnect`** and keep the socket path out of the guard — scope the guard to the
+  HTTP endpoint (`/graphql` exactly, not the prefix) or exclude `/graphql/ws`. This is the option a
+  browser client usually needs, because a `WebSocket` constructor can set no headers, so
+  `connectionParams` is the only credential channel it has.
+- **Authenticate on the upgrade** and let the guard do the work, using a credential a browser CAN
+  put on an upgrade — a cookie, via `auth-plugin`'s session strategy (M73) — or a header when the
+  client is a server. `onConnect` then needs no token check, and `ctx.request.user` is already
+  populated when the handshake is decided.
+
+Do not read a guard's `401` on the socket path as a broken `onConnect`; it means the request never
+reached the handshake.
+
 ## Resolver Context
 
 The default context a resolver receives is `DefaultGraphqlContext`, and its shape is
