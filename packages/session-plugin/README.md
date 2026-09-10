@@ -192,6 +192,30 @@ token must arrive in that header), `ignoreMethods` (default `GET`/`HEAD`/`OPTION
 (exact paths or regular expressions that skip form CSRF). `exclude` is only for a separately-mounted
 non-browser protocol surface such as Connect/gRPC — never use it for an application form route.
 
+### What `SameSite` does not separate
+
+`cookie.sameSite` defaults to `'lax'`, which is a real defence and a commonly misread one. It is
+evaluated against the **site** — scheme plus registrable domain — and **a port is not part of a
+site**. So `http://127.0.0.1:5300` and `http://127.0.0.1:5301` are same-site, and the session cookie
+rides a subresource request between them exactly as it would within one application. `localhost` and
+`127.0.0.1` ARE different sites; two ports on either are not.
+
+That matters because `ignoreMethods` exempts `GET`/`HEAD`/`OPTIONS` from form CSRF, which is right:
+the web's rule is that those methods are safe (RFC 9110), so a token on them is not standard
+practice. The two rules are individually correct and meet at one assumption — **that your GET
+handlers have no side effects.** A GET that mutates is reachable from any co-hosted application,
+with the session cookie attached, through nothing more than an `<img>` tag; neither `SameSite=Lax`
+nor form CSRF stands between them, and measured, such a request lands.
+
+This is the ordinary shape of a development machine, of a shared corporate domain, and of any
+deployment where a second service answers on another port of the same name. Two things follow:
+
+- Keep every `GET` free of side effects. If one must mutate, make it a `POST` so form CSRF covers
+  it, rather than adding it to a token check.
+- Do not read "`SameSite=Lax` by default" as isolation from another port. For that you need distinct
+  registrable domains, or `__Host-`/`__Secure-` cookie prefixes plus HTTPS, neither of which a port
+  alone provides.
+
 ### The sequence: safe request, then mutation
 
 `csrfFormMiddleware` verifies every method outside `ignoreMethods` — including the endpoint that
