@@ -100,7 +100,13 @@ describe('ServiceBusBroker health (M70c)', () => {
       expect(transportProbes).toBe(2);
     });
 
-    it('bounds a hung transport: reachability resolves false after the 2s deadline', async () => {
+    it('bounds a hung transport: reachability resolves unknown after the 2s deadline', async () => {
+      // V5-2 changed the OUTCOME this test pins, not the bound. M90b asserted
+      // `false` here, which is what made the emulator — whose administration
+      // endpoint has no TLS listener, so the probe always exceeds the bound —
+      // report a broker that was publishing 200s as `down`, and drain the
+      // replica through `/ready`. The bound itself is unchanged and still
+      // asserted below: a hung transport must not hold a health response.
       const runtime = createFakeRuntime();
       const timers: Array<{ at: number; fn: () => void }> = [];
       let clock = 0;
@@ -124,8 +130,10 @@ describe('ServiceBusBroker health (M70c)', () => {
       // Fire the deadline timer the probe armed.
       clock = 2_000;
       for (const timer of timers.splice(0)) timer.fn();
-      expect(await pending).toBe(false);
-      expect(await broker.isHealthy()).toBe(false);
+      expect(await pending).toBeUndefined();
+      // …and the consequence: an undetermined probe leaves the replica in
+      // rotation rather than draining it.
+      expect(await broker.isHealthy()).toBe(true);
     });
 
     it('does not report a broker down when a hung transport later answers true', async () => {

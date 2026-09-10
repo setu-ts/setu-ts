@@ -1001,33 +1001,101 @@ describe('adaptServiceBusModule', () => {
       await expect(transport.isHealthy!()).resolves.toBe(true);
     });
 
-    it('counts a positively identified 401 as reachable — the namespace answered', async () => {
-      const { mod } = createProbeModule(() => Promise.reject(authorizeError(401)));
-      const transport = adaptServiceBusModule(mod, {
-        connectionString: 'Endpoint=sb://demo/',
-        adminConnectionString: 'Endpoint=sb://demo/',
-      });
-      await expect(transport.isHealthy!()).resolves.toBe(true);
-    });
+    /**
+     * The classifier's complete outcome set, as data (M90h's enumeration
+     * rule). Its JSDoc names three outcomes and the boundary between them is
+     * the whole point of V5-2, so the cases live in one table that is
+     * iterated rather than in separate `it` blocks that can drift apart from
+     * the classification and from each other.
+     *
+     * `false` is reserved for a namespace that positively is not there.
+     * Everything else that is not an auth verdict reports on the MANAGEMENT
+     * request, and reporting `down` for it drains a replica whose data plane
+     * is publishing fine.
+     */
+    const CLASSIFIER_CASES: ReadonlyArray<{
+      readonly name: string;
+      readonly rejection: unknown;
+      readonly expected: boolean | undefined;
+    }> = [
+      {
+        name: 'a 401 — the namespace answered with an auth verdict',
+        rejection: authorizeError(401),
+        expected: true,
+      },
+      {
+        name: 'a 403 — a send/listen-only credential is not an outage',
+        rejection: authorizeError(403),
+        expected: true,
+      },
+      {
+        name: 'a 404 — a deleted namespace is a fact about the namespace',
+        rejection: Object.assign(new Error('not found'), { statusCode: 404 }),
+        expected: false,
+      },
+      {
+        name: 'a 410 — a namespace that is gone is equally a fact about it',
+        rejection: Object.assign(new Error('gone'), { statusCode: 410 }),
+        expected: false,
+      },
+      {
+        // Azure documents 429 as temporary namespace throttling or a
+        // conflicting management operation. Classifying it `false` reported
+        // `down` for a broker that was publishing throughout — V5-2 reached
+        // through a status code instead of a socket error.
+        name: 'a 429 — management-plane throttling establishes nothing',
+        rejection: Object.assign(new Error('too many requests'), { statusCode: 429 }),
+        expected: undefined,
+      },
+      {
+        name: 'a 500 — a management-plane fault is not a data-plane outage',
+        rejection: Object.assign(new Error('server error'), { statusCode: 500 }),
+        expected: undefined,
+      },
+      {
+        name: 'a 503 — the management plane being busy says nothing either',
+        rejection: Object.assign(new Error('service unavailable'), { statusCode: 503 }),
+        expected: undefined,
+      },
+      {
+        // V5-2 itself. This is what the emulator produces: its administration
+        // endpoint has no TLS listener, so the SDK throws with no
+        // `statusCode`. Reporting `false` made `/health` say `down` for a
+        // broker answering 200s, and `/ready` drained the replica.
+        name: 'a network failure — no status means the namespace never answered',
+        rejection: Object.assign(new Error('Client network socket disconnected'), {
+          code: 'ECONNRESET',
+        }),
+        expected: undefined,
+      },
+      {
+        name: 'a rejection that is not an object at all',
+        rejection: 'exploded',
+        expected: undefined,
+      },
+      {
+        name: 'a statusCode that is present but not numeric',
+        rejection: Object.assign(new Error('odd'), { statusCode: '401' }),
+        expected: undefined,
+      },
+    ];
 
-    it('counts a positively identified 403 as reachable', async () => {
-      const { mod } = createProbeModule(() => Promise.reject(authorizeError(403)));
-      const transport = adaptServiceBusModule(mod, {
-        connectionString: 'Endpoint=sb://demo/',
-        adminConnectionString: 'Endpoint=sb://demo/',
+    for (const testCase of CLASSIFIER_CASES) {
+      it(`classifies ${testCase.name} as ${String(testCase.expected)}`, async () => {
+        const { mod } = createProbeModule(() => Promise.reject(testCase.rejection));
+        const transport = adaptServiceBusModule(mod, {
+          connectionString: 'Endpoint=sb://demo/',
+          adminConnectionString: 'Endpoint=sb://demo/',
+        });
+        await expect(transport.isHealthy!()).resolves.toBe(testCase.expected);
       });
-      await expect(transport.isHealthy!()).resolves.toBe(true);
-    });
+    }
 
-    it('resolves false on any other failure — an outage, not an auth verdict', async () => {
-      const { mod } = createProbeModule(() =>
-        Promise.reject(Object.assign(new Error('timeout'), { statusCode: 500 }))
-      );
-      const transport = adaptServiceBusModule(mod, {
-        connectionString: 'Endpoint=sb://demo/',
-        adminConnectionString: 'Endpoint=sb://demo/',
-      });
-      await expect(transport.isHealthy!()).resolves.toBe(false);
+    it('covers every documented outcome', () => {
+      // Guards the table against becoming one-sided: a table that lost its
+      // `false` cases would still pass every case above.
+      const outcomes = new Set(CLASSIFIER_CASES.map((c) => c.expected));
+      expect(outcomes).toEqual(new Set([true, false, undefined]));
     });
 
     it('omits isHealthy when the administration client has no namespace read', () => {

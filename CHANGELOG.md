@@ -6,6 +6,36 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`common`** — `createCachedProbe` is generic over its outcome type, with a `fallback` recorded on
+  timeout or rejection (default `false`, so every existing caller is unchanged). A probe that reads
+  a _proxy_ for the thing it reports on — Service Bus's administration endpoint standing in for its
+  data plane — can now say "could not determine" instead of "down". `fallback` stays optional for a
+  `boolean` probe and is **required** once the outcome type is wider, since `false` is the only
+  value the helper can name on its own: omitting it for, say, a `'up' | 'down'` probe would have
+  resolved `false` under a signature promising it could not.
+
+### Fixed
+
+- **`messaging-plugin`** — the Service Bus health probe reported a **live** broker as `down`. It
+  reads the namespace's administration endpoint to report on its data plane, and every failure —
+  including its own two-second bound — resolved `false`, so `/health` said `down` and `/ready`
+  answered `503` for a broker that was publishing successfully. Measured against the emulator
+  `docs/messaging-emulators.md` documents, whose administration endpoint has no TLS listener.
+  Reachability is now tri-state, and the question each outcome answers is _does this response
+  establish a fact about the **data** plane_. A `404`/`410` does — the namespace is not there — and
+  still reports `down`. A `401`/`403` proves the namespace answered, so it still counts as
+  reachable. Everything else reports on the **management** request rather than the namespace and now
+  leaves the replica in rotation with `reachable: 'unknown'`: a network-layer failure with no status
+  at all, and a management-plane status that establishes nothing — a `429`, which Azure documents as
+  temporary throttling or a conflicting management operation, or a `5xx`. Those last two previously
+  answered `down`, which is the same defect as the network-failure case reached through a status
+  code instead of a socket error. A namespace that is genuinely gone still reports `down`
+  regardless: the data client stops being ready, and the indicator checks `isReady()` before it
+  consults the probe. `IServiceBusTransport.isHealthy?` widens to `Promise<boolean | undefined>`; an
+  implementation resolving a plain `boolean` satisfies it unchanged.
+
 ### Documentation
 
 - **`graphql-plugin`** — documented that `subscriptions.websocket.onConnect` and a pipeline guard on

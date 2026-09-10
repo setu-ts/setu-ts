@@ -174,8 +174,13 @@ export interface IServiceBusTransport {
    * without a liveness check omits it and the broker reports `unknown`
    * reachability. The SDK owns streaming-pull reconnection, so the broker
    * issues no reconnect loop of its own.
+   *
+   * Resolving `undefined` means **could not determine** — the probe itself
+   * failed rather than the namespace answering (V5-2). Widened from
+   * `Promise<boolean>` in 0.5.1; an implementation that still resolves a
+   * plain `boolean` satisfies it unchanged.
    */
-  isHealthy?(): Promise<boolean>;
+  isHealthy?(): Promise<boolean | undefined>;
 }
 
 /** Handle for an open Service Bus subscription receiver. */
@@ -210,22 +215,72 @@ export interface ServiceBusOptions {
 }
 
 /**
- * Positively identifies an authorization response from Service Bus (M90b).
+ * Statuses that positively establish the namespace is not there.
  *
- * A 401/403 is the namespace ANSWERING with an auth verdict, which proves
- * the transport path is reachable — a send/listen-only credential is not a
- * network outage. The SDK surfaces HTTP failures as objects carrying a
- * numeric `statusCode`; anything else is treated as unreachable.
+ * A 404 or a 410 is the management plane telling us the namespace does not
+ * exist (or no longer does), which IS a fact about the data plane: there is
+ * nothing to publish to. Every other status is a fact about the MANAGEMENT
+ * request — see {@linkcode classifyProbeFailure}.
+ */
+const NAMESPACE_ABSENT_STATUSES: ReadonlySet<number> = new Set([404, 410]);
+
+/**
+ * Statuses that prove the namespace answered without proving anything else.
+ *
+ * A 401/403 is an auth verdict, which means the request reached the namespace
+ * and got a considered reply — a send/listen-only credential is not an outage.
+ */
+const NAMESPACE_ANSWERED_STATUSES: ReadonlySet<number> = new Set([401, 403]);
+
+/**
+ * Classifies a failed administration probe (M90b, corrected for V5-2).
+ *
+ * The probe reads the namespace's MANAGEMENT plane to report on its DATA
+ * plane, and the two fail independently, so the caught error has to be sorted
+ * into three outcomes rather than two. The question each arm answers is not
+ * "was this response an error" — every input here is one — but **does this
+ * response establish a fact about the DATA plane?**
+ *
+ * - **`true` — reachable.** {@linkcode NAMESPACE_ANSWERED_STATUSES}: the
+ *   namespace answered with an auth verdict, which proves the transport path
+ *   is live. A send/listen-only credential is not an outage.
+ * - **`false` — down.** {@linkcode NAMESPACE_ABSENT_STATUSES}: the namespace
+ *   is not there. This is the only class of answer that positively
+ *   establishes the data plane is unavailable.
+ * - **`undefined` — cannot determine.** Everything else. Two shapes reach
+ *   here and they share one reason. A management-plane status that is neither
+ *   of the above — 429 throttling, a 5xx, a 408 — reports on the MANAGEMENT
+ *   request, not on the namespace: Azure documents 429 as temporary
+ *   throttling or a conflicting management operation, and a data plane
+ *   publishing fine throughout is the normal case. And no `statusCode` at all
+ *   is a network-layer failure: ECONNRESET, DNS failure, a firewalled or
+ *   separately-private-endpointed management plane, and the emulator, which
+ *   ships no TLS listener for administration.
+ *
+ * Reporting `down` for either shape drains a replica whose data plane is
+ * publishing 200s — that is V5-2, and the 429 arm is the same defect reached
+ * through a status code instead of a socket error. A namespace that is
+ * genuinely gone still reports `down`: the data client stops being ready, and
+ * the indicator checks `isReady()` before it ever consults this probe.
  *
  * @param error - The caught probe error
- * @returns `true` when the error is an identified 401/403 response
+ * @returns `true` reachable, `false` positively absent, `undefined` unknown
  */
-function isAuthorizationResponse(error: unknown): boolean {
+function classifyProbeFailure(error: unknown): boolean | undefined {
   if (typeof error !== 'object' || error === null) {
-    return false;
+    return undefined;
   }
   const statusCode = (error as { statusCode?: unknown }).statusCode;
-  return statusCode === 401 || statusCode === 403;
+  if (typeof statusCode !== 'number') {
+    return undefined;
+  }
+  if (NAMESPACE_ANSWERED_STATUSES.has(statusCode)) {
+    return true;
+  }
+  if (NAMESPACE_ABSENT_STATUSES.has(statusCode)) {
+    return false;
+  }
+  return undefined;
 }
 
 /**
@@ -453,12 +508,12 @@ export function adaptServiceBusModule(
     // than lying `down`. The broker caches and bounds this probe.
     ...(typeof readNamespace === 'function'
       ? {
-        isHealthy: async (): Promise<boolean> => {
+        isHealthy: async (): Promise<boolean | undefined> => {
           try {
             await readNamespace.call(admin);
             return true;
           } catch (error) {
-            return isAuthorizationResponse(error);
+            return classifyProbeFailure(error);
           }
         },
       }
@@ -491,8 +546,13 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    * endpoint — owns the 5-second cache and the 2-second bound, so polling
    * `/health` cannot turn into broker load, and a hung transport cannot
    * hold a health response past the bound.
+   *
+   * Tri-state since V5-2: the bound resolves `undefined`, not `false`. A
+   * management endpoint too slow to answer within 2 s has told us nothing
+   * about the data plane, and reporting `down` there drained replicas that
+   * were publishing fine.
    */
-  #probe: (() => Promise<boolean>) | null = null;
+  #probe: (() => Promise<boolean | undefined>) | null = null;
 
   constructor(
     runtime: IRuntimeServices,
@@ -607,9 +667,13 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     const transport = this.#transport;
     if (transport !== null && typeof transport.isHealthy === 'function') {
       const isHealthy = transport.isHealthy;
-      this.#probe = createCachedProbe({
+      this.#probe = createCachedProbe<boolean | undefined>({
         // Bound call: a transport's `isHealthy` may read instance state.
         probe: () => isHealthy.call(transport),
+        // A probe that times out or rejects has not reached the namespace, so
+        // it cannot report on it. `false` — the helper's default, and correct
+        // for a probe that reads the backend directly — is wrong here (V5-2).
+        fallback: undefined,
         ttlMs: PROBE_TTL_MS,
         timeoutMs: PROBE_TIMEOUT_MS,
         hrtime: this.#runtime.hrtime.bind(this.#runtime),

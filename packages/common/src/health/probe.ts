@@ -32,12 +32,35 @@ import type { IRuntimeServices, TimerHandle } from '../runtime.ts';
  *
  * @since 0.1.0
  */
-export interface CachedProbeOptions {
+export interface CachedProbeOptions<T = boolean> {
   /**
    * The reachability probe. Resolving `true` means the backend is reachable;
    * resolving `false` or rejecting means it is not.
+   *
+   * A probe may resolve a wider outcome than `boolean` — see
+   * {@linkcode CachedProbeOptions.fallback}. `T` defaults to `boolean`, so
+   * every existing caller is unchanged.
    */
-  readonly probe: () => Promise<boolean>;
+  readonly probe: () => Promise<T>;
+  /**
+   * Outcome recorded when the probe times out or rejects.
+   *
+   * Defaults to `false` — the policy this helper was built for, where a
+   * backend that will not answer counts as unreachable. That is the right
+   * answer when the probe reads the thing whose health is being reported.
+   *
+   * It is the WRONG answer when the probe reads a proxy for that thing and
+   * the proxy can fail independently: `messaging-plugin`'s Service Bus probe
+   * reads the namespace's MANAGEMENT plane to report on its DATA plane, so a
+   * management endpoint that is firewalled, absent (the emulator ships no
+   * TLS listener for it) or merely slow used to report a live, publishing
+   * broker as `down` and drain the replica. Such a probe passes
+   * `fallback: undefined` and widens `T`, so "I could not determine this"
+   * stays distinguishable from "it is down".
+   *
+   * @default false
+   */
+  readonly fallback?: T;
   /**
    * How long to cache the last outcome, in milliseconds.
    *
@@ -46,7 +69,8 @@ export interface CachedProbeOptions {
   readonly ttlMs?: number;
   /**
    * Per-probe timeout, in milliseconds. A probe that does not settle within
-   * this window counts as unreachable (`false`).
+   * this window resolves {@linkcode CachedProbeOptions.fallback}, which is
+   * `false` — unreachable — unless the caller widened it.
    *
    * @default 2000
    */
@@ -94,33 +118,65 @@ export interface CachedProbeOptions {
  * ```
  * @since 0.1.0
  */
-export function createCachedProbe(options: CachedProbeOptions): () => Promise<boolean> {
+export function createCachedProbe(
+  options: CachedProbeOptions<boolean>,
+): () => Promise<boolean>;
+/**
+ * Widened-outcome form: `fallback` is REQUIRED.
+ *
+ * The default fallback is `false`, which this function cannot produce for an
+ * outcome type that does not include it. Requiring the caller to name theirs
+ * is what keeps the returned `Promise<T>` honest — without this overload a
+ * `createCachedProbe<'up' | 'down'>` call that omitted `fallback` would hand
+ * back `false` on a timeout under a type promising it could not.
+ *
+ * `fallback: undefined` is a valid value here, not an omission: it is the one
+ * the tri-state Service Bus probe passes to mean "could not determine".
+ */
+export function createCachedProbe<T>(
+  options: CachedProbeOptions<T> & { readonly fallback: T },
+): () => Promise<T>;
+export function createCachedProbe<T = boolean>(
+  options: CachedProbeOptions<T>,
+): () => Promise<T> {
   const ttlMs = options.ttlMs ?? 5000;
   const timeoutMs = options.timeoutMs ?? 2000;
+  // `false` is the documented default and the only outcome this helper can
+  // name without knowing `T`. The cast is confined to this line and the
+  // overloads above are what make it sound: a caller may only omit `fallback`
+  // through the boolean overload, for which `false` is a valid `T`. Any wider
+  // outcome type has to name its own fallback, so this branch is unreachable
+  // for it.
+  //
+  // Membership, NOT `??`. `undefined` is a legitimate fallback — it is the one
+  // the tri-state Service Bus probe passes to mean "could not determine" — and
+  // `options.fallback ?? false` collapses it back to `false`, reinstating the
+  // exact defect that widening exists to fix. Caught by that probe's own test.
+  const fallback = ('fallback' in options ? options.fallback : false) as T;
   const setTimer = options.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = options.clearTimer ?? ((handle) => {
     clearTimeout(handle as ReturnType<typeof setTimeout>);
   });
 
-  let cached: { readonly value: boolean; readonly at: number } | null = null;
-  let inFlight: Promise<boolean> | null = null;
+  let cached: { readonly value: T; readonly at: number } | null = null;
+  let inFlight: Promise<T> | null = null;
 
-  const runProbe = (): Promise<boolean> => {
+  const runProbe = (): Promise<T> => {
     let timer: TimerHandle;
-    const timeout = new Promise<boolean>((resolve) => {
-      timer = setTimer(() => resolve(false), timeoutMs);
+    const timeout = new Promise<T>((resolve) => {
+      timer = setTimer(() => resolve(fallback), timeoutMs);
     });
-    // A probe that rejects, or throws synchronously, is unreachable — not an
-    // error. The attempt therefore never rejects.
+    // A probe that rejects, or throws synchronously, resolves the fallback —
+    // not an error. The attempt therefore never rejects.
     const attempt = Promise.resolve()
       .then(() => options.probe())
-      .then((reachable) => reachable, () => false);
+      .then((reachable) => reachable, () => fallback);
     return Promise.race([attempt, timeout]).finally(() => {
       clearTimer(timer);
     });
   };
 
-  return (): Promise<boolean> => {
+  return (): Promise<T> => {
     const now = options.hrtime();
     if (cached !== null && now - cached.at < ttlMs) {
       return Promise.resolve(cached.value);
