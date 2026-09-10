@@ -281,4 +281,53 @@ describe('resolveProbeTiming', () => {
     });
     expect(typeof probe).toBe('function');
   });
+
+  describe('a widened outcome type (V5-2)', () => {
+    it('records an explicit `undefined` fallback on timeout, not `false`', async () => {
+      // The bug this test exists for was in the fix, not the original: the
+      // default was resolved with `options.fallback ?? false`, which cannot
+      // tell an ABSENT fallback from one explicitly set to `undefined` — so
+      // the tri-state caller silently got `false` back, reinstating the very
+      // defect the widening exists to remove.
+      let fire: (() => void) | undefined;
+      const probe = createCachedProbe<boolean | undefined>({
+        probe: () => new Promise<boolean>(() => {}),
+        fallback: undefined,
+        timeoutMs: 5,
+        hrtime: () => 0,
+        setTimer: (fn) => {
+          fire = fn;
+          return 1;
+        },
+        clearTimer: () => {},
+      });
+
+      const pending = probe();
+      fire?.();
+      expect(await pending).toBeUndefined();
+    });
+
+    it('records an explicit `undefined` fallback when the probe rejects', async () => {
+      const probe = createCachedProbe<boolean | undefined>({
+        probe: () => Promise.reject(new Error('unreachable')),
+        fallback: undefined,
+        hrtime: () => 0,
+        setTimer: () => 1,
+        clearTimer: () => {},
+      });
+      expect(await probe()).toBeUndefined();
+    });
+
+    it('still defaults to `false` when no fallback is supplied', async () => {
+      // Every pre-existing caller relies on this, so the widening has to leave
+      // it exactly as it was.
+      const probe = createCachedProbe({
+        probe: () => Promise.reject(new Error('unreachable')),
+        hrtime: () => 0,
+        setTimer: () => 1,
+        clearTimer: () => {},
+      });
+      expect(await probe()).toBe(false);
+    });
+  });
 });

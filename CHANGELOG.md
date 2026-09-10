@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`common`** — `createCachedProbe` is generic over its outcome type, with an optional `fallback`
+  recorded on timeout or rejection (default `false`, so every existing caller is unchanged). A probe
+  that reads a _proxy_ for the thing it reports on — Service Bus's administration endpoint standing
+  in for its data plane — can now say "could not determine" instead of "down".
+
+### Fixed
+
+- **`messaging-plugin`** — the Service Bus health probe reported a **live** broker as `down`. It
+  reads the namespace's administration endpoint to report on its data plane, and every failure —
+  including its own two-second bound — resolved `false`, so `/health` said `down` and `/ready`
+  answered `503` for a broker that was publishing successfully. Measured against the emulator
+  `docs/messaging-emulators.md` documents, whose administration endpoint has no TLS listener.
+  Reachability is now tri-state: a probe that never reached the namespace reports
+  `reachable: 'unknown'` and leaves the replica in rotation, while a namespace that positively
+  answers — a `404`, a `5xx` — still reports `down`, and a `401`/`403` still counts as reachable.
+  `IServiceBusTransport.isHealthy?` widens to `Promise<boolean | undefined>`; an implementation
+  resolving a plain `boolean` satisfies it unchanged.
+
 ### Documentation
 
 - **`graphql-plugin`** — documented that `subscriptions.websocket.onConnect` and a pipeline guard on

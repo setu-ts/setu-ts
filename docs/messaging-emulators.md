@@ -96,6 +96,30 @@ is itself useful: it is the one place the inbox's failure path can be driven aga
 and the suite asserts it surfaces `ReplyInboxUnavailableError` naming the reply topic and the
 `Manage` right. **Service Bus RPC remains unverified against real Azure.**
 
+The same limitation reaches the **health indicator**, and it is worth knowing before you read one.
+`ServiceBusBroker`'s reachability probe is an administration call, and the emulator's administration
+endpoint has no TLS listener — the SDK throws `RestError`/`ECONNRESET` after about six seconds. So
+against the emulator the probe can never succeed, and the indicator reports
+
+```json
+{ "status": "up", "data": { "broker": "service-bus", "reachable": "unknown" } }
+```
+
+`unknown` rather than `down`: a probe that never reached the namespace has learned nothing about it,
+so it must not drain a replica whose data plane is publishing fine. Before this was corrected (V5-2)
+the same configuration answered `down` and `/ready` returned `503` while `publish` returned `200`. A
+namespace that positively answers unhealthy — a `404` for one that has been deleted, say — is still
+reported `down`, because that is an answer rather than a silence.
+
+**Against the emulator specifically, that means the indicator cannot tell a running broker from a
+stopped one.** Measured: with the container stopped it also reports `up`/`unknown` and `/ready`
+stays `200`, because there is no administration endpoint to answer either way — only the publish
+itself fails. This is a property of the emulator, not of a real namespace, where a `Manage`-capable
+credential succeeds and a send/listen-only one is refused with a `401` that counts as reachable. Do
+not use the emulator to exercise health transitions; use it for the data plane, which is what it
+implements. A publish against a stopped broker also holds the request for the SDK's full retry
+budget — shorten it with `retryOptions` (X28-6) if a test needs to fail fast.
+
 ## AWS SQS
 
 `packages/queue-plugin/test/e2e/sqs-elasticmq.test.ts` runs against ElasticMQ and **is** wired into
