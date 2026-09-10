@@ -7,7 +7,11 @@
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { COMMAND_HANDLER_SEAM, COMMAND_HANDLERS_EXPORT } from '../seams/cqrs.ts';
 import { seamNames } from '../seams/seam-spec.ts';
-import { renderDeclarationHeader, renderMethodSignature } from '../utils/render-declaration.ts';
+import {
+  renderConstAssignment,
+  renderDeclarationHeader,
+  renderMethodSignature,
+} from '../utils/render-declaration.ts';
 
 /**
  * Generates a command and its handler, and regenerates the seam barrel.
@@ -24,7 +28,7 @@ export function generateCommandHandler(
   const contents = `import type { CqrsCommand, ICommandHandler } from '@setu-ts/common';
 
 /** Type name the command bus routes on. */
-export const ${names.screaming}_COMMAND = '${names.pascal}';
+${renderConstAssignment(`${names.screaming}_COMMAND`, `'${names.pascal}'`)}
 
 /** Payload of the ${names.pascal} command. */
 export interface ${names.pascal}Payload {

@@ -7,7 +7,11 @@
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { QUERY_HANDLER_SEAM, QUERY_HANDLERS_EXPORT } from '../seams/cqrs.ts';
 import { seamNames } from '../seams/seam-spec.ts';
-import { renderDeclarationHeader, renderMethodSignature } from '../utils/render-declaration.ts';
+import {
+  renderConstAssignment,
+  renderDeclarationHeader,
+  renderMethodSignature,
+} from '../utils/render-declaration.ts';
 
 /**
  * Generates a query and its handler, and regenerates the seam barrel.
@@ -24,7 +28,7 @@ export function generateQueryHandler(
   const contents = `import type { CqrsQuery, IQueryHandler } from '@setu-ts/common';
 
 /** Type name the query bus routes on. */
-export const ${names.screaming}_QUERY = '${names.pascal}';
+${renderConstAssignment(`${names.screaming}_QUERY`, `'${names.pascal}'`)}
 
 /** Criteria the ${names.pascal} query accepts. */
 export interface ${names.pascal}Criteria {

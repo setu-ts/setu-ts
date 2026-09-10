@@ -121,7 +121,15 @@ All notable changes to this project are documented here. The format follows
   lengths found three more overflows of the same class that the row did not name — the
   `extends CqrsQuery<…>` interface header, the `handle(…)` signature, and a barrel registration
   entry — all fixed here, because a scaffold that fails its own format check for a long name is the
-  same defect whichever line does it.
+  same defect whichever line does it. Sweeping the name one character at a time against a real
+  formatter then found two more class-header forms and a fourth line kind: the formatter has FIVE
+  header forms, and the fourth returns the `implements` keyword to the declaration line while the
+  type ARGUMENTS split — the opposite of what the first three suggest, and picked on whether the
+  declaration, keyword and type head still fit rather than on the declaration's own length. The
+  `export const` a handler names itself after wraps too. Generated handlers are proven clean by that
+  sweep for every artifact name up to **67 characters**, which is a measured ceiling rather than a
+  round number: at 68 an interface's own `readonly type: typeof …;` property is the next line the
+  formatter rewrites, and the test names where the bound is so raising it is a deliberate act.
 
 ### Documentation
 
