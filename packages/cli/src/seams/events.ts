@@ -21,6 +21,7 @@ import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
   assembleSeamBarrel,
   renderExportedArray,
+  renderRegistrationEntry,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -66,7 +67,10 @@ function renderEventsBarrel(artifacts: SeamArtifacts): string {
   // site, in the developer-owned artifact module.
   const entries = names.map((name) => {
     const n = deriveNames(name);
-    return `{ type: ${n.screaming}_EVENT, handler: create${n.pascal}EventHandler }`;
+    return renderRegistrationEntry([
+      `type: ${n.screaming}_EVENT`,
+      `handler: create${n.pascal}EventHandler`,
+    ]);
   });
 
   return assembleSeamBarrel(header, imports, [

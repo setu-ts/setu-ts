@@ -26,6 +26,7 @@ import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
   assembleSeamBarrel,
   renderExportedArray,
+  renderRegistrationEntry,
   renderSeamImports,
   seamHeader,
   seamNames,
@@ -107,11 +108,17 @@ function renderCqrsBarrel(artifacts: SeamArtifacts): string {
   // in by taking `services`.
   const commandEntries = commands.map((name) => {
     const n = deriveNames(name);
-    return `{ type: ${n.screaming}_COMMAND, handler: create${n.pascal}CommandHandler }`;
+    return renderRegistrationEntry([
+      `type: ${n.screaming}_COMMAND`,
+      `handler: create${n.pascal}CommandHandler`,
+    ]);
   });
   const queryEntries = queries.map((name) => {
     const n = deriveNames(name);
-    return `{ type: ${n.screaming}_QUERY, handler: create${n.pascal}QueryHandler }`;
+    return renderRegistrationEntry([
+      `type: ${n.screaming}_QUERY`,
+      `handler: create${n.pascal}QueryHandler`,
+    ]);
   });
 
   return assembleSeamBarrel(header, imports, [

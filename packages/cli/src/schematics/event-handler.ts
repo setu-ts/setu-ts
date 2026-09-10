@@ -7,6 +7,11 @@
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { EVENT_HANDLERS_EXPORT, EVENTS_SEAM } from '../seams/events.ts';
 import { seamNames } from '../seams/seam-spec.ts';
+import {
+  renderConstAssignment,
+  renderDeclarationHeader,
+  renderMethodSignature,
+} from '../utils/render-declaration.ts';
 
 /**
  * Generates an event handler and regenerates the seam barrel that subscribes it.
@@ -24,7 +29,7 @@ export function generateEventHandler(
 import type { IEventHandler } from '@setu-ts/events-plugin';
 
 /** Event type name the bus routes on. */
-export const ${names.screaming}_EVENT = '${names.kebab}';
+${renderConstAssignment(`${names.screaming}_EVENT`, `'${names.kebab}'`)}
 
 /** Payload carried by the ${names.kebab} event. */
 export interface ${names.pascal}Payload {
@@ -42,13 +47,24 @@ export interface ${names.pascal}Payload {
  * subscribe one by hand. The barrel references the factory below by name, so the
  * factory is the single construction site.
  */
-export class ${names.pascal}EventHandler implements IEventHandler<${names.pascal}Payload> {
+${
+    renderDeclarationHeader(
+      `export class ${names.pascal}EventHandler`,
+      `implements IEventHandler<${names.pascal}Payload>`,
+    )
+  }
   /**
    * Reacts to the event.
    *
    * @param event - The published domain event
    */
-  async handle(event: IDomainEvent<${names.pascal}Payload>): Promise<void> {
+${
+    renderMethodSignature(
+      'async handle',
+      [`event: IDomainEvent<${names.pascal}Payload>`],
+      'Promise<void>',
+    )
+  }
     // Replace with the real reaction.
     await Promise.resolve(event.data.id);
   }
