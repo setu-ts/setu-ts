@@ -438,3 +438,81 @@ describe('SchedulerPlugin behaviour-chain startup gate', () => {
     expect(delivered).toEqual([]);
   });
 });
+
+describe('a declared job that cannot be scheduled names the entry (X23-1)', () => {
+  /**
+   * The refusal itself is correct — an invalid cron expression must stop the
+   * boot. What was missing is WHICH entry produced it: the underlying error
+   * says `Invalid cron expression: not a cron` and nothing else, so an
+   * application declaring several jobs is told an expression is bad and left
+   * to find it. The plugin holds both the declared index and the job's own
+   * `name`.
+   *
+   * The factory arm has said this since M86 ("rejects `start()` with an error
+   * naming `SchedulerPlugin({ jobs })` and the entry's index"); an instance
+   * entry took a different path and got none of it.
+   */
+  const badCron: SchedulerJobDefinition = {
+    trigger: 'cron',
+    name: 'bad-expr',
+    expression: 'not a cron',
+    handler: () => {},
+  };
+
+  it('names the option, the declared index and the job name', async () => {
+    const harness = createHarness();
+    await expect(SchedulerPlugin({ jobs: [badCron] }).register(harness.ctx))
+      .rejects.toThrow(
+        "Failed to schedule SchedulerPlugin({ jobs })[0] (name 'bad-expr'): " +
+          'Invalid cron expression: not a cron',
+      );
+  });
+
+  it('names the DECLARED index, not the position among instances', async () => {
+    // The index a developer counts is the one in the array they wrote. With a
+    // factory ahead of it, filtering first would name entry 0 — a working one.
+    const harness = createHarness();
+    const factory: RegistryFactory<SchedulerJobDefinition> = () =>
+      everyDefinition([], 'from-factory');
+
+    await expect(SchedulerPlugin({ jobs: [factory, badCron] }).register(harness.ctx))
+      .rejects.toThrow('SchedulerPlugin({ jobs })[1]');
+  });
+
+  it('retains the original refusal as the cause', async () => {
+    // The label is added, not substituted: the underlying diagnostic is what
+    // says what was actually wrong with the expression.
+    const harness = createHarness();
+    const error = await Promise.resolve(
+      SchedulerPlugin({ jobs: [badCron] }).register(harness.ctx),
+    ).then(() => undefined, (e: unknown) => e);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).cause).toBeInstanceOf(Error);
+    expect(((error as Error).cause as Error).message).toBe('Invalid cron expression: not a cron');
+  });
+
+  it('labels a factory-supplied definition the same way', async () => {
+    // Both arms describe the same job, so an operator must not be able to
+    // tell them apart from the failure. `resolveRegistryEntry` already names
+    // a factory that THROWS; this is a factory that returns a bad definition.
+    const harness = createHarness();
+    const factory: RegistryFactory<SchedulerJobDefinition> = () => badCron;
+    await SchedulerPlugin({ jobs: [factory] }).register(harness.ctx);
+
+    await expect(runInitHooks(harness)).rejects.toThrow(
+      "Failed to schedule SchedulerPlugin({ jobs })[0] (name 'bad-expr')",
+    );
+  });
+
+  it('leaves a valid array unaffected', async () => {
+    // Vacuity guard: without it, a plugin that refused every job would
+    // satisfy every assertion above.
+    const delivered: string[] = [];
+    const { runtime } = await boot({
+      jobs: [everyDefinition(delivered, 'a'), everyDefinition(delivered, 'b')],
+    });
+    await runtime.advance(ONE_FIRE_MS);
+    expect(delivered.sort()).toEqual(['a', 'b']);
+  });
+});
