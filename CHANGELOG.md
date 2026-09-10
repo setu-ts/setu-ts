@@ -15,6 +15,10 @@ All notable changes to this project are documented here. The format follows
   `boolean` probe and is **required** once the outcome type is wider, since `false` is the only
   value the helper can name on its own: omitting it for, say, a `'up' | 'down'` probe would have
   resolved `false` under a signature promising it could not.
+- **`common`** — `causeMessage(value)` is published: an `Error`'s own message, or `String(value)`
+  otherwise. It was a private helper with a byte-identical copy in `@setu-ts/scheduler-plugin`,
+  because the two arms of one `jobs` option have to produce the same sentence and §2.2 forbids the
+  import that would let one read the other's. One implementation now, reachable by both.
 
 - **`common`** — `IMailer.isHealthy?()` reports the mail transport's reachability: `true`, `false`,
   or `undefined` when the question cannot be asked. OPTIONAL, so no implementor breaks.

@@ -17,7 +17,7 @@ import type {
   ScheduleOptions,
   SchedulerJobHandler,
 } from '@setu-ts/common';
-import { resolveRegistryEntry } from '@setu-ts/common';
+import { causeMessage, resolveRegistryEntry } from '@setu-ts/common';
 import { SchedulerUnavailableError } from '../errors.ts';
 import type {
   IDistributedLock,
@@ -394,20 +394,6 @@ async function scheduleDeclaredJob(
       { cause },
     );
   }
-}
-
-/**
- * Extracts a message from an unknown thrown value.
- *
- * A local copy of the one `resolveRegistryEntry` uses: that helper's is
- * private to `@setu-ts/common`, and the two messages have to read the same
- * way for the two arms of `jobs` to be indistinguishable to an operator.
- *
- * @param cause - The value that was thrown
- * @returns The message, or a stable fallback when the value is not an `Error`
- */
-function causeMessage(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }
 
 /**

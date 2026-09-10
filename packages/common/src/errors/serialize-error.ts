@@ -321,3 +321,31 @@ function readMember(source: Error, key: ErrorMember): unknown {
     return undefined;
   }
 }
+
+/**
+ * Extracts a caller-facing message from an unknown thrown value.
+ *
+ * The one-line counterpart of {@linkcode serializeError}: that turns a thrown
+ * value into a structured record for a log sink, this turns it into the
+ * sentence that goes inside another error's message.
+ *
+ * It is published because two packages must produce the SAME sentence and
+ * §2.2 forbids the import that would let one read the other's copy.
+ * `resolveRegistryEntry` uses it for a factory that threw, and
+ * `@setu-ts/scheduler-plugin` for a declared job that could not be scheduled —
+ * the two arms of one `jobs` option, which have to be indistinguishable to an
+ * operator reading the failure. A local copy in each was byte-identical and
+ * free to drift.
+ *
+ * @param cause - The value that was thrown
+ * @returns Its message, or a stable fallback when it is not an `Error`
+ *
+ * @example
+ * ```typescript
+ * throw new Error(`Failed to start: ${causeMessage(cause)}`, { cause });
+ * ```
+ * @since 0.6.0
+ */
+export function causeMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}

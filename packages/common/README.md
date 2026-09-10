@@ -110,6 +110,7 @@ package fits the plugin architecture.
 | --------------------------------- | --------- |
 | `assertRealPathContained`         | function  |
 | `brandErrorResponder`             | function  |
+| `causeMessage`                    | function  |
 | `composeBehaviorChain`            | function  |
 | `contentTypeFor`                  | function  |
 | `contextToTraceparent`            | function  |
@@ -224,7 +225,6 @@ package fits the plugin architecture.
 | `ICounter`                        | interface |
 | `ICqrsFacade`                     | interface |
 | `IDatabaseAdapter`                | interface |
-| `ITransactionIsolationSupport`    | interface |
 | `IDataSource`                     | interface |
 | `IDecoratorApi`                   | interface |
 | `IDnsResolver`                    | interface |
@@ -293,6 +293,7 @@ package fits the plugin architecture.
 | `ITenantRepository`               | interface |
 | `ITenantResolver`                 | interface |
 | `ITransaction`                    | interface |
+| `ITransactionIsolationSupport`    | interface |
 | `IValidationService`              | interface |
 | `IWebSocketConnection`            | interface |
 | `IWebSocketService`               | interface |

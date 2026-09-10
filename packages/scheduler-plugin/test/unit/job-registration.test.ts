@@ -505,6 +505,32 @@ describe('a declared job that cannot be scheduled names the entry (X23-1)', () =
     );
   });
 
+  it('produces the SAME error from both arms, message and cause', async () => {
+    // The two tests above check each arm on its own, which leaves the actual
+    // contract — that an operator cannot tell them apart — asserted by nobody:
+    // either arm's text could drift and both would keep passing. One
+    // definition, both routes, compared.
+    const instanceHarness = createHarness();
+    const instanceError = await Promise.resolve(
+      SchedulerPlugin({ jobs: [badCron] }).register(instanceHarness.ctx),
+    ).then(() => undefined, (e: unknown) => e);
+
+    const factoryHarness = createHarness();
+    const factory: RegistryFactory<SchedulerJobDefinition> = () => badCron;
+    await SchedulerPlugin({ jobs: [factory] }).register(factoryHarness.ctx);
+    const factoryError = await runInitHooks(factoryHarness).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+
+    expect(instanceError).toBeInstanceOf(Error);
+    expect(factoryError).toBeInstanceOf(Error);
+    expect((factoryError as Error).message).toBe((instanceError as Error).message);
+    expect(((factoryError as Error).cause as Error).message).toBe(
+      ((instanceError as Error).cause as Error).message,
+    );
+  });
+
   it('leaves a valid array unaffected', async () => {
     // Vacuity guard: without it, a plugin that refused every job would
     // satisfy every assertion above.
