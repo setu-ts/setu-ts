@@ -2,6 +2,12 @@
 
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/setu-ts-logo-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/setu-ts-logo-light.svg">
+  <img alt="Setu-TS" src="assets/setu-ts-logo-light.svg" width="420">
+</picture>
+
 **Plugin-first enterprise backend framework built on Hono.**
 
 Enterprise architecture without the weight. Runtime freedom without the chaos.
