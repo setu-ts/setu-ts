@@ -329,5 +329,35 @@ describe('resolveProbeTiming', () => {
       });
       expect(await probe()).toBe(false);
     });
+
+    it('refuses a widened outcome type that names no fallback', () => {
+      // A COMPILE-time assertion, and the only kind available: the defect it
+      // guards has no runtime symptom in this file. Omitting `fallback` for an
+      // outcome type that does not include `false` used to type-check and then
+      // resolve `false` on a timeout, under a signature promising it could
+      // not. The `@ts-expect-error` is self-validating — if the overloads stop
+      // refusing this call, the unused directive fails `deno check`.
+      // @ts-expect-error - `fallback` is required once `T` is not boolean
+      const probe = createCachedProbe<'up' | 'down'>({
+        probe: () => Promise.resolve('up' as const),
+        hrtime: () => 0,
+        setTimer: () => 1,
+        clearTimer: () => {},
+      });
+      expect(typeof probe).toBe('function');
+    });
+
+    it('accepts a widened outcome type that names one', () => {
+      // The other half: the refusal above must be about the MISSING fallback,
+      // not about widening being rejected outright.
+      const probe = createCachedProbe<'up' | 'down'>({
+        probe: () => Promise.resolve('up' as const),
+        fallback: 'down',
+        hrtime: () => 0,
+        setTimer: () => 1,
+        clearTimer: () => {},
+      });
+      expect(typeof probe).toBe('function');
+    });
   });
 });

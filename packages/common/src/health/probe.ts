@@ -118,14 +118,35 @@ export interface CachedProbeOptions<T = boolean> {
  * ```
  * @since 0.1.0
  */
+export function createCachedProbe(
+  options: CachedProbeOptions<boolean>,
+): () => Promise<boolean>;
+/**
+ * Widened-outcome form: `fallback` is REQUIRED.
+ *
+ * The default fallback is `false`, which this function cannot produce for an
+ * outcome type that does not include it. Requiring the caller to name theirs
+ * is what keeps the returned `Promise<T>` honest — without this overload a
+ * `createCachedProbe<'up' | 'down'>` call that omitted `fallback` would hand
+ * back `false` on a timeout under a type promising it could not.
+ *
+ * `fallback: undefined` is a valid value here, not an omission: it is the one
+ * the tri-state Service Bus probe passes to mean "could not determine".
+ */
+export function createCachedProbe<T>(
+  options: CachedProbeOptions<T> & { readonly fallback: T },
+): () => Promise<T>;
 export function createCachedProbe<T = boolean>(
   options: CachedProbeOptions<T>,
 ): () => Promise<T> {
   const ttlMs = options.ttlMs ?? 5000;
   const timeoutMs = options.timeoutMs ?? 2000;
   // `false` is the documented default and the only outcome this helper can
-  // name without knowing `T`. The cast is confined to this line: a caller that
-  // omits `fallback` has `T = boolean`, for which `false` is valid.
+  // name without knowing `T`. The cast is confined to this line and the
+  // overloads above are what make it sound: a caller may only omit `fallback`
+  // through the boolean overload, for which `false` is a valid `T`. Any wider
+  // outcome type has to name its own fallback, so this branch is unreachable
+  // for it.
   //
   // Membership, NOT `??`. `undefined` is a legitimate fallback — it is the one
   // the tri-state Service Bus probe passes to mean "could not determine" — and

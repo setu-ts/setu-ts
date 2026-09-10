@@ -215,26 +215,56 @@ export interface ServiceBusOptions {
 }
 
 /**
+ * Statuses that positively establish the namespace is not there.
+ *
+ * A 404 or a 410 is the management plane telling us the namespace does not
+ * exist (or no longer does), which IS a fact about the data plane: there is
+ * nothing to publish to. Every other status is a fact about the MANAGEMENT
+ * request — see {@linkcode classifyProbeFailure}.
+ */
+const NAMESPACE_ABSENT_STATUSES: ReadonlySet<number> = new Set([404, 410]);
+
+/**
+ * Statuses that prove the namespace answered without proving anything else.
+ *
+ * A 401/403 is an auth verdict, which means the request reached the namespace
+ * and got a considered reply — a send/listen-only credential is not an outage.
+ */
+const NAMESPACE_ANSWERED_STATUSES: ReadonlySet<number> = new Set([401, 403]);
+
+/**
  * Classifies a failed administration probe (M90b, corrected for V5-2).
  *
  * The probe reads the namespace's MANAGEMENT plane to report on its DATA
  * plane, and the two fail independently, so the caught error has to be sorted
- * into three outcomes rather than two:
+ * into three outcomes rather than two. The question each arm answers is not
+ * "was this response an error" — every input here is one — but **does this
+ * response establish a fact about the DATA plane?**
  *
- * - **`true` — reachable.** A 401/403 is the namespace ANSWERING with an auth
- *   verdict, which proves the transport path is live. A send/listen-only
- *   credential is not an outage.
- * - **`false` — down.** Any other numeric `statusCode`: the management
- *   endpoint answered and the answer was bad (a deleted namespace is 404).
- *   The namespace was reached, so this is a fact about it, not about the path.
- * - **`undefined` — cannot determine.** No `statusCode` at all, which is what
- *   a network-layer failure looks like: ECONNRESET, DNS failure, a firewalled
- *   or separately-private-endpointed management plane, and the emulator,
- *   which ships no TLS listener for administration. Reporting `down` here
- *   drained replicas whose data plane was publishing fine (V5-2).
+ * - **`true` — reachable.** {@linkcode NAMESPACE_ANSWERED_STATUSES}: the
+ *   namespace answered with an auth verdict, which proves the transport path
+ *   is live. A send/listen-only credential is not an outage.
+ * - **`false` — down.** {@linkcode NAMESPACE_ABSENT_STATUSES}: the namespace
+ *   is not there. This is the only class of answer that positively
+ *   establishes the data plane is unavailable.
+ * - **`undefined` — cannot determine.** Everything else. Two shapes reach
+ *   here and they share one reason. A management-plane status that is neither
+ *   of the above — 429 throttling, a 5xx, a 408 — reports on the MANAGEMENT
+ *   request, not on the namespace: Azure documents 429 as temporary
+ *   throttling or a conflicting management operation, and a data plane
+ *   publishing fine throughout is the normal case. And no `statusCode` at all
+ *   is a network-layer failure: ECONNRESET, DNS failure, a firewalled or
+ *   separately-private-endpointed management plane, and the emulator, which
+ *   ships no TLS listener for administration.
+ *
+ * Reporting `down` for either shape drains a replica whose data plane is
+ * publishing 200s — that is V5-2, and the 429 arm is the same defect reached
+ * through a status code instead of a socket error. A namespace that is
+ * genuinely gone still reports `down`: the data client stops being ready, and
+ * the indicator checks `isReady()` before it ever consults this probe.
  *
  * @param error - The caught probe error
- * @returns `true` reachable, `false` positively down, `undefined` unknown
+ * @returns `true` reachable, `false` positively absent, `undefined` unknown
  */
 function classifyProbeFailure(error: unknown): boolean | undefined {
   if (typeof error !== 'object' || error === null) {
@@ -244,7 +274,13 @@ function classifyProbeFailure(error: unknown): boolean | undefined {
   if (typeof statusCode !== 'number') {
     return undefined;
   }
-  return statusCode === 401 || statusCode === 403;
+  if (NAMESPACE_ANSWERED_STATUSES.has(statusCode)) {
+    return true;
+  }
+  if (NAMESPACE_ABSENT_STATUSES.has(statusCode)) {
+    return false;
+  }
+  return undefined;
 }
 
 /**
