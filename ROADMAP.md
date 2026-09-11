@@ -9372,5 +9372,5 @@ name the boundary and point at `overrideCapability`.
 | 90g       | ✅     | concurrency loses work silently                                                                    |
 | 90h       | ✅     | documentation that survives contact ([#261](https://github.com/setu-ts/setu-ts/pull/261))          |
 | 90i       | ✅     | observability that joins up ([#260](https://github.com/setu-ts/setu-ts/pull/260))                  |
-| 90j       | ⬜     | operator diagnostics survive to the operator ([#263](https://github.com/setu-ts/setu-ts/pull/263)) |
+| 90j       | ✅     | operator diagnostics survive to the operator ([#263](https://github.com/setu-ts/setu-ts/pull/263)) |
 | 91        | ✅     | test app composes like the real one ([#278](https://github.com/setu-ts/setu-ts/pull/278))          |

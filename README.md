@@ -411,40 +411,10 @@ Each package also carries its own README with options, semantics, and a worked e
 
 ---
 
-## Roadmap
-
-**64 of 68 milestones are complete** (numbered 0–52, some with lettered follow-ups such as 14b and
-24c). The framework itself is built; what remains is examples, documentation, and release
-engineering.
-
-| Phase               | Milestones | Status | Focus                                                            |
-| ------------------- | ---------- | ------ | ---------------------------------------------------------------- |
-| Foundation          | 0–2        | ✅     | Monorepo, common contracts, plugin kernel                        |
-| Core plugins        | 3–9        | ✅     | Runtime, logger, config, validation, exceptions, DI, decorators  |
-| Data plugins        | 10–15      | ✅     | Database, cache, events, CQRS, messaging, queue                  |
-| Security            | 16–17      | ✅     | Authentication, authorization, HTTP security                     |
-| Scheduling          | 18         | ✅     | Scheduler with distributed locking                               |
-| Observability       | 19–21, 24  | ✅     | Metrics, health, OpenAPI, telemetry                              |
-| Hono migration      | 22–23      | ✅     | Kernel routing and serving on Hono; Cloudflare Workers           |
-| Enterprise          | 25–27      | ✅     | Secrets, audit, resilience                                       |
-| Features            | 28–32      | ✅     | Storage, mail, notifications, feature flags, multi-tenancy       |
-| Real-time & SSR     | 41–46      | ✅     | HTTP adapters, streaming, SSE, React SSR, worker pool, WebSocket |
-| Testing             | 33         | ✅     | Test utilities                                                   |
-| Tooling             | 34–36      | ✅     | CLI, SDK, starter bundles                                        |
-| Sessions            | 47–48      | ✅     | Alpha-3 limitation closeout, cookie sessions, form CSRF          |
-| Service protocols   | 49–51      | ✅     | gRPC/Connect/gRPC-Web, service discovery, GraphQL                |
-| Cloudflare platform | 52         | ✅     | KV, R2, D1, Queues, Cron, Cache API, Durable Objects             |
-| Release engineering | 37–40      | ⬜     | Examples, documentation, Docker/K8s, final release               |
-
-Detailed milestones, file structures, and interface definitions are documented in
-[`ROADMAP.md`](ROADMAP.md).
-
----
-
 ## Contributing
 
 Contributions are welcome. The foundation is complete, so the most useful contributions right now
-are bug reports against the alpha, and plugins built on the capability model.
+are bug reports against the current release, and plugins built on the capability model.
 
 ### Before You Write Code
 
