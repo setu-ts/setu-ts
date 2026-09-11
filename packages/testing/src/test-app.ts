@@ -11,7 +11,7 @@ import { createApplication } from '@setu-ts/kernel';
  * prefer {@linkcode TestAppFromApp}, which builds from the project's own
  * composition root instead of a second, divergent one.
  *
- * @since 0.1.0
+ * @since 0.6.0
  */
 export interface TestAppFromPlugins {
   /**
@@ -68,7 +68,8 @@ export interface TestAppFromApp {
    *
    * Throws naming the entry if the application holds no plugin with that name:
    * a silently ignored `without: ['databse']` would run the whole test against
-   * the real plugin while reporting success.
+   * the real plugin while reporting success. Repeated entries are de-duplicated,
+   * so listing a name twice is not that error.
    */
   without?: readonly string[];
   /**
@@ -159,7 +160,11 @@ export async function createTestApp(
   const app = options?.app ?? createApplication({ plugins: options?.plugins ?? [] });
 
   if (options?.app !== undefined) {
-    for (const name of options.without ?? []) {
+    // De-duplicated: `unregister` removes every plugin carrying the name, so a
+    // repeated entry would find nothing on the second pass and throw "the
+    // application holds no plugin with that name" — blaming the caller's
+    // spelling for a harmless duplicate.
+    for (const name of new Set(options.without ?? [])) {
       if (!app.unregister(name)) {
         throw new Error(
           `createTestApp: cannot exclude plugin '${name}' — the application holds no plugin ` +

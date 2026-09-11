@@ -1,5 +1,5 @@
 import type { CapabilityToken, IPlugin, IPluginContext } from '@setu-ts/common';
-import { PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 /**
  * Priority carried by every plugin {@linkcode overrideCapability} emits.
@@ -14,6 +14,34 @@ import { PLUGIN_PRIORITY } from '@setu-ts/common';
  * still higher number would run later and win. No first-party plugin does.
  */
 const OVERRIDE_PRIORITY = PLUGIN_PRIORITY.LOWEST + 1;
+
+/**
+ * Capabilities the kernel registers with `{ multi: true }`, which cannot be
+ * replaced by an override.
+ *
+ * `ServiceRegistry.getAll` returns `[...inherited, ...single, ...multi]`, so a
+ * `{ override: true }` registration lands in the SINGLE map and is *prepended*
+ * to the multi list rather than replacing anything — every real provider still
+ * runs, and the caller is told the capability was overridden. `has()` cannot
+ * distinguish the two (`service-registry.ts:99` consults both maps) and the
+ * public `IServiceRegistry` exposes no non-instantiating discriminator —
+ * `get`/`getAll` both resolve a `registerFactory` registration, so probing with
+ * either would construct the very service the test is replacing.
+ *
+ * These five are every multi registration the framework makes; each is written
+ * through an `IPluginContext` facade (`ctx.health.register`,
+ * `ctx.metrics.register`, `ctx.openapi.addSchema`, `ctx.decorators.register`,
+ * `ctx.cli.register`), so they are the complete in-framework set. A plugin
+ * calling `ctx.services.register(token, svc, { multi: true })` directly is not
+ * detectable here and is documented instead.
+ */
+const MULTI_PROVIDER_TOKENS: ReadonlySet<CapabilityToken> = new Set([
+  CAPABILITIES.HEALTH_INDICATOR,
+  CAPABILITIES.METRIC_REGISTRATION,
+  CAPABILITIES.OPENAPI_SCHEMA,
+  CAPABILITIES.DECORATOR_HANDLER,
+  CAPABILITIES.CLI_COMMAND,
+]);
 
 /**
  * Creates a plugin that REPLACES an already-provided capability with a test
@@ -43,8 +71,16 @@ const OVERRIDE_PRIORITY = PLUGIN_PRIORITY.LOWEST + 1;
  * @param service - The test double to register under it
  * @returns A plugin to append to `createTestApp`'s `overrides`, or to pass to
  * `app.register()` on an un-started application
- * @throws {Error} At `register()` time, if nothing provides `token`. A silent
- * no-op would leave the real service serving while the test reported success.
+ * **Multi-provider capabilities cannot be overridden.** `health-indicator`,
+ * `metric-registration`, `openapi-schema`, `decorator-handler` and `cli-command`
+ * are registered with `{ multi: true }`, and `getAll` returns the single and
+ * multi registrations *concatenated* — so an override would add a provider
+ * while every real one kept running. Those five are refused by name; exclude
+ * the plugin that registers the provider instead.
+ *
+ * @throws {Error} At `register()` time, if nothing provides `token`, or if
+ * `token` is a multi-provider capability. A silent no-op would leave the real
+ * service serving while the test reported success.
  * @example
  * ```typescript
  * import { createTestApp, overrideCapability } from '@setu-ts/testing';
@@ -64,6 +100,14 @@ export function overrideCapability(token: CapabilityToken, service: object): IPl
     version: '0.6.0',
     priority: OVERRIDE_PRIORITY,
     register(ctx: IPluginContext): void {
+      if (MULTI_PROVIDER_TOKENS.has(token)) {
+        throw new Error(
+          `Cannot override capability '${token}': it is a multi-provider capability. ` +
+            `Overriding one ADDS a provider rather than replacing the existing ones, so every ` +
+            `real provider would still run while the test reported success. Exclude the plugin ` +
+            `that registers it instead — createTestApp({ app, without: ['<plugin>'] }).`,
+        );
+      }
       if (!ctx.services.has(token)) {
         throw new Error(
           `Cannot override capability '${token}': nothing provides it. ` +

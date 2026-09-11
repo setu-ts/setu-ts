@@ -138,6 +138,12 @@ It **throws at `register()` when nothing provides the token**. Without that chec
 would register the double under a nonsense name, leave the real service serving, and let the test
 pass against the real dependency.
 
+It also **refuses a multi-provider capability** — `health-indicator`, `metric-registration`,
+`openapi-schema`, `decorator-handler` and `cli-command`, the five the kernel registers with
+`{ multi: true }`. `getAll` returns the single and multi registrations concatenated, so an override
+would ADD a provider while every real one kept running, and the test would report success. Exclude
+the plugin that registers the provider instead.
+
 > **`overrideCapability` replaces, `createMockPlugin` provides.** `createMockPlugin` declares the
 > token in `provides` — which is what satisfies a dependent plugin's `dependencies` check, and which
 > the kernel refuses when a real plugin already declares it

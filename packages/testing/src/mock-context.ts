@@ -68,7 +68,12 @@ const DEFAULT_TEST_RUNTIME: IRuntimeServices = {
  * Returns the internal default test runtime for direct accessor verification.
  * Exported solely for unit-test coverage of DEFAULT_TEST_RUNTIME's remaining
  * accessors (platform, version, hostname, now, randomBytes, setTimeout,
- * setInterval, exit). NOT part of the public API.
+ * setInterval, exit), and by `test/fixtures/fake-runtime.ts`, which stands this
+ * default up as the `runtime` capability a kernel app needs at `start()` rather
+ * than declaring another hand-written copy — the copies drift, and this one
+ * carries three corrections (length-honouring `randomBytes`, a non-`null`
+ * `subtle`, inert timers) that the drifted ones lack. NOT part of the public
+ * API.
  * @internal
  */
 export function _getDefaults(): typeof DEFAULT_TEST_RUNTIME {

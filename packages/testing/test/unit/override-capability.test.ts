@@ -103,6 +103,63 @@ describe('overrideCapability', () => {
     await expect(app.start()).rejects.toThrow(/use createMockPlugin\(\) to provide one it lacks/);
   });
 
+  it('refuses a multi-provider capability rather than silently adding a provider', async () => {
+    // `has()` consults BOTH maps, so the presence check passes; but
+    // `{ override: true }` writes to the SINGLE map while `getAll` returns
+    // single and multi CONCATENATED — so an override would add a provider,
+    // every real one would keep running, and the test would report success.
+    const producer: IPlugin = {
+      name: 'producer',
+      version: '1.0.0',
+      register(ctx: IPluginContext) {
+        // HealthIndicatorFn returns a Promise (common/src/services/health.ts:26).
+        ctx.health.register('real-db', () => Promise.resolve({ status: 'up' as const }));
+      },
+    };
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        producer,
+        overrideCapability(CAPABILITIES.HEALTH_INDICATOR, { name: 'real-db', check: () => ({}) }),
+      ],
+    });
+
+    await expect(app.start()).rejects.toThrow(
+      /Cannot override capability 'health-indicator': it is a multi-provider capability/,
+    );
+  });
+
+  it('names every capability the kernel registers with multi: true', () => {
+    // Pinned as a set: a sixth multi registration added to the kernel without a
+    // matching entry here reintroduces the silent add-a-provider path.
+    const refused: string[] = [];
+    for (
+      const token of [
+        CAPABILITIES.HEALTH_INDICATOR,
+        CAPABILITIES.METRIC_REGISTRATION,
+        CAPABILITIES.OPENAPI_SCHEMA,
+        CAPABILITIES.DECORATOR_HANDLER,
+        CAPABILITIES.CLI_COMMAND,
+      ]
+    ) {
+      const plugin = overrideCapability(token, {});
+      try {
+        plugin.register({
+          services: { has: () => true },
+        } as unknown as IPluginContext);
+      } catch (error) {
+        if ((error as Error).message.includes('multi-provider')) refused.push(token);
+      }
+    }
+    expect(refused).toEqual([
+      'health-indicator',
+      'metric-registration',
+      'openapi-schema',
+      'decorator-handler',
+      'cli-command',
+    ]);
+  });
+
   it('refuses two overrides of one token on the plugin name', async () => {
     const app = createApplication({
       plugins: [

@@ -10024,7 +10024,12 @@ it returns declares no `provides` (a second declaration of a live token is refus
 before any plugin runs), registers with `{ override: true }`, and carries a priority above
 `PLUGIN_PRIORITY.LOWEST` so it wins regardless of the replaced plugin's own band. It **throws at
 `register()` when nothing provides `token`** — a mistyped token would otherwise register the double
-under a nonsense name and leave the real service serving.
+under a nonsense name and leave the real service serving — and **when `token` is a multi-provider
+capability** (`health-indicator`, `metric-registration`, `openapi-schema`, `decorator-handler`,
+`cli-command`). `ServiceRegistry.getAll` returns the single and multi registrations concatenated, so
+an override of one ADDS a provider rather than replacing the existing ones: every real provider
+would still run while the caller was told the capability was overridden. Exclude the plugin that
+registers the provider instead.
 
 > `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
 > the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the

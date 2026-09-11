@@ -99,6 +99,27 @@ describe('createTestApp — the composition-root arm', () => {
     ).rejects.toThrow(/cannot exclude plugin 'databse'/);
   });
 
+  it('de-duplicates `without`, so a repeated name is not reported as unknown', async () => {
+    const ran: string[] = [];
+    const eager: IPlugin = {
+      name: 'database',
+      version: '1.0.0',
+      register() {
+        ran.push('database');
+      },
+    };
+    // `unregister` removes every match, so the second pass over a repeated name
+    // would find nothing and throw "holds no plugin with that name" — blaming
+    // the caller's spelling for a plugin the application had in fact held.
+    const app = await createTestApp({
+      app: root([eager]),
+      without: ['database', 'database'],
+    });
+
+    expect(ran).toEqual([]);
+    expect(app.services.has('database')).toBe(false);
+  });
+
   it('applies `without` before `overrides`', async () => {
     const order: string[] = [];
     const marker: IPlugin = {

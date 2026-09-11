@@ -144,8 +144,13 @@ changes nothing about how a request is served.
 
 ### 3.7 Refusing an unknown `without` name
 
-- **Decision:** `createTestApp({ app, without })` throws naming the unmatched name (and listing the
-  names the app does hold) when `app.unregister(name)` returns `false`.
+- **Decision:** `createTestApp({ app, without })` throws naming the unmatched name when
+  `app.unregister(name)` returns `false`. **Corrected during code review:** this originally also
+  promised to list the names the app DOES hold, which is not implementable — `IKernelApplication`
+  exposes `unregister` and no plugin-list accessor, and adding one to satisfy an error message is a
+  public-surface change the finding does not justify. Entries are de-duplicated before the loop, so
+  a name listed twice is idempotent rather than throwing on the second pass (where it would report
+  "holds no plugin with that name" about a plugin the app had held).
 - **Why:** A silently ignored `without: ['databse']` runs the whole test against the real plugin
   while reporting success — this repository's own silent-pass failure class, and the reason
   `unregister` returns a `boolean` at all rather than `void`.
