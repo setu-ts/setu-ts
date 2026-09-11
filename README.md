@@ -414,7 +414,7 @@ Each package also carries its own README with options, semantics, and a worked e
 ## Contributing
 
 Contributions are welcome. The foundation is complete, so the most useful contributions right now
-are bug reports against the alpha, and plugins built on the capability model.
+are bug reports against the current release, and plugins built on the capability model.
 
 ### Before You Write Code
 
