@@ -4812,7 +4812,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   suites), the absent-token refusal removed, the `without` refusal removed, and `unregister`
   reporting correctly while removing nothing (3 suites). All changed `src` files at 100%
   branch/function/line except `application.ts` (95.1/100/97.2, up from 93.4/93.4/90.3)) — complete
-  (PR pending)
+  (PR #278)
 
 - **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
   the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
