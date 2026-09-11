@@ -164,6 +164,12 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   published or generated output, a required member added to a public interface, a manifest or
   compiler-option edit — belongs in the guide, not buried in a feature entry. A release with none
   needs no entry.
+- **Rename `docs/upgrading.md`'s `## Unreleased` heading to the version being cut**, the same way
+  the CHANGELOG's is renamed. Milestones file their reader actions under `Unreleased` as they land,
+  so this step is a rename rather than a recall — which is the point: reconstructing what several
+  milestones demanded of a reader, at cut time, is how the guide's first two entries ended up under
+  the wrong releases (M90h). `test/docs-gate.test.ts` refuses a heading with no matching CHANGELOG
+  section, so a forgotten rename fails the suite rather than shipping.
 
 ### 2. Verify
 

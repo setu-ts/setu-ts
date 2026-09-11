@@ -29,6 +29,7 @@ function fakeApp(
     middleware: {} as IKernelApplication['middleware'],
     services: {} as IKernelApplication['services'],
     register: () => fakeApp(start, onFetch),
+    unregister: () => false,
     start,
     stop: () => Promise.resolve(),
     fetch: () => {

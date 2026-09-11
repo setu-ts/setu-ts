@@ -9270,15 +9270,24 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 
 ### Types
 
-| Export               | Kind | Purpose                                                                            |
-| -------------------- | ---- | ---------------------------------------------------------------------------------- |
-| `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                        |
-| `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection           |
-| `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }`)        |
-| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`) |
+| Export               | Kind | Purpose                                                                                          |
+| -------------------- | ---- | ------------------------------------------------------------------------------------------------ |
+| `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                                      |
+| `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)` |
+| `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }`)                      |
+| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)               |
 
 Contract notes:
 
+- **`unregister(name: string): boolean`** removes a pending plugin before `start()`, returning
+  `true` when one carried that name. Plugins do not run until `start()`, so removing one means its
+  `register()` — and any eager side effect inside it, such as a database adapter's `connect()` —
+  never happens. That is the one thing overriding a capability cannot do: an override replaces what
+  consumers resolve, after the real plugin has already run. It **throws** once the application has
+  started, mirroring `register()`, because `start()` has already read the plugin list and a silent
+  `false` would report success for an operation that can have had no effect. Removing a plugin
+  another declares in `dependencies` is not refused here — `start()` reports it, naming both.
+  `@setu-ts/testing`'s `createTestApp({ app, without })` is the intended caller.
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.
@@ -9930,23 +9939,26 @@ streaming-response reader.
 
 ### Exports
 
-| Export                | File                               | Description                        |
-| --------------------- | ---------------------------------- | ---------------------------------- |
-| `createTestApp`       | `src/test-app.ts`                  | Test application factory           |
-| `TestAppOptions`      | `src/test-app.ts`                  | Factory options                    |
-| `createMockPlugin`    | `src/mock-plugin.ts`               | Mock plugin builder                |
-| `MockPluginOptions`   | `src/mock-plugin.ts`               | Builder options                    |
-| `collectStream`       | `src/inject.ts`                    | Collect streaming response body    |
-| `inject`              | `src/inject.ts`                    | Inject HTTP requests into test app |
-| `StreamingBody`       | `src/inject.ts`                    | Stream collector result shape      |
-| `createTestContext`   | `src/mock-context.ts`              | Create a mock `IRequestContext`    |
-| `TestContextOptions`  | `src/mock-context.ts`              | Context builder options            |
-| `MockResponse`        | `src/mock-context.ts`              | Fake `IResponse` double            |
-| `MockServiceRegistry` | `src/mock-registry.ts`             | Fake `IServiceRegistry` double     |
-| `FixtureManager`      | `src/fixtures/fixture-manager.ts`  | Assemble mock plugins per-test     |
-| `IKernelApplication`  | (re-export from `@setu-ts/kernel`) | Kernel application interface       |
-| `InjectRequest`       | (re-export from `@setu-ts/kernel`) | Shape for `inject()` request       |
-| `InjectResponse`      | (re-export from `@setu-ts/kernel`) | Shape for `inject()` response      |
+| Export                | File                               | Description                                   |
+| --------------------- | ---------------------------------- | --------------------------------------------- |
+| `createTestApp`       | `src/test-app.ts`                  | Test application factory                      |
+| `TestAppOptions`      | `src/test-app.ts`                  | Factory options (union of the two arms below) |
+| `TestAppFromPlugins`  | `src/test-app.ts`                  | Hand-assembled arm                            |
+| `TestAppFromApp`      | `src/test-app.ts`                  | Composition-root arm                          |
+| `overrideCapability`  | `src/override-capability.ts`       | Capability replacement plugin builder         |
+| `createMockPlugin`    | `src/mock-plugin.ts`               | Mock plugin builder                           |
+| `MockPluginOptions`   | `src/mock-plugin.ts`               | Builder options                               |
+| `collectStream`       | `src/inject.ts`                    | Collect streaming response body               |
+| `inject`              | `src/inject.ts`                    | Inject HTTP requests into test app            |
+| `StreamingBody`       | `src/inject.ts`                    | Stream collector result shape                 |
+| `createTestContext`   | `src/mock-context.ts`              | Create a mock `IRequestContext`               |
+| `TestContextOptions`  | `src/mock-context.ts`              | Context builder options                       |
+| `MockResponse`        | `src/mock-context.ts`              | Fake `IResponse` double                       |
+| `MockServiceRegistry` | `src/mock-registry.ts`             | Fake `IServiceRegistry` double                |
+| `FixtureManager`      | `src/fixtures/fixture-manager.ts`  | Assemble mock plugins per-test                |
+| `IKernelApplication`  | (re-export from `@setu-ts/kernel`) | Kernel application interface                  |
+| `InjectRequest`       | (re-export from `@setu-ts/kernel`) | Shape for `inject()` request                  |
+| `InjectResponse`      | (re-export from `@setu-ts/kernel`) | Shape for `inject()` response                 |
 
 ### Registration
 
@@ -9963,14 +9975,63 @@ const app = await createTestApp({
 });
 ```
 
+Or from the application the project already composes, which keeps the test's composition —
+middleware, error handling, health indicators, route ordering — the one production has:
+
+```typescript
+import { createTestApp, overrideCapability } from '@setu-ts/testing';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApp } from '../setu.config.ts';
+
+const app = await createTestApp({
+  app: createApp(),
+  without: ['database'],
+  overrides: [overrideCapability(CAPABILITIES.MAIL, fakeMailer)],
+});
+```
+
 ### Options
 
-`TestAppOptions` — `createTestApp(options?)`:
+`TestAppOptions` — `createTestApp(options?)` — is a **union of two mutually exclusive arms**, so
+supplying both `plugins` and `app` is a compile error rather than a runtime throw.
+
+`TestAppFromPlugins` — assemble by hand (unit scope):
 
 | Option      | Type        | Default | Behavior                                                                                                                                                                                                                              |
 | ----------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `plugins`   | `IPlugin[]` | `[]`    | Pre-registered before `start()`. **Must include a `runtime` capability provider** (`RuntimePlugin()`, or a mock providing `CAPABILITIES.RUNTIME`) whenever `autoStart` is left `true` — the kernel requires one and throws otherwise. |
 | `autoStart` | `boolean`   | `true`  | `true` calls `await app.start()` (no port, so no socket) before returning. `false` returns the un-started app — required to register further plugins or to add global middleware.                                                     |
+
+`TestAppFromApp` — start from the composition root:
+
+| Option      | Type                 | Default  | Behavior                                                                                                                                                                                                   |
+| ----------- | -------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`       | `IKernelApplication` | required | An already-constructed, **not yet started** application — typically a scaffolded project's `createApp()` from `setu.config.ts`, or a starter factory's return value.                                       |
+| `without`   | `readonly string[]`  | `[]`     | Plugin names dropped via `IKernelApplication.unregister` before `start()`, so each plugin's `register()` — and any eager side effect in it — never runs. **Throws** naming an entry the app does not hold. |
+| `overrides` | `readonly IPlugin[]` | `[]`     | Plugins appended after `without` is applied, usually `overrideCapability` results. Exists because the default `autoStart: true` leaves no window in which a caller could register them.                    |
+| `autoStart` | `boolean`            | `true`   | As above.                                                                                                                                                                                                  |
+
+**`without` and `overrides` are not interchangeable.** An override replaces a service _after_ the
+real plugin's `register()` has run, so an eager side effect inside it — `DatabasePlugin` calls
+`adapter.connect()` there — has already happened. Only `without` prevents that.
+
+`overrideCapability(token: CapabilityToken, service: object): IPlugin` takes no options. The plugin
+it returns declares no `provides` (a second declaration of a live token is refused by the kernel
+before any plugin runs), registers with `{ override: true }`, and carries a priority above
+`PLUGIN_PRIORITY.LOWEST` so it wins regardless of the replaced plugin's own band. It **throws at
+`register()` when nothing provides `token`** — a mistyped token would otherwise register the double
+under a nonsense name and leave the real service serving.
+
+> `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
+> the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the
+> kernel refuses when a real plugin already declares it. Use it in an application that does not
+> register the real plugin.
+
+**Unhandled errors.** Neither arm installs `errorHandler` — this package depends on `common` and
+`kernel` only, so a default would mean a second RFC 9457 formatter that `@setu-ts/exceptions`' own
+tests do not drive. The `plugins` arm therefore answers the kernel's `{ error, detail? }` fallback;
+the `app:` arm inherits whatever responder the composition root registered, and is the answer for
+response-shape fidelity.
 
 `MockPluginOptions` — `createMockPlugin(options)`:
 

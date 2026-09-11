@@ -7,7 +7,50 @@ is a release step ([releasing.md](./releasing.md)), not a memory exercise.
 Each heading names the release that **shipped** the change, so an upgrade spanning several releases
 is the union of every section between the version you are on and the one you are moving to.
 
+`## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
+cutting a release renames that heading to the version and is a rename, not a recall.
+
 <!-- version:history -->
+
+## Unreleased
+
+One change fails `deno check`, and only for a hand-written stand-in — an application that obtains
+its app from `createApplication` or a starter factory needs no change at all.
+
+### Add `unregister` to a hand-written `IKernelApplication`
+
+`@setu-ts/kernel`'s `IKernelApplication` gained a required `unregister(name: string): boolean`,
+which removes a pending plugin before `start()`. It exists because overriding a capability is a
+_post-hoc_ substitution: by the time an override replaces a service, the real plugin's `register()`
+has already run, so an eager side effect inside it — `DatabasePlugin` calls `adapter.connect()`
+there — has already happened. Only removing the plugin prevents that.
+
+`createApplication` and all three starters return an implementation, so callers are unaffected. If
+you wrote your own stand-in:
+
+```typescript
+// TS2741 Property 'unregister' is missing in type '…' but required in type 'IKernelApplication'.
+const app: IKernelApplication = {
+  // …router, middleware, services, register, start, stop, fetch, inject…
+  unregister: (_name) => false, // a stand-in that holds no plugins of its own
+};
+```
+
+The intended caller is `@setu-ts/testing`:
+
+```typescript
+import { createTestApp, overrideCapability } from '@setu-ts/testing';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApp } from '../setu.config.ts';
+
+const app = await createTestApp({
+  app: createApp(), // the composition production uses
+  without: ['database'], // never connects
+  overrides: [overrideCapability(CAPABILITIES.MAIL, fakeMailer)],
+});
+```
+
+Nothing about existing tests changes: `createTestApp({ plugins: [...] })` behaves exactly as it did.
 
 ## 0.5.0
 

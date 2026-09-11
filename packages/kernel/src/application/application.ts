@@ -108,6 +108,30 @@ export interface IKernelApplication extends IApplication {
    * @returns The inject response
    */
   inject(request: InjectRequest): Promise<InjectResponse>;
+  /**
+   * Removes a pending plugin by name before the application starts.
+   *
+   * Plugins do not run until `start()`, so removing one here means its
+   * `register()` — and any eager side effect inside it, such as a database
+   * adapter's `connect()` — never happens at all. That is the one thing
+   * overriding a capability cannot do: an override replaces what consumers
+   * resolve, after the real plugin has already run.
+   *
+   * Removing a plugin another plugin declares in `dependencies` is not
+   * refused here; `start()` reports it, naming both plugins.
+   *
+   * @param name - The plugin's `name`, as declared on `IPlugin`
+   * @returns `true` when a plugin was removed, `false` when none carried that name
+   * @throws {Error} If the application has already started
+   * @example
+   * ```typescript
+   * const app = createApp();            // the project's own composition root
+   * app.unregister('database');         // the real adapter never connects
+   * await app.start();
+   * ```
+   * @since 0.6.0
+   */
+  unregister(name: string): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +187,18 @@ class Application implements IKernelApplication {
     }
     this.#plugins.push(plugin);
     return this;
+  }
+
+  unregister(name: string): boolean {
+    if (this.#started) {
+      throw new Error('Cannot unregister plugins after the application has started.');
+    }
+    const index = this.#plugins.findIndex((plugin) => plugin.name === name);
+    if (index === -1) {
+      return false;
+    }
+    this.#plugins.splice(index, 1);
+    return true;
   }
 
   async start(options?: StartOptions): Promise<void> {

@@ -9,6 +9,7 @@ import {
   inject,
   MockResponse,
   MockServiceRegistry,
+  overrideCapability,
 } from '../../src/index.ts';
 
 // Type imports for assignability checks
@@ -18,6 +19,8 @@ import type {
   InjectResponse,
   MockPluginOptions,
   StreamingBody,
+  TestAppFromApp,
+  TestAppFromPlugins,
   TestAppOptions,
   TestContextOptions,
 } from '../../src/index.ts';
@@ -37,6 +40,24 @@ describe('barrel exports', () => {
     expect(typeof MockResponse).toBe('function');
     expect(typeof FixtureManager).toBe('function');
     expect(typeof collectStream).toBe('function');
+    expect(typeof overrideCapability).toBe('function');
+  });
+
+  // Declared against the BARREL, not the concrete module: dropping a
+  // re-export leaves every runtime assertion in this package green, because
+  // every other test imports `../../src/<file>.ts` directly (the M56 class).
+  it('re-exports the composition-root types from the barrel', () => {
+    const fromPlugins: TestAppFromPlugins = { plugins: [], autoStart: true };
+    const fromApp: TestAppFromApp = {
+      app: null as unknown as IKernelApplication,
+      without: ['database'],
+      overrides: [],
+    };
+    const asUnion: TestAppOptions = fromPlugins;
+
+    expect(fromPlugins.autoStart).toBe(true);
+    expect(fromApp.without).toEqual(['database']);
+    expect(asUnion).toBe(fromPlugins);
   });
 
   // The exported option types are structural, so the meaningful assertion is

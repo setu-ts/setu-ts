@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/testing`** — `createTestApp` gains a **composition-root arm**: pass `app` (an
+  already-constructed, not-yet-started application — a scaffolded project's `createApp()` from
+  `setu.config.ts`, or a starter factory's return value) instead of `plugins`, with optional
+  `without` and `overrides`, and the test starts from the application the project actually ships.
+  Everything that root registered is present — its middleware, error handling, health indicators and
+  route ordering — so a test observes production's composition rather than a second one assembled by
+  hand. `TestAppOptions` is now a union of the two exported arms, `TestAppFromPlugins` and
+  `TestAppFromApp`, so supplying both `plugins` and `app` is a compile error; the `plugins` arm is
+  otherwise unchanged. Closes the `@setu-ts/testing` watch-item X11 left open (M91).
+- **`@setu-ts/testing`** — `overrideCapability(token, service)` builds the replacement plugin
+  AI_GUIDELINES §3.4 describes, applying the three constraints that make one work: it declares no
+  `provides` (a second declaration of a live token is refused before any plugin runs), registers
+  with `{ override: true }`, and carries a priority above `PLUGIN_PRIORITY.LOWEST` so it wins
+  regardless of the replaced plugin's band. It **throws at `register()` when nothing provides the
+  token** — without that, a mistyped token registers the double under a nonsense name, leaves the
+  real service serving, and the test passes against the real dependency. `createMockPlugin` is
+  unchanged and still the right tool for _providing_ a capability an application lacks; it cannot
+  _replace_ one, because its `provides` declaration collides with the real plugin's (M91).
 - **`common`** — `createCachedProbe` is generic over its outcome type, with a `fallback` recorded on
   timeout or rejection (default `false`, so every existing caller is unchanged). A probe that reads
   a _proxy_ for the thing it reports on — Service Bus's administration endpoint standing in for its
@@ -36,6 +54,21 @@ All notable changes to this project are documented here. The format follows
 - **`common`** — optional `IGrpcService.refuses?(request)`, answered from the request HEADERS and
   consulted by the kernel BEFORE it reads the body. Optional, so an implementor that omits it keeps
   the previous behaviour exactly.
+
+### Changed
+
+- **BREAKING — `@setu-ts/kernel`: `IKernelApplication` gains a required
+  `unregister(name: string):
+  boolean`.** It removes a pending plugin before `start()`, returning
+  `true` when one carried that name and throwing once the application has started. Plugins do not
+  run until `start()`, so removing one means its `register()` — and any eager side effect inside it,
+  such as `DatabasePlugin`'s `adapter.connect()` — never happens at all. That is the one thing
+  overriding a capability cannot do: an override replaces what consumers resolve, _after_ the real
+  plugin has already run. **Migration:** callers are unaffected, and `createApplication` already
+  returns an implementation. Only a hand-written stand-in for `IKernelApplication` breaks; give it
+  `unregister(name) { return false; }` if it holds no plugins of its own, or splice its own pending
+  list. Removing a plugin another declares in `dependencies` is not refused by `unregister` —
+  `start()` reports it, naming both plugins (M91).
 
 ### Fixed
 

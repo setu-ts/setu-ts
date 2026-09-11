@@ -9139,6 +9139,96 @@ fields (`code` first) read through the same guard, plus
 `catch (cause) { throw new Error('…', { cause }); }` at the five remaining sites. Both are
 mechanical, and `serializeError` already walks a cause chain when one exists.
 
+## Milestone 91: A Test App That Composes Like the Real One
+
+**Package(s):** `packages/kernel`, `packages/testing`
+
+**Corrected from `common` + `kernel` + `testing`** (the M70b / M70g / M70h / M70k / M90a precedent —
+the list is corrected when source-checking contradicts the framing it was scoped under). The
+exclusion member was scoped onto `IApplication` in `common`, on the reading that a composition root
+might return one. It does not: `createApplication` returns `IKernelApplication`
+(`kernel/src/application/application.ts:1506`) and so do all three starters
+(`starters/rest-starter/src/app.ts:93`, `microservice-starter/src/app.ts:57`,
+`full-stack-starter/src/app.ts:78`), which is also the only interface carrying `inject()` — the
+thing a test app exists for. The widening lands in `kernel` and `common` is untouched.
+
+**Objective:** Close [X11](../smoke/X11-FINDINGS.md)'s watch-item — _"`@setu-ts/testing` has no
+`createTestApp` + `errorHandler` story; the broader question is whether a test app should compose
+like a real one"_ — by making the real composition root the thing a test app is built from.
+
+**The answer is yes, and the ecosystem is unanimous about it.** Laravel's `CreatesApplication`
+requires the same `bootstrap/app.php` the server does; ASP.NET Core's
+`WebApplicationFactory<Program>` boots the real `Program.cs`; Fastify's convention is one `build()`
+imported by both `server.js` and the tests; Spring Boot's `@SpringBootTest` starts the real
+`@SpringBootApplication` and subtracts from it with `@MockBean`. Only NestJS reconstructs the graph
+declaratively (`Test.createTestingModule`), and its single most reported testing defect is the
+composition gap that follows — `createNestApplication()` does not run `main.ts`, so
+`app.useGlobalPipes(new ValidationPipe())` is absent in tests and a route that `400`s in production
+silently accepts garbage. Nest's own remedy is a convention, not a mechanism: register globals as
+module providers under `APP_PIPE` / `APP_FILTER` / `APP_GUARD`, because those are part of the graph
+and therefore _are_ reproduced.
+
+`createTestApp` is `createApplication({ plugins }) + start()` and nothing else
+(`testing/src/test-app.ts:70-81`) — school two, without the override machinery that makes school two
+survivable. Meanwhile the framework already ships the school-one asset: M34b gave every scaffolded
+project a `setu.config.ts` exporting `createApp()`, deliberately not started, precisely so the
+plugin list has one home. Nothing in `@setu-ts/testing` can consume it.
+
+**Three facts were established by probing the kernel, and each one shapes a deliverable.**
+
+- **`createMockPlugin` cannot override anything.** It declares `provides: [token]`
+  (`testing/src/mock-plugin.ts:57,61`), which collides in `buildProviderIndex`
+  (`kernel/src/registry/plugin-resolver.ts:130`) against any real plugin claiming that token:
+  `Capability 'database' is provided by both 'database' and 'database-mock'`. It works only in an
+  app where the real plugin was never registered — which is the hand-assembly arm, and is exactly
+  what it is for. The replacement mechanism AI_GUIDELINES §3.4 already blesses — "a replacement
+  plugin registers the same capability token with `override: true`" — has no helper, and
+  hand-rolling it is three non-obvious constraints deep (declare no `provides`, pass
+  `{ override: true }`, and run after every claimant).
+- **Ordering is a real hazard and it fails confusingly.** `DEFAULT_PRIORITY` is 500
+  (`plugin-resolver.ts:150`), so an override plugin at the default placed against a real plugin at
+  `PLUGIN_PRIORITY.LOW` (900) runs first and the real plugin then throws
+  `Capability 'database' is already registered. Use { override: true } to replace it.` — an error
+  naming the real plugin, which reads as the real plugin's bug.
+- **Override is post-hoc substitution, not pre-emptive replacement, and that is the gap exclusion
+  closes.** `DatabasePlugin.register()` calls `await adapter.connect()`
+  (`database-plugin/src/plugin/database-plugin.ts:115`). Overriding the service afterward changes
+  what consumers resolve; it does not stop a real socket being attempted at `start()`. Nest gets the
+  pre-emptive half for free because providers are instantiated lazily and `.overrideProvider()`
+  replaces the definition before the container touches it. Our unit of composition is a plugin
+  carrying routes, middleware, health indicators and lifecycle hooks, so "override the database" and
+  "do not run the database plugin" are different operations and we have only the first.
+
+**Deliverables.**
+
+- **`IKernelApplication.unregister(name)`** — removes a pending plugin before `start()`, symmetric
+  with `register()` and with `IServiceRegistry.unregister`'s `boolean` return
+  (`common/src/registry.ts:161`). Throws once started, as `register()` does. Required rather than
+  optional: the kernel's own `Application` is the only implementor, and an optional member cannot
+  distinguish "this app cannot exclude" from "no such plugin". §10.2 approval recorded.
+- **`overrideCapability(token, service)`** in `@setu-ts/testing` — emits the plugin shape above with
+  a sentinel priority above `PLUGIN_PRIORITY.LOWEST`, and **refuses at `register()` a token nothing
+  already provides**. That refusal is the design's load-bearing half: without it
+  `overrideCapability(CAPABILITIES.DATABSE, mock)` registers a mock under a nonsense token, leaves
+  the real one serving, and the test passes against the real database. It also enforces the split —
+  `createMockPlugin` provides a capability the app lacks, `overrideCapability` replaces one it has.
+- **A composition-root arm on `createTestApp`** — `{ app, without?, overrides? }`, a union against
+  the existing `{ plugins? }` arm so supplying both is a compile error (the M30 `ChannelConfig` /
+  M50 / M52c precedent). `without` and `overrides` are load-bearing rather than sugar: the default
+  `autoStart: true` leaves the caller no window between construction and `start()`, which is the
+  window both need. An unknown `without` name throws — a silently ignored `without: ['databse']`
+  runs the test against the real plugin, which is this repository's own silent-pass failure class.
+- **The `errorHandler` question is answered by documentation, not by a default.** The `plugins` arm
+  keeps the kernel fallback body; `packages/testing` depends on `common` + `kernel` only (M33), so
+  installing a responder means a second RFC 9457 formatter that `@setu-ts/exceptions`' own tests do
+  not drive — the M56 media-type defect class. The `app:` arm dissolves the question instead, since
+  an app built from `createApp()` already carries whatever the project registered. The README note
+  added for X11-2 is extended to say so.
+
+**Not a deliverable.** `createMockPlugin` is unchanged. It is correct for the arm it serves and its
+`provides` is what satisfies a dependent plugin's `dependencies` check; only its JSDoc changes, to
+name the boundary and point at `overrideCapability`.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                            |
@@ -9278,3 +9368,4 @@ mechanical, and `serializeError` already walks a cause chain when one exists.
 | 90h       | ✅     | documentation that survives contact ([#261](https://github.com/setu-ts/setu-ts/pull/261))          |
 | 90i       | ✅     | observability that joins up ([#260](https://github.com/setu-ts/setu-ts/pull/260))                  |
 | 90j       | ⬜     | operator diagnostics survive to the operator ([#263](https://github.com/setu-ts/setu-ts/pull/263)) |
+| 91        | ✅     | test app composes like the real one (testing + kernel)                                             |
