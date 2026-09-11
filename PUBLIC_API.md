@@ -9286,8 +9286,12 @@ Contract notes:
   consumers resolve, after the real plugin has already run. It **throws** once the application has
   started, mirroring `register()`, because `start()` has already read the plugin list and a silent
   `false` would report success for an operation that can have had no effect. Removing a plugin
-  another declares in `dependencies` is not refused here — `start()` reports it, naming both.
-  `@setu-ts/testing`'s `createTestApp({ app, without })` is the intended caller.
+  another declares in `dependencies` is not refused here — `start()` reports it, naming the
+  dependent plugin and the unsatisfied **capability**. It does not name the removed plugin when its
+  name differs from the token it provided, which is the usual case (`database-plugin` provides
+  `database`), so a failure after a `without` reads as a missing capability rather than as the
+  exclusion that caused it. `@setu-ts/testing`'s `createTestApp({ app, without })` is the intended
+  caller.
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.

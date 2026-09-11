@@ -59,7 +59,7 @@ describe('Application.unregister', () => {
     expect(app.unregister('database')).toBe(false);
   });
 
-  it('removes only the first plugin carrying the name, leaving the rest intact', async () => {
+  it('leaves plugins carrying other names untouched', async () => {
     const ran: string[] = [];
     const app = createApplication({
       plugins: [runtimePlugin(), eagerPlugin('a', ran), eagerPlugin('b', ran)],
@@ -69,6 +69,23 @@ describe('Application.unregister', () => {
     await app.start();
 
     expect(ran).toEqual(['b']);
+  });
+
+  it('removes EVERY pending plugin carrying the name, not just the first', async () => {
+    const ran: string[] = [];
+    // Two pending plugins may share a name: the kernel refuses duplicates at
+    // `start()`, not at `register()`. Removing only the first would leave one
+    // running while the caller was told the name was dropped — and would turn a
+    // loud startup failure into a silently-running plugin, because the
+    // duplicate is gone by the time the resolver looks.
+    const app = createApplication({
+      plugins: [runtimePlugin(), eagerPlugin('database', ran), eagerPlugin('database', ran)],
+    });
+
+    expect(app.unregister('database')).toBe(true);
+    await app.start();
+
+    expect(ran).toEqual([]);
   });
 
   it('throws after the application has started', async () => {
@@ -84,23 +101,38 @@ describe('Application.unregister', () => {
     expect(app.services.has('database')).toBe(true);
   });
 
-  it('leaves a dependent plugin to fail loudly at start(), naming both', async () => {
+  it('leaves a dependent plugin to fail loudly at start()', async () => {
     const ran: string[] = [];
+    // The realistic shape, where a plugin's NAME differs from the TOKEN it
+    // provides — as every first-party plugin does. A fixture whose name and
+    // token coincide makes the assertion below pass on a coincidence.
+    const provider: IPlugin = {
+      name: 'database-plugin',
+      version: '1.0.0',
+      provides: ['database'],
+      register() {
+        ran.push('database-plugin');
+      },
+    };
     const dependent: IPlugin = {
       name: 'orders',
       version: '1.0.0',
       dependencies: ['database'],
       register() {},
     };
-    const app = createApplication({
-      plugins: [runtimePlugin(), eagerPlugin('database', ran), dependent],
-    });
+    const app = createApplication({ plugins: [runtimePlugin(), provider, dependent] });
 
-    app.unregister('database');
+    app.unregister('database-plugin');
 
     // Removing a plugin others depend on is not refused here — that is the
-    // resolver's job, and its message names the dependency as well as the
-    // dependent, which a refusal at `unregister()` could not.
-    await expect(app.start()).rejects.toThrow(/orders.*database|database.*orders/s);
+    // resolver's job. Its message names the DEPENDENT and the unsatisfied
+    // CAPABILITY; it does NOT name the plugin that was removed, which is what
+    // the docs now say rather than claiming it "names both plugins".
+    const error = await app.start().then(() => null, (e: Error) => e);
+    expect(error?.message).toBe(
+      "Plugin 'orders' depends on capability 'database', but no registered plugin provides it.",
+    );
+    expect(error?.message).not.toContain('database-plugin');
+    expect(ran).toEqual([]);
   });
 });

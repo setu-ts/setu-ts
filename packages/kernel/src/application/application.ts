@@ -118,10 +118,17 @@ export interface IKernelApplication extends IApplication {
    * resolve, after the real plugin has already run.
    *
    * Removing a plugin another plugin declares in `dependencies` is not
-   * refused here; `start()` reports it, naming both plugins.
+   * refused here; `start()` reports it — naming the dependent plugin and the unsatisfied
+   * capability, though not the removed plugin's own name when the two differ
+   * (`database-plugin` provides `database`).
+   *
+   * Removes **every** pending plugin carrying the name, not the first. Two may
+   * share one — the kernel refuses duplicates at `start()`, not at `register()`
+   * — and dropping one would leave the other running while the caller was told
+   * the name was gone.
    *
    * @param name - The plugin's `name`, as declared on `IPlugin`
-   * @returns `true` when a plugin was removed, `false` when none carried that name
+   * @returns `true` when at least one plugin was removed, `false` when none carried that name
    * @throws {Error} If the application has already started
    * @example
    * ```typescript
@@ -193,12 +200,19 @@ class Application implements IKernelApplication {
     if (this.#started) {
       throw new Error('Cannot unregister plugins after the application has started.');
     }
-    const index = this.#plugins.findIndex((plugin) => plugin.name === name);
-    if (index === -1) {
-      return false;
+    // Removes EVERY match, not the first. Two pending plugins may share a name
+    // — `assertUniqueNames` refuses that at `start()`, not at `register()` — and
+    // removing one would leave the other running while the caller was told the
+    // name was dropped. It also converts that loud startup failure into a
+    // silently-running plugin, since the duplicate is gone by the time the
+    // resolver looks.
+    const before = this.#plugins.length;
+    for (let index = this.#plugins.length - 1; index >= 0; index--) {
+      if (this.#plugins[index]?.name === name) {
+        this.#plugins.splice(index, 1);
+      }
     }
-    this.#plugins.splice(index, 1);
-    return true;
+    return this.#plugins.length !== before;
   }
 
   async start(options?: StartOptions): Promise<void> {

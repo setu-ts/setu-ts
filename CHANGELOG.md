@@ -60,15 +60,20 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — `@setu-ts/kernel`: `IKernelApplication` gains a required
   `unregister(name: string):
   boolean`.** It removes a pending plugin before `start()`, returning
-  `true` when one carried that name and throwing once the application has started. Plugins do not
-  run until `start()`, so removing one means its `register()` — and any eager side effect inside it,
-  such as `DatabasePlugin`'s `adapter.connect()` — never happens at all. That is the one thing
-  overriding a capability cannot do: an override replaces what consumers resolve, _after_ the real
-  plugin has already run. **Migration:** callers are unaffected, and `createApplication` already
-  returns an implementation. Only a hand-written stand-in for `IKernelApplication` breaks; give it
+  `true` when at least one carried that name and throwing once the application has started. It
+  removes **every** pending plugin with the name, not the first: two may share one, since the kernel
+  refuses duplicates at `start()` rather than at `register()`, so dropping only the first would
+  leave the other running while the caller was told the name was gone — and would turn that loud
+  startup failure into a silently-running plugin. Plugins do not run until `start()`, so removing
+  one means its `register()` — and any eager side effect inside it, such as `DatabasePlugin`'s
+  `adapter.connect()` — never happens at all. That is the one thing overriding a capability cannot
+  do: an override replaces what consumers resolve, _after_ the real plugin has already run.
+  **Migration:** callers are unaffected, and `createApplication` already returns an implementation.
+  Only a hand-written stand-in for `IKernelApplication` breaks; give it
   `unregister(name) { return false; }` if it holds no plugins of its own, or splice its own pending
   list. Removing a plugin another declares in `dependencies` is not refused by `unregister` —
-  `start()` reports it, naming both plugins (M91).
+  `start()` reports it, naming the dependent plugin and the unsatisfied capability — not the removed
+  plugin's own name when the two differ (M91).
 
 ### Fixed
 
