@@ -49,6 +49,14 @@ export interface MockPluginOptions {
  * // Consumed as ctx.services.get<Idb>(CAPABILITIES.DATABASE);
  * ```
  *
+ * **This PROVIDES a capability; it cannot REPLACE one.** The returned plugin
+ * declares the token in `provides`, which is what lets a dependent plugin's
+ * `dependencies` check pass — and which the kernel refuses when a real plugin
+ * already declares it (`Capability 'database' is provided by both 'database'
+ * and 'database-mock'`), before any plugin runs. Use it in an application that
+ * does not register the real plugin. To substitute a double into one that does,
+ * use `overrideCapability(token, service)`.
+ *
  * @param options - Mock plugin configuration
  * @returns An `IPlugin` that registers the mock service
  * @since 0.1.0

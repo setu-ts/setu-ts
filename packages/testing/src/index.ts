@@ -8,7 +8,9 @@
  */
 
 export { createTestApp } from './test-app.ts';
-export type { TestAppOptions } from './test-app.ts';
+export type { TestAppFromApp, TestAppFromPlugins, TestAppOptions } from './test-app.ts';
+
+export { overrideCapability } from './override-capability.ts';
 
 export { createMockPlugin } from './mock-plugin.ts';
 export type { MockPluginOptions } from './mock-plugin.ts';

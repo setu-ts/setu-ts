@@ -4736,6 +4736,84 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   table — was declined with cause as a research pass across eight adapters that does not belong in a
   mechanical version bump.
 
+- **Milestone 91** (`packages/kernel` + `packages/testing` — a test app that composes like the real
+  one. Closes X11's watch-item (`smoke/X11-FINDINGS.md`, local-only), which asked "whether a test
+  app should compose like a real one". **The ecosystem answers yes unanimously**, and checking that
+  is what settled the design: Laravel's `CreatesApplication` requires the same `bootstrap/app.php`
+  the server does, ASP.NET Core's `WebApplicationFactory<Program>` boots the real `Program.cs`,
+  Fastify's convention is one `build()` imported by both `server.js` and the tests, and Spring's
+  `@SpringBootTest` starts the real application and subtracts with `@MockBean`. Only **NestJS**
+  reconstructs the graph declaratively, and its single most reported testing defect is the
+  composition gap that follows — `createNestApplication()` does not run `main.ts`, so an
+  `app.useGlobalPipes(new ValidationPipe())` is absent in tests and a route that `400`s in
+  production silently accepts garbage; Nest's own remedy is a **convention**
+  (`APP_PIPE`/`APP_FILTER`/`APP_GUARD` module providers), not a mechanism. `createTestApp` was
+  school two with none of the machinery: ten lines, `createApplication({ plugins }) + start()`.
+  Meanwhile M34b had already shipped the school-one asset — every scaffolded project exports a
+  deliberately-unstarted `createApp()` from `setu.config.ts` so the plugin list has ONE home — and
+  nothing in `@setu-ts/testing` could consume it.
+
+  **Three facts were established by probing the kernel before anything was designed, and each one
+  became a deliverable.** (1) **`createMockPlugin` cannot override anything** — it declares
+  `provides: [token]`, which collides in `buildProviderIndex` against any real plugin claiming that
+  token (`Capability 'database' is provided by both 'database' and 'database-mock'`), so the
+  package's only substitution helper works only where the real plugin was never registered. The
+  replacement mechanism AI_GUIDELINES §3.4 already mandates — "a replacement plugin registers the
+  same capability token with `override: true`" — had no helper and is three non-obvious constraints
+  deep. (2) **Ordering fails confusingly**: `DEFAULT_PRIORITY` is 500, so a default-priority
+  override against a `PLUGIN_PRIORITY.LOW` (900) provider runs FIRST and the real plugin then throws
+  `already registered` — an error naming the real plugin, which reads as the real plugin's bug. (3)
+  **Override is post-hoc substitution, not pre-emptive replacement**, and that gap is why exclusion
+  had to ship: `DatabasePlugin.register()` calls `await adapter.connect()`, so replacing the service
+  afterward changes what consumers resolve while a real socket is still attempted at `start()`. Nest
+  gets the pre-emptive half free because providers are lazy and `.overrideProvider()` replaces the
+  definition before the container touches it; our unit of composition is a plugin carrying routes,
+  middleware, indicators and hooks, so "override the database" and "do not run the database plugin"
+  are different operations and we had only the first.
+
+  **The package list was corrected from `common` + `kernel` + `testing` to `kernel` + `testing`
+  before a line was written** (the M70b/M70g/M70k/M90a precedent). The exclusion member was scoped
+  onto `IApplication` in `common` on the reading that a composition root might return one; it does
+  not — `createApplication` and all three starters return `IKernelApplication`, which is also the
+  only interface carrying `inject()`. **No `common` change at all.** Ships
+  `IKernelApplication.unregister(name): boolean` (**breaking**: a required member),
+  `overrideCapability(token, service)`, and a `{ app, without?, overrides? }` arm on `createTestApp`
+  as a union against the existing `{ plugins? }` arm, so supplying both is a compile error (the M30
+  `ChannelConfig` / M50 / M52c precedent). `without` and `overrides` are load-bearing rather than
+  sugar — the default `autoStart: true` leaves no window between construction and `start()`, which
+  is the window both need. **`overrideCapability` refuses at `register()` a token nothing already
+  provides**, and that refusal is the design's load-bearing half: `{ override: true }` on an absent
+  token succeeds silently, so a mistyped token would register the double under a nonsense name,
+  leave the real service serving, and pass the test against the real dependency. An unknown
+  `without` name throws for the same reason. `createMockPlugin` is **unchanged** — its `provides` is
+  what satisfies a dependent plugin's `dependencies` check — and the collision is now pinned as a
+  test so a later "symmetry fix" fails something that names why.
+
+  **The `errorHandler` half was answered by documentation rather than a default**, and the `app:`
+  arm is what makes that honest: `packages/testing` depends on `common` + `kernel` only (M33), so
+  installing a responder means hand-rolling RFC 9457 from the `common` seam — a second formatter
+  `@setu-ts/exceptions`' own tests do not drive, the M56 media-type class. An app built from
+  `createApp()` already carries whatever the root registered, which the integration suite proves by
+  asserting the root's shape through the `app:` arm and the kernel fallback through the `plugins`
+  arm in the same file.
+
+  **Two things the gates caught that the targeted runs could not.** The plan's §8 claimed
+  `Application` was the only implementor, citing `grep -rn "implements IKernelApplication"` — the
+  wrong probe for a structurally typed language, since a stand-in built as an object literal
+  implements the interface without the keyword. The full `deno task test` found exactly one
+  (`test/worker-startup-behavior.test.ts`), which is now the worked example the upgrade guide's
+  one-line migration describes. And `docs/upgrading.md`'s own attribution gate (added by M90h after
+  that guide filed two of three entries under the wrong release) refused a `## 0.6.0` heading with
+  no matching CHANGELOG section — correctly, since the release is not cut. The entry now lands under
+  `## Unreleased` at milestone time, where the knowledge is, and `docs/releasing.md` gains the
+  rename step; reconstructing several milestones' reader actions at cut time IS the memory exercise
+  that guide exists to remove. Five negative controls were each observed failing and reverted:
+  `overrideCapability` declaring `provides` (2 suites), the sentinel priority dropped to `NORMAL` (2
+  suites), the absent-token refusal removed, the `without` refusal removed, and `unregister`
+  reporting correctly while removing nothing (3 suites). All changed `src` files at 100%
+  branch/function/line except `application.ts` (95.1/100/97.2, up from 93.4/93.4/90.3)) — complete
+  (PR #278)
+
 - **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
   the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
   compat suites as release gates. The `smoke/` programme's X16–X19 exercises against published

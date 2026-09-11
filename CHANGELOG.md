@@ -8,6 +8,36 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/testing`** — `createTestApp` gains a **composition-root arm**: pass `app` (an
+  already-constructed, not-yet-started application — a scaffolded project's `createApp()` from
+  `setu.config.ts`, or a starter factory's return value) instead of `plugins`, with optional
+  `without` and `overrides`, and the test starts from the application the project actually ships.
+  Everything that root registered is present — its middleware, error handling, health indicators and
+  route ordering, except what `without` explicitly removes — so a test observes production's
+  composition rather than a second one assembled by hand. `TestAppOptions` is now a union of the two
+  exported arms, `TestAppFromPlugins` and `TestAppFromApp`, so supplying both `plugins` and `app` is
+  a compile error; the `plugins` arm is otherwise unchanged. Closes the `@setu-ts/testing`
+  watch-item X11 left open (M91).
+- **`@setu-ts/testing`** — `overrideCapability(token, service)` builds the replacement plugin
+  AI_GUIDELINES §3.4 describes, applying the three constraints that make one work: it declares no
+  `provides` (a second declaration of a live token is refused before any plugin runs), registers
+  with `{ override: true }`, and orders itself through an `optionalDependencies` edge on the token
+  plus `PLUGIN_PRIORITY.HIGHEST` — after the provider, whatever its band, and before an ordinary
+  consumer. It **throws during `start()` when nothing provides the token** — without that, a
+  mistyped token registers the double under a nonsense name, leaves the real service serving, and
+  the test passes against the real dependency. It likewise refuses a multi-provider capability,
+  where `getAll` returns the single and multi registrations concatenated so an override would ADD a
+  provider while every real one kept running — detected generically by a provider count rather than
+  a list of known tokens, so a capability an application registers itself with `{ multi: true }` is
+  refused too. The override is ordered AFTER the provider and BEFORE ordinary consumers — an
+  `optionalDependencies` edge on the token plus an early priority — so it reaches a consumer that
+  resolves the capability during its own `register()` (`NotificationPlugin` does) as well as one
+  that resolves it per request, and it replaces a provider in any priority band. It does not undo
+  the provider's eager side effects, and it requires the provider to declare the token in
+  `provides`; both bounds and the `without`-plus-`createMockPlugin` alternative are stated in the
+  README and `PUBLIC_API.md`. `createMockPlugin` is unchanged and still the right tool for
+  _providing_ a capability an application lacks; it cannot _replace_ one, because its `provides`
+  declaration collides with the real plugin's (M91).
 - **`common`** — `createCachedProbe` is generic over its outcome type, with a `fallback` recorded on
   timeout or rejection (default `false`, so every existing caller is unchanged). A probe that reads
   a _proxy_ for the thing it reports on — Service Bus's administration endpoint standing in for its
@@ -36,6 +66,29 @@ All notable changes to this project are documented here. The format follows
 - **`common`** — optional `IGrpcService.refuses?(request)`, answered from the request HEADERS and
   consulted by the kernel BEFORE it reads the body. Optional, so an implementor that omits it keeps
   the previous behaviour exactly.
+
+### Changed
+
+- **BREAKING — `@setu-ts/kernel`: `IKernelApplication` gains a required
+  `unregister(name: string):
+  boolean`.** It removes a pending plugin before `start()`, returning
+  `true` when at least one carried that name and throwing once the application has started. It
+  removes **every** pending plugin with the name, not the first: two may share one, since the kernel
+  refuses duplicates at `start()` rather than at `register()`, so dropping only the first would
+  leave the other running while the caller was told the name was gone — and would turn that loud
+  startup failure into a silently-running plugin. Plugins do not run until `start()`, so removing
+  one means its `register()` — and any eager side effect inside it, such as `DatabasePlugin`'s
+  `adapter.connect()` — never happens at all. That is the one thing overriding a capability cannot
+  do: an override replaces what consumers resolve, _after_ the real plugin has already run.
+  **Migration:** callers are unaffected, and `createApplication` already returns an implementation.
+  Only a hand-written stand-in for `IKernelApplication` breaks; give it
+  `unregister(name) { return false; }` if it holds no plugins of its own, or splice its own pending
+  list. Removing a plugin another declares in `dependencies` is not refused by `unregister` —
+  `IKernelApplication` also gains a required **`hasPlugin(name): boolean`** — a pure read used to
+  validate a whole exclusion set before removing any of it, so a misspelled entry leaves the
+  application untouched rather than partially excluded. `start()` reports it, naming the dependent
+  plugin and the unsatisfied capability — not the removed plugin's own name when the two differ
+  (M91).
 
 ### Fixed
 

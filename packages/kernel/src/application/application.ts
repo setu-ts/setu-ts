@@ -108,6 +108,58 @@ export interface IKernelApplication extends IApplication {
    * @returns The inject response
    */
   inject(request: InjectRequest): Promise<InjectResponse>;
+  /**
+   * Removes a pending plugin by name before the application starts.
+   *
+   * Plugins do not run until `start()`, so removing one here means its
+   * `register()` — and any eager side effect inside it, such as a database
+   * adapter's `connect()` — never happens at all. That is the one thing
+   * overriding a capability cannot do: an override replaces what consumers
+   * resolve, after the real plugin has already run.
+   *
+   * Removing a plugin another plugin declares in `dependencies` is not
+   * refused here; `start()` reports it — naming the dependent plugin and the unsatisfied
+   * capability, though not the removed plugin's own name when the two differ
+   * (`database-plugin` provides `database`).
+   *
+   * Removes **every** pending plugin carrying the name, not the first. Two may
+   * share one — the kernel refuses duplicates at `start()`, not at `register()`
+   * — and dropping one would leave the other running while the caller was told
+   * the name was gone.
+   *
+   * @param name - The plugin's `name`, as declared on `IPlugin`
+   * @returns `true` when at least one plugin was removed, `false` when none carried that name
+   * @throws {Error} If startup has begun — including after a `start()` that
+   * FAILED, since the plugins that ran before the failure cannot be un-run
+   * @example
+   * ```typescript
+   * const app = createApp();            // the project's own composition root
+   * app.unregister('database');         // the real adapter never connects
+   * await app.start();
+   * ```
+   * @since 0.6.0
+   */
+  unregister(name: string): boolean;
+  /**
+   * Reports whether a plugin carrying this name is pending.
+   *
+   * A pure read — it neither resolves nor constructs anything. It exists so a
+   * caller applying several exclusions can validate the whole set BEFORE
+   * removing any of them: `unregister` mutates immediately, so removing as you
+   * go leaves earlier exclusions applied when a later name turns out to be
+   * misspelled, handing a caller that catches the error a silently altered
+   * application.
+   *
+   * Answers against the registered plugin list, which startup does NOT clear — so
+   * after `start()` it still reports `true` for a plugin that has already run.
+   * Its purpose is pre-`start()` validation, and `unregister` throws once any
+   * plugin has registered, so a later answer is not actionable either way.
+   *
+   * @param name - The plugin's `name`, as declared on `IPlugin`
+   * @returns `true` when at least one pending plugin carries that name
+   * @since 0.6.0
+   */
+  hasPlugin(name: string): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +178,19 @@ class Application implements IKernelApplication {
     spec: Readonly<Record<string, EnvVarSpec>>;
   }[] = [];
   #started = false;
+  /**
+   * Whether any plugin has begun registering. Unlike {@linkcode #started} this is
+   * never reset: `start()` rolls `#started` back on failure so a failed start can
+   * be corrected and retried, but plugins that already ran cannot be un-run.
+   * `unregister` reads this so it can never report having removed a plugin whose
+   * `register()` has already executed.
+   *
+   * Set inside the registration loop rather than on entry to `#runStartup`,
+   * because plugin RESOLUTION can fail before anything runs — and correcting
+   * that failure by removing the offending plugin is exactly what `unregister`
+   * is for.
+   */
+  #registrationStarted = false;
   #serverHandle: unknown = null;
   #inFlight = 0;
   #stopping = false;
@@ -163,6 +228,38 @@ class Application implements IKernelApplication {
     }
     this.#plugins.push(plugin);
     return this;
+  }
+
+  hasPlugin(name: string): boolean {
+    return this.#plugins.some((plugin) => plugin.name === name);
+  }
+
+  unregister(name: string): boolean {
+    // `#registrationStarted`, not `#started`: a FAILED `start()` rolls `#started`
+    // back so the application can be corrected and retried, but the plugins that
+    // ran before the failure have already run — their `register()` executed and
+    // their services are in the registry. Removing one from the pending list
+    // then could not deliver what this method promises, and returning `true`
+    // would report a removal that did not happen.
+    if (this.#registrationStarted) {
+      throw new Error(
+        'Cannot unregister plugins once startup has begun. Plugins that already ' +
+          'registered cannot be un-run, so build a fresh application instead.',
+      );
+    }
+    // Removes EVERY match, not the first. Two pending plugins may share a name
+    // — `assertUniqueNames` refuses that at `start()`, not at `register()` — and
+    // removing one would leave the other running while the caller was told the
+    // name was dropped. It also converts that loud startup failure into a
+    // silently-running plugin, since the duplicate is gone by the time the
+    // resolver looks.
+    const before = this.#plugins.length;
+    for (let index = this.#plugins.length - 1; index >= 0; index--) {
+      if (this.#plugins[index]?.name === name) {
+        this.#plugins.splice(index, 1);
+      }
+    }
+    return this.#plugins.length !== before;
   }
 
   async start(options?: StartOptions): Promise<void> {
@@ -335,6 +432,12 @@ class Application implements IKernelApplication {
     //    the onInit hooks that run once all plugins have registered.
     try {
       for (const plugin of ordered) {
+        // Set here, not at the top of `#runStartup`: `resolvePluginOrder` above
+        // can throw (an unsatisfied dependency, a cycle, no runtime provider)
+        // before any plugin has run, and that is the most correctable startup
+        // failure there is — gating `unregister` on it would refuse to let the
+        // caller remove the plugin that caused it.
+        this.#registrationStarted = true;
         this.#registeringPlugin = plugin.name;
         await plugin.register(ctx);
         await this.#lifecycle.runRegister();

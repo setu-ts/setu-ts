@@ -9270,15 +9270,42 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 
 ### Types
 
-| Export               | Kind | Purpose                                                                            |
-| -------------------- | ---- | ---------------------------------------------------------------------------------- |
-| `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                        |
-| `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection           |
-| `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }`)        |
-| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`) |
+| Export               | Kind | Purpose                                                                                          |
+| -------------------- | ---- | ------------------------------------------------------------------------------------------------ |
+| `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                                      |
+| `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)` |
+| `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }`)                      |
+| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)               |
 
 Contract notes:
 
+- **`unregister(name: string): boolean`** removes **every** pending plugin carrying the name before
+  `start()`, returning `true` when one or more matched. Two pending plugins may share a name — the
+  kernel refuses duplicates at `start()`, not at `register()` — so removing only the first would
+  leave one running while the caller was told the name was gone. Plugins do not run until `start()`,
+  so removing one means its `register()` — and any eager side effect inside it, such as a database
+  adapter's `connect()` — never happens. That is the one thing overriding a capability cannot do: an
+  override replaces what consumers resolve, after the real plugin has already run. It **throws**
+  once the application has started, mirroring `register()`, because `start()` has already read the
+  plugin list and a silent `false` would report success for an operation that can have had no
+  effect. It throws once any plugin has REGISTERED, not merely once `start()` was called: plugin
+  resolution can fail before anything runs — an unsatisfied dependency, a cycle, no runtime provider
+  — and removing the offending plugin is exactly how that is corrected, so those failures leave
+  `unregister` available. Removing a plugin another declares in `dependencies` is not refused here —
+  `start()` reports it, naming the dependent plugin and the unsatisfied **capability**. It does not
+  name the removed plugin when its name differs from the token it provided, which is the usual case
+  (`database-plugin` provides `database`), so a failure after a `without` reads as a missing
+  capability rather than as the exclusion that caused it. `@setu-ts/testing`'s
+  `createTestApp({ app, without })` is the intended caller.
+- **`hasPlugin(name: string): boolean`** reports whether a plugin carrying that name is pending. A
+  pure read — it resolves and constructs nothing. It exists so a caller applying several exclusions
+  can validate the whole set before removing any of them: `unregister` mutates immediately, so
+  removing as it goes would leave earlier exclusions applied when a later name is misspelled, and
+  the throw is recoverable, so a caller that catches it and reuses that composition root would be
+  handed a silently altered one. `createTestApp` checks every `without` entry through this member
+  first and names all unmatched entries in one error. It answers against the registered plugin list,
+  which is the PENDING list only before `start()` — startup does not clear it, so afterwards the
+  member still reports `true` for a plugin that has already run.
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.
@@ -9930,23 +9957,26 @@ streaming-response reader.
 
 ### Exports
 
-| Export                | File                               | Description                        |
-| --------------------- | ---------------------------------- | ---------------------------------- |
-| `createTestApp`       | `src/test-app.ts`                  | Test application factory           |
-| `TestAppOptions`      | `src/test-app.ts`                  | Factory options                    |
-| `createMockPlugin`    | `src/mock-plugin.ts`               | Mock plugin builder                |
-| `MockPluginOptions`   | `src/mock-plugin.ts`               | Builder options                    |
-| `collectStream`       | `src/inject.ts`                    | Collect streaming response body    |
-| `inject`              | `src/inject.ts`                    | Inject HTTP requests into test app |
-| `StreamingBody`       | `src/inject.ts`                    | Stream collector result shape      |
-| `createTestContext`   | `src/mock-context.ts`              | Create a mock `IRequestContext`    |
-| `TestContextOptions`  | `src/mock-context.ts`              | Context builder options            |
-| `MockResponse`        | `src/mock-context.ts`              | Fake `IResponse` double            |
-| `MockServiceRegistry` | `src/mock-registry.ts`             | Fake `IServiceRegistry` double     |
-| `FixtureManager`      | `src/fixtures/fixture-manager.ts`  | Assemble mock plugins per-test     |
-| `IKernelApplication`  | (re-export from `@setu-ts/kernel`) | Kernel application interface       |
-| `InjectRequest`       | (re-export from `@setu-ts/kernel`) | Shape for `inject()` request       |
-| `InjectResponse`      | (re-export from `@setu-ts/kernel`) | Shape for `inject()` response      |
+| Export                | File                               | Description                                   |
+| --------------------- | ---------------------------------- | --------------------------------------------- |
+| `createTestApp`       | `src/test-app.ts`                  | Test application factory                      |
+| `TestAppOptions`      | `src/test-app.ts`                  | Factory options (union of the two arms below) |
+| `TestAppFromPlugins`  | `src/test-app.ts`                  | Hand-assembled arm                            |
+| `TestAppFromApp`      | `src/test-app.ts`                  | Composition-root arm                          |
+| `overrideCapability`  | `src/override-capability.ts`       | Capability replacement plugin builder         |
+| `createMockPlugin`    | `src/mock-plugin.ts`               | Mock plugin builder                           |
+| `MockPluginOptions`   | `src/mock-plugin.ts`               | Builder options                               |
+| `collectStream`       | `src/inject.ts`                    | Collect streaming response body               |
+| `inject`              | `src/inject.ts`                    | Inject HTTP requests into test app            |
+| `StreamingBody`       | `src/inject.ts`                    | Stream collector result shape                 |
+| `createTestContext`   | `src/mock-context.ts`              | Create a mock `IRequestContext`               |
+| `TestContextOptions`  | `src/mock-context.ts`              | Context builder options                       |
+| `MockResponse`        | `src/mock-context.ts`              | Fake `IResponse` double                       |
+| `MockServiceRegistry` | `src/mock-registry.ts`             | Fake `IServiceRegistry` double                |
+| `FixtureManager`      | `src/fixtures/fixture-manager.ts`  | Assemble mock plugins per-test                |
+| `IKernelApplication`  | (re-export from `@setu-ts/kernel`) | Kernel application interface                  |
+| `InjectRequest`       | (re-export from `@setu-ts/kernel`) | Shape for `inject()` request                  |
+| `InjectResponse`      | (re-export from `@setu-ts/kernel`) | Shape for `inject()` response                 |
 
 ### Registration
 
@@ -9963,14 +9993,92 @@ const app = await createTestApp({
 });
 ```
 
+Or from the application the project already composes, which keeps the test's composition —
+middleware, error handling, health indicators, route ordering — the one production has:
+
+```typescript
+import { createTestApp, overrideCapability } from '@setu-ts/testing';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApp } from '../setu.config.ts';
+
+const app = await createTestApp({
+  app: createApp(),
+  without: ['database'],
+  overrides: [overrideCapability(CAPABILITIES.MAIL, fakeMailer)],
+});
+```
+
 ### Options
 
-`TestAppOptions` — `createTestApp(options?)`:
+`TestAppOptions` — `createTestApp(options?)` — is a **union of two mutually exclusive arms**, so
+supplying both `plugins` and `app` is a compile error rather than a runtime throw.
+
+`TestAppFromPlugins` — assemble by hand (unit scope):
 
 | Option      | Type        | Default | Behavior                                                                                                                                                                                                                              |
 | ----------- | ----------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `plugins`   | `IPlugin[]` | `[]`    | Pre-registered before `start()`. **Must include a `runtime` capability provider** (`RuntimePlugin()`, or a mock providing `CAPABILITIES.RUNTIME`) whenever `autoStart` is left `true` — the kernel requires one and throws otherwise. |
 | `autoStart` | `boolean`   | `true`  | `true` calls `await app.start()` (no port, so no socket) before returning. `false` returns the un-started app — required to register further plugins or to add global middleware.                                                     |
+
+`TestAppFromApp` — start from the composition root:
+
+| Option      | Type                 | Default  | Behavior                                                                                                                                                                                                   |
+| ----------- | -------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `app`       | `IKernelApplication` | required | An already-constructed, **not yet started** application — typically a scaffolded project's `createApp()` from `setu.config.ts`, or a starter factory's return value.                                       |
+| `without`   | `readonly string[]`  | `[]`     | Plugin names dropped via `IKernelApplication.unregister` before `start()`, so each plugin's `register()` — and any eager side effect in it — never runs. **Throws** naming an entry the app does not hold. |
+| `overrides` | `readonly IPlugin[]` | `[]`     | Plugins appended after `without` is applied, usually `overrideCapability` results. Exists because the default `autoStart: true` leaves no window in which a caller could register them.                    |
+| `autoStart` | `boolean`            | `true`   | As above.                                                                                                                                                                                                  |
+
+**`without` and `overrides` are not interchangeable.** An override replaces a service _after_ the
+real plugin's `register()` has run, so an eager side effect inside it — `DatabasePlugin` calls
+`adapter.connect()` there — has already happened. Only `without` prevents that.
+
+`overrideCapability(token: CapabilityToken, service: object): IPlugin` takes no options. The plugin
+it returns declares no `provides` (a second declaration of a live token is refused by the kernel
+before any plugin runs), registers with `{ override: true }`, and orders itself through an
+`optionalDependencies` edge on the token plus `PLUGIN_PRIORITY.HIGHEST` — after the provider,
+whatever its band, and before an ordinary consumer. It **throws during `start()` when nothing
+provides `token`** — a mistyped token would otherwise register the double under a nonsense name and
+leave the real service serving — and **when `token` is a multi-provider capability**. Both checks
+are raised from an `onInit` hook rather than from the plugin's own `register()`, because the
+override registers early: at that point a multi-provider capability has not accumulated its
+providers yet, and a token the override does not shadow may still be registered by a later plugin.
+`onInit` runs once every plugin has registered, and a throw there fails `start()` exactly as one in
+`register()` would. `ServiceRegistry.getAll` returns the single and multi registrations
+concatenated, so an override of one ADDS a provider rather than replacing the existing ones: every
+real provider would still run while the caller was told the capability was overridden. Detection is
+generic — a provider count taken after the write, not a list of known tokens — so the kernel's five
+(`health-indicator`, `metric-registration`, `openapi-schema`, `decorator-handler`, `cli-command`)
+and any capability an application registers itself with `{ multi: true }` are refused alike. The
+count resolves nothing that is being replaced: the override lands in the single map first, so a
+`registerFactory` provider is never constructed. Exclude the plugin that registers the provider
+instead.
+
+`overrideCapability` is ordered **after the provider and before ordinary consumers**, so it reaches
+a consumer that resolves the capability during its own `register()` as well as one that resolves it
+per request — `NotificationPlugin` resolves `CAPABILITIES.MAIL` while registering, and an override
+beneath it is seen by every notification it sends. Ordering comes from an `optionalDependencies`
+edge on the token, which the resolver visits ahead of any priority number, plus an early priority
+that places it before a `PLUGIN_PRIORITY.NORMAL` consumer — so a provider in any band is replaced.
+
+Two bounds remain. It does **not** undo the provider's eager side effects: the provider's
+`register()` has run, so a database adapter's `connect()` already happened — `without` is what
+prevents that. And it **requires the provider to declare the token in `provides`**, which is what
+the ordering edge hangs on and how a plugin is depended upon at all; a provider that registers a
+capability without declaring it fails startup with `Capability '<token>' is already registered`. For
+either, exclude the provider and supply the double ahead of its consumers —
+`without: ['mail-plugin']` plus a `createMockPlugin` at `PLUGIN_PRIORITY.HIGH`.
+
+> `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
+> the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the
+> kernel refuses when a real plugin already declares it. Use it in an application that does not
+> register the real plugin.
+
+**Unhandled errors.** Neither arm installs `errorHandler` — this package depends on `common` and
+`kernel` only, so a default would mean a second RFC 9457 formatter that `@setu-ts/exceptions`' own
+tests do not drive. The `plugins` arm therefore answers the kernel's `{ error, detail? }` fallback;
+the `app:` arm inherits whatever responder the composition root registered, and is the answer for
+response-shape fidelity.
 
 `MockPluginOptions` — `createMockPlugin(options)`:
 

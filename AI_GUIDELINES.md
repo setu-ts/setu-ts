@@ -371,7 +371,12 @@ Every package must include:
   for assertions.
 - Use `@setu-ts/testing` for test utilities.
 - Use `app.inject()` for HTTP testing without a server.
-- Use `createMockPlugin()` for mocking plugin services.
+- Use `createMockPlugin()` to PROVIDE a capability an application does not register, and
+  `overrideCapability()` to REPLACE one it does. They are not interchangeable: `createMockPlugin`
+  declares the token in `provides`, which the kernel refuses when a real plugin already declares it.
+- Prefer `createTestApp({ app: createApp() })` over a hand-assembled `plugins` list wherever the
+  behaviour under test depends on how the application is composed — the composition root is the one
+  place the plugin list lives, and a second list drifts from it silently.
 - Node/Bun compatibility is verified by a separate compat suite in CI that consumes the packages
   through JSR's npm compatibility layer.
 
