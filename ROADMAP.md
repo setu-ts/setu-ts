@@ -9277,7 +9277,12 @@ other.
   produces
   `<html><head><title>Users</title></head><body><ul><li>Ada &lt;script&gt;</li><li>Grace</li></ul></body></html>`
   — escaped by default, zero client JavaScript, no `new Function`. `packages/kernel/deno.json:8`
-  already pins `jsr:@hono/hono@^4.12.30`, so the default arm adds **no new dependency**.
+  already pins `jsr:@hono/hono@^4.12.30` and the lockfile resolves it to `4.13.0`, so the default
+  arm introduces **no new third-party dependency into the resolution set**. It is not free of
+  manifest work, and the plan must not read it as such: the root `imports` carries only `@std/*`, so
+  a member does not inherit the specifier and `packages/view-plugin/deno.json` declares it itself;
+  the root `workspace` is an explicit 47-entry list rather than a glob, so it gains
+  `./packages/view-plugin`.
 - **`jsr:@hono/hono/html` exports exactly `html` and `raw`.** A tagged template needs no
   `jsxImportSource` and works in a plain `.ts` file, which is the one ergonomic cost the JSX arm
   carries. It is a second arm rather than a fallback: the two answer different questions, and both
@@ -9309,10 +9314,14 @@ is unanimous across the 47 shipped members: `database-plugin` not `prisma-plugin
 
 **Deliverables.**
 
-- **`IViewEngine` + `CAPABILITIES.VIEW` in `common`** — a `render` taking a view component and its
-  props and answering `string | Promise<string>`. The async arm is not speculative: `hono/jsx`
-  supports `Suspense` and async components, and a port that cannot express one would refuse them.
-  New token and new interface, both additive; no existing contract changes.
+- **`IViewEngine` + `Component<P>` + `CAPABILITIES.VIEW` in `common`** — a `render` taking a view
+  component and its props and answering `string | Promise<string>`. The async arm is not
+  speculative: `hono/jsx` supports `Suspense` and async components, and a port that cannot express
+  one would refuse them. `Component<P>` is a structural type and lands in `common` for the same
+  reason the port does: `decorator-plugin` must name it to type `@Render`'s parameter and §2.2
+  forbids it importing `view-plugin`, so a package-local copy on each side would be two declarations
+  of one public contract, free to drift. New token and two new types, all additive; no existing
+  contract changes.
 - **`@setu-ts/view-plugin`** registering an `IViewEngine` under that token, with options a union
   discriminated on `engine` so a missing per-arm field is a compile error (the M30 `ChannelConfig` /
   M50 / M52c precedent): `'hono-jsx'` (default), `'hono-html'`, `'custom'`. A `view` health
@@ -9320,13 +9329,34 @@ is unanimous across the 47 shipped members: `database-plugin` not `prisma-plugin
 - **`@Render(Component)` in `decorator-plugin`**, resolving `CAPABILITIES.VIEW` at `register()` and
   branching in `createHandler` (`decorator-plugin.ts:325-343`), which already passes a
   `HandlerResult` through untouched and otherwise calls `ctx.response.json(result)` at line 341 — so
-  render is a third branch rather than a rewrite. A decorated route carrying `@Render` with no
-  registered provider must **fail at `register()` naming both remedies**, never serve JSON where the
-  author asked for HTML.
+  render is a third branch rather than a rewrite. The new branch **awaits** the engine (the port's
+  return is `string | Promise<string>`) and answers through `ctx.response.html(...)`
+  (`common/src/http.ts:206`), never `json`. A decorated route carrying `@Render` with no registered
+  provider must **fail at `register()` naming both remedies**, never serve JSON where the author
+  asked for HTML — and the check is per route, so an application with no rendered route needs no
+  view plugin at all.
+- **`CAPABILITIES.VIEW` joins `decorator-plugin`'s `optionalDependencies`**
+  (`decorator-plugin.ts:801`, today `[CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION]`, whose
+  own comment at line 810 states that the array is what guarantees a provider is registered first).
+  Without the edge, resolving at `register()` is a race decided by plugin order rather than a
+  contract, which is the whole reason the validation arm carries it. The edge is safe in the one
+  direction that matters: `view-plugin` registers a service and declares no dependency on
+  `decorator-plugin`, so no cycle is introduced — M90i's P1 found that an `optionalDependencies`
+  edge added in the other direction makes **every** application registering both plugins throw at
+  `start()`, and the plan must re-establish that this pair is acyclic rather than inherit the claim.
+- **A status or header alongside a rendered body needs `@Ctx()`.** A decorated handler's return
+  value is the props bag, so it cannot also carry a status — the M58 constraint, unchanged by this
+  milestone. The plan states it and the docs show it; `@Render` does not grow a `status` argument,
+  which would be a second way to say what `@Ctx()` already says.
 - **A free `render(ctx, Component, props)` funnelling through the same implementation.** The
   functional generator mode has been the default since M65, so a decorator-only API would leave the
   majority path out — and "one capability, one implementation, every entry point" requires one test
   driving both under a non-default configuration.
+- **`scripts/release-packages.ts` gains the member in `PUBLISHED_PACKAGES` Tier 4** (plugins
+  depending on `common`), taking `release:verify` from 47 publishable packages to 48. M51 shipped a
+  workspace member absent from both release lists, which every one of the four gates and the
+  coverage bar passed over while the package would simply never have published; only
+  `release:verify` looks for it.
 - **CLI + docs.** A `setu g view` schematic is **out of scope** pending the plan's answer on where a
   component file belongs relative to the existing `controllers`/`services` seams. `docs/mvc.md` and
   a `migration-nestjs.md` section are in scope, since the absence of the latter is half the finding.
