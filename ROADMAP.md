@@ -9386,6 +9386,131 @@ story of its own.
 
 ---
 
+## Milestone 93: Domain and Event-Driven Ergonomics
+
+The two halves deliberately have separate milestones and package ownership. **M93a** makes an
+aggregate able to retain the facts it raised; it is local domain ergonomics and knows nothing about
+a broker, database, plugin context, or handler. **M93b** makes a cross-service event a named,
+versioned contract over the existing messaging capability; it works equally for a domain fact, a
+scheduled operation, or an external webhook. Neither capability imports the other plugin.
+
+This split is a correctness boundary, not release choreography. An automatic aggregate-to-broker
+`commit()` would couple a domain object to infrastructure and turn a database write plus broker
+publish into an unacknowledged dual write. A durable outbox and consumer inbox are important
+follow-on reliability work, but are intentionally not smuggled into either ergonomics milestone.
+
+### Milestone 93a: Aggregate-Local Domain Event Recording
+
+**Package:** `@setu-ts/events-plugin`
+
+**Objective:** Let a rich aggregate record domain facts without writing a private mutable array,
+without publishing while its invariants are still being evaluated, and without inheriting a
+framework-coupled aggregate root.
+
+`@setu-ts/events-plugin` already owns `IDomainEvent`, `DomainEvent`, and the in-process `IEventBus`,
+but none records the events an aggregate has raised. Every application therefore has to invent its
+own collection, snapshot, and clearing semantics. Nest's optional CQRS package offers
+`AggregateRoot.apply()` and `commit()`, but its event publisher must first be merged onto the
+entity; that is the coupling Setu must not adopt. The .NET reference pattern is the useful half: a
+base entity appends events to an in-memory list and the application layer decides when to dispatch
+them.
+
+**Deliverables.**
+
+- **`IDomainEvents` plus `createDomainEvents()`** — a small public interface and factory exported
+  from `events-plugin`. The interface has `record(event)`, `pending()`, `remove(event): boolean`,
+  and `clear()`. `pending()` answers an ordered, read-only snapshot, never the mutable backing list.
+  `remove` compares event references with `===`, removes the _first_ matching occurrence, and
+  returns `false` without changing the collection when none matches; it never uses `IDomainEvent.id`
+  as equality. The factory returns the interface, so the mutable implementation remains private.
+- **Composition, not an `AggregateRoot` base class.** An aggregate owns a recorder:
+
+  ```ts
+  class Order {
+    readonly events = createDomainEvents();
+
+    place(): void {
+      // enforce invariants and mutate state
+      this.events.record(new OrderPlaced(/* ... */));
+    }
+  }
+  ```
+
+  This leaves applications free to retain their own entity hierarchy and keeps the domain object
+  portable. It also gives a child entity an explicit route to surface a fact through its aggregate
+  rather than an ambient global dispatcher.
+- **Precise lifecycle tests and documentation.** Tests cover insertion order, duplicate references,
+  immutable snapshots, `[A, B, A]` becoming `[B, A]` after one `remove(A)`, an absent removal
+  returning `false` without changing the list, clearing, and an aggregate reconstructed from
+  persistence starting with no pending events. The README and `PUBLIC_API.md` show the application
+  boundary: save the aggregate, read `pending()`, dispatch or persist those facts, and only then
+  remove/clear according to that application's confirmed policy.
+
+**Not a deliverable.** No `CAPABILITIES` token, plugin registration, `EventPublisher`, automatic
+publication, `autoCommit`, repository hook, transaction hook, event sourcing/history replay, or
+outbox. `IEventBus.publish()` keeps its current handler-failure policy; a successful call is not an
+aggregate-event acknowledgement mechanism. This is deliberately one public helper in the package
+that already owns local domain events, not a new DDD package.
+
+### Milestone 93b: Integration Event Contracts over Existing Messaging
+
+**Package:** `@setu-ts/messaging-plugin`
+
+**Objective:** Make an event-driven service declare, publish, and consume a stable integration event
+contract without repeating untyped topic strings, ad-hoc payload envelopes, and subscription
+boilerplate at every boundary.
+
+The messaging plugin already provides the transport fundamentals: `IMessageBroker`, typed payload
+generics, topic subscriptions, consumer-group options, declarative subscriptions, ingress
+behaviours, trace propagation, and seven broker arms. The missing layer is semantic rather than
+transport-specific. A `broker.publish('orders.created', payload)` call cannot state an event's
+schema version, identity, causal chain, or aggregate version. The existing `EventsMessagingBridge`
+is kept unchanged for compatibility, but it forwards `event.data` as the broker payload and so is a
+convenience bridge, not a portable integration-event envelope.
+
+**Deliverables.**
+
+- **A first-class integration-event definition and wire envelope, exported by `messaging-plugin`.**
+  `defineIntegrationEvent<T>({ type, version, topic, parse })` produces a reusable definition and
+  requires `parse: (value: unknown) => T`; a missing parser is a type error. Its envelope carries a
+  stable event ID, type, positive integer version, ISO-8601 occurrence timestamp, parsed payload,
+  optional correlation and causation IDs, and optional aggregate ID/version. The envelope is payload
+  data, not broker headers, because every supported transport can carry payloads while headers are
+  not universally available.
+- **`publishIntegrationEvent` and `onIntegrationEvent` helpers.** The publisher receives the
+  application's `IRuntimeServices`, the broker, a definition, payload, and optional causal metadata,
+  then creates and publishes the envelope. The consumer helper structurally validates the envelope's
+  required fields and exact type/version, then runs `parse` before calling the application handler.
+  A malformed envelope or parser rejection follows the broker's native failure path; no
+  `SubscriptionDefinition.handler` receives an unvalidated `T`. The helper produces the existing
+  `SubscriptionDefinition` shape, so it plugs directly into `MessagingPlugin({ subscriptions })`. No
+  `IMessageBroker` method changes and no custom broker adapter has to be rewritten.
+- **A versioned-topic rollout policy.** Each incompatible version owns a distinct topic whose name
+  ends in `.v<version>` (for example `orders.placed.v1` and `orders.placed.v2`). Consumers subscribe
+  explicitly to every version they support, one definition per topic; they never receive and reject
+  an unsupported version from a shared topic. A producer rolls forward by dual-publishing the old
+  and new definitions until every required consumer has deployed and is consuming the new topic,
+  then stops the old publication only after its agreed migration window. This makes the temporary
+  duplication explicit and prevents both missed events and accidental old-consumer breakage.
+- **Contract-first examples and tests.** Documentation demonstrates one producer, two independent
+  consumer groups, correlation propagation, parser success/failure, version/type rejection, a
+  versioned dual-publish migration, and explicit mapping from a local domain event to an integration
+  event. Tests exercise the exact wire envelope, metadata propagation, parser failure through the
+  broker path, declarative registration, and each helper against the in-memory broker.
+
+**Not a deliverable.** No dependency on `events-plugin`, automatic domain-event bridging,
+decorator/assembly scanning, saga DSL, event store, portable broker retry/DLQ policy, or end-to-end
+exactly-once claim. In particular, a transport accepting a publish says nothing about every consumer
+finishing successfully; the messaging README's current dispatch timing remains true.
+
+**Deferred reliability milestone.** A later design owns the transactional outbox and consumer inbox:
+write business state and an integration-event envelope atomically, relay persisted rows with
+at-least-once delivery, and de-duplicate per consumer by stable event ID. It must decide ordering,
+retention, replay, and failure observability across the database and messaging contracts; none of
+those choices belongs in a local recorder or a typed publishing convenience API.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                            |
@@ -9527,3 +9652,5 @@ story of its own.
 | 90j       | ✅     | operator diagnostics survive to the operator ([#263](https://github.com/setu-ts/setu-ts/pull/263)) |
 | 91        | ✅     | test app composes like the real one ([#278](https://github.com/setu-ts/setu-ts/pull/278))          |
 | 92        | ⬜     | view plugin — server-rendered HTML as a capability                                                 |
+| 93a       | ⬜     | events-plugin — aggregate-local domain event recording                                             |
+| 93b       | ⬜     | messaging-plugin — versioned integration event contracts                                           |
