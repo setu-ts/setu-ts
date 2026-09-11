@@ -343,6 +343,17 @@ describe('real-backend CI wiring', () => {
       // image — without it the container prints usage and exits 0, so the
       // suite would find nothing listening and skip.
       expect(text).toContain('quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data');
+      // The readiness loop is as load-bearing as the image, and asserting it
+      // against the whole file would pass on the Bigtable/NATS/Kafka steps'
+      // identical scaffolding — so scope to the MinIO step and assert the
+      // probe, the bound, and the non-zero exit. Without the loop the suite
+      // races a server that is still formatting its pool; without the `exit 1`
+      // a server that never came up is reported as a healthy start.
+      const minioStep = text.slice(text.indexOf('- name: Start MinIO')).split('\n      - name:')[0];
+      expect(minioStep).toContain('http://localhost:9000/minio/health/ready');
+      expect(minioStep).toMatch(/for _ in \$\(seq 1 \d+\); do/);
+      expect(minioStep).toContain('docker logs m70c-minio');
+      expect(minioStep).toContain('exit 1');
       // A service container takes no `command`/`environment` key, so a block
       // carrying either is an invalid workflow — and the text pins above would
       // still pass. Assert their absence too.
