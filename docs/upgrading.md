@@ -21,10 +21,11 @@ its app from `createApplication` or a starter factory needs no change at all.
 
 `@setu-ts/kernel`'s `IKernelApplication` gained a required `unregister(name: string): boolean`,
 which removes every pending plugin carrying that name before `start()` and throws once startup has
-begun. It exists because overriding a capability is a _post-hoc_ substitution: by the time an
-override replaces a service, the real plugin's `register()` has already run, so an eager side effect
-inside it — `DatabasePlugin` calls `adapter.connect()` there — has already happened. Only removing
-the plugin prevents that.
+begun, plus a required `hasPlugin(name: string): boolean` — a pure read reporting whether such a
+plugin is pending. It exists because overriding a capability is a _post-hoc_ substitution: by the
+time an override replaces a service, the real plugin's `register()` has already run, so an eager
+side effect inside it — `DatabasePlugin` calls `adapter.connect()` there — has already happened.
+Only removing the plugin prevents that.
 
 `createApplication` and all three starters return an implementation, so callers are unaffected. If
 you wrote your own stand-in:
@@ -34,6 +35,7 @@ you wrote your own stand-in:
 const app: IKernelApplication = {
   // …router, middleware, services, register, start, stop, fetch, inject…
   unregister: (_name) => false, // see the note below
+  hasPlugin: (_name) => false,
 };
 ```
 

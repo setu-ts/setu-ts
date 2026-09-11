@@ -164,14 +164,24 @@ export async function createTestApp(
     // repeated entry would find nothing on the second pass and throw "the
     // application holds no plugin with that name" — blaming the caller's
     // spelling for a harmless duplicate.
-    for (const name of new Set(options.without ?? [])) {
-      if (!app.unregister(name)) {
-        throw new Error(
-          `createTestApp: cannot exclude plugin '${name}' — the application holds no plugin ` +
-            `with that name. Check the spelling against the composition root; an ignored ` +
-            `exclusion would run the test against the real plugin.`,
-        );
-      }
+    //
+    // Removal happens in a second pass, AFTER every name has been checked.
+    // Removing as we go would leave earlier exclusions applied to the caller's
+    // application when a later name turns out to be misspelled — the throw is
+    // recoverable, so a caller that catches it and reuses that composition root
+    // would be handed a silently mutated one.
+    const names = new Set(options.without ?? []);
+    const missing = [...names].filter((name) => !app.hasPlugin(name));
+    if (missing.length > 0) {
+      throw new Error(
+        `createTestApp: cannot exclude plugin${missing.length > 1 ? 's' : ''} ` +
+          `${missing.map((name) => `'${name}'`).join(', ')} — the application holds no plugin ` +
+          `with that name. Check the spelling against the composition root; an ignored ` +
+          `exclusion would run the test against the real plugin.`,
+      );
+    }
+    for (const name of names) {
+      app.unregister(name);
     }
     for (const plugin of options.overrides ?? []) {
       app.register(plugin);

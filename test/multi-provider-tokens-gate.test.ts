@@ -29,11 +29,13 @@ describe('multi-provider token drift gate', () => {
     );
 
     // Each site reads `registry.register(CAPABILITIES.X, …, { multi: true })`.
-    // Capture the token constant of every call that passes `multi: true`.
+    // Capture the token of every call whose options ENABLE multi — matching on
+    // an options object whose sole property is `multi: true` would let a future
+    // `{ multi: true, override: true }` escape the gate this test exists to be.
     const kernelTokens = new Set<string>();
     for (
       const match of application.matchAll(
-        /registry\.register\(\s*CAPABILITIES\.([A-Z_]+)[\s\S]*?\{\s*multi:\s*true\s*\}/g,
+        /registry\.register\(\s*CAPABILITIES\.([A-Z_]+)[\s\S]*?\{[^{}]*\bmulti:\s*true\b[^{}]*\}/g,
       )
     ) {
       kernelTokens.add(match[1] as string);

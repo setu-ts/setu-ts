@@ -34,6 +34,30 @@ function eagerPlugin(name: string, ran: string[]): IPlugin {
   };
 }
 
+describe('Application.hasPlugin', () => {
+  it('reports pending plugins without resolving anything', async () => {
+    const ran: string[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), eagerPlugin('database', ran)] });
+
+    expect(app.hasPlugin('database')).toBe(true);
+    expect(app.hasPlugin('databse')).toBe(false);
+    // A pure read: nothing registered, nothing constructed.
+    expect(ran).toEqual([]);
+
+    await app.start();
+    expect(ran).toEqual(['database']);
+  });
+
+  it('reflects a removal', () => {
+    const ran: string[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), eagerPlugin('database', ran)] });
+
+    app.unregister('database');
+
+    expect(app.hasPlugin('database')).toBe(false);
+  });
+});
+
 describe('Application.unregister', () => {
   it('removes a pending plugin so its register() never runs', async () => {
     const ran: string[] = [];

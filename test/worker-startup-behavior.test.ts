@@ -30,6 +30,7 @@ function fakeApp(
     services: {} as IKernelApplication['services'],
     register: () => fakeApp(start, onFetch),
     unregister: () => false,
+    hasPlugin: () => false,
     start,
     stop: () => Promise.resolve(),
     fetch: () => {

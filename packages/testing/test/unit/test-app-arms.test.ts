@@ -120,6 +120,45 @@ describe('createTestApp — the composition-root arm', () => {
     expect(app.services.has('database')).toBe(false);
   });
 
+  it('leaves the application untouched when any `without` name is unknown', async () => {
+    // `unregister` mutates immediately, so removing as we go would leave the
+    // earlier exclusion applied when a later name turns out to be misspelled —
+    // and the throw is recoverable, so a caller that catches it and reuses the
+    // composition root would be handed a silently altered one.
+    const ran: string[] = [];
+    const built = root([
+      {
+        name: 'database',
+        version: '1.0.0',
+        register() {
+          ran.push('database');
+        },
+      },
+      {
+        name: 'cache',
+        version: '1.0.0',
+        register() {
+          ran.push('cache');
+        },
+      },
+    ]);
+
+    await expect(
+      createTestApp({ app: built, without: ['database', 'cahce'] }),
+    ).rejects.toThrow(/cannot exclude plugin 'cahce'/);
+
+    // Nothing was removed: the good name is still pending and still runs.
+    expect(built.hasPlugin('database')).toBe(true);
+    await built.start();
+    expect(ran).toEqual(['database', 'cache']);
+  });
+
+  it('names every unknown `without` entry, not just the first', async () => {
+    await expect(
+      createTestApp({ app: root(), without: ['databse', 'cahce'] }),
+    ).rejects.toThrow(/cannot exclude plugins 'databse', 'cahce'/);
+  });
+
   it('applies `without` before `overrides`', async () => {
     const order: string[] = [];
     const marker: IPlugin = {

@@ -79,8 +79,11 @@ All notable changes to this project are documented here. The format follows
   Only a hand-written stand-in for `IKernelApplication` breaks; give it
   `unregister(name) { return false; }` if it holds no plugins of its own, or splice its own pending
   list. Removing a plugin another declares in `dependencies` is not refused by `unregister` —
-  `start()` reports it, naming the dependent plugin and the unsatisfied capability — not the removed
-  plugin's own name when the two differ (M91).
+  `IKernelApplication` also gains a required **`hasPlugin(name): boolean`** — a pure read used to
+  validate a whole exclusion set before removing any of it, so a misspelled entry leaves the
+  application untouched rather than partially excluded. `start()` reports it, naming the dependent
+  plugin and the unsatisfied capability — not the removed plugin's own name when the two differ
+  (M91).
 
 ### Fixed
 

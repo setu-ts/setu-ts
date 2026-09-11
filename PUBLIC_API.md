@@ -9294,6 +9294,13 @@ Contract notes:
   (`database-plugin` provides `database`), so a failure after a `without` reads as a missing
   capability rather than as the exclusion that caused it. `@setu-ts/testing`'s
   `createTestApp({ app, without })` is the intended caller.
+- **`hasPlugin(name: string): boolean`** reports whether a plugin carrying that name is pending. A
+  pure read — it resolves and constructs nothing. It exists so a caller applying several exclusions
+  can validate the whole set before removing any of them: `unregister` mutates immediately, so
+  removing as it goes would leave earlier exclusions applied when a later name is misspelled, and
+  the throw is recoverable, so a caller that catches it and reuses that composition root would be
+  handed a silently altered one. `createTestApp` checks every `without` entry through this member
+  first and names all unmatched entries in one error.
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.

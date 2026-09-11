@@ -140,6 +140,24 @@ export interface IKernelApplication extends IApplication {
    * @since 0.6.0
    */
   unregister(name: string): boolean;
+  /**
+   * Reports whether a plugin carrying this name is pending.
+   *
+   * A pure read — it neither resolves nor constructs anything. It exists so a
+   * caller applying several exclusions can validate the whole set BEFORE
+   * removing any of them: `unregister` mutates immediately, so removing as you
+   * go leaves earlier exclusions applied when a later name turns out to be
+   * misspelled, handing a caller that catches the error a silently altered
+   * application.
+   *
+   * Answers against the pending list, so it reports `false` once startup has
+   * consumed that list — use it before `start()`.
+   *
+   * @param name - The plugin's `name`, as declared on `IPlugin`
+   * @returns `true` when at least one pending plugin carries that name
+   * @since 0.6.0
+   */
+  hasPlugin(name: string): boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +221,10 @@ class Application implements IKernelApplication {
     }
     this.#plugins.push(plugin);
     return this;
+  }
+
+  hasPlugin(name: string): boolean {
+    return this.#plugins.some((plugin) => plugin.name === name);
   }
 
   unregister(name: string): boolean {
