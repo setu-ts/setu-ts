@@ -9205,11 +9205,12 @@ plugin list has one home. Nothing in `@setu-ts/testing` can consume it.
 
 **Deliverables.**
 
-- **`IKernelApplication.unregister(name)`** — removes a pending plugin before `start()`, symmetric
-  with `register()` and with `IServiceRegistry.unregister`'s `boolean` return
-  (`common/src/registry.ts:161`). Throws once started, as `register()` does. Required rather than
-  optional: the kernel's own `Application` is the only implementor, and an optional member cannot
-  distinguish "this app cannot exclude" from "no such plugin". §10.2 approval recorded.
+- **`IKernelApplication.unregister(name)`** — removes every pending plugin carrying the name before
+  `start()` (and throws once startup has begun), symmetric with `register()` and with
+  `IServiceRegistry.unregister`'s `boolean` return (`common/src/registry.ts:161`). Throws once
+  started, as `register()` does. Required rather than optional: the kernel's own `Application` is
+  the only implementor, and an optional member cannot distinguish "this app cannot exclude" from "no
+  such plugin". §10.2 approval recorded.
 - **`overrideCapability(token, service)`** in `@setu-ts/testing` — emits the plugin shape above with
   a sentinel priority above `PLUGIN_PRIORITY.LOWEST`, and **refuses at `register()` a token nothing
   already provides**. That refusal is the design's load-bearing half: without it

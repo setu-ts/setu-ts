@@ -88,6 +88,33 @@ describe('Application.unregister', () => {
     expect(ran).toEqual([]);
   });
 
+  it('throws after a FAILED start, where plugins have already run', async () => {
+    const ran: string[] = [];
+    const exploder: IPlugin = {
+      name: 'exploder',
+      version: '1.0.0',
+      priority: 900,
+      register() {
+        throw new Error('boom during startup');
+      },
+    };
+    const app = createApplication({
+      plugins: [runtimePlugin(), eagerPlugin('database', ran), exploder],
+    });
+
+    await expect(app.start()).rejects.toThrow('boom during startup');
+
+    // `start()` rolls `#started` back so a failed start can be corrected and
+    // retried — but `database` already ran and its service is in the registry,
+    // so removing it from the pending list cannot deliver what `unregister`
+    // promises, and `true` would report a removal that did not happen.
+    expect(ran).toEqual(['database']);
+    expect(app.services.has('database')).toBe(true);
+    expect(() => app.unregister('database')).toThrow(
+      'Cannot unregister plugins once startup has begun',
+    );
+  });
+
   it('throws after the application has started', async () => {
     const ran: string[] = [];
     const app = createApplication({ plugins: [runtimePlugin(), eagerPlugin('database', ran)] });
@@ -96,7 +123,7 @@ describe('Application.unregister', () => {
     // A silent `false` would report success for an operation that cannot have
     // had any effect: #runStartup has already read the plugin array.
     expect(() => app.unregister('database')).toThrow(
-      'Cannot unregister plugins after the application has started.',
+      'Cannot unregister plugins once startup has begun',
     );
     expect(app.services.has('database')).toBe(true);
   });

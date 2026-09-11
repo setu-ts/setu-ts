@@ -9279,19 +9279,21 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 
 Contract notes:
 
-- **`unregister(name: string): boolean`** removes a pending plugin before `start()`, returning
-  `true` when one carried that name. Plugins do not run until `start()`, so removing one means its
-  `register()` — and any eager side effect inside it, such as a database adapter's `connect()` —
-  never happens. That is the one thing overriding a capability cannot do: an override replaces what
-  consumers resolve, after the real plugin has already run. It **throws** once the application has
-  started, mirroring `register()`, because `start()` has already read the plugin list and a silent
-  `false` would report success for an operation that can have had no effect. Removing a plugin
-  another declares in `dependencies` is not refused here — `start()` reports it, naming the
-  dependent plugin and the unsatisfied **capability**. It does not name the removed plugin when its
-  name differs from the token it provided, which is the usual case (`database-plugin` provides
-  `database`), so a failure after a `without` reads as a missing capability rather than as the
-  exclusion that caused it. `@setu-ts/testing`'s `createTestApp({ app, without })` is the intended
-  caller.
+- **`unregister(name: string): boolean`** removes **every** pending plugin carrying the name before
+  `start()`, returning `true` when one or more matched. Two pending plugins may share a name — the
+  kernel refuses duplicates at `start()`, not at `register()` — so removing only the first would
+  leave one running while the caller was told the name was gone. Plugins do not run until `start()`,
+  so removing one means its `register()` — and any eager side effect inside it, such as a database
+  adapter's `connect()` — never happens. That is the one thing overriding a capability cannot do: an
+  override replaces what consumers resolve, after the real plugin has already run. It **throws**
+  once the application has started, mirroring `register()`, because `start()` has already read the
+  plugin list and a silent `false` would report success for an operation that can have had no
+  effect. Removing a plugin another declares in `dependencies` is not refused here — `start()`
+  reports it, naming the dependent plugin and the unsatisfied **capability**. It does not name the
+  removed plugin when its name differs from the token it provided, which is the usual case
+  (`database-plugin` provides `database`), so a failure after a `without` reads as a missing
+  capability rather than as the exclusion that caused it. `@setu-ts/testing`'s
+  `createTestApp({ app, without })` is the intended caller.
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.
@@ -10035,9 +10037,11 @@ registers the provider instead.
 resolved the capability during its own `register()` keeps the original object — `NotificationPlugin`
 captures `CAPABILITIES.MAIL` while registering, so an override beneath it replaces the registry
 entry while every notification still reaches the real mailer, with no error and no signal. No
-ordering fixes this: an override placed before the real provider is overwritten by it and the kernel
-refuses to start. Exclude the provider and supply the double ahead of its consumers instead —
-`without: ['mail-plugin']` plus a `createMockPlugin` at `PLUGIN_PRIORITY.HIGH`.
+ordering fixes this: an override placed before the real provider registers the token first, and the
+provider's own registration then fails — it registers without `{ override: true }`, which the kernel
+refuses on a live token — so the application does not start at all. Exclude the provider and supply
+the double ahead of its consumers instead — `without: ['mail-plugin']` plus a `createMockPlugin` at
+`PLUGIN_PRIORITY.HIGH`.
 
 > `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
 > the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the

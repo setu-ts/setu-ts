@@ -93,20 +93,26 @@ const app = await createTestApp({
 });
 ```
 
-Everything the root registered is present: its middleware, its error handling, its health
-indicators, its route ordering. A test therefore observes the composition production has rather than
-a second one assembled by hand — which is what the `plugins` arm inevitably drifts into.
+Everything the root registered is present — its middleware, its error handling, its health
+indicators, its route ordering — except what `without` explicitly removes: an excluded plugin
+contributes none of those, which is the point of excluding it. A test therefore observes the
+composition production has rather than a second one assembled by hand — which is what the `plugins`
+arm inevitably drifts into.
 
 The two arms are mutually exclusive: `TestAppOptions` is a union, so supplying both `plugins` and
 `app` is a compile error rather than a runtime throw.
 
 **`without` and `overrides` do different things, and the difference matters.**
 
-|                                                 | `without`                            | `overrides`                             |
-| ----------------------------------------------- | ------------------------------------ | --------------------------------------- |
-| When                                            | Before `start()`                     | After `start()` has run the real plugin |
-| Effect                                          | The plugin's `register()` never runs | The plugin's service is replaced        |
-| Eager side effects (`connect()`, a broker dial) | Prevented                            | **Already happened**                    |
+Both are applied before `createTestApp` calls `start()`; what differs is when they take effect
+during that startup.
+
+|                                                 | `without`                            | `overrides`                                               |
+| ----------------------------------------------- | ------------------------------------ | --------------------------------------------------------- |
+| Applied                                         | Before `start()`                     | Before `start()`                                          |
+| Takes effect                                    | The plugin is gone from the list     | Late in the same startup, after the real plugin registers |
+| Effect                                          | The plugin's `register()` never runs | The plugin's service is replaced                          |
+| Eager side effects (`connect()`, a broker dial) | Prevented                            | **Already happened**                                      |
 
 `DatabasePlugin.register()` calls `adapter.connect()`, so an override leaves a real connection
 attempt in place. Use `without` when you need the plugin not to run at all, and `overrides` when you
@@ -142,8 +148,10 @@ It replaces what every resolution **after it registers** sees. A consumer that r
 capability during its own `register()` holds the original object and keeps using it —
 `NotificationPlugin` does exactly that, so overriding `mail` beneath it replaces the registry entry
 while every notification still reaches the real mailer, with no error and no signal. No ordering
-fixes it: an override placed _before_ the real provider is overwritten by it, and the kernel then
-refuses to start. Remove the provider and supply the double ahead of its consumers instead:
+fixes it: an override placed _before_ the real provider registers the token first, and the
+provider's own registration then fails — it registers without `{ override: true }`, which the kernel
+refuses on a live token — so the application does not start at all. Remove the provider and supply
+the double ahead of its consumers instead:
 
 ```typescript
 await createTestApp({

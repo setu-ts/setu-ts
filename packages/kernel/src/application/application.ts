@@ -129,7 +129,8 @@ export interface IKernelApplication extends IApplication {
    *
    * @param name - The plugin's `name`, as declared on `IPlugin`
    * @returns `true` when at least one plugin was removed, `false` when none carried that name
-   * @throws {Error} If the application has already started
+   * @throws {Error} If startup has begun — including after a `start()` that
+   * FAILED, since the plugins that ran before the failure cannot be un-run
    * @example
    * ```typescript
    * const app = createApp();            // the project's own composition root
@@ -157,6 +158,14 @@ class Application implements IKernelApplication {
     spec: Readonly<Record<string, EnvVarSpec>>;
   }[] = [];
   #started = false;
+  /**
+   * Whether `#runStartup` has begun registering plugins. Unlike {@linkcode
+   * #started} this is never reset: `start()` rolls `#started` back on failure so
+   * a failed start can be corrected and retried, but plugins that already ran
+   * cannot be un-run. `unregister` reads this so it can never report having
+   * removed a plugin whose `register()` has already executed.
+   */
+  #registrationStarted = false;
   #serverHandle: unknown = null;
   #inFlight = 0;
   #stopping = false;
@@ -197,8 +206,17 @@ class Application implements IKernelApplication {
   }
 
   unregister(name: string): boolean {
-    if (this.#started) {
-      throw new Error('Cannot unregister plugins after the application has started.');
+    // `#registrationStarted`, not `#started`: a FAILED `start()` rolls `#started`
+    // back so the application can be corrected and retried, but the plugins that
+    // ran before the failure have already run — their `register()` executed and
+    // their services are in the registry. Removing one from the pending list
+    // then could not deliver what this method promises, and returning `true`
+    // would report a removal that did not happen.
+    if (this.#registrationStarted) {
+      throw new Error(
+        'Cannot unregister plugins once startup has begun. Plugins that already ' +
+          'registered cannot be un-run, so build a fresh application instead.',
+      );
     }
     // Removes EVERY match, not the first. Two pending plugins may share a name
     // — `assertUniqueNames` refuses that at `start()`, not at `register()` — and
@@ -245,6 +263,7 @@ class Application implements IKernelApplication {
   }
 
   async #runStartup(options?: StartOptions): Promise<void> {
+    this.#registrationStarted = true;
     // 1. Resolve plugin order — throws without runtime provider
     const ordered = resolvePluginOrder(this.#plugins);
 

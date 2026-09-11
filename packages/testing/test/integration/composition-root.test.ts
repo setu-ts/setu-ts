@@ -137,8 +137,10 @@ describe('overrideCapability against an eagerly-capturing consumer', () => {
   it('does NOT reach a consumer that captured the service while registering', async () => {
     // The documented bound, pinned. An override runs after every other plugin,
     // so it replaces what LATER resolutions see — a reference already taken is
-    // not one of them. No ordering fixes it: placed before the real provider,
-    // the override is overwritten by it and the kernel refuses to start.
+    // not one of them. No ordering fixes it: placed before the real provider the
+    // override registers the token first, and the provider's own registration
+    // then fails — it registers without `{ override: true }` — so the
+    // application does not start at all.
     const trace = newTrace();
     const captured: { mailer: Mailer | null } = { mailer: null };
     const fakeSent: string[] = [];

@@ -10,8 +10,13 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
  * otherwise lose to. The kernel orders by `(priority, registration order)`,
  * so two overrides of different tokens are unaffected by each other.
  *
- * This is a convention rather than an enforced ceiling: a plugin declaring a
- * still higher number would run later and win. No first-party plugin does.
+ * This is a convention rather than an enforced ceiling — the testing package
+ * cannot bound what a plugin declares — but the failure mode is loud rather
+ * than silent. A provider declaring a HIGHER number runs after the override, so
+ * the override reaches its presence check with nothing yet providing the token
+ * and refuses by name; the application does not start. You therefore get either
+ * the override or a startup refusal naming the token, never a silently wrong
+ * service. No first-party plugin declares above `PLUGIN_PRIORITY.LOWEST`.
  */
 const OVERRIDE_PRIORITY = PLUGIN_PRIORITY.LOWEST + 1;
 
@@ -62,8 +67,11 @@ const MULTI_PROVIDER_TOKENS: ReadonlySet<CapabilityToken> = new Set([
  *    {@linkcode createMockPlugin} cannot be used to override.
  * 2. It registers with `{ override: true }`, without which the kernel refuses a
  *    second registration of a live token.
- * 3. It runs last (see `OVERRIDE_PRIORITY`), so it wins regardless of the
- *    replaced plugin's own priority band.
+ * 3. It runs after every first-party priority band (see `OVERRIDE_PRIORITY`),
+ *    so it wins against a provider in any of them — including
+ *    `PLUGIN_PRIORITY.LOW`, which a default-priority plugin would lose to. A
+ *    provider declaring a number above the sentinel is refused at startup
+ *    rather than silently winning.
  *
  * **The override is post-hoc, and that bounds what it can reach.** It runs after
  * every other plugin, so it replaces what every resolution *from then on* sees —
@@ -78,10 +86,11 @@ const MULTI_PROVIDER_TOKENS: ReadonlySet<CapabilityToken> = new Set([
  *   `mail` beneath it replaces the registry entry while every notification
  *   still reaches the real mailer, with no error and no signal.
  *
- * No ordering fixes the second case: an override placed *before* the real
- * provider is then overwritten by it — the real plugin registers without
- * `{ override: true }`, so the kernel throws `already registered` and the
- * application cannot start.
+ * No ordering fixes the second case. An override placed *before* the real
+ * provider registers the token FIRST; the provider's own registration then
+ * fails, because it registers without `{ override: true }` and the kernel
+ * refuses a second registration of a live token — so the application does not
+ * start at all. The provider never overwrites the override; it throws.
  *
  * For either case, remove the provider instead of replacing it, and supply the
  * double as a provider ahead of its consumers:

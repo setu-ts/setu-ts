@@ -53,11 +53,15 @@ describe('barrel exports', () => {
       without: ['database'],
       overrides: [],
     };
-    const asUnion: TestAppOptions = fromPlugins;
+    // BOTH arms must satisfy the union: assigning only one leaves the test green
+    // if the other is dropped from it.
+    const asPluginsArm: TestAppOptions = fromPlugins;
+    const asAppArm: TestAppOptions = fromApp;
 
     expect(fromPlugins.autoStart).toBe(true);
     expect(fromApp.without).toEqual(['database']);
-    expect(asUnion).toBe(fromPlugins);
+    expect(asPluginsArm).toBe(fromPlugins);
+    expect(asAppArm).toBe(fromApp);
   });
 
   // The exported option types are structural, so the meaningful assertion is

@@ -13,10 +13,11 @@ All notable changes to this project are documented here. The format follows
   `setu.config.ts`, or a starter factory's return value) instead of `plugins`, with optional
   `without` and `overrides`, and the test starts from the application the project actually ships.
   Everything that root registered is present — its middleware, error handling, health indicators and
-  route ordering — so a test observes production's composition rather than a second one assembled by
-  hand. `TestAppOptions` is now a union of the two exported arms, `TestAppFromPlugins` and
-  `TestAppFromApp`, so supplying both `plugins` and `app` is a compile error; the `plugins` arm is
-  otherwise unchanged. Closes the `@setu-ts/testing` watch-item X11 left open (M91).
+  route ordering, except what `without` explicitly removes — so a test observes production's
+  composition rather than a second one assembled by hand. `TestAppOptions` is now a union of the two
+  exported arms, `TestAppFromPlugins` and `TestAppFromApp`, so supplying both `plugins` and `app` is
+  a compile error; the `plugins` arm is otherwise unchanged. Closes the `@setu-ts/testing`
+  watch-item X11 left open (M91).
 - **`@setu-ts/testing`** — `overrideCapability(token, service)` builds the replacement plugin
   AI_GUIDELINES §3.4 describes, applying the three constraints that make one work: it declares no
   `provides` (a second declaration of a live token is refused before any plugin runs), registers

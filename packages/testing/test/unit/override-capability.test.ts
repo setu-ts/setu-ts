@@ -78,6 +78,25 @@ describe('overrideCapability', () => {
     expect(app.services.get<{ who: string }>(CAPABILITIES.DATABASE).who).toBe('MOCK');
   });
 
+  it('refuses rather than silently losing to a provider above the sentinel priority', async () => {
+    // OVERRIDE_PRIORITY is a convention, not a ceiling — this package cannot
+    // bound what a plugin declares. A provider above it runs AFTER the override,
+    // so the override reaches its presence check with nothing yet providing the
+    // token and refuses by name. Either the override applies or startup fails;
+    // never a silently wrong service.
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        { ...realDatabase(), priority: 5000 },
+        overrideCapability(CAPABILITIES.DATABASE, { who: 'MOCK' }),
+      ],
+    });
+
+    await expect(app.start()).rejects.toThrow(
+      /Cannot override capability 'database': nothing provides it/,
+    );
+  });
+
   it('refuses a token nothing provides, naming it', async () => {
     // Without this, `{ override: true }` on an absent token succeeds silently:
     // the double registers under a nonsense token, the real service keeps

@@ -1,7 +1,9 @@
 # Milestone 91 — Test app composition (`@setu-ts/testing`, `@setu-ts/kernel`)
 
-> **Status:** Planning. Branch: `feat/m91-test-app-composition`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR #278). Branch: `feat/m91-test-app-composition`. `main` is protected — all
+> work (implementation + fixes) stayed on this one branch. Archived on completion: this is the
+> design record written BEFORE the code, and the shipped artifacts — the source, its tests,
+> `PUBLIC_API.md` and `CHANGELOG.md` — are the living contract.
 
 ## 0. Objective & scope
 
