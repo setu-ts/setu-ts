@@ -9234,6 +9234,158 @@ plugin list has one home. Nothing in `@setu-ts/testing` can consume it.
 `provides` is what satisfies a dependent plugin's `dependencies` check; only its JSDoc changes, to
 name the boundary and point at `overrideCapability`.
 
+## Milestone 92: View Plugin — Server-Rendered HTML as a Capability
+
+**Package(s):** `packages/common`, `packages/decorator-plugin`, `packages/view-plugin` (new)
+
+**Objective:** Give a controller a way to answer with HTML it did not concatenate by hand. The
+framework can serve a React SPA with SSR and can return a string, and has nothing in between — so
+the one thing a NestJS user reaches for on day one, `@Render('index')` with a view engine, has no
+answer here.
+
+**The gap is real, unplanned, and never claimed.** `CAPABILITIES` declares no `VIEW` or `TEMPLATE`
+token (`common/src/tokens.ts`), no package under `packages/` ships a view engine, and
+`static-plugin`'s own scope note disclaims one in as many words (ROADMAP.md:6048, "Not a template
+engine"). The one `TemplateEngine` in the tree is M29's, 94 lines of `{{ variable }}` substitution
+for email bodies (`mail-plugin/src/templates/template-engine.ts`), not exported as a capability and
+not reachable from a handler. `docs/migration-nestjs.md` mentions views nowhere, so the capability
+is not falsely advertised — it is silently absent from a chapter the source framework has, which a
+migrating reader discovers by writing a controller.
+
+**Why it never appeared: NestJS does not implement views either.** `@Render` ends at Express's
+`res.render()` or `@fastify/view` — the platform adapter owns the engine and Nest inherits it. M23
+moved this framework onto Hono's `fetch` entry and deleted the server-object model, so there is no
+`res.render` to delegate to. The port has to be owned here rather than adapted, which is the whole
+reason a milestone exists.
+
+**The React Router plugin is a view _layer_ and is not the V of MVC.** Server-side MVC loads four
+properties onto a view: the controller selects it by name, it is passive (a pure function from a
+data bag to a string), the server produces the final bytes, and it is a string with no second
+runtime. `react-router-plugin` inverts the first — in framework mode the route module _is_ both
+controller and view, the `loader` is the action and the default export is the markup, dispatched by
+React Router's own router, so no separate controller remains to say `@Render(...)`. It breaks the
+second outright: a hydrated component holds state, runs effects, and intercepts navigation, which
+means it has absorbed part of the controller rather than only the view. Both plugins can coexist in
+one application — they claim different tokens and different routes — and neither substitutes for the
+other.
+
+**Four facts were established by probe before the design was fixed, and two of them changed it.**
+
+- **`hono/jsx` is already in the dependency graph and renders to an escaped string.**
+  `jsr:@hono/hono/jsx` resolves and exports a full JSX runtime (`createElement`, `Fragment`,
+  `Suspense`, `ErrorBoundary`, `createContext`, `forwardRef`, …), and a rendered tree's `toString()`
+  produces
+  `<html><head><title>Users</title></head><body><ul><li>Ada &lt;script&gt;</li><li>Grace</li></ul></body></html>`
+  — escaped by default, zero client JavaScript, no `new Function`. `packages/kernel/deno.json:8`
+  already pins `jsr:@hono/hono@^4.12.30` and the lockfile resolves it to `4.13.0`, so the default
+  arm introduces **no new third-party dependency into the resolution set**. It is not free of
+  manifest work, and the plan must not read it as such: the root `imports` carries only `@std/*`, so
+  a member does not inherit the specifier and `packages/view-plugin/deno.json` declares it itself;
+  the root `workspace` is an explicit 47-entry list rather than a glob, so it gains
+  `./packages/view-plugin`.
+- **`jsr:@hono/hono/html` exports exactly `html` and `raw`.** A tagged template needs no
+  `jsxImportSource` and works in a plain `.ts` file, which is the one ergonomic cost the JSX arm
+  carries. It is a second arm rather than a fallback: the two answer different questions, and both
+  render to a string through the same port.
+- **A standard method decorator can type-check the handler's return value against the component's
+  props.** Probed on Deno 2.9 with `Render<P>(c: Component<P>)` returning
+  `<T extends (...a: never[]) => P | Promise<P>>(target: T, ctx: ClassMethodDecoratorContext) => T`:
+  a handler returning `{ totallyWrong: number }` under `@Render(UserList)` fails with
+  `TS1270 … is not assignable to type 'void | (() => { totallyWrong: number })'`, while the control
+  — correct **sync and async** handlers — checks clean. This is strictly stronger than the surface
+  it is modelled on: NestJS's `@Render('users/index')` is a string checked against nothing, where a
+  typo or a missing field is a runtime surprise.
+- **Therefore the view is named by reference, not by path.** `@Render(UserList)` removes the view
+  resolver entirely — no views directory, no filesystem lookup, no template registry — which is what
+  makes the capability Workers-portable by construction rather than by a precompile step. It is a
+  deliberate divergence from the NestJS spelling, taken because the property it buys (a compile
+  error instead of a 500) is the one the framework's own defect history keeps asking for.
+
+**The package is named for the capability, not the backend, and that is forced rather than
+stylistic.** `@Render` must live in `decorator-plugin`, which AI_GUIDELINES §2.2 forbids from
+importing the view plugin — so it resolves a capability token and calls a method on whatever
+answers, exactly as `@ValidateBody` has reached `CAPABILITIES.VALIDATION` since M70n
+(`decorator-plugin/src/plugin/decorator-plugin.ts:544-568`). A contract in `common` therefore exists
+whether or not it is given a name, and naming the package after one of its backends
+(`hono-jsx-plugin`) would leave the `'custom'` arm registering under the wrong noun. The convention
+is unanimous across the 47 shipped members: `database-plugin` not `prisma-plugin`,
+`messaging-plugin` not `rabbitmq-plugin`, `storage-plugin` not `s3-plugin` — the backend names the
+**arm**.
+
+**Deliverables.**
+
+- **`IViewEngine` + `Component<P>` + `CAPABILITIES.VIEW` in `common`** — a `render` taking a view
+  component and its props and answering `string | Promise<string>`. The async arm is not
+  speculative: `hono/jsx` supports `Suspense` and async components, and a port that cannot express
+  one would refuse them. `Component<P>` is a structural type and lands in `common` for the same
+  reason the port does: `decorator-plugin` must name it to type `@Render`'s parameter and §2.2
+  forbids it importing `view-plugin`, so a package-local copy on each side would be two declarations
+  of one public contract, free to drift. New token and two new types, all additive; no existing
+  contract changes.
+- **`@setu-ts/view-plugin`** registering an `IViewEngine` under that token, with options a union
+  discriminated on `engine` so a missing per-arm field is a compile error (the M30 `ChannelConfig` /
+  M50 / M52c precedent): `'hono-jsx'` (default), `'hono-html'`, `'custom'`. A `view` health
+  indicator reporting the selected engine; no `onClose` (rendering is stateless).
+- **`@Render(Component)` in `decorator-plugin`**, resolving `CAPABILITIES.VIEW` at `register()` and
+  branching in `createHandler` (`decorator-plugin.ts:325-343`), which already passes a
+  `HandlerResult` through untouched and otherwise calls `ctx.response.json(result)` at line 341 — so
+  render is a third branch rather than a rewrite. The new branch **awaits** the engine (the port's
+  return is `string | Promise<string>`) and answers through `ctx.response.html(...)`
+  (`common/src/http.ts:206`), never `json`. A decorated route carrying `@Render` with no registered
+  provider must **fail at `register()` naming both remedies**, never serve JSON where the author
+  asked for HTML — and the check is per route, so an application with no rendered route needs no
+  view plugin at all.
+- **`CAPABILITIES.VIEW` joins `decorator-plugin`'s `optionalDependencies`**
+  (`decorator-plugin.ts:801`, today `[CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION]`, whose
+  own comment at line 810 states that the array is what guarantees a provider is registered first).
+  Without the edge, resolving at `register()` is a race decided by plugin order rather than a
+  contract, which is the whole reason the validation arm carries it. The edge is safe in the one
+  direction that matters: `view-plugin` registers a service and declares no dependency on
+  `decorator-plugin`, so no cycle is introduced — M90i's P1 found that an `optionalDependencies`
+  edge added in the other direction makes **every** application registering both plugins throw at
+  `start()`, and the plan must re-establish that this pair is acyclic rather than inherit the claim.
+- **A status or header alongside a rendered body needs `@Ctx()`.** A decorated handler's return
+  value is the props bag, so it cannot also carry a status — the M58 constraint, unchanged by this
+  milestone. The plan states it and the docs show it; `@Render` does not grow a `status` argument,
+  which would be a second way to say what `@Ctx()` already says.
+- **A free `render(ctx, Component, props)` funnelling through the same implementation.** The
+  functional generator mode has been the default since M65, so a decorator-only API would leave the
+  majority path out — and "one capability, one implementation, every entry point" requires one test
+  driving both under a non-default configuration.
+- **`scripts/release-packages.ts` gains the member in `PUBLISHED_PACKAGES` Tier 4** (plugins
+  depending on `common`), taking `release:verify` from 47 publishable packages to 48. M51 shipped a
+  workspace member absent from both release lists, which every one of the four gates and the
+  coverage bar passed over while the package would simply never have published; only
+  `release:verify` looks for it.
+- **CLI + docs.** A `setu g view` schematic is **out of scope** pending the plan's answer on where a
+  component file belongs relative to the existing `controllers`/`services` seams. `docs/mvc.md` and
+  a `migration-nestjs.md` section are in scope, since the absence of the latter is half the finding.
+
+**Not a deliverable — deferred past 1.0 by maintainer decision.** A first-party **Handlebars** arm
+and an **HTMX** integration (`HX-Request` layout skipping, fragment responses). Both are real and
+both are addons rather than bases: HTMX already works today against `IResponse.html(string)`
+(`common/src/http.ts:206`) and needs ergonomics rather than capability, and Handlebars is reachable
+through the `'custom'` arm the moment someone wants it — which is what makes deferring it honest
+instead of stranding a migrating reader. Shipping either now would also drag in a decision this
+milestone does not need: Handlebars' runtime `compile()` builds via `new Function`, banned by
+AI_GUIDELINES §13.5 and blocked by the Workers CSP, so that arm needs a precompiled-template build
+story of its own.
+
+**Open questions the plan must resolve.**
+
+- **A by-reference port and a by-name engine do not fit the same signature.** `IViewEngine.render`
+  takes a component; a string-named engine (Handlebars, Eta) takes a path plus a loader. The plan
+  must state whether the deferred arm wraps each template as a `(props) => string` function, or
+  whether the port carries a second by-name method — and must not leave it to be improvised when
+  someone writes the first `'custom'` adapter.
+- **Layouts.** Whether a layout is simply a component taking `children` (the JSX-native answer, zero
+  new surface) or a plugin-level `layout` option. The former is preferred; the latter must be
+  refused explicitly if it is refused, not omitted.
+- **Streaming.** Whether `render` may return a `ReadableStream` through M42's `IResponse.stream()`
+  for `Suspense` boundaries, or whether the first cut buffers to a string and says so.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                            |
@@ -9374,3 +9526,4 @@ name the boundary and point at `overrideCapability`.
 | 90i       | ✅     | observability that joins up ([#260](https://github.com/setu-ts/setu-ts/pull/260))                  |
 | 90j       | ✅     | operator diagnostics survive to the operator ([#263](https://github.com/setu-ts/setu-ts/pull/263)) |
 | 91        | ✅     | test app composes like the real one ([#278](https://github.com/setu-ts/setu-ts/pull/278))          |
+| 92        | ⬜     | view plugin — server-rendered HTML as a capability                                                 |
