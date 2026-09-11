@@ -9152,7 +9152,11 @@ might return one. It does not: `createApplication` returns `IKernelApplication`
 `full-stack-starter/src/app.ts:78`), which is also the only interface carrying `inject()` — the
 thing a test app exists for. The widening lands in `kernel` and `common` is untouched.
 
-**Objective:** Close [X11](../smoke/X11-FINDINGS.md)'s watch-item — _"`@setu-ts/testing` has no
+> **The reproduction is NOT in this repository.** `smoke/` is excluded locally
+> (`.git/info/exclude`), so the `smoke/X11-FINDINGS.md` citation below names a file that exists on
+> the machine the exercise ran on and not in a clone — the same convention the M90 block states.
+
+**Objective:** Close `smoke/X11-FINDINGS.md`'s watch-item — _"`@setu-ts/testing` has no
 `createTestApp` + `errorHandler` story; the broader question is whether a test app should compose
 like a real one"_ — by making the real composition root the thing a test app is built from.
 

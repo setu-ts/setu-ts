@@ -12,6 +12,7 @@ import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createTestApp } from '../../src/test-app.ts';
 import { overrideCapability } from '../../src/override-capability.ts';
+import { createMockPlugin } from '../../src/mock-plugin.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 interface Mailer {
@@ -38,7 +39,7 @@ interface RootTrace {
  * — and the mailer sits in the `LOW` band, the case a default-priority
  * override would lose to.
  */
-function createRoot(trace: RootTrace): IKernelApplication {
+function createRoot(trace: RootTrace, extra: readonly IPlugin[] = []): IKernelApplication {
   const runtime = createFakeRuntime();
 
   const runtimePlugin: IPlugin = {
@@ -70,7 +71,9 @@ function createRoot(trace: RootTrace): IKernelApplication {
     },
   };
 
-  const app = createApplication({ plugins: [runtimePlugin, databasePlugin, mailPlugin] });
+  const app = createApplication({
+    plugins: [runtimePlugin, databasePlugin, mailPlugin, ...extra],
+  });
 
   // The root's own error handling. `@setu-ts/testing` may not depend on
   // `@setu-ts/exceptions` (§2.2 / M33), so this brands the same `common` seam
@@ -108,6 +111,87 @@ function newTrace(): RootTrace {
     realMailer: { sent, send: (to: string) => void sent.push(to) },
   };
 }
+
+/**
+ * A consumer that resolves its dependency during its OWN `register()` and holds
+ * the object — the shape `NotificationPlugin` has, where `createProvider` calls
+ * `ctx.services.get(CAPABILITIES.MAIL)` while registering. Reproduced locally
+ * rather than imported: `@setu-ts/testing` depends on `common` and `kernel`
+ * only (M33), and AI_GUIDELINES §2.2 forbids importing a plugin.
+ */
+function eagerConsumer(captured: { mailer: Mailer | null }): IPlugin {
+  return {
+    name: 'notifier',
+    version: '1.0.0',
+    // The edge that orders the provider first — exactly what NotificationPlugin
+    // declares. Without it this fixture would resolve before the LOW-band mail
+    // plugin and fail for a reason unrelated to what the test asserts.
+    optionalDependencies: [CAPABILITIES.MAIL],
+    register(ctx: IPluginContext) {
+      captured.mailer = ctx.services.get<Mailer>(CAPABILITIES.MAIL);
+    },
+  };
+}
+
+describe('overrideCapability against an eagerly-capturing consumer', () => {
+  it('does NOT reach a consumer that captured the service while registering', async () => {
+    // The documented bound, pinned. An override runs after every other plugin,
+    // so it replaces what LATER resolutions see — a reference already taken is
+    // not one of them. No ordering fixes it: placed before the real provider,
+    // the override is overwritten by it and the kernel refuses to start.
+    const trace = newTrace();
+    const captured: { mailer: Mailer | null } = { mailer: null };
+    const fakeSent: string[] = [];
+    const app = await createTestApp({
+      app: createRoot(trace, [eagerConsumer(captured)]),
+      overrides: [
+        overrideCapability(
+          CAPABILITIES.MAIL,
+          {
+            sent: fakeSent,
+            send: (to: string) => void fakeSent.push(to),
+          } satisfies Mailer,
+        ),
+      ],
+    });
+
+    captured.mailer?.send('a@example.test');
+
+    expect(fakeSent).toEqual([]); // the double saw nothing
+    expect(trace.realMailer.sent).toEqual(['a@example.test']);
+    // …while the registry itself DOES return the double.
+    expect(app.services.get<Mailer>(CAPABILITIES.MAIL).sent).toBe(fakeSent);
+  });
+
+  it('is reached when the provider is excluded and the double registers ahead of the consumer', async () => {
+    // The documented remedy. `without` removes the provider, so nothing can be
+    // captured from it; the double registers at a priority ahead of the
+    // consumer, so the consumer captures the double instead.
+    const trace = newTrace();
+    const captured: { mailer: Mailer | null } = { mailer: null };
+    const fakeSent: string[] = [];
+    await createTestApp({
+      app: createRoot(trace, [eagerConsumer(captured)]),
+      without: ['mail'],
+      overrides: [
+        createMockPlugin({
+          name: 'mail',
+          provides: CAPABILITIES.MAIL,
+          priority: PLUGIN_PRIORITY.HIGH,
+          service: {
+            sent: fakeSent,
+            send: (to: string) => void fakeSent.push(to),
+          } satisfies Mailer,
+        }),
+      ],
+    });
+
+    captured.mailer?.send('b@example.test');
+
+    expect(fakeSent).toEqual(['b@example.test']);
+    expect(trace.realMailer.sent).toEqual([]);
+  });
+});
 
 describe('createTestApp against a real composition root', () => {
   it('runs every plugin the root registered', async () => {

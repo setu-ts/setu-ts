@@ -138,6 +138,26 @@ It **throws at `register()` when nothing provides the token**. Without that chec
 would register the double under a nonsense name, leave the real service serving, and let the test
 pass against the real dependency.
 
+It replaces what every resolution **after it registers** sees. A consumer that resolved this
+capability during its own `register()` holds the original object and keeps using it —
+`NotificationPlugin` does exactly that, so overriding `mail` beneath it replaces the registry entry
+while every notification still reaches the real mailer, with no error and no signal. No ordering
+fixes it: an override placed _before_ the real provider is overwritten by it, and the kernel then
+refuses to start. Remove the provider and supply the double ahead of its consumers instead:
+
+```typescript
+await createTestApp({
+  app: createApp(),
+  without: ['mail-plugin'],
+  overrides: [createMockPlugin({
+    name: 'mail-plugin',
+    provides: CAPABILITIES.MAIL,
+    service: fakeMailer,
+    priority: PLUGIN_PRIORITY.HIGH, // ahead of the consumer that captures it
+  })],
+});
+```
+
 It also **refuses a multi-provider capability** — `health-indicator`, `metric-registration`,
 `openapi-schema`, `decorator-handler` and `cli-command`, the five the kernel registers with
 `{ multi: true }`. `getAll` returns the single and multi registrations concatenated, so an override

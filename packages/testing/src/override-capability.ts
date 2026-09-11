@@ -47,6 +47,10 @@ const MULTI_PROVIDER_TOKENS: ReadonlySet<CapabilityToken> = new Set([
  * Creates a plugin that REPLACES an already-provided capability with a test
  * double, leaving the rest of the application's composition intact.
  *
+ * It replaces what every resolution *after it registers* sees. A consumer that
+ * captured the service during its own `register()` keeps the original — see
+ * "post-hoc" below for the case and the remedy.
+ *
  * This is the replacement mechanism AI_GUIDELINES §3.4 describes — "a
  * replacement plugin registers the same capability token with
  * `override: true`" — with the three constraints that make it work applied for
@@ -61,11 +65,39 @@ const MULTI_PROVIDER_TOKENS: ReadonlySet<CapabilityToken> = new Set([
  * 3. It runs last (see `OVERRIDE_PRIORITY`), so it wins regardless of the
  *    replaced plugin's own priority band.
  *
- * **The override is post-hoc.** The real plugin's `register()` has already run
- * by the time this one replaces its service, so any eager side effect inside it
- * — a database adapter's `connect()`, a broker's dial — has already happened.
- * To prevent those, drop the plugin instead: `createTestApp({ app, without })`,
- * or `app.unregister(name)` directly.
+ * **The override is post-hoc, and that bounds what it can reach.** It runs after
+ * every other plugin, so it replaces what every resolution *from then on* sees —
+ * but two things have already happened by that point:
+ *
+ * - **Eager side effects.** The real plugin's `register()` has run, so a
+ *   database adapter's `connect()` or a broker's dial has already occurred.
+ * - **Eagerly captured references.** A consumer that resolved this capability
+ *   during its OWN `register()` holds the original object and keeps using it.
+ *   `NotificationPlugin` does exactly this — `createProvider` calls
+ *   `ctx.services.get(CAPABILITIES.MAIL)` while registering — so overriding
+ *   `mail` beneath it replaces the registry entry while every notification
+ *   still reaches the real mailer, with no error and no signal.
+ *
+ * No ordering fixes the second case: an override placed *before* the real
+ * provider is then overwritten by it — the real plugin registers without
+ * `{ override: true }`, so the kernel throws `already registered` and the
+ * application cannot start.
+ *
+ * For either case, remove the provider instead of replacing it, and supply the
+ * double as a provider ahead of its consumers:
+ *
+ * ```typescript
+ * await createTestApp({
+ *   app: createApp(),
+ *   without: ['mail-plugin'],
+ *   overrides: [createMockPlugin({
+ *     name: 'mail-plugin',
+ *     provides: CAPABILITIES.MAIL,
+ *     service: fakeMailer,
+ *     priority: PLUGIN_PRIORITY.HIGH,   // ahead of the consumer that captures it
+ *   })],
+ * });
+ * ```
  *
  * @param token - The capability token to replace. Must already be provided.
  * @param service - The test double to register under it

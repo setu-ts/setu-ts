@@ -4737,21 +4737,21 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   mechanical version bump.
 
 - **Milestone 91** (`packages/kernel` + `packages/testing` — a test app that composes like the real
-  one. Closes [X11]'s watch-item, which asked "whether a test app should compose like a real one".
-  **The ecosystem answers yes unanimously**, and checking that is what settled the design: Laravel's
-  `CreatesApplication` requires the same `bootstrap/app.php` the server does, ASP.NET Core's
-  `WebApplicationFactory<Program>` boots the real `Program.cs`, Fastify's convention is one
-  `build()` imported by both `server.js` and the tests, and Spring's `@SpringBootTest` starts the
-  real application and subtracts with `@MockBean`. Only **NestJS** reconstructs the graph
-  declaratively, and its single most reported testing defect is the composition gap that follows —
-  `createNestApplication()` does not run `main.ts`, so an `app.useGlobalPipes(new ValidationPipe())`
-  is absent in tests and a route that `400`s in production silently accepts garbage; Nest's own
-  remedy is a **convention** (`APP_PIPE`/`APP_FILTER`/`APP_GUARD` module providers), not a
-  mechanism. `createTestApp` was school two with none of the machinery: ten lines,
-  `createApplication({ plugins }) + start()`. Meanwhile M34b had already shipped the school-one
-  asset — every scaffolded project exports a deliberately-unstarted `createApp()` from
-  `setu.config.ts` so the plugin list has ONE home — and nothing in `@setu-ts/testing` could consume
-  it.
+  one. Closes X11's watch-item (`smoke/X11-FINDINGS.md`, local-only), which asked "whether a test
+  app should compose like a real one". **The ecosystem answers yes unanimously**, and checking that
+  is what settled the design: Laravel's `CreatesApplication` requires the same `bootstrap/app.php`
+  the server does, ASP.NET Core's `WebApplicationFactory<Program>` boots the real `Program.cs`,
+  Fastify's convention is one `build()` imported by both `server.js` and the tests, and Spring's
+  `@SpringBootTest` starts the real application and subtracts with `@MockBean`. Only **NestJS**
+  reconstructs the graph declaratively, and its single most reported testing defect is the
+  composition gap that follows — `createNestApplication()` does not run `main.ts`, so an
+  `app.useGlobalPipes(new ValidationPipe())` is absent in tests and a route that `400`s in
+  production silently accepts garbage; Nest's own remedy is a **convention**
+  (`APP_PIPE`/`APP_FILTER`/`APP_GUARD` module providers), not a mechanism. `createTestApp` was
+  school two with none of the machinery: ten lines, `createApplication({ plugins }) + start()`.
+  Meanwhile M34b had already shipped the school-one asset — every scaffolded project exports a
+  deliberately-unstarted `createApp()` from `setu.config.ts` so the plugin list has ONE home — and
+  nothing in `@setu-ts/testing` could consume it.
 
   **Three facts were established by probing the kernel before anything was designed, and each one
   became a deliverable.** (1) **`createMockPlugin` cannot override anything** — it declares

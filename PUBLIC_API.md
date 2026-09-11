@@ -10031,6 +10031,14 @@ an override of one ADDS a provider rather than replacing the existing ones: ever
 would still run while the caller was told the capability was overridden. Exclude the plugin that
 registers the provider instead.
 
+`overrideCapability` replaces what every resolution **after it registers** sees. A consumer that
+resolved the capability during its own `register()` keeps the original object — `NotificationPlugin`
+captures `CAPABILITIES.MAIL` while registering, so an override beneath it replaces the registry
+entry while every notification still reaches the real mailer, with no error and no signal. No
+ordering fixes this: an override placed before the real provider is overwritten by it and the kernel
+refuses to start. Exclude the provider and supply the double ahead of its consumers instead —
+`without: ['mail-plugin']` plus a `createMockPlugin` at `PLUGIN_PRIORITY.HIGH`.
+
 > `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
 > the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the
 > kernel refuses when a real plugin already declares it. Use it in an application that does not

@@ -5,14 +5,14 @@
 
 ## 0. Objective & scope
 
-Close [X11](../smoke/X11-FINDINGS.md)'s watch-item by making a test application buildable from the
-project's own composition root rather than from a hand-assembled plugin array. `@setu-ts/testing`
-gains a `{ app, without?, overrides? }` arm on `createTestApp` and an `overrideCapability` helper
-that emits the replacement-plugin shape AI_GUIDELINES §3.4 already blesses; `@setu-ts/kernel` gains
-`IKernelApplication.unregister(name)`, the one operation an override cannot express — dropping a
-plugin before its `register()` runs, so its eager side effects (a real `adapter.connect()`) never
-happen. The boundary is composition: this milestone changes how a test app is _assembled_, and
-changes nothing about how a request is served.
+Close `smoke/X11-FINDINGS.md`'s watch-item (local-only; see `.git/info/exclude`) by making a test
+application buildable from the project's own composition root rather than from a hand-assembled
+plugin array. `@setu-ts/testing` gains a `{ app, without?, overrides? }` arm on `createTestApp` and
+an `overrideCapability` helper that emits the replacement-plugin shape AI_GUIDELINES §3.4 already
+blesses; `@setu-ts/kernel` gains `IKernelApplication.unregister(name)`, the one operation an
+override cannot express — dropping a plugin before its `register()` runs, so its eager side effects
+(a real `adapter.connect()`) never happen. The boundary is composition: this milestone changes how a
+test app is _assembled_, and changes nothing about how a request is served.
 
 - **In scope:** `IKernelApplication.unregister`; `overrideCapability`; the `createTestApp`
   composition-root arm; the doc corrections those require in `packages/testing/README.md`,
@@ -226,8 +226,15 @@ deno task release:verify 0.5.0
   `overrideCapability`'s JSDoc; the integration test pins the `LOW` (900) case, which is the highest
   band any first-party plugin uses.
 - **A test could `without` a plugin others depend on and get a confusing startup failure.** →
-  Mitigation: this is correct behaviour — the resolver's unsatisfied-dependency error names both
-  plugins — and `application-unregister.test.ts` pins it so the message is not mistaken for a bug.
+  Mitigation: this is correct behaviour, and `application-unregister.test.ts` pins the exact message
+  so it is not mistaken for a bug. **Corrected during code review:** that message names the
+  DEPENDENT plugin and the unsatisfied CAPABILITY —
+  `Plugin 'orders' depends on capability
+  'database', but no registered plugin provides it.` — and
+  NOT the removed plugin's own name when it differs from the token it provided, which is every
+  first-party plugin (`database-plugin` provides `database`). This bullet previously claimed it
+  "names both plugins", the same claim corrected in the JSDoc, `PUBLIC_API.md` and `CHANGELOG.md`;
+  the test now asserts the string and asserts the removed plugin's name is ABSENT.
 - **The union could break an existing `TestAppOptions` annotation.** → Mitigation:
   `TestAppFromPlugins` carries exactly today's fields, so a `{ plugins, autoStart }` object still
   satisfies the union; a test asserts an annotated variable of the old shape still compiles.
