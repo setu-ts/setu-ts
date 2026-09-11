@@ -71,9 +71,13 @@ import { PLUGIN_PRIORITY } from '@setu-ts/common';
  * application's own multi capability is refused too. Exclude the plugin that
  * registers the provider instead.
  *
- * @throws {Error} At `register()` time, if nothing provides `token`, or if
- * `token` is a multi-provider capability. A silent no-op would leave the real
- * service serving while the test reported success.
+ * @throws {Error} During `start()` — from an `onInit` hook, not from
+ * `register()` — if nothing provides `token`, or if `token` is a multi-provider
+ * capability. Both checks run there because this plugin registers EARLY: at its
+ * own `register()` a multi-provider capability has not accumulated its providers
+ * yet, and a token it does not shadow may still be registered by a later plugin.
+ * A silent no-op would leave the real service serving while the test reported
+ * success.
  * @example
  * ```typescript
  * import { createTestApp, overrideCapability } from '@setu-ts/testing';

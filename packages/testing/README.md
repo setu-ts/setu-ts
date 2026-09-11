@@ -137,10 +137,10 @@ await app.start();
 
 It applies the three constraints that make a replacement plugin work: it declares no `provides` (a
 second declaration of a live token is refused before any plugin runs), it registers with
-`{ override: true }`, and it carries a priority above `PLUGIN_PRIORITY.LOWEST` so it wins regardless
-of the replaced plugin's own band.
+`{ override: true }`, and it orders itself through an `optionalDependencies` edge on the token plus
+`PLUGIN_PRIORITY.HIGHEST` — after the provider, whatever its band, and before an ordinary consumer.
 
-It **throws at `register()` when nothing provides the token**. Without that check a mistyped token
+It **throws during `start()` when nothing provides the token**. Without that check a mistyped token
 would register the double under a nonsense name, leave the real service serving, and let the test
 pass against the real dependency.
 
@@ -175,12 +175,16 @@ await createTestApp({
 });
 ```
 
-It also **refuses a multi-provider capability**. `getAll` returns the single and multi registrations
-concatenated, so an override would ADD a provider while every real one kept running and the test
-would report success. Detection is generic — a post-registration provider count, not a list of known
-tokens — so the kernel's five (`health-indicator`, `metric-registration`, `openapi-schema`,
-`decorator-handler`, `cli-command`) and any capability an application registers with
-`{ multi: true }` are refused alike. Exclude the plugin that registers the provider instead.
+It also **refuses a multi-provider capability**. Both refusals are raised from an `onInit` hook
+rather than from the plugin's own `register()`, because the override registers early — at that point
+a multi-provider capability has not accumulated its providers yet, and a token it does not shadow
+may still be registered by a later plugin. Either way the application refuses to start. `getAll`
+returns the single and multi registrations concatenated, so an override would ADD a provider while
+every real one kept running and the test would report success. Detection is generic — a
+post-registration provider count, not a list of known tokens — so the kernel's five
+(`health-indicator`, `metric-registration`, `openapi-schema`, `decorator-handler`, `cli-command`)
+and any capability an application registers with `{ multi: true }` are refused alike. Exclude the
+plugin that registers the provider instead.
 
 > **`overrideCapability` replaces, `createMockPlugin` provides.** `createMockPlugin` declares the
 > token in `provides` — which is what satisfies a dependent plugin's `dependencies` check, and which

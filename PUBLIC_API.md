@@ -9304,8 +9304,8 @@ Contract notes:
   the throw is recoverable, so a caller that catches it and reuses that composition root would be
   handed a silently altered one. `createTestApp` checks every `without` entry through this member
   first and names all unmatched entries in one error. It answers against the registered plugin list,
-  which startup does not clear, so after `start()` it still reports `true` for a plugin that has
-  already run.
+  which is the PENDING list only before `start()` — startup does not clear it, so afterwards the
+  member still reports `true` for a plugin that has already run.
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.
@@ -10035,14 +10035,19 @@ real plugin's `register()` has run, so an eager side effect inside it — `Datab
 
 `overrideCapability(token: CapabilityToken, service: object): IPlugin` takes no options. The plugin
 it returns declares no `provides` (a second declaration of a live token is refused by the kernel
-before any plugin runs), registers with `{ override: true }`, and carries a priority above
-`PLUGIN_PRIORITY.LOWEST` so it wins regardless of the replaced plugin's own band. It **throws at
-`register()` when nothing provides `token`** — a mistyped token would otherwise register the double
-under a nonsense name and leave the real service serving — and **when `token` is a multi-provider
-capability**. `ServiceRegistry.getAll` returns the single and multi registrations concatenated, so
-an override of one ADDS a provider rather than replacing the existing ones: every real provider
-would still run while the caller was told the capability was overridden. Detection is generic — a
-provider count taken after the write, not a list of known tokens — so the kernel's five
+before any plugin runs), registers with `{ override: true }`, and orders itself through an
+`optionalDependencies` edge on the token plus `PLUGIN_PRIORITY.HIGHEST` — after the provider,
+whatever its band, and before an ordinary consumer. It **throws during `start()` when nothing
+provides `token`** — a mistyped token would otherwise register the double under a nonsense name and
+leave the real service serving — and **when `token` is a multi-provider capability**. Both checks
+are raised from an `onInit` hook rather than from the plugin's own `register()`, because the
+override registers early: at that point a multi-provider capability has not accumulated its
+providers yet, and a token the override does not shadow may still be registered by a later plugin.
+`onInit` runs once every plugin has registered, and a throw there fails `start()` exactly as one in
+`register()` would. `ServiceRegistry.getAll` returns the single and multi registrations
+concatenated, so an override of one ADDS a provider rather than replacing the existing ones: every
+real provider would still run while the caller was told the capability was overridden. Detection is
+generic — a provider count taken after the write, not a list of known tokens — so the kernel's five
 (`health-indicator`, `metric-registration`, `openapi-schema`, `decorator-handler`, `cli-command`)
 and any capability an application registers itself with `{ multi: true }` are refused alike. The
 count resolves nothing that is being replaced: the override lands in the single map first, so a

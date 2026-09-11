@@ -21,21 +21,22 @@ All notable changes to this project are documented here. The format follows
 - **`@setu-ts/testing`** — `overrideCapability(token, service)` builds the replacement plugin
   AI_GUIDELINES §3.4 describes, applying the three constraints that make one work: it declares no
   `provides` (a second declaration of a live token is refused before any plugin runs), registers
-  with `{ override: true }`, and carries a priority above `PLUGIN_PRIORITY.LOWEST` so it wins
-  regardless of the replaced plugin's band. It **throws at `register()` when nothing provides the
-  token** — without that, a mistyped token registers the double under a nonsense name, leaves the
-  real service serving, and the test passes against the real dependency. It likewise refuses a
-  multi-provider capability, where `getAll` returns the single and multi registrations concatenated
-  so an override would ADD a provider while every real one kept running — detected generically by a
-  provider count rather than a list of known tokens, so a capability an application registers itself
-  with `{ multi: true }` is refused too. The override is ordered AFTER the provider and BEFORE
-  ordinary consumers — an `optionalDependencies` edge on the token plus an early priority — so it
-  reaches a consumer that resolves the capability during its own `register()` (`NotificationPlugin`
-  does) as well as one that resolves it per request, and it replaces a provider in any priority
-  band. It does not undo the provider's eager side effects, and it requires the provider to declare
-  the token in `provides`; both bounds and the `without`-plus-`createMockPlugin` alternative are
-  stated in the README and `PUBLIC_API.md`. `createMockPlugin` is unchanged and still the right tool
-  for _providing_ a capability an application lacks; it cannot _replace_ one, because its `provides`
+  with `{ override: true }`, and orders itself through an `optionalDependencies` edge on the token
+  plus `PLUGIN_PRIORITY.HIGHEST` — after the provider, whatever its band, and before an ordinary
+  consumer. It **throws during `start()` when nothing provides the token** — without that, a
+  mistyped token registers the double under a nonsense name, leaves the real service serving, and
+  the test passes against the real dependency. It likewise refuses a multi-provider capability,
+  where `getAll` returns the single and multi registrations concatenated so an override would ADD a
+  provider while every real one kept running — detected generically by a provider count rather than
+  a list of known tokens, so a capability an application registers itself with `{ multi: true }` is
+  refused too. The override is ordered AFTER the provider and BEFORE ordinary consumers — an
+  `optionalDependencies` edge on the token plus an early priority — so it reaches a consumer that
+  resolves the capability during its own `register()` (`NotificationPlugin` does) as well as one
+  that resolves it per request, and it replaces a provider in any priority band. It does not undo
+  the provider's eager side effects, and it requires the provider to declare the token in
+  `provides`; both bounds and the `without`-plus-`createMockPlugin` alternative are stated in the
+  README and `PUBLIC_API.md`. `createMockPlugin` is unchanged and still the right tool for
+  _providing_ a capability an application lacks; it cannot _replace_ one, because its `provides`
   declaration collides with the real plugin's (M91).
 - **`common`** — `createCachedProbe` is generic over its outcome type, with a `fallback` recorded on
   timeout or rejection (default `false`, so every existing caller is unchanged). A probe that reads
