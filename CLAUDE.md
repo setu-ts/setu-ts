@@ -4820,12 +4820,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `0.3.0` produced **8 findings, 4 High**, all now closed as M89a (declarations that enforce
   nothing), M89b (caller errors that read as server faults), and M89c (the ingress surface above) —
   grouped by defect **shape** rather than by package, the M70a–M70n precedent. The X20–X38 register
-  that follows it is being closed the same way: M90a (abuse control), M90b (health truth bounded, PR
+  that follows it was closed the same way: M90a (abuse control), M90b (health truth bounded, PR
   #249), M90c (credential revocation and token type), M90d (the two brokers that cannot start, PR
   #256), M90e (static delivery correctness, PR #252), M90f (caller errors reach the client
   correctly, PR #259), M90g (concurrency loses work silently, PR #258), M90h (documentation that
-  survives contact, above) and M90i (observability that joins up, PR #260) are complete; M90j is
-  awaiting review (PR #263).
+  survives contact, above), M90i (observability that joins up, PR #260) and M90j (operator
+  diagnostics survive to the operator, PR #263) are complete, closing the register.
 
 ## Verification (run before declaring any work done)
 
