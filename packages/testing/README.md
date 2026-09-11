@@ -166,11 +166,12 @@ await createTestApp({
 });
 ```
 
-It also **refuses a multi-provider capability** — `health-indicator`, `metric-registration`,
-`openapi-schema`, `decorator-handler` and `cli-command`, the five the kernel registers with
-`{ multi: true }`. `getAll` returns the single and multi registrations concatenated, so an override
-would ADD a provider while every real one kept running, and the test would report success. Exclude
-the plugin that registers the provider instead.
+It also **refuses a multi-provider capability**. `getAll` returns the single and multi registrations
+concatenated, so an override would ADD a provider while every real one kept running and the test
+would report success. Detection is generic — a post-registration provider count, not a list of known
+tokens — so the kernel's five (`health-indicator`, `metric-registration`, `openapi-schema`,
+`decorator-handler`, `cli-command`) and any capability an application registers with
+`{ multi: true }` are refused alike. Exclude the plugin that registers the provider instead.
 
 > **`overrideCapability` replaces, `createMockPlugin` provides.** `createMockPlugin` declares the
 > token in `provides` — which is what satisfies a dependent plugin's `dependencies` check, and which

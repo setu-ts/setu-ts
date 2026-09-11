@@ -10034,11 +10034,15 @@ before any plugin runs), registers with `{ override: true }`, and carries a prio
 `PLUGIN_PRIORITY.LOWEST` so it wins regardless of the replaced plugin's own band. It **throws at
 `register()` when nothing provides `token`** — a mistyped token would otherwise register the double
 under a nonsense name and leave the real service serving — and **when `token` is a multi-provider
-capability** (`health-indicator`, `metric-registration`, `openapi-schema`, `decorator-handler`,
-`cli-command`). `ServiceRegistry.getAll` returns the single and multi registrations concatenated, so
+capability**. `ServiceRegistry.getAll` returns the single and multi registrations concatenated, so
 an override of one ADDS a provider rather than replacing the existing ones: every real provider
-would still run while the caller was told the capability was overridden. Exclude the plugin that
-registers the provider instead.
+would still run while the caller was told the capability was overridden. Detection is generic — a
+provider count taken after the write, not a list of known tokens — so the kernel's five
+(`health-indicator`, `metric-registration`, `openapi-schema`, `decorator-handler`, `cli-command`)
+and any capability an application registers itself with `{ multi: true }` are refused alike. The
+count resolves nothing that is being replaced: the override lands in the single map first, so a
+`registerFactory` provider is never constructed. Exclude the plugin that registers the provider
+instead.
 
 `overrideCapability` replaces what every resolution **after it registers** sees. A consumer that
 resolved the capability during its own `register()` keeps the original object — `NotificationPlugin`

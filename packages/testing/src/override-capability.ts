@@ -1,5 +1,5 @@
 import type { CapabilityToken, IPlugin, IPluginContext } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { PLUGIN_PRIORITY } from '@setu-ts/common';
 
 /**
  * Priority carried by every plugin {@linkcode overrideCapability} emits.
@@ -19,34 +19,6 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
  * service. No first-party plugin declares above `PLUGIN_PRIORITY.LOWEST`.
  */
 const OVERRIDE_PRIORITY = PLUGIN_PRIORITY.LOWEST + 1;
-
-/**
- * Capabilities the kernel registers with `{ multi: true }`, which cannot be
- * replaced by an override.
- *
- * `ServiceRegistry.getAll` returns `[...inherited, ...single, ...multi]`, so a
- * `{ override: true }` registration lands in the SINGLE map and is *prepended*
- * to the multi list rather than replacing anything — every real provider still
- * runs, and the caller is told the capability was overridden. `has()` cannot
- * distinguish the two (`service-registry.ts:99` consults both maps) and the
- * public `IServiceRegistry` exposes no non-instantiating discriminator —
- * `get`/`getAll` both resolve a `registerFactory` registration, so probing with
- * either would construct the very service the test is replacing.
- *
- * These five are every multi registration the framework makes; each is written
- * through an `IPluginContext` facade (`ctx.health.register`,
- * `ctx.metrics.register`, `ctx.openapi.addSchema`, `ctx.decorators.register`,
- * `ctx.cli.register`), so they are the complete in-framework set. A plugin
- * calling `ctx.services.register(token, svc, { multi: true })` directly is not
- * detectable here and is documented instead.
- */
-const MULTI_PROVIDER_TOKENS: ReadonlySet<CapabilityToken> = new Set([
-  CAPABILITIES.HEALTH_INDICATOR,
-  CAPABILITIES.METRIC_REGISTRATION,
-  CAPABILITIES.OPENAPI_SCHEMA,
-  CAPABILITIES.DECORATOR_HANDLER,
-  CAPABILITIES.CLI_COMMAND,
-]);
 
 /**
  * Creates a plugin that REPLACES an already-provided capability with a test
@@ -112,12 +84,15 @@ const MULTI_PROVIDER_TOKENS: ReadonlySet<CapabilityToken> = new Set([
  * @param service - The test double to register under it
  * @returns A plugin to append to `createTestApp`'s `overrides`, or to pass to
  * `app.register()` on an un-started application
- * **Multi-provider capabilities cannot be overridden.** `health-indicator`,
- * `metric-registration`, `openapi-schema`, `decorator-handler` and `cli-command`
- * are registered with `{ multi: true }`, and `getAll` returns the single and
- * multi registrations *concatenated* — so an override would add a provider
- * while every real one kept running. Those five are refused by name; exclude
- * the plugin that registers the provider instead.
+ * **Multi-provider capabilities cannot be overridden**, and are refused. A token
+ * registered with `{ multi: true }` — the kernel's `health-indicator`,
+ * `metric-registration`, `openapi-schema`, `decorator-handler` and
+ * `cli-command`, and any an application registers itself — has no single
+ * provider to replace: `getAll` returns the single and multi registrations
+ * *concatenated*, so an override would add a provider while every real one kept
+ * running. Detection is generic rather than a list of known tokens, so an
+ * application's own multi capability is refused too. Exclude the plugin that
+ * registers the provider instead.
  *
  * @throws {Error} At `register()` time, if nothing provides `token`, or if
  * `token` is a multi-provider capability. A silent no-op would leave the real
@@ -141,14 +116,6 @@ export function overrideCapability(token: CapabilityToken, service: object): IPl
     version: '0.6.0',
     priority: OVERRIDE_PRIORITY,
     register(ctx: IPluginContext): void {
-      if (MULTI_PROVIDER_TOKENS.has(token)) {
-        throw new Error(
-          `Cannot override capability '${token}': it is a multi-provider capability. ` +
-            `Overriding one ADDS a provider rather than replacing the existing ones, so every ` +
-            `real provider would still run while the test reported success. Exclude the plugin ` +
-            `that registers it instead — createTestApp({ app, without: ['<plugin>'] }).`,
-        );
-      }
       if (!ctx.services.has(token)) {
         throw new Error(
           `Cannot override capability '${token}': nothing provides it. ` +
@@ -157,6 +124,32 @@ export function overrideCapability(token: CapabilityToken, service: object): IPl
         );
       }
       ctx.services.register(token, service, { override: true });
+
+      // Multi-provider detection, AFTER the write and generically — there is no
+      // non-instantiating way to ask the registry beforehand (`has()` consults
+      // both the single and multi maps, so it cannot tell them apart).
+      //
+      // `getAll` returns `[...inherited, ...single, ...multi]`, so on a single-
+      // provider token it now returns exactly our own object: length 1, and the
+      // replaced registration is never resolved — a `registerFactory` provider
+      // is NOT constructed by this check. More than one entry means the token is
+      // multi-registered and the write above ADDED a provider rather than
+      // replacing the existing ones, which would leave every real provider
+      // running while the caller was told the capability was overridden.
+      //
+      // The stale write is not undone: `IServiceRegistry.unregister` deletes both
+      // maps and would destroy the real providers, and throwing here fails
+      // `start()`, so the application is discarded either way.
+      const providers = ctx.services.getAll(token).length;
+      if (providers > 1) {
+        throw new Error(
+          `Cannot override capability '${token}': it is a multi-provider capability ` +
+            `(${providers - 1} other provider${providers === 2 ? '' : 's'}). Overriding one ADDS ` +
+            `a provider rather than replacing the existing ones, so every real provider would ` +
+            `still run while the test reported success. Exclude the plugin that registers it ` +
+            `instead — createTestApp({ app, without: ['<plugin>'] }).`,
+        );
+      }
     },
   };
 }

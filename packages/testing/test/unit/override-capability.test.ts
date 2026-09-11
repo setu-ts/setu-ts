@@ -148,35 +148,50 @@ describe('overrideCapability', () => {
     );
   });
 
-  it('names every capability the kernel registers with multi: true', () => {
-    // Pinned as a set: a sixth multi registration added to the kernel without a
-    // matching entry here reintroduces the silent add-a-provider path.
-    const refused: string[] = [];
-    for (
-      const token of [
-        CAPABILITIES.HEALTH_INDICATOR,
-        CAPABILITIES.METRIC_REGISTRATION,
-        CAPABILITIES.OPENAPI_SCHEMA,
-        CAPABILITIES.DECORATOR_HANDLER,
-        CAPABILITIES.CLI_COMMAND,
-      ]
-    ) {
-      const plugin = overrideCapability(token, {});
-      try {
-        plugin.register({
-          services: { has: () => true },
-        } as unknown as IPluginContext);
-      } catch (error) {
-        if ((error as Error).message.includes('multi-provider')) refused.push(token);
-      }
-    }
-    expect(refused).toEqual([
-      'health-indicator',
-      'metric-registration',
-      'openapi-schema',
-      'decorator-handler',
-      'cli-command',
-    ]);
+  it('refuses a CUSTOM multi-provider capability, which no token list could name', async () => {
+    // Detection is generic — a post-registration `getAll(token).length > 1` —
+    // so a capability an APPLICATION registers with `{ multi: true }` is refused
+    // too. A hardcoded list of framework tokens could never see this one.
+    const hooks: IPlugin = {
+      name: 'hooks',
+      version: '1.0.0',
+      register(ctx: IPluginContext) {
+        ctx.services.register('app.hooks', { id: 'realA' }, { multi: true });
+        ctx.services.register('app.hooks', { id: 'realB' }, { multi: true });
+      },
+    };
+    const app = createApplication({
+      plugins: [runtimePlugin(), hooks, overrideCapability('app.hooks', { id: 'MOCK' })],
+    });
+
+    await expect(app.start()).rejects.toThrow(
+      /Cannot override capability 'app.hooks': it is a multi-provider capability \(2 other providers\)/,
+    );
+  });
+
+  it('does not construct a replaced factory provider while detecting multi', async () => {
+    // The detection resolves `getAll`, so it must not build the very service it
+    // is replacing: the override lands in the single map FIRST, so the replaced
+    // registration is gone before anything resolves.
+    let constructed = 0;
+    const provider: IPlugin = {
+      name: 'db',
+      version: '1.0.0',
+      provides: ['db'],
+      register(ctx: IPluginContext) {
+        ctx.services.registerFactory('db', () => {
+          constructed++;
+          return { who: 'REAL' };
+        });
+      },
+    };
+    const app = createApplication({
+      plugins: [runtimePlugin(), provider, overrideCapability('db', { who: 'MOCK' })],
+    });
+    await app.start();
+
+    expect(constructed).toBe(0);
+    expect(app.services.get<{ who: string }>('db').who).toBe('MOCK');
   });
 
   it('refuses two overrides of one token on the plugin name', async () => {
