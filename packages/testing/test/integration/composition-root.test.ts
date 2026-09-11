@@ -134,17 +134,20 @@ function eagerConsumer(captured: { mailer: Mailer | null }): IPlugin {
 }
 
 describe('overrideCapability against an eagerly-capturing consumer', () => {
-  it('does NOT reach a consumer that captured the service while registering', async () => {
-    // The documented bound, pinned. An override runs after every other plugin,
-    // so it replaces what LATER resolutions see — a reference already taken is
-    // not one of them. No ordering fixes it: placed before the real provider the
-    // override registers the token first, and the provider's own registration
-    // then fails — it registers without `{ override: true }` — so the
-    // application does not start at all.
+  it('reaches a consumer that resolved the capability while registering', async () => {
+    // The case that makes an override useful rather than merely tidy.
+    // `NotificationPlugin` resolves `CAPABILITIES.MAIL` inside its own
+    // `register()` and keeps the object, so an override that ran after every
+    // plugin would replace the registry entry while every notification still
+    // reached the real mailer — no error, no signal.
+    //
+    // The override declares `optionalDependencies: [token]`, which orders it
+    // AFTER the provider, and an early priority, which orders it BEFORE
+    // ordinary consumers. The kernel's resolver does the work.
     const trace = newTrace();
     const captured: { mailer: Mailer | null } = { mailer: null };
     const fakeSent: string[] = [];
-    const app = await createTestApp({
+    await createTestApp({
       app: createRoot(trace, [eagerConsumer(captured)]),
       overrides: [
         overrideCapability(
@@ -159,16 +162,35 @@ describe('overrideCapability against an eagerly-capturing consumer', () => {
 
     captured.mailer?.send('a@example.test');
 
-    expect(fakeSent).toEqual([]); // the double saw nothing
-    expect(trace.realMailer.sent).toEqual(['a@example.test']);
-    // …while the registry itself DOES return the double.
-    expect(app.services.get<Mailer>(CAPABILITIES.MAIL).sent).toBe(fakeSent);
+    expect(fakeSent).toEqual(['a@example.test']);
+    expect(trace.realMailer.sent).toEqual([]);
+  });
+
+  it("still leaves the provider's eager side effects done — exclude it for those", async () => {
+    // An override reaches the captor, but the provider's `register()` has still
+    // run: a database adapter's `connect()` already happened. `without` is the
+    // only thing that prevents that, which is why both options exist.
+    const trace = newTrace();
+    const app = await createTestApp({
+      app: createRoot(trace),
+      overrides: [
+        overrideCapability(
+          CAPABILITIES.MAIL,
+          {
+            sent: [],
+            send: () => {},
+          } satisfies Mailer,
+        ),
+      ],
+    });
+
+    expect(trace.connected).toEqual(['database']);
+    expect(app.services.has(CAPABILITIES.DATABASE)).toBe(true);
   });
 
   it('is reached when the provider is excluded and the double registers ahead of the consumer', async () => {
-    // The documented remedy. `without` removes the provider, so nothing can be
-    // captured from it; the double registers at a priority ahead of the
-    // consumer, so the consumer captures the double instead.
+    // The other composition: remove the provider entirely — which also prevents
+    // its eager side effects — and supply the double as a provider.
     const trace = newTrace();
     const captured: { mailer: Mailer | null } = { mailer: null };
     const fakeSent: string[] = [];

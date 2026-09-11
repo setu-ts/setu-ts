@@ -10049,15 +10049,20 @@ count resolves nothing that is being replaced: the override lands in the single 
 `registerFactory` provider is never constructed. Exclude the plugin that registers the provider
 instead.
 
-`overrideCapability` replaces what every resolution **after it registers** sees. A consumer that
-resolved the capability during its own `register()` keeps the original object — `NotificationPlugin`
-captures `CAPABILITIES.MAIL` while registering, so an override beneath it replaces the registry
-entry while every notification still reaches the real mailer, with no error and no signal. No
-ordering fixes this: an override placed before the real provider registers the token first, and the
-provider's own registration then fails — it registers without `{ override: true }`, which the kernel
-refuses on a live token — so the application does not start at all. Exclude the provider and supply
-the double ahead of its consumers instead — `without: ['mail-plugin']` plus a `createMockPlugin` at
-`PLUGIN_PRIORITY.HIGH`.
+`overrideCapability` is ordered **after the provider and before ordinary consumers**, so it reaches
+a consumer that resolves the capability during its own `register()` as well as one that resolves it
+per request — `NotificationPlugin` resolves `CAPABILITIES.MAIL` while registering, and an override
+beneath it is seen by every notification it sends. Ordering comes from an `optionalDependencies`
+edge on the token, which the resolver visits ahead of any priority number, plus an early priority
+that places it before a `PLUGIN_PRIORITY.NORMAL` consumer — so a provider in any band is replaced.
+
+Two bounds remain. It does **not** undo the provider's eager side effects: the provider's
+`register()` has run, so a database adapter's `connect()` already happened — `without` is what
+prevents that. And it **requires the provider to declare the token in `provides`**, which is what
+the ordering edge hangs on and how a plugin is depended upon at all; a provider that registers a
+capability without declaring it fails startup with `Capability '<token>' is already registered`. For
+either, exclude the provider and supply the double ahead of its consumers —
+`without: ['mail-plugin']` plus a `createMockPlugin` at `PLUGIN_PRIORITY.HIGH`.
 
 > `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
 > the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the

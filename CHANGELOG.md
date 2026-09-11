@@ -28,10 +28,13 @@ All notable changes to this project are documented here. The format follows
   multi-provider capability, where `getAll` returns the single and multi registrations concatenated
   so an override would ADD a provider while every real one kept running — detected generically by a
   provider count rather than a list of known tokens, so a capability an application registers itself
-  with `{ multi: true }` is refused too. An override replaces what every resolution AFTER it
-  registers sees; a consumer that captured the service during its own `register()` keeps the
-  original, which the README and `PUBLIC_API.md` state along with the
-  `without`-plus-`createMockPlugin` remedy. `createMockPlugin` is unchanged and still the right tool
+  with `{ multi: true }` is refused too. The override is ordered AFTER the provider and BEFORE
+  ordinary consumers — an `optionalDependencies` edge on the token plus an early priority — so it
+  reaches a consumer that resolves the capability during its own `register()` (`NotificationPlugin`
+  does) as well as one that resolves it per request, and it replaces a provider in any priority
+  band. It does not undo the provider's eager side effects, and it requires the provider to declare
+  the token in `provides`; both bounds and the `without`-plus-`createMockPlugin` alternative are
+  stated in the README and `PUBLIC_API.md`. `createMockPlugin` is unchanged and still the right tool
   for _providing_ a capability an application lacks; it cannot _replace_ one, because its `provides`
   declaration collides with the real plugin's (M91).
 - **`common`** — `createCachedProbe` is generic over its outcome type, with a `fallback` recorded on

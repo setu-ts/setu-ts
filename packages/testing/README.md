@@ -144,14 +144,23 @@ It **throws at `register()` when nothing provides the token**. Without that chec
 would register the double under a nonsense name, leave the real service serving, and let the test
 pass against the real dependency.
 
-It replaces what every resolution **after it registers** sees. A consumer that resolved this
-capability during its own `register()` holds the original object and keeps using it —
-`NotificationPlugin` does exactly that, so overriding `mail` beneath it replaces the registry entry
-while every notification still reaches the real mailer, with no error and no signal. No ordering
-fixes it: an override placed _before_ the real provider registers the token first, and the
-provider's own registration then fails — it registers without `{ override: true }`, which the kernel
-refuses on a live token — so the application does not start at all. Remove the provider and supply
-the double ahead of its consumers instead:
+It is ordered **after the provider and before ordinary consumers**, so it reaches a consumer that
+resolves the capability during its own `register()` as well as one that resolves it per request —
+`NotificationPlugin` resolves `CAPABILITIES.MAIL` while registering, and an override beneath it is
+seen by every notification it sends. Ordering comes from an `optionalDependencies` edge on the token
+plus an early priority, so it works against a provider in any priority band.
+
+Two bounds remain, both documented rather than surprising:
+
+- **It does not undo the provider's eager side effects.** The provider's `register()` has run, so a
+  database adapter's `connect()` already happened. Use `without` for that.
+- **It requires the provider to declare the token in `provides`** — that is what the ordering edge
+  hangs on, and how a plugin is depended upon at all. A provider that registers a capability without
+  declaring it fails startup with `Capability '<token>' is already registered`; declare `provides`,
+  or use the removal form below.
+
+To remove the provider instead of replacing it — which also prevents its eager side effects — supply
+the double as a provider ahead of its consumers:
 
 ```typescript
 await createTestApp({

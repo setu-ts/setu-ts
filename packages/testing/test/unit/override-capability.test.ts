@@ -42,10 +42,16 @@ describe('overrideCapability', () => {
     expect(plugin.name).toBe(`test-override.${CAPABILITIES.DATABASE}`);
   });
 
-  it('runs after every first-party priority band', () => {
+  it('orders itself after the provider and before ordinary consumers', () => {
     const plugin = overrideCapability(CAPABILITIES.DATABASE, { who: 'MOCK' });
 
-    expect(plugin.priority).toBeGreaterThan(PLUGIN_PRIORITY.LOWEST);
+    // After the provider: an optional dependency edge on the token, which the
+    // resolver honours ahead of any priority number.
+    expect(plugin.optionalDependencies).toEqual([CAPABILITIES.DATABASE]);
+    // Before ordinary consumers: an early seed, so the depth-first sort reaches
+    // it (and, through the edge, its provider) before a NORMAL-band plugin.
+    expect(plugin.priority).toBe(PLUGIN_PRIORITY.HIGHEST);
+    expect(plugin.priority).toBeLessThan(PLUGIN_PRIORITY.NORMAL);
   });
 
   it('replaces the service a real plugin registered', async () => {
@@ -78,22 +84,48 @@ describe('overrideCapability', () => {
     expect(app.services.get<{ who: string }>(CAPABILITIES.DATABASE).who).toBe('MOCK');
   });
 
-  it('refuses rather than silently losing to a provider above the sentinel priority', async () => {
-    // OVERRIDE_PRIORITY is a convention, not a ceiling — this package cannot
-    // bound what a plugin declares. A provider above it runs AFTER the override,
-    // so the override reaches its presence check with nothing yet providing the
-    // token and refuses by name. Either the override applies or startup fails;
-    // never a silently wrong service.
+  it('overrides a provider in ANY priority band, including above its own', async () => {
+    // Ordering comes from the `optionalDependencies` edge on the token, not from
+    // the priority number — so a provider declaring a higher priority than the
+    // override is still replaced, rather than the override running first and
+    // refusing (or colliding).
+    for (const priority of [PLUGIN_PRIORITY.HIGHEST, PLUGIN_PRIORITY.LOW, 5000]) {
+      const app = createApplication({
+        plugins: [
+          runtimePlugin(),
+          { ...realDatabase(), priority },
+          overrideCapability(CAPABILITIES.DATABASE, { who: 'MOCK' }),
+        ],
+      });
+      await app.start();
+
+      expect(app.services.get<{ who: string }>(CAPABILITIES.DATABASE).who).toBe('MOCK');
+    }
+  });
+
+  it('fails startup loudly when the provider declares no `provides`', async () => {
+    // The ordering edge hangs on `provides`, which is also how a plugin is
+    // depended upon at all. A provider that registers a capability without
+    // declaring it cannot be ordered against, so the override registers first
+    // and the provider's own plain registration then fails — loudly, at
+    // startup, rather than silently producing the wrong service.
+    const undeclared: IPlugin = {
+      name: 'db',
+      version: '1.0.0',
+      register(ctx: IPluginContext) {
+        ctx.services.register(CAPABILITIES.DATABASE, { who: 'REAL' });
+      },
+    };
     const app = createApplication({
       plugins: [
         runtimePlugin(),
-        { ...realDatabase(), priority: 5000 },
+        undeclared,
         overrideCapability(CAPABILITIES.DATABASE, { who: 'MOCK' }),
       ],
     });
 
     await expect(app.start()).rejects.toThrow(
-      /Cannot override capability 'database': nothing provides it/,
+      /Capability 'database' is already registered/,
     );
   });
 

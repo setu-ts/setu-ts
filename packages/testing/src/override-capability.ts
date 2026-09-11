@@ -2,31 +2,12 @@ import type { CapabilityToken, IPlugin, IPluginContext } from '@setu-ts/common';
 import { PLUGIN_PRIORITY } from '@setu-ts/common';
 
 /**
- * Priority carried by every plugin {@linkcode overrideCapability} emits.
- *
- * One above {@linkcode PLUGIN_PRIORITY.LOWEST}, so an override registers after
- * every plugin that could claim the token — including one at
- * `PLUGIN_PRIORITY.LOW` (900), which a default-priority (500) plugin would
- * otherwise lose to. The kernel orders by `(priority, registration order)`,
- * so two overrides of different tokens are unaffected by each other.
- *
- * This is a convention rather than an enforced ceiling — the testing package
- * cannot bound what a plugin declares — but the failure mode is loud rather
- * than silent. A provider declaring a HIGHER number runs after the override, so
- * the override reaches its presence check with nothing yet providing the token
- * and refuses by name; the application does not start. You therefore get either
- * the override or a startup refusal naming the token, never a silently wrong
- * service. No first-party plugin declares above `PLUGIN_PRIORITY.LOWEST`.
- */
-const OVERRIDE_PRIORITY = PLUGIN_PRIORITY.LOWEST + 1;
-
-/**
  * Creates a plugin that REPLACES an already-provided capability with a test
  * double, leaving the rest of the application's composition intact.
  *
- * It replaces what every resolution *after it registers* sees. A consumer that
- * captured the service during its own `register()` keeps the original — see
- * "post-hoc" below for the case and the remedy.
+ * It is ordered after the provider and before ordinary consumers, so it reaches
+ * a consumer that resolves the capability during its own `register()` as well as
+ * one that resolves it per request.
  *
  * This is the replacement mechanism AI_GUIDELINES §3.4 describes — "a
  * replacement plugin registers the same capability token with
@@ -39,33 +20,29 @@ const OVERRIDE_PRIORITY = PLUGIN_PRIORITY.LOWEST + 1;
  *    {@linkcode createMockPlugin} cannot be used to override.
  * 2. It registers with `{ override: true }`, without which the kernel refuses a
  *    second registration of a live token.
- * 3. It runs after every first-party priority band (see `OVERRIDE_PRIORITY`),
- *    so it wins against a provider in any of them — including
- *    `PLUGIN_PRIORITY.LOW`, which a default-priority plugin would lose to. A
- *    provider declaring a number above the sentinel is refused at startup
- *    rather than silently winning.
+ * 3. It is ordered **after the provider and before ordinary consumers**, which
+ *    is what lets it reach a consumer that resolves the capability during its
+ *    OWN `register()` — `NotificationPlugin` does exactly that. Ordering comes
+ *    from an `optionalDependencies` edge on the token (the resolver visits a
+ *    dependency first, whatever its priority band) plus an early priority, so
+ *    the depth-first sort reaches this plugin, and through the edge its
+ *    provider, before a `PLUGIN_PRIORITY.NORMAL` consumer.
  *
- * **The override is post-hoc, and that bounds what it can reach.** It runs after
- * every other plugin, so it replaces what every resolution *from then on* sees —
- * but two things have already happened by that point:
+ * **What it still cannot do: undo the provider's eager side effects.** The real
+ * plugin's `register()` has run by the time this one replaces its service, so a
+ * database adapter's `connect()` or a broker's dial has already happened. Only
+ * removing the plugin prevents that — `createTestApp({ app, without })`, or
+ * `app.unregister(name)` directly.
  *
- * - **Eager side effects.** The real plugin's `register()` has run, so a
- *   database adapter's `connect()` or a broker's dial has already occurred.
- * - **Eagerly captured references.** A consumer that resolved this capability
- *   during its OWN `register()` holds the original object and keeps using it.
- *   `NotificationPlugin` does exactly this — `createProvider` calls
- *   `ctx.services.get(CAPABILITIES.MAIL)` while registering — so overriding
- *   `mail` beneath it replaces the registry entry while every notification
- *   still reaches the real mailer, with no error and no signal.
+ * **It requires the provider to declare the token in `provides`.** That is what
+ * the ordering edge hangs on, and it is how a plugin is depended upon at all. A
+ * plugin that registers a capability without declaring it cannot be ordered
+ * against, so the override registers first and the provider's own plain
+ * registration then fails the application's startup with `Capability '<token>'
+ * is already registered`. Declare `provides`, or use the removal form below.
  *
- * No ordering fixes the second case. An override placed *before* the real
- * provider registers the token FIRST; the provider's own registration then
- * fails, because it registers without `{ override: true }` and the kernel
- * refuses a second registration of a live token — so the application does not
- * start at all. The provider never overwrites the override; it throws.
- *
- * For either case, remove the provider instead of replacing it, and supply the
- * double as a provider ahead of its consumers:
+ * To remove the provider instead of replacing it — which also prevents its eager
+ * side effects — supply the double as a provider ahead of its consumers:
  *
  * ```typescript
  * await createTestApp({
@@ -114,42 +91,51 @@ export function overrideCapability(token: CapabilityToken, service: object): IPl
   return {
     name: `test-override.${token}`,
     version: '0.6.0',
-    priority: OVERRIDE_PRIORITY,
+    optionalDependencies: [token],
+    priority: PLUGIN_PRIORITY.HIGHEST,
     register(ctx: IPluginContext): void {
-      if (!ctx.services.has(token)) {
-        throw new Error(
-          `Cannot override capability '${token}': nothing provides it. ` +
-            `overrideCapability() replaces a capability the application already has — ` +
-            `check the token for a typo, or use createMockPlugin() to provide one it lacks.`,
-        );
-      }
+      // Whether the real provider has already registered. The
+      // `optionalDependencies` edge above guarantees it has, WHENEVER the
+      // provider declares the token in `provides` — which is how a plugin is
+      // depended upon at all. Recorded here because by `onInit` the registry
+      // cannot distinguish "I replaced a provider" from "I was the only one".
+      const replacedAProvider = ctx.services.has(token);
+
       ctx.services.register(token, service, { override: true });
 
-      // Multi-provider detection, AFTER the write and generically — there is no
-      // non-instantiating way to ask the registry beforehand (`has()` consults
-      // both the single and multi maps, so it cannot tell them apart).
-      //
-      // `getAll` returns `[...inherited, ...single, ...multi]`, so on a single-
-      // provider token it now returns exactly our own object: length 1, and the
-      // replaced registration is never resolved — a `registerFactory` provider
-      // is NOT constructed by this check. More than one entry means the token is
-      // multi-registered and the write above ADDED a provider rather than
-      // replacing the existing ones, which would leave every real provider
-      // running while the caller was told the capability was overridden.
-      //
-      // The stale write is not undone: `IServiceRegistry.unregister` deletes both
-      // maps and would destroy the real providers, and throwing here fails
-      // `start()`, so the application is discarded either way.
-      const providers = ctx.services.getAll(token).length;
-      if (providers > 1) {
-        throw new Error(
-          `Cannot override capability '${token}': it is a multi-provider capability ` +
-            `(${providers - 1} other provider${providers === 2 ? '' : 's'}). Overriding one ADDS ` +
-            `a provider rather than replacing the existing ones, so every real provider would ` +
-            `still run while the test reported success. Exclude the plugin that registers it ` +
-            `instead — createTestApp({ app, without: ['<plugin>'] }).`,
-        );
-      }
+      // Both refusals are verified at `onInit`, not here: this plugin registers
+      // EARLY (see the priority above), so at `register()` time a multi-provider
+      // capability has not accumulated its providers yet and a token this
+      // override does not shadow may still be registered by a later plugin.
+      // `onInit` runs once every plugin has registered, which is the first
+      // moment either question has a settled answer, and a throw there fails
+      // `start()` exactly as one here would.
+      ctx.lifecycle.onInit(() => {
+        // `getAll` returns `[...inherited, ...single, ...multi]`, so on a
+        // single-provider token it returns exactly our own object. More than one
+        // entry means the token is multi-registered and the write above ADDED a
+        // provider rather than replacing the existing ones, which would leave
+        // every real provider running while the caller was told the capability
+        // was overridden. The replaced registration is never resolved, so a
+        // `registerFactory` provider is not constructed by this count.
+        const providers = ctx.services.getAll(token).length;
+        if (providers > 1) {
+          throw new Error(
+            `Cannot override capability '${token}': it is a multi-provider capability ` +
+              `(${providers - 1} other provider${providers === 2 ? '' : 's'}). Overriding one ` +
+              `ADDS a provider rather than replacing the existing ones, so every real provider ` +
+              `would still run while the test reported success. Exclude the plugin that ` +
+              `registers it instead — createTestApp({ app, without: ['<plugin>'] }).`,
+          );
+        }
+        if (!replacedAProvider) {
+          throw new Error(
+            `Cannot override capability '${token}': nothing provides it. ` +
+              `overrideCapability() replaces a capability the application already has — ` +
+              `check the token for a typo, or use createMockPlugin() to provide one it lacks.`,
+          );
+        }
+      });
     },
   };
 }
