@@ -9288,9 +9288,12 @@ Contract notes:
   override replaces what consumers resolve, after the real plugin has already run. It **throws**
   once the application has started, mirroring `register()`, because `start()` has already read the
   plugin list and a silent `false` would report success for an operation that can have had no
-  effect. Removing a plugin another declares in `dependencies` is not refused here — `start()`
-  reports it, naming the dependent plugin and the unsatisfied **capability**. It does not name the
-  removed plugin when its name differs from the token it provided, which is the usual case
+  effect. It throws once any plugin has REGISTERED, not merely once `start()` was called: plugin
+  resolution can fail before anything runs — an unsatisfied dependency, a cycle, no runtime provider
+  — and removing the offending plugin is exactly how that is corrected, so those failures leave
+  `unregister` available. Removing a plugin another declares in `dependencies` is not refused here —
+  `start()` reports it, naming the dependent plugin and the unsatisfied **capability**. It does not
+  name the removed plugin when its name differs from the token it provided, which is the usual case
   (`database-plugin` provides `database`), so a failure after a `without` reads as a missing
   capability rather than as the exclusion that caused it. `@setu-ts/testing`'s
   `createTestApp({ app, without })` is the intended caller.
@@ -9300,7 +9303,9 @@ Contract notes:
   removing as it goes would leave earlier exclusions applied when a later name is misspelled, and
   the throw is recoverable, so a caller that catches it and reuses that composition root would be
   handed a silently altered one. `createTestApp` checks every `without` entry through this member
-  first and names all unmatched entries in one error.
+  first and names all unmatched entries in one error. It answers against the registered plugin list,
+  which startup does not clear, so after `start()` it still reports `true` for a plugin that has
+  already run.
 - **Listening requires** `CAPABILITIES.HTTP_ADAPTER` (registered by the runtime plugin) **and** a
   `port` option. Without either, `start()` skips server creation — `inject()` and tests need no
   server.

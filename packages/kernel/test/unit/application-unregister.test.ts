@@ -48,6 +48,17 @@ describe('Application.hasPlugin', () => {
     expect(ran).toEqual(['database']);
   });
 
+  it('reports true after start(), since startup does not clear the plugin list', async () => {
+    // Documented rather than special-cased: its purpose is pre-`start()`
+    // validation, and `unregister` throws once any plugin has registered, so a
+    // later answer is not actionable either way.
+    const ran: string[] = [];
+    const app = createApplication({ plugins: [runtimePlugin(), eagerPlugin('database', ran)] });
+    await app.start();
+
+    expect(app.hasPlugin('database')).toBe(true);
+  });
+
   it('reflects a removal', () => {
     const ran: string[] = [];
     const app = createApplication({ plugins: [runtimePlugin(), eagerPlugin('database', ran)] });
@@ -110,6 +121,30 @@ describe('Application.unregister', () => {
     await app.start();
 
     expect(ran).toEqual([]);
+  });
+
+  it('still permits removal when plugin RESOLUTION failed before anything ran', async () => {
+    // `resolvePluginOrder` throws before the registration loop — an unsatisfied
+    // dependency, a cycle, no runtime provider — and correcting that by removing
+    // the offending plugin is exactly what `unregister` is for. Gating on entry
+    // to `#runStartup` would refuse the most correctable failure there is.
+    const ran: string[] = [];
+    const dependent: IPlugin = {
+      name: 'orders',
+      version: '1.0.0',
+      dependencies: ['database'],
+      register() {
+        ran.push('orders');
+      },
+    };
+    const app = createApplication({ plugins: [runtimePlugin(), dependent] });
+
+    await expect(app.start()).rejects.toThrow(/depends on capability 'database'/);
+    expect(ran).toEqual([]); // nothing ran
+
+    expect(app.unregister('orders')).toBe(true);
+    await app.start(); // the correction works
+    expect(app.services.has(CAPABILITIES.RUNTIME)).toBe(true);
   });
 
   it('throws after a FAILED start, where plugins have already run', async () => {

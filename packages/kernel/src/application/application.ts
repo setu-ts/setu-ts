@@ -150,8 +150,10 @@ export interface IKernelApplication extends IApplication {
    * misspelled, handing a caller that catches the error a silently altered
    * application.
    *
-   * Answers against the pending list, so it reports `false` once startup has
-   * consumed that list — use it before `start()`.
+   * Answers against the registered plugin list, which startup does NOT clear — so
+   * after `start()` it still reports `true` for a plugin that has already run.
+   * Its purpose is pre-`start()` validation, and `unregister` throws once any
+   * plugin has registered, so a later answer is not actionable either way.
    *
    * @param name - The plugin's `name`, as declared on `IPlugin`
    * @returns `true` when at least one pending plugin carries that name
@@ -177,11 +179,16 @@ class Application implements IKernelApplication {
   }[] = [];
   #started = false;
   /**
-   * Whether `#runStartup` has begun registering plugins. Unlike {@linkcode
-   * #started} this is never reset: `start()` rolls `#started` back on failure so
-   * a failed start can be corrected and retried, but plugins that already ran
-   * cannot be un-run. `unregister` reads this so it can never report having
-   * removed a plugin whose `register()` has already executed.
+   * Whether any plugin has begun registering. Unlike {@linkcode #started} this is
+   * never reset: `start()` rolls `#started` back on failure so a failed start can
+   * be corrected and retried, but plugins that already ran cannot be un-run.
+   * `unregister` reads this so it can never report having removed a plugin whose
+   * `register()` has already executed.
+   *
+   * Set inside the registration loop rather than on entry to `#runStartup`,
+   * because plugin RESOLUTION can fail before anything runs — and correcting
+   * that failure by removing the offending plugin is exactly what `unregister`
+   * is for.
    */
   #registrationStarted = false;
   #serverHandle: unknown = null;
@@ -285,7 +292,6 @@ class Application implements IKernelApplication {
   }
 
   async #runStartup(options?: StartOptions): Promise<void> {
-    this.#registrationStarted = true;
     // 1. Resolve plugin order — throws without runtime provider
     const ordered = resolvePluginOrder(this.#plugins);
 
@@ -426,6 +432,12 @@ class Application implements IKernelApplication {
     //    the onInit hooks that run once all plugins have registered.
     try {
       for (const plugin of ordered) {
+        // Set here, not at the top of `#runStartup`: `resolvePluginOrder` above
+        // can throw (an unsatisfied dependency, a cycle, no runtime provider)
+        // before any plugin has run, and that is the most correctable startup
+        // failure there is — gating `unregister` on it would refuse to let the
+        // caller remove the plugin that caused it.
+        this.#registrationStarted = true;
         this.#registeringPlugin = plugin.name;
         await plugin.register(ctx);
         await this.#lifecycle.runRegister();
