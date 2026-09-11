@@ -336,14 +336,19 @@ describe('real-backend CI wiring', () => {
       expect(text).toContain('image: rabbitmq:4-management-alpine');
       expect(text).toContain('- 5672:5672');
       expect(text).toContain('RABBITMQ_URL: amqp://localhost:5672');
-      // MinIO (storage S3 outage suite)
-      expect(text).toContain('image: minio/minio:edge-cicd');
+      // MinIO (storage S3 outage suite). A docker-run STEP, not a service:
+      // Docker Hub's `minio/minio` stopped serving anonymous pulls on
+      // 2026-09-11, and every quay.io tag needs the `server /data` argument a
+      // service block cannot pass. Pinning the argument matters as much as the
+      // image — without it the container prints usage and exits 0, so the
+      // suite would find nothing listening and skip.
+      expect(text).toContain('quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data');
       // A service container takes no `command`/`environment` key, so a block
       // carrying either is an invalid workflow — and the text pins above would
       // still pass. Assert their absence too.
       expect(text).not.toMatch(/^\s+command:/m);
       expect(text).not.toMatch(/^\s+environment:/m);
-      expect(text).toContain('- 9000:9000');
+      expect(text).toContain('-p 127.0.0.1:9000:9000');
       expect(text).toContain('S3_ENDPOINT_URL: http://localhost:9000');
       // Mailpit (mail SMTP outage suite)
       expect(text).toContain('image: axllent/mailpit:v1.20.4');
