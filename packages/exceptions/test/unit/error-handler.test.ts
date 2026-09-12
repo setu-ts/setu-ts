@@ -280,6 +280,75 @@ describe('errorHandler middleware', () => {
     });
   });
 
+  describe('application response hook', () => {
+    it('returns the application-owned HTML response for a normalized HttpError', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({
+        respond: (error, context) => {
+          expect(context).toBe(ctx);
+          expect(error).toBeInstanceOf(HttpError);
+          expect(error.statusCode).toBe(404);
+          expect(error.message).toBe('User 42 not found');
+          return context.response
+            .status(error.statusCode)
+            .html(`<h1>${error.statusCode} ${error.message}</h1>`);
+        },
+      });
+
+      const result = await mw(ctx, nextThrows(notFound('User 42 not found')));
+
+      expect(result?.__handlerResult).toBe(true);
+      expect(responseSnapshot().status).toBe(404);
+      expect(responseSnapshot().headers.get('content-type')).toBe('text/html; charset=utf-8');
+      expect(responseSnapshot().body).toBe('<h1>404 User 42 not found</h1>');
+    });
+
+    it('receives the masked error while logging the original diagnostic', async () => {
+      const logger = new FakeLogger();
+      const services = new Map([[CAPABILITIES.LOGGER, logger]]);
+      const { ctx, responseSnapshot } = createFakeContext({ services });
+      const driverError = new Error(
+        "SQL: SELECT * FROM users WHERE email = 'alice@example.com'",
+      );
+      const mw = errorHandler({
+        respond: (error, context) => {
+          expect(error.statusCode).toBe(500);
+          expect(error.message).toBe('Internal Server Error');
+          expect(error.message).not.toContain('SELECT');
+          return context.response.status(error.statusCode).html('<h1>Something went wrong</h1>');
+        },
+      });
+
+      await mw(ctx, nextThrows(driverError));
+
+      expect(responseSnapshot().status).toBe(500);
+      expect(responseSnapshot().headers.get('content-type')).toBe('text/html; charset=utf-8');
+      expect(logger.calls).toHaveLength(1);
+      expect(logger.calls[0].message).toContain('SELECT');
+      expect(logger.calls[0].message).toContain('alice@example.com');
+    });
+
+    it('falls through to the configured formatter only when the hook returns undefined', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({
+        format: 'rfc9457',
+        respond: () => undefined,
+      });
+
+      await mw(ctx, nextThrows(notFound('gone')));
+
+      expect(responseSnapshot().status).toBe(404);
+      expect(responseSnapshot().headers.get('content-type')).toBe('application/problem+json');
+      expect(parseBody(responseSnapshot().body)).toEqual({
+        type: 'about:blank',
+        title: 'Not Found',
+        status: 404,
+        detail: 'gone',
+        instance: '/',
+      });
+    });
+  });
+
   describe('stack trace', () => {
     it('omits stack by default', async () => {
       const { ctx, responseSnapshot } = createFakeContext();

@@ -62,6 +62,27 @@ async function fetchProblem(
 }
 
 describe('errorHandler in a kernel application', () => {
+  describe('application response hook', () => {
+    it('serves an application-owned HTML response through the real kernel pipeline', async () => {
+      const app = await createErroringApp('rfc9457', notFound('User 42 does not exist'), {
+        respond: (error, ctx) => {
+          return ctx.response
+            .status(error.statusCode)
+            .html(`<h1>${error.statusCode} ${error.message}</h1>`);
+        },
+      });
+      try {
+        const response = await app.fetch(new Request('http://test.local/boom'));
+
+        expect(response.status).toBe(404);
+        expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
+        expect(await response.text()).toBe('<h1>404 User 42 does not exist</h1>');
+      } finally {
+        await app.stop();
+      }
+    });
+  });
+
   describe("format: 'rfc9457'", () => {
     it('serves an about:blank Problem Details body as problem+json', async () => {
       const app = await createErroringApp('rfc9457', notFound('User 42 does not exist'));

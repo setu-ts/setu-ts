@@ -32,15 +32,22 @@ app.router.get('/users/:id', async (ctx) => {
 
 `errorHandler(options?)` takes:
 
-| Option              | Type                                   | Default     | Description                                      |
-| ------------------- | -------------------------------------- | ----------- | ------------------------------------------------ |
-| `format`            | `ErrorFormat \| ErrorHandlerFormatter` | `'default'` | Body shape, or a formatter function.             |
-| `includeStackTrace` | `boolean`                              | `false`     | Add the stack to the body. Development only.     |
-| `logErrors`         | `boolean`                              | `true`      | Report handled errors to the resolved `ILogger`. |
+| Option               | Type                                                                     | Default     | Description                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------- |
+| `format`             | `ErrorFormat \| ErrorHandlerFormatter`                                   | `'default'` | Body shape, or a formatter function.                                                                          |
+| `includeStackTrace`  | `boolean`                                                                | `false`     | Add the stack to the body. Development only.                                                                  |
+| `maskInternalErrors` | `boolean`                                                                | `true`      | Replace unhandled non-`HttpError` 5xx diagnostics with their status title before serving the response.        |
+| `logErrors`          | `boolean`                                                                | `true`      | Report handled errors to the resolved `ILogger`.                                                              |
+| `respond`            | `(error: HttpError, ctx: IRequestContext) => HandlerResult \| undefined` | —           | Write an application-owned caught-error response; return `undefined` to use the configured formatter instead. |
 
 `format` accepts `'default'`, `'rfc9457'`, the deprecated `'rfc7807'`, or a function. Passing a
 formatter directly is equivalent to naming it — both paths select the same
 `application/problem+json` content type for Problem Details bodies.
+
+`respond` is called after error normalization, masking, status resolution, and logging. It can
+return an HTML (or another application-owned) result through `ctx.response`; the callback owns that
+result's status, headers, and body. It applies only to errors caught by `errorHandler`, not
+responder-based terminals such as an unmatched-path `404`.
 
 ## What it exports
 

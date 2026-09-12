@@ -2267,6 +2267,13 @@ app.middleware.add(errorHandler({
 }));
 ```
 
+For an application-owned response to a caught error, `respond` can return a result built with the
+live context's response writer (for example, `ctx.response.status(error.statusCode).html(page)`). It
+runs after normalization, masking, served-status resolution, and logging; its returned result owns
+the response, while `undefined` falls through to the configured formatter. This is an explicit
+application branch, not content negotiation, and it does not intercept the responder terminals
+below.
+
 ### Error Responder Seam
 
 The kernel ships zero error formatting, but it does produce error responses of its own (a malformed

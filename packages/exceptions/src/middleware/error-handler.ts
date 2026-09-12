@@ -90,6 +90,18 @@ export interface ErrorHandlerOptions {
    * registered. When no logger is present, logging is silently skipped.
    */
   readonly logErrors?: boolean;
+  /**
+   * Lets the application write its own response for a caught error. The hook
+   * receives the normalized error after status hints, internal-error masking,
+   * and status resolution, so `error.statusCode` is safe to serve. Return a
+   * {@linkcode HandlerResult} produced by `ctx.response` to use that response;
+   * return `undefined` to fall through to the configured formatter unchanged.
+   *
+   * The hook owns its returned response's status, headers, and body. It is
+   * called only for errors caught by this middleware, not responder-based
+   * terminals such as an unmatched-path `404`.
+   */
+  readonly respond?: (error: HttpError, ctx: IRequestContext) => HandlerResult | undefined;
 }
 
 /** The `application/problem+json` content type for Problem Details responses. */
@@ -122,8 +134,10 @@ const PROBLEM_DETAILS_FORMATTERS: ReadonlySet<ErrorHandlerFormatter> = new Set([
  * 3. If `next()` throws any other `Error`, it is wrapped in a `500`
  *    `internalServerError` carrying the original as `cause`.
  * 4. When `logErrors` is on and a logger is registered, the error is logged.
- * 5. The error body is formatted via {@linkcode selectFormatter}, optionally
- *    enriched with a `stack` trace, then sent with the right status and
+ * 5. When configured, lets the application write its own response. A returned
+ *    `HandlerResult` short-circuits formatting; `undefined` falls through.
+ * 6. Otherwise, formats the error via {@linkcode selectFormatter}, optionally
+ *    enriches it with a `stack` trace, and sends it with the right status and
  *    content type. The middleware **returns a `HandlerResult`** (short-circuit)
  *    and never re-invokes `next()`.
  *
@@ -136,6 +150,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
   const includeStackTrace = options?.includeStackTrace ?? false;
   const maskInternalErrors = options?.maskInternalErrors ?? true;
   const logErrors = options?.logErrors ?? true;
+  const respond = options?.respond;
   const formatter = selectFormatter(format);
   const contentType = PROBLEM_DETAILS_FORMATTERS.has(formatter) ? PROBLEM_JSON : JSON_CONTENT_TYPE;
   // The responder is built ONCE at factory time from the formatter and content
@@ -232,6 +247,16 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // that no client ever saw.
       if (logErrors) {
         logError(ctx, error, responseError.statusCode);
+      }
+
+      // This is deliberately after the normalization/masking/status/logging
+      // path. An application-owned response must receive the same safe error
+      // and served status that the formatter would have received, while the
+      // logger keeps the original diagnostic. Only `undefined` means "use the
+      // framework formatter"; any returned HandlerResult owns the response.
+      const result = respond?.(responseError, ctx);
+      if (result !== undefined) {
+        return result;
       }
 
       const body = formatter(responseError, ctx);

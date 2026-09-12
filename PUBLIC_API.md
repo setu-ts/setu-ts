@@ -9771,15 +9771,15 @@ middleware via the application's pipeline.
 
 ### Types
 
-| Export                  | Kind | Purpose                                                                                           |
-| ----------------------- | ---- | ------------------------------------------------------------------------------------------------- |
-| `ValidationError`       | type | A single validation failure (`{ field, message, code? }`)                                         |
-| `HttpErrorInit`         | type | Options object for `HttpError.from()`                                                             |
-| `ErrorHandlerOptions`   | type | Options for `errorHandler()` (`{ format?, includeStackTrace?, logErrors?, maskInternalErrors? }`) |
-| `ErrorHandlerFormatter` | type | `(error: Error, ctx?) => Record<string, unknown>`                                                 |
-| `ErrorFormat`           | type | `'default' \| 'rfc9457' \| 'rfc7807'` (this package's union, no `'nestjs'`)                       |
-| `DefaultErrorBody`      | type | Framework-standard error body shape                                                               |
-| `ProblemDetails`        | type | RFC 9457 Problem Details body shape                                                               |
+| Export                  | Kind | Purpose                                                                                                                                                                                                           |
+| ----------------------- | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ValidationError`       | type | A single validation failure (`{ field, message, code? }`)                                                                                                                                                         |
+| `HttpErrorInit`         | type | Options object for `HttpError.from()`                                                                                                                                                                             |
+| `ErrorHandlerOptions`   | type | Options for `errorHandler()` (`{ format?, includeStackTrace?, logErrors?, maskInternalErrors?, respond? }`); `respond(error: HttpError, ctx: IRequestContext)` returns a `HandlerResult` or `undefined` fallback. |
+| `ErrorHandlerFormatter` | type | `(error: Error, ctx?) => Record<string, unknown>`                                                                                                                                                                 |
+| `ErrorFormat`           | type | `'default' \| 'rfc9457' \| 'rfc7807'` (this package's union, no `'nestjs'`)                                                                                                                                       |
+| `DefaultErrorBody`      | type | Framework-standard error body shape                                                                                                                                                                               |
+| `ProblemDetails`        | type | RFC 9457 Problem Details body shape                                                                                                                                                                               |
 
 Contract notes:
 
@@ -9804,6 +9804,15 @@ Contract notes:
   `{ statusCode, message, details? }`: it is the framework's pre-formatter shape, written directly
   by `respondWithError`, and it is what an application without `errorHandler` keeps receiving
   byte-for-byte.
+- **Application-owned caught-error response**: `ErrorHandlerOptions.respond` runs after a caught
+  value has been normalized, status-hinted or masked, resolved to a serveable status, and logged. It
+  receives that `HttpError` and the live `IRequestContext`; returning a `HandlerResult` built
+  through `ctx.response` bypasses framework formatting, so the application owns the returned status,
+  headers, and body (for example, an HTML error page). Returning `undefined` is the only fallback
+  signal and preserves the configured formatter exactly. This hook is deliberately limited to
+  `errorHandler`'s caught-error path: the M70f responder still formats unmatched-path `404`,
+  malformed-request `400`, shutdown-drain `503`, and other responder-based terminals, including when
+  no full request context exists.
 - **RFC 9457 compliance**: when `format: 'rfc9457'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
   `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (Problem
