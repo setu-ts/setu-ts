@@ -27,9 +27,10 @@ await app.start({ port: 3000 });
 Both arm names describe the **authoring mode** — which import your components use — rather than a
 rendering strategy; one engine serves both, and the selected mode is reported by the `view` health
 indicator. `ViewPlugin()` defaults to the `'hono-jsx'` arm — components authored with
-`@hono/hono/jsx`, escaped by default, zero client JavaScript. `ViewPlugin({ engine: 'hono-html' })`
-selects the `html` tagged-template arm, which needs no `jsxImportSource` and works in a plain `.ts`
-file. The `'custom'` arm registers an application-supplied `IViewEngine` verbatim.
+`@hono/hono/jsx`, escaped by the JSX runtime, zero client JavaScript.
+`ViewPlugin({ engine: 'hono-html' })` selects the `html` tagged-template arm, which needs no
+`jsxImportSource` and works in a plain `.ts` file. The `'custom'` arm registers an
+application-supplied `IViewEngine` verbatim.
 
 ## The functional entry point
 
@@ -49,11 +50,14 @@ export function usersRoute(ctx: IRequestContext) {
 ## The class-based entry point
 
 ```typescript
+import { html } from '@hono/hono/html';
 import { Controller, Get, Render } from '@setu-ts/decorator-plugin';
 import { ViewPlugin } from '@setu-ts/view-plugin';
 
+// The `html` tag escapes every interpolation. A plain
+// `(props) => \`<li>${user}</li>\`` template would NOT — see Escaping below.
 const UserList = (props: { readonly users: readonly string[] }) =>
-  `<ul>${props.users.map((user) => `<li>${user}</li>`).join('')}</ul>`;
+  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
 
 @Controller('/pages')
 class PagesController {
@@ -152,6 +156,7 @@ widening the return union costs no type safety: a props bag of the wrong shape i
 error.
 
 ```typescript
+import { html } from '@hono/hono/html';
 import { Controller, Ctx, Get, Params, Post, Render } from '@setu-ts/decorator-plugin';
 import type { HandlerResult, IRequestContext } from '@setu-ts/common';
 
@@ -160,7 +165,7 @@ interface TaskFormProps {
   readonly errors: Readonly<Record<string, string>>;
 }
 
-const TaskForm = (props: TaskFormProps) => `<form>${props.values.title}</form>`;
+const TaskForm = (props: TaskFormProps) => html`<form>${props.values.title}</form>`;
 
 @Controller('/tasks')
 class TasksController {
@@ -245,6 +250,26 @@ app.register(ViewPlugin({ engine: 'custom', view: engine }));
 Interpolations are escaped by the rendering runtime in both default arms; the one opt-out is hono's
 own `raw()`, re-exported from `@setu-ts/view-plugin` so an application does not import hono
 directly. No escaping logic lives in the plugin, so the two arms cannot disagree about it.
+
+**The escaping belongs to the runtime, not to the plugin — and a plain string component therefore
+gets none.** `Component<P>` is structural, so `(props) => string` is a valid component: it is the
+shape a by-name engine adapts a compiled template to, and the plugin returns whatever it produced
+**unchanged**. That is correct for a Handlebars or Eta template, which has already escaped its own
+interpolations, and it is an **XSS hole** for a hand-written template literal:
+
+```typescript
+import { html } from '@hono/hono/html';
+
+// UNSAFE: `name` is interpolated raw. With name = '<script>alert(1)</script>'
+// this serves the script tag verbatim.
+const Unsafe = (props: { readonly name: string }) => `<p>Hello, ${props.name}</p>`;
+
+// Safe: the tag escapes the interpolation.
+const Safe = (props: { readonly name: string }) => html`<p>Hello, ${props.name}</p>`;
+```
+
+Write views with JSX or the `html` tag. Reach for a plain string only when the value is already
+escaped by the engine that produced it.
 
 ### An inline `<script>` must use `raw()`
 

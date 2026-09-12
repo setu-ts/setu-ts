@@ -53,3 +53,30 @@ describe('@Render', () => {
     expect(route!.view).toBeUndefined();
   });
 });
+
+describe('@Render precedence', () => {
+  it('the TOPMOST decorator wins when a handler carries two', () => {
+    // Raised in review as an untested documented decision. Decorators apply
+    // bottom-up, so the replace-scalar write means the one written FIRST in
+    // source is the one that survives — the opposite of what "last wins"
+    // suggests to a reader, which is exactly why it is pinned here.
+    const First = (props: { readonly a: string }) => `<i>${props.a}</i>`;
+    const Second = (props: { readonly a: string }) => `<b>${props.a}</b>`;
+
+    @Controller('/precedence')
+    class TwoRenders {
+      @Render(First)
+      @Render(Second)
+      @Get('/x')
+      handler(): { readonly a: string } {
+        return { a: 'z' };
+      }
+    }
+
+    const routes = [...metadataStore.getRoutesFor(TwoRenders)];
+
+    expect(routes).toHaveLength(1);
+    expect(routes[0]?.view).toBe(First);
+    expect(routes[0]?.view).not.toBe(Second);
+  });
+});

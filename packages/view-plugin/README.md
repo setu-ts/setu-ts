@@ -111,9 +111,14 @@ for it would hide the mistake.
 
 ## Escaping
 
-Escaping is ON by default through both arms, and no escaping logic lives in this package — the JSX
+Escaping is ON through both default arms, and no escaping logic lives in this package — the JSX
 runtime and the `html` tagged template do it. The documented opt-out is hono's own `raw()`,
 re-exported from this package's barrel so an application does not import hono directly:
+
+**The escaping is the runtime's, not this package's — a plain string component gets none.**
+`Component<P>` is structural, so `(props) => string` is valid and its output is returned unchanged.
+That is right for a by-name engine whose compiled template already escaped, and an XSS hole for a
+hand-written literal like `` (p) => `<p>${p.name}</p>` ``. Write views with JSX or the `html` tag.
 
 ```typescript
 import { html } from '@hono/hono/html';

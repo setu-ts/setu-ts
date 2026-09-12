@@ -49,6 +49,14 @@ export type RenderDecorator<P> = (
  * (`__handlerResult: true`), so widening the union costs nothing: a props bag
  * of the wrong shape is still a compile error.
  *
+ * **A zero-argument component gives `P` no inference site**, so it widens to
+ * `unknown` and any handler return is accepted — `@Render(() => '<p>x</p>')`
+ * beside a handler returning an unrelated bag type-checks. The consequence is
+ * benign rather than unsafe: the component ignores props, so the page renders
+ * correctly and the handler has merely computed something nobody reads. It is
+ * recorded rather than fixed because narrowing it would reject the legitimate
+ * static-page component this case describes.
+ *
  * Marks a handler as a rendered route: the method returns the component's
  * props bag, and the framework answers with the component rendered to HTML
  * (`text/html; charset=utf-8`), never JSON.
@@ -88,8 +96,11 @@ export function Render<P>(component: Component<P>): RenderDecorator<P> {
   // `unknown` cannot do.
   return methodDecorator((store: MetadataStore, target, handler) => {
     store.mutateMethod(target, handler, (meta) => {
-      // One component per handler: the last `@Render` to apply wins, the
-      // same replace-scalar rule every other scalar metadata field follows.
+      // One component per handler, replace-scalar like every other scalar
+      // metadata field. Decorators apply BOTTOM-UP, so when a handler carries
+      // two the TOPMOST one wins — "last to apply" reads the other way round
+      // to someone scanning the source, which is why it is spelled out here
+      // and pinned by a test rather than left to the word "last".
       meta.view = component as Component<unknown>;
     });
   });

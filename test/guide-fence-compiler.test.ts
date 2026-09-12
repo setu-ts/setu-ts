@@ -113,9 +113,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // decorated handler) and the `raw()` script opt-out. Every fence here is
     // written to disk as `.ts`, so a JSX fence would be a parse error — the
     // escaping example uses the `html` tag and states the JSX spelling in prose.
-    total: 8,
-    ts: 8,
-    compile: 8,
+    // +1 in review: the Escaping section gained a fence contrasting an UNSAFE
+    // plain template literal with the `html` tag, because two reviewers
+    // independently found that a plain `(props) => string` component escapes
+    // nothing while the guide claimed escaping was on by default.
+    total: 9,
+    ts: 9,
+    compile: 9,
     external: 0,
     pseudocode: 0,
     skipped: 0,
@@ -152,10 +156,11 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // 262 since M92: docs/mvc.md joins the corpus (+5, all compiling) and the
   // migration-nestjs.md Views section adds one external NestJS fence and one
   // compiling Setu-TS fence. 265 once mvc.md gained its Forms section (+2) and
-  // the `raw()` script opt-out (+1) — all three compile.
-  total: 265,
-  ts: 219,
-  compile: 186,
+  // the `raw()` script opt-out (+1) — all three compile. 266 once the Escaping
+  // section gained the plain-string-is-not-escaped contrast (+1, compiling).
+  total: 266,
+  ts: 220,
+  compile: 187,
   external: 33,
   pseudocode: 0,
   skipped: 46,

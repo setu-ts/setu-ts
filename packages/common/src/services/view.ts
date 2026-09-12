@@ -52,9 +52,17 @@ export interface IViewEngine {
   /**
    * Renders a view component with the given props to an HTML string.
    *
-   * Interpolations are escaped by default (the JSX runtime and the `html`
-   * tagged template both escape); a component opts out with hono's own
-   * `raw()`, never with engine-level configuration.
+   * Interpolations are escaped by the RENDERING RUNTIME — the JSX runtime and
+   * the `html` tagged template both escape — and a component opts out with
+   * hono's own `raw()`, never with engine-level configuration.
+   *
+   * The escaping is therefore a property of how a component is WRITTEN, not a
+   * guarantee this port makes. A plain `(props) => string` component is a
+   * valid {@linkcode Component} and its output is returned **unchanged**:
+   * correct for a by-name engine whose compiled template has already escaped
+   * its own interpolations, and an XSS hole for a hand-written template
+   * literal such as ``(p) => `<p>${p.name}</p>` ``. Prefer JSX or the `html`
+   * tag; reach for a plain string only when the producer already escaped.
    *
    * @typeParam P - The component's props bag
    * @param component - The view component to render

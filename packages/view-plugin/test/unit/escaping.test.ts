@@ -10,6 +10,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { html } from '@hono/hono/html';
 
+import type { Component } from '@setu-ts/common';
 import { ViewEngine } from '../../src/engines/view-engine.ts';
 import { raw } from '../../src/index.ts';
 import { UserList } from '../fixtures/users.tsx';
@@ -44,5 +45,21 @@ describe('escaping', () => {
 
   it('raw() passes markup through unescaped — the documented opt-out', () => {
     expect(String(raw('<b>bold</b>'))).toBe('<b>bold</b>');
+  });
+
+  it("a PLAIN STRING component is returned unchanged — escaping is the runtime's, not this package's", async () => {
+    // Both automated reviewers raised this independently on the M92 PR, and it
+    // is correct: `Component<P>` is structural, so a hand-written template
+    // literal is a valid component and the engine has nothing to escape with.
+    // Pinned as a TEST rather than left to prose, because the README, the
+    // guide and the `IViewEngine` JSDoc all now state it and a claim only a
+    // human checks is a claim that drifts.
+    const Unsafe: Component<{ readonly name: string }> = (props) => `<p>${props.name}</p>`;
+
+    const result = await new ViewEngine().render(Unsafe, {
+      name: '<script>alert(1)</script>',
+    });
+
+    expect(result).toBe('<p><script>alert(1)</script></p>');
   });
 });
