@@ -43,6 +43,46 @@ await bus.publish(new UserCreated({ userId: '123' }));
 await bus.publishBatch([new UserCreated({ userId: '124' }), new UserCreated({ userId: '125' })]);
 ```
 
+## Aggregate-local domain events
+
+An aggregate can retain the facts raised during its current operation without inheriting a framework
+base class or publishing while its persistence policy is unresolved:
+
+```typescript
+import { createDomainEvents, type IDomainEvent } from '@setu-ts/events-plugin';
+
+class Order {
+  readonly events = createDomainEvents();
+
+  place(event: IDomainEvent<{ readonly orderId: string }>): void {
+    // Check invariants and mutate order state first.
+    this.events.record(event);
+  }
+}
+
+const order = new Order();
+order.place({
+  type: 'order.placed',
+  id: 'event-1',
+  occurredOn: new Date(),
+  data: { orderId: 'order-1' },
+});
+
+// The application owns this boundary: save the aggregate, then dispatch or
+// persist the pending facts. Remove or clear only after its chosen policy succeeds.
+const pending = order.events.pending();
+for (const domainEvent of pending) {
+  await dispatchAfterSave(domainEvent);
+  order.events.remove(domainEvent);
+}
+```
+
+`pending()` returns an ordered snapshot, so it never exposes the recorder's mutable collection.
+`remove(event)` compares the exact event reference, removes only the first occurrence, and returns
+`false` without mutation when that reference is absent. A reconstructed aggregate creates a fresh
+recorder and therefore begins with no pending facts. This helper never calls `IEventBus`; automatic
+publication and durable outbox coordination remain application responsibilities.
+
 ## Options
 
 | Option         | Type                                            | Default   | Description                                                              |
@@ -58,6 +98,7 @@ otherwise a no-op. **A failing handler never makes `publish` reject** in either 
 | Export                     | Kind      |
 | -------------------------- | --------- |
 | `defineDomainEvent`        | function  |
+| `createDomainEvents`       | function  |
 | `EventsPlugin`             | function  |
 | `subscribeHandler`         | function  |
 | `DomainEvent`              | class     |
@@ -66,6 +107,7 @@ otherwise a no-op. **A failing handler never makes `publish` reject** in either 
 | `EventHandlerRegistration` | interface |
 | `EventsPluginOptions`      | interface |
 | `IDomainEvent`             | interface |
+| `IDomainEvents`            | interface |
 | `IEventBus`                | interface |
 | `IEventHandler`            | interface |
 | `EventHandler`             | type      |

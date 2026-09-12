@@ -7,6 +7,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
+  createDomainEvents,
   defineDomainEvent,
   DomainEvent,
   EventsPlugin,
@@ -14,7 +15,11 @@ import {
   IntegrationEvent,
   subscribeHandler,
 } from '@setu-ts/events-plugin';
-import type { EventHandlerRegistration, IEventHandler } from '@setu-ts/events-plugin';
+import type {
+  EventHandlerRegistration,
+  IDomainEvents,
+  IEventHandler,
+} from '@setu-ts/events-plugin';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('events-plugin barrel exports', () => {
@@ -24,7 +29,22 @@ describe('events-plugin barrel exports', () => {
     expect(typeof DomainEvent).toBe('function');
     expect(typeof IntegrationEvent).toBe('function');
     expect(typeof defineDomainEvent).toBe('function');
+    expect(typeof createDomainEvents).toBe('function');
     expect(typeof subscribeHandler).toBe('function'); // regression guard: was `undefined`
+  });
+
+  it('creates an IDomainEvents recorder through the public barrel', () => {
+    const events: IDomainEvents = createDomainEvents();
+    const event = {
+      type: 'barrel.test',
+      id: 'barrel-1',
+      occurredOn: new Date(0),
+      data: { value: 'barrel' },
+    };
+
+    events.record(event);
+
+    expect(events.pending()).toEqual([event]);
   });
 
   it('subscribeHandler reached via the barrel actually subscribes', async () => {
