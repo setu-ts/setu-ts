@@ -5,7 +5,7 @@
  * by M31 and M50, not `'external'`.
  *
  * @module
- * @since 0.5.0
+ * @since 0.6.0
  */
 import type { IViewEngine } from '@setu-ts/common';
 
@@ -30,7 +30,7 @@ import type { IViewEngine } from '@setu-ts/common';
  * need an opt-out. Compose explicitly instead: wrap the child component in
  * the layout at the call site.
  *
- * @since 0.5.0
+ * @since 0.6.0
  */
 export type ViewPluginOptions =
   | {

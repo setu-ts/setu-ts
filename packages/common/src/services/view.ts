@@ -11,7 +11,7 @@
  * `(props) => string` template are all `Component<P>` implementations.
  *
  * @module
- * @since 0.5.0
+ * @since 0.6.0
  */
 
 /**
@@ -24,7 +24,7 @@
  * renderable shape without this package importing a JSX runtime.
  *
  * @typeParam P - The component's props bag
- * @since 0.5.0
+ * @since 0.6.0
  */
 export type Component<P> = (props: P) => unknown;
 
@@ -46,7 +46,7 @@ export type Component<P> = (props: P) => unknown;
  * const engine = ctx.services.get<IViewEngine>(CAPABILITIES.VIEW);
  * const html = await engine.render(UserList, { users });
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export interface IViewEngine {
   /**
@@ -71,7 +71,7 @@ export interface IViewEngine {
    * @throws {Error} Implementations refuse a tree holding a pending
    *         `<Suspense>` boundary by name (buffered rendering would serve
    *         only the fallback forever) and wrap a component that throws
-   * @since 0.5.0
+   * @since 0.6.0
    */
   render<P>(component: Component<P>, props: P): string | Promise<string>;
 }

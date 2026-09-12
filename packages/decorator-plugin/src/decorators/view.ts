@@ -15,7 +15,7 @@
  * like a JSX component.
  *
  * @module
- * @since 0.5.0
+ * @since 0.6.0
  */
 import type { Component, HandlerResult } from '@setu-ts/common';
 
@@ -30,7 +30,7 @@ import type { MetadataStore } from '../metadata/metadata-store.ts';
  * string checked against nothing.
  *
  * @typeParam P - The decorated component's props bag
- * @since 0.5.0
+ * @since 0.6.0
  */
 export type RenderDecorator<P> = (
   value: (...args: never[]) =>
@@ -87,7 +87,7 @@ export type RenderDecorator<P> = (
  *   }
  * }
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export function Render<P>(component: Component<P>): RenderDecorator<P> {
   // `methodDecorator` returns `(value: unknown, context) => void`, which is

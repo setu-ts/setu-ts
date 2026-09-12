@@ -7,7 +7,7 @@
  * boundary that buffered rendering would answer with its fallback forever.
  *
  * @module
- * @since 0.5.0
+ * @since 0.6.0
  */
 import type { Component } from '@setu-ts/common';
 
@@ -18,7 +18,7 @@ import type { Component } from '@setu-ts/common';
  *
  * @param component - The component being rendered
  * @returns The component's function name, or an anonymous marker
- * @since 0.5.0
+ * @since 0.6.0
  */
 export function componentName(component: Component<never>): string {
   return component.name !== '' ? component.name : '(anonymous component)';
@@ -41,7 +41,7 @@ export function componentName(component: Component<never>): string {
  *   }
  * }
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export class ViewRenderError extends Error {
   /**
@@ -66,7 +66,7 @@ export class ViewRenderError extends Error {
  * resolution is deferred to a follow-up milestone; the remedy today is to move
  * the `<Suspense>` boundary out of the rendered tree.
  *
- * @since 0.5.0
+ * @since 0.6.0
  */
 export class UnresolvedSuspenseError extends Error {
   /**

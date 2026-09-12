@@ -10,7 +10,7 @@
  * same configuration.
  *
  * @module
- * @since 0.5.0
+ * @since 0.6.0
  */
 import type { Component, HandlerResult, IRequestContext, IViewEngine } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -40,7 +40,7 @@ import { CAPABILITIES } from '@setu-ts/common';
  *
  * router.get('/users', (ctx) => renderView(ctx, UserList, { users }));
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export async function renderView<P>(
   ctx: IRequestContext,

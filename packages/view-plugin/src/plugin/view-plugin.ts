@@ -14,7 +14,7 @@
  * `optionalDependencies` edge (decorator → view) cannot form a cycle.
  *
  * @module
- * @since 0.5.0
+ * @since 0.6.0
  */
 import type { IPlugin, IPluginContext, IViewEngine } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -61,7 +61,7 @@ function selectEngine(options: ViewPluginOptions): IViewEngine {
  *   plugins: [RuntimePlugin(), ViewPlugin()], // or ViewPlugin({ engine: 'hono-html' })
  * });
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export function ViewPlugin(options: ViewPluginOptions = {}): IPlugin {
   const engine = selectEngine(options);

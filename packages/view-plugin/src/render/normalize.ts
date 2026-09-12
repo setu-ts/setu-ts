@@ -21,7 +21,7 @@
  * surface.
  *
  * @module
- * @since 0.5.0
+ * @since 0.6.0
  */
 import type { Component } from '@setu-ts/common';
 import type { HtmlEscapedString } from '@hono/hono/utils/html';
@@ -48,7 +48,7 @@ import { UnresolvedSuspenseError, ViewRenderError } from '../errors.ts';
  *         empty string here
  * @throws {UnresolvedSuspenseError} When the rendered tree holds a pending
  *         `<Suspense>` boundary
- * @since 0.5.0
+ * @since 0.6.0
  */
 export async function normalizeRendered(
   value: unknown,
@@ -100,7 +100,7 @@ export async function normalizeRendered(
  * @throws {ViewRenderError} When the component throws or returns `undefined`
  * @throws {UnresolvedSuspenseError} When the tree holds a pending `<Suspense>`
  *         boundary (passed through unwrapped)
- * @since 0.5.0
+ * @since 0.6.0
  */
 export async function renderComponent<P>(
   component: Component<P>,
