@@ -281,7 +281,9 @@ The envelope's fields:
 
 `occurredAt` is an ISO-8601 **string**, not a `Date`: a payload round-trips through the serializer's
 `JSON.parse` on every transport, so a `Date` would arrive at the consumer as a string regardless of
-what the producer put in. The string is the honest type.
+what the producer put in. The string is the honest type. The optional causal fields must be finite
+numbers: JSON serialization maps `NaN`/`Infinity` to `null`, so a non-finite `aggregateVersion`
+would arrive as `null`.
 
 One definition serves both directions — the producer reads its `type`/`version`/`topic`, the
 consumer the same three plus `parse`:

@@ -4869,7 +4869,31 @@ The wire envelope, published as the message payload:
 so a `Date` would arrive as a string on every transport. The consumer's structural check REQUIRES
 the five mandatory fields at their primitive types, checks `type` and `version` for exact equality,
 and IGNORES unknown extra top-level fields — an additive envelope change is never a breaking
-deployment. Payload strictness belongs to `parse`, where the application owns the policy.
+deployment. Payload strictness belongs to `parse`, where the application owns the policy. Metadata
+values must be finite: JSON serialization maps `NaN`/`Infinity` to `null`, so a non-finite
+`aggregateVersion` would reach consumers as `null` (`occurredAt` cannot hit this — it is built with
+`Date.toISOString()`).
+
+The ten exported symbols of this section: the four functions above (`defineIntegrationEvent`,
+`publishIntegrationEvent`, `onIntegrationEvent`, `causedBy`), the `IntegrationEventRejectedError`
+class (rejections, below), and five types:
+
+- **`IntegrationEventDefinition<T>`** (interface) — the contract `defineIntegrationEvent` returns
+  and both directions read: readonly `type`, `version`, `topic`, and `parse: (value: unknown) => T`.
+  `parse` runs on the consumer side only.
+- **`IntegrationEventEnvelope<T>`** (interface) — the wire shape in the table above. The handler
+  receives it with `data` rebuilt to the parsed value, so `envelope.data === payload` holds on every
+  delivery.
+- **`IntegrationEventMetadata`** (interface) — the optional fifth argument of
+  `publishIntegrationEvent`: `correlationId`/`causationId`/`aggregateId` (`string`) and
+  `aggregateVersion` (`number`), each omitted from the envelope when absent. `causedBy()` returns a
+  value assignable to it.
+- **`IntegrationEventHandler<T>`** (type) — `(payload: T, envelope: IntegrationEventEnvelope<T>`,
+  `metadata: MessageMetadata) => void | Promise<void>`: parsed payload first, envelope second,
+  transport metadata third.
+- **`IntegrationEventRejectionReason`** (type) —
+  `'malformed' | 'type-mismatch' | 'version-mismatch' | 'parse'`, the `reason` discriminant of
+  `IntegrationEventRejectedError` (table below).
 
 A refused delivery throws `IntegrationEventRejectedError` before the handler runs, following the
 broker's native failure path (nack-and-redeliver on a real broker; the dispatch report on the
