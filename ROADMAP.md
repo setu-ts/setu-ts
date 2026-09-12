@@ -9348,10 +9348,15 @@ is unanimous across the 47 shipped members: `database-plugin` not `prisma-plugin
   value is the props bag, so it cannot also carry a status — the M58 constraint, unchanged by this
   milestone. The plan states it and the docs show it; `@Render` does not grow a `status` argument,
   which would be a second way to say what `@Ctx()` already says.
-- **A free `render(ctx, Component, props)` funnelling through the same implementation.** The
+- **A free `renderView(ctx, Component, props)` funnelling through the same implementation.** The
   functional generator mode has been the default since M65, so a decorator-only API would leave the
   majority path out — and "one capability, one implementation, every entry point" requires one test
-  driving both under a non-default configuration.
+  driving both under a non-default configuration. Named `renderView` rather than `render` — a
+  deliberate, narrow deviation from this section's first draft, taken for import-site clarity:
+  `render` is the single most collided identifier in this space (`react-dom`, `hono/jsx/dom`,
+  testing libraries), and a full-stack application may register `react-router-plugin` and
+  `view-plugin` together and import from both. The signature and the shared implementation are
+  exactly as specified.
 - **`scripts/release-packages.ts` gains the member in `PUBLISHED_PACKAGES` Tier 4** (plugins
   depending on `common`), taking `release:verify` from 47 publishable packages to 48. M51 shipped a
   workspace member absent from both release lists, which every one of the four gates and the
@@ -9371,18 +9376,24 @@ milestone does not need: Handlebars' runtime `compile()` builds via `new Functio
 AI_GUIDELINES §13.5 and blocked by the Workers CSP, so that arm needs a precompiled-template build
 story of its own.
 
-**Open questions the plan must resolve.**
+**Open questions — resolved in the plan (M92 §2, §3).**
 
-- **A by-reference port and a by-name engine do not fit the same signature.** `IViewEngine.render`
-  takes a component; a string-named engine (Handlebars, Eta) takes a path plus a loader. The plan
-  must state whether the deferred arm wraps each template as a `(props) => string` function, or
-  whether the port carries a second by-name method — and must not leave it to be improvised when
-  someone writes the first `'custom'` adapter.
-- **Layouts.** Whether a layout is simply a component taking `children` (the JSX-native answer, zero
-  new surface) or a plugin-level `layout` option. The former is preferred; the latter must be
-  refused explicitly if it is refused, not omitted.
-- **Streaming.** Whether `render` may return a `ReadableStream` through M42's `IResponse.stream()`
-  for `Suspense` boundaries, or whether the first cut buffers to a string and says so.
+- **A by-reference port and a by-name engine do not fit the same signature.** RESOLVED: the port
+  stays by reference only. `Component<P>` is structural — a compiled template `(props) => string`
+  satisfies it (probed) — so the deferred Handlebars-style arm adapts each template to a
+  `Component<P>` through the `'custom'` arm. No second by-name method: it would have no reader the
+  day it merged, which the dead-surface rule forbids.
+- **Layouts.** RESOLVED: a layout is an ordinary component taking `children` (probed working with
+  escaping preserved). A plugin-level `layout` option is REFUSED explicitly: it would wrap every
+  render, including the HTMX fragments and partial responses `IResponse.html` already serves, where
+  a full document is the wrong answer — and a page wanting no layout would then need an opt-out,
+  which is more surface than the composition it replaces. Stated in `docs/mvc.md` and in
+  `ViewPluginOptions`' JSDoc.
+- **Streaming.** RESOLVED: the first cut buffers, and the probe changed the answer. Buffering a
+  `<Suspense>` tree silently serves only the fallback with a `200` — "buffer and say so" alone ships
+  a silent wrong answer — so a tree with pending `Suspense` is REFUSED by name
+  (`UnresolvedSuspenseError`, detected through `HtmlEscapedString.callbacks`), with streaming
+  resolution deferred to a follow-up `M92b` with an owner, not left open.
 
 ---
 
@@ -9786,7 +9797,7 @@ do, and the `exclude` escape already exists.
 | 90i       | ✅     | observability that joins up ([#260](https://github.com/setu-ts/setu-ts/pull/260))                  |
 | 90j       | ✅     | operator diagnostics survive to the operator ([#263](https://github.com/setu-ts/setu-ts/pull/263)) |
 | 91        | ✅     | test app composes like the real one ([#278](https://github.com/setu-ts/setu-ts/pull/278))          |
-| 92        | ⬜     | view plugin — server-rendered HTML as a capability                                                 |
+| 92        | ✅     | view plugin — server-rendered HTML as a capability (PR pending)                                    |
 | 93a       | ⬜     | events-plugin — aggregate-local domain event recording                                             |
 | 93b       | ⬜     | messaging-plugin — versioned integration event contracts                                           |
 | 94a       | ⬜     | exceptions — application-owned error response                                                      |

@@ -301,3 +301,30 @@ describe('@setu-ts/common barrel — M90f malformed body', () => {
     expect(common.httpStatusHintOf(error)?.title).toBe('Bad Request');
   });
 });
+
+// ---------------------------------------------------------------------------
+// M92 — the view rendering contract
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — M92 view contract', () => {
+  it('exposes CAPABILITIES.VIEW, resolved by the view plugin and the decorator plugin', () => {
+    expect(common.CAPABILITIES.VIEW).toBe('view');
+  });
+
+  it('exports the IViewEngine type (declared against the barrel)', () => {
+    // A type-only export cannot be probed at runtime, so it is asserted at
+    // COMPILE time — an annotation declared against the barrel. Dropping
+    // `export type { IViewEngine }` fails `deno check` here while every
+    // runtime assertion in this file stays green (the M56 defect class).
+    const engine: common.IViewEngine = {
+      render: (component, props) => String(component(props)),
+    };
+    expect(engine.render(() => '<p>x</p>', undefined)).toBe('<p>x</p>');
+  });
+
+  it('exports the Component type (declared against the barrel)', () => {
+    const component: common.Component<{ readonly id: number }> = (props) =>
+      `<span>${props.id}</span>`;
+    expect(component({ id: 7 })).toBe('<span>7</span>');
+  });
+});

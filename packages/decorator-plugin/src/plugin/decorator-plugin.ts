@@ -12,6 +12,7 @@
  */
 import type {
   ClassProvider,
+  Component,
   Constructor,
   DecoratorHandler,
   FactoryProvider,
@@ -20,6 +21,7 @@ import type {
   IPlugin,
   IPluginContext,
   IValidationService,
+  IViewEngine,
   MiddlewareFunction,
   ProviderOptions,
   RouteDefinition,
@@ -326,6 +328,7 @@ function createHandler(
   instance: unknown,
   handlerName: string,
   params: readonly ParameterMetadata[],
+  render?: RenderRoute,
 ): RouteHandler {
   const fn = (instance as Record<string, unknown>)[handlerName];
   if (typeof fn !== 'function') {
@@ -338,8 +341,51 @@ function createHandler(
     if (isHandlerResult(result)) {
       return result;
     }
-    return ctx.response.json(result);
+    if (render === undefined) {
+      return ctx.response.json(result);
+    }
+    // The render branch: the engine resolved once at register() renders the
+    // handler's returned props bag, and the answer is HTML — never JSON.
+    return ctx.response.html(await render.engine.render(render.view, result));
   };
+}
+
+/** The render pairing a route carries when it is decorated with `@Render`. */
+interface RenderRoute {
+  readonly view: Component<unknown>;
+  readonly engine: IViewEngine;
+}
+
+/**
+ * Refuses a rendered route whose application registered no
+ * `CAPABILITIES.VIEW` provider, naming the controller, the handler, and both
+ * remedies.
+ *
+ * Throws rather than warns — deliberately diverging from the `@ValidateBody`
+ * arm above, and the divergence has a reason: that decorator shipped inert in
+ * M9 (so turning the released no-op into a startup crash is a worse failure
+ * than a warning) and an application may legitimately want only its OpenAPI
+ * description. `@Render` is new surface with no released behaviour to
+ * preserve, and its absent-provider failure mode is serving JSON where the
+ * author asked for HTML — a silently wrong content type. Called once per
+ * rendered route at `register()`, so an application with no rendered route
+ * needs no view plugin at all.
+ */
+function requireViewEngine(
+  engine: IViewEngine | undefined,
+  target: Constructor,
+  route: RouteMetadata,
+  fullPath: string,
+): IViewEngine {
+  if (engine === undefined) {
+    throw new Error(
+      `Route ${route.method} ${fullPath} (${className(target)}.${route.handler}) is decorated ` +
+        'with @Render, but no CAPABILITIES.VIEW provider is registered. Register ViewPlugin ' +
+        'from @setu-ts/view-plugin (or any other provider of CAPABILITIES.VIEW) so the route ' +
+        'can answer HTML instead of JSON.',
+    );
+  }
+  return engine;
 }
 
 /** Composes the post-authorization route middleware (class then method). */
@@ -710,6 +756,7 @@ function registerController(
   enforceSchemas: boolean,
   enforceRoles: boolean,
   authorization: IAuthorizationService | undefined,
+  viewEngine: IViewEngine | undefined,
 ): void {
   const ctrlMeta = metadataStore.getController(target);
   if (ctrlMeta === undefined) {
@@ -720,7 +767,10 @@ function registerController(
   for (const route of metadataStore.getRoutesFor(target)) {
     const fullPath = joinPaths(ctrlMeta.version ?? '', ctrlMeta.path, route.path);
     warnUnresolvableParameters(ctx, target, route);
-    const handler = createHandler(instance, route.handler, route.params);
+    const render = route.view !== undefined
+      ? { view: route.view, engine: requireViewEngine(viewEngine, target, route, fullPath) }
+      : undefined;
+    const handler = createHandler(instance, route.handler, route.params, render);
     const middleware = composeGuards(ctrlMeta, route);
     if (enforceRoles) {
       appendAuthorizationMiddleware(ctx, target, ctrlMeta, route, middleware, authorization);
@@ -797,8 +847,8 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
     provides: [CAPABILITIES.METADATA_STORE],
     // Real dependency edges (not priority luck): a REPLACEMENT provider
     // registered at a higher priority number still lands before this plugin,
-    // so the register-time resolution of both capabilities sees it.
-    optionalDependencies: [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION],
+    // so the register-time resolution of all three capabilities sees it.
+    optionalDependencies: [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION, CAPABILITIES.VIEW],
     priority: PLUGIN_PRIORITY.LOW,
 
     async register(ctx: IPluginContext): Promise<void> {
@@ -821,6 +871,14 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       // exactly while none exists.
       const authorization = ctx.services.has(CAPABILITIES.AUTHORIZATION)
         ? ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION)
+        : undefined;
+      // Registration-time view engine: resolved ONCE per application start,
+      // the same shape the two reads above follow. The optionalDependencies
+      // edge on CAPABILITIES.VIEW is what makes this a contract rather than
+      // plugin-order luck. Rendered routes are checked PER ROUTE below — an
+      // application with no @Render route needs no view plugin.
+      const viewEngine = ctx.services.has(CAPABILITIES.VIEW)
+        ? ctx.services.get<IViewEngine>(CAPABILITIES.VIEW)
         : undefined;
 
       let discoveredControllers: Constructor[] = [];
@@ -859,7 +917,15 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
         registerService(ctx, svc);
       }
       for (const ctrl of controllers) {
-        registerController(ctx, ctrl, validation, enforceSchemas, enforceRoles, authorization);
+        registerController(
+          ctx,
+          ctrl,
+          validation,
+          enforceSchemas,
+          enforceRoles,
+          authorization,
+          viewEngine,
+        );
       }
       replayCustomDecorators(ctx);
     },

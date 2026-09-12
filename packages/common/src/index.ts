@@ -377,6 +377,9 @@ export type {
 // SSR contracts
 export type { ISsrService } from './services/ssr.ts';
 
+// View rendering contracts
+export type { Component, IViewEngine } from './services/view.ts';
+
 // Session contracts
 export type {
   ISession,

@@ -64,8 +64,9 @@
 55. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
 56. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
 57. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
-58. [Boundary-Type Compatibility](#boundary-type-compatibility)
-59. [Summary](#summary)
+58. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
+59. [Boundary-Type Compatibility](#boundary-type-compatibility)
+60. [Summary](#summary)
 
 ---
 
@@ -8962,7 +8963,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 | Export                                          | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CAPABILITIES`                                  | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `CAPABILITIES`                                  | const    | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `VIEW: 'view'` (view rendering)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `createCapabilityToken(name)`                   | function | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `encodeFrameData(data)`                         | function | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `decodeFrameData(payload)`                      | function | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -9047,6 +9048,7 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 | DNS                 | `IDnsResolver`, `SrvRecord`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | gRPC                | `IGrpcService`, `GrpcServiceDefinition`, `GrpcServingStatus`, `RpcFetchHandler`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | Cloudflare          | `splitWorkerEnv`, `SplitWorkerEnv`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| View rendering      | `IViewEngine`, `Component` — the view port (`render(component, props): string \| Promise<string>`) and the structural component type it renders, named by `@Render` and `renderView` (M92)                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
@@ -9770,6 +9772,7 @@ carry full JSDoc.
 | `Public`                                                     | function | Method decorator — contributes `security: []` only for a route without an enforced `@Roles`/`@Permissions` restriction. It does NOT exempt a route from a guard or from enforcement; a restricted route keeps its derived OpenAPI security requirement                                                                                                                                                                                                                                                                                                                                                                          |
 | `UseGuards`/`UseInterceptors`/`UseFilters`                   | function | Class/method pipeline decorators                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `ValidateBody`/`ValidateQuery`/`ValidateParams`              | function | Method decorators — attach validation schemas. ENFORCED when a `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not `false`: the capability's middleware is appended LAST in the route's chain (after guards), answering `400` before the handler while preserving guard `401`/`403` precedence. Without such a provider the schemas stay description-only and `DecoratorPlugin` logs one warning per affected route                                                                                                                                                                                    |
+| `Render`                                                     | function | Method decorator — attaches a view component to the route; the handler returns the component's PROPS bag and the framework answers `text/html; charset=utf-8`, never JSON. The handler's return is type-checked against the component's props. The engine is resolved from `CAPABILITIES.VIEW` once at `register()` (the token joins `optionalDependencies`), and a rendered route with no provider FAILS at `register()` naming the controller, the handler and both remedies. A status or header alongside a rendered body goes through `@Params(Ctx())` (M92)                                                                |
 | `ApiTags`                                                    | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `ApiOperation`/`ApiResponse`                                 | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `Module`                                                     | function | Class decorator grouping controllers, providers, and imported modules for `DecoratorPlugin({ modules })`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -11391,6 +11394,68 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
 - Health indicator: reports `up`/`down`/`degraded` based on root directory accessibility
 
 ---
+
+## View Plugin (`@setu-ts/view-plugin`)
+
+Server-rendered HTML as a capability, shipped in **Milestone 92**. The plugin registers an
+`IViewEngine` under `CAPABILITIES.VIEW`; the view is named BY REFERENCE — a component the
+application already has — so there is no view resolver, no views directory and no filesystem lookup,
+which makes the capability Workers-portable by construction.
+
+### Registration
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { ViewPlugin } from '@setu-ts/view-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    ViewPlugin(), // or ViewPlugin({ engine: 'hono-html' })
+  ],
+});
+```
+
+### Options
+
+`ViewPluginOptions` is a union discriminated on `engine`, so a missing per-arm field is a compile
+error rather than a startup throw:
+
+| Option   | Type          | Default      | Behavior                                                                                         |
+| -------- | ------------- | ------------ | ------------------------------------------------------------------------------------------------ |
+| `engine` | `'hono-jsx'`  | `'hono-jsx'` | Components are JSX functions; the application manifest declares `jsx` / `jsxImportSource`.       |
+| `engine` | `'hono-html'` | —            | Components return an `html` tagged template; needs no `jsxImportSource`, works in a plain `.ts`. |
+| `engine` | `'custom'`    | —            | Requires `view`; the supplied engine is registered verbatim.                                     |
+| `view`   | `IViewEngine` | —            | `'custom'` arm only — the application's own engine.                                              |
+
+### Exports
+
+| Export                    | Kind     | Purpose                                                                                                                           |
+| ------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `ViewPlugin`              | function | Plugin factory — registers the selected engine under `CAPABILITIES.VIEW` and a `view` health indicator reporting it (always `up`) |
+| `renderView`              | function | Functional entry point — `renderView(ctx, component, props)` resolves the engine per request and answers `IResponse.html(...)`    |
+| `raw`                     | function | The escaping opt-out, re-exported from `@hono/hono/html` so an application does not import hono directly                          |
+| `ViewRenderError`         | class    | A component threw while rendering (original carried as `cause`), or returned a value with no string form                          |
+| `UnresolvedSuspenseError` | class    | The rendered tree holds a pending `<Suspense>` boundary; buffered rendering would serve only the fallback, so it is refused       |
+| `ViewPluginOptions`       | type     | The discriminated options union above                                                                                             |
+
+### Behavior notes
+
+- **Two entry points, one implementation.** `@Render(Component)` resolves the engine once at
+  `register()` (the token joins `DecoratorPlugin`'s `optionalDependencies`); `renderView` resolves
+  it per request. Both answer through the same `IResponse.html(...)` write — byte-identical bodies
+  and headers, pinned by an integration test under a non-default configuration.
+- **Buffered by design.** `IViewEngine.render` answers `string | Promise<string>` and nothing else.
+  A tree holding a pending `<Suspense>` boundary is refused with `UnresolvedSuspenseError` rather
+  than served as its fallback with a `200`; streaming resolution is deferred to a follow-up
+  milestone. An async component WITHOUT `<Suspense>` renders clean, as does an `html` template with
+  an async interpolation — the refusal has no false positive.
+- **Escaping is on.** Both default arms escape interpolations through their rendering runtime;
+  `raw()` is the documented opt-out. Rendered output is always a primitive string.
+- **Layouts are components.** A layout is an ordinary component taking `children`. There is no
+  plugin-level `layout` option: it would wrap every render, including fragment responses where a
+  full document is wrong.
 
 ## Boundary-Type Compatibility
 

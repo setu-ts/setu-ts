@@ -541,17 +541,17 @@ error[private-type-ref]: public type references private type
       );
     });
 
-    it('has the expected authoritative count of 49 targets', async () => {
+    it('has the expected authoritative count of 50 targets', async () => {
       const fs = {
         readTextFile: async (path: string) => await Deno.readTextFile(path),
         readDir: (path: string) => Deno.readDir(path),
         stat: (path: string) => Deno.stat(path),
       };
       const result = await collectApiEntrypoints(fs);
-      // 47 published packages, runtime has 2 exports (./src/index.ts + ./worker),
+      // 48 published packages, runtime has 2 exports (./src/index.ts + ./worker),
       // cli has 2 exports (./src/index.ts + ./main), rest have 1 each
-      // = 47 + 1 (extra runtime) + 1 (extra cli) = 49
-      expect(result.targets).toHaveLength(49);
+      // = 48 + 1 (extra runtime) + 1 (extra cli) = 50
+      expect(result.targets).toHaveLength(50);
     });
 
     it('maps each target to its correct package name', async () => {

@@ -12,7 +12,7 @@
  *
  * @module
  */
-import type { Constructor, IMetadataStore, MiddlewareFunction } from '@setu-ts/common';
+import type { Component, Constructor, IMetadataStore, MiddlewareFunction } from '@setu-ts/common';
 
 import { takePending } from './pending.ts';
 import type { HttpMethod } from '@setu-ts/common';
@@ -180,6 +180,11 @@ export interface RouteMetadata {
   readonly roles?: readonly string[];
   /** Required permissions (`@Permissions`). */
   readonly permissions?: readonly string[];
+  /**
+   * The view component attached by `@Render(Component)` — the route answers
+   * HTML rendered from the handler's returned props bag instead of JSON.
+   */
+  readonly view?: Component<unknown>;
 }
 
 /**
@@ -216,6 +221,8 @@ export interface MethodMeta {
   roles?: string[];
   /** Required permissions (`@Permissions`). */
   permissions?: string[];
+  /** The view component attached by `@Render(Component)` (mutable twin). */
+  view?: Component<unknown>;
 }
 
 /**
@@ -661,6 +668,7 @@ export class MetadataStore implements IMetadataStore {
       ...(meta.isPublic ? { isPublic: true } : {}),
       ...(meta.roles !== undefined ? { roles: [...meta.roles] } : {}),
       ...(meta.permissions !== undefined ? { permissions: [...meta.permissions] } : {}),
+      ...(meta.view !== undefined ? { view: meta.view } : {}),
     };
   }
 }

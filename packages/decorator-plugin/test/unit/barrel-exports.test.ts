@@ -62,6 +62,7 @@ const EXPECTED_VALUES = [
   'Optional',
   'Permissions',
   'Public',
+  'Render',
   'Roles',
   'UseFilters',
   'UseGuards',

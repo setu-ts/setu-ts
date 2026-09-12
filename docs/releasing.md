@@ -96,6 +96,13 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 
   It must come back empty before you go further. `release:verify` checks resolvability afterwards,
   which is the backstop — but it reports a broken tree rather than preventing one.
+- **First-time publishers.** A workspace member present in `PUBLISHED_PACKAGES` can still fail to
+  publish if the JSR package was never created and the repo never linked — a failure that surfaces
+  only in the release workflow, long after the branch merged. The **`view-plugin`** member (M92) has
+  never been published: before the first release that ships it, run `release:create-packages` (a JSR
+  package must exist before it can be published) and `release:link-repos` (tokenless OIDC publishing
+  requires the repo link). Both are idempotent; the M35 `sdk` release recorded the same step for the
+  last first-time publisher.
 - **Grep the source, not only the manifests.** `packages/sdk` writes its `jsr:` specifier inline in
   four `src/**` files rather than through an import-map alias, and its manifest maps that exact
   specifier string to a pinned version — so the range in the source and both sides of the mapping

@@ -72,7 +72,11 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/session-plugin/README.md': 10,
   'packages/audit-plugin/README.md': 3,
   'packages/common/README.md': 2,
-  'packages/decorator-plugin/README.md': 3,
+  // M92: +1 for the @Render example.
+  'packages/decorator-plugin/README.md': 4,
+  // M92: the new package's README is born gated — usage, functional renderView,
+  // the @Render decorator and the raw() opt-out.
+  'packages/view-plugin/README.md': 4,
   'packages/validation-plugin/README.md': 2,
   'packages/sse-plugin/README.md': 6,
   'packages/websocket-plugin/README.md': 10,
@@ -100,7 +104,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(23);
+    expect(Object.keys(READMES)).toHaveLength(24);
 
     const counts: Record<string, number> = {};
     for (const readme of Object.keys(READMES)) {

@@ -4,7 +4,9 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
-    "useUnknownInCatchVariables": true
+    "useUnknownInCatchVariables": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@hono/hono/jsx"
   },
   "imports": {
     "@setu-ts/common": "../../../packages/common/src/index.ts",
@@ -39,6 +41,8 @@
     "@setu-ts/full-stack-starter": "../../../packages/starters/full-stack-starter/src/index.ts",
     "@std/testing/bdd": "jsr:@std/testing@^1.0.6/bdd",
     "@std/expect": "jsr:@std/expect@^1.0.19",
+    "@setu-ts/view-plugin": "../../../packages/view-plugin/src/index.ts",
+    "@hono/hono": "jsr:@hono/hono@^4.12.30",
     "@std/zod": "npm:zod@^3.23.8",
     "zod": "npm:zod@^3.23.8"
   }

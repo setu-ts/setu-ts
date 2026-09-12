@@ -1018,6 +1018,31 @@ emitDecoratorMetadata).
 
 ---
 
+### @setu-ts/view-plugin
+
+**Purpose:** Server-rendered HTML as a capability — view engines for JSX and html-tag components,
+named by reference.
+
+**Capability Token:** `CAPABILITIES.VIEW`
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ✅   | ✅  | ✅      |
+
+> Views are pure functions rendered to strings — no filesystem, no sockets — so the capability is
+> portable by construction. A tree holding a pending `<Suspense>` boundary is refused by name
+> (`UnresolvedSuspenseError`) rather than served as its fallback forever; streaming resolution is
+> deferred to a follow-up milestone.
+
+**Links:**
+
+- [README](../packages/view-plugin/README.md)
+- [API Reference](./api/view-plugin/src/index.ts/index.html)
+
+---
+
 ### @setu-ts/websocket-plugin
 
 **Purpose:** WebSocket support with room broadcasting.

@@ -162,6 +162,7 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 | WebSocket             | ✅     | `websocket-plugin`          | Full-duplex on all four runtimes; rooms, heartbeat, limits    |
 | Cross-replica fan-out | ✅     | `realtime-backplane-plugin` | Rooms and channels reach clients on other replicas            |
 | React SSR             | ✅     | `react-router-plugin`       | React Router v7 framework mode with file-based routing        |
+| Server-rendered views | ✅     | `view-plugin`               | `@Render` + `renderView` over hono-jsx / hono-html engines    |
 
 ### Operations
 
@@ -358,7 +359,7 @@ A Deno 2 workspace. Every package is published independently to JSR.
 
 ```
 setu-ts/
-├── packages/              # 47 workspace members, all published on JSR
+├── packages/              # 48 workspace members, all published on JSR
 │   ├── common/            # Shared contracts, capability tokens (no dependencies)
 │   ├── kernel/            # Plugin kernel, middleware pipeline, router
 │   ├── runtime/           # Runtime services and HTTP adapters (Node, Deno, Bun, Workers)

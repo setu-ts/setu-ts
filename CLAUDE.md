@@ -4814,6 +4814,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   branch/function/line except `application.ts` (95.1/100/97.2, up from 93.4/93.4/90.3)) — complete
   (PR #278)
 
+- **Milestone 92** (`packages/common` + `packages/decorator-plugin` + `packages/view-plugin` (new) —
+  view plugin: server-rendered HTML as a capability) — complete (PR pending). `common` gains
+  `CAPABILITIES.VIEW`, `IViewEngine` and `Component<P>`; the new `@setu-ts/view-plugin` registers an
+  engine under the token with two zero-new-dependency arms (`'hono-jsx'` default, `'hono-html'`) and
+  a `'custom'` arm; views are named BY REFERENCE (`@Render(UserList)`), so there is no view resolver
+  and no filesystem lookup — Workers-portable by construction. `@Render` in `decorator-plugin`
+  type-checks the handler's return against the component's props (a wrong bag is a compile error),
+  resolves the engine once at `register()` through a new `optionalDependencies` edge, and a rendered
+  route with no provider fails at `register()` naming both remedies — a deliberate divergence from
+  the `@ValidateBody` warn arm, with the reason in the JSDoc. The free
+  `renderView(ctx, component,
+  props)` funnels both entry points through the same engine and
+  `IResponse.html` write, pinned byte-identical under a non-default configuration. Rendered output
+  is a buffered primitive string; the two awaits plus `String(...)` in `normalizeRendered` are each
+  load-bearing (the type-checker hides all three defects), and a pending `<Suspense>` boundary is
+  refused with `UnresolvedSuspenseError` rather than silently served as its fallback — streaming
+  deferred to a named `M92b` owner. `release:verify` moves from 47 to 48 publishable packages; the
+  runbook gains the first-publish step (`release:create-packages` + `release:link-repos`)
+
 - **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
   the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
   compat suites as release gates. The `smoke/` programme's X16–X19 exercises against published
