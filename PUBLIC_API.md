@@ -11431,6 +11431,13 @@ error rather than a startup throw:
 values funnel through one engine, because escaping belongs to the rendering runtime and there is
 nothing left to configure per mode. The selected mode is reported by the `view` health indicator.
 
+**Redirecting from a rendered route.** A `@Render` handler may return a `HandlerResult` from
+`ctx.response` instead of the props bag, so the standard form pattern works: return the props to
+re-render the form carrying validation errors, or `ctx.response.redirect(target, 303)` once the
+submission is accepted. The redirect short-circuits before the view runs, so no HTML body is
+produced. `HandlerResult` is branded, so widening the return union costs no type safety — a props
+bag of the wrong shape is still a compile error.
+
 **Rendering nothing.** A component's top-level return follows the rendering runtime's own rules, so
 `(props) => props.show && <Banner />` behaves at the top level exactly as it does nested: `null`,
 `false`, `true` and `''` render as the empty string, while `0` renders as `0`. `undefined` is the

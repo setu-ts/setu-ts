@@ -17,7 +17,7 @@
  * @module
  * @since 0.5.0
  */
-import type { Component } from '@setu-ts/common';
+import type { Component, HandlerResult } from '@setu-ts/common';
 
 import { methodDecorator } from '../metadata/context-bridge.ts';
 import type { MetadataStore } from '../metadata/metadata-store.ts';
@@ -33,11 +33,22 @@ import type { MetadataStore } from '../metadata/metadata-store.ts';
  * @since 0.5.0
  */
 export type RenderDecorator<P> = (
-  value: (...args: never[]) => P | Promise<P>,
+  value: (...args: never[]) =>
+    | P
+    | HandlerResult
+    | Promise<P | HandlerResult>,
   context: ClassMethodDecoratorContext,
 ) => void;
 
 /**
+ * A handler may also return a `HandlerResult` from `ctx.response` — a
+ * redirect, most usefully — instead of the props bag. That is what makes
+ * POST-redirect-GET expressible on a rendered route: a form handler returns
+ * the props to re-render itself with errors, or `ctx.response.redirect(...)`
+ * once the submission is accepted. `HandlerResult` is branded
+ * (`__handlerResult: true`), so widening the union costs nothing: a props bag
+ * of the wrong shape is still a compile error.
+ *
  * Marks a handler as a rendered route: the method returns the component's
  * props bag, and the framework answers with the component rendered to HTML
  * (`text/html; charset=utf-8`), never JSON.
