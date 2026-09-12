@@ -190,3 +190,93 @@ describe('validateEnvelope', () => {
     expect(rejection.message).toContain('2');
   });
 });
+
+describe('envelope guards found in review (PR #287)', () => {
+  const runtime = createFakeRuntime({ uuidPrefix: 'guard', startTimestamp: FIXED_MS });
+  const guarded = defineIntegrationEvent<{ n: number }>({
+    type: 't',
+    version: 1,
+    topic: 't.v1',
+    parse: (value) => value as { n: number },
+  });
+  const base = {
+    id: 'i',
+    type: 't',
+    version: 1,
+    occurredAt: '2026-01-01T00:00:00.000Z',
+    data: { n: 1 },
+  };
+
+  // `JSON.stringify` DROPS a key whose value is `undefined`, so an undefined
+  // payload published cleanly and then arrived with no `data` at all — every
+  // consumer refused it, and on the default composition that refusal is
+  // reported and dropped, so the event vanished silently.
+  it('refuses an undefined payload at the producer and names the null remedy', () => {
+    expect(() => createEnvelope(runtime, guarded, undefined as never))
+      .toThrow(TypeError);
+    expect(() => createEnvelope(runtime, guarded, undefined as never))
+      .toThrow(/must publish `null` instead/);
+  });
+
+  it('publishes a null payload, the documented payloadless shape', () => {
+    const nullable = defineIntegrationEvent<null>({
+      type: 't',
+      version: 1,
+      topic: 't.v1',
+      parse: () => null,
+    });
+    expect(createEnvelope(runtime, nullable, null).data).toBe(null);
+  });
+
+  // A non-finite number serializes to `null`, so the consumer would receive an
+  // aggregate version it cannot use while the producer believed it sent one.
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    it(`refuses a non-finite aggregateVersion (${String(bad)}) at the producer`, () => {
+      expect(() => createEnvelope(runtime, guarded, { n: 1 }, { aggregateVersion: bad }))
+        .toThrow(/"aggregateVersion" must be a finite number/);
+    });
+  }
+
+  it('accepts a finite aggregateVersion unchanged', () => {
+    expect(createEnvelope(runtime, guarded, { n: 1 }, { aggregateVersion: 0 }).aggregateVersion)
+      .toBe(0);
+  });
+
+  // `occurredAt` is exposed to application code as an ISO-8601 instant; an
+  // arbitrary string made that declared type a lie and produced an Invalid Date.
+  it('refuses an occurredAt that is not an ISO-8601 instant', () => {
+    expect(() => validateEnvelope({ ...base, occurredAt: 'not a timestamp' }, guarded))
+      .toThrow(/not an ISO-8601 instant/);
+  });
+
+  it('accepts the canonical occurredAt createEnvelope emits', () => {
+    const built = createEnvelope(runtime, guarded, { n: 1 });
+    expect(validateEnvelope({ ...built }, guarded).occurredAt).toBe(built.occurredAt);
+  });
+
+  // The optional causal fields are typed on the envelope and handed to
+  // application code — and `causedBy` copies `correlationId` into the NEXT
+  // event, so a wrong primitive propagates one hop before anyone sees it.
+  for (const field of ['correlationId', 'causationId', 'aggregateId'] as const) {
+    it(`refuses a non-string ${field}`, () => {
+      expect(() => validateEnvelope({ ...base, [field]: 12345 }, guarded))
+        .toThrow(new RegExp(`"${field}" field must be a string`));
+    });
+  }
+
+  it('refuses a non-finite aggregateVersion on the wire', () => {
+    expect(() => validateEnvelope({ ...base, aggregateVersion: 'four' }, guarded))
+      .toThrow(/"aggregateVersion" field must be a finite number/);
+  });
+
+  it('accepts an envelope carrying every optional field correctly typed', () => {
+    const full = {
+      ...base,
+      correlationId: 'c-1',
+      causationId: 'e-1',
+      aggregateId: 'a-1',
+      aggregateVersion: 3,
+    };
+    expect(validateEnvelope(full, guarded).correlationId).toBe('c-1');
+  });
+});

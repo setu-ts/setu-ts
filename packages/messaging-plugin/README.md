@@ -454,12 +454,26 @@ may add a field this build does not know about, and refusing it would make every
 change a coordinated deployment. Payload strictness is the parser's job, where the application owns
 the policy.
 
-The rejection follows the broker's native failure path — nack-and-redeliver on a real broker, the
-dispatch report on the in-memory one. The error's `message` carries the whole diagnostic (reason,
-topic, expected against observed), because the in-memory default composition logs exactly
-`error.message` through the application's logger; the structured fields serve an `instanceof` branch
-on a path that surfaces the error object, such as a dead-letter consumer or a bespoke sink on the
-[`'custom'` broker arm](#options).
+A payload of `undefined` is refused at the producer: `JSON.stringify` drops a key whose value is
+`undefined`, so such an event would publish cleanly and then arrive with no `data` at all, and every
+consumer would refuse it as malformed — silently, on a composition with no logger. A payloadless
+integration event publishes `null`. For the same reason a non-finite `aggregateVersion` (which
+serializes to `null`) is refused, and on the consumer side a present
+`correlationId`/`causationId`/`aggregateId` must be a string, a present `aggregateVersion` a finite
+number, and `occurredAt` a real ISO-8601 instant — otherwise the envelope's declared types would be
+a lie one hop before `causedBy` copies `correlationId` into the next event.
+
+The rejection follows the broker's OWN failure path, and that path differs per arm — it is not a
+retry guarantee. RabbitMQ nacks with requeue DISABLED, so a refused message is dead-lettered when a
+DLX is configured and discarded otherwise, and logs the failure. NATS naks, which redelivers while
+the stream retains the message, and (since PR #287) also logs it. The in-memory broker reports
+through `onDispatchError` and drops. Because a rejection here is deterministic — the same envelope
+fails the same way on every delivery — redelivery cannot resolve it, so a dead-letter queue rather
+than a retry is where a refused event is inspected. The error's `message` carries the whole
+diagnostic (reason, topic, expected against observed), because the in-memory default composition
+logs exactly `error.message` through the application's logger; the structured fields serve an
+`instanceof` branch on a path that surfaces the error object, such as a dead-letter consumer or a
+bespoke sink on the [`'custom'` broker arm](#options).
 
 ### Behaviour ordering
 

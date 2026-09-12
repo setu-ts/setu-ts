@@ -15,6 +15,7 @@ import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
 import { JetStreamStreamError, JetStreamUnavailableError } from '../errors.ts';
+import { describeError } from './describe-error.ts';
 
 /**
  * Lazily load nats at runtime.
@@ -586,7 +587,14 @@ export class NatsBroker implements MessageBrokerAdapter {
         if (handlerResult instanceof Promise) {
           handlerResult.then(() => {
             msgTyped.ack();
-          }).catch(() => {
+          }).catch((error: unknown) => {
+            // `nak()` REDELIVERS, so a message this handler can never accept
+            // (a malformed envelope, an unparsable payload) comes back for as
+            // long as the stream retains it. Discarding the error here left
+            // that loop completely silent — the one broker that retries was
+            // the one that reported nothing. Report first, exactly as the
+            // RabbitMQ adapter does, then nak.
+            this.#logger?.error(`Message handler failed: ${describeError(error)}`);
             msgTyped.nak();
           });
         } else {

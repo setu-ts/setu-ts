@@ -22,10 +22,15 @@ All notable changes to this project are documented here. The format follows
   value so `envelope.data === payload`, and only then calls the application handler; a refusal
   throws `IntegrationEventRejectedError` discriminated by `reason`
   (`malformed`/`type-mismatch`/`version-mismatch`/`parse`, the parser's own error carried as
-  `cause`). `causedBy(envelope)` extracts the chain-root rule for correlation propagation. No
-  `IMessageBroker` method changes, no new capability token, and no dependency on
-  `@setu-ts/events-plugin`; ingress behaviours observe the raw envelope, before the wrapper, by
-  design.
+  `cause`). `causedBy(envelope)` extracts the chain-root rule for correlation propagation. A
+  payloadless event publishes `null`, never `undefined`, which JSON drops (refused at the producer,
+  naming the remedy); a non-finite `aggregateVersion` is refused for the same reason; and the
+  consumer type-checks every optional causal field and requires `occurredAt` to be a real ISO-8601
+  instant, so the envelope's declared types hold for application code and for `causedBy`.
+  Separately, `NatsBroker` now reports a rejected handler before `nak()` — it redelivers, so that
+  branch was the one retry loop in the plugin with no diagnostic at all. No `IMessageBroker` method
+  changes, no new capability token, and no dependency on `@setu-ts/events-plugin`; ingress
+  behaviours observe the raw envelope, before the wrapper, by design.
 - **`@setu-ts/events-plugin` — aggregate-local `createDomainEvents()` and `IDomainEvents`.** A
   framework-independent recorder for facts raised by an aggregate during an operation. It preserves
   insertion order, returns isolated snapshots, and never publishes; application code owns

@@ -4895,10 +4895,15 @@ class (rejections, below), and five types:
   `'malformed' | 'type-mismatch' | 'version-mismatch' | 'parse'`, the `reason` discriminant of
   `IntegrationEventRejectedError` (table below).
 
-A refused delivery throws `IntegrationEventRejectedError` before the handler runs, following the
-broker's native failure path (nack-and-redeliver on a real broker; the dispatch report on the
-in-memory one). Its `message` carries the whole diagnostic — the structured fields serve an
-`instanceof` branch on a path that surfaces the error object:
+A refused delivery throws `IntegrationEventRejectedError` before the handler runs. The rejection
+follows the broker's OWN failure path, and that path differs per arm — it is not a retry guarantee.
+RabbitMQ nacks with requeue DISABLED, so a refused message is dead-lettered when a DLX is configured
+and discarded otherwise, and logs the failure. NATS naks, which redelivers while the stream retains
+the message, and (since PR #287) also logs it. The in-memory broker reports through
+`onDispatchError` and drops. Because a rejection here is deterministic — the same envelope fails the
+same way on every delivery — redelivery cannot resolve it, so a dead-letter queue rather than a
+retry is where a refused event is inspected. Its `message` carries the whole diagnostic — the
+structured fields serve an `instanceof` branch on a path that surfaces the error object:
 
 | `reason`           | Fault                                                                          |
 | ------------------ | ------------------------------------------------------------------------------ |

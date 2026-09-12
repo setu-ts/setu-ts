@@ -759,6 +759,48 @@ describe('NatsBroker', () => {
     );
   });
 
+  // PR #287 review: `nak()` REDELIVERS, so a message the handler can never
+  // accept comes back for as long as the stream retains it — and this branch
+  // discarded the error, making NATS the one broker that retries forever while
+  // reporting nothing. Reverting the fix fails this test and leaves the N8
+  // nak assertion below passing, which is exactly why N8 could not catch it.
+  it('subscribe reports the handler error before nak(), so a retry loop is not silent', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const errors: string[] = [];
+    const fakeConnection = new FakeNatsConnection({
+      seededMessages: [
+        {
+          subject: 'test.subject',
+          data: JSON.stringify({ x: 1 }),
+          seq: 1,
+          timestampNanos: new Date().getTime() * 1_000_000,
+        },
+      ],
+    });
+    const broker = new NatsBroker(runtime, serializer, {
+      client: fakeConnection,
+      logger: { error: (msg) => errors.push(msg) },
+    });
+
+    await broker.connect();
+    const sub = await broker.subscribe(
+      'test.subject',
+      () => Promise.reject(new Error('malformed envelope')),
+      { queue: 'reporting-consumer' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain('Message handler failed');
+    expect(errors[0]).toContain('malformed envelope');
+    // Still nak'd — reporting replaces nothing.
+    expect(fakeConnection.jetstream().deliveredMessages[0].isNaked()).toBe(true);
+
+    await sub.unsubscribe();
+    await broker.disconnect();
+  });
+
   // N8: failure-path - handler throws → nak() called
   it('subscribe calls nak() when the async handler throws', async () => {
     const runtime = createFakeRuntime();

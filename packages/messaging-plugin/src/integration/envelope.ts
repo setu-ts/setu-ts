@@ -74,6 +74,27 @@ export function createEnvelope<T>(
   payload: T,
   metadata?: IntegrationEventMetadata,
 ): IntegrationEventEnvelope<T> {
+  // `data` is mandatory on the wire, and `JSON.stringify` DROPS a key whose
+  // value is `undefined` — so an `undefined` payload publishes cleanly and
+  // then arrives with no `data` at all, which every consumer refuses as
+  // malformed. On the default in-memory composition that refusal is reported
+  // and dropped, so the event vanishes silently. Refuse at the producer, and
+  // name the one-character remedy: a payloadless event carries `null`.
+  if (payload === undefined) {
+    throw new TypeError(
+      `publishIntegrationEvent: "${definition.type}" payload is undefined, which JSON drops — ` +
+        'a payloadless integration event must publish `null` instead',
+    );
+  }
+  // A non-finite number serializes to `null`, so the consumer would receive an
+  // aggregate version it cannot use while the producer believes it sent one.
+  if (metadata?.aggregateVersion !== undefined && !Number.isFinite(metadata.aggregateVersion)) {
+    throw new TypeError(
+      `publishIntegrationEvent: "aggregateVersion" must be a finite number; received ${
+        String(metadata.aggregateVersion)
+      }`,
+    );
+  }
   return {
     id: runtime.uuid(),
     type: definition.type,
@@ -161,8 +182,34 @@ export function validateEnvelope(
   if (typeof envelope['occurredAt'] !== 'string') {
     throw malformed(definition, 'the "occurredAt" field must be a string');
   }
+  if (Number.isNaN(Date.parse(envelope['occurredAt']))) {
+    throw malformed(
+      definition,
+      `the "occurredAt" field is not an ISO-8601 instant: "${envelope['occurredAt']}"`,
+    );
+  }
   if (envelope['data'] === undefined) {
     throw malformed(definition, 'the envelope is missing the "data" field');
+  }
+  // The optional causal fields are typed `string`/`number` on
+  // `IntegrationEventEnvelope`, and the consumer hands them to application code
+  // (and to `causedBy`, which propagates `correlationId` into the NEXT event).
+  // A foreign producer that sends the wrong primitive would otherwise make that
+  // declared type a lie, one hop before it is copied onward.
+  for (const field of ['correlationId', 'causationId', 'aggregateId'] as const) {
+    if (envelope[field] !== undefined && typeof envelope[field] !== 'string') {
+      throw malformed(definition, `the "${field}" field must be a string when present`);
+    }
+  }
+  if (
+    envelope['aggregateVersion'] !== undefined &&
+    (typeof envelope['aggregateVersion'] !== 'number' ||
+      !Number.isFinite(envelope['aggregateVersion']))
+  ) {
+    throw malformed(
+      definition,
+      'the "aggregateVersion" field must be a finite number when present',
+    );
   }
   if (envelope['type'] !== definition.type) {
     throw new IntegrationEventRejectedError({

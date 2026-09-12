@@ -42,8 +42,13 @@ export type IntegrationEventHandler<T> = (
  * malformed envelope, a mismatched `type`/`version`, or a rejecting parser
  * throws {@linkcode IntegrationEventRejectedError} — the application handler
  * is never called with an unvalidated value — and the rejection follows the
- * broker's native failure path: nack-and-redeliver on a real broker,
- * `onDispatchError` on the in-memory one. When `MessagingPlugin({ behaviors })`
+ * broker's OWN failure path, which differs per arm and is not a retry
+ * guarantee: RabbitMQ nacks with requeue DISABLED (dead-lettered when a DLX is
+ * configured, discarded otherwise) and logs; NATS naks, which redelivers while
+ * the stream retains the message; the in-memory broker reports to
+ * `onDispatchError` and drops. Since a rejection here is deterministic — the
+ * same envelope fails the same way every time — redelivery cannot resolve it,
+ * so a dead-letter queue, not a retry, is the place to inspect one. When `MessagingPlugin({ behaviors })`
  * is configured, the behaviour chain runs BEFORE this wrapper, so
  * `IngressContext.payload` is the raw envelope and never the parsed payload.
  *
