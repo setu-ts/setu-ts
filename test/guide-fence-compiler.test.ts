@@ -109,9 +109,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
   'docs/mvc.md': {
     // M92: the new guide is born gated — five fences, all TypeScript, all
     // compiling (two as fragments through the committed `app` prelude).
-    total: 5,
-    ts: 5,
-    compile: 5,
+    // +3 for the Forms section (the urlencoded read, the redirect-or-re-render
+    // decorated handler) and the `raw()` script opt-out. Every fence here is
+    // written to disk as `.ts`, so a JSX fence would be a parse error — the
+    // escaping example uses the `html` tag and states the JSX spelling in prose.
+    total: 8,
+    ts: 8,
+    compile: 8,
     external: 0,
     pseudocode: 0,
     skipped: 0,
@@ -147,10 +151,11 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
 const EXPECTED_AGGREGATE: FenceCounts = {
   // 262 since M92: docs/mvc.md joins the corpus (+5, all compiling) and the
   // migration-nestjs.md Views section adds one external NestJS fence and one
-  // compiling Setu-TS fence.
-  total: 262,
-  ts: 216,
-  compile: 183,
+  // compiling Setu-TS fence. 265 once mvc.md gained its Forms section (+2) and
+  // the `raw()` script opt-out (+1) — all three compile.
+  total: 265,
+  ts: 219,
+  compile: 186,
   external: 33,
   pseudocode: 0,
   skipped: 46,

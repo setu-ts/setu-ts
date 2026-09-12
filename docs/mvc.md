@@ -73,6 +73,117 @@ props; a route decorated with no provider registered fails at `register()` namin
 the handler and both remedies. A status code alongside a rendered body goes through `@Params(Ctx())`
 — the return value IS the props bag, so `@Render` carries no `status` argument.
 
+## Forms
+
+A form is the reason server-rendered HTML exists, and three things about it are not obvious.
+
+**There is no `formData()`.** `IRequest` exposes `json()`, `text()` and `bytes()`, so an
+`application/x-www-form-urlencoded` body is read as text and parsed with the web-standard
+`URLSearchParams` — the same route `session-plugin`'s CSRF verifier takes. The runtime pre-reads the
+body into a buffer, so `text()` is replayable and a later reader still sees it.
+
+**Validate with the service, not the middleware.** `validateBody(schema)` short-circuits with a
+Problem Details JSON body — correct for an API, useless for a form, which needs its own page back
+with the fields still filled in. `IValidationService.validate()` returns a `Result` instead of
+short-circuiting, so the handler decides what to render.
+
+**Re-render the same component, then redirect.** The rejected submission renders the form it came
+from — one template, so the empty state and the error state cannot drift — and a successful one
+answers `303`, so a refresh does not resubmit.
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IRequestContext, IValidationService, ValidationIssue } from '@setu-ts/common';
+import { renderView } from '@setu-ts/view-plugin';
+import { z } from 'zod';
+
+const TaskSchema = z.object({
+  title: z.string().trim().min(3, 'Title must be at least 3 characters'),
+});
+
+interface TaskFormProps {
+  readonly values: { readonly title: string };
+  readonly errors: Readonly<Record<string, string>>;
+}
+
+const TaskForm = (props: TaskFormProps) =>
+  `<form method="post" action="/tasks">
+     <input name="title" value="${props.values.title}" />
+     ${props.errors.title ?? ''}
+   </form>`;
+
+/** `IRequest` has no `formData()` — read the body as text and parse it. */
+async function readForm(ctx: IRequestContext): Promise<Record<string, string>> {
+  const params = new URLSearchParams(await ctx.request.text());
+  const out: Record<string, string> = {};
+  for (const [key, value] of params) out[key] = value;
+  return out;
+}
+
+function firstMessagePerField(issues: readonly ValidationIssue[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const issue of issues) if (out[issue.path] === undefined) out[issue.path] = issue.message;
+  return out;
+}
+
+export async function submit(ctx: IRequestContext) {
+  const form = await readForm(ctx);
+  const validation = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
+  const result = validation.validate<{ title: string }>(TaskSchema, form);
+
+  if (!result.success) {
+    ctx.response.status(422); // unprocessable — and the page IS the error report
+    return await renderView(ctx, TaskForm, {
+      values: { title: form.title ?? '' },
+      errors: firstMessagePerField(result.error),
+    });
+  }
+
+  return ctx.response.redirect('/tasks', 303); // POST-redirect-GET
+}
+```
+
+### A rendered route may redirect
+
+A `@Render` handler returns its props bag — but it may also return a `HandlerResult` from
+`ctx.response`, which is what makes POST-redirect-GET expressible on a decorated route. The redirect
+short-circuits before the view runs, so no HTML body is produced. `HandlerResult` is branded, so
+widening the return union costs no type safety: a props bag of the wrong shape is still a compile
+error.
+
+```typescript
+import { Controller, Ctx, Get, Params, Post, Render } from '@setu-ts/decorator-plugin';
+import type { HandlerResult, IRequestContext } from '@setu-ts/common';
+
+interface TaskFormProps {
+  readonly values: { readonly title: string };
+  readonly errors: Readonly<Record<string, string>>;
+}
+
+const TaskForm = (props: TaskFormProps) => `<form>${props.values.title}</form>`;
+
+@Controller('/tasks')
+class TasksController {
+  @Render(TaskForm)
+  @Get('/new')
+  blank(): TaskFormProps {
+    return { values: { title: '' }, errors: {} };
+  }
+
+  @Render(TaskForm)
+  @Params(Ctx())
+  @Post('/')
+  create(ctx: IRequestContext): TaskFormProps | HandlerResult {
+    const accepted = ctx.request.method === 'POST';
+    return accepted
+      ? ctx.response.redirect('/tasks', 303)
+      : { values: { title: '' }, errors: { title: 'Title must be at least 3 characters' } };
+  }
+}
+
+export { TasksController };
+```
+
 ## Rendered output is buffered
 
 `IViewEngine.render` answers `string | Promise<string>` — rendering buffers before send and never
@@ -134,6 +245,30 @@ app.register(ViewPlugin({ engine: 'custom', view: engine }));
 Interpolations are escaped by the rendering runtime in both default arms; the one opt-out is hono's
 own `raw()`, re-exported from `@setu-ts/view-plugin` so an application does not import hono
 directly. No escaping logic lives in the plugin, so the two arms cannot disagree about it.
+
+### An inline `<script>` must use `raw()`
+
+Escaping applies to every interpolation, including the body of a `<script>` element. A client script
+interpolated plainly is emitted with `&#39;` for each quote and `&lt;` for each `<` — valid HTML,
+and a `SyntaxError` in the browser. The script never runs and nothing reports why, so any page that
+opens an `EventSource` or a `WebSocket` needs the opt-out:
+
+```typescript
+import { html } from '@hono/hono/html';
+import { raw } from '@setu-ts/view-plugin';
+
+const CLIENT = `const es = new EventSource('/events');
+es.onmessage = (e) => { if (e.data < '9') console.log(e.data); };`;
+
+export const Page = () =>
+  html`
+    <div id="log"></div>
+    <script>${raw(CLIENT)}</script>
+  `;
+```
+
+The JSX arm has the identical trap in its own spelling — `<script>{CLIENT}</script>` escapes the
+same way and needs the same `raw(CLIENT)`.
 
 ## Health
 
