@@ -9497,7 +9497,12 @@ convenience bridge, not a portable integration-event envelope.
   `SubscriptionDefinition` shape, so it plugs directly into `MessagingPlugin({ subscriptions })`. No
   `IMessageBroker` method changes and no custom broker adapter has to be rewritten.
 - **A versioned-topic rollout policy.** Each incompatible version owns a distinct topic whose name
-  ends in `.v<version>` (for example `orders.placed.v1` and `orders.placed.v2`). Consumers subscribe
+  ends in `.v<version>` (for example `orders.placed.v1` and `orders.placed.v2`). This suffix is
+  ENFORCED by the `defineIntegrationEvent` factory at definition time — a topic that does not end
+  with the exact `.v${version}` string is refused, at module load, with the expected suffix named —
+  so the policy cannot be quietly violated by a version bump that leaves the topic unchanged. The
+  escape is deliberate: the raw `broker.publish`/`broker.subscribe` surface is unchanged and remains
+  the documented route for a pre-existing topic that predates the policy. Consumers subscribe
   explicitly to every version they support, one definition per topic; they never receive and reject
   an unsupported version from a shared topic. A producer rolls forward by dual-publishing the old
   and new definitions until every required consumer has deployed and is consuming the new topic,
@@ -9799,7 +9804,7 @@ do, and the `exclude` escape already exists.
 | 91        | ✅     | test app composes like the real one ([#278](https://github.com/setu-ts/setu-ts/pull/278))                |
 | 92        | ✅     | view plugin — server-rendered HTML as a capability ([#284](https://github.com/setu-ts/setu-ts/pull/284)) |
 | 93a       | ✅     | events-plugin — aggregate-local domain event recording                                                   |
-| 93b       | ⬜     | messaging-plugin — versioned integration event contracts                                                 |
+| 93b       | ✅     | messaging-plugin — versioned integration event contracts (PR pending)                                    |
 | 94a       | ⬜     | exceptions — application-owned error response                                                            |
 | 94b       | ⬜     | common + runtime + storage/session — one form-body abstraction                                           |
 | 94c       | ⬜     | session-plugin — CSRF token field helper                                                                 |

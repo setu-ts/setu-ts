@@ -57,10 +57,13 @@ export abstract class DomainEvent<T = unknown> implements IDomainEvent<T> {
 /**
  * Abstract base class for integration (cross-service) events.
  *
- * An empty semantic subclass of `DomainEvent` — no added fields. The _type
- * identity_ (not a boolean marker) discriminates cross-service events for
- * M14's messaging bridge (`instanceof IntegrationEvent`). The in-memory bus
- * publishes it like any other event.
+ * An empty semantic subclass of `DomainEvent` — no added fields, and no
+ * framework reader: it is a semantic MARKER only. Nothing dispatches on
+ * `instanceof IntegrationEvent` — the M14 messaging bridge selects forwarded
+ * events by its configured `eventTypes` string list, never by class identity
+ * — and the in-memory bus publishes it like any other event. A typed
+ * cross-service contract (wire envelope, schema version, causal chain) is
+ * `defineIntegrationEvent` in `@setu-ts/messaging-plugin`, not this class.
  *
  * @typeParam T - The event payload type
  * @example

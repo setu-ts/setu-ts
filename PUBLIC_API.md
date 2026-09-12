@@ -4801,6 +4801,99 @@ at most one round trip per TTL.
 
 `data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
 
+### Integration event contracts
+
+The contract layer ON TOP OF the transport: a declarable, versioned integration event with a
+portable wire envelope — payload data, never transport headers, so every broker arm carries it
+without an adapter change. No `IMessageBroker` method is added and no capability token is added.
+
+```typescript
+import {
+  causedBy,
+  defineIntegrationEvent,
+  onIntegrationEvent,
+  publishIntegrationEvent,
+} from '@setu-ts/messaging-plugin';
+
+// The contract: four fields, validated eagerly. The topic MUST end with the
+// exact `.v${version}` suffix — the versioned-topic rollout policy enforced
+// by the factory, not documented prose. A pre-existing unversioned topic has
+// no definition; keep using the raw broker.publish/subscribe surface for it.
+const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.placed',
+  version: 1,
+  topic: 'orders.placed.v1',
+  parse: (value) => value as { orderId: string },
+});
+
+// Producer: builds the envelope (below) and publishes it to the definition's
+// topic. parse is NEVER run on publish — a producer CAN publish a payload its
+// own consumers reject, and that surfaces at the consumer.
+await publishIntegrationEvent(runtime, broker, orderPlaced, { orderId: '123' }, {
+  correlationId: 'root-1', // each field optional; omitted when absent
+  causationId: 'e-0',
+  aggregateId: 'order-1',
+  aggregateVersion: 3,
+});
+
+// Consumer: produces the existing SubscriptionDefinition — plugs straight
+// into MessagingPlugin({ subscriptions }). The handler receives the parsed
+// payload, the envelope (rebuilt with data = the parsed value), and the
+// transport metadata.
+const subscription = onIntegrationEvent(orderPlaced, async (payload, envelope) => {
+  await provisionOrder(payload.orderId, envelope.id);
+}, { queue: 'billing' });
+// provisionOrder: the application's own work, resolved from the parsed
+// payload; envelope carries the identity/correlation fields; the third
+// handler argument is the transport MessageMetadata.
+
+// Correlation propagation: the chain-root rule, extracted.
+const causal = causedBy(envelope); // { correlationId: envelope.correlationId ?? envelope.id, causationId: envelope.id }
+```
+
+The wire envelope, published as the message payload:
+
+| Field              | Type     | Present always? | Meaning                                                          |
+| ------------------ | -------- | --------------- | ---------------------------------------------------------------- |
+| `id`               | `string` | yes             | Producer-assigned identity (`runtime.uuid()`)                    |
+| `type`             | `string` | yes             | The contract's semantic event name                               |
+| `version`          | `number` | yes             | The contract version                                             |
+| `occurredAt`       | `string` | yes             | Publish time, ISO-8601 (`new Date(runtime.now()).toISOString()`) |
+| `data`             | payload  | yes             | The event payload, carried verbatim                              |
+| `correlationId`    | `string` | optional        | ID of the causal chain root                                      |
+| `causationId`      | `string` | optional        | ID of the directly causing event                                 |
+| `aggregateId`      | `string` | optional        | ID of the aggregate the event concerns                           |
+| `aggregateVersion` | `number` | optional        | Version of the aggregate the event concerns                      |
+
+`occurredAt` is a string, not a `Date`: payloads round-trip through the serializer's `JSON.parse`,
+so a `Date` would arrive as a string on every transport. The consumer's structural check REQUIRES
+the five mandatory fields at their primitive types, checks `type` and `version` for exact equality,
+and IGNORES unknown extra top-level fields — an additive envelope change is never a breaking
+deployment. Payload strictness belongs to `parse`, where the application owns the policy.
+
+A refused delivery throws `IntegrationEventRejectedError` before the handler runs, following the
+broker's native failure path (nack-and-redeliver on a real broker; the dispatch report on the
+in-memory one). Its `message` carries the whole diagnostic — the structured fields serve an
+`instanceof` branch on a path that surfaces the error object:
+
+| `reason`           | Fault                                                                          |
+| ------------------ | ------------------------------------------------------------------------------ |
+| `malformed`        | Not an object, or a mandatory field missing or of the wrong primitive type     |
+| `type-mismatch`    | The envelope's `type` differs from the definition                              |
+| `version-mismatch` | The envelope's `version` differs from the definition                           |
+| `parse`            | The definition's parser threw; the thrown value is carried as `cause` verbatim |
+
+When `MessagingPlugin({ behaviors })` is configured, the behaviour chain runs BEFORE the wrapper, so
+`IngressContext.payload` is the raw envelope, never the parsed payload — a short-circuiting
+behaviour must be able to refuse a message without the framework parsing it first. A handler needing
+a resolved capability uses the existing `RegistryFactory<SubscriptionDefinition>` arm:
+`(services) => onIntegrationEvent(definition, handlerFor(services))`.
+
+Mapping a local domain event (M93a's `createDomainEvents()`) onto a published integration event is
+application policy, written out explicitly — `event.type` is deliberately not the integration
+`type`, and `event.occurredOn` (when the fact happened) is deliberately not the envelope's
+`occurredAt` (when it was published).
+
 ## Queue (`@setu-ts/queue-plugin`)
 
 Provides background job queue with Memory and Redis adapters.

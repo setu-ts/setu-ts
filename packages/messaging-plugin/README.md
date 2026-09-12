@@ -256,6 +256,283 @@ closed the two cloud brokers that were not reading what their platforms assign).
 `metadata.messageId` for de-duplication on an at-least-once transport gets a value on every
 first-party broker.
 
+## Integration events
+
+The transport primitives above carry any payload; an integration event is the **contract** layer on
+top of them. `defineIntegrationEvent` names an event, versions it, and pairs it with a parser;
+`publishIntegrationEvent` and `onIntegrationEvent` put a portable envelope on the wire and take it
+off again. No `IMessageBroker` method changes, no broker adapter is rewritten, and no capability
+token is added: the envelope is **payload data**, the whole `message` argument to `publish`, because
+payload is the one channel every broker arm carries while headers are not universally available.
+
+The envelope's fields:
+
+| Field              | Type        | Present always? | Meaning                                                          |
+| ------------------ | ----------- | --------------- | ---------------------------------------------------------------- |
+| `id`               | `string`    | yes             | Producer-assigned event identity (`runtime.uuid()`)              |
+| `type`             | `string`    | yes             | The contract's semantic event name                               |
+| `version`          | `number`    | yes             | The contract version                                             |
+| `occurredAt`       | `string`    | yes             | Publish time, ISO-8601 (`new Date(runtime.now()).toISOString()`) |
+| `data`             | the payload | yes             | The event payload, carried verbatim                              |
+| `correlationId`    | `string`    | optional        | ID of the causal chain root                                      |
+| `causationId`      | `string`    | optional        | ID of the directly causing event                                 |
+| `aggregateId`      | `string`    | optional        | ID of the aggregate the event concerns                           |
+| `aggregateVersion` | `number`    | optional        | Version of the aggregate the event concerns                      |
+
+`occurredAt` is an ISO-8601 **string**, not a `Date`: a payload round-trips through the serializer's
+`JSON.parse` on every transport, so a `Date` would arrive at the consumer as a string regardless of
+what the producer put in. The string is the honest type.
+
+One definition serves both directions — the producer reads its `type`/`version`/`topic`, the
+consumer the same three plus `parse`:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
+import {
+  defineIntegrationEvent,
+  MessagingPlugin,
+  onIntegrationEvent,
+  publishIntegrationEvent,
+} from '@setu-ts/messaging-plugin';
+import { CAPABILITIES, type IMessageBroker, type IRuntimeServices } from '@setu-ts/common';
+
+// Your application's own work — a stand-in so this example compiles as written.
+declare function provisionOrder(orderId: string): Promise<void>;
+
+const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.placed',
+  version: 1,
+  topic: 'orders.placed.v1', // MUST end with `.v${version}` — enforced at definition time
+  parse: (value) => value as { orderId: string },
+});
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    LoggerPlugin(),
+    MessagingPlugin({
+      subscriptions: [
+        // Consumer: the handler receives the PARSED payload, the envelope, and
+        // the transport metadata. A malformed envelope never reaches it.
+        onIntegrationEvent(orderPlaced, async (payload) => {
+          await provisionOrder(payload.orderId);
+        }, { queue: 'billing' }),
+      ],
+    }),
+  ],
+});
+
+await app.start();
+
+const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
+const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+
+await publishIntegrationEvent(runtime, broker, orderPlaced, { orderId: '123' });
+```
+
+### Correlation propagation
+
+A handler that publishes the next event derives the causal fields from the envelope it was handed —
+`causedBy` is the whole chain-root rule, extracted so no handler copies it by hand. This is an
+application-level causal chain carried in the payload; it is a different thing from the W3C
+`traceparent` the telemetry layer propagates in transport headers (see
+[Trace propagation](#trace-propagation)), and neither replaces the other.
+
+```typescript
+import {
+  causedBy,
+  defineIntegrationEvent,
+  publishIntegrationEvent,
+} from '@setu-ts/messaging-plugin';
+import type { IntegrationEventEnvelope } from '@setu-ts/messaging-plugin';
+import { CAPABILITIES, type IMessageBroker, type IRuntimeServices } from '@setu-ts/common';
+
+const orderCharged = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.charged',
+  version: 1,
+  topic: 'orders.charged.v1',
+  parse: (value) => value as { orderId: string },
+});
+
+// Inside a handler: the consumed envelope's correlationId (or its own id,
+// when it is the chain root) plus its id as the direct cause.
+async function charge(
+  runtime: IRuntimeServices,
+  broker: IMessageBroker,
+  consumed: IntegrationEventEnvelope<{ orderId: string }>,
+): Promise<void> {
+  await publishIntegrationEvent(runtime, broker, orderCharged, consumed.data, {
+    ...causedBy(consumed),
+  });
+}
+
+declare const runtime: IRuntimeServices;
+declare const broker: IMessageBroker;
+declare const consumed: IntegrationEventEnvelope<{ orderId: string }>;
+await charge(runtime, broker, consumed);
+```
+
+### The versioned-topic rollout policy
+
+Each incompatible version owns a **distinct topic** whose name ends in `.v<version>`, and the
+factory enforces this rather than documenting it: `defineIntegrationEvent` refuses a `topic` that
+does not end with the exact string `.v${version}`, at definition time — at module load, loudly, with
+the expected suffix named. A version bump with an unchanged topic is precisely the change that
+breaks every deployed consumer, and no type checker can see it.
+
+Consumers subscribe explicitly to every version they support, one definition per topic, so they
+never receive and reject an unsupported version from a shared topic. A producer rolls forward by
+**dual-publishing** both topics until every required consumer has deployed onto the new one, then
+stops the old publication after the agreed migration window:
+
+```typescript
+import { defineIntegrationEvent, publishIntegrationEvent } from '@setu-ts/messaging-plugin';
+import { CAPABILITIES, type IMessageBroker, type IRuntimeServices } from '@setu-ts/common';
+
+const ordersPlacedV1 = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.placed',
+  version: 1,
+  topic: 'orders.placed.v1',
+  parse: (value) => value as { orderId: string },
+});
+
+const ordersPlacedV2 = defineIntegrationEvent<{ orderId: string; totalCents: number }>({
+  type: 'orders.placed',
+  version: 2,
+  topic: 'orders.placed.v2',
+  parse: (value) => value as { orderId: string; totalCents: number },
+});
+
+// The migration window: both topics are published; the v1 publication stops
+// only after every required consumer has deployed onto v2.
+async function publishBoth(
+  runtime: IRuntimeServices,
+  broker: IMessageBroker,
+  order: { orderId: string; totalCents: number },
+): Promise<void> {
+  await publishIntegrationEvent(runtime, broker, ordersPlacedV1, { orderId: order.orderId });
+  await publishIntegrationEvent(runtime, broker, ordersPlacedV2, order);
+}
+
+declare const runtime: IRuntimeServices;
+declare const broker: IMessageBroker;
+await publishBoth(runtime, broker, { orderId: '123', totalCents: 9900 });
+```
+
+The suffix guard locks out a topic that predates this policy — a live `orders.created` with no
+version suffix cannot be expressed as a definition. The raw `broker.publish` / `broker.subscribe`
+surface is unchanged and remains the documented route for such a topic.
+
+### What the publisher does NOT do
+
+`publishIntegrationEvent` never runs `parse`. The parser is a narrowing function `unknown → T`, and
+a realistic one (a schema with defaults, coercion, or stripping) returns a different object than it
+was given — running it on publish would silently change what the producer asked to send. The honest
+consequence: a producer **can** publish a payload its own consumers reject, and that surfaces at the
+consumer as a `reason: 'parse'` rejection. What the consumer parses is the value after a JSON round
+trip, which the producer's call never saw.
+
+### Rejections
+
+`onIntegrationEvent`'s wrapper validates the delivered envelope structurally, checks `type` and
+`version` for exact equality, and runs `parse` — all before the application handler runs. A refusal
+throws `IntegrationEventRejectedError`, discriminated by `reason`:
+
+| `reason`           | Fault                                                                      |
+| ------------------ | -------------------------------------------------------------------------- |
+| `malformed`        | Not an object, or a mandatory field missing or of the wrong primitive type |
+| `type-mismatch`    | The envelope's `type` differs from the definition                          |
+| `version-mismatch` | The envelope's `version` differs from the definition                       |
+| `parse`            | The definition's parser threw (carried as `cause`)                         |
+
+Unknown EXTRA envelope fields are accepted and forwarded — a producer on a later framework version
+may add a field this build does not know about, and refusing it would make every additive envelope
+change a coordinated deployment. Payload strictness is the parser's job, where the application owns
+the policy.
+
+The rejection follows the broker's native failure path — nack-and-redeliver on a real broker, the
+dispatch report on the in-memory one. The error's `message` carries the whole diagnostic (reason,
+topic, expected against observed), because the in-memory default composition logs exactly
+`error.message` through the application's logger; the structured fields serve an `instanceof` branch
+on a path that surfaces the error object, such as a dead-letter consumer or a bespoke sink on the
+[`'custom'` broker arm](#options).
+
+### Behaviour ordering
+
+When `MessagingPlugin({ behaviors })` is configured, the ingress behaviour chain runs **before** the
+integration-event wrapper, so `IngressContext.payload` is the raw envelope and never the parsed
+payload. That ordering is deliberate: a behaviour that short-circuits (a tenant guard, an auth
+check) must be able to refuse a message without the framework parsing it first, and a behaviour
+reading `envelope.correlationId` off the raw object is doing something useful. A behaviour therefore
+cannot depend on `payload` being the parsed `T`.
+
+### Mapping a local domain event to an integration event
+
+Mapping a fact an aggregate recorded (see
+[`@setu-ts/events-plugin`](https://github.com/setu-ts/setu-ts/tree/main/packages/events-plugin))
+onto a published integration event is APPLICATION policy, written out explicitly — no framework path
+performs it. Two traps get named: `event.type` is the domain fact's name and deliberately NOT the
+integration `type` (the contract owns its own `type`/`version` pair, so refactoring an internal
+class name cannot break the wire), and `event.occurredOn` is when the fact HAPPENED while the
+envelope's `occurredAt` is set at publish time — different instants, never conflated.
+
+```typescript
+import { createDomainEvents } from '@setu-ts/events-plugin';
+import { defineIntegrationEvent, publishIntegrationEvent } from '@setu-ts/messaging-plugin';
+import {
+  CAPABILITIES,
+  type IDomainEvent,
+  type IMessageBroker,
+  type IRuntimeServices,
+} from '@setu-ts/common';
+
+const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.placed',
+  version: 1,
+  topic: 'orders.placed.v1',
+  parse: (value) => value as { orderId: string },
+});
+
+// The facts an aggregate recorded locally, read at the application boundary.
+const events = createDomainEvents();
+
+// The contract's own parser is the narrowing step for the payload; the causal
+// fields come from the domain fact.
+function metadataFor(event: IDomainEvent): {
+  causationId: string;
+  aggregateId?: string;
+  aggregateVersion?: number;
+} {
+  const metadata: { causationId: string; aggregateId?: string; aggregateVersion?: number } = {
+    causationId: event.id,
+  };
+  if (event.aggregateId !== undefined) metadata.aggregateId = event.aggregateId;
+  if (event.version !== undefined) metadata.aggregateVersion = event.version;
+  return metadata;
+}
+
+async function publishPending(
+  runtime: IRuntimeServices,
+  broker: IMessageBroker,
+): Promise<void> {
+  for (const event of events.pending()) {
+    await publishIntegrationEvent(runtime, broker, orderPlaced, orderPlaced.parse(event.data), {
+      ...metadataFor(event),
+    });
+  }
+}
+
+declare const runtime: IRuntimeServices;
+declare const broker: IMessageBroker;
+await publishPending(runtime, broker);
+events.clear(); // after the application's own confirmed dispatch policy
+```
+
+Publishing this way says nothing about any consumer finishing: as [Publish timing](#publish-timing)
+documents, a transport accepting a publish resolves on dispatch hand-off, not on handler completion.
+
 ## Bridging in-process events
 
 `EventsMessagingBridge` forwards selected events from
@@ -295,70 +572,80 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 
 ## Exports
 
-| Export                         | Kind      |
-| ------------------------------ | --------- |
-| `adaptPubSubModule`            | function  |
-| `adaptServiceBusModule`        | function  |
-| `EventsMessagingBridge`        | function  |
-| `loadPubSubModule`             | function  |
-| `loadServiceBusModule`         | function  |
-| `MessagingPlugin`              | function  |
-| `ChainGateTimeoutError`        | class     |
-| `CloudBrokerUnavailableError`  | class     |
-| `GcpPubSubBroker`              | class     |
-| `InMemoryBroker`               | class     |
-| `JetStreamStreamError`         | class     |
-| `JetStreamUnavailableError`    | class     |
-| `JsonSerializer`               | class     |
-| `KafkaBroker`                  | class     |
-| `MessagingNotSupportedError`   | class     |
-| `NatsBroker`                   | class     |
-| `RabbitMqBroker`               | class     |
-| `RedisStreamsBroker`           | class     |
-| `RemoteHandlerError`           | class     |
-| `ReplyInboxUnavailableError`   | class     |
-| `RequestTimeoutError`          | class     |
-| `ServiceBusBroker`             | class     |
-| `CustomMessagingOptions`       | interface |
-| `EventsMessagingBridgeOptions` | interface |
-| `IMessageBroker`               | interface |
-| `INatsHeaders`                 | interface |
-| `InMemoryBrokerOptions`        | interface |
-| `IPubSubSubscription`          | interface |
-| `IPubSubTransport`             | interface |
-| `ISerializer`                  | interface |
-| `IServiceBusProcessErrorArgs`  | interface |
-| `IServiceBusReceiver`          | interface |
-| `IServiceBusSubscribeOptions`  | interface |
-| `IServiceBusSubscription`      | interface |
-| `IServiceBusTransport`         | interface |
-| `ISubscription`                | interface |
-| `KafkaMessagingOptions`        | interface |
-| `KafkaOptions`                 | interface |
-| `MemoryMessagingOptions`       | interface |
-| `MessageMetadata`              | interface |
-| `MessagingCommonOptions`       | interface |
-| `NatsMessagingOptions`         | interface |
-| `NatsOptions`                  | interface |
-| `PubSubOptions`                | interface |
-| `PubSubSdkModule`              | interface |
-| `RabbitMqMessagingOptions`     | interface |
-| `RabbitMqOptions`              | interface |
-| `RedisStreamsMessagingOptions` | interface |
-| `RedisStreamsOptions`          | interface |
-| `RequestOptions`               | interface |
-| `ServiceBusOptions`            | interface |
-| `ServiceBusRetryOptions`       | interface |
-| `ServiceBusSdkModule`          | interface |
-| `SubscribeOptions`             | interface |
-| `SubscriptionDefinition`       | interface |
-| `MessageHandler`               | type      |
-| `MessagingBrokerType`          | type      |
-| `MessagingPluginOptions`       | type      |
-| `PubSubMessagingOptions`       | type      |
-| `RequestHandler`               | type      |
-| `ServiceBusMessagingOptions`   | type      |
-| `SubscriptionEntry`            | type      |
+| Export                            | Kind      |
+| --------------------------------- | --------- |
+| `adaptPubSubModule`               | function  |
+| `adaptServiceBusModule`           | function  |
+| `causedBy`                        | function  |
+| `defineIntegrationEvent`          | function  |
+| `EventsMessagingBridge`           | function  |
+| `loadPubSubModule`                | function  |
+| `loadServiceBusModule`            | function  |
+| `MessagingPlugin`                 | function  |
+| `onIntegrationEvent`              | function  |
+| `publishIntegrationEvent`         | function  |
+| `ChainGateTimeoutError`           | class     |
+| `CloudBrokerUnavailableError`     | class     |
+| `GcpPubSubBroker`                 | class     |
+| `InMemoryBroker`                  | class     |
+| `IntegrationEventRejectedError`   | class     |
+| `JetStreamStreamError`            | class     |
+| `JetStreamUnavailableError`       | class     |
+| `JsonSerializer`                  | class     |
+| `KafkaBroker`                     | class     |
+| `MessagingNotSupportedError`      | class     |
+| `NatsBroker`                      | class     |
+| `RabbitMqBroker`                  | class     |
+| `RedisStreamsBroker`              | class     |
+| `RemoteHandlerError`              | class     |
+| `ReplyInboxUnavailableError`      | class     |
+| `RequestTimeoutError`             | class     |
+| `ServiceBusBroker`                | class     |
+| `CustomMessagingOptions`          | interface |
+| `EventsMessagingBridgeOptions`    | interface |
+| `IMessageBroker`                  | interface |
+| `INatsHeaders`                    | interface |
+| `InMemoryBrokerOptions`           | interface |
+| `IntegrationEventDefinition`      | interface |
+| `IntegrationEventEnvelope`        | interface |
+| `IntegrationEventMetadata`        | interface |
+| `IPubSubSubscription`             | interface |
+| `IPubSubTransport`                | interface |
+| `ISerializer`                     | interface |
+| `IServiceBusProcessErrorArgs`     | interface |
+| `IServiceBusReceiver`             | interface |
+| `IServiceBusSubscribeOptions`     | interface |
+| `IServiceBusSubscription`         | interface |
+| `IServiceBusTransport`            | interface |
+| `ISubscription`                   | interface |
+| `KafkaMessagingOptions`           | interface |
+| `KafkaOptions`                    | interface |
+| `MemoryMessagingOptions`          | interface |
+| `MessageMetadata`                 | interface |
+| `MessagingCommonOptions`          | interface |
+| `NatsMessagingOptions`            | interface |
+| `NatsOptions`                     | interface |
+| `PubSubOptions`                   | interface |
+| `PubSubSdkModule`                 | interface |
+| `RabbitMqMessagingOptions`        | interface |
+| `RabbitMqOptions`                 | interface |
+| `RedisStreamsMessagingOptions`    | interface |
+| `RedisStreamsOptions`             | interface |
+| `RequestOptions`                  | interface |
+| `ServiceBusOptions`               | interface |
+| `ServiceBusRetryOptions`          | interface |
+| `ServiceBusSdkModule`             | interface |
+| `SubscribeOptions`                | interface |
+| `SubscriptionDefinition`          | interface |
+| `IntegrationEventHandler`         | type      |
+| `IntegrationEventRejectionReason` | type      |
+| `MessageHandler`                  | type      |
+| `MessagingBrokerType`             | type      |
+| `MessagingPluginOptions`          | type      |
+| `PubSubMessagingOptions`          | type      |
+| `RequestHandler`                  | type      |
+| `ServiceBusMessagingOptions`      | type      |
+| `SubscriptionEntry`               | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

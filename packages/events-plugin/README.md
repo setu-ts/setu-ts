@@ -105,8 +105,8 @@ otherwise a no-op. **A failing handler never makes `publish` reject** in either 
 
 | Export                     | Kind      |
 | -------------------------- | --------- |
-| `defineDomainEvent`        | function  |
 | `createDomainEvents`       | function  |
+| `defineDomainEvent`        | function  |
 | `EventsPlugin`             | function  |
 | `subscribeHandler`         | function  |
 | `DomainEvent`              | class     |
