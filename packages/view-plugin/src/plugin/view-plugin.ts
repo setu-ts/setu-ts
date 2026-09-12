@@ -53,10 +53,13 @@ function selectEngine(options: ViewPluginOptions): IViewEngine {
  * @returns The plugin instance
  * @example
  * ```typescript
- * import { App } from '@setu-ts/kernel';
+ * import { createApplication } from '@setu-ts/kernel';
+ * import { RuntimePlugin } from '@setu-ts/runtime';
  * import { ViewPlugin } from '@setu-ts/view-plugin';
  *
- * app.register(ViewPlugin()); // or ViewPlugin({ engine: 'hono-html' })
+ * const app = createApplication({
+ *   plugins: [RuntimePlugin(), ViewPlugin()], // or ViewPlugin({ engine: 'hono-html' })
+ * });
  * ```
  * @since 0.5.0
  */
