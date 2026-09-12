@@ -106,11 +106,7 @@ function rebind(target) {
 function workspacePackageNames() {
   const root = JSON.parse(readFileSync('../deno.json', 'utf8'));
   return root.workspace
-    .map((entry) =>
-      JSON.parse(
-        readFileSync(`../${entry.replace(/^\.\//, '')}/deno.json`, 'utf8'),
-      )
-    )
+    .map((entry) => JSON.parse(readFileSync(`../${entry.replace(/^\.\//, '')}/deno.json`, 'utf8')))
     .map((cfg) => cfg.name.replace('@setu-ts/', '@jsr/setu-ts__'))
     .sort();
 }
@@ -147,13 +143,9 @@ const failedToLoad = [];
 for (const name of declared) {
   try {
     const module = await import(name);
-    if (Object.keys(module).length === 0) {
-      failedToLoad.push(`${name} (no exports)`);
-    }
+    if (Object.keys(module).length === 0) failedToLoad.push(`${name} (no exports)`);
   } catch (error) {
-    failedToLoad.push(
-      `${name} (${String(error.message).split('\n')[0].slice(0, 90)})`,
-    );
+    failedToLoad.push(`${name} (${String(error.message).split('\n')[0].slice(0, 90)})`);
   }
 }
 check(
@@ -163,10 +155,7 @@ check(
 );
 
 // 3. The entry points this suite drives directly are the documented shapes.
-check(
-  'kernel exports createApplication',
-  typeof createApplication === 'function',
-);
+check('kernel exports createApplication', typeof createApplication === 'function');
 check('runtime exports RuntimePlugin', typeof RuntimePlugin === 'function');
 check('logger-plugin exports LoggerPlugin', typeof LoggerPlugin === 'function');
 check('common exports the capability tokens', CAPABILITIES.LOGGER === 'logger');
@@ -192,16 +181,10 @@ try {
   );
 
   const logger = app.services.get(CAPABILITIES.LOGGER);
-  check(
-    'resolved logger service exposes info()',
-    typeof logger?.info === 'function',
-  );
+  check('resolved logger service exposes info()', typeof logger?.info === 'function');
 
   // 6. The in-process pipeline serves a request.
-  const injected = await app.inject({
-    method: 'GET',
-    url: 'http://compat.test/compat',
-  });
+  const injected = await app.inject({ method: 'GET', url: 'http://compat.test/compat' });
   check(
     'inject() serves the route',
     injected.statusCode === 200 && injected.body === `{"runtime":"${host}"}`,
@@ -227,11 +210,7 @@ try {
 //    Binding it again is the only observation that distinguishes a closed
 //    listener from one the adapter merely stopped routing to.
 const rebound = await rebind(port);
-check(
-  'stop() releases the listening port',
-  rebound === null,
-  rebound ?? undefined,
-);
+check('stop() releases the listening port', rebound === null, rebound ?? undefined);
 
 // 9. The published grpc/telemetry artifacts must ship no non-literal path from
 //    an `npm:` string into import(). JSR's npm-compatibility rewrite is static
@@ -397,19 +376,13 @@ function listJsFiles(dir) {
   return out;
 }
 
-for (
-  const name of ['@jsr/setu-ts__grpc-plugin', '@jsr/setu-ts__telemetry-plugin']
-) {
+for (const name of ['@jsr/setu-ts__grpc-plugin', '@jsr/setu-ts__telemetry-plugin']) {
   const pkgDir = `node_modules/${name}`;
   let version;
   try {
     version = JSON.parse(readFileSync(`${pkgDir}/package.json`, 'utf8')).version;
   } catch {
-    check(
-      `${name} is installed with a readable version`,
-      false,
-      'no package.json',
-    );
+    check(`${name} is installed with a readable version`, false, 'no package.json');
     continue;
   }
 
@@ -426,9 +399,7 @@ for (
     const source = readFileSync(file, 'utf8');
     const rel = file.replace(`${pkgDir}/`, '');
     if (npmImportOccurrences(source).length > 0) npmInImport.push(rel);
-    if (parameterizedImporterOccurrences(source).length > 0) {
-      indirection.push(rel);
-    }
+    if (parameterizedImporterOccurrences(source).length > 0) indirection.push(rel);
   }
   const details = [
     npmInImport.length > 0 ? `npm: inside import(): ${npmInImport.join(', ')}` : '',
@@ -443,7 +414,5 @@ for (
   );
 }
 
-console.log(
-  failures === 0 ? `\nAll checks passed (${host}).` : `\n${failures} check(s) failed.`,
-);
+console.log(failures === 0 ? `\nAll checks passed (${host}).` : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
