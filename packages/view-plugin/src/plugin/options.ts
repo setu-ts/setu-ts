@@ -23,6 +23,13 @@ import type { IViewEngine } from '@setu-ts/common';
  *   Eta) participates: it adapts each compiled template to a
  *   `(props) => string` function, which is already a `Component<P>`.
  *
+ * There is deliberately no plugin-level `layout` option: such an option
+ * would wrap EVERY render — including the fragments and partial responses
+ * `IResponse.html` already serves to HTMX-style callers, where a full
+ * document is the wrong answer — and a page wanting no layout would then
+ * need an opt-out. Compose explicitly instead: wrap the child component in
+ * the layout at the call site.
+ *
  * @since 0.5.0
  */
 export type ViewPluginOptions =

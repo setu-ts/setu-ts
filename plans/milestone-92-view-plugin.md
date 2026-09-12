@@ -414,11 +414,13 @@ test above exercises the real library rather than a fake. There is no lazy-impor
 **Negative controls to run and revert, each observed failing:** (1) drop the `await` in
 `normalizeRendered` — the async cases must emit `object Promise`; (2) drop the `String(...)` — the
 async cases must report `typeof === 'object'`; (3) remove the `Suspense` refusal — the buffered
-fallback must be served with a 200; (4) remove `CAPABILITIES.VIEW` from `optionalDependencies` — the
-both-orders e2e must fail in one order; (5) revert the snippet-harness `jsx` keys — the new README
-fences must fail `TS2874`; (6) drop `renderView` from the barrel — the barrel-exports assertion must
-fail while every runtime test still passes, which is what proves the assertion is the thing catching
-it.
+fallback must be served with a 200; (4) drop the `optionalDependencies` edge from the shipped
+replacement-`VIEW` control — a provider at `PLUGIN_PRIORITY.LOWEST` registered after
+`DecoratorPlugin`, which only the edge orders before the decorator (priority alone would not: the
+M45b finding) — and `start()` must refuse the application; (5) revert the snippet-harness `jsx` keys
+— the new README fences must fail `TS2874`; (6) drop `renderView` from the barrel — the
+barrel-exports assertion must fail while every runtime test still passes, which is what proves the
+assertion is the thing catching it.
 
 ## 7. Verification gates
 
