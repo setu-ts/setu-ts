@@ -9511,6 +9511,141 @@ those choices belongs in a local recorder or a typed publishing convenience API.
 
 ---
 
+## Milestone 94: Form Bodies and Error Views — the Seams M92 Surfaced
+
+**Package(s):** 94a `packages/exceptions`; 94b `packages/common`, `packages/runtime`,
+`packages/storage-plugin`, `packages/session-plugin`; 94c `packages/session-plugin`.
+
+**Objective:** Close the three seams that only became visible once M92 made server-rendered HTML a
+first-class capability. Every one of them is a place where a framework built API-first meets a
+browser, and in each the framework is correct for an API client and awkward or silent for a page.
+
+**Provenance: these were found by BUILDING, not by reading.** M92's two demo applications
+(`.tmp/view-functional`, `.tmp/view-class-based`) were extended with the classic MVC round — forms,
+validation, sessions, flash, login, logout, file upload, SSE and WebSocket consumers, HTML error
+pages. Two defects in the view plugin itself were found and fixed during M92; these three are what
+was left over, and none of them is a defect in `view-plugin`.
+
+**The competitor comparison was MEASURED, not read, and two doc-derived claims did not survive.**
+Runnable ASP.NET Core 9 and NestJS 10 applications were built exposing the same shapes
+(`.tmp/compare/`, with a README recording the commands). The corrections matter because the first
+version of this section's reasoning rested on the docs:
+
+- **ASP.NET does NOT negotiate error responses on `Accept` the way its docs imply.** The two
+  mechanisms are ALTERNATIVES, not layers. `UseExceptionHandler("/Home/Error")` plus
+  `UseStatusCodePagesWithReExecute` answered HTML for **both** `Accept: text/html` AND
+  `Accept: application/json`. The parameterless `UseExceptionHandler()` + `UseStatusCodePages()` +
+  `AddProblemDetails()` negotiated `problem+json` correctly for a 404, but gave a browser
+  `text/plain` rather than a page and answered a thrown 500 with an **empty body**. The real split
+  is by controller type, and even that is partial: an `[ApiController]` returning `NotFound()` or
+  `Problem(422)` produced ProblemDetails, while a **thrown** exception in that same controller got
+  the HTML page, because the global re-execution handler is unconditional. So **no framework of the
+  three produces HTML-for-browsers and JSON-for-APIs automatically on the exception path** — all
+  three make the developer write the branch.
+- **The multipart-CSRF limitation is shared with NestJS, not unique to us.** Nest with `csrf-csrf`
+  answered `invalid csrf token` for a token in a multipart form FIELD and accepted the same token in
+  a header — byte-for-byte our behaviour, and for the same reason (the urlencoded body parser runs
+  before the multipart one, so the field is never seen). ASP.NET genuinely solves it: a token in a
+  multipart form field was accepted (200) and the no-token control refused (400), because
+  `Request.Form` parses both encodings behind one abstraction.
+
+**The performance question was settled by measurement before the milestone was opened**, because
+M87/M88 had just spent two milestones on the request and response paths and a new `IRequest` member
+is exactly the kind of addition that could give some of it back. It does not:
+
+- `IRequest` is implemented as `class FrameworkRequest` with **prototype methods** and private-field
+  memoization (`fetch-mapping.ts:78`), so a new `formData()` method allocates nothing per request.
+  The only possible per-request cost is one extra private field.
+- That field costs **~0.4 ns**, measured by comparing two classes differing only in the field,
+  interleaved over 11 rounds in one process: 68,446,181 vs 66,605,856 ops/s, a median ratio of
+  **97.3%** with 1 of 11 rounds faster. Against a bare request at roughly 10,000 ns that is
+  **0.004%** — some 400x below the noise floor of the framework benchmark, whose per-pass spread at
+  the real mapping function measured 19–34%. **The first version of that benchmark was wrong and is
+  recorded here so it is not repeated**: it read the new field in one variant's hot loop and so
+  measured an extra comparison as well as the shape, reporting 94.5%; a bodyless GET never touches
+  the field.
+- The parse costs are work applications **already pay**: 859 ns for the `URLSearchParams` round an
+  app hand-rolls today, 6,689 ns for the real `parseMultipart` over a ~1.1 KB two-part body.
+- For multipart the accessor should be **cheaper than the alternative**. `csrf/verify.ts:108` and
+  `upload-middleware.ts:133` read the same body independently today, so closing the CSRF hole
+  without a shared accessor parses the body twice (≈13,378 ns). A memoized `formData()` parses once,
+  exactly as `#json` already memoizes `json()`.
+
+### 94a — an error response the application owns
+
+`ErrorHandlerFormatter` returns `Record<string, unknown>` and the middleware always writes it as
+`application/json` or `application/problem+json` (`error-handler.ts:261`), so **the error path
+cannot express a non-JSON body at all**. There is no content negotiation anywhere in the chain, and
+a browser meeting a thrown error or an unmatched path is shown raw JSON.
+
+Catching does not help either, and that is the specific friction: `errorHandler` **swallows** the
+error to write its own body, so a wrapping middleware sees nothing propagate. An application must
+instead INSPECT the finished response, and must additionally skip responses that are already HTML —
+the first version written during M92 clobbered a handler's deliberate `401` re-render of a sign-in
+form with a generic "something went wrong". Three subtleties where a NestJS exception filter has
+none: it catches, it holds the platform response, it is one place.
+
+**Deliverable.** An application-owned hook on `ErrorHandlerOptions` — working shape
+`respond?: (error, ctx) => HandlerResult | undefined` — consulted before formatting, with
+`undefined` falling through to the existing formatter so nothing released changes. The application
+supplies the callback, so `packages/exceptions` never imports `view-plugin` and §2.2 is untouched.
+It generalises past HTML: an application could answer XML or CSV by the same route.
+
+**Explicitly NOT in scope: ASP.NET-style re-execution.** It is the nicest of the three developer
+experiences, but it needs the kernel to re-dispatch a request mid-flight, and the measurement above
+shows the negotiation it is supposed to buy does not actually work as documented.
+
+### 94b — one form-body abstraction
+
+`IRequest` exposes `json()` / `text()` / `bytes()` and **no form accessor**. That single gap is the
+root cause of three separate frictions: an application hand-rolls urlencoded parsing,
+`session-plugin`'s CSRF verifier cannot see a token in a multipart body, and `storage-plugin` ships
+its own parser that nothing else can reach.
+
+**Deliverable.** An **optional** `IRequest.formData?()` returning one shape for both encodings,
+memoized like `json()`. Optional rather than required because a required member breaks every
+out-of-repo implementor — the M42 `signal?` / M44 `fs?` / M45 `workers?` precedent — and there are
+four in-repo producers (`common`'s type, `kernel`, `runtime`, `testing`). `parseMultipart` is
+promoted to `common` and `storage-plugin` delegates to it: **172 lines with zero imports**, a pure
+function, so this is §2.1's pure-utility allowance and the M55 content-type-map precedent — it
+DELETES a duplicate rather than creating the M30b `pemToDer` one. The multipart CSRF hole then
+closes as a consequence rather than as its own fix.
+
+**Open questions the plan must resolve.**
+
+- **The returned shape.** What a repeated field name yields, and how a file part is distinguished
+  from a text part. The web `FormData` answer (`getAll`, `File` vs `string`) is the obvious
+  candidate and must be checked against what `ParsedPart` already carries rather than assumed.
+- **Whether `storage-plugin`'s upload middleware should consume the accessor**, which is what makes
+  the double parse a single one — and whether its `maxFiles` / `allowedMimeTypes` / size refusals
+  still have a place to stand once parsing has moved.
+- **What an unparseable or wrong-content-type body does.** A throw, an empty result, or `undefined`
+  are three different contracts for a caller, and the CSRF verifier and an application handler want
+  different ones.
+
+### 94c — the CSRF token a form does not have to remember
+
+ASP.NET's `FormTagHelper` **auto-injects** the hidden `__RequestVerificationToken` into every POST
+form — verified against a view carrying no helper call at all, in both the urlencoded and the
+multipart form. It is the one ergonomic where ASP.NET is cleanly ahead of both Setu-TS and NestJS,
+and forgetting the field is otherwise a silent `403` discovered at runtime: it happened twice while
+building M92's demo, once on a sign-out form and once on a task form after CSRF was switched on.
+
+**Deliverable.** A token field helper exported from `session-plugin` — the package that owns the
+token — so a view does not hand-write the hidden input. It is a `session-plugin` export rather than
+a `view-plugin` one precisely because §2.2 forbids `view-plugin` importing it.
+
+**Also in scope, and cheap:** `SessionPlugin({ csrf: {} })` registers the middleware **globally**
+(`session-plugin.ts:125`), so switching it on retroactively `403`s every existing form and API POST
+in an application. That is correct security and matches ASP.NET's recommended
+`AutoValidateAntiforgeryToken` posture, but it is a composition fact rather than a local opt-in and
+is documented nowhere a reader meets before the 403.
+
+**Not a deliverable.** Changing the global default. Global-with-opt-out is what all three frameworks
+do, and the `exclude` escape already exists.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                            |
@@ -9654,3 +9789,6 @@ those choices belongs in a local recorder or a typed publishing convenience API.
 | 92        | ⬜     | view plugin — server-rendered HTML as a capability                                                 |
 | 93a       | ⬜     | events-plugin — aggregate-local domain event recording                                             |
 | 93b       | ⬜     | messaging-plugin — versioned integration event contracts                                           |
+| 94a       | ⬜     | exceptions — application-owned error response                                                      |
+| 94b       | ⬜     | common + runtime + storage/session — one form-body abstraction                                     |
+| 94c       | ⬜     | session-plugin — CSRF token field helper                                                           |
