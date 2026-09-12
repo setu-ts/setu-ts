@@ -50,6 +50,7 @@ base class or publishing while its persistence policy is unresolved:
 
 ```typescript
 import { createDomainEvents, type IDomainEvent } from '@setu-ts/events-plugin';
+import type { IRuntimeServices } from '@setu-ts/common';
 
 class Order {
   readonly events = createDomainEvents();
@@ -60,13 +61,20 @@ class Order {
   }
 }
 
+function orderPlaced(
+  runtime: IRuntimeServices,
+  orderId: string,
+): IDomainEvent<{ readonly orderId: string }> {
+  return {
+    type: 'order.placed',
+    id: 'event-1',
+    occurredOn: new Date(runtime.now()),
+    data: { orderId },
+  };
+}
+
 const order = new Order();
-order.place({
-  type: 'order.placed',
-  id: 'event-1',
-  occurredOn: new Date(),
-  data: { orderId: 'order-1' },
-});
+order.place(orderPlaced(runtime, 'order-1'));
 
 // The application owns this boundary: save the aggregate, then dispatch or
 // persist the pending facts. Remove or clear only after its chosen policy succeeds.

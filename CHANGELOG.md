@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/events-plugin` — aggregate-local `createDomainEvents()` and `IDomainEvents`.** A
+  framework-independent recorder for facts raised by an aggregate during an operation. It preserves
+  insertion order, returns isolated snapshots, and never publishes; application code owns
+  persistence, dispatch, and acknowledgement policy.
 - **`@setu-ts/view-plugin` (new package)** — server-rendered HTML as a capability. Registers an
   `IViewEngine` under the new `CAPABILITIES.VIEW` token; the view is named BY REFERENCE
   (`@Render(UserList)`, never `'users/index'`), so there is no view resolver and no filesystem
