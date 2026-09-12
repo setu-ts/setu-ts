@@ -1297,9 +1297,9 @@ graph TB
 | **Purpose**          | In-memory event bus for domain events                                                                                      |
 | **Responsibilities** | Publish/subscribe domain events; event handler registration; error handling                                                |
 | **Dependencies**     | `common`, `kernel`                                                                                                         |
-| **Public API**       | `EventsPlugin()`; `IEventBus`; `DomainEvent`; `IntegrationEvent`; `defineDomainEvent`; `IEventHandler`; `subscribeHandler` |
+| **Public API**       | `EventsPlugin()`; `IEventBus`; `DomainEvent`; `IntegrationEvent`; `defineDomainEvent`; `IDomainEvents`; `createDomainEvents`; `IEventHandler`; `subscribeHandler` |
 | **Extension Points** | Custom event bus (override `events` token); custom event handlers                                                          |
-| **Rules**            | In-memory only; for distributed events, use messaging plugin                                                               |
+| **Rules**            | In-memory only; `IDomainEvents` records aggregate-local facts without publishing; for distributed events, use messaging plugin |
 
 #### @setu-ts/cqrs-plugin
 

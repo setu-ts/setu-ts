@@ -9798,7 +9798,7 @@ do, and the `exclude` escape already exists.
 | 90j       | ✅     | operator diagnostics survive to the operator ([#263](https://github.com/setu-ts/setu-ts/pull/263))       |
 | 91        | ✅     | test app composes like the real one ([#278](https://github.com/setu-ts/setu-ts/pull/278))                |
 | 92        | ✅     | view plugin — server-rendered HTML as a capability ([#284](https://github.com/setu-ts/setu-ts/pull/284)) |
-| 93a       | ⬜     | events-plugin — aggregate-local domain event recording                                                   |
+| 93a       | ✅     | events-plugin — aggregate-local domain event recording                                                   |
 | 93b       | ⬜     | messaging-plugin — versioned integration event contracts                                                 |
 | 94a       | ⬜     | exceptions — application-owned error response                                                            |
 | 94b       | ⬜     | common + runtime + storage/session — one form-body abstraction                                           |

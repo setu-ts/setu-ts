@@ -10,6 +10,8 @@ export { EventsPlugin } from './plugin/events-plugin.ts';
 export { InMemoryEventBus } from './bus/in-memory-event-bus.ts';
 export { defineDomainEvent, DomainEvent } from './events/domain-event.ts';
 export { IntegrationEvent } from './events/integration-event.ts';
+export { createDomainEvents } from './events/domain-events.ts';
+export type { IDomainEvents } from './events/domain-events.ts';
 export type { IEventHandler } from './handlers/event-handler.ts';
 export { subscribeHandler } from './handlers/event-handler.ts';
 export type { EventHandlerRegistration, EventsPluginOptions } from './interfaces/index.ts';

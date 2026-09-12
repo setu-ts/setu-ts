@@ -2808,6 +2808,47 @@ app.router.post('/users', async (ctx) => {
 });
 ```
 
+### Recording aggregate-local domain events
+
+Use `createDomainEvents()` as a field owned by an aggregate. It records local facts only: it does
+not resolve a capability, call `IEventBus`, save an aggregate, or provide an outbox guarantee.
+
+```typescript
+import { createDomainEvents, type IDomainEvent } from '@setu-ts/events-plugin';
+
+class Order {
+  readonly events = createDomainEvents();
+
+  place(event: IDomainEvent<{ readonly orderId: string }>): void {
+    // Invariants and state mutation happen before the fact is recorded.
+    this.events.record(event);
+  }
+}
+
+const order = new Order();
+// Save order first. The application then chooses to dispatch or persist each fact.
+for (const event of order.events.pending()) {
+  await dispatchAfterSave(event);
+  order.events.remove(event);
+}
+```
+
+`pending()` is an insertion-ordered, read-only snapshot rather than the mutable backing collection.
+`remove(event)` uses reference equality (`===`), removes the first matching occurrence, and returns
+`false` without changing the recorder if the reference is absent. `clear()` removes every pending
+fact. A reconstructed aggregate creates a new recorder and begins with no pending facts.
+
+```typescript
+interface IDomainEvents {
+  record<T>(event: IDomainEvent<T>): void;
+  pending(): readonly IDomainEvent[];
+  remove(event: IDomainEvent): boolean;
+  clear(): void;
+}
+
+function createDomainEvents(): IDomainEvents;
+```
+
 ### Subscribing to Events
 
 ```typescript
@@ -2854,6 +2895,10 @@ interface IEventBus {
   fields).
 - **`defineDomainEvent`** — Factory that binds `DomainEvent` and `IntegrationEvent` to a runtime,
   returning event IDs and timestamps from the runtime's `uuid` and `now` services.
+- **`IDomainEvents`** — Aggregate-owned local recorder contract. Its snapshots are ordered and
+  isolated from mutable recorder state; it never dispatches events itself.
+- **`createDomainEvents`** — Factory for a new empty `IDomainEvents` recorder, intended for an
+  aggregate field rather than a framework base class.
 - **`IEventHandler`** — Class-based event handler interface with a `handle(event)` method.
 - **`subscribeHandler`** — Function that adapts an `IEventHandler` instance to the `EventHandler`
   signature and subscribes it to the bus; returns an `Unsubscribe` function.
