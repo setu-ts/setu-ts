@@ -19,9 +19,9 @@
 import type { IPlugin, IPluginContext, IViewEngine } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
+import { ViewEngine } from '../engines/view-engine.ts';
+
 import type { ViewPluginOptions } from './options.ts';
-import { HonoHtmlEngine } from '../engines/hono-html-engine.ts';
-import { HonoJsxEngine } from '../engines/hono-jsx-engine.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Plugin name — matches the package name without the scope. */
@@ -32,10 +32,11 @@ function selectEngine(options: ViewPluginOptions): IViewEngine {
   if (options.engine === 'custom') {
     return options.view;
   }
-  if (options.engine === 'hono-html') {
-    return new HonoHtmlEngine();
-  }
-  return new HonoJsxEngine();
+  // `'hono-jsx'` and `'hono-html'` name the AUTHORING mode, not a rendering
+  // strategy — both return values funnel through the same normalization, so
+  // both get the same engine. The selected mode is reported by the health
+  // indicator; see ViewPluginOptions for why it is still declared.
+  return new ViewEngine();
 }
 
 /**

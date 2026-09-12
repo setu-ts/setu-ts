@@ -11,12 +11,12 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { HonoJsxEngine } from '../../src/engines/hono-jsx-engine.ts';
+import { ViewEngine } from '../../src/engines/view-engine.ts';
 import { Layout, UserList } from '../fixtures/users.tsx';
 
-describe('HonoJsxEngine', () => {
+describe('ViewEngine (JSX authoring mode)', () => {
   it('renders a .tsx fixture carrying no pragma (proving the manifest config)', async () => {
-    const result = await new HonoJsxEngine().render(UserList, {
+    const result = await new ViewEngine().render(UserList, {
       users: ['ada', 'grace'],
     });
 
@@ -31,7 +31,7 @@ describe('HonoJsxEngine', () => {
         children: UserList({ users: props.users }),
       });
 
-    const result = await new HonoJsxEngine().render(Page, { users: ['ada'] });
+    const result = await new ViewEngine().render(Page, { users: ['ada'] });
 
     expect(result).toBe(
       '<html><head><title>Users</title></head><body><ul><li>ada</li></ul></body></html>',

@@ -76,7 +76,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/decorator-plugin/README.md': 4,
   // M92: the new package's README is born gated — usage, functional renderView,
   // the @Render decorator and the raw() opt-out.
-  'packages/view-plugin/README.md': 4,
+  'packages/view-plugin/README.md': 5,
   'packages/validation-plugin/README.md': 2,
   'packages/sse-plugin/README.md': 6,
   'packages/websocket-plugin/README.md': 10,

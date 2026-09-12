@@ -8,7 +8,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createElement as h } from '@hono/hono/jsx';
 
-import { HonoJsxEngine } from '../../src/engines/hono-jsx-engine.ts';
+import { ViewEngine } from '../../src/engines/view-engine.ts';
 import { renderComponent } from '../../src/render/normalize.ts';
 import { UnresolvedSuspenseError, ViewRenderError } from '../../src/index.ts';
 
@@ -23,14 +23,14 @@ async function RejectingPage() {
   throw new Error('async fault');
 }
 
-/** A component returning a value with no string form. */
-function NullPage() {
-  return null;
+/** A component that forgot its `return` — the one refused falsy value. */
+function UndefinedPage() {
+  return undefined;
 }
 
 describe('ViewRenderError', () => {
   it('a throwing component surfaces ViewRenderError with the original as cause', async () => {
-    const error = await new HonoJsxEngine().render(ExplodingPage, undefined).then(
+    const error = await new ViewEngine().render(ExplodingPage, undefined).then(
       () => null,
       (e: unknown) => e,
     );
@@ -53,15 +53,18 @@ describe('ViewRenderError', () => {
     expect(((error as Error).cause as Error).message).toBe('async fault');
   });
 
-  it('a component returning null is refused by name', async () => {
-    const error = await new HonoJsxEngine().render(NullPage, undefined).then(
+  it('a component returning undefined is refused by name', async () => {
+    // `null`/`false` are the deliberate "render nothing" values and yield ''
+    // (falsy-returns.test.ts). `undefined` is almost always a missing
+    // `return`, so it stays a named refusal rather than a silent empty page.
+    const error = await new ViewEngine().render(UndefinedPage, undefined).then(
       () => null,
       (e: unknown) => e,
     );
 
     expect(error).toBeInstanceOf(ViewRenderError);
-    expect((error as ViewRenderError).message).toContain('NullPage');
-    expect((error as ViewRenderError).message).toContain('null');
+    expect((error as ViewRenderError).message).toContain('UndefinedPage');
+    expect((error as ViewRenderError).message).toContain('missing `return`');
   });
 
   it('an anonymous component is named without pretending otherwise', () => {

@@ -21,10 +21,13 @@ All notable changes to this project are documented here. The format follows
   props)`. Rendered output is a buffered primitive string; a tree
   holding a pending `<Suspense>` boundary is refused with `UnresolvedSuspenseError` rather than
   served as its fallback forever (streaming resolution deferred to a follow-up milestone). Escaping
-  stays in the rendering runtime; `raw()` is re-exported as the documented opt-out. Adds
-  `CAPABILITIES.VIEW`, `IViewEngine` and `Component<P>` to `@setu-ts/common`, a `docs/mvc.md` guide,
-  a Views section to `docs/migration-nestjs.md`, and the 48th member to the release list (first
-  publish needs `release:create-packages` + `release:link-repos`; see `docs/releasing.md`).
+  stays in the rendering runtime; `raw()` is re-exported as the documented opt-out. A top-level
+  return follows the rendering runtime's own rules — `null`, `false`, `true` and `''` render as the
+  empty string so `(p) => p.show && <Banner />` behaves as it does nested, while `undefined` is
+  refused as a probable missing `return`. Adds `CAPABILITIES.VIEW`, `IViewEngine` and `Component<P>`
+  to `@setu-ts/common`, a `docs/mvc.md` guide, a Views section to `docs/migration-nestjs.md`, and
+  the 48th member to the release list (first publish needs `release:create-packages` +
+  `release:link-repos`; see `docs/releasing.md`).
 - **`@setu-ts/testing`** — `createTestApp` gains a **composition-root arm**: pass `app` (an
   already-constructed, not-yet-started application — a scaffolded project's `createApp()` from
   `setu.config.ts`, or a starter factory's return value) instead of `plugins`, with optional

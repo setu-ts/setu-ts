@@ -24,10 +24,12 @@ const app = createApplication({
 await app.start({ port: 3000 });
 ```
 
-`ViewPlugin()` defaults to the `'hono-jsx'` arm — components authored with `@hono/hono/jsx`, escaped
-by default, zero client JavaScript. `ViewPlugin({ engine: 'hono-html' })` selects the `html`
-tagged-template arm, which needs no `jsxImportSource` and works in a plain `.ts` file. The
-`'custom'` arm registers an application-supplied `IViewEngine` verbatim.
+Both arm names describe the **authoring mode** — which import your components use — rather than a
+rendering strategy; one engine serves both, and the selected mode is reported by the `view` health
+indicator. `ViewPlugin()` defaults to the `'hono-jsx'` arm — components authored with
+`@hono/hono/jsx`, escaped by default, zero client JavaScript. `ViewPlugin({ engine: 'hono-html' })`
+selects the `html` tagged-template arm, which needs no `jsxImportSource` and works in a plain `.ts`
+file. The `'custom'` arm registers an application-supplied `IViewEngine` verbatim.
 
 ## The functional entry point
 

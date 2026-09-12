@@ -55,30 +55,11 @@ export async function renderView<P>(
     );
   }
   const engine = ctx.services.get<IViewEngine>(CAPABILITIES.VIEW);
-  return await renderToResponse(engine, ctx, component, props);
-}
-
-/**
- * The render-and-respond sequence: engine render, then the single
- * `IResponse.html(...)` write. Internal to this package — the `@Render`
- * branch in `decorator-plugin` performs the identical sequence against the
- * same resolved engine, which is what the both-entry-points integration test
- * pins byte-identically.
- *
- * @typeParam P - The component's props bag
- * @param engine - The engine resolved from `CAPABILITIES.VIEW`
- * @param ctx - The current kernel request context
- * @param component - The view component to render
- * @param props - The props passed to the component
- * @returns The handler result carrying the HTML body
- * @since 0.5.0
- */
-export async function renderToResponse<P>(
-  engine: IViewEngine,
-  ctx: IRequestContext,
-  component: Component<P>,
-  props: P,
-): Promise<HandlerResult> {
-  const html = await engine.render(component, props);
-  return ctx.response.html(html);
+  // The render-and-respond sequence is two lines and is deliberately NOT
+  // extracted for sharing: AI_GUIDELINES §2.2 forbids `decorator-plugin`
+  // importing this package, so the `@Render` branch cannot call a helper here
+  // and performs the identical sequence inline. The shared implementation is
+  // `IViewEngine.render` itself, which both entry points reach on the SAME
+  // resolved engine — pinned byte-identically by both-entry-points.test.ts.
+  return ctx.response.html(await engine.render(component, props));
 }

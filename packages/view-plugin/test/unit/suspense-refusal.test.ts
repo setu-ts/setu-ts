@@ -10,8 +10,7 @@ import { expect } from '@std/expect';
 import { createElement as h, Suspense } from '@hono/hono/jsx';
 import { html } from '@hono/hono/html';
 
-import { HonoJsxEngine } from '../../src/engines/hono-jsx-engine.ts';
-import { HonoHtmlEngine } from '../../src/engines/hono-html-engine.ts';
+import { ViewEngine } from '../../src/engines/view-engine.ts';
 import { UnresolvedSuspenseError } from '../../src/index.ts';
 
 /** Resolves after a tick — long after the buffered render has decided. */
@@ -46,7 +45,7 @@ function AsyncInterpolation() {
 
 describe('pending Suspense refusal', () => {
   it('a buffered Suspense tree throws UnresolvedSuspenseError naming the component', async () => {
-    const engine = new HonoJsxEngine();
+    const engine = new ViewEngine();
 
     const error = await engine.render(SuspenseTree, undefined).then(
       () => null,
@@ -61,21 +60,21 @@ describe('pending Suspense refusal', () => {
   });
 
   it('a sync tree renders clean — no over-firing', async () => {
-    const result = await new HonoJsxEngine().render(SyncTree, undefined);
+    const result = await new ViewEngine().render(SyncTree, undefined);
 
     expect(typeof result).toBe('string');
     expect(result).toBe('<ul><li>ada</li></ul>');
   });
 
   it('an async tree without Suspense renders clean — no over-firing', async () => {
-    const result = await new HonoJsxEngine().render(AsyncTreeWithoutSuspense, undefined);
+    const result = await new ViewEngine().render(AsyncTreeWithoutSuspense, undefined);
 
     expect(typeof result).toBe('string');
     expect(result).toContain('real-content');
   });
 
   it('an html template with an async interpolation renders clean — no over-firing', async () => {
-    const result = await new HonoHtmlEngine().render(AsyncInterpolation, undefined);
+    const result = await new ViewEngine().render(AsyncInterpolation, undefined);
 
     expect(typeof result).toBe('string');
     expect(result).toContain('resolved-later');

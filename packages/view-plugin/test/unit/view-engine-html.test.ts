@@ -7,11 +7,10 @@
  *
  * @module
  */
+import { ViewEngine } from '../../src/engines/view-engine.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { html } from '@hono/hono/html';
-
-import { HonoHtmlEngine } from '../../src/engines/hono-html-engine.ts';
 
 interface PageProps {
   readonly title: string;
@@ -26,9 +25,9 @@ function Page(props: PageProps) {
   `;
 }
 
-describe('HonoHtmlEngine', () => {
+describe('ViewEngine (html-tag authoring mode)', () => {
   it('renders a tagged-template component from a plain .ts file', async () => {
-    const result = await new HonoHtmlEngine().render(Page, {
+    const result = await new ViewEngine().render(Page, {
       title: 'Users',
       items: ['ada', 'grace'],
     });

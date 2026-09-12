@@ -15,7 +15,7 @@
  * (AI_GUIDELINES §10).
  */
 import { UnresolvedSuspenseError, ViewRenderError } from './errors.ts';
-import { raw } from './engines/hono-html-engine.ts';
+import { raw } from './html.ts';
 import type { ViewPluginOptions } from './plugin/options.ts';
 import { ViewPlugin } from './plugin/view-plugin.ts';
 import { renderView } from './render/render-view.ts';

@@ -11426,8 +11426,19 @@ error rather than a startup throw:
 | -------- | ------------- | ------------ | ------------------------------------------------------------------------------------------------ |
 | `engine` | `'hono-jsx'`  | `'hono-jsx'` | Components are JSX functions; the application manifest declares `jsx` / `jsxImportSource`.       |
 | `engine` | `'hono-html'` | —            | Components return an `html` tagged template; needs no `jsxImportSource`, works in a plain `.ts`. |
-| `engine` | `'custom'`    | —            | Requires `view`; the supplied engine is registered verbatim.                                     |
-| `view`   | `IViewEngine` | —            | `'custom'` arm only — the application's own engine.                                              |
+
+`'hono-jsx'` and `'hono-html'` name the **authoring mode**, not a rendering strategy: both return
+values funnel through one engine, because escaping belongs to the rendering runtime and there is
+nothing left to configure per mode. The selected mode is reported by the `view` health indicator.
+
+**Rendering nothing.** A component's top-level return follows the rendering runtime's own rules, so
+`(props) => props.show && <Banner />` behaves at the top level exactly as it does nested: `null`,
+`false`, `true` and `''` render as the empty string, while `0` renders as `0`. `undefined` is the
+one exception — it is refused with `ViewRenderError`, because it is almost always a missing `return`
+rather than a deliberate empty render.
+
+| `engine` | `'custom'` | — | Requires `view`; the supplied engine is registered verbatim. | |
+`view` | `IViewEngine` | — | `'custom'` arm only — the application's own engine. |
 
 ### Exports
 
@@ -11436,7 +11447,7 @@ error rather than a startup throw:
 | `ViewPlugin`              | function | Plugin factory — registers the selected engine under `CAPABILITIES.VIEW` and a `view` health indicator reporting it (always `up`) |
 | `renderView`              | function | Functional entry point — `renderView(ctx, component, props)` resolves the engine per request and answers `IResponse.html(...)`    |
 | `raw`                     | function | The escaping opt-out, re-exported from `@hono/hono/html` so an application does not import hono directly                          |
-| `ViewRenderError`         | class    | A component threw while rendering (original carried as `cause`), or returned a value with no string form                          |
+| `ViewRenderError`         | class    | A component threw while rendering (original carried as `cause`), or returned `undefined` (almost always a missing `return`)       |
 | `UnresolvedSuspenseError` | class    | The rendered tree holds a pending `<Suspense>` boundary; buffered rendering would serve only the fallback, so it is refused       |
 | `ViewPluginOptions`       | type     | The discriminated options union above                                                                                             |
 

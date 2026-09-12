@@ -9,8 +9,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { ViewPlugin } from '../../src/plugin/view-plugin.ts';
-import { HonoJsxEngine } from '../../src/engines/hono-jsx-engine.ts';
-import { HonoHtmlEngine } from '../../src/engines/hono-html-engine.ts';
+import { ViewEngine } from '../../src/engines/view-engine.ts';
 import type { IViewEngine } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { HealthIndicatorFn, IPlugin, IPluginContext } from '@setu-ts/common';
@@ -71,7 +70,7 @@ describe('ViewPlugin', () => {
     await ViewPlugin().register(ctx);
 
     expect(ctx.services.has(CAPABILITIES.VIEW)).toBe(true);
-    expect(registered.get(CAPABILITIES.VIEW)).toBeInstanceOf(HonoJsxEngine);
+    expect(registered.get(CAPABILITIES.VIEW)).toBeInstanceOf(ViewEngine);
   });
 
   it('registers the tagged-template arm when selected', async () => {
@@ -79,7 +78,7 @@ describe('ViewPlugin', () => {
 
     await ViewPlugin({ engine: 'hono-html' }).register(ctx);
 
-    expect(registered.get(CAPABILITIES.VIEW)).toBeInstanceOf(HonoHtmlEngine);
+    expect(registered.get(CAPABILITIES.VIEW)).toBeInstanceOf(ViewEngine);
   });
 
   it('the view indicator reports the selected engine and is always up', async () => {

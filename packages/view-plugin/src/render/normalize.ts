@@ -32,18 +32,20 @@ import { UnresolvedSuspenseError, ViewRenderError } from '../errors.ts';
  * Converts a component's rendered value into a primitive HTML string.
  *
  * Awaits the component's own return (an async component's render genuinely is
- * a promise), awaits the node's `toString()` (a Promise whenever the tree
- * holds an async component), refuses a tree holding a pending `<Suspense>`
- * boundary by name (§3.3 — buffered rendering would serve only the fallback),
- * and returns `String(...)` of the result so the answer is always a
- * **primitive** string.
+ * a promise), answers `''` for the rendering runtime's own "render nothing"
+ * values so `cond && <X/>` behaves at the top level exactly as it does nested,
+ * awaits the node's `toString()` (a Promise whenever the tree holds an async
+ * component), refuses a tree holding a pending `<Suspense>` boundary by name
+ * (§3.3 — buffered rendering would serve only the fallback), and returns
+ * `String(...)` of the result so the answer is always a **primitive** string.
  *
  * @param value - The component's return: a JSX node, an `html` tagged
  *        template result, a string, or a promise of any of these
  * @param component - The component being rendered, for error naming
  * @returns The rendered HTML as a primitive string
- * @throws {ViewRenderError} When the value has no string form (`null` /
- *         `undefined`)
+ * @throws {ViewRenderError} When the value is `undefined` — a component that
+ *         renders nothing returns `null` or `false`, both of which yield an
+ *         empty string here
  * @throws {UnresolvedSuspenseError} When the rendered tree holds a pending
  *         `<Suspense>` boundary
  * @since 0.5.0
@@ -53,12 +55,22 @@ export async function normalizeRendered(
   component: Component<never>,
 ): Promise<string> {
   const awaited: unknown = await value;
-  if (awaited === null || awaited === undefined) {
+  if (awaited === undefined) {
     throw new ViewRenderError(
       component,
-      `returned ${String(awaited)}, which has no string form. A view component must return ` +
-        'JSX, an html tagged template, or a string.',
+      'returned undefined. A component that renders nothing returns null or false; `undefined` ' +
+        'is almost always a missing `return`, so it is refused rather than served as an empty ' +
+        'page.',
     );
+  }
+  // The rendering runtime's own "render nothing" values, matched here so a
+  // top-level return behaves exactly as the same expression does nested.
+  // Measured against @hono/hono@4.13.0: as a CHILD, false / true / null /
+  // undefined / '' all render as nothing while 0 and NaN render their text.
+  // Without this, `(p) => p.show && <Banner/>` served the four-character body
+  // `false` under a 200 — the whole page being the word "false".
+  if (awaited === null || awaited === false || awaited === true) {
+    return '';
   }
   const text: unknown = await (awaited as { toString(): unknown }).toString();
   // The refusal signal is typed and exact (M92 §1): a sync tree carries no
@@ -85,8 +97,7 @@ export async function normalizeRendered(
  * @param component - The component to invoke
  * @param props - The props passed to the component
  * @returns The rendered HTML as a primitive string
- * @throws {ViewRenderError} When the component throws or returns a value with
- *         no string form
+ * @throws {ViewRenderError} When the component throws or returns `undefined`
  * @throws {UnresolvedSuspenseError} When the tree holds a pending `<Suspense>`
  *         boundary (passed through unwrapped)
  * @since 0.5.0

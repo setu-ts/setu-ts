@@ -87,7 +87,7 @@ than inheriting them, per CLAUDE.md; two of the probes changed the design (§3.2
   promise — the async arm is required, not speculative. `unknown` as the component's return keeps
   one type covering a `JSXNode`, an `HtmlEscapedString` and a plain `(props) => string`.
 - **Test home:** `packages/common/test/unit/view-contract.test.ts` (type-level assignability of all
-  three component shapes); `packages/view-plugin/test/unit/hono-jsx-engine.test.ts`.
+  three component shapes); `packages/view-plugin/test/unit/view-engine-jsx.test.ts`.
 
 ### 3.2 Rendered-value normalization — the static type lies
 
@@ -107,6 +107,19 @@ than inheriting them, per CLAUDE.md; two of the probes changed the design (§3.2
 - **Test home:** `packages/view-plugin/test/unit/normalize.test.ts` — a sync component, an async
   component, and a component whose tree nests an async child, each asserting the result is a
   **primitive** string (`typeof === 'string'`) and that the text never contains `object Promise`.
+
+**Correction (post-review).** As first written this decision covered only the promise and
+boxed-String traps, and handed every non-nullish value to `String(...)` — so a component whose
+top-level return was `false` served the four-character body `false` under a `200`. That is the most
+common conditional idiom in JSX (`(p) => p.show && <Banner/>`), and the same component nested inside
+a parent rendered as nothing, so the framework contradicted its own rendering runtime at the top
+level and did so inconsistently (`null` threw while `false` printed). Measured against
+`@hono/hono@4.13.0`: as a CHILD, `false` / `true` / `null` / `undefined` / `''` all render as
+nothing while `0` and `NaN` render their text. `normalizeRendered` now answers `''` for `null`,
+`false` and `true`, with `undefined` the one deliberate exception — it is almost always a missing
+`return`, so keeping it a named refusal preserves the mistake-catcher §3.18 was reaching for. Pinned
+by `falsy-returns.test.ts`, whose negative control fails 5 of 8 steps with the rule removed while
+the three deliberate controls (truthy branch, `0`, `undefined`) still pass.
 
 ### 3.3 Pending `Suspense` is refused by name, never served as the fallback
 
@@ -134,7 +147,7 @@ than inheriting them, per CLAUDE.md; two of the probes changed the design (§3.2
   `IResponse.html` already serves today, where a full document is the wrong answer — and a page that
   wants no layout would then need an opt-out, which is more surface than the composition it
   replaces.
-- **Test home:** `packages/view-plugin/test/unit/hono-jsx-engine.test.ts` — a page composing a
+- **Test home:** `packages/view-plugin/test/unit/view-engine-jsx.test.ts` — a page composing a
   layout renders one document with the child's content escaped.
 
 ### 3.5 The first cut buffers; `render` does not return a stream
@@ -228,6 +241,15 @@ than inheriting them, per CLAUDE.md; two of the probes changed the design (§3.2
   under a **non-default** configuration (`engine: 'hono-html'`) drives a decorated route and a
   functional route and asserts byte-identical bodies and headers.
 
+**Correction (post-review).** `renderToResponse` was specified as the shared function BOTH entry
+points call. That is unimplementable: `decorator-plugin` cannot import `@setu-ts/view-plugin`
+(AI_GUIDELINES §2.2), so the `@Render` branch can never reach a helper in this package and performs
+the two-line sequence inline. The extracted function therefore had no caller outside its own module
+while its JSDoc claimed a sharing that cannot happen, so it is removed and `renderView` inlines the
+same two lines. The genuinely shared implementation is `IViewEngine.render`, which both entry points
+reach on the SAME resolved engine — which is what `both-entry-points.test.ts` pins byte-identically,
+and what the rule was actually protecting.
+
 ### 3.11 The new package's manifest carries the JSX configuration
 
 - **Decision:** `packages/view-plugin/deno.json` declares
@@ -241,7 +263,7 @@ than inheriting them, per CLAUDE.md; two of the probes changed the design (§3.2
   member config works with **no per-file pragma**, and that `deno check packages` walks the
   directory so an unimported `.tsx` is still checked. Pinning the same range the kernel pins keeps
   one resolved hono in the lockfile.
-- **Test home:** the four gates themselves; `packages/view-plugin/test/unit/hono-jsx-engine.test.ts`
+- **Test home:** the four gates themselves; `packages/view-plugin/test/unit/view-engine-jsx.test.ts`
   renders from a `.tsx` fixture carrying no pragma, which fails if the manifest is wrong.
 
 ### 3.12 `decorator-plugin` gains no hono dependency
@@ -266,6 +288,14 @@ than inheriting them, per CLAUDE.md; two of the probes changed the design (§3.2
   `'external'`.
 - **Test home:** `packages/view-plugin/test/types/options.ts` — `@ts-expect-error` on a `'custom'`
   arm with no `view`.
+
+**Correction (post-review).** The two built-in arms were implemented as two engine classes whose
+`render` bodies were byte-identical — the M14d shape, where a seam every arm passes identically
+hides that the seam does nothing. It follows directly from §3.15: once escaping belongs to the
+rendering runtime, nothing is left to configure per mode. There is now ONE `ViewEngine`, and
+`'hono-jsx'` / `'hono-html'` name the **authoring mode** (which import an application's components
+use), reported by the `view` health indicator. The §4.1 table's per-arm behaviour column is
+corrected to say so rather than implying a rendering difference that does not exist.
 
 ### 3.14 Health indicator and lifecycle
 
@@ -367,10 +397,10 @@ manifest configures.
 | `packages/view-plugin/src/index.ts`                                                                        | Barrel; module JSDoc opening with `@module` (`release:verify` check 5).                                                                                   |
 | `packages/view-plugin/src/plugin/view-plugin.ts`                                                           | `ViewPlugin` factory, arm selection, `view` health indicator, empty dependency arrays (§3.9).                                                             |
 | `packages/view-plugin/src/plugin/options.ts`                                                               | `ViewPluginOptions` discriminated union.                                                                                                                  |
-| `packages/view-plugin/src/engines/hono-jsx-engine.ts`                                                      | The default arm.                                                                                                                                          |
-| `packages/view-plugin/src/engines/hono-html-engine.ts`                                                     | The tagged-template arm; re-exports `raw`.                                                                                                                |
+| `packages/view-plugin/src/engines/view-engine.ts`                                                          | The one built-in engine, serving both authoring modes (§3.13 correction).                                                                                 |
+| `packages/view-plugin/src/html.ts`                                                                         | Re-exports `raw`, the escaping opt-out.                                                                                                                   |
 | `packages/view-plugin/src/render/normalize.ts`                                                             | `normalizeRendered` (§3.2) and the `Suspense` refusal (§3.3).                                                                                             |
-| `packages/view-plugin/src/render/render-view.ts`                                                           | `renderView` and the shared `renderToResponse` (§3.10).                                                                                                   |
+| `packages/view-plugin/src/render/render-view.ts`                                                           | `renderView` (§3.10 correction — no extracted `renderToResponse`).                                                                                        |
 | `packages/view-plugin/src/errors.ts`                                                                       | `ViewRenderError`, `UnresolvedSuspenseError`.                                                                                                             |
 | `packages/view-plugin/README.md`                                                                           | Package README with a `PUBLIC_API.md` anchor link (absolute GitHub URL, per the JSR relative-link rule).                                                  |
 | `packages/decorator-plugin/src/decorators/view.ts`                                                         | `Render` (§3.7).                                                                                                                                          |
@@ -390,8 +420,9 @@ manifest configures.
 | `packages/common/test/unit/view-contract.test.ts`                            | `common/src/services/view.ts`, `tokens.ts`           | A JSX component, an `html`-tag component and a plain `(props) => string` are all assignable to `Component<P>`; `CAPABILITIES.VIEW === 'view'` and matches the token grammar; the `render` return union is pinned (§3.5).                 |
 | `packages/view-plugin/test/unit/normalize.test.ts`                           | `src/render/normalize.ts`                            | Sync, async, and nested-async components each yield a **primitive** string (`typeof === 'string'`) whose text never contains `object Promise`. Calls `normalizeRendered(value: unknown): Promise<string>`.                               |
 | `packages/view-plugin/test/unit/suspense-refusal.test.ts`                    | `src/render/normalize.ts`, `src/errors.ts`           | A pending `Suspense` tree throws `UnresolvedSuspenseError` naming the component; the three measured non-`Suspense` shapes render clean (the over-firing control).                                                                        |
-| `packages/view-plugin/test/unit/hono-jsx-engine.test.ts`                     | `src/engines/hono-jsx-engine.ts`                     | Renders a `.tsx` fixture carrying **no** pragma (which also proves §3.11's manifest); a layout composing `children` produces one document.                                                                                               |
-| `packages/view-plugin/test/unit/hono-html-engine.test.ts`                    | `src/engines/hono-html-engine.ts`                    | Renders from a plain `.ts` file with no `jsxImportSource`.                                                                                                                                                                               |
+| `packages/view-plugin/test/unit/view-engine-jsx.test.ts`                     | `src/engines/view-engine.ts`                         | Renders a `.tsx` fixture carrying **no** pragma (which also proves §3.11's manifest); a layout composing `children` produces one document.                                                                                               |
+| `packages/view-plugin/test/unit/view-engine-html.test.ts`                    | `src/engines/view-engine.ts`                         | Renders from a plain `.ts` file with no `jsxImportSource`.                                                                                                                                                                               |
+| `packages/view-plugin/test/unit/falsy-returns.test.ts`                       | `src/render/normalize.ts`                            | A `false` top-level return renders `''`, never the text `false`, and agrees with the same component rendered as a CHILD; `null`/`true` likewise; `0` still renders `0`; `undefined` still refused by name (§3.2 correction).             |
 | `packages/view-plugin/test/unit/escaping.test.ts`                            | both engines                                         | `'Ada <script>'` → `Ada &lt;script&gt;` through both arms, entities written literally; `raw()` passes markup through.                                                                                                                    |
 | `packages/view-plugin/test/unit/custom-engine.test.ts`                       | `src/plugin/view-plugin.ts`, `src/plugin/options.ts` | A `'custom'` engine of plain `(props) => string` components renders through the identical path (§3.6).                                                                                                                                   |
 | `packages/view-plugin/test/unit/view-plugin.test.ts`                         | `src/plugin/view-plugin.ts`                          | Registers under `CAPABILITIES.VIEW`; `dependencies` and `optionalDependencies` are both absent (§3.9); the `view` indicator reports the selected engine; no `onClose`.                                                                   |

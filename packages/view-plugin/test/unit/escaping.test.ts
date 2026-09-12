@@ -10,8 +10,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { html } from '@hono/hono/html';
 
-import { HonoJsxEngine } from '../../src/engines/hono-jsx-engine.ts';
-import { HonoHtmlEngine } from '../../src/engines/hono-html-engine.ts';
+import { ViewEngine } from '../../src/engines/view-engine.ts';
 import { raw } from '../../src/index.ts';
 import { UserList } from '../fixtures/users.tsx';
 
@@ -22,7 +21,7 @@ function TaggedPage(props: { readonly users: readonly string[] }) {
 
 describe('escaping', () => {
   it("the hono-jsx arm escapes 'Ada <script>' to literal entities", async () => {
-    const result = await new HonoJsxEngine().render(UserList, {
+    const result = await new ViewEngine().render(UserList, {
       users: ['Ada <script>', 'Grace'],
     });
 
@@ -34,7 +33,7 @@ describe('escaping', () => {
   });
 
   it("the hono-html arm escapes 'Ada <script>' to literal entities", async () => {
-    const result = await new HonoHtmlEngine().render(TaggedPage, {
+    const result = await new ViewEngine().render(TaggedPage, {
       users: ['Ada <script>', 'Grace'],
     });
 
