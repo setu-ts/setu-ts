@@ -20,8 +20,8 @@ gets it for free because the envelope is **payload data**, not transport headers
   `causedBy` for correlation propagation, one exported rejection error, the versioned-topic rollout
   policy made mechanical, and the doc deliverables in §2.
 - **NOT this milestone:**
-  - Aggregate-local domain-event recording — **M93a** (`@setu-ts/events-plugin`). **This milestone
-    does not depend on M93a and can be built and merged before it** (verified:
+  - Aggregate-local domain-event recording — **M93a** (`@setu-ts/events-plugin`). **M93a merged
+    first (PR #285) and this milestone still imports nothing from it** (verified:
     `grep -rn events-plugin
     packages/messaging-plugin/` finds it only in an existing README
     fence, never in `src/`; `IDomainEvents`/`createDomainEvents` do not exist in `packages/` yet;
@@ -55,6 +55,8 @@ gets it for free because the envelope is **payload data**, not transport headers
 | Barrel assertion                      | `packages/messaging-plugin/test/unit/barrel-exports.test.ts:19-`     | Asserts each value export is defined and a function. Extended, not replaced.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Plugin-owned dispatch reporter        | `packages/messaging-plugin/src/plugin/messaging-plugin.ts:228-242`   | **`MessagingPlugin` always supplies its own `onDispatchError`**, so `InMemoryBrokerOptions.onDispatchError` is NOT reachable through `MessagingPluginOptions` (the option's own JSDoc says so at `interfaces/index.ts:313-314`). Its reporter reads the logger at call time and flattens the error to `error.message` in one string: `In-memory broker handler rejected for topic "<topic>" (messageId: <id>): <detail>`. Load-bearing for §3.5 and §6.                                                                                                                                                                        |
 | `CustomMessagingOptions`              | `packages/messaging-plugin/src/interfaces/index.ts:591-594`          | `{ broker: 'custom'; instance: IMessageBroker }`. `MessageBrokerAdapter extends IMessageBroker` (`brokers/message-broker.ts:39`), so an application-constructed `InMemoryBroker` carrying its own `onDispatchError` is assignable here — the one route to a bespoke rejection sink.                                                                                                                                                                                                                                                                                                                                            |
+| `IDomainEvent<T>`                     | `packages/common/src/services/events.ts:17-30`                       | `type`, `id`, `occurredOn: Date`, `data`, optional `aggregateId`, optional `version`. Read by the README's domain-to-integration example (§3.11) — from `common`, never from `events-plugin`.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `createDomainEvents` (M93a, merged)   | `packages/events-plugin/src/events/domain-events.ts:70-93`           | `createDomainEvents(): IDomainEvents` with `record`/`pending`/`remove`/`clear`. Merged in PR #285. Used **only** in a README fence (§3.11); no `src` file in this package imports it, and `packages/messaging-plugin/README.md:269` already imports `@setu-ts/events-plugin` in a fence, so the gate resolves it.                                                                                                                                                                                                                                                                                                              |
 | `createMockPlugin`                    | `packages/testing/src/mock-plugin.ts:64-72`                          | `createMockPlugin({ name, service })` registers `service` under `provides ?? name` and declares it in `provides`. `CAPABILITIES.LOGGER` is the literal `'logger'` (`common/src/tokens.ts:43`), which is what the plugin's reporter reads — so `{ name: 'logger', service: recordingLogger }` is the §6 case-(c) seam. No collision: that suite registers no `LoggerPlugin`, and §6.4 reserves `createMockPlugin` for exactly this (providing a capability the application does not register). Eight packages already import `@setu-ts/testing` in tests, `view-plugin` most recently, so this is precedented and publish-safe. |
 | `@since` convention                   | `packages/kernel/src/application/application.ts:140,160`             | M91 (unreleased, ships in `0.6.0`) tags new members `@since 0.6.0` while the manifests read `0.5.0`. This milestone follows M91: **`@since 0.6.0`**.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
@@ -65,7 +67,7 @@ gets it for free because the envelope is **payload data**, not transport headers
 | C1 | `packages/events-plugin/src/events/domain-event.ts:62` claims `IntegrationEvent`'s type identity "discriminates cross-service events for M14's messaging bridge (`instanceof IntegrationEvent`)". `grep -rn "instanceof IntegrationEvent" packages/` finds that phrase **only in this comment and in a test comment** — the bridge matches by the `eventTypes` string list (`events-messaging-bridge.ts:90-97`) and performs no `instanceof` anywhere. The claimed consumer does not exist. | The bridge's behaviour is correct; the JSDoc is wrong. Correct the comment to describe what the bridge actually does. This is a docs-must-match-behavior fix on a claim **about the messaging bridge**, which this milestone owns; it is a comment-only edit in `events-plugin` with no `src` behaviour change and no import between the packages.                       | Rewrite the `IntegrationEvent` JSDoc paragraph in `packages/events-plugin/src/events/domain-event.ts` to state that the bridge selects by configured `eventTypes` and that the class is a semantic marker with no framework reader, and point a cross-service contract at `defineIntegrationEvent`. |
 | C2 | The ROADMAP's M93b signature is `defineIntegrationEvent<T>({ type, version, topic, parse })`, and its rollout policy says each version "owns a distinct topic whose name ends in `.v<version>`" — but a supplied `topic` and a supplied `version` can disagree (`topic: 'orders.placed.v1', version: 2`), leaving the policy as prose a producer can silently violate.                                                                                                                      | Keep the ROADMAP's four-field signature (a `type` is the semantic name that travels in the envelope, a `topic` is the transport destination, and collapsing them would force the wire name to equal the event name). Make the policy **mechanical** instead: `defineIntegrationEvent` refuses at definition time a `topic` that does not end with `.v${version}` (§3.2). | ROADMAP M93b "versioned-topic rollout policy" bullet gains one sentence recording that the suffix is enforced by the factory rather than documented, and names the escape (the raw `broker.publish`/`subscribe` surface is unchanged for a pre-existing unversioned topic).                         |
 | C3 | `test/package-readme-fence-compiler.test.ts:57` pins the messaging README at 6 compilable fences; this milestone adds a documented producer/consumer/migration example set to that README.                                                                                                                                                                                                                                                                                                  | Add the fences, make every one of them compile, and move the pinned count to match.                                                                                                                                                                                                                                                                                      | Update the count in `test/package-readme-fence-compiler.test.ts` in the same PR (a stale count is a gate that stops discriminating).                                                                                                                                                                |
-| C4 | `PUBLIC_API.md:4143` "Messaging" section documents the broker, the bridge, and the options, and has no integration-event surface at all — but §10.5 requires every `index.ts` export to appear there.                                                                                                                                                                                                                                                                                       | Add a new `### Integration event contracts` subsection under the Messaging section.                                                                                                                                                                                                                                                                                      | `PUBLIC_API.md` subsection covering all ten new exports, the envelope field table, the rejection-reason table, and the rollout policy. Plus the regenerated README exports table (`deno task docs:exports`).                                                                                        |
+| C4 | `PUBLIC_API.md:4188` "Messaging" section documents the broker, the bridge, and the options, and has no integration-event surface at all — but §10.5 requires every `index.ts` export to appear there.                                                                                                                                                                                                                                                                                       | Add a new `### Integration event contracts` subsection under the Messaging section.                                                                                                                                                                                                                                                                                      | `PUBLIC_API.md` subsection covering all ten new exports, the envelope field table, the rejection-reason table, and the rollout policy. Plus the regenerated README exports table (`deno task docs:exports`).                                                                                        |
 
 ## 3. Design decisions
 
@@ -236,6 +238,28 @@ gets it for free because the envelope is **payload data**, not transport headers
 - **Test home:** `test/unit/integration/envelope.test.ts` validates an envelope carrying an unknown
   extra field and asserts it passes, and that the extra field survives onto the handler's envelope.
 
+### 3.11 The domain-to-integration mapping is an explicit README example, not a framework path
+
+- **Decision:** The README shows an application mapping one `IDomainEvent` — recorded by M93a's
+  `createDomainEvents()` — onto a published integration event, building the payload explicitly from
+  `event.data` and passing the causal fields as
+  `{ causationId: event.id, aggregateId: event.aggregateId, aggregateVersion: event.version }`. It
+  lives in a README fence as application code; no `src` file in this package imports
+  `@setu-ts/events-plugin`, and nothing in the framework performs this mapping automatically.
+- **Why:** The ROADMAP names this example as a deliverable, and now that M93a is merged it can
+  reference a real API rather than a sketch. Writing it out is also the only place two traps get
+  named. First, `event.type` is the **domain** fact's name and is deliberately not the integration
+  `type`: the contract owns its own `type`/`version` pair, and deriving the wire name from an
+  internal class name would couple a published contract to a refactor. Second, `event.occurredOn` is
+  when the fact happened and the envelope's `occurredAt` is when it was published — different
+  instants, and conflating them would silently misreport end-to-end latency for every consumer.
+  Forwarding `event.data` whole is what `EventsMessagingBridge` already does
+  (`events-messaging-bridge.ts:94`) and is precisely the unversioned shape this milestone exists to
+  replace, so the example transforms rather than forwards.
+- **Test home:** the README fence gate (C3) compiles it. There is deliberately no runtime assertion:
+  the mapping is application policy, not framework behaviour, and a test asserting one particular
+  mapping would be asserting a decision the application owns.
+
 ## 4. Exported surface — every symbol names its consumer
 
 | Exported symbol                   | Kind      | Consumer / real code path that READS it                                                                                                                                                                                          |
@@ -357,12 +381,13 @@ return type on an exported function is a JSR slow type that `deno task check` do
   Mitigation: one paragraph in the README's new section stating that the trace context is transport
   metadata owned by the telemetry layer while correlation is an application-level causal chain in
   the payload, and that neither replaces the other.
-- **C1 edits a file M93a may also touch.** The JSDoc correction lands in
-  `packages/events-plugin/src/events/domain-event.ts`, and M93a adds its recorder to the same
-  package. This is a merge-order risk, not a dependency: the edit is comment-only, touches no export
-  and no behaviour, and M93a's own deliverable is a new file plus a barrel line. Mitigation:
-  whichever branch merges second rebases and re-reads the paragraph; if M93a is in flight when this
-  is ready, the C1 edit is the trivially droppable part of the diff.
+- **C1's file overlap with M93a — settled, not open.** M93a (PR #285) merged first and created a
+  **new** file, `packages/events-plugin/src/events/domain-events.ts`; it never touched
+  `domain-event.ts`, so C1's target is clean. This branch is rebased on the merge and every citation
+  above was re-verified against the merged tree, which caught one drift: M93a's `PUBLIC_API.md`
+  insertion moved the Messaging section from line 4143 to 4188. The remaining overlap is
+  adjacent-line only — the `93b` ROADMAP row beside M93a's `93a` row, and a sibling CHANGELOG bullet
+  under the same `Unreleased` heading.
 - **The integration suite passes vacuously if no message is ever delivered.** A subscription that
   silently fails to register would leave every "handler not called" assertion true. Mitigation:
   every case that asserts an absence is paired in the same suite with a positive case on the same
@@ -384,8 +409,14 @@ return type on an exported function is a JSR slow type that `deno task check` do
   retry and dead-letter configuration remains that arm's concern.
 - **Any change to `EventsMessagingBridge`.** It keeps forwarding `event.data`
   (`events-messaging-bridge.ts:94`) and remains the compatibility path.
-- **`@since` tags in `@setu-ts/view-plugin`.** While verifying the `@since` convention (§1) it was
-  observed that M92 tagged its new surface `@since 0.5.0` — the manifest version — while M91 tagged
-  its own unreleased surface `@since 0.6.0`, the version both will actually ship in. One of the two
-  is wrong and it is not this package. This milestone follows M91 and leaves the M92 tags alone;
-  correcting them is a defect in already-merged `main` and belongs on a `fix/…` branch.
+- **Mis-stamped `@since` tags in `@setu-ts/view-plugin` and `@setu-ts/events-plugin`.** While
+  verifying the convention (§1) it was observed that M92 and M93a both tag new surface
+  `@since 0.5.0`, while M91 tags its own `@since 0.6.0`. M91 is correct and the other two are false,
+  proved against the tag rather than argued: `v0.5.0` is published, and
+  `git show v0.5.0:packages/events-plugin/src/events/domain-events.ts` finds nothing, so the symbol
+  was not available in the release it claims. The mechanism explains both and will keep producing
+  them — a release branch bumps every manifest **to the shipping version**, so after v0.5.0 ships
+  the manifest reads `0.5.0`, and an author filling in `@since` from the manifest gets the
+  **previous** release every time. Nothing gates it. This milestone follows M91 and uses
+  `@since 0.6.0`; correcting the two merged packages is a defect in already-merged `main` and
+  belongs on a `fix/…` branch, not here.
