@@ -4838,7 +4838,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `pending()` returns an isolated snapshot; `remove()` uses strict reference equality and removes
   one first occurrence; `clear()` empties the recorder. No capability token, plugin registration,
   automatic publication, aggregate base class, or outbox was added. Implementation commit
-  `9ca07b7e`; PR pending) — complete
+  `5e02dcfb`; PR #285) — complete
 
 - **Next milestone** — **M93b** (messaging-plugin — versioned integration-event contracts over the
   existing messaging capability).
