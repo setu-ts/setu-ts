@@ -372,6 +372,7 @@ const REQUIRED_GUIDES = [
   'docs/cli.md',
   'docs/programmatic-api.md',
   'docs/decorators.md',
+  'docs/mvc.md',
   'docs/custom-plugins.md',
   'docs/migration-nestjs.md',
   'docs/migration-fastify.md',

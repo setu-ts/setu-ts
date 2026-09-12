@@ -96,6 +96,19 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 
   It must come back empty before you go further. `release:verify` checks resolvability afterwards,
   which is the backstop — but it reports a broken tree rather than preventing one.
+- **First-time publishers.** A workspace member present in `PUBLISHED_PACKAGES` can still fail to
+  publish if the JSR package was never created and the repo never linked — a failure that surfaces
+  only in the release workflow, long after the branch merged. The **`view-plugin`** member (M92) has
+  never been published: before the first release that ships it, run `release:create-packages` (a JSR
+  package must exist before it can be published) and `release:link-repos` (tokenless OIDC publishing
+  requires the repo link). Both are idempotent; the M35 `sdk` release recorded the same step for the
+  last first-time publisher. **And once it has published, move it into the compat suite**: a package
+  that has never been on JSR sits in `PENDING_FIRST_PUBLISH` in `compat/compat.test.mjs`, because
+  `bun install` cannot fetch a package that does not exist and demanding it would deadlock the
+  milestone PR that introduces it. Delete the entry and add `@jsr/setu-ts__<name>` to
+  `compat/package.json` dependencies in the release that publishes it — otherwise check 1 keeps
+  passing while the package is covered on Deno and nowhere else, which is the exact coverage hole
+  that check exists to catch.
 - **Grep the source, not only the manifests.** `packages/sdk` writes its `jsr:` specifier inline in
   four `src/**` files rather than through an import-map alias, and its manifest maps that exact
   specifier string to a pinned version — so the range in the source and both sides of the mapping

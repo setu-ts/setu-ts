@@ -185,6 +185,7 @@ describe('documentation gate — required guides', () => {
       'docs/cli.md',
       'docs/programmatic-api.md',
       'docs/decorators.md',
+      'docs/mvc.md',
       'docs/custom-plugins.md',
       'docs/migration-nestjs.md',
       'docs/migration-fastify.md',

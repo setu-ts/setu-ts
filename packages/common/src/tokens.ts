@@ -138,6 +138,12 @@ export const CAPABILITIES = {
   GRAPHQL: 'graphql',
   /** Static file serving plugin. */
   STATIC_FILES: 'static-files',
+  /**
+   * View rendering (server-rendered HTML) — an `IViewEngine` that turns a
+   * view component and its props into an HTML string, so a handler can answer
+   * with markup it did not concatenate by hand.
+   */
+  VIEW: 'view',
 } as const;
 
 /**

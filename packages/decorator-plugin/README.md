@@ -91,6 +91,44 @@ app.register(ValidationPlugin());
 app.register(DecoratorPlugin({ controllers: [UsersController] }));
 ```
 
+## Rendered views
+
+`@Render(Component)` marks a route as rendered: the handler returns the component's PROPS bag and
+the framework answers with the component rendered to HTML (`text/html; charset=utf-8`), never JSON.
+The view is named by reference — a function the application already has — and the decorator
+type-checks that return against the component's props, so a wrong props bag is a compile error
+naming the mismatch.
+
+```typescript
+import { html } from '@hono/hono/html';
+import { Controller, Get, Render } from '@setu-ts/decorator-plugin';
+
+// The `html` tag escapes every interpolation. A plain
+// `(props) => \`<li>${user}</li>\`` template would NOT: escaping belongs to the
+// rendering runtime, and a plain string component is returned unchanged.
+const UserList = (props: { readonly users: readonly string[] }) =>
+  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+
+@Controller('/pages')
+class PagesController {
+  @Render(UserList)
+  @Get('/users')
+  users() {
+    return { users: ['ada', 'grace'] }; // the props bag — the framework answers HTML
+  }
+}
+```
+
+The engine is resolved from `CAPABILITIES.VIEW` once at `register()` — which is why the token joins
+this plugin's `optionalDependencies` (a real ordering edge, not priority luck). A rendered route
+with no provider FAILS at `register()`, naming the controller, the handler and both remedies
+(register `ViewPlugin`, or any other `CAPABILITIES.VIEW` provider); the check is per route, so an
+application with no `@Render` route needs no view plugin. A status code or header alongside a
+rendered body goes through `@Params(Ctx())` — the return value IS the props bag, so it cannot also
+carry a status, and `@Render` deliberately grows no `status` argument. Rendering itself — engines,
+escaping, the `Suspense` refusal — lives in `@setu-ts/view-plugin`; this package imports no
+rendering runtime.
+
 ## What it exports
 
 - **Routing** — `@Controller`, `@Version`,
@@ -103,6 +141,8 @@ app.register(DecoratorPlugin({ controllers: [UsersController] }));
   marking)
 - **Pipeline** — `@UseGuards`, `@UseInterceptors`, `@UseFilters`
 - **Validation** — `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
+- **Views** — `@Render(Component)` (renders through a `CAPABILITIES.VIEW` provider — see
+  `@setu-ts/view-plugin`)
 - **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse`
 - **Extension** — `createDecorator`, `Custom`, `registerParameterResolver`
 - **Discovery** — `discoverControllers`
@@ -168,6 +208,7 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `Public`                     | function  |
 | `Query`                      | function  |
 | `registerParameterResolver`  | function  |
+| `Render`                     | function  |
 | `resolveParameter`           | function  |
 | `resolveParameters`          | function  |
 | `Roles`                      | function  |
@@ -203,6 +244,7 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `MiddlewareLike`             | type      |
 | `ModuleImporter`             | type      |
 | `ParameterType`              | type      |
+| `RenderDecorator`            | type      |
 | `SetuClassDecorator`         | type      |
 | `SetuClassOrMethodDecorator` | type      |
 | `SetuMethodDecorator`        | type      |

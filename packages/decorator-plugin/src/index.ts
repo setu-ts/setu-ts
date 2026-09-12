@@ -55,6 +55,10 @@ export type { InjectableOptions, InjectToken, OptionalToken } from './decorators
 // --- Security decorators ---
 export { Permissions, Public, Roles } from './decorators/security.ts';
 
+// --- View decorators ---
+export { Render } from './decorators/view.ts';
+export type { RenderDecorator } from './decorators/view.ts';
+
 // --- Pipeline decorators ---
 export { UseFilters, UseGuards, UseInterceptors } from './decorators/pipeline.ts';
 export type { MiddlewareLike } from './decorators/pipeline.ts';

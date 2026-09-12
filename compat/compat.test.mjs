@@ -31,7 +31,11 @@ const host = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
  * would deadlock the milestone PR that introduces it. Remove the entry once the
  * package ships. Anything else missing is a coverage hole and fails check 1.
  */
-const PENDING_FIRST_PUBLISH = [];
+const PENDING_FIRST_PUBLISH = [
+  // M92: new in this milestone and not yet on JSR. Moves into
+  // `package.json` dependencies in the release that first publishes it.
+  '@jsr/setu-ts__view-plugin',
+];
 
 let failures = 0;
 

@@ -575,6 +575,60 @@ app.router.post('/users', async (ctx) => {
 });
 ```
 
+## Views
+
+### NestJS
+
+`@Render('users/index')` names a template by path; the view engine resolves the file, and the string
+is checked against nothing — a typo in the template name or a missing props field surfaces at
+runtime.
+
+```typescript
+@Controller('pages')
+export class PagesController {
+  @Get('users')
+  @Render('users/index')
+  users() {
+    return { users: this.usersService.findAll() };
+  }
+}
+```
+
+### Setu-TS
+
+`@Render(Component)` names the view BY REFERENCE — a function the application already has — so there
+is no view resolver and no filesystem lookup. The decorator type-checks the handler's return against
+the component's props, so the mistake NestJS catches at runtime is a compile error here. The engine
+comes from `@setu-ts/view-plugin` (registers under `CAPABILITIES.VIEW`); a rendered route with no
+provider fails at `register()`, never serving JSON where the author asked for HTML. A status code or
+header alongside a rendered body goes through the positional context source: the return value IS the
+props bag, so `@Render` carries no `status` argument.
+
+```typescript
+import { Controller, Ctx, Get, Params, Render } from '@setu-ts/decorator-plugin';
+import type { IRequestContext } from '@setu-ts/common';
+
+const UserList = (props: { readonly users: readonly string[] }) =>
+  `<ul>${props.users.map((user) => `<li>${user}</li>`).join('')}</ul>`;
+
+@Controller('/pages')
+export class PagesController {
+  @Render(UserList)
+  @Get('/users')
+  users(): { readonly users: readonly string[] } {
+    return { users: ['ada', 'grace'] }; // the props bag — the framework answers HTML
+  }
+
+  @Render(UserList)
+  @Params(Ctx())
+  @Get('/created')
+  created(ctx: IRequestContext): { readonly users: readonly string[] } {
+    ctx.response.status(201); // through the context, not through @Render
+    return { users: ['new'] };
+  }
+}
+```
+
 ## WebSocket
 
 ### NestJS

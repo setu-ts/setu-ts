@@ -106,6 +106,24 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     pseudocode: 0,
     skipped: 1,
   },
+  'docs/mvc.md': {
+    // M92: the new guide is born gated — five fences, all TypeScript, all
+    // compiling (two as fragments through the committed `app` prelude).
+    // +3 for the Forms section (the urlencoded read, the redirect-or-re-render
+    // decorated handler) and the `raw()` script opt-out. Every fence here is
+    // written to disk as `.ts`, so a JSX fence would be a parse error — the
+    // escaping example uses the `html` tag and states the JSX spelling in prose.
+    // +1 in review: the Escaping section gained a fence contrasting an UNSAFE
+    // plain template literal with the `html` tag, because two reviewers
+    // independently found that a plain `(props) => string` component escapes
+    // nothing while the guide claimed escaping was on by default.
+    total: 9,
+    ts: 9,
+    compile: 9,
+    external: 0,
+    pseudocode: 0,
+    skipped: 0,
+  },
   'docs/migration-fastify.md': {
     total: 32,
     ts: 32,
@@ -115,10 +133,12 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 0,
   },
   'docs/migration-nestjs.md': {
-    total: 35,
-    ts: 35,
-    compile: 19,
-    external: 16,
+    // M92: +2 for the Views section — one external NestJS fence, one
+    // compiling Setu-TS fence.
+    total: 37,
+    ts: 37,
+    compile: 20,
+    external: 17,
     pseudocode: 0,
     skipped: 0,
   },
@@ -133,13 +153,15 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
 };
 
 const EXPECTED_AGGREGATE: FenceCounts = {
-  // 255 since M83: docs/decorators.md lost its `deno.json` "Enable Decorators"
-  // block (standard decorators need no compiler option) and a duplicated
-  // `@Inject` example the migration had collapsed into a copy of its neighbour.
-  total: 255,
-  ts: 209,
-  compile: 177,
-  external: 32,
+  // 262 since M92: docs/mvc.md joins the corpus (+5, all compiling) and the
+  // migration-nestjs.md Views section adds one external NestJS fence and one
+  // compiling Setu-TS fence. 265 once mvc.md gained its Forms section (+2) and
+  // the `raw()` script opt-out (+1) — all three compile. 266 once the Escaping
+  // section gained the plain-string-is-not-escaped contrast (+1, compiling).
+  total: 266,
+  ts: 220,
+  compile: 187,
+  external: 33,
   pseudocode: 0,
   skipped: 46,
 };

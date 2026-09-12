@@ -9,7 +9,7 @@ making every indicator's status source explicit, and it is enforced by
 The CLI schematic at `packages/cli/src/schematics/health-indicator.ts` mentions
 `ctx.health.register` inside a template string and is not a registration site.
 
-There are **26** registration sites. `static-plugin` registers the same `static-files` indicator
+There are **27** registration sites. `static-plugin` registers the same `static-files` indicator
 from two branches (the no-`fs` arm and the `fs` arm), so it contributes two rows; only one is active
 at a time.
 
@@ -63,6 +63,7 @@ site outside the defensible in-process set is `configuration-literal` any more.
 | 24 | `multi-tenancy`      | multi-tenancy-plugin      | `packages/multi-tenancy-plugin/src/plugin/multi-tenancy-plugin.ts:292`          | `configuration-literal` | `status: 'up'` beside live `data.resolver`/`strategy`/`store`. In-process middleware, no backend.                                                                                                                                                                                                                                                                                                                                       |
 | 25 | `react-router`       | react-router-plugin       | `packages/react-router-plugin/src/plugin/react-router-plugin.ts:245`            | `configuration-literal` | `status: 'up'` beside live `data.mode`/`serverBuildPath`. Stateless handler (the source notes there is no socket, pool, timer, or subscription to close).                                                                                                                                                                                                                                                                               |
 | 26 | `secrets`            | secrets-plugin            | `packages/secrets-plugin/src/plugin/secrets-plugin.ts:143`                      | `live-state`            | M90b: `isReady()` lifecycle + a cached, bounded reachability probe — Vault `/v1/sys/health` (no secret read, no token); env reports lifecycle truth; a cloud facade without the optional `isHealthy()` member is `reachable: 'unknown'`.                                                                                                                                                                                                |
+| 27 | `view`               | view-plugin               | `packages/view-plugin/src/plugin/view-plugin.ts:77`                             | `justified-literal`     | M92: rendering is stateless and touches no backend — there is nothing to probe — so `up` is the correct signal, and the live `data` carries the real fact: the selected engine (`hono-jsx`, `hono-html`, or `custom`).                                                                                                                                                                                                                  |
 
 ## Out-of-scope defects recorded (not changed on this branch)
 

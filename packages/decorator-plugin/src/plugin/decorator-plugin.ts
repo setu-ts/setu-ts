@@ -12,6 +12,7 @@
  */
 import type {
   ClassProvider,
+  Component,
   Constructor,
   DecoratorHandler,
   FactoryProvider,
@@ -20,6 +21,7 @@ import type {
   IPlugin,
   IPluginContext,
   IValidationService,
+  IViewEngine,
   MiddlewareFunction,
   ProviderOptions,
   RouteDefinition,
@@ -326,6 +328,7 @@ function createHandler(
   instance: unknown,
   handlerName: string,
   params: readonly ParameterMetadata[],
+  render?: RenderRoute,
 ): RouteHandler {
   const fn = (instance as Record<string, unknown>)[handlerName];
   if (typeof fn !== 'function') {
@@ -338,8 +341,71 @@ function createHandler(
     if (isHandlerResult(result)) {
       return result;
     }
-    return ctx.response.json(result);
+    if (render === undefined) {
+      return ctx.response.json(result);
+    }
+    // The render branch: the engine resolved once at register() renders the
+    // handler's returned props bag, and the answer is HTML — never JSON.
+    return ctx.response.html(await render.engine.render(render.view, result));
   };
+}
+
+/**
+ * Resolves the view engine from wherever the application put it.
+ *
+ * The registry is the ordinary home, but `DecoratorPlugin({ services })`
+ * registers an `@Injectable` into `ctx.container` when a DI container is
+ * present, so a container-supplied engine is invisible to `ctx.services`. A
+ * container miss is swallowed deliberately: absent means absent, and the
+ * per-route refusal below is the diagnostic, not this lookup.
+ */
+function resolveViewEngine(ctx: IPluginContext): IViewEngine | undefined {
+  if (ctx.services.has(CAPABILITIES.VIEW)) {
+    return ctx.services.get<IViewEngine>(CAPABILITIES.VIEW);
+  }
+  try {
+    return ctx.container?.resolve<IViewEngine>(CAPABILITIES.VIEW);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The render pairing a route carries when it is decorated with `@Render`. */
+interface RenderRoute {
+  readonly view: Component<unknown>;
+  readonly engine: IViewEngine;
+}
+
+/**
+ * Refuses a rendered route whose application registered no
+ * `CAPABILITIES.VIEW` provider, naming the controller, the handler, and both
+ * remedies.
+ *
+ * Throws rather than warns — deliberately diverging from the `@ValidateBody`
+ * arm above, and the divergence has a reason: that decorator shipped inert in
+ * M9 (so turning the released no-op into a startup crash is a worse failure
+ * than a warning) and an application may legitimately want only its OpenAPI
+ * description. `@Render` is new surface with no released behaviour to
+ * preserve, and its absent-provider failure mode is serving JSON where the
+ * author asked for HTML — a silently wrong content type. Called once per
+ * rendered route at `register()`, so an application with no rendered route
+ * needs no view plugin at all.
+ */
+function requireViewEngine(
+  engine: IViewEngine | undefined,
+  target: Constructor,
+  route: RouteMetadata,
+  fullPath: string,
+): IViewEngine {
+  if (engine === undefined) {
+    throw new Error(
+      `Route ${route.method} ${fullPath} (${className(target)}.${route.handler}) is decorated ` +
+        'with @Render, but no CAPABILITIES.VIEW provider is registered. Register ViewPlugin ' +
+        'from @setu-ts/view-plugin (or any other provider of CAPABILITIES.VIEW) so the route ' +
+        'can answer HTML instead of JSON.',
+    );
+  }
+  return engine;
 }
 
 /** Composes the post-authorization route middleware (class then method). */
@@ -710,6 +776,7 @@ function registerController(
   enforceSchemas: boolean,
   enforceRoles: boolean,
   authorization: IAuthorizationService | undefined,
+  viewEngine: IViewEngine | undefined,
 ): void {
   const ctrlMeta = metadataStore.getController(target);
   if (ctrlMeta === undefined) {
@@ -720,7 +787,10 @@ function registerController(
   for (const route of metadataStore.getRoutesFor(target)) {
     const fullPath = joinPaths(ctrlMeta.version ?? '', ctrlMeta.path, route.path);
     warnUnresolvableParameters(ctx, target, route);
-    const handler = createHandler(instance, route.handler, route.params);
+    const render = route.view !== undefined
+      ? { view: route.view, engine: requireViewEngine(viewEngine, target, route, fullPath) }
+      : undefined;
+    const handler = createHandler(instance, route.handler, route.params, render);
     const middleware = composeGuards(ctrlMeta, route);
     if (enforceRoles) {
       appendAuthorizationMiddleware(ctx, target, ctrlMeta, route, middleware, authorization);
@@ -797,8 +867,8 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
     provides: [CAPABILITIES.METADATA_STORE],
     // Real dependency edges (not priority luck): a REPLACEMENT provider
     // registered at a higher priority number still lands before this plugin,
-    // so the register-time resolution of both capabilities sees it.
-    optionalDependencies: [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION],
+    // so the register-time resolution of all three capabilities sees it.
+    optionalDependencies: [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION, CAPABILITIES.VIEW],
     priority: PLUGIN_PRIORITY.LOW,
 
     async register(ctx: IPluginContext): Promise<void> {
@@ -822,7 +892,6 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       const authorization = ctx.services.has(CAPABILITIES.AUTHORIZATION)
         ? ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION)
         : undefined;
-
       let discoveredControllers: Constructor[] = [];
       let discoveredServices: Constructor[] = [];
       if (opts.autoDiscover === true && opts.controllersPath !== undefined) {
@@ -858,8 +927,24 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       for (const svc of services) {
         registerService(ctx, svc);
       }
+
+      // Resolved AFTER the service loop, and only then, because
+      // `@Injectable({ token: CAPABILITIES.VIEW })` is a valid way to supply an
+      // engine: snapshotting before `registerService` made that composition
+      // fail at startup with a message telling the author to register a plugin
+      // they had deliberately replaced. In DI mode the provider lands in
+      // `ctx.container` rather than the registry, so both are consulted.
+      const viewEngine = resolveViewEngine(ctx);
       for (const ctrl of controllers) {
-        registerController(ctx, ctrl, validation, enforceSchemas, enforceRoles, authorization);
+        registerController(
+          ctx,
+          ctrl,
+          validation,
+          enforceSchemas,
+          enforceRoles,
+          authorization,
+          viewEngine,
+        );
       }
       replayCustomDecorators(ctx);
     },

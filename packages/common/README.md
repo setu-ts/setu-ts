@@ -295,6 +295,7 @@ package fits the plugin architecture.
 | `ITransaction`                    | interface |
 | `ITransactionIsolationSupport`    | interface |
 | `IValidationService`              | interface |
+| `IViewEngine`                     | interface |
 | `IWebSocketConnection`            | interface |
 | `IWebSocketService`               | interface |
 | `IWebSocketTransport`             | interface |
@@ -370,6 +371,7 @@ package fits the plugin architecture.
 | `ChannelSendResult`               | type      |
 | `CircuitState`                    | type      |
 | `CliCommandHandler`               | type      |
+| `Component`                       | type      |
 | `Constructor`                     | type      |
 | `CursorValue`                     | type      |
 | `DecoratorHandler`                | type      |

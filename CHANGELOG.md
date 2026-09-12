@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/view-plugin` (new package)** — server-rendered HTML as a capability. Registers an
+  `IViewEngine` under the new `CAPABILITIES.VIEW` token; the view is named BY REFERENCE
+  (`@Render(UserList)`, never `'users/index'`), so there is no view resolver and no filesystem
+  lookup, making the capability Workers-portable by construction. Two zero-new-dependency arms
+  (`'hono-jsx'` default, `'hono-html'` tagged template) plus a `'custom'` arm for any engine that
+  adapts its templates to `Component<P>` functions. Two entry points, one implementation:
+  `@Render(Component)` (and its exported `RenderDecorator` type) in `@setu-ts/decorator-plugin`
+  (type-checks the handler's return against the component's props; `CAPABILITIES.VIEW` joins its
+  `optionalDependencies`; a rendered route with no provider fails at `register()` naming both
+  remedies) and the free `renderView(ctx, component,
+  props)`. Rendered output is a buffered
+  primitive string; a tree holding a pending `<Suspense>` boundary is refused with
+  `UnresolvedSuspenseError` rather than served as its fallback forever (streaming resolution
+  deferred to a follow-up milestone). Escaping stays in the rendering runtime; `raw()` is
+  re-exported as the documented opt-out. A `@Render` handler may return a `HandlerResult` from
+  `ctx.response` instead of the props bag — a redirect, most usefully — so POST-redirect-GET is
+  expressible on a rendered route; `HandlerResult` is branded, so a props bag of the wrong shape is
+  still a compile error. A top-level return follows the rendering runtime's own rules — `null`,
+  `false`, `true` and `''` render as the empty string so `(p) => p.show && <Banner />` behaves as it
+  does nested, while `undefined` is refused as a probable missing `return`. Adds
+  `CAPABILITIES.VIEW`, `IViewEngine` and `Component<P>` to `@setu-ts/common`, a `docs/mvc.md` guide,
+  a Views section to `docs/migration-nestjs.md`, and the 48th member to the release list (first
+  publish needs `release:create-packages` + `release:link-repos`; see `docs/releasing.md`).
 - **`@setu-ts/testing`** — `createTestApp` gains a **composition-root arm**: pass `app` (an
   already-constructed, not-yet-started application — a scaffolded project's `createApp()` from
   `setu.config.ts`, or a starter factory's return value) instead of `plugins`, with optional

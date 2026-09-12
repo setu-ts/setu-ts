@@ -1,6 +1,7 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@hono/hono@*": "4.13.0",
     "jsr:@hono/hono@4": "4.13.0",
     "jsr:@hono/hono@^4.12.30": "4.13.0",
     "jsr:@std/assert@^1.0.19": "1.0.19",
@@ -3117,6 +3118,15 @@
         "dependencies": [
           "jsr:@setu-ts/common@0.5",
           "jsr:@setu-ts/kernel@0.5"
+        ]
+      },
+      "packages/view-plugin": {
+        "dependencies": [
+          "jsr:@hono/hono@^4.12.30",
+          "jsr:@setu-ts/common@0.5",
+          "jsr:@setu-ts/decorator-plugin@0.5",
+          "jsr:@setu-ts/runtime@0.5",
+          "jsr:@setu-ts/testing@0.5"
         ]
       }
     }

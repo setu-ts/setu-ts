@@ -56,6 +56,7 @@ export const PLUGIN_HEALTH_INDICATORS: ReadonlyMap<string, readonly string[]> = 
   ['sse-plugin', ['sse']],
   ['static-plugin', ['static-files']],
   ['storage-plugin', ['storage']],
+  ['view-plugin', ['view']],
   ['websocket-plugin', ['websocket']],
   ['worker-pool-plugin', ['worker-pool']],
 ]);

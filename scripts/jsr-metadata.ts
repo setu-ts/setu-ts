@@ -158,6 +158,14 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     // serve assets through Workers Assets or R2 via `cloudflare-plugin`.
     runtimeCompat: NO_EDGE,
   },
+  'view-plugin': {
+    description:
+      'Server-rendered HTML: view engines for JSX and html-tag components, named by reference',
+    // Renders pure functions to strings — no filesystem, no sockets, no
+    // runtime services beyond the request context, so it is portable by
+    // construction (M92 §3.1).
+    runtimeCompat: PORTABLE,
+  },
 
   // ── Data ──────────────────────────────────────────────────────────────────
   'database-plugin': {
