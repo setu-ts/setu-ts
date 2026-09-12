@@ -12,16 +12,16 @@
  * Run with `node compat.test.mjs` or `bun compat.test.mjs`. Exits non-zero on
  * the first failed check.
  */
-import { createServer } from "node:net";
-import { readdirSync, readFileSync } from "node:fs";
+import { createServer } from 'node:net';
+import { readdirSync, readFileSync } from 'node:fs';
 
-import { CAPABILITIES } from "@jsr/setu-ts__common";
-import { createApplication } from "@jsr/setu-ts__kernel";
-import { detectRuntime, RuntimePlugin } from "@jsr/setu-ts__runtime";
-import { LoggerPlugin } from "@jsr/setu-ts__logger-plugin";
+import { CAPABILITIES } from '@jsr/setu-ts__common';
+import { createApplication } from '@jsr/setu-ts__kernel';
+import { detectRuntime, RuntimePlugin } from '@jsr/setu-ts__runtime';
+import { LoggerPlugin } from '@jsr/setu-ts__logger-plugin';
 
 /** The runtime this process is executing on, as the framework should see it. */
-const host = typeof globalThis.Bun === "undefined" ? "node" : "bun";
+const host = typeof globalThis.Bun === 'undefined' ? 'node' : 'bun';
 
 /**
  * Workspace members deliberately absent from `package.json`, by JSR npm name.
@@ -34,7 +34,7 @@ const host = typeof globalThis.Bun === "undefined" ? "node" : "bun";
 const PENDING_FIRST_PUBLISH = [
   // M92: new in this milestone and not yet on JSR. Moves into
   // `package.json` dependencies in the release that first publishes it.
-  "@jsr/setu-ts__view-plugin",
+  '@jsr/setu-ts__view-plugin',
 ];
 
 let failures = 0;
@@ -52,7 +52,7 @@ function check(label, passed, detail) {
     return;
   }
   failures += 1;
-  console.error(`  FAIL ${label}${detail === undefined ? "" : ` — ${detail}`}`);
+  console.error(`  FAIL ${label}${detail === undefined ? '' : ` — ${detail}`}`);
 }
 
 /**
@@ -64,12 +64,12 @@ function check(label, passed, detail) {
 function freePort() {
   return new Promise((resolve, reject) => {
     const probe = createServer();
-    probe.on("error", reject);
-    probe.listen(0, "127.0.0.1", () => {
+    probe.on('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
       const address = probe.address();
       probe.close(() => {
-        if (address === null || typeof address === "string") {
-          reject(new Error("could not determine an ephemeral port"));
+        if (address === null || typeof address === 'string') {
+          reject(new Error('could not determine an ephemeral port'));
           return;
         }
         resolve(address.port);
@@ -88,8 +88,8 @@ function freePort() {
 function rebind(target) {
   return new Promise((resolve) => {
     const probe = createServer();
-    probe.on("error", (error) => resolve(error.code ?? error.message));
-    probe.listen(target, "127.0.0.1", () => probe.close(() => resolve(null)));
+    probe.on('error', (error) => resolve(error.code ?? error.message));
+    probe.listen(target, '127.0.0.1', () => probe.close(() => resolve(null)));
   });
 }
 
@@ -104,21 +104,21 @@ function rebind(target) {
  * @returns {string[]} Sorted `@jsr/setu-ts__*` names.
  */
 function workspacePackageNames() {
-  const root = JSON.parse(readFileSync("../deno.json", "utf8"));
+  const root = JSON.parse(readFileSync('../deno.json', 'utf8'));
   return root.workspace
     .map((entry) =>
       JSON.parse(
-        readFileSync(`../${entry.replace(/^\.\//, "")}/deno.json`, "utf8"),
+        readFileSync(`../${entry.replace(/^\.\//, '')}/deno.json`, 'utf8'),
       )
     )
-    .map((cfg) => cfg.name.replace("@setu-ts/", "@jsr/setu-ts__"))
+    .map((cfg) => cfg.name.replace('@setu-ts/', '@jsr/setu-ts__'))
     .sort();
 }
 
 /** Builds the application under test: kernel + runtime + one real plugin. */
 function createCompatApp() {
   const app = createApplication({ plugins: [RuntimePlugin(), LoggerPlugin()] });
-  app.router.get("/compat", (ctx) => ctx.response.json({ runtime: host }));
+  app.router.get('/compat', (ctx) => ctx.response.json({ runtime: host }));
   return app;
 }
 
@@ -129,7 +129,7 @@ console.log(`Setu-TS compat suite — ${host}`);
 //    would keep reporting green over a shrinking fraction of the framework.
 const expected = workspacePackageNames();
 const declared = Object.keys(
-  JSON.parse(readFileSync("package.json", "utf8")).dependencies ?? {},
+  JSON.parse(readFileSync('package.json', 'utf8')).dependencies ?? {},
 );
 const uncovered = expected.filter(
   (name) => !declared.includes(name) && !PENDING_FIRST_PUBLISH.includes(name),
@@ -137,7 +137,7 @@ const uncovered = expected.filter(
 check(
   `all ${expected.length} workspace packages are declared`,
   uncovered.length === 0,
-  `missing: ${uncovered.join(", ")}`,
+  `missing: ${uncovered.join(', ')}`,
 );
 
 // 2. Each one loads through the npm-compat artifact and exposes a surface. A
@@ -152,24 +152,24 @@ for (const name of declared) {
     }
   } catch (error) {
     failedToLoad.push(
-      `${name} (${String(error.message).split("\n")[0].slice(0, 90)})`,
+      `${name} (${String(error.message).split('\n')[0].slice(0, 90)})`,
     );
   }
 }
 check(
   `all ${declared.length} packages import and expose a surface`,
   failedToLoad.length === 0,
-  failedToLoad.join("; "),
+  failedToLoad.join('; '),
 );
 
 // 3. The entry points this suite drives directly are the documented shapes.
 check(
-  "kernel exports createApplication",
-  typeof createApplication === "function",
+  'kernel exports createApplication',
+  typeof createApplication === 'function',
 );
-check("runtime exports RuntimePlugin", typeof RuntimePlugin === "function");
-check("logger-plugin exports LoggerPlugin", typeof LoggerPlugin === "function");
-check("common exports the capability tokens", CAPABILITIES.LOGGER === "logger");
+check('runtime exports RuntimePlugin', typeof RuntimePlugin === 'function');
+check('logger-plugin exports LoggerPlugin', typeof LoggerPlugin === 'function');
+check('common exports the capability tokens', CAPABILITIES.LOGGER === 'logger');
 
 // 4. Runtime detection agrees with the process actually running the suite. A
 //    regression here silently routes every runtime service to the wrong
@@ -193,17 +193,17 @@ try {
 
   const logger = app.services.get(CAPABILITIES.LOGGER);
   check(
-    "resolved logger service exposes info()",
-    typeof logger?.info === "function",
+    'resolved logger service exposes info()',
+    typeof logger?.info === 'function',
   );
 
   // 6. The in-process pipeline serves a request.
   const injected = await app.inject({
-    method: "GET",
-    url: "http://compat.test/compat",
+    method: 'GET',
+    url: 'http://compat.test/compat',
   });
   check(
-    "inject() serves the route",
+    'inject() serves the route',
     injected.statusCode === 200 && injected.body === `{"runtime":"${host}"}`,
     `got ${injected.statusCode} ${injected.body}`,
   );
@@ -215,7 +215,7 @@ try {
   const response = await fetch(`http://127.0.0.1:${port}/compat`);
   const body = await response.text();
   check(
-    "HTTP adapter serves the route over a real socket",
+    'HTTP adapter serves the route over a real socket',
     response.status === 200 && body === `{"runtime":"${host}"}`,
     `got ${response.status} ${body}`,
   );
@@ -228,7 +228,7 @@ try {
 //    listener from one the adapter merely stopped routing to.
 const rebound = await rebind(port);
 check(
-  "stop() releases the listening port",
+  'stop() releases the listening port',
   rebound === null,
   rebound ?? undefined,
 );
@@ -250,8 +250,8 @@ check(
 //    pending rather than failing — a hard check would turn this PR red for the
 //    very defect it fixes. Once a newer version is installed the guard lifts
 //    and a surviving `npm:` inside import( fails the suite.
-const LAST_BROKEN = "0.1.0-alpha.8";
-const FIXED_IN = "0.1.0-alpha.9";
+const LAST_BROKEN = '0.1.0-alpha.8';
+const FIXED_IN = '0.1.0-alpha.9';
 
 /** Compares two `0.1.0[-alpha.N]` versions; -1/0/1. Unparseable → 0 (don't gate). */
 function compareVersions(a, b) {
@@ -268,7 +268,7 @@ function compareVersions(a, b) {
   const pa = parse(a);
   const pb = parse(b);
   if (pa === null || pb === null) return 0;
-  for (const key of ["major", "minor", "patch"]) {
+  for (const key of ['major', 'minor', 'patch']) {
     if (pa[key] !== pb[key]) return pa[key] < pb[key] ? -1 : 1;
   }
   // Same tuple: a release (pre === null) sorts after any prerelease.
@@ -295,14 +295,14 @@ function stripComments(source) {
   let i = 0;
   while (i < n) {
     const c = source[i];
-    if (c === '"' || c === "'" || c === "`") {
+    if (c === '"' || c === "'" || c === '`') {
       // Keep the string verbatim; skip to its closing delimiter.
       const quote = c;
       out[i] = c;
       i++;
       while (i < n) {
         out[i] = source[i];
-        if (source[i] === "\\") {
+        if (source[i] === '\\') {
           i++;
           if (i < n) out[i] = source[i];
           i++;
@@ -316,26 +316,26 @@ function stripComments(source) {
       }
       continue;
     }
-    if (c === "/" && source[i + 1] === "/") {
-      while (i < n && source[i] !== "\n") {
-        out[i] = " ";
+    if (c === '/' && source[i + 1] === '/') {
+      while (i < n && source[i] !== '\n') {
+        out[i] = ' ';
         i++;
       }
       continue;
     }
-    if (c === "/" && source[i + 1] === "*") {
-      out[i] = " ";
+    if (c === '/' && source[i + 1] === '*') {
+      out[i] = ' ';
       i++;
-      out[i] = " ";
+      out[i] = ' ';
       i++;
-      while (i < n && !(source[i] === "*" && source[i + 1] === "/")) {
-        out[i] = source[i] === "\n" ? "\n" : " ";
+      while (i < n && !(source[i] === '*' && source[i + 1] === '/')) {
+        out[i] = source[i] === '\n' ? '\n' : ' ';
         i++;
       }
       if (i < n) {
-        out[i] = " ";
+        out[i] = ' ';
         i++;
-        out[i] = " ";
+        out[i] = ' ';
         i++;
       }
       continue;
@@ -343,7 +343,7 @@ function stripComments(source) {
     out[i] = c;
     i++;
   }
-  return out.join("");
+  return out.join('');
 }
 
 /** Offsets of every `import( "npm:…` / `import('npm:…` / `import(`npm:…` call. */
@@ -376,8 +376,7 @@ function parameterizedImporterOccurrences(source) {
   // Concise arrow body: (id) => import(id)
   const concise = /\(\s*([A-Za-z_$][\w$]*)\s*\)\s*=>\s*import\(\s*\1\s*\)/g;
   // Braced arrow body: (id) => { ... import(id) ... }
-  const braced =
-    /\(\s*([A-Za-z_$][\w$]*)\s*\)\s*=>\s*\{[^{}]*import\(\s*\1\s*\)[^{}]*\}/g;
+  const braced = /\(\s*([A-Za-z_$][\w$]*)\s*\)\s*=>\s*\{[^{}]*import\(\s*\1\s*\)[^{}]*\}/g;
   const hits = [];
   for (const re of [concise, braced]) {
     let m;
@@ -393,24 +392,23 @@ function listJsFiles(dir) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = `${dir}/${entry.name}`;
     if (entry.isDirectory()) out.push(...listJsFiles(path));
-    else if (entry.name.endsWith(".js")) out.push(path);
+    else if (entry.name.endsWith('.js')) out.push(path);
   }
   return out;
 }
 
 for (
-  const name of ["@jsr/setu-ts__grpc-plugin", "@jsr/setu-ts__telemetry-plugin"]
+  const name of ['@jsr/setu-ts__grpc-plugin', '@jsr/setu-ts__telemetry-plugin']
 ) {
   const pkgDir = `node_modules/${name}`;
   let version;
   try {
-    version =
-      JSON.parse(readFileSync(`${pkgDir}/package.json`, "utf8")).version;
+    version = JSON.parse(readFileSync(`${pkgDir}/package.json`, 'utf8')).version;
   } catch {
     check(
       `${name} is installed with a readable version`,
       false,
-      "no package.json",
+      'no package.json',
     );
     continue;
   }
@@ -425,23 +423,19 @@ for (
   const npmInImport = [];
   const indirection = [];
   for (const file of listJsFiles(`${pkgDir}/src`)) {
-    const source = readFileSync(file, "utf8");
-    const rel = file.replace(`${pkgDir}/`, "");
+    const source = readFileSync(file, 'utf8');
+    const rel = file.replace(`${pkgDir}/`, '');
     if (npmImportOccurrences(source).length > 0) npmInImport.push(rel);
     if (parameterizedImporterOccurrences(source).length > 0) {
       indirection.push(rel);
     }
   }
   const details = [
-    npmInImport.length > 0
-      ? `npm: inside import(): ${npmInImport.join(", ")}`
-      : "",
-    indirection.length > 0
-      ? `parameterized importer: ${indirection.join(", ")}`
-      : "",
+    npmInImport.length > 0 ? `npm: inside import(): ${npmInImport.join(', ')}` : '',
+    indirection.length > 0 ? `parameterized importer: ${indirection.join(', ')}` : '',
   ]
     .filter(Boolean)
-    .join("; ");
+    .join('; ');
   check(
     `${name} @ ${version} ships no non-literal npm: path into import()`,
     npmInImport.length === 0 && indirection.length === 0,
@@ -450,8 +444,6 @@ for (
 }
 
 console.log(
-  failures === 0
-    ? `\nAll checks passed (${host}).`
-    : `\n${failures} check(s) failed.`,
+  failures === 0 ? `\nAll checks passed (${host}).` : `\n${failures} check(s) failed.`,
 );
 process.exit(failures === 0 ? 0 : 1);
