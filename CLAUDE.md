@@ -4833,18 +4833,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   deferred to a named `M92b` owner. `release:verify` moves from 47 to 48 publishable packages; the
   runbook gains the first-publish step (`release:create-packages` + `release:link-repos`)
 
-- **Next milestone** — **M40** (final release), the row that stays open until the M90 letters land:
-  the 1.0 gate named in README's Versioning section — benchmarks, a security audit, and the Node/Bun
-  compat suites as release gates. The `smoke/` programme's X16–X19 exercises against published
-  `0.3.0` produced **8 findings, 4 High**, all now closed as M89a (declarations that enforce
-  nothing), M89b (caller errors that read as server faults), and M89c (the ingress surface above) —
-  grouped by defect **shape** rather than by package, the M70a–M70n precedent. The X20–X38 register
-  that follows it was closed the same way: M90a (abuse control), M90b (health truth bounded, PR
-  #249), M90c (credential revocation and token type), M90d (the two brokers that cannot start, PR
-  #256), M90e (static delivery correctness, PR #252), M90f (caller errors reach the client
-  correctly, PR #259), M90g (concurrency loses work silently, PR #258), M90h (documentation that
-  survives contact, above), M90i (observability that joins up, PR #260) and M90j (operator
-  diagnostics survive to the operator, PR #263) are complete, closing the register.
+- **Milestone 93a** (`packages/events-plugin` — aggregate-local domain event recording: public
+  `IDomainEvents` and `createDomainEvents()` retain ordered local facts for an aggregate;
+  `pending()` returns an isolated snapshot; `remove()` uses strict reference equality and removes
+  one first occurrence; `clear()` empties the recorder. No capability token, plugin registration,
+  automatic publication, aggregate base class, or outbox was added. Implementation commit
+  `9ca07b7e`; PR pending) — complete
+
+- **Next milestone** — **M93b** (messaging-plugin — versioned integration-event contracts over the
+  existing messaging capability).
 
 ## Verification (run before declaring any work done)
 
