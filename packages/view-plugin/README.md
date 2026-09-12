@@ -86,6 +86,8 @@ error rather than a startup throw:
 | -------- | ------------- | ------------ | ----------------------------------------------------------------------------------------- |
 | `engine` | `'hono-jsx'`  | `'hono-jsx'` | Components are JSX functions. The application manifest declares `jsx` / `jsxImportSource` |
 | `engine` | `'hono-html'` | —            | Components return an `html` tagged template; works in a plain `.ts` file                  |
+| `engine` | `'custom'`    | —            | Requires `view`; the supplied engine is registered verbatim                               |
+| `view`   | `IViewEngine` | —            | `'custom'` arm only — the application's own engine                                        |
 
 Both values name the **authoring mode** — which import your components use — not a rendering
 strategy. One engine serves both, because escaping belongs to the rendering runtime; the selected
@@ -105,9 +107,6 @@ const Banner = (props: { readonly show: boolean }) =>
 `null`, `false`, `true` and `''` render as the empty string; `0` renders as `0`. `undefined` is
 refused with `ViewRenderError` — it is almost always a missing `return`, so serving an empty page
 for it would hide the mistake.
-
-| `engine` | `'custom'` | — | Requires `view`; the supplied engine is registered verbatim | | `view`
-| `IViewEngine` | — | `'custom'` arm only — the application's own engine |
 
 ## Escaping
 

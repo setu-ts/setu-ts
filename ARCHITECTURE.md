@@ -1155,6 +1155,8 @@ graph TB
     kernel --> react-router
     common --> static
     kernel --> static
+    common --> view
+    kernel --> view
     common --> worker-pool
     kernel --> worker-pool
     common --> rest-starter

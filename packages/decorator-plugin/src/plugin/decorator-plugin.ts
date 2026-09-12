@@ -350,6 +350,26 @@ function createHandler(
   };
 }
 
+/**
+ * Resolves the view engine from wherever the application put it.
+ *
+ * The registry is the ordinary home, but `DecoratorPlugin({ services })`
+ * registers an `@Injectable` into `ctx.container` when a DI container is
+ * present, so a container-supplied engine is invisible to `ctx.services`. A
+ * container miss is swallowed deliberately: absent means absent, and the
+ * per-route refusal below is the diagnostic, not this lookup.
+ */
+function resolveViewEngine(ctx: IPluginContext): IViewEngine | undefined {
+  if (ctx.services.has(CAPABILITIES.VIEW)) {
+    return ctx.services.get<IViewEngine>(CAPABILITIES.VIEW);
+  }
+  try {
+    return ctx.container?.resolve<IViewEngine>(CAPABILITIES.VIEW);
+  } catch {
+    return undefined;
+  }
+}
+
 /** The render pairing a route carries when it is decorated with `@Render`. */
 interface RenderRoute {
   readonly view: Component<unknown>;
@@ -872,15 +892,6 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       const authorization = ctx.services.has(CAPABILITIES.AUTHORIZATION)
         ? ctx.services.get<IAuthorizationService>(CAPABILITIES.AUTHORIZATION)
         : undefined;
-      // Registration-time view engine: resolved ONCE per application start,
-      // the same shape the two reads above follow. The optionalDependencies
-      // edge on CAPABILITIES.VIEW is what makes this a contract rather than
-      // plugin-order luck. Rendered routes are checked PER ROUTE below — an
-      // application with no @Render route needs no view plugin.
-      const viewEngine = ctx.services.has(CAPABILITIES.VIEW)
-        ? ctx.services.get<IViewEngine>(CAPABILITIES.VIEW)
-        : undefined;
-
       let discoveredControllers: Constructor[] = [];
       let discoveredServices: Constructor[] = [];
       if (opts.autoDiscover === true && opts.controllersPath !== undefined) {
@@ -916,6 +927,14 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       for (const svc of services) {
         registerService(ctx, svc);
       }
+
+      // Resolved AFTER the service loop, and only then, because
+      // `@Injectable({ token: CAPABILITIES.VIEW })` is a valid way to supply an
+      // engine: snapshotting before `registerService` made that composition
+      // fail at startup with a message telling the author to register a plugin
+      // they had deliberately replaced. In DI mode the provider lands in
+      // `ctx.container` rather than the registry, so both are consulted.
+      const viewEngine = resolveViewEngine(ctx);
       for (const ctrl of controllers) {
         registerController(
           ctx,

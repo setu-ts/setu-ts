@@ -11427,6 +11427,8 @@ error rather than a startup throw:
 | -------- | ------------- | ------------ | ------------------------------------------------------------------------------------------------ |
 | `engine` | `'hono-jsx'`  | `'hono-jsx'` | Components are JSX functions; the application manifest declares `jsx` / `jsxImportSource`.       |
 | `engine` | `'hono-html'` | —            | Components return an `html` tagged template; needs no `jsxImportSource`, works in a plain `.ts`. |
+| `engine` | `'custom'`    | —            | Requires `view`; the supplied engine is registered verbatim.                                     |
+| `view`   | `IViewEngine` | —            | `'custom'` arm only — the application's own engine.                                              |
 
 `'hono-jsx'` and `'hono-html'` name the **authoring mode**, not a rendering strategy: both return
 values funnel through one engine, because escaping belongs to the rendering runtime and there is
@@ -11444,9 +11446,6 @@ bag of the wrong shape is still a compile error.
 `false`, `true` and `''` render as the empty string, while `0` renders as `0`. `undefined` is the
 one exception — it is refused with `ViewRenderError`, because it is almost always a missing `return`
 rather than a deliberate empty render.
-
-| `engine` | `'custom'` | — | Requires `view`; the supplied engine is registered verbatim. | |
-`view` | `IViewEngine` | — | `'custom'` arm only — the application's own engine. |
 
 ### Exports
 

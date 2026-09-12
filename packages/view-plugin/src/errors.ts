@@ -25,9 +25,11 @@ export function componentName(component: Component<never>): string {
 }
 
 /**
- * A view component threw while rendering, or returned a value with no string
- * form (e.g. `null`). A failure raised from a throwing component carries the
- * original as `cause`, so the underlying fault is never swallowed.
+ * A view component threw while rendering, or returned `undefined` — almost
+ * always a missing `return`, since `null` and `false` are the deliberate
+ * render-nothing values and yield an empty string. A failure raised from a
+ * throwing component carries the original as `cause`, so the underlying fault
+ * is never swallowed.
  *
  * @example
  * ```typescript

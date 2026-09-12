@@ -100,10 +100,14 @@ type-checks that return against the component's props, so a wrong props bag is a
 naming the mismatch.
 
 ```typescript
+import { html } from '@hono/hono/html';
 import { Controller, Get, Render } from '@setu-ts/decorator-plugin';
 
+// The `html` tag escapes every interpolation. A plain
+// `(props) => \`<li>${user}</li>\`` template would NOT: escaping belongs to the
+// rendering runtime, and a plain string component is returned unchanged.
 const UserList = (props: { readonly users: readonly string[] }) =>
-  `<ul>${props.users.map((user) => `<li>${user}</li>`).join('')}</ul>`;
+  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
 
 @Controller('/pages')
 class PagesController {
