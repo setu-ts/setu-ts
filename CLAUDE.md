@@ -4847,7 +4847,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   with validate → parse → rebuild → handler and `IntegrationEventRejectedError` discriminated by
   `reason`, and `causedBy` for correlation propagation. Payload data, not transport headers — no
   `IMessageBroker` change, no new capability token, no broker adapter rewritten, no dependency on
-  `@setu-ts/events-plugin`) — complete (PR pending)
+  `@setu-ts/events-plugin`) — complete (PR #287)
 
 - **Next milestone** — **M94** (94a `exceptions`, 94b `common` + `runtime` + storage/session, 94c
   `session-plugin` — form bodies and error views, the seams M92 surfaced).
