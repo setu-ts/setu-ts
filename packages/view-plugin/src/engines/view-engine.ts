@@ -13,7 +13,7 @@
  * option names the authoring mode (see `ViewPluginOptions`).
  *
  * @module
- * @since 0.5.0
+ * @since 0.6.0
  */
 import type { Component, IViewEngine } from '@setu-ts/common';
 
@@ -22,7 +22,7 @@ import { renderComponent } from '../render/normalize.ts';
 /**
  * Renders a view component to a primitive HTML string.
  *
- * @since 0.5.0
+ * @since 0.6.0
  */
 export class ViewEngine implements IViewEngine {
   /**
@@ -32,7 +32,7 @@ export class ViewEngine implements IViewEngine {
    * @param component - The view component to render
    * @param props - The props passed to the component
    * @returns The rendered HTML
-   * @since 0.5.0
+   * @since 0.6.0
    */
   render<P>(component: Component<P>, props: P): Promise<string> {
     return renderComponent(component, props);

@@ -3,6 +3,6 @@
  * rendering runtime directly.
  *
  * @module
- * @since 0.5.0
+ * @since 0.6.0
  */
 export { raw } from '@hono/hono/html';

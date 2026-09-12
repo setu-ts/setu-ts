@@ -22,7 +22,7 @@ import type { IDomainEvent } from '@setu-ts/common';
  *   }
  * }
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export interface IDomainEvents {
   /**
@@ -65,7 +65,7 @@ export interface IDomainEvents {
  * the recorder.
  *
  * @returns A new empty domain-event recorder
- * @since 0.5.0
+ * @since 0.6.0
  */
 export function createDomainEvents(): IDomainEvents {
   const events: IDomainEvent[] = [];
