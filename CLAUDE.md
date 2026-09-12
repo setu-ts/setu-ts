@@ -4815,7 +4815,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (PR #278)
 
 - **Milestone 92** (`packages/common` + `packages/decorator-plugin` + `packages/view-plugin` (new) —
-  view plugin: server-rendered HTML as a capability) — complete (PR pending). `common` gains
+  view plugin: server-rendered HTML as a capability) — complete (PR #284). `common` gains
   `CAPABILITIES.VIEW`, `IViewEngine` and `Component<P>`; the new `@setu-ts/view-plugin` registers an
   engine under the token with two zero-new-dependency arms (`'hono-jsx'` default, `'hono-html'`) and
   a `'custom'` arm; views are named BY REFERENCE (`@Render(UserList)`), so there is no view resolver
