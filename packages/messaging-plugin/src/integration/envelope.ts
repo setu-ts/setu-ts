@@ -111,6 +111,35 @@ export function createEnvelope<T>(
 }
 
 /**
+ * An ISO-8601 instant, in the interoperable RFC 3339 profile: a full date, a
+ * time to at least seconds, and an explicit UTC designator or numeric offset.
+ *
+ * `Date.parse` alone is far weaker than the wire contract. It accepts
+ * date-only values (`2026-01-01`), implementation-defined formats such as RFC
+ * 2822 (`Thu, 01 Jan 1970 00:00:00 GMT`), and — the case that actually
+ * corrupts data — a zone-less `2026-01-01T00:00:00`, which every engine reads
+ * in its OWN local time. Measured: that string resolves to
+ * `2025-12-31T18:30:00.000Z` on a `+05:30` host, so a cross-service event
+ * carrying one would mean a different instant on every consumer.
+ *
+ * The `T` and `Z` are matched case-insensitively because RFC 3339 permits the
+ * lowercase forms and some emitters use them; everything else is exact, so an
+ * impossible date is then caught by the `Date.parse` check that follows.
+ */
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Reports whether a string is an ISO-8601 instant this contract accepts.
+ *
+ * @internal
+ * @param value - The candidate timestamp
+ * @returns `true` when the value is a well-formed, real instant
+ */
+function isIsoInstant(value: string): boolean {
+  return ISO_INSTANT.test(value) && !Number.isNaN(Date.parse(value));
+}
+
+/**
  * Builds the malformed-envelope refusal for one detail.
  * @internal
  */
@@ -182,7 +211,7 @@ export function validateEnvelope(
   if (typeof envelope['occurredAt'] !== 'string') {
     throw malformed(definition, 'the "occurredAt" field must be a string');
   }
-  if (Number.isNaN(Date.parse(envelope['occurredAt']))) {
+  if (!isIsoInstant(envelope['occurredAt'])) {
     throw malformed(
       definition,
       `the "occurredAt" field is not an ISO-8601 instant: "${envelope['occurredAt']}"`,

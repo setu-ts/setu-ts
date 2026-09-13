@@ -594,7 +594,17 @@ export class NatsBroker implements MessageBrokerAdapter {
             // that loop completely silent — the one broker that retries was
             // the one that reported nothing. Report first, exactly as the
             // RabbitMQ adapter does, then nak.
-            this.#logger?.error(`Message handler failed: ${describeError(error)}`);
+            //
+            // The reporter is an application-supplied callback with no
+            // non-throwing contract, and it is the LAST-RESORT sink: its own
+            // failure must never cost the message its disposition, nor escape
+            // this `.catch()` as an unhandled rejection. Swallowed here for
+            // the same reason `InMemoryBroker.#reportDispatchError` swallows.
+            try {
+              this.#logger?.error(`Message handler failed: ${describeError(error)}`);
+            } catch {
+              // Swallowed deliberately — see above.
+            }
             msgTyped.nak();
           });
         } else {

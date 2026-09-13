@@ -801,6 +801,46 @@ describe('NatsBroker', () => {
     await broker.disconnect();
   });
 
+  // The reporter is application-supplied and has no non-throwing contract. If
+  // its failure escaped, the message would lose its disposition entirely (no
+  // ack, no nak) and the rejection would surface as an unhandled rejection —
+  // so a broken logging transport would silently stall redelivery.
+  it('still naks when the logger itself throws', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeNatsConnection({
+      seededMessages: [
+        {
+          subject: 'test.subject',
+          data: JSON.stringify({ x: 1 }),
+          seq: 1,
+          timestampNanos: new Date().getTime() * 1_000_000,
+        },
+      ],
+    });
+    const broker = new NatsBroker(runtime, serializer, {
+      client: fakeConnection,
+      logger: {
+        error: () => {
+          throw new Error('logging transport is down');
+        },
+      },
+    });
+
+    await broker.connect();
+    const sub = await broker.subscribe(
+      'test.subject',
+      () => Promise.reject(new Error('handler failure')),
+      { queue: 'throwing-logger-consumer' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(fakeConnection.jetstream().deliveredMessages[0].isNaked()).toBe(true);
+
+    await sub.unsubscribe();
+    await broker.disconnect();
+  });
+
   // N8: failure-path - handler throws → nak() called
   it('subscribe calls nak() when the async handler throws', async () => {
     const runtime = createFakeRuntime();

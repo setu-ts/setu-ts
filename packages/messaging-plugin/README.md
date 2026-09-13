@@ -475,6 +475,13 @@ serializes to `null`) is refused, and on the consumer side a present
 number, and `occurredAt` a real ISO-8601 instant — otherwise the envelope's declared types would be
 a lie one hop before `causedBy` copies `correlationId` into the next event.
 
+`occurredAt` must be an ISO-8601 instant in the interoperable RFC 3339 profile — a full date, a time
+to at least seconds, and an explicit `Z` or a numeric offset (`2026-01-01T00:00:00Z`,
+`2026-01-01T00:00:00.000Z`, `2026-01-01T00:00:00+05:30`). A date-only value, an RFC 2822 date, or a
+zone-LESS timestamp is refused: `Date.parse` accepts all three, and the zone-less form is read in
+each engine's own local time — measured, `2026-01-01T00:00:00` becomes `2025-12-31T18:30:00.000Z` on
+a `+05:30` host — so one event would mean a different instant on every consumer.
+
 The rejection follows the broker's OWN failure path, and that path differs per arm — it is not a
 retry guarantee. RabbitMQ nacks with requeue DISABLED, so a refused message is dead-lettered when a
 DLX is configured and discarded otherwise, and logs the failure. NATS naks, which redelivers while

@@ -4871,10 +4871,17 @@ The wire envelope, published as the message payload:
 so a `Date` would arrive as a string on every transport. The consumer's structural check REQUIRES
 the five mandatory fields at their primitive types, checks `type` and `version` for exact equality,
 and IGNORES unknown extra top-level fields — an additive envelope change is never a breaking
-deployment. Payload strictness belongs to `parse`, where the application owns the policy. Metadata
-values must be finite: JSON serialization maps `NaN`/`Infinity` to `null`, so a non-finite
-`aggregateVersion` would reach consumers as `null` (`occurredAt` cannot hit this — it is built with
-`Date.toISOString()`).
+deployment. Payload strictness belongs to `parse`, where the application owns the policy. The
+optional causal fields are checked on both sides: `correlationId`, `causationId` and `aggregateId`
+must be strings, and `aggregateVersion` — the only number among them — must be FINITE, because JSON
+serialization maps `NaN`/`Infinity` to `null`, so a non-finite one would reach consumers as `null`.
+
+`occurredAt` must be an ISO-8601 instant in the interoperable RFC 3339 profile — a full date, a time
+to at least seconds, and an explicit `Z` or a numeric offset (`2026-01-01T00:00:00Z`,
+`2026-01-01T00:00:00.000Z`, `2026-01-01T00:00:00+05:30`). A date-only value, an RFC 2822 date, or a
+zone-LESS timestamp is refused: `Date.parse` accepts all three, and the zone-less form is read in
+each engine's own local time — measured, `2026-01-01T00:00:00` becomes `2025-12-31T18:30:00.000Z` on
+a `+05:30` host — so one event would mean a different instant on every consumer.
 
 The ten exported symbols of this section: the four functions above (`defineIntegrationEvent`,
 `publishIntegrationEvent`, `onIntegrationEvent`, `causedBy`), the `IntegrationEventRejectedError`

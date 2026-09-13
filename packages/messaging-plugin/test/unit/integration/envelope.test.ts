@@ -244,10 +244,42 @@ describe('envelope guards found in review (PR #287)', () => {
 
   // `occurredAt` is exposed to application code as an ISO-8601 instant; an
   // arbitrary string made that declared type a lie and produced an Invalid Date.
-  it('refuses an occurredAt that is not an ISO-8601 instant', () => {
-    expect(() => validateEnvelope({ ...base, occurredAt: 'not a timestamp' }, guarded))
-      .toThrow(/not an ISO-8601 instant/);
-  });
+  // `Date.parse` alone is far weaker than the wire contract: it accepts
+  // date-only values, RFC 2822, and — the case that corrupts data — a
+  // zone-less timestamp, which every engine reads in its OWN local time.
+  // Measured on a +05:30 host, '2026-01-01T00:00:00' became
+  // '2025-12-31T18:30:00.000Z', so such an event means a different instant on
+  // every consumer.
+  for (
+    const bad of [
+      'not a timestamp',
+      '2026-01-01', // date-only: not an instant
+      '2026-01-01T00:00:00', // no zone designator: local-time drift
+      'Thu, 01 Jan 1970 00:00:00 GMT', // RFC 2822, implementation-defined
+      '2026-13-45T00:00:00Z', // well-shaped but an impossible date
+    ]
+  ) {
+    it(`refuses an occurredAt that is not an ISO-8601 instant: ${bad}`, () => {
+      expect(() => validateEnvelope({ ...base, occurredAt: bad }, guarded))
+        .toThrow(/not an ISO-8601 instant/);
+    });
+  }
+
+  // The interoperable RFC 3339 profile, so a producer in another language is
+  // not refused for emitting a legal instant this framework does not itself
+  // emit (no fractional seconds, a numeric offset, lowercase designators).
+  for (
+    const good of [
+      '2026-01-01T00:00:00Z',
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:00:00+05:30',
+      '2026-01-01t00:00:00z',
+    ]
+  ) {
+    it(`accepts the ISO-8601 instant ${good}`, () => {
+      expect(validateEnvelope({ ...base, occurredAt: good }, guarded).occurredAt).toBe(good);
+    });
+  }
 
   it('accepts the canonical occurredAt createEnvelope emits', () => {
     const built = createEnvelope(runtime, guarded, { n: 1 });
