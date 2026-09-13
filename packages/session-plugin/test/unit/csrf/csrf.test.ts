@@ -119,6 +119,15 @@ describe('csrfTokenField', () => {
       `<input type="hidden" name="x&amp;&lt;&gt;&quot;&#39;" value="${token}">`,
     );
   });
+
+  it('escapes a pre-existing token before placing it in the value attribute', async () => {
+    const { ctx, session } = await withSession();
+    session.set(CSRF_SESSION_KEY, 'token-with-"-delimiter');
+
+    expect(csrfTokenField(ctx)).toBe(
+      '<input type="hidden" name="_csrf" value="token-with-&quot;-delimiter">',
+    );
+  });
 });
 
 describe('readCsrfToken', () => {

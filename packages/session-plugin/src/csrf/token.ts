@@ -102,7 +102,8 @@ export function csrfTokenField(
   options: Pick<CsrfFormOptions, 'fieldName'> = {},
 ): string {
   const fieldName = escapeHtmlAttribute(resolveCsrfConfig(options).fieldName);
-  return `<input type="hidden" name="${fieldName}" value="${getCsrfToken(ctx)}">`;
+  const token = escapeHtmlAttribute(getCsrfToken(ctx));
+  return `<input type="hidden" name="${fieldName}" value="${token}">`;
 }
 
 /** Escapes the delimiter characters meaningful in a quoted HTML attribute. */
