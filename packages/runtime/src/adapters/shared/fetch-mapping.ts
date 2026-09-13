@@ -182,13 +182,23 @@ class FrameworkRequest implements IRequest {
    *
    * The cache holds the in-flight PROMISE like every other body reader, and a
    * rejection is cached like `json()`'s: a body that is not a form will not
-   * become one on a retry. The content-type is read off the NATIVE request,
-   * never `this.headers`, so a form read does not take the lazy header copy
-   * on a request whose middleware never touches headers.
+   * become one on a retry.
+   *
+   * The content-type is read off `this.headers` — the PUBLIC, writable copy —
+   * not off the native request. `#readBody` reads the native headers because
+   * framing (`content-length`, `transfer-encoding`) is a property of the wire
+   * that no middleware may restate, but the content-type is semantic: it is
+   * what a middleware normalizing a client's header is entitled to change, and
+   * the other two `formData()` producers (the kernel's `inject()` and
+   * `@setu-ts/testing`'s `MockRequest`) both read their public headers. Reading
+   * the native object here made the three disagree — a mutation honoured in a
+   * test and ignored on the served path, which is the one thing the shared
+   * parse exists to prevent (M94b review). The lazy header copy this forces is
+   * paid only by a request that actually reads a form.
    */
   formData(): Promise<FormBody> {
     return this.#form ??= this.bytes().then((body) =>
-      parseFormBody(body, this.#raw.headers.get('content-type'))
+      parseFormBody(body, this.headers.get('content-type'))
     );
   }
 

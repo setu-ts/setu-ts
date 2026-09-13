@@ -350,9 +350,13 @@ interface IRequest {
 
 **Note:** `IRequest` has no `query` field (query parsing happens in the router), no `body` field
 (body is read through the dedicated methods above), and no `bodyUsed` property. `formData` is
-OPTIONAL on the `signal`/`raw` precedent: a request that omits it falls back to
-`parseFormBody(await request.bytes(), request.headers.get('content-type'))` from `@setu-ts/common`,
-which throws the `415`-branded `UnsupportedFormEncodingError` for a non-form content-type.
+OPTIONAL on the `signal`/`raw` precedent. Nothing falls back automatically: the framework's own form
+consumers (the upload middleware and the CSRF verifier) call
+`parseFormBody(await request.bytes(), request.headers.get('content-type'))` from `@setu-ts/common`
+themselves when a request omits the accessor, and application code reading a form from a custom
+`IRequest` does the same. Either route throws the `415`-branded `UnsupportedFormEncodingError` for a
+non-form content-type; what the accessor adds over the fallback is memoization, so two middleware
+reading one body trigger a single parse.
 
 ### IRequestContext
 

@@ -7,6 +7,8 @@
  * @module
  */
 
+import { parseContentType } from './content-type.ts';
+
 /** A single parsed part from a multipart body. */
 export interface ParsedPart {
   /** The form field name (Content-Disposition `name="…"`). */
@@ -17,7 +19,6 @@ export interface ParsedPart {
   readonly mimeType: string;
 }
 
-const CONTENT_TYPE_HEADER = 'Content-Type:';
 const MIME_DEFAULT = 'application/octet-stream';
 
 /**
@@ -81,8 +82,9 @@ export function parseMultipart(
     const nextBoundary = findNextBoundary(body, dataStart, boundaryBytes, lastBoundaryBytes);
     if (nextBoundary === -1) break;
 
-    // Strip trailing \r\n before next boundary.
-    const dataEnd = nextBoundary - 2;
+    // Strip the line break that belongs to the delimiter, which is 2 bytes for
+    // a CRLF body and 1 for a bare-LF one.
+    const dataEnd = nextBoundary - precedingLineBreakLength(body, nextBoundary);
     const partData = body.slice(dataStart, dataEnd > dataStart ? dataEnd : dataStart);
 
     // Omit `filename` when absent (exactOptionalPropertyTypes forbids `undefined`).
@@ -97,18 +99,15 @@ export function parseMultipart(
   return parts;
 }
 
-/** Extracts the boundary parameter from a content-type header. */
+/**
+ * Extracts the `boundary` parameter through the SAME parse the classifier
+ * reads, so `formEncodingOf` cannot promise a parse this function then refuses
+ * (M94b review). The previous regex matched `boundary=` anywhere in the raw
+ * header, so `xboundary=q` supplied a delimiter for a header that names none.
+ */
 function extractBoundary(contentType: string): string | null {
-  // Match `boundary=` followed by optional quote + quoted value OR unquoted token (no `;`).
-  // Quoted boundaries can contain spaces: boundary="abc xyz"
-  // Unquoted boundaries cannot: boundary=abc; charset=utf-8 → capture only "abc".
-  // Case-INSENSITIVE since M94b: parameter names are case-insensitive per RFC
-  // 9110, and the promoted classifier (`formEncodingOf`) case-folds the same
-  // check — the two must agree, or the accessor would throw where the
-  // classifier promised a parse. Internal-only module: this widens what
-  // parses; it changes no public surface (disclosed in CHANGELOG).
-  const match = contentType.match(/boundary=(?:"([^"]+)"|'([^']+)'|([^";\s]+))/i);
-  return match ? match[1] ?? match[2] ?? match[3] ?? null : null;
+  const boundary = parseContentType(contentType).parameters.get('boundary');
+  return boundary === undefined || boundary === '' ? null : boundary;
 }
 
 /** Checks if `body` at `offset` starts with `prefix`. */
@@ -133,45 +132,119 @@ function findDoubleCrlf(body: Uint8Array, offset: number): number {
   return -1;
 }
 
-/** Parses header lines into { name, mime }. */
+/**
+ * Parses one part's header block into `{ name, filename, mime }`.
+ *
+ * Each line is split at its FIRST `:` and the field name is compared
+ * case-insensitively, because RFC 7578 header field names are
+ * case-insensitive like every other HTTP header. The previous implementation
+ * matched the exact strings `Content-Disposition` and `Content-Type`, so a
+ * client sending `content-disposition` (legal, and what several HTTP libraries
+ * emit) lost the field name, the filename discriminator and the MIME type —
+ * measured: the part arrived under the name `'unknown'`, so a CSRF token was
+ * never found and an upload was never delivered.
+ */
 function parseHeaders(block: Uint8Array): { name?: string; mime?: string; filename?: string } {
   const text = new TextDecoder().decode(block);
   const result: { name?: string; mime?: string; filename?: string } = {};
 
-  for (const line of text.split('\r\n').filter(Boolean)) {
-    const trimmed = line.trim();
-    // Extract name/filename from Content-Disposition: `name="…"` and optional `filename="…"`.
-    if (trimmed.includes('Content-Disposition')) {
-      const nameMatch = trimmed.match(/[^a-z]name="([^"]*)"/) ?? trimmed.match(/^name="([^"]*)"/);
-      if (nameMatch) {
-        result.name = nameMatch[1];
-      }
-      const fileMatch = trimmed.match(/filename="([^"]*)"/);
-      if (fileMatch) {
-        result.filename = fileMatch[1];
-      }
-    }
-    if (trimmed.startsWith(CONTENT_TYPE_HEADER)) {
-      result.mime = trimmed.slice(CONTENT_TYPE_HEADER.length).trim();
+  for (const line of text.split(/\r?\n/)) {
+    const colon = line.indexOf(':');
+    if (colon === -1) continue;
+    const field = line.slice(0, colon).trim().toLowerCase();
+    const value = line.slice(colon + 1).trim();
+
+    if (field === 'content-disposition') {
+      const nameMatch = value.match(/(?:^|;)\s*name="([^"]*)"/);
+      if (nameMatch) result.name = nameMatch[1];
+      const fileMatch = value.match(/(?:^|;)\s*filename="([^"]*)"/);
+      if (fileMatch) result.filename = fileMatch[1];
+    } else if (field === 'content-type') {
+      result.mime = value;
     }
   }
 
   return result;
 }
 
-/** Finds the next boundary marker starting at `offset`. */
+/**
+ * Finds the next DELIMITER starting at `offset`.
+ *
+ * A multipart delimiter is not merely the byte sequence `--<boundary>`: RFC
+ * 2046 §5.1.1 defines it as a line break FOLLOWED by `--<boundary>`, followed
+ * in turn by a line break (another part) or `--` (the close). Matching the raw
+ * byte sequence anywhere silently truncated any value containing it — measured
+ * before this fix, the field value `prefix--AaB03xsuffix` came back as
+ * `'pref'`, because the match also consumed the two bytes a real delimiter's
+ * CRLF occupies. Real clients choose a boundary unlikely to appear in the data,
+ * but "unlikely" is not "never", and the failure is silent corruption of a
+ * CSRF token or uploaded file rather than a refusal.
+ *
+ * @param body - The whole request body
+ * @param offset - Where to start scanning (always inside a part's data)
+ * @param boundary - The `--<boundary>` bytes
+ * @param lastBoundary - The `--<boundary>--` bytes
+ * @returns The index of the delimiter's line break, or `-1` when none remains
+ */
 function findNextBoundary(
   body: Uint8Array,
   offset: number,
   boundary: Uint8Array,
   lastBoundary: Uint8Array,
 ): number {
-  let pos = body.indexOf(boundary[0], offset);
+  let pos = body.indexOf(boundary[0] as number, offset);
   while (pos !== -1) {
-    if (tryMatch(body, pos, boundary) || tryMatch(body, pos, lastBoundary)) {
-      return pos;
-    }
-    pos = body.indexOf(boundary[0], pos + 1);
+    if (isDelimiterAt(body, pos, boundary, lastBoundary)) return pos;
+    pos = body.indexOf(boundary[0] as number, pos + 1);
   }
   return -1;
+}
+
+/**
+ * Reports whether a real delimiter starts at `pos`, i.e. `--<boundary>`
+ * followed by a line break or the closing `--`.
+ *
+ * The preceding line break is checked by the CALLER's arithmetic rather than
+ * here: `parseMultipart` strips the two bytes before the returned index, so a
+ * match is only accepted when those bytes are actually a CRLF (or a bare LF).
+ */
+function isDelimiterAt(
+  body: Uint8Array,
+  pos: number,
+  boundary: Uint8Array,
+  lastBoundary: Uint8Array,
+): boolean {
+  if (!tryMatch(body, pos, boundary)) return false;
+  // Must be preceded by the line break that belongs to the delimiter.
+  if (precedingLineBreakLength(body, pos) === 0) return false;
+  // And followed by a line break (another part) or `--` (the close).
+  if (tryMatch(body, pos, lastBoundary)) return true;
+  // An out-of-range read yields `undefined`, which equals neither byte, so a
+  // delimiter running off the end of the body needs no separate length guard.
+  const next = body[pos + boundary.length];
+  if (next === 10) return true; // bare LF, which this parser accepts throughout
+  return next === 13 && body[pos + boundary.length + 1] === 10; // CRLF
+}
+
+/**
+ * Reports how many bytes the line break immediately before `pos` occupies:
+ * `2` for CRLF, `1` for a bare LF, `0` when no line break ends there.
+ *
+ * The length is RETURNED rather than a boolean because the caller strips
+ * exactly these bytes from the part's data; assuming a fixed 2 would truncate
+ * the final byte of every part whenever the delimiter is preceded by a bare LF.
+ *
+ * A bare LF is accepted here even though a wholly bare-LF BODY does not parse
+ * (measured, on this branch and before it: `dataStart` is `headerEnd + 4`, so
+ * the `\n\n` header separator leaves the data offset two bytes past its start
+ * and no part survives). The file's LF tolerance is partial and this function
+ * does not complete it — it simply declines to hardcode an assumption the
+ * caller would then have to share.
+ *
+ * No `pos < 1` guard is needed: a negative index reads `undefined`, which
+ * equals neither byte, so the comparisons already answer `0`.
+ */
+function precedingLineBreakLength(body: Uint8Array, pos: number): number {
+  if (body[pos - 1] !== 10) return 0;
+  return body[pos - 2] === 13 ? 2 : 1;
 }

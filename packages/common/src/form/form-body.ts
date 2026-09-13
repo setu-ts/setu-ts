@@ -22,12 +22,17 @@
  */
 
 import { UnsupportedFormEncodingError } from '../errors/unsupported-form-encoding.ts';
+import { parseContentType } from './content-type.ts';
 import type { ParsedPart } from './multipart-parser.ts';
 import { parseMultipart } from './multipart-parser.ts';
 
 // Hoisted decoder — one per process, not one per parsed part (the
 // `fetch-mapping` A1 precedent; `TextDecoder` construction is not free).
 const decoder = new TextDecoder();
+
+/** The two media types this module parses, matched exactly after case-folding. */
+const MULTIPART_FORM_DATA = 'multipart/form-data';
+const FORM_URLENCODED = 'application/x-www-form-urlencoded';
 
 /**
  * The two request encodings a form body can carry.
@@ -130,14 +135,20 @@ export interface FormBody {
 /**
  * Classifies a request content-type as one of the two form encodings.
  *
- * Case-insensitive (the previous hand-rolled checks disagreed here) and
- * parameter-tolerant, so `; charset=UTF-8` and `; boundary=…` both classify.
- * A `multipart/form-data` type carrying NO `boundary=` — or one whose
- * `boundary` parameter carries an EMPTY value — is `undefined`: the body is
- * not parseable as a form, and reporting an encoding that cannot be parsed
- * would hand the caller a guaranteed throw. The boundary grammar here is the
- * parser's own, case-folded: the two MUST agree, or the accessor would throw
- * the parser's unhinted error where it documented a `415`.
+ * The media type is matched EXACTLY against the two supported types after
+ * case-folding, and parameters are parsed separately through the shared
+ * {@linkcode parseContentType} — which is also what `parseMultipart` reads its
+ * `boundary` from, so the classifier and the parser cannot disagree about a
+ * header. A substring search over the raw value accepted three shapes that are
+ * not forms (each measured): a suffixed media type
+ * (`application/x-www-form-urlencoded-v2`), a supported type appearing inside
+ * an unrelated QUOTED parameter (`text/plain; note="…urlencoded"`), and
+ * `boundary=` matching inside a different parameter NAME (`xboundary=q`).
+ *
+ * A `multipart/form-data` type carrying no `boundary` parameter — or one whose
+ * value is empty — is `undefined`: the body is not parseable as a form, and
+ * reporting an encoding that cannot be parsed would hand the caller a
+ * guaranteed throw.
  *
  * Pure — this is the one classifier the upload middleware's multipart guard
  * and the CSRF verifier's form guard both read, replacing their private
@@ -154,11 +165,15 @@ export interface FormBody {
  */
 export function formEncodingOf(contentType: string | null): FormEncoding | undefined {
   if (contentType === null) return undefined;
-  const ct = contentType.toLowerCase();
-  if (ct.includes('multipart/form-data')) {
-    return /boundary=(?:"[^"]+"|'[^']+'|[^";\s]+)/i.test(ct) ? 'multipart' : undefined;
+  const { mediaType, parameters } = parseContentType(contentType);
+  if (mediaType === MULTIPART_FORM_DATA) {
+    // A multipart body is unparseable without its delimiter, so a type
+    // carrying no usable `boundary` is NOT a form: reporting an encoding here
+    // would promise a parse that `parseMultipart` must then refuse.
+    const boundary = parameters.get('boundary');
+    return boundary !== undefined && boundary !== '' ? 'multipart' : undefined;
   }
-  if (ct.includes('application/x-www-form-urlencoded')) return 'urlencoded';
+  if (mediaType === FORM_URLENCODED) return 'urlencoded';
   return undefined;
 }
 

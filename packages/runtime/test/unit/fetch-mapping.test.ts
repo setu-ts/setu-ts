@@ -545,3 +545,32 @@ describe('fetch-mapping | full round-trip', () => {
     expect(response.headers.get('location')).toBe('/echo/1');
   });
 });
+
+describe('fetch-mapping | formData reads the PUBLIC headers (M94b review)', () => {
+  it('honours a middleware rewriting content-type onto a form type', async () => {
+    // The native request says text/plain; a middleware normalizes it. Reading
+    // the native object made this throw the 415 while the kernel's inject()
+    // and MockRequest — which read their public headers — parsed it: the three
+    // producers disagreeing is what the one shared parse exists to prevent.
+    const request = mapWebRequestToFrameworkRequest(
+      new Request('http://test.local/f', { method: 'POST', body: 'a=1&b=2' }),
+    );
+    request.headers.set('content-type', 'application/x-www-form-urlencoded');
+
+    const form = await request.formData!();
+    expect([...form.entries()]).toEqual([['a', '1'], ['b', '2']]);
+  });
+
+  it('honours a middleware rewriting content-type AWAY from a form type', async () => {
+    const request = mapWebRequestToFrameworkRequest(
+      new Request('http://test.local/f', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'a=1',
+      }),
+    );
+    request.headers.set('content-type', 'application/json');
+
+    await expect(request.formData!()).rejects.toThrow(UnsupportedFormEncodingError);
+  });
+});

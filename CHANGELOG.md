@@ -30,6 +30,32 @@ All notable changes to this project are documented here. The format follows
   internal — `parseFormBody` is the only public entry), and both first-party consumers now read the
   shared accessor: `createUploadMiddleware` keeps every bound and refusal where it was, and
   `extractToken` (see the session-plugin entry).
+- **`@setu-ts/common` — three multipart/form-parsing defects fixed while promoting the parser.** All
+  three were pre-existing in the `@setu-ts/storage-plugin` parser this release moves into `common`,
+  and all three failed silently; promoting it is what made them reachable from the CSRF verifier and
+  from every `IRequest.formData()` caller, so they are fixed where the code now lives. (1)
+  **Boundary detection now requires the full delimiter context** — a line break, `--<boundary>`,
+  then a line break or the closing `--`, per RFC 2046 §5.1.1. Matching the raw byte sequence
+  anywhere truncated any value containing it: the field value `prefix--AaB03xsuffix` came back as
+  `pref`, silently corrupting a CSRF token or uploaded file rather than refusing it. (2) **Part
+  header field names are matched case-insensitively**, as RFC 7578 defines them. The parser compared
+  the exact strings `Content-Disposition` and `Content-Type`, so a client sending
+  `content-disposition` — legal, and what several HTTP libraries emit — lost its field name,
+  filename discriminator and MIME type: the part arrived under the name `unknown`, so a CSRF token
+  was never found and an upload was never delivered. (3) **`formEncodingOf` matches the media-type
+  token exactly** and reads `boundary` as a real parameter, through a new shared `parseContentType`
+  that `parseMultipart` reads too — so the classifier can no longer promise a parse the parser
+  refuses. Substring matching admitted three non-forms into form parsing:
+  `application/x-www-form-urlencoded-v2` (a suffixed type),
+  `text/plain; note="application/x-www-form-urlencoded"` (the type inside an unrelated quoted
+  parameter), and `multipart/form-data; xboundary=q` (`boundary=` matching a different parameter
+  name). A quoted boundary containing `;` now parses correctly.
+- **`@setu-ts/runtime` — `IRequest.formData()` reads the request's PUBLIC headers.** It read the
+  native request's headers, so a middleware rewriting `content-type` was ignored on the served path
+  while the kernel's `inject()` and `@setu-ts/testing`'s `MockRequest` — which read their public
+  headers — honoured it. The three producers of one shared parse now agree. Framing headers
+  (`content-length`, `transfer-encoding`) are still read natively, which is correct: framing is a
+  property of the wire, not something a middleware restates.
 - **`@setu-ts/session-plugin` — CSRF tokens can arrive in a `multipart/form-data` FIELD.** The
   verifier previously read only the configured header for multipart posts, because parsing the body
   would have meant importing the storage plugin's parser. With the parser promoted into `common`,
