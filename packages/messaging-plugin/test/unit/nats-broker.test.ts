@@ -841,6 +841,50 @@ describe('NatsBroker', () => {
     await broker.disconnect();
   });
 
+  // `MessageHandler` returns `void | Promise<void>`, so a handler may throw
+  // SYNCHRONOUSLY — and the throw escaped the consume callback before either
+  // ack() or nak() ran, leaving the message undisposed until the ack-wait
+  // timeout. The RabbitMQ adapter awaits inside a try/catch and has never had
+  // this hole; NATS was the outlier. Deserialization of a malformed payload
+  // throws the same way, two lines earlier, so it shares the boundary.
+  it('naks when the handler throws SYNCHRONOUSLY, not just on a rejected promise', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const errors: string[] = [];
+    const fakeConnection = new FakeNatsConnection({
+      seededMessages: [
+        {
+          subject: 'test.subject',
+          data: JSON.stringify({ x: 1 }),
+          seq: 1,
+          timestampNanos: new Date().getTime() * 1_000_000,
+        },
+      ],
+    });
+    const broker = new NatsBroker(runtime, serializer, {
+      client: fakeConnection,
+      logger: { error: (msg) => errors.push(msg) },
+    });
+
+    await broker.connect();
+    const sub = await broker.subscribe(
+      'test.subject',
+      () => {
+        throw new Error('synchronous handler failure');
+      },
+      { queue: 'sync-throw-consumer' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const msg = fakeConnection.jetstream().deliveredMessages[0];
+    expect(msg.isNaked()).toBe(true);
+    expect(msg.isAcked()).toBe(false);
+    expect(errors[0]).toContain('synchronous handler failure');
+
+    await sub.unsubscribe();
+    await broker.disconnect();
+  });
+
   // N8: failure-path - handler throws → nak() called
   it('subscribe calls nak() when the async handler throws', async () => {
     const runtime = createFakeRuntime();
