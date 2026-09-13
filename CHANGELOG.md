@@ -160,6 +160,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`@setu-ts/exceptions`: a `415` is served with its canonical title.** `STATUS_TITLES` gained a
+  `415: 'Unsupported Media Type'` row. It had none, because `415` is the first status the framework
+  brands with `withHttpStatusHint` and never produces through a factory (M94b's form accessor), and
+  the Problem Details formatters derive `title` from `statusTitle(status)` — so a client reading a
+  `415` under `errorHandler({ format: 'rfc9457' })` got `"title": "Error"` while the SAME error
+  under `'default'` read `"message": "Unsupported Media Type"`: the two configured formats
+  disagreeing about one error. Every test asserted the title on the brand (the error object) and
+  none read the served body, which is why nothing saw it; `status-title-served.test.ts` now drives
+  each branded status through `errorHandler` in both formats, and the root
+  `status-title-coverage.test.ts` reads the branded statuses out of first-party source so a package
+  branding a NEW status fails the gate instead of serving a meaningless title. An application that
+  produced its own `415` — by `new HttpError(415, …)` or its own hint — also stops reading `'Error'`
+  under the Problem Details formats.
 - **BREAKING — `@setu-ts/storage-plugin`: a multipart part with no `filename` under the upload field
   name is no longer an upload.** It used to be reported as an `UploadedFile` whose `filename` fell
   back to the field name; since the upload middleware reads forms through the new shared accessor

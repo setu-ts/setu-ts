@@ -152,6 +152,9 @@ describe('statusTitle', () => {
     expect(statusTitle(404)).toBe('Not Found');
     expect(statusTitle(409)).toBe('Conflict');
     expect(statusTitle(413)).toBe('Payload Too Large');
+    // Branded by M94b's form accessor, which passes no factory — the row
+    // it lacked made a served `415` read `"title": "Error"` under rfc9457.
+    expect(statusTitle(415)).toBe('Unsupported Media Type');
     expect(statusTitle(422)).toBe('Unprocessable Entity');
     expect(statusTitle(429)).toBe('Too Many Requests');
     expect(statusTitle(500)).toBe('Internal Server Error');
