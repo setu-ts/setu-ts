@@ -5731,6 +5731,18 @@ app.router.get('/files/stream/:key', async (ctx) => {
 });
 ```
 
+**Demand-driven streaming is a property of `S3Provider`, not of `getStream?` in general.** On that
+path, serving a large object to a slow client does not pull the object into memory: the provider
+stays 2-3 MiB ahead of the consumer (measured constant in elapsed time and in bytes delivered), a
+consumer that stops reading stops the wire, and cancelling releases the upstream connection. On
+every other provider a large object becomes memory-resident regardless of how slowly the client
+reads — `GcsProvider` and `AzureBlobProvider` stream natively but drain their SDK stream eagerly
+with no demand signal and no cancellation, while `MemoryProvider` and `LocalStorageProvider` have no
+native `getStream` at all and take `StorageService`'s buffered fallback. The storage-plugin README
+carries the per-provider table. Note also that process RSS does not measure any of this — a large
+download raises the allocator high-water mark while retaining nothing, and importing the AWS SDK
+costs ~29 MiB by itself.
+
 ### Providers
 
 The plugin ships five named providers plus a first-class B2 preset that reuses S3 under the hood.

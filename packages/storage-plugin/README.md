@@ -150,6 +150,38 @@ proves the root is READABLE.
 The optional `getStream?` reads an object as a `ReadableStream<Uint8Array>`, wired through
 `IResponse.stream()` for zero-copy downloads.
 
+### Backpressure — per provider
+
+Demand-driven streaming is **not** a property of `getStream?` in general. It holds for `S3Provider`
+and is measured there; the other providers reach the object differently, and two of them read as
+fast as the backend will send regardless of what the consumer is doing.
+
+| Provider                      | Streaming                | Bounded memory for a slow consumer                                 |
+| ----------------------------- | ------------------------ | ------------------------------------------------------------------ |
+| `S3Provider` (and the B2 arm) | Native, demand-driven    | **Yes** — measured; cancelling releases the upstream connection.   |
+| `GcsProvider`                 | Native, but eager        | **No** — enqueues on `'data'` with no `pull` and no `cancel` hook. |
+| `AzureBlobProvider`           | Native, but eager        | **No** — drains the SDK stream in a `for await` with no `cancel`.  |
+| `MemoryProvider`              | None — buffered fallback | **No** — the whole object is already in memory.                    |
+| `LocalStorageProvider`        | None — buffered fallback | **No** — `StorageService` reads it whole, then emits one chunk.    |
+
+For the two eager providers and the two fallbacks, a large object is resident in memory regardless
+of how slowly the client reads, and an aborted download does not stop the upstream transfer. Only
+the S3 path should be relied on for a large-object relay today.
+
+Measured for `S3Provider` against real MinIO: it stays 2-3 MiB ahead of the reader — 3.1 MiB at 1
+MiB/s, 1.9-2.5 MiB at 2 MiB/s — and that figure is constant, moving by at most 0.30 MiB over an
+eight-second window while delivered bytes grow four-fold. A consumer that stops reading altogether
+stops the wire. `test/integration/stream-backpressure-real.test.ts` pins all of that at both rates
+against a byte-counting relay in front of the backend. (The same figure was observed once on a 256
+MiB object; that is provenance for the size-independence claim, not something the guard re-checks —
+it runs against 64 MiB.)
+
+**Process RSS does not measure it.** A large download raises the allocator high-water mark without
+retaining anything: forcing GC mid-transfer returns `heapUsed` and `external` to baseline while RSS
+stays up, and importing the AWS SDK alone costs ~29 MiB before any object is touched. A generated
+`ReadableStream` is therefore not a like-for-like control for an SDK-backed one, and comparing the
+two on RSS reports a difference that is mostly the SDK. Count bytes at the socket instead.
+
 ## Health indicator
 
 Registered under the `storage` capability. Since M70c it reports two signals: the provider's
