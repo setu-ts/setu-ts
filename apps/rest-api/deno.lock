@@ -620,7 +620,8 @@
         "@smithy/core",
         "@smithy/types",
         "tslib"
-      ]
+      ],
+      "deprecated": true
     },
     "@smithy/signature-v4@5.7.3": {
       "integrity": "sha512-7ImGm+FkHRLcBaRttIAMZ6bzJZWb2cJGoYjq46F2UjycujWzrL9GEN9h4w7eQyXJYnltrUhxbbieBAIRrdqpow==",
@@ -1863,6 +1864,15 @@
         ]
       },
       "jsr:@setu-ts/validation-plugin@0.6.0": {},
+      "jsr:@setu-ts/view-plugin@0.6.0": {
+        "dependencies": [
+          "jsr:@hono/hono@^4.12.30",
+          "jsr:@setu-ts/common@0.6",
+          "jsr:@setu-ts/decorator-plugin@0.6",
+          "jsr:@setu-ts/runtime@0.6",
+          "jsr:@setu-ts/testing@0.6"
+        ]
+      },
       "jsr:@setu-ts/websocket-plugin@0.6.0": {},
       "jsr:@setu-ts/worker-pool-plugin@0.6.0": {}
     }

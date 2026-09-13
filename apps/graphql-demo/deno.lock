@@ -339,6 +339,15 @@
         ]
       },
       "jsr:@setu-ts/validation-plugin@0.6.0": {},
+      "jsr:@setu-ts/view-plugin@0.6.0": {
+        "dependencies": [
+          "jsr:@hono/hono@^4.12.30",
+          "jsr:@setu-ts/common@0.6",
+          "jsr:@setu-ts/decorator-plugin@0.6",
+          "jsr:@setu-ts/runtime@0.6",
+          "jsr:@setu-ts/testing@0.6"
+        ]
+      },
       "jsr:@setu-ts/websocket-plugin@0.6.0": {},
       "jsr:@setu-ts/worker-pool-plugin@0.6.0": {}
     }
