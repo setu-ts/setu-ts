@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] — 2026-09-13
 
 ### Added
 
@@ -5216,6 +5216,7 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[0.6.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.6.0
 [0.5.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.5.0
 [0.4.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.4.0
 [0.3.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.3.0
