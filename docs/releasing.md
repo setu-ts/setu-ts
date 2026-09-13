@@ -102,13 +102,26 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   never been published: before the first release that ships it, run `release:create-packages` (a JSR
   package must exist before it can be published) and `release:link-repos` (tokenless OIDC publishing
   requires the repo link). Both are idempotent; the M35 `sdk` release recorded the same step for the
-  last first-time publisher. **And once it has published, move it into the compat suite**: a package
-  that has never been on JSR sits in `PENDING_FIRST_PUBLISH` in `compat/compat.test.mjs`, because
-  `bun install` cannot fetch a package that does not exist and demanding it would deadlock the
-  milestone PR that introduces it. Delete the entry and add `@jsr/setu-ts__<name>` to
-  `compat/package.json` dependencies in the release that publishes it — otherwise check 1 keeps
-  passing while the package is covered on Deno and nowhere else, which is the exact coverage hole
-  that check exists to catch.
+  last first-time publisher — though only the ordering half of it, because the compat suite did not
+  exist yet when `sdk` first published, which is why the sequencing below was unverified until
+  `view-plugin` hit it.
+
+  **And once it has published — in a FOLLOW-UP PR, never in the release PR itself — move it into the
+  compat suite.** A package that has never been on JSR sits in `PENDING_FIRST_PUBLISH` in
+  `compat/compat.test.mjs`, because `bun install` cannot fetch a package that does not exist and
+  demanding it would deadlock the milestone PR that introduces it. The release PR deadlocks the same
+  way and for the same reason: `node-compat` and `bun-compat` run on **every** pull request and
+  resolve `latest` from the registry, so a dependency on a package the tag run has not published yet
+  fails at install. Measured while cutting `v0.6.0`, with `kernel` as the control:
+  `jsr.io/@setu-ts/view-plugin/meta.json` and `npm.jsr.io/@jsr/setu-ts__view-plugin` both answered
+  `404` while both of `kernel`'s answered `200`. `release:create-packages` does not change that — it
+  creates an empty package, and an empty package has no version to resolve.
+
+  So the order is: release PR (compat untouched) → merge → tag → publish → **then** a follow-up PR
+  that deletes the `PENDING_FIRST_PUBLISH` entry and adds `@jsr/setu-ts__<name>` to
+  `compat/package.json` dependencies. Do not leave that follow-up unopened: while the entry stands,
+  check 1 keeps passing while the package is covered on Deno and nowhere else, which is the exact
+  coverage hole that check exists to catch.
 - **Grep the source, not only the manifests.** `packages/sdk` writes its `jsr:` specifier inline in
   four `src/**` files rather than through an import-map alias, and its manifest maps that exact
   specifier string to a pinned version — so the range in the source and both sides of the mapping
