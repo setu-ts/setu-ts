@@ -281,9 +281,11 @@ The envelope's fields:
 
 `occurredAt` is an ISO-8601 **string**, not a `Date`: a payload round-trips through the serializer's
 `JSON.parse` on every transport, so a `Date` would arrive at the consumer as a string regardless of
-what the producer put in. The string is the honest type. The optional causal fields must be finite
-numbers: JSON serialization maps `NaN`/`Infinity` to `null`, so a non-finite `aggregateVersion`
-would arrive as `null`.
+what the producer put in. The string is the honest type. `correlationId`, `causationId` and
+`aggregateId` are strings; `aggregateVersion` is the only number, and it must be FINITE, because
+JSON serialization maps `NaN`/`Infinity` to `null` — a non-finite one would arrive as `null`. Each
+is checked on both sides: refused at the producer, and refused as a `malformed` rejection at the
+consumer.
 
 One definition serves both directions — the producer reads its `type`/`version`/`topic`, the
 consumer the same three plus `parse`:
@@ -307,7 +309,17 @@ const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
   type: 'orders.placed',
   version: 1,
   topic: 'orders.placed.v1', // MUST end with `.v${version}` — enforced at definition time
-  parse: (value) => value as { orderId: string },
+  // `parse` is the payload validation boundary, and it runs on a value that has
+  // crossed a process. A bare `value as T` is a compile-time assertion that
+  // checks NOTHING at runtime, so a wrong payload would reach the handler typed
+  // as if it were right. Narrow it for real:
+  parse: (value) => {
+    const candidate = value as { orderId?: unknown };
+    if (typeof candidate?.orderId !== 'string') {
+      throw new TypeError('orderPlaced: "orderId" must be a string');
+    }
+    return { orderId: candidate.orderId };
+  },
 });
 
 const app = createApplication({
@@ -355,7 +367,7 @@ const orderCharged = defineIntegrationEvent<{ orderId: string }>({
   type: 'orders.charged',
   version: 1,
   topic: 'orders.charged.v1',
-  parse: (value) => value as { orderId: string },
+  parse: (value) => value as { orderId: string }, // terse here; validate for real (see above)
 });
 
 // Inside a handler: the consumed envelope's correlationId (or its own id,
@@ -397,14 +409,14 @@ const ordersPlacedV1 = defineIntegrationEvent<{ orderId: string }>({
   type: 'orders.placed',
   version: 1,
   topic: 'orders.placed.v1',
-  parse: (value) => value as { orderId: string },
+  parse: (value) => value as { orderId: string }, // terse here; validate for real (see above)
 });
 
 const ordersPlacedV2 = defineIntegrationEvent<{ orderId: string; totalCents: number }>({
   type: 'orders.placed',
   version: 2,
   topic: 'orders.placed.v2',
-  parse: (value) => value as { orderId: string; totalCents: number },
+  parse: (value) => value as { orderId: string; totalCents: number }, // terse; validate for real
 });
 
 // The migration window: both topics are published; the v1 publication stops
@@ -508,7 +520,7 @@ const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
   type: 'orders.placed',
   version: 1,
   topic: 'orders.placed.v1',
-  parse: (value) => value as { orderId: string },
+  parse: (value) => value as { orderId: string }, // terse here; validate for real (see above)
 });
 
 // The facts an aggregate recorded locally, read at the application boundary.

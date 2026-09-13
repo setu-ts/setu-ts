@@ -4823,6 +4823,8 @@ const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
   type: 'orders.placed',
   version: 1,
   topic: 'orders.placed.v1',
+  // `parse` is the validation boundary: a bare `as` checks nothing at runtime.
+  // Narrow it for real — see the messaging-plugin README for a worked parser.
   parse: (value) => value as { orderId: string },
 });
 
