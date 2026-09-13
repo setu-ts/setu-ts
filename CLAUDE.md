@@ -4857,7 +4857,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `HttpError` after logging. Its returned `HandlerResult` owns the response; only `undefined`
   preserves the formatter's JSON/Problem Details output. The hook stays out of M70f responder
   terminals, which can lack a full request context, and adds no view-plugin dependency — complete
-  (PR pending)
+  (PR #288)
 
 ## Verification (run before declaring any work done)
 
