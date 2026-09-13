@@ -5731,6 +5731,13 @@ app.router.get('/files/stream/:key', async (ctx) => {
 });
 ```
 
+The stream is demand-driven, so serving a large object to a slow client does not pull the object
+into memory: the provider stays a small bounded distance ahead of the consumer (2-3 MiB for
+`S3Provider`, measured constant in elapsed time, in bytes delivered, and across object size), a
+consumer that stops reading stops the wire, and cancelling the stream releases the upstream
+connection. Note that process RSS does not measure this — a large download raises the allocator
+high-water mark while retaining nothing, and importing the AWS SDK costs ~29 MiB by itself.
+
 ### Providers
 
 The plugin ships five named providers plus a first-class B2 preset that reuses S3 under the hood.

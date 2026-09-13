@@ -150,6 +150,22 @@ proves the root is READABLE.
 The optional `getStream?` reads an object as a `ReadableStream<Uint8Array>`, wired through
 `IResponse.stream()` for zero-copy downloads.
 
+### Backpressure
+
+The stream is demand-driven: the provider reads only a small, bounded amount ahead of whatever is
+consuming it, and cancelling it releases the upstream connection. Measured against real MinIO,
+`S3Provider` stays 2-3 MiB ahead of the reader — 3.1 MiB at 1 MiB/s, 1.9-2.5 MiB at 2 MiB/s — and
+that figure is constant: over an eight-second window it moves by at most 0.30 MiB while delivered
+bytes grow four-fold, and it is the same on a 64 MiB object and a 256 MiB one. A consumer that stops
+reading altogether stops the wire. `test/integration/stream-backpressure-real.test.ts` pins this
+against a byte-counting relay in front of the backend.
+
+**Process RSS does not measure it.** A large download raises the allocator high-water mark without
+retaining anything: forcing GC mid-transfer returns `heapUsed` and `external` to baseline while RSS
+stays up, and importing the AWS SDK alone costs ~29 MiB before any object is touched. A generated
+`ReadableStream` is therefore not a like-for-like control for an SDK-backed one, and comparing the
+two on RSS reports a difference that is mostly the SDK. Count bytes at the socket instead.
+
 ## Health indicator
 
 Registered under the `storage` capability. Since M70c it reports two signals: the provider's
