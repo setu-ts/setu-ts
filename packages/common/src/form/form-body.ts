@@ -25,6 +25,10 @@ import { UnsupportedFormEncodingError } from '../errors/unsupported-form-encodin
 import type { ParsedPart } from './multipart-parser.ts';
 import { parseMultipart } from './multipart-parser.ts';
 
+// Hoisted decoder — one per process, not one per parsed part (the
+// `fetch-mapping` A1 precedent; `TextDecoder` construction is not free).
+const decoder = new TextDecoder();
+
 /**
  * The two request encodings a form body can carry.
  *
@@ -103,6 +107,11 @@ export interface FormBody {
    * `getAll`, so a repeated field (multi-select, multi-file) keeps the order
    * the client sent.
    *
+   * The returned array is the parse's own READ view, not a defensive copy:
+   * mutating it mutates what later `getAll` calls return. Treat it as
+   * read-only (the `IResponse.snapshot()` precedent — a copy would allocate
+   * on every read of a value most readers never touch).
+   *
    * @param name - The form field name
    * @returns The values, empty when the name is absent
    */
@@ -123,9 +132,12 @@ export interface FormBody {
  *
  * Case-insensitive (the previous hand-rolled checks disagreed here) and
  * parameter-tolerant, so `; charset=UTF-8` and `; boundary=…` both classify.
- * A `multipart/form-data` type carrying NO `boundary=` is `undefined`: the
- * body is not parseable as a form, and reporting an encoding that cannot be
- * parsed would hand the caller a guaranteed throw.
+ * A `multipart/form-data` type carrying NO `boundary=` — or one whose
+ * `boundary` parameter carries an EMPTY value — is `undefined`: the body is
+ * not parseable as a form, and reporting an encoding that cannot be parsed
+ * would hand the caller a guaranteed throw. The boundary grammar here is the
+ * parser's own, case-folded: the two MUST agree, or the accessor would throw
+ * the parser's unhinted error where it documented a `415`.
  *
  * Pure — this is the one classifier the upload middleware's multipart guard
  * and the CSRF verifier's form guard both read, replacing their private
@@ -144,7 +156,7 @@ export function formEncodingOf(contentType: string | null): FormEncoding | undef
   if (contentType === null) return undefined;
   const ct = contentType.toLowerCase();
   if (ct.includes('multipart/form-data')) {
-    return ct.includes('boundary=') ? 'multipart' : undefined;
+    return /boundary=(?:"[^"]+"|'[^']+'|[^";\s]+)/i.test(ct) ? 'multipart' : undefined;
   }
   if (ct.includes('application/x-www-form-urlencoded')) return 'urlencoded';
   return undefined;
@@ -178,7 +190,7 @@ export function parseFormBody(body: Uint8Array, contentType: string | null): For
     throw new UnsupportedFormEncodingError();
   }
   if (encoding === 'urlencoded') {
-    return urlencodedForm(new TextDecoder().decode(body));
+    return urlencodedForm(decoder.decode(body));
   }
   // Reachable only with a non-null content-type: `formEncodingOf` answers
   // `undefined` for `null`, and that arm already threw above.
@@ -241,7 +253,7 @@ function multipartForm(parts: readonly ParsedPart[]): FormBody {
     // no filename is a plain field value regardless of its Content-Type, and
     // an empty-string filename is still a file (an empty file input).
     const value: FormValue = part.filename === undefined
-      ? new TextDecoder().decode(part.data)
+      ? decoder.decode(part.data)
       : { filename: part.filename, mimeType: part.mimeType, data: part.data };
     appendValue(acc, part.name, value);
   }

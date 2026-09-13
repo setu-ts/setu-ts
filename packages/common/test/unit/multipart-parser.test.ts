@@ -38,6 +38,25 @@ function makeBody(
 }
 
 describe('parseMultipart', () => {
+  it('parses a body whose boundary parameter name uses unusual casing', () => {
+    // Parameter names are case-insensitive per RFC 9110, and the promoted
+    // classifier case-folds the same check — the parser must too, or the
+    // accessor would throw where the classifier promised a parse (review C2).
+    const boundary = '----CaseVar';
+    const enc = new TextEncoder();
+    const body = new Uint8Array([
+      ...enc.encode(`--${boundary}\r\n`),
+      ...enc.encode('Content-Disposition: form-data; name="avatar"; filename="a.txt"\r\n'),
+      ...enc.encode('Content-Type: text/plain\r\n\r\n'),
+      ...enc.encode('DATA'),
+      ...enc.encode(`\r\n--${boundary}--\r\n`),
+    ]);
+    const parts = parseMultipart(body, `MULTIPART/FORM-DATA; BOUNDARY=${boundary}`);
+    expect(parts.length).toBe(1);
+    expect(parts[0].name).toBe('avatar');
+    expect(parts[0].filename).toBe('a.txt');
+  });
+
   it('parses a single-part body correctly', () => {
     const boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW';
     const text = new TextEncoder().encode('Hello, world!');

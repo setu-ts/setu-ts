@@ -102,7 +102,12 @@ function extractBoundary(contentType: string): string | null {
   // Match `boundary=` followed by optional quote + quoted value OR unquoted token (no `;`).
   // Quoted boundaries can contain spaces: boundary="abc xyz"
   // Unquoted boundaries cannot: boundary=abc; charset=utf-8 → capture only "abc".
-  const match = contentType.match(/boundary=(?:"([^"]+)"|'([^']+)'|([^";\s]+))/);
+  // Case-INSENSITIVE since M94b: parameter names are case-insensitive per RFC
+  // 9110, and the promoted classifier (`formEncodingOf`) case-folds the same
+  // check — the two must agree, or the accessor would throw where the
+  // classifier promised a parse. Internal-only module: this widens what
+  // parses; it changes no public surface (disclosed in CHANGELOG).
+  const match = contentType.match(/boundary=(?:"([^"]+)"|'([^']+)'|([^";\s]+))/i);
   return match ? match[1] ?? match[2] ?? match[3] ?? null : null;
 }
 

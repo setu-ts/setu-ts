@@ -156,6 +156,16 @@ describe('parseFormBody — the web-standard semantic rows (plan §1.1)', () => 
     expect(form.get('c')).toBe('1');
     expect(form.getAll('a')).toEqual(['']);
   });
+
+  it('parses through a case-variant multipart content-type (review C2)', () => {
+    const form = parseFormBody(
+      multipartBody([{ name: 'file', filename: 'a.txt', mime: 'text/plain', data: 'v' }], 'FB'),
+      'Multipart/Form-Data; Boundary=FB',
+    );
+    expect(form.getAll('file')).toEqual([
+      { filename: 'a.txt', mimeType: 'text/plain', data: new TextEncoder().encode('v') },
+    ]);
+  });
 });
 
 describe('parseFormBody — the 415 refusal (§3.4)', () => {

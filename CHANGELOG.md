@@ -173,7 +173,12 @@ All notable changes to this project are documented here. The format follows
   malformed body: the shared classifier classifies it as not-a-form (a body that could never be
   parsed), and a caller that wants the fields gets the accessor's `415`. Everything else is
   unchanged: the `Content-Length` check, the `bytes()` read, the `maxBodyBytes` cap, `maxFiles`,
-  `maxSize` and `allowedMimeTypes` refusals and their statuses all stay where they were.
+  `maxSize` and `allowedMimeTypes` refusals and their statuses all stay where they were. The
+  promoted parser (internal — `parseMultipart` stays unexported) now also matches the `boundary`
+  PARAMETER NAME case-insensitively, as RFC 9110 parameter names are: a
+  `Multipart/Form-Data; Boundary=…` content-type parses where it previously bypassed the middleware
+  or answered `400`, disclosed here because the move that promoted the parser otherwise froze its
+  behavior.
 - **BREAKING — `@setu-ts/kernel`: `IKernelApplication` gains a required
   `unregister(name: string):
   boolean`.** It removes a pending plugin before `start()`, returning
