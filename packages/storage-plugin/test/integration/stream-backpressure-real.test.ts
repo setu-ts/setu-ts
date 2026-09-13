@@ -32,6 +32,15 @@
  * regression that finding feared — moves wire bytes, which this measures, and
  * would have been invisible to the RSS probe that raised it.
  *
+ * ## Scope
+ *
+ * This pins `S3Provider` ONLY, and that is the honest scope rather than a
+ * convenience: `GcsProvider` and `AzureBlobProvider` stream natively but drain
+ * their SDK stream eagerly with no `pull` and no `cancel`, and `MemoryProvider`
+ * and `LocalStorageProvider` have no native `getStream` at all, so
+ * `StorageService` reads the object whole and emits one chunk. None of those
+ * four would pass this suite, and the README's per-provider table says so.
+ *
  * Guarded on `S3_ENDPOINT_URL` via `ignore:`, so an absent backend reports as
  * IGNORED rather than as a pass that asserted nothing.
  *
@@ -60,8 +69,12 @@ const skip = endpoint === undefined || !sdkPresent;
 const MIB = 1024 * 1024;
 /** Object size. Large enough that buffering it whole is unmistakable. */
 const OBJECT_BYTES = 64 * MIB;
-/** Consumer rate. Slow relative to loopback MinIO, so backpressure is real. */
-const READ_RATE_BYTES_PER_SEC = 2 * MIB;
+/**
+ * Consumer rates, slow relative to loopback MinIO so backpressure is real.
+ * Both figures the docs quote are exercised here rather than asserted in prose
+ * only, so a regression cannot make a published number stale silently.
+ */
+const READ_RATES_BYTES_PER_SEC = [1 * MIB, 2 * MIB] as const;
 /** How long the slow consumer runs. */
 const READ_WINDOW_MS = 8_000;
 /**
@@ -117,7 +130,15 @@ function startCountingProxy(originHost: string, originPort: number, port: number
         const n = await from.read(buf);
         if (n === null) break;
         if (count) originBytes += n;
-        await to.write(buf.subarray(0, n));
+        // `write()` may forward FEWER bytes than asked; dropping the unwritten
+        // suffix would silently truncate the relayed HTTP stream, and the catch
+        // below would read the resulting failure as a normal close.
+        let offset = 0;
+        while (offset < n) {
+          const written = await to.write(buf.subarray(offset, n));
+          if (written <= 0) throw new Error('TCP relay made no write progress');
+          offset += written;
+        }
       }
     } catch {
       // Either side closing mid-copy is the normal end of a relayed request.
@@ -241,67 +262,93 @@ describe('REAL MinIO/S3 streaming backpressure (X45-1)', { ignore: skip }, () =>
       await provider.connect();
 
       // ── (1) slow consumer: read-ahead stays bounded and does not scale ────
-      // Sampled BEFORE the request: measured, 4-392 KiB of body can already
-      // have landed by the time `getStream()` resolves, and those bytes count
-      // toward `consumed` while a later baseline would miss them — which drives
-      // read-ahead negative on a fast enough machine. Taking it here means the
-      // figure carries the response headers (a few hundred bytes) instead.
-      const baseline = proxy.originBytes();
-      const slow = await provider.getStream(OBJECT_KEY);
-      expect(slow).not.toBeNull();
-      const reader = (slow as ReadableStream<Uint8Array>).getReader();
+      for (const rate of READ_RATES_BYTES_PER_SEC) {
+        // Sampled BEFORE the request: measured, 4-392 KiB of body can already
+        // have landed by the time `getStream()` resolves, and those bytes count
+        // toward `consumed` while a later baseline would miss them — which
+        // drives read-ahead negative on a fast enough machine. Taking it here
+        // means the figure carries the response headers (a few hundred bytes).
+        const baseline = proxy.originBytes();
+        const slow = await provider.getStream(OBJECT_KEY);
+        expect(slow).not.toBeNull();
+        const reader = (slow as ReadableStream<Uint8Array>).getReader();
 
-      let consumed = 0;
-      let earlyReadAhead = -1;
-      const startedAt = performance.now();
+        let consumed = 0;
+        let earlyReadAhead = -1;
+        // Capping only the END of the window would let a provider burst far
+        // ahead and then idle while the consumer caught up, so the peak is
+        // tracked across every iteration instead.
+        let peakReadAhead = 0;
+        const startedAt = performance.now();
+        const sampleAhead = (): number => {
+          const ahead = proxy.originBytes() - baseline - consumed;
+          if (ahead > peakReadAhead) peakReadAhead = ahead;
+          return ahead;
+        };
 
-      while (performance.now() - startedAt < READ_WINDOW_MS) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        consumed += value.byteLength;
-        const dueAt = startedAt + (consumed / READ_RATE_BYTES_PER_SEC) * 1000;
-        // Bounded by the window's remainder: a provider that hands over one
-        // enormous chunk must not be able to sleep this loop past its window.
-        const remaining = startedAt + READ_WINDOW_MS - performance.now();
-        const delay = Math.min(dueAt - performance.now(), remaining);
-        if (delay > 0) await wait(delay);
-        // Sample read-ahead a quarter of the way in, for the scaling check.
-        if (earlyReadAhead < 0 && performance.now() - startedAt >= READ_WINDOW_MS / 4) {
-          earlyReadAhead = proxy.originBytes() - baseline - consumed;
+        while (performance.now() - startedAt < READ_WINDOW_MS) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          consumed += value.byteLength;
+          sampleAhead();
+          const dueAt = startedAt + (consumed / rate) * 1000;
+          // Bounded by the window's remainder: a provider that hands over one
+          // enormous chunk must not be able to sleep this loop past its window.
+          const remaining = startedAt + READ_WINDOW_MS - performance.now();
+          const delay = Math.min(dueAt - performance.now(), remaining);
+          if (delay > 0) await wait(delay);
+          // Read-ahead is highest after the consumer has been idle, so sample
+          // again on this side of the pacing delay.
+          const ahead = sampleAhead();
+          if (earlyReadAhead < 0 && performance.now() - startedAt >= READ_WINDOW_MS / 4) {
+            earlyReadAhead = ahead;
+          }
         }
+
+        const lateReadAhead = sampleAhead();
+        const label = `at ${rate / MIB} MiB/s`;
+
+        // The consumer really was slow, and really did get a partial object:
+        // without this the caps below could pass on a stream that never ran.
+        expect(consumed, label).toBeGreaterThan(4 * MIB);
+        expect(consumed, label).toBeLessThan(OBJECT_BYTES / 2);
+
+        // A provider that buffered the object would sit ~48 MiB ahead. The PEAK
+        // is what is capped, so a burst that has drained by the end cannot pass.
+        expect(peakReadAhead, label).toBeLessThan(READ_AHEAD_CAP_BYTES);
+        // The sample was actually taken (the -1 sentinel fails this).
+        expect(earlyReadAhead, label).toBeGreaterThanOrEqual(0);
+        // And read-ahead must not SCALE with what has been delivered: a fixed
+        // socket buffer stays put while the consumed total grows four-fold. The
+        // slack is deliberately small — reusing the cap here would make this
+        // assertion implied by the one above, and so unable to fail at all.
+        expect(lateReadAhead - earlyReadAhead, label)
+          .toBeLessThan(READ_AHEAD_SCALING_SLACK_BYTES);
+
+        await reader.cancel();
+        await wait(300);
       }
 
-      const lateReadAhead = proxy.originBytes() - baseline - consumed;
-
-      // The consumer really was slow, and really did get a partial object:
-      // without this the caps below could pass on a stream that never ran.
-      expect(consumed).toBeGreaterThan(4 * MIB);
-      expect(consumed).toBeLessThan(OBJECT_BYTES / 2);
-
-      // A provider that buffered the object would sit ~48 MiB ahead here.
-      expect(lateReadAhead).toBeLessThan(READ_AHEAD_CAP_BYTES);
-      // The sample was actually taken (the -1 sentinel fails this).
-      expect(earlyReadAhead).toBeGreaterThanOrEqual(0);
-      // And read-ahead must not SCALE with what has been delivered: a fixed
-      // socket buffer stays put while the consumed total grows four-fold. The
-      // slack is deliberately small — reusing the cap here would make this
-      // assertion implied by the one above, and so unable to fail at all.
-      expect(lateReadAhead - earlyReadAhead).toBeLessThan(READ_AHEAD_SCALING_SLACK_BYTES);
-
       // ── (2) cancelling releases the upstream connection ───────────────────
-      await reader.cancel();
+      // Every stream opened above was cancelled; none may still be draining.
       await wait(500);
       expect(proxy.openConnections()).toBe(0);
 
       // ── (3) stalled consumer: the wire goes quiet ─────────────────────────
+      const stalledBaseline = proxy.originBytes();
       const stalled = await provider.getStream(OBJECT_KEY);
       expect(stalled).not.toBeNull();
       const stalledReader = (stalled as ReadableStream<Uint8Array>).getReader();
       const first = await stalledReader.read();
       expect(first.done).toBe(false);
+      const firstBytes = first.value?.byteLength ?? 0;
       // Let whatever was already in flight land before sampling.
       await wait(1_000);
       const settled = proxy.originBytes();
+      // The settling window is measured too: without this an eager provider
+      // could pull the whole object during it and then go quiet, satisfying the
+      // growth check below while never having stopped the wire at all.
+      expect(settled - stalledBaseline - firstBytes).toBeLessThan(READ_AHEAD_CAP_BYTES);
       await wait(3_000);
       expect(proxy.originBytes() - settled).toBeLessThan(STALLED_GROWTH_CAP_BYTES);
       await stalledReader.cancel();

@@ -391,18 +391,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Documentation
 
-- **`storage-plugin`** — documented that `IStorage.getStream?` is demand-driven, and that process
-  RSS does not measure it. X45-1 read a slow-client RSS rise as the S3 stream pulling ahead of its
-  consumer; counted at the socket instead, read-ahead is 2-3 MiB and CONSTANT across 20 s and 20 MiB
-  delivered (3.1 MiB at a 1 MiB/s consumer, 1.9-2.5 MiB at 2 MiB/s), a stalled consumer stops the
-  wire, and cancelling releases the upstream connection. The RSS reading does not discriminate —
-  forcing GC mid-transfer returns `heapUsed` and `external` to baseline while RSS stays up, and a
-  generated-`ReadableStream` control is not like-for-like because it never pays the AWS SDK's ~29
-  MiB import. The finding's own figures say the same: a 1 GiB object plateaued at 132 MB and then
-  fell to 113 MB. The suggested `pull()` adapter measures 3.2 MiB against 3.1 MiB, so it was not
-  adopted. No code change; the gap was that no gate drove a large real object through a slow reader,
-  now closed by a guarded suite measuring wire bytes through a byte-counting relay (verified to fail
-  at 47.9 MiB against a 16 MiB cap when `getStream` is replaced with an eager unbounded pump).
+- **`storage-plugin`** — documented that `S3Provider.getStream` is demand-driven, that the other
+  four providers are NOT, and that process RSS does not measure any of it. X45-1 read a slow-client
+  RSS rise as the S3 stream pulling ahead of its consumer; counted at the socket instead, read-ahead
+  is 2-3 MiB and CONSTANT across 20 s and 20 MiB delivered (3.1 MiB at a 1 MiB/s consumer, 1.9-2.5
+  MiB at 2 MiB/s), a stalled consumer stops the wire, and cancelling releases the upstream
+  connection. The scoping is the part worth reading: `GcsProvider` and `AzureBlobProvider` stream
+  natively but drain their SDK stream eagerly with no `pull` and no `cancel`, and `MemoryProvider`
+  and `LocalStorageProvider` have no native `getStream`, so `StorageService` reads the object whole
+  and emits it as one chunk — on all four, a large object is memory-resident however slowly the
+  client reads. A per-provider table now says so rather than leaving the S3 measurement to read as a
+  general guarantee. The RSS reading does not discriminate — forcing GC mid-transfer returns
+  `heapUsed` and `external` to baseline while RSS stays up, and a generated-`ReadableStream` control
+  is not like-for-like because it never pays the AWS SDK's ~29 MiB import. The finding's own figures
+  say the same: a 1 GiB object plateaued at 132 MB and then fell to 113 MB. The suggested `pull()`
+  adapter measures 3.2 MiB against 3.1 MiB, so it was not adopted. No code change; the gap was that
+  no gate drove a large real object through a slow reader, now closed by a guarded suite measuring
+  wire bytes through a byte-counting relay (verified to fail at 47.9 MiB against a 16 MiB cap when
+  `getStream` is replaced with an eager unbounded pump).
 
 - **`graphql-plugin`** — documented that `subscriptions.websocket.onConnect` and a pipeline guard on
   the socket path cannot both authenticate a subscription. `connectionParams` is the protocol's auth
