@@ -4872,8 +4872,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `UnsupportedFormEncodingError` self-brands `415`; an unparseable multipart body yields an empty
   form (documented limit, not a throw); the CSRF verifier reads both form encodings and refuses a
   file-borne token; the upload middleware consumes the accessor with every bound and refusal
-  unchanged (breaking: a no-`filename` part under the field is no longer an upload) — complete
-  (feat/m94b-form-data)
+  unchanged (breaking: a no-`filename` part under the field is no longer an upload) — complete (PR
+  #290)
 - **Milestone 94c** (`packages/session-plugin` — CSRF token field helper):
   `csrfTokenField(ctx, options?)` mints through the existing `getCsrfToken` path and returns a
   complete escaped hidden input under the default `'_csrf'` field or an explicit matching
