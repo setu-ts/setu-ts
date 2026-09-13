@@ -1,4 +1,5 @@
 import type {
+  FormBody,
   HandlerResult,
   IRequest,
   IRequestContext,
@@ -11,7 +12,7 @@ import type {
 import type { HttpMethod } from '@setu-ts/common';
 import type { IPrincipal } from '@setu-ts/common';
 import type { ITenant } from '@setu-ts/common';
-import { parseJsonBody, sealRequestIdentity } from '@setu-ts/common';
+import { parseFormBody, parseJsonBody, sealRequestIdentity } from '@setu-ts/common';
 
 import { MockServiceRegistry } from './mock-registry.ts';
 
@@ -158,6 +159,8 @@ class MockRequest implements IRequest {
   readonly #bodyText: string;
   /** Retained so `bytes()` returns the caller's exact buffer, not a re-encode. */
   readonly #bodyBytes: Uint8Array | undefined;
+  /** The memoized form read — the in-flight promise, never the resolved value. */
+  #form: Promise<FormBody> | undefined;
 
   constructor(options: {
     method: string;
@@ -229,6 +232,22 @@ class MockRequest implements IRequest {
 
   bytes(): Promise<Uint8Array> {
     return Promise.resolve(this.#bodyBytes ?? new TextEncoder().encode(this.#bodyText));
+  }
+
+  /**
+   * Reads the body as a form through the shared `parseFormBody`, memoized
+   * like the real producers (M94b): the in-flight promise is cached, so two
+   * readers observe one parse, and a rejection is cached with it.
+   *
+   * A non-form content-type rejects with the same `415`-branded
+   * `UnsupportedFormEncodingError` the served path rejects with — a double
+   * that succeeded where production throws would let a suite prove the
+   * opposite of the framework's contract.
+   */
+  formData(): Promise<FormBody> {
+    return this.#form ??= this.bytes().then((body) =>
+      parseFormBody(body, this.headers.get('content-type'))
+    );
   }
 }
 

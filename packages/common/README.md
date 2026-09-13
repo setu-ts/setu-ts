@@ -124,6 +124,7 @@ package fits the plugin architecture.
 | `err`                             | function  |
 | `errorResponderOf`                | function  |
 | `extractContextFromHeaders`       | function  |
+| `formEncodingOf`                  | function  |
 | `fromNullable`                    | function  |
 | `httpStatusHintOf`                | function  |
 | `isErr`                           | function  |
@@ -141,6 +142,7 @@ package fits the plugin architecture.
 | `none`                            | function  |
 | `ok`                              | function  |
 | `parseCookie`                     | function  |
+| `parseFormBody`                   | function  |
 | `parseJsonBody`                   | function  |
 | `parseTraceparentToContext`       | function  |
 | `replacePrincipal`                | function  |
@@ -167,6 +169,7 @@ package fits the plugin architecture.
 | `withSecurityMetadata`            | function  |
 | `withValidationMetadata`          | function  |
 | `MalformedRequestBodyError`       | class     |
+| `UnsupportedFormEncodingError`    | class     |
 | `CAPABILITIES`                    | const     |
 | `CLIENT_IP_STATE_KEY`             | const     |
 | `ERROR_RESPONDER_BRAND`           | const     |
@@ -198,6 +201,8 @@ package fits the plugin architecture.
 | `ErrorResponseInit`               | interface |
 | `FactoryProvider`                 | interface |
 | `FlagContext`                     | interface |
+| `FormBody`                        | interface |
+| `FormFile`                        | interface |
 | `GraphqlConnectionInfo`           | interface |
 | `GraphqlExecutionOutcome`         | interface |
 | `GraphqlExecutionResult`          | interface |
@@ -380,6 +385,8 @@ package fits the plugin architecture.
 | `FilterComparison`                | type      |
 | `FilterExpression`                | type      |
 | `FilterOperator`                  | type      |
+| `FormEncoding`                    | type      |
+| `FormValue`                       | type      |
 | `GraphqlSubscriptionOutcome`      | type      |
 | `GrpcServingStatus`               | type      |
 | `HardenedCall`                    | type      |

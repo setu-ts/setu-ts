@@ -4849,8 +4849,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `IMessageBroker` change, no new capability token, no broker adapter rewritten, no dependency on
   `@setu-ts/events-plugin`) — complete (PR #287)
 
-- **Next milestone** — **M94b** (`common` + `runtime` + storage/session — one form-body
-  abstraction).
+- **Next milestone** — **M40** (final polish and release: integration testing across all plugins,
+  performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the
+  Deno/Node/Bun/Workers portability matrix validated end to end. The last ⬜ row in the ROADMAP;
+  M94a, M94b and M94c are all complete below).
 
 - **Milestone 94a** (`packages/exceptions` — application-owned caught-error responses):
   `ErrorHandlerOptions.respond(error, ctx)` receives the normalized, masked/hinted, served-status
@@ -4859,6 +4861,19 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the selected response status. The hook stays out of M70f responder terminals, which can lack a
   full request context, and adds no view-plugin dependency — complete (PR #288)
 
+- **Milestone 94b** (`packages/common` + `packages/runtime` + `packages/kernel` +
+  `packages/testing` + `packages/storage-plugin` + `packages/session-plugin` — one form-body
+  abstraction): the OPTIONAL `IRequest.formData?()` (`signal?`/`fs?`/`raw?` precedent) resolves a
+  read-only `FormBody` with the web `FormData` semantics — ordered `getAll` for repeats, `entries()`
+  in wire order, file-versus-text on `filename !== undefined` — over a framework value whose bytes
+  stay synchronous; `parseFormBody`/`formEncodingOf` are the ONE parse and the ONE classifier all
+  three producers and both first-party consumers share; `storage-plugin`'s multipart parser moved
+  byte-identically into `common` (`parseMultipart`/`ParsedPart` stay internal);
+  `UnsupportedFormEncodingError` self-brands `415`; an unparseable multipart body yields an empty
+  form (documented limit, not a throw); the CSRF verifier reads both form encodings and refuses a
+  file-borne token; the upload middleware consumes the accessor with every bound and refusal
+  unchanged (breaking: a no-`filename` part under the field is no longer an upload) — complete (PR
+  #290)
 - **Milestone 94c** (`packages/session-plugin` — CSRF token field helper):
   `csrfTokenField(ctx, options?)` mints through the existing `getCsrfToken` path and returns a
   complete escaped hidden input under the default `'_csrf'` field or an explicit matching

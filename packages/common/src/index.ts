@@ -127,6 +127,14 @@ export {
   withValidationMetadata,
 } from './http.ts';
 
+// Form body reading (M94b) — the ONE parse every `IRequest.formData?()`
+// producer shares, and the ONE classifier both form consumers read
+export { formEncodingOf, parseFormBody } from './form/form-body.ts';
+export type { FormBody, FormEncoding, FormFile, FormValue } from './form/form-body.ts';
+// Unsupported form encoding (M94b) — the 415-branded rejection every
+// `IRequest.formData?()` producer rejects with
+export { UnsupportedFormEncodingError } from './errors/unsupported-form-encoding.ts';
+
 // Runtime abstraction
 export type {
   IDnsResolver,

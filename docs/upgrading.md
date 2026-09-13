@@ -14,8 +14,46 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-One change fails `deno check`, and only for a hand-written stand-in — an application that obtains
-its app from `createApplication` or a starter factory needs no change at all.
+One change fails `deno check`, and only for a hand-written stand-in. Two change behaviour silently —
+they compile, so the compiler will not point at them: check whether you upload files without a
+`filename`, and whether anything reads a `415` response body.
+
+### Check uploads posted without a `filename`
+
+`@setu-ts/storage-plugin`'s `createUploadMiddleware` now delivers only the parts that declared a
+`filename`, because it reads the request through M94b's shared form accessor and a part with no
+`filename` is a plain form value in the web standard's terms. It used to report such a part as an
+`UploadedFile` whose `filename` fell back to the field name.
+
+**A browser file input always sends a `filename`, even an empty one for an empty input, so ordinary
+uploads are unaffected** — and `filename=""` still arrives as a file. What changes is a non-browser
+client (a hand-built `curl -F`, an SDK, a test fixture) posting a plain value under the upload field
+name: `getUploadedFile(ctx)` now returns `undefined` for it, with no error and no log line.
+
+Two ways forward, depending on what the part actually is:
+
+```typescript
+// It is a file: have the client declare a filename on the part.
+//   Content-Disposition: form-data; name="file"; filename="report.csv"
+
+// It is a plain field: read it as one, which is now possible on any request.
+const form = await ctx.request.formData!();
+const note = form.get('note'); // string | FormFile | undefined
+if (typeof note === 'string') { /* … */ }
+```
+
+Relatedly, a `multipart/form-data` content-type carrying no `boundary=` now passes through the
+upload middleware unparsed instead of being answered `400`: it cannot be parsed as a form at all, so
+the shared classifier treats it as not-a-form. A handler that calls `formData()` on such a request
+gets a `415`.
+
+### A `415` response body's title changed under the Problem Details formats
+
+`@setu-ts/exceptions` had no `STATUS_TITLES` row for `415`, so a `415` served through
+`errorHandler({ format: 'rfc9457' })` (or `'rfc7807'`) carried `"title": "Error"`. It now carries
+`"title": "Unsupported Media Type"`, matching what the same error already reported as `"message"`
+under the `'default'` format. No action is needed unless something asserts or branches on that
+string — a contract test with a recorded fixture, or a client mapping titles to messages.
 
 ### Add `unregister` to a hand-written `IKernelApplication`
 

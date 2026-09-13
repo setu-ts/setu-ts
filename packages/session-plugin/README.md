@@ -207,10 +207,13 @@ escapes the configured field name; do not use it for application-provided form c
 
 Options: `fieldName` (default `_csrf`), `headerName` (defaults to `x-csrf-token`, so a `fetch` post
 can present the token in that header without further configuration; an explicit name still wins, and
-it is **required knowledge for `multipart/form-data`**, which this package does not parse — the
-token must arrive in that header), `ignoreMethods` (default `GET`/`HEAD`/`OPTIONS`), and `exclude`
-(exact paths or regular expressions that skip form CSRF). `exclude` is only for a separately-mounted
-non-browser protocol surface such as Connect/gRPC — never use it for an application form route.
+the header is read FIRST, so a client that sends it triggers no body parse at all — including for
+`multipart/form-data`, whose FIELD carries the token too since M94b, while a token arriving as a
+multipart FILE part is refused (a client chooses freely whether a part carries a `filename`, so a
+non-string value never reaches the comparison)), `ignoreMethods` (default `GET`/`HEAD`/`OPTIONS`),
+and `exclude` (exact paths or regular expressions that skip form CSRF). `exclude` is only for a
+separately-mounted non-browser protocol surface such as Connect/gRPC — never use it for an
+application form route.
 
 ### What `SameSite` does not separate
 

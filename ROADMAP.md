@@ -9806,5 +9806,5 @@ do, and the `exclude` escape already exists.
 | 93a       | ✅     | events-plugin — aggregate-local domain event recording                                                         |
 | 93b       | ✅     | messaging-plugin — versioned integration event contracts ([#287](https://github.com/setu-ts/setu-ts/pull/287)) |
 | 94a       | ✅     | exceptions — application-owned error response                                                                  |
-| 94b       | ⬜     | common + runtime + storage/session — one form-body abstraction                                                 |
+| 94b       | ✅     | common + runtime + storage/session — one form-body abstraction                                                 |
 | 94c       | ✅     | session-plugin — CSRF token field helper                                                                       |

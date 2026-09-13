@@ -13,8 +13,8 @@
  * @module
  */
 
-import type { HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
-import { parseJsonBody, withHttpStatusHint } from '@setu-ts/common';
+import type { FormBody, HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
+import { parseFormBody, parseJsonBody, withHttpStatusHint } from '@setu-ts/common';
 
 // Hoisted TextDecoder — avoids per-call allocation (A1 — no slice needed).
 const decoder = new TextDecoder();
@@ -83,6 +83,7 @@ class FrameworkRequest implements IRequest {
   readonly #raw: Request;
   #body: Promise<Uint8Array> | undefined;
   #json: Promise<unknown> | undefined;
+  #form: Promise<FormBody> | undefined;
   #headers: Headers | undefined;
   readonly #maxBodyBytes: number | undefined;
 
@@ -174,6 +175,31 @@ class FrameworkRequest implements IRequest {
    */
   json<T = unknown>(): Promise<T> {
     return (this.#json ??= this.text().then((text) => parseJsonBody(text))) as Promise<T>;
+  }
+
+  /**
+   * Reads the body as a form (`parseFormBody`, M94b). Idempotent.
+   *
+   * The cache holds the in-flight PROMISE like every other body reader, and a
+   * rejection is cached like `json()`'s: a body that is not a form will not
+   * become one on a retry.
+   *
+   * The content-type is read off `this.headers` — the PUBLIC, writable copy —
+   * not off the native request. `#readBody` reads the native headers because
+   * framing (`content-length`, `transfer-encoding`) is a property of the wire
+   * that no middleware may restate, but the content-type is semantic: it is
+   * what a middleware normalizing a client's header is entitled to change, and
+   * the other two `formData()` producers (the kernel's `inject()` and
+   * `@setu-ts/testing`'s `MockRequest`) both read their public headers. Reading
+   * the native object here made the three disagree — a mutation honoured in a
+   * test and ignored on the served path, which is the one thing the shared
+   * parse exists to prevent (M94b review). The lazy header copy this forces is
+   * paid only by a request that actually reads a form.
+   */
+  formData(): Promise<FormBody> {
+    return this.#form ??= this.bytes().then((body) =>
+      parseFormBody(body, this.headers.get('content-type'))
+    );
   }
 
   /**

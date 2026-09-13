@@ -29,10 +29,21 @@ import type { ValidationError } from './http-error.ts';
 
 /**
  * A human-readable title for a given HTTP status code. This is the single
- * source of truth used by both the factory functions and the RFC 7807
- * formatter so the `title` field never drifts from the produced `statusCode`.
+ * source of truth used by both the factory functions and the Problem Details
+ * formatters so the `title` field never drifts from the produced `statusCode`.
  *
- * Keys are the status codes the factories below produce.
+ * Keys are every status the framework itself produces — the ones the factories
+ * below return AND the ones first-party code brands onto an error with
+ * `withHttpStatusHint` from `@setu-ts/common`, which reaches this table through
+ * the responder seam without passing a factory (`413` from the request-size and
+ * body-cap refusals, `415` from the form accessor, `501`/`503`/`504` from the
+ * database, secrets and resilience refusals). A branded status with no row here
+ * is served the generic `'Error'` title, so `test/status-title-coverage.test.ts`
+ * enumerates the branded statuses from source and fails when one is missing —
+ * `415` reached a client as `"title": "Error"` under `'rfc9457'` while the same
+ * error read `"message": "Unsupported Media Type"` under `'default'`, because
+ * every test asserted the brand on the error object and none read the served
+ * body.
  *
  * @since 0.1.0
  */
@@ -43,6 +54,7 @@ export const STATUS_TITLES: Readonly<Record<number, string>> = {
   404: 'Not Found',
   409: 'Conflict',
   413: 'Payload Too Large',
+  415: 'Unsupported Media Type',
   422: 'Unprocessable Entity',
   429: 'Too Many Requests',
   500: 'Internal Server Error',

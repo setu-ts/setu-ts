@@ -6,8 +6,18 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { parseFormBody } from '@setu-ts/common';
 import type { IRequestContext } from '@setu-ts/common';
 import { createUploadMiddleware, getUploadedFile } from '../../src/middleware/upload-middleware.ts';
+/**
+ * Wraps the fake request so it CARRIES the optional `formData` accessor —
+ * the shape all three real producers have. Attaching it per-test keeps the
+ * other tests in this file exercising the fallback arm unchanged.
+ */
+function attachAccessor(ctx: IRequestContext, contentType: string, body: Uint8Array): void {
+  (ctx.request as { formData?: () => Promise<unknown> }).formData = () =>
+    Promise.resolve(parseFormBody(body, contentType));
+}
 /** Creates a minimal fake context for middleware testing. */
 function makeCtx(partial?: Partial<IRequestContext>): IRequestContext {
   const calls: Array<{ status: number; body: unknown }> = [];
@@ -226,9 +236,13 @@ describe('createUploadMiddleware', () => {
     expect(uploads[0].name).toBe('avatar');
     expect(uploads[0].mimeType).toBe('image/png');
   });
-  it('malformed content-type (no boundary) returns 400', async () => {
+  it('a multipart content-type with NO boundary is not a form and passes through (M94b §3.4)', async () => {
+    // Changed with M94b: the ONE classifier classifies a boundary-less
+    // multipart type as not-a-form (a body it could never parse), so the
+    // guard passes the request through instead of parsing into a bare throw
+    // answered `400`. A caller that wants the fields gets the accessor's
+    // `415`; this middleware only decides it is not the upload path.
     const ctx = makeCtx();
-    // Content-type includes multipart/form-data but has no boundary parameter
     ctx.request.headers.set('content-type', 'multipart/form-data');
     ctx.request.bytes = () => Promise.resolve(new Uint8Array([0x01, 0x02, 0x03]));
     const mw = createUploadMiddleware();
@@ -237,7 +251,8 @@ describe('createUploadMiddleware', () => {
       nextCalled = true;
       return Promise.resolve();
     });
-    expect(nextCalled).toBe(false);
+    expect(nextCalled).toBe(true);
+    expect(ctx.state.get('storage-plugin:uploads')).toBeUndefined();
   });
   it('multiple files stored correctly', async () => {
     const boundary = '----MultiFileBoundary';
@@ -395,5 +410,93 @@ describe('getUploadedFile', () => {
     const ctx = makeCtx();
     ctx.state.set('storage-plugin:uploads', []);
     expect(getUploadedFile(ctx, 'any')).toBeUndefined();
+  });
+
+  // --- M94b: the accessor arm, and the file/text discriminator ---
+
+  it('an EMPTY filename still uploads (the empty file input) — accessor arm', async () => {
+    // The trap: a truthiness test on `filename` would drop `filename=""`,
+    // which is what an empty <input type="file"> sends and what the web
+    // standard reports as a (nameless) File.
+    const boundary = '----EmptyName';
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; name="file"; filename=""\r\n'),
+      ...encoder.encode('Content-Type: application/octet-stream\r\n\r\n'),
+      ...encoder.encode('x'),
+      ...encoder.encode(`\r\n--${boundary}--\r\n`),
+    ]);
+    const ctx = makeCtx();
+    attachAccessor(ctx, `multipart/form-data; boundary=${boundary}`, body);
+    ctx.request.headers.set('content-type', `multipart/form-data; boundary=${boundary}`);
+    ctx.request.bytes = () => Promise.resolve(body);
+    const mw = createUploadMiddleware();
+    let nextCalled = false;
+    await mw(ctx, (): Promise<void> => {
+      nextCalled = true;
+      return Promise.resolve();
+    });
+    expect(nextCalled).toBe(true);
+    const uploads = ctx.state.get('storage-plugin:uploads') as
+      | import('../../src/interfaces/index.ts').UploadedFile[]
+      | undefined;
+    expect(uploads?.length).toBe(1);
+    expect(uploads?.[0].filename).toBe('');
+    expect(uploads?.[0].size).toBe(1);
+  });
+
+  it('a part with NO filename under the field name is no longer an upload (§3.8)', async () => {
+    // The accepted behaviour change: a plain value under the file field is a
+    // form value in the web standard's terms, not an upload.
+    const boundary = '----NoName';
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; name="file"\r\n\r\n'),
+      ...encoder.encode('plain-value'),
+      ...encoder.encode(`\r\n--${boundary}--\r\n`),
+    ]);
+    const ctx = makeCtx();
+    attachAccessor(ctx, `multipart/form-data; boundary=${boundary}`, body);
+    ctx.request.headers.set('content-type', `multipart/form-data; boundary=${boundary}`);
+    ctx.request.bytes = () => Promise.resolve(body);
+    const mw = createUploadMiddleware();
+    let nextCalled = false;
+    await mw(ctx, (): Promise<void> => {
+      nextCalled = true;
+      return Promise.resolve();
+    });
+    expect(nextCalled).toBe(true);
+    // A parse that yields no file still writes the (empty) uploads list —
+    // `getUploadedFile` reads it as "no upload".
+    const uploads = ctx.state.get('storage-plugin:uploads') as
+      | import('../../src/interfaces/index.ts').UploadedFile[]
+      | undefined;
+    expect(uploads?.length).toBe(0);
+  });
+
+  it('reads through the request accessor when it is present, delivering the file', async () => {
+    const boundary = '----Accessor';
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; name="file"; filename="a.bin"\r\n'),
+      ...encoder.encode('Content-Type: application/octet-stream\r\n\r\n'),
+      ...encoder.encode('DATA'),
+      ...encoder.encode(`\r\n--${boundary}--\r\n`),
+    ]);
+    const ctx = makeCtx();
+    attachAccessor(ctx, `multipart/form-data; boundary=${boundary}`, body);
+    ctx.request.headers.set('content-type', `multipart/form-data; boundary=${boundary}`);
+    ctx.request.bytes = () => Promise.resolve(body);
+    const mw = createUploadMiddleware();
+    await mw(ctx, (): Promise<void> => Promise.resolve());
+    const uploads = ctx.state.get('storage-plugin:uploads') as
+      | import('../../src/interfaces/index.ts').UploadedFile[]
+      | undefined;
+    expect(uploads?.length).toBe(1);
+    expect(uploads?.[0].filename).toBe('a.bin');
+    expect(new TextDecoder().decode(uploads?.[0].data ?? new Uint8Array(0))).toBe('DATA');
   });
 });

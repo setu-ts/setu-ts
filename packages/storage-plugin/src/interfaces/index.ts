@@ -250,7 +250,9 @@ export interface UploadedFile {
   readonly name: string;
   /**
    * The client-provided original file name (Content-Disposition `filename="…"`).
-   * Falls back to the field name when the client sent no `filename`.
+   * Always present: since M94b a part carrying NO `filename` under the field
+   * name is a plain form value, not an upload (an empty `filename=""` — an
+   * empty file input — still is one).
    */
   readonly filename: string;
   /** File bytes. */
@@ -281,12 +283,16 @@ export interface UploadMiddlewareOptions {
    * `min(maxSize * 2 + framing allowance, maxBodyBytes)`, so raising `maxSize`
    * raises the bound only up to this ceiling.
    *
-   * It bounds parsing and the per-part copies the parse produces, NOT the
-   * initial read: the HTTP adapter buffers the whole body into memory before
-   * any middleware runs (`mapWebRequestToFrameworkRequest` calls
-   * `arrayBuffer()`), and `IRequest` exposes no body stream, so no middleware
-   * can decline to read. Bounding the read needs a streaming request body,
-   * which is a framework-level change.
+   * It bounds the parse THIS middleware triggers and the per-part copies that
+   * parse produces — not the initial read. Nothing is read ahead of the first
+   * consumer since the body became memoized-lazy in the HTTP adapter (M87),
+   * and `RuntimePlugin({ maxBodyBytes })` (M90a) bounds the read itself —
+   * that runtime bound is the one covering every reader, including a CSRF
+   * middleware that parsed the same form before this middleware ran (M94b),
+   * which is why this parse is no longer necessarily the request's first. The
+   * read still cannot be declined: `IRequest` exposes no body stream, so
+   * capping it for every reader needs a streaming request body, a
+   * framework-level change.
    *
    * @since 0.3.0
    */

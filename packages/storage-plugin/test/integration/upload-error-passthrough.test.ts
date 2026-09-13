@@ -4,8 +4,10 @@
  *
  * The register's control: a handler that throws BEHIND the upload middleware
  * must produce the SAME response as the same handler WITHOUT it (the handler's
- * own 500, in the configured format), not a 400 "malformed body". A genuinely
- * malformed body (no boundary) still answers 400 and logs a warn.
+ * own 500, in the configured format), not a 400 "malformed body". Since M94b a
+ * boundary-less multipart content-type is not a form at all — the middleware
+ * passes it through, so the downstream handler's own answer is what the client
+ * sees, which is the same property asserted the other way round.
  *
  * @module
  */
@@ -74,22 +76,27 @@ describe('upload middleware passes downstream errors through (X8-1)', () => {
     }
   });
 
-  it('a genuinely malformed body still answers 400 (not the downstream 500)', async () => {
+  it('a no-boundary content-type is not a form and reaches the handler untouched (M94b)', async () => {
     const withMw = await app(true);
+    const withoutMw = await app(false);
     try {
-      // No boundary in the content type → the parser rejects it.
-      const res = await withMw.fetch(
-        new Request('http://test.local/upload', {
-          method: 'POST',
-          headers: { 'content-type': 'multipart/form-data' },
-          body: 'not a real multipart body',
-        }),
-      );
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as Record<string, unknown>;
-      expect(body.title).toBe('Bad Request');
+      // Changed with M94b: a boundary-less multipart type is classified as
+      // not-a-form, so the middleware passes it through instead of answering
+      // its own 400 "Failed to parse multipart body" — the handler's own
+      // answer (here, its 500) is what the client sees, X8-1's property.
+      const init = {
+        method: 'POST',
+        headers: { 'content-type': 'multipart/form-data' },
+        body: 'not a real multipart body',
+      } as RequestInit;
+      const behind = await withMw.fetch(new Request('http://test.local/upload', init));
+      const direct = await withoutMw.fetch(new Request('http://test.local/upload', init));
+      expect(behind.status).toBe(500);
+      expect(direct.status).toBe(500);
+      expect(await behind.json()).toEqual(await direct.json());
     } finally {
       await withMw.stop();
+      await withoutMw.stop();
     }
   });
 });

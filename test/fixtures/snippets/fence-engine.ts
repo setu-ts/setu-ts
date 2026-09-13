@@ -302,6 +302,7 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
   IRepository: '@setu-ts/database-plugin',
   HttpMethod: '@setu-ts/common',
   ITenant: '@setu-ts/common',
+  FormBody: '@setu-ts/common',
   IAuthService: '@setu-ts/common',
   IAuthorizationService: '@setu-ts/common',
   IAuditLogger: '@setu-ts/common',

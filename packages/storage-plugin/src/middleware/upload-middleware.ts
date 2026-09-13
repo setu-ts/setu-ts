@@ -1,13 +1,25 @@
 /**
- * Upload middleware — parses `multipart/form-data` and exposes files via
- * `ctx.state` plus a typed `getUploadedFile()` helper.
+ * Upload middleware — reads `multipart/form-data` through the request's
+ * `formData()` accessor (M94b) and exposes files via `ctx.state` plus a typed
+ * `getUploadedFile()` helper.
  *
  * @module
  */
-import type { ILogger, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { CAPABILITIES, httpStatusHintOf, respondWithError } from '@setu-ts/common';
+import type {
+  FormBody,
+  FormFile,
+  ILogger,
+  IRequestContext,
+  MiddlewareFunction,
+} from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  formEncodingOf,
+  httpStatusHintOf,
+  parseFormBody,
+  respondWithError,
+} from '@setu-ts/common';
 import type { UploadedFile, UploadMiddlewareOptions } from '../interfaces/index.ts';
-import { parseMultipart } from '../multipart/multipart-parser.ts';
 
 /** Key used to store parsed uploads in `ctx.state`. */
 const UPLOADS_STATE_KEY = 'storage-plugin:uploads';
@@ -82,10 +94,23 @@ function assertByteLimit(option: string, value: number): void {
 /**
  * Creates an upload middleware factory.
  *
- * Reads the buffered `ctx.request.bytes()`, parses `multipart/form-data`,
- * enforces `maxSize`/`allowedMimeTypes`/`maxFiles`, then stores the result
- * under `'storage-plugin:uploads'` in `ctx.state`. Every refusal
- * short-circuits without calling `next`.
+ * Checks the declared `Content-Length`, reads the body once through
+ * `ctx.request.bytes()` and caps that length against
+ * {@linkcode resolveMaxBodyBytes} BEFORE the form is touched, then obtains the
+ * form through the request's `formData()` accessor — or, when the request
+ * omits that optional member (an out-of-repo `IRequest`), through the same
+ * shared `parseFormBody` the accessor itself calls — and enforces
+ * `maxSize`/`allowedMimeTypes`/`maxFiles` on the field's FILE parts before
+ * storing the result under `'storage-plugin:uploads'` in `ctx.state`. Every
+ * refusal short-circuits without calling `next`. Parsing is the shared one
+ * parse (M94b): a `csrfFormMiddleware` that already read the same form ahead
+ * of this middleware costs it nothing, because the accessor memoizes. The
+ * policy (every bound and every refusal status) stayed here; only the parse
+ * moved to `common`.
+ *
+ * A part carrying no `filename` under the field name is a plain form value in
+ * the web standard's terms and is no longer reported as an upload — see the
+ * CHANGELOG migration note.
  *
  * Refusals are answered `413` when something was too large — the request body
  * against {@linkcode resolveMaxBodyBytes}, or one file against `maxSize` — and
@@ -109,8 +134,11 @@ export function createUploadMiddleware(
   return async (ctx, next) => {
     const ct = ctx.request.headers.get('content-type') ?? '';
 
-    // Only process multipart requests.
-    if (!ct.includes('multipart/form-data')) {
+    // Only process multipart requests — the ONE classifier (M94b), which also
+    // case-folds where the private `includes()` it replaces did not. A
+    // multipart type with no `boundary=` classifies as not-a-form and passes
+    // through, like any other request this middleware would not parse.
+    if (formEncodingOf(ct) !== 'multipart') {
       await next();
       return;
     }
@@ -146,13 +174,26 @@ export function createUploadMiddleware(
         return;
       }
 
-      const parts = parseMultipart(body, ct);
+      // ONE form parse (M94b): through the request's memoized accessor when
+      // the request carries it, through the same shared `parseFormBody` when
+      // it does not — the branch an out-of-repo `IRequest` takes. The guard
+      // above guarantees this parse cannot reject with a `415`.
+      const form: FormBody = ctx.request.formData !== undefined
+        ? await ctx.request.formData()
+        : parseFormBody(body, ct);
 
-      // Filter to matching field names.
-      const filtered = parts.filter((p) => p.name === fieldname);
+      // The field's FILE parts only. `typeof value !== 'string'` is exactly
+      // the web standard's discriminator — a part is a file when it declared
+      // a `filename`, even an EMPTY one (an empty file input sends
+      // `filename=""`); a truthiness test on `filename` here would wrongly
+      // drop that case. A part with NO filename under the field name is a
+      // plain form value now and is no longer an upload (CHANGELOG).
+      const files = form.getAll(fieldname).filter((value): value is FormFile =>
+        typeof value !== 'string'
+      );
 
       // Enforce maxFiles cap.
-      if (maxFiles !== undefined && filtered.length > maxFiles) {
+      if (maxFiles !== undefined && files.length > maxFiles) {
         respondWithError(ctx, {
           status: 400,
           title: 'Too many files',
@@ -163,8 +204,8 @@ export function createUploadMiddleware(
 
       // Validate each file.
       const uploaded: UploadedFile[] = [];
-      for (const part of filtered) {
-        if (part.data.length > maxSize) {
+      for (const file of files) {
+        if (file.data.length > maxSize) {
           respondWithError(ctx, {
             status: 413,
             title: 'File too large',
@@ -172,20 +213,20 @@ export function createUploadMiddleware(
           });
           return;
         }
-        if (allowedMimeTypes && !allowedMimeTypes.includes(part.mimeType)) {
+        if (allowedMimeTypes && !allowedMimeTypes.includes(file.mimeType)) {
           respondWithError(ctx, {
             status: 400,
             title: 'Invalid MIME type',
-            detail: `Type '${part.mimeType}' not allowed`,
+            detail: `Type '${file.mimeType}' not allowed`,
           });
           return;
         }
         uploaded.push({
-          name: part.name,
-          filename: part.filename ?? part.name,
-          data: part.data,
-          mimeType: part.mimeType,
-          size: part.data.length,
+          name: fieldname,
+          filename: file.filename,
+          data: file.data,
+          mimeType: file.mimeType,
+          size: file.data.length,
         });
       }
 
