@@ -58,11 +58,12 @@ export type { ServiceBusSdkModule } from './brokers/service-bus-broker.ts';
 export { JsonSerializer } from './serializers/json-serializer.ts';
 export type { ISerializer } from './serializers/serializer.ts';
 
-// Request-reply, gate, and NATS-prerequisite error classes (for consumer
-// `instanceof` handling)
+// Request-reply, gate, NATS-prerequisite, and integration-event rejection
+// error classes (for consumer `instanceof` handling)
 export {
   ChainGateTimeoutError,
   CloudBrokerUnavailableError,
+  IntegrationEventRejectedError,
   JetStreamStreamError,
   JetStreamUnavailableError,
   MessagingNotSupportedError,
@@ -70,6 +71,16 @@ export {
   ReplyInboxUnavailableError,
   RequestTimeoutError,
 } from './errors.ts';
+export type { IntegrationEventRejectionReason } from './errors.ts';
+
+// Integration-event contracts (M93b)
+export { defineIntegrationEvent } from './integration/definition.ts';
+export type { IntegrationEventDefinition } from './integration/definition.ts';
+export type { IntegrationEventEnvelope } from './integration/envelope.ts';
+export { causedBy, publishIntegrationEvent } from './integration/publish.ts';
+export type { IntegrationEventMetadata } from './integration/publish.ts';
+export { onIntegrationEvent } from './integration/subscribe.ts';
+export type { IntegrationEventHandler } from './integration/subscribe.ts';
 
 // Option types
 export type {

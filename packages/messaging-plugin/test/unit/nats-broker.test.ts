@@ -759,6 +759,132 @@ describe('NatsBroker', () => {
     );
   });
 
+  // PR #287 review: `nak()` REDELIVERS, so a message the handler can never
+  // accept comes back for as long as the stream retains it — and this branch
+  // discarded the error, making NATS the one broker that retries forever while
+  // reporting nothing. Reverting the fix fails this test and leaves the N8
+  // nak assertion below passing, which is exactly why N8 could not catch it.
+  it('subscribe reports the handler error before nak(), so a retry loop is not silent', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const errors: string[] = [];
+    const fakeConnection = new FakeNatsConnection({
+      seededMessages: [
+        {
+          subject: 'test.subject',
+          data: JSON.stringify({ x: 1 }),
+          seq: 1,
+          timestampNanos: new Date().getTime() * 1_000_000,
+        },
+      ],
+    });
+    const broker = new NatsBroker(runtime, serializer, {
+      client: fakeConnection,
+      logger: { error: (msg) => errors.push(msg) },
+    });
+
+    await broker.connect();
+    const sub = await broker.subscribe(
+      'test.subject',
+      () => Promise.reject(new Error('malformed envelope')),
+      { queue: 'reporting-consumer' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain('Message handler failed');
+    expect(errors[0]).toContain('malformed envelope');
+    // Still nak'd — reporting replaces nothing.
+    expect(fakeConnection.jetstream().deliveredMessages[0].isNaked()).toBe(true);
+
+    await sub.unsubscribe();
+    await broker.disconnect();
+  });
+
+  // The reporter is application-supplied and has no non-throwing contract. If
+  // its failure escaped, the message would lose its disposition entirely (no
+  // ack, no nak) and the rejection would surface as an unhandled rejection —
+  // so a broken logging transport would silently stall redelivery.
+  it('still naks when the logger itself throws', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const fakeConnection = new FakeNatsConnection({
+      seededMessages: [
+        {
+          subject: 'test.subject',
+          data: JSON.stringify({ x: 1 }),
+          seq: 1,
+          timestampNanos: new Date().getTime() * 1_000_000,
+        },
+      ],
+    });
+    const broker = new NatsBroker(runtime, serializer, {
+      client: fakeConnection,
+      logger: {
+        error: () => {
+          throw new Error('logging transport is down');
+        },
+      },
+    });
+
+    await broker.connect();
+    const sub = await broker.subscribe(
+      'test.subject',
+      () => Promise.reject(new Error('handler failure')),
+      { queue: 'throwing-logger-consumer' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(fakeConnection.jetstream().deliveredMessages[0].isNaked()).toBe(true);
+
+    await sub.unsubscribe();
+    await broker.disconnect();
+  });
+
+  // `MessageHandler` returns `void | Promise<void>`, so a handler may throw
+  // SYNCHRONOUSLY — and the throw escaped the consume callback before either
+  // ack() or nak() ran, leaving the message undisposed until the ack-wait
+  // timeout. The RabbitMQ adapter awaits inside a try/catch and has never had
+  // this hole; NATS was the outlier. Deserialization of a malformed payload
+  // throws the same way, two lines earlier, so it shares the boundary.
+  it('naks when the handler throws SYNCHRONOUSLY, not just on a rejected promise', async () => {
+    const runtime = createFakeRuntime();
+    const serializer = new JsonSerializer();
+    const errors: string[] = [];
+    const fakeConnection = new FakeNatsConnection({
+      seededMessages: [
+        {
+          subject: 'test.subject',
+          data: JSON.stringify({ x: 1 }),
+          seq: 1,
+          timestampNanos: new Date().getTime() * 1_000_000,
+        },
+      ],
+    });
+    const broker = new NatsBroker(runtime, serializer, {
+      client: fakeConnection,
+      logger: { error: (msg) => errors.push(msg) },
+    });
+
+    await broker.connect();
+    const sub = await broker.subscribe(
+      'test.subject',
+      () => {
+        throw new Error('synchronous handler failure');
+      },
+      { queue: 'sync-throw-consumer' },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const msg = fakeConnection.jetstream().deliveredMessages[0];
+    expect(msg.isNaked()).toBe(true);
+    expect(msg.isAcked()).toBe(false);
+    expect(errors[0]).toContain('synchronous handler failure');
+
+    await sub.unsubscribe();
+    await broker.disconnect();
+  });
+
   // N8: failure-path - handler throws → nak() called
   it('subscribe calls nak() when the async handler throws', async () => {
     const runtime = createFakeRuntime();

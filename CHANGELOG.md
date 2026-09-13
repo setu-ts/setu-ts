@@ -8,6 +8,29 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/messaging-plugin` — versioned integration-event contracts over the existing messaging
+  capability.** `defineIntegrationEvent<T>({ type, version, topic, parse })` declares a contract and
+  refuses a topic that does not end with the exact `.v${version}` suffix, making the versioned-topic
+  rollout policy mechanical (the raw `broker.publish`/`subscribe` surface is unchanged and remains
+  the route for a pre-existing unversioned topic). `publishIntegrationEvent` wraps the caller's
+  payload in a portable envelope — `id`, `type`, `version`, ISO-8601 `occurredAt`, `data`, optional
+  `correlationId`/`causationId`/`aggregateId`/`aggregateVersion` — as payload data, never transport
+  headers, so every broker arm carries it with no adapter change; it never runs `parse` on publish,
+  so a producer CAN publish a payload its own consumers reject. `onIntegrationEvent` produces the
+  existing `SubscriptionDefinition`: it validates the envelope structurally (ignoring unknown extra
+  fields), checks `type`/`version` exactly, runs `parse`, rebuilds the envelope with the parsed
+  value so `envelope.data === payload`, and only then calls the application handler; a refusal
+  throws `IntegrationEventRejectedError` discriminated by `reason`
+  (`malformed`/`type-mismatch`/`version-mismatch`/`parse`, the parser's own error carried as
+  `cause`). `causedBy(envelope)` extracts the chain-root rule for correlation propagation. A
+  payloadless event publishes `null`, never `undefined`, which JSON drops (refused at the producer,
+  naming the remedy); a non-finite `aggregateVersion` is refused for the same reason; and the
+  consumer type-checks every optional causal field and requires `occurredAt` to be a real ISO-8601
+  instant, so the envelope's declared types hold for application code and for `causedBy`.
+  Separately, `NatsBroker` now reports a rejected handler before `nak()` — it redelivers, so that
+  branch was the one retry loop in the plugin with no diagnostic at all. No `IMessageBroker` method
+  changes, no new capability token, and no dependency on `@setu-ts/events-plugin`; ingress
+  behaviours observe the raw envelope, before the wrapper, by design.
 - **`@setu-ts/events-plugin` — aggregate-local `createDomainEvents()` and `IDomainEvents`.** A
   framework-independent recorder for facts raised by an aggregate during an operation. It preserves
   insertion order, returns isolated snapshots, and never publishes; application code owns

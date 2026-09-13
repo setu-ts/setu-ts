@@ -1,5 +1,7 @@
 /**
- * Request-reply error classes exported for consumer `instanceof` handling.
+ * Error classes exported for consumer `instanceof` handling: request-reply,
+ * the chain gate, the NATS JetStream prerequisites, and integration-event
+ * delivery rejections.
  *
  * @module
  */
@@ -133,6 +135,81 @@ export class ChainGateTimeoutError extends Error {
     );
     this.name = 'ChainGateTimeoutError';
     this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
+ * Why an integration-event delivery was refused before the application
+ * handler ran. The four values are the four distinct producer-side faults an
+ * operator triaging a dead-letter needs to tell apart.
+ *
+ * @since 0.6.0
+ */
+export type IntegrationEventRejectionReason =
+  | 'malformed'
+  | 'type-mismatch'
+  | 'version-mismatch'
+  | 'parse';
+
+/**
+ * Thrown by {@linkcode onIntegrationEvent}'s wrapper when a delivered message
+ * is refused before the application handler runs. One class rather than four
+ * keeps the consumer's `instanceof` branch a single import, while `reason`
+ * discriminates.
+ *
+ * The `message` carries the whole diagnostic on its own — the reason, the
+ * topic, and the expected against the observed `type`/`version` — because the
+ * default in-memory composition's dispatch reporter flattens a rejection to
+ * `error.message` in one log string, so on that path the structured fields
+ * never reach an operator and the message is all that survives. The fields
+ * serve an application's `instanceof` branch on a path that surfaces the error
+ * object itself (a real broker's nack handler, or a bespoke sink on the
+ * `'custom'` broker arm).
+ *
+ * For `reason: 'parse'`, the thrown parser error is carried as `cause` — a
+ * schema error's field paths are the most useful diagnostic in the whole path.
+ * The field is typed `unknown` and set verbatim: a parser that throws a
+ * non-`Error` value (a string, most commonly) is preserved as-is, and the
+ * rejection's own message still names the topic and reason without it.
+ *
+ * @since 0.6.0
+ */
+export class IntegrationEventRejectedError extends Error {
+  /** Why the delivery was refused. */
+  readonly reason: IntegrationEventRejectionReason;
+  /** The topic the message was consumed from. */
+  readonly topic: string;
+  /** The `type` the consuming definition expects. */
+  readonly expectedType: string;
+  /** The `version` the consuming definition expects. */
+  readonly expectedVersion: number;
+
+  /**
+   * Creates the rejection. The message is composed here so every refusal
+   * reads the same way on the flattened log path.
+   *
+   * @param details - The refusal's structured fields, the human-readable
+   *   `detail` naming the observed fault, and the parser's thrown value as
+   *   `cause` when `reason` is `'parse'`
+   */
+  constructor(details: {
+    reason: IntegrationEventRejectionReason;
+    topic: string;
+    expectedType: string;
+    expectedVersion: number;
+    detail: string;
+    cause?: unknown;
+  }) {
+    super(
+      `Integration event rejected on topic "${details.topic}" (reason: ${details.reason}) — ` +
+        `expected type "${details.expectedType}" version ${details.expectedVersion}: ${details.detail}`,
+      details.cause === undefined ? undefined : { cause: details.cause },
+    );
+    this.name = 'IntegrationEventRejectedError';
+    this.reason = details.reason;
+    this.topic = details.topic;
+    this.expectedType = details.expectedType;
+    this.expectedVersion = details.expectedVersion;
   }
 }
 

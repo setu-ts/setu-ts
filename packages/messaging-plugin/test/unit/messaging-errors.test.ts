@@ -2,6 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   CloudBrokerUnavailableError,
+  IntegrationEventRejectedError,
   MessagingNotSupportedError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
@@ -45,5 +46,59 @@ describe('messaging errors', () => {
     expect(err.message).toContain('messaging.replies');
     expect(err.message).toContain('Manage');
     expect(err).toBeInstanceOf(Error);
+  });
+
+  it('IntegrationEventRejectedError carries its structured fields and is an Error', () => {
+    const err = new IntegrationEventRejectedError({
+      reason: 'type-mismatch',
+      topic: 'orders.placed.v1',
+      expectedType: 'orders.placed',
+      expectedVersion: 1,
+      detail: 'the envelope declares type "orders.cancelled"',
+    });
+    expect(err.name).toBe('IntegrationEventRejectedError');
+    expect(err.reason).toBe('type-mismatch');
+    expect(err.topic).toBe('orders.placed.v1');
+    expect(err.expectedType).toBe('orders.placed');
+    expect(err.expectedVersion).toBe(1);
+    expect(err).toBeInstanceOf(Error);
+  });
+
+  it('IntegrationEventRejectedError composes the whole diagnostic into its message', () => {
+    const err = new IntegrationEventRejectedError({
+      reason: 'version-mismatch',
+      topic: 'orders.placed.v1',
+      expectedType: 'orders.placed',
+      expectedVersion: 1,
+      detail: 'the envelope declares version 2',
+    });
+    // The default in-memory composition flattens rejections to `error.message`
+    // — the message must carry the reason, topic, and expected version alone.
+    expect(err.message).toContain('version-mismatch');
+    expect(err.message).toContain('orders.placed.v1');
+    expect(err.message).toContain('version 1');
+    expect(err.message).toContain('the envelope declares version 2');
+  });
+
+  it('IntegrationEventRejectedError carries cause when given and omits it otherwise', () => {
+    const cause = new Error('orderId: expected string');
+    const withCause = new IntegrationEventRejectedError({
+      reason: 'parse',
+      topic: 'orders.placed.v1',
+      expectedType: 'orders.placed',
+      expectedVersion: 1,
+      detail: 'the parse function rejected the payload — orderId: expected string',
+      cause,
+    });
+    expect(withCause.cause).toBe(cause);
+
+    const withoutCause = new IntegrationEventRejectedError({
+      reason: 'malformed',
+      topic: 'orders.placed.v1',
+      expectedType: 'orders.placed',
+      expectedVersion: 1,
+      detail: 'the delivered message is not a JSON object',
+    });
+    expect((withoutCause as { cause?: unknown }).cause).toBeUndefined();
   });
 });

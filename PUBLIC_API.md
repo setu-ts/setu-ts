@@ -4801,6 +4801,137 @@ at most one round trip per TTL.
 
 `data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
 
+### Integration event contracts
+
+The contract layer ON TOP OF the transport: a declarable, versioned integration event with a
+portable wire envelope — payload data, never transport headers, so every broker arm carries it
+without an adapter change. No `IMessageBroker` method is added and no capability token is added.
+
+```typescript
+import {
+  causedBy,
+  defineIntegrationEvent,
+  onIntegrationEvent,
+  publishIntegrationEvent,
+} from '@setu-ts/messaging-plugin';
+
+// The contract: four fields, validated eagerly. The topic MUST end with the
+// exact `.v${version}` suffix — the versioned-topic rollout policy enforced
+// by the factory, not documented prose. A pre-existing unversioned topic has
+// no definition; keep using the raw broker.publish/subscribe surface for it.
+const orderPlaced = defineIntegrationEvent<{ orderId: string }>({
+  type: 'orders.placed',
+  version: 1,
+  topic: 'orders.placed.v1',
+  // `parse` is the validation boundary: a bare `as` checks nothing at runtime.
+  // Narrow it for real — see the messaging-plugin README for a worked parser.
+  parse: (value) => value as { orderId: string },
+});
+
+// Producer: builds the envelope (below) and publishes it to the definition's
+// topic. parse is NEVER run on publish — a producer CAN publish a payload its
+// own consumers reject, and that surfaces at the consumer.
+await publishIntegrationEvent(runtime, broker, orderPlaced, { orderId: '123' }, {
+  correlationId: 'root-1', // each field optional; omitted when absent
+  causationId: 'e-0',
+  aggregateId: 'order-1',
+  aggregateVersion: 3,
+});
+
+// Consumer: produces the existing SubscriptionDefinition — plugs straight
+// into MessagingPlugin({ subscriptions }). The handler receives the parsed
+// payload, the envelope (rebuilt with data = the parsed value), and the
+// transport metadata.
+const subscription = onIntegrationEvent(orderPlaced, async (payload, envelope) => {
+  await provisionOrder(payload.orderId, envelope.id);
+}, { queue: 'billing' });
+// provisionOrder: the application's own work, resolved from the parsed
+// payload; envelope carries the identity/correlation fields; the third
+// handler argument is the transport MessageMetadata.
+
+// Correlation propagation: the chain-root rule, extracted.
+const causal = causedBy(envelope); // { correlationId: envelope.correlationId ?? envelope.id, causationId: envelope.id }
+```
+
+The wire envelope, published as the message payload:
+
+| Field              | Type     | Present always? | Meaning                                                          |
+| ------------------ | -------- | --------------- | ---------------------------------------------------------------- |
+| `id`               | `string` | yes             | Producer-assigned identity (`runtime.uuid()`)                    |
+| `type`             | `string` | yes             | The contract's semantic event name                               |
+| `version`          | `number` | yes             | The contract version                                             |
+| `occurredAt`       | `string` | yes             | Publish time, ISO-8601 (`new Date(runtime.now()).toISOString()`) |
+| `data`             | payload  | yes             | The event payload, carried verbatim                              |
+| `correlationId`    | `string` | optional        | ID of the causal chain root                                      |
+| `causationId`      | `string` | optional        | ID of the directly causing event                                 |
+| `aggregateId`      | `string` | optional        | ID of the aggregate the event concerns                           |
+| `aggregateVersion` | `number` | optional        | Version of the aggregate the event concerns                      |
+
+`occurredAt` is a string, not a `Date`: payloads round-trip through the serializer's `JSON.parse`,
+so a `Date` would arrive as a string on every transport. The consumer's structural check REQUIRES
+the five mandatory fields at their primitive types, checks `type` and `version` for exact equality,
+and IGNORES unknown extra top-level fields — an additive envelope change is never a breaking
+deployment. Payload strictness belongs to `parse`, where the application owns the policy. The
+optional causal fields are checked on both sides: `correlationId`, `causationId` and `aggregateId`
+must be strings, and `aggregateVersion` — the only number among them — must be FINITE, because JSON
+serialization maps `NaN`/`Infinity` to `null`, so a non-finite one would reach consumers as `null`.
+
+`occurredAt` must be an ISO-8601 instant in the interoperable RFC 3339 profile — a full date, a time
+to at least seconds, and an explicit `Z` or a numeric offset (`2026-01-01T00:00:00Z`,
+`2026-01-01T00:00:00.000Z`, `2026-01-01T00:00:00+05:30`). A date-only value, an RFC 2822 date, or a
+zone-LESS timestamp is refused: `Date.parse` accepts all three, and the zone-less form is read in
+each engine's own local time — measured, `2026-01-01T00:00:00` becomes `2025-12-31T18:30:00.000Z` on
+a `+05:30` host — so one event would mean a different instant on every consumer.
+
+The ten exported symbols of this section: the four functions above (`defineIntegrationEvent`,
+`publishIntegrationEvent`, `onIntegrationEvent`, `causedBy`), the `IntegrationEventRejectedError`
+class (rejections, below), and five types:
+
+- **`IntegrationEventDefinition<T>`** (interface) — the contract `defineIntegrationEvent` returns
+  and both directions read: readonly `type`, `version`, `topic`, and `parse: (value: unknown) => T`.
+  `parse` runs on the consumer side only.
+- **`IntegrationEventEnvelope<T>`** (interface) — the wire shape in the table above. The handler
+  receives it with `data` rebuilt to the parsed value, so `envelope.data === payload` holds on every
+  delivery.
+- **`IntegrationEventMetadata`** (interface) — the optional fifth argument of
+  `publishIntegrationEvent`: `correlationId`/`causationId`/`aggregateId` (`string`) and
+  `aggregateVersion` (`number`), each omitted from the envelope when absent. `causedBy()` returns a
+  value assignable to it.
+- **`IntegrationEventHandler<T>`** (type) — `(payload: T, envelope: IntegrationEventEnvelope<T>`,
+  `metadata: MessageMetadata) => void | Promise<void>`: parsed payload first, envelope second,
+  transport metadata third.
+- **`IntegrationEventRejectionReason`** (type) —
+  `'malformed' | 'type-mismatch' | 'version-mismatch' | 'parse'`, the `reason` discriminant of
+  `IntegrationEventRejectedError` (table below).
+
+A refused delivery throws `IntegrationEventRejectedError` before the handler runs. The rejection
+follows the broker's OWN failure path, and that path differs per arm — it is not a retry guarantee.
+RabbitMQ nacks with requeue DISABLED, so a refused message is dead-lettered when a DLX is configured
+and discarded otherwise, and logs the failure. NATS naks, which redelivers while the stream retains
+the message, and (since PR #287) also logs it. The in-memory broker reports through
+`onDispatchError` and drops. Because a rejection here is deterministic — the same envelope fails the
+same way on every delivery — redelivery cannot resolve it, so a dead-letter queue rather than a
+retry is where a refused event is inspected. Its `message` carries the whole diagnostic — the
+structured fields serve an `instanceof` branch on a path that surfaces the error object:
+
+| `reason`           | Fault                                                                          |
+| ------------------ | ------------------------------------------------------------------------------ |
+| `malformed`        | Not an object, or a mandatory field missing or of the wrong primitive type     |
+| `type-mismatch`    | The envelope's `type` differs from the definition                              |
+| `version-mismatch` | The envelope's `version` differs from the definition                           |
+| `parse`            | The definition's parser threw; the thrown value is carried as `cause` verbatim |
+
+When `MessagingPlugin({ behaviors })` is configured, the behaviour chain runs BEFORE the wrapper, so
+`IngressContext.payload` is the raw envelope, never the parsed payload — a short-circuiting
+behaviour must be able to refuse a message without the framework parsing it first. A handler needing
+a resolved capability uses the existing `RegistryFactory<SubscriptionDefinition>` arm:
+`(services) => onIntegrationEvent(definition, handlerFor(services))`.
+
+Mapping a local domain event (M93a's `createDomainEvents()`) onto a published integration event is
+application policy, written out explicitly — `event.type` is deliberately not the integration
+`type`, and `event.occurredOn` (when the fact happened) is deliberately not the envelope's
+`occurredAt` (when it was published).
+
 ## Queue (`@setu-ts/queue-plugin`)
 
 Provides background job queue with Memory and Redis adapters.

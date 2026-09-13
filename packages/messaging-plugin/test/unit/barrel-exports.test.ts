@@ -2,6 +2,11 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as messaging from '../../src/index.ts';
 import type {
+  IntegrationEventDefinition,
+  IntegrationEventEnvelope,
+  IntegrationEventHandler,
+  IntegrationEventMetadata,
+  IntegrationEventRejectionReason,
   PubSubMessagingOptions,
   PubSubOptions,
   ServiceBusMessagingOptions,
@@ -65,6 +70,19 @@ describe('barrel exports', () => {
     expect(typeof messaging.JetStreamUnavailableError).toBe('function');
     expect(messaging.JetStreamStreamError).toBeDefined();
     expect(typeof messaging.JetStreamStreamError).toBe('function');
+
+    // M93b: the four integration-event helpers and the rejection error class
+    // thrown by `onIntegrationEvent`'s wrapper on the real delivery path.
+    expect(messaging.defineIntegrationEvent).toBeDefined();
+    expect(typeof messaging.defineIntegrationEvent).toBe('function');
+    expect(messaging.publishIntegrationEvent).toBeDefined();
+    expect(typeof messaging.publishIntegrationEvent).toBe('function');
+    expect(messaging.onIntegrationEvent).toBeDefined();
+    expect(typeof messaging.onIntegrationEvent).toBe('function');
+    expect(messaging.causedBy).toBeDefined();
+    expect(typeof messaging.causedBy).toBe('function');
+    expect(messaging.IntegrationEventRejectedError).toBeDefined();
+    expect(typeof messaging.IntegrationEventRejectedError).toBe('function');
   });
 
   it('gains nothing else on the value surface (M90d pin)', () => {
@@ -90,11 +108,35 @@ describe('barrel exports', () => {
       broker: 'service-bus',
       connectionString: 'test',
     };
+    // M93b: the five integration-event types are nameable from the barrel —
+    // a type export dropped from it leaves every runtime assertion green (the
+    // M56 defect class), so they are pinned here by name.
+    const _integrationDefinition: IntegrationEventDefinition<{ orderId: string }> = {
+      type: 'orders.placed',
+      version: 1,
+      topic: 'orders.placed.v1',
+      parse: (value) => value as { orderId: string },
+    };
+    const _integrationEnvelope: IntegrationEventEnvelope<{ orderId: string }> = {
+      id: 'e-1',
+      type: 'orders.placed',
+      version: 1,
+      occurredAt: '2025-01-01T00:00:00.000Z',
+      data: { orderId: 'o-1' },
+    };
+    const _integrationMetadata: IntegrationEventMetadata = { correlationId: 'root-1' };
+    const _integrationHandler: IntegrationEventHandler<{ orderId: string }> = () => {};
+    const _integrationReason: IntegrationEventRejectionReason = 'malformed';
     expect(_pubSubOpts).toBeDefined();
     expect(_serviceBusOpts).toBeDefined();
     expect(_serviceBusRetry).toBeDefined();
     expect(_pubSubMessagingOpts).toBeDefined();
     expect(_serviceBusMessagingOpts).toBeDefined();
+    expect(_integrationDefinition).toBeDefined();
+    expect(_integrationEnvelope).toBeDefined();
+    expect(_integrationMetadata).toBeDefined();
+    expect(_integrationHandler).toBeDefined();
+    expect(_integrationReason).toBeDefined();
   });
 
   it('accepts headersFactory on the PUBLIC nats arm, not just internal NatsOptions', () => {

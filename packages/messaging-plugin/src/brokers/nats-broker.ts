@@ -15,6 +15,7 @@ import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from './reconnect.ts';
 import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
 import { JetStreamStreamError, JetStreamUnavailableError } from '../errors.ts';
+import { describeError } from './describe-error.ts';
 
 /**
  * Lazily load nats at runtime.
@@ -566,31 +567,62 @@ export class NatsBroker implements MessageBrokerAdapter {
           nak(): void;
         };
 
-        const content = new TextDecoder().decode(msgTyped.data);
-        const deserialized = this.#serializer.deserialize<T>(content);
-
-        const nanos = msgTyped.info?.timestampNanos;
-        const metadata: MessageMetadata = {
-          topic,
-          messageId: String(msgTyped.seq),
-          // Divide through BigInt: the nanosecond epoch exceeds the float
-          // safe-integer range, and an Invalid Date must never reach a
-          // handler as `metadata.timestamp`.
-          ...(nanos !== undefined
-            ? { timestamp: new Date(Number(BigInt(nanos) / 1_000_000n)) }
-            : {}),
-          headers: toHeaderRecord(msgTyped.headers),
+        // ONE disposition path for every failure shape, shared by the
+        // synchronous and asynchronous branches below.
+        //
+        // `nak()` REDELIVERS, so a message this consumer can never accept
+        // comes back for as long as the stream retains it. Discarding the
+        // error left that loop completely silent — the one broker that
+        // retries was the only one that reported nothing. Report first,
+        // exactly as the RabbitMQ adapter does, then nak.
+        //
+        // The reporter is an application-supplied callback with no
+        // non-throwing contract, and it is the LAST-RESORT sink: its own
+        // failure must never cost the message its disposition, nor escape as
+        // an unhandled rejection. Swallowed for the same reason
+        // `InMemoryBroker.#reportDispatchError` swallows.
+        const fail = (error: unknown): void => {
+          try {
+            this.#logger?.error(`Message handler failed: ${describeError(error)}`);
+          } catch {
+            // Swallowed deliberately — see above.
+          }
+          msgTyped.nak();
         };
 
-        const handlerResult = handler(deserialized, metadata);
-        if (handlerResult instanceof Promise) {
-          handlerResult.then(() => {
+        // `MessageHandler` returns `void | Promise<void>`, so a handler may
+        // throw SYNCHRONOUSLY — and deserializing a malformed payload throws
+        // earlier still. Either escaped this callback before `ack()` or
+        // `nak()` ran, leaving the message undisposed until the ack-wait
+        // timeout. The RabbitMQ adapter awaits inside a try/catch and never
+        // had this hole; NATS was the outlier.
+        try {
+          const content = new TextDecoder().decode(msgTyped.data);
+          const deserialized = this.#serializer.deserialize<T>(content);
+
+          const nanos = msgTyped.info?.timestampNanos;
+          const metadata: MessageMetadata = {
+            topic,
+            messageId: String(msgTyped.seq),
+            // Divide through BigInt: the nanosecond epoch exceeds the float
+            // safe-integer range, and an Invalid Date must never reach a
+            // handler as `metadata.timestamp`.
+            ...(nanos !== undefined
+              ? { timestamp: new Date(Number(BigInt(nanos) / 1_000_000n)) }
+              : {}),
+            headers: toHeaderRecord(msgTyped.headers),
+          };
+
+          const handlerResult = handler(deserialized, metadata);
+          if (handlerResult instanceof Promise) {
+            handlerResult.then(() => {
+              msgTyped.ack();
+            }).catch(fail);
+          } else {
             msgTyped.ack();
-          }).catch(() => {
-            msgTyped.nak();
-          });
-        } else {
-          msgTyped.ack();
+          }
+        } catch (error) {
+          fail(error);
         }
       },
     });
