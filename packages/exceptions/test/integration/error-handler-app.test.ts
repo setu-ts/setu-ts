@@ -63,9 +63,10 @@ async function fetchProblem(
 
 describe('errorHandler in a kernel application', () => {
   describe('application response hook', () => {
-    it('serves an application-owned HTML response through the real kernel pipeline', async () => {
+    it('awaits an application-owned HTML response through the real kernel pipeline', async () => {
       const app = await createErroringApp('rfc9457', notFound('User 42 does not exist'), {
-        respond: (error, ctx) => {
+        respond: async (error, ctx) => {
+          await Promise.resolve();
           return ctx.response
             .status(error.statusCode)
             .html(`<h1>${error.statusCode} ${error.message}</h1>`);

@@ -34,10 +34,12 @@ All notable changes to this project are documented here. The format follows
 
 - **`@setu-ts/exceptions` — application-owned caught-error responses.**
   `errorHandler({ respond(error, ctx) { ... } })` can now return an application response — including
-  an HTML view through `ctx.response` — after the framework has normalized, disclosure-masked,
-  status-sanitized, and logged the caught error. Returning `undefined` preserves the existing
-  formatter-led JSON or Problem Details output exactly. The hook deliberately does not cover M70f
-  responder terminals such as unmatched-path `404`, malformed-request `400`, or drain `503`.
+  an HTML view through `ctx.response` — after the framework has normalized, disclosure-masked, and
+  status-sanitized the caught error. The hook may be asynchronous; returning or resolving to
+  `undefined` preserves the existing formatter-led JSON or Problem Details output exactly. Logging
+  retains the unmasked diagnostic and records the selected response's status. The hook deliberately
+  does not cover M70f responder terminals such as unmatched-path `404`, malformed-request `400`, or
+  drain `503`.
 - **`@setu-ts/events-plugin` — aggregate-local `createDomainEvents()` and `IDomainEvents`.** A
   framework-independent recorder for facts raised by an aggregate during an operation. It preserves
   insertion order, returns isolated snapshots, and never publishes; application code owns

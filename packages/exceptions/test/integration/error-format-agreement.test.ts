@@ -23,6 +23,7 @@ import type { IKernelApplication } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { errorHandler } from '../../src/middleware/error-handler.ts';
+import type { ErrorHandlerOptions } from '../../src/middleware/error-handler.ts';
 import type { ErrorFormat, ErrorHandlerFormatter } from '../../src/formatters/error-formatter.ts';
 import { notFound } from '../../src/errors/exceptions.ts';
 
@@ -33,12 +34,13 @@ import { notFound } from '../../src/errors/exceptions.ts';
  */
 async function createApp(
   format: ErrorFormat | ErrorHandlerFormatter,
+  extra?: Omit<ErrorHandlerOptions, 'format' | 'logErrors'>,
 ): Promise<IKernelApplication> {
   const app = await createTestApp({
     plugins: [RuntimePlugin()],
     autoStart: false,
   });
-  app.middleware.add(errorHandler({ format, logErrors: false }), {
+  app.middleware.add(errorHandler({ format, logErrors: false, ...extra }), {
     priority: 0,
     name: 'error-handler',
   });
@@ -82,6 +84,31 @@ describe('the kernel 404 terminal agrees with the configured error format (X9-6)
       });
     });
   }
+
+  it('does not invoke the caught-error hook for an unmatched route', async () => {
+    let hookCalls = 0;
+    const app = await createApp('rfc9457', {
+      respond: () => {
+        hookCalls += 1;
+        return undefined;
+      },
+    });
+    try {
+      const terminal = await problem(app, '/no-such-route');
+
+      expect(hookCalls).toBe(0);
+      expect(terminal.contentType).toBe('application/problem+json');
+      expect(terminal.body).toEqual({
+        type: 'about:blank',
+        title: 'Not Found',
+        status: 404,
+        detail: 'Not Found',
+        instance: '/no-such-route',
+      });
+    } finally {
+      await app.stop();
+    }
+  });
 
   describe('format: a custom formatter function', () => {
     // A formatter that stamps a recognisable `marker` — proves the kernel's

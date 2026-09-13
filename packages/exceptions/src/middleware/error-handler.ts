@@ -95,13 +95,17 @@ export interface ErrorHandlerOptions {
    * receives the normalized error after status hints, internal-error masking,
    * and status resolution, so `error.statusCode` is safe to serve. Return a
    * {@linkcode HandlerResult} produced by `ctx.response` to use that response;
-   * return `undefined` to fall through to the configured formatter unchanged.
+   * it may resolve that result asynchronously. Return or resolve to `undefined`
+   * to fall through to the configured formatter unchanged.
    *
    * The hook owns its returned response's status, headers, and body. It is
    * called only for errors caught by this middleware, not responder-based
    * terminals such as an unmatched-path `404`.
    */
-  readonly respond?: (error: HttpError, ctx: IRequestContext) => HandlerResult | undefined;
+  readonly respond?: (
+    error: HttpError,
+    ctx: IRequestContext,
+  ) => HandlerResult | undefined | Promise<HandlerResult | undefined>;
 }
 
 /** The `application/problem+json` content type for Problem Details responses. */
@@ -133,9 +137,11 @@ const PROBLEM_DETAILS_FORMATTERS: ReadonlySet<ErrorHandlerFormatter> = new Set([
  * 2. If `next()` throws an `HttpError`, its `statusCode` is used as-is.
  * 3. If `next()` throws any other `Error`, it is wrapped in a `500`
  *    `internalServerError` carrying the original as `cause`.
- * 4. When `logErrors` is on and a logger is registered, the error is logged.
- * 5. When configured, lets the application write its own response. A returned
- *    `HandlerResult` short-circuits formatting; `undefined` falls through.
+ * 4. When configured, lets the application write its own response. A returned
+ *    or resolved `HandlerResult` short-circuits formatting; `undefined` falls
+ *    through.
+ * 5. When `logErrors` is on and a logger is registered, the unmasked error is
+ *    logged with the status the selected response serves.
  * 6. Otherwise, formats the error via {@linkcode selectFormatter}, optionally
  *    enriches it with a `stack` trace, and sends it with the right status and
  *    content type. The middleware **returns a `HandlerResult`** (short-circuit)
@@ -238,25 +244,36 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
         );
       }
 
-      // Log the UNMASKED error, so the log keeps the SQL, the bound parameters
-      // and the cause chain regardless of masking — but report the status that
-      // was actually SERVED. Masking preserves the status, so this is the same
-      // number it always was; a hint does not (a `500`-normalized error is
-      // answered `501`), and logging the pre-hint status would leave an
-      // operator correlating a log line with a response looking for a `500`
-      // that no client ever saw.
-      if (logErrors) {
-        logError(ctx, error, responseError.statusCode);
+      // The hook sees the same safe error and served status that the formatter
+      // would receive. It can perform asynchronous view rendering; only
+      // `undefined` means "use the framework formatter". A hook failure stays
+      // an application failure, but records the original caught diagnostic
+      // before it propagates to the surrounding pipeline.
+      let result: HandlerResult | undefined;
+      try {
+        result = await respond?.(responseError, ctx);
+      } catch (hookError) {
+        if (logErrors) {
+          logError(ctx, error, responseError.statusCode);
+        }
+        throw hookError;
+      }
+      if (result !== undefined) {
+        // The application-owned result can choose a status different from the
+        // normalized error (for example a 418 HTML page for a caught 500), so
+        // inspect the completed writer rather than reporting the fallback.
+        if (logErrors) {
+          logError(ctx, error, ctx.response.snapshot().status);
+        }
+        return result;
       }
 
-      // This is deliberately after the normalization/masking/status/logging
-      // path. An application-owned response must receive the same safe error
-      // and served status that the formatter would have received, while the
-      // logger keeps the original diagnostic. Only `undefined` means "use the
-      // framework formatter"; any returned HandlerResult owns the response.
-      const result = respond?.(responseError, ctx);
-      if (result !== undefined) {
-        return result;
+      // Log the UNMASKED error, so the log keeps the SQL, the bound parameters
+      // and the cause chain regardless of masking — and report the status the
+      // formatter below will actually serve. A hint may change a normalized
+      // `500` to `501`, so logging the pre-hint status would mislead operators.
+      if (logErrors) {
+        logError(ctx, error, responseError.statusCode);
       }
 
       const body = formatter(responseError, ctx);

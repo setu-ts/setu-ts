@@ -4854,10 +4854,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 
 - **Milestone 94a** (`packages/exceptions` — application-owned caught-error responses):
   `ErrorHandlerOptions.respond(error, ctx)` receives the normalized, masked/hinted, served-status
-  `HttpError` after logging. Its returned `HandlerResult` owns the response; only `undefined`
-  preserves the formatter's JSON/Problem Details output. The hook stays out of M70f responder
-  terminals, which can lack a full request context, and adds no view-plugin dependency — complete
-  (PR #288)
+  `HttpError`. It may return or resolve a `HandlerResult` that owns the response; only `undefined`
+  preserves the formatter's JSON/Problem Details output. Logging retains the original diagnostic and
+  the selected response status. The hook stays out of M70f responder terminals, which can lack a
+  full request context, and adds no view-plugin dependency — complete (PR #288)
 
 ## Verification (run before declaring any work done)
 

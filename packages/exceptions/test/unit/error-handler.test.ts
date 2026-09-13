@@ -303,6 +303,24 @@ describe('errorHandler middleware', () => {
       expect(responseSnapshot().body).toBe('<h1>404 User 42 not found</h1>');
     });
 
+    it('awaits an asynchronous application-owned response', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({
+        respond: async (error, context) => {
+          await Promise.resolve();
+          return context.response
+            .status(error.statusCode)
+            .html(`<h1>${error.statusCode} ${error.message}</h1>`);
+        },
+      });
+
+      await mw(ctx, nextThrows(notFound('User 42 not found')));
+
+      expect(responseSnapshot().status).toBe(404);
+      expect(responseSnapshot().headers.get('content-type')).toBe('text/html; charset=utf-8');
+      expect(responseSnapshot().body).toBe('<h1>404 User 42 not found</h1>');
+    });
+
     it('receives the masked error while logging the original diagnostic', async () => {
       const logger = new FakeLogger();
       const services = new Map([[CAPABILITIES.LOGGER, logger]]);
@@ -346,6 +364,63 @@ describe('errorHandler middleware', () => {
         detail: 'gone',
         instance: '/',
       });
+    });
+
+    it('falls through when an asynchronous hook resolves undefined', async () => {
+      const { ctx, responseSnapshot } = createFakeContext();
+      const mw = errorHandler({
+        format: 'rfc9457',
+        respond: async () => {
+          await Promise.resolve();
+          return undefined;
+        },
+      });
+
+      await mw(ctx, nextThrows(notFound('gone')));
+
+      expect(responseSnapshot().status).toBe(404);
+      expect(responseSnapshot().headers.get('content-type')).toBe('application/problem+json');
+      expect(parseBody(responseSnapshot().body)).toEqual({
+        type: 'about:blank',
+        title: 'Not Found',
+        status: 404,
+        detail: 'gone',
+        instance: '/',
+      });
+    });
+
+    it('logs the status selected by the application-owned response', async () => {
+      const logger = new FakeLogger();
+      const services = new Map([[CAPABILITIES.LOGGER, logger]]);
+      const { ctx, responseSnapshot } = createFakeContext({ services });
+      const mw = errorHandler({
+        respond: (_error, context) => context.response.status(418).html('<h1>Teapot</h1>'),
+      });
+
+      await mw(ctx, nextThrows(internalServerError('database unavailable')));
+
+      expect(responseSnapshot().status).toBe(418);
+      expect(logger.calls).toHaveLength(1);
+      expect(logger.calls[0].message).toBe('database unavailable');
+      expect(logger.calls[0].meta?.statusCode).toBe(418);
+    });
+
+    it('logs the caught error and rethrows when the hook fails', async () => {
+      const logger = new FakeLogger();
+      const services = new Map([[CAPABILITIES.LOGGER, logger]]);
+      const { ctx } = createFakeContext({ services });
+      const mw = errorHandler({
+        respond: () => {
+          throw new Error('view rendering failed');
+        },
+      });
+
+      await expect(mw(ctx, nextThrows(internalServerError('database unavailable'))))
+        .rejects.toThrow('view rendering failed');
+
+      expect(logger.calls).toHaveLength(1);
+      expect(logger.calls[0].message).toBe('database unavailable');
+      expect(logger.calls[0].meta?.statusCode).toBe(500);
     });
   });
 
