@@ -218,7 +218,18 @@ function isDelimiterAt(
   // Must be preceded by the line break that belongs to the delimiter.
   if (precedingLineBreakLength(body, pos) === 0) return false;
   // And followed by a line break (another part) or `--` (the close).
-  if (tryMatch(body, pos, lastBoundary)) return true;
+  // The CLOSING delimiter needs its trailing context checked too, or any
+  // `--<boundary>--` inside part data ends the body: measured, file data
+  // containing `\r\n--AaB03x--NOT-A-DELIMITER` truncated to its first line
+  // while `Response.formData()` returned it whole. RFC 2046 §5.1.1 allows only
+  // transport padding and a line break after the close (the epilogue then
+  // follows), or the end of the body.
+  if (tryMatch(body, pos, lastBoundary)) {
+    let after = pos + lastBoundary.length;
+    while (body[after] === 32 || body[after] === 9) after++; // transport padding
+    if (after === body.length || body[after] === 10) return true;
+    return body[after] === 13 && body[after + 1] === 10;
+  }
   // An out-of-range read yields `undefined`, which equals neither byte, so a
   // delimiter running off the end of the body needs no separate length guard.
   const next = body[pos + boundary.length];

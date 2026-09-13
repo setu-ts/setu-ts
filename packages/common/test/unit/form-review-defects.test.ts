@@ -209,3 +209,62 @@ describe('multipart delimiter and header edge cases', () => {
     expect(form.get('v')).toBe('ok');
   });
 });
+
+describe('an apostrophe is a token character, not a quote (review round 2)', () => {
+  // RFC 9110 §5.6.4 defines quoted-string with DQUOTE; §5.6.2 lists `'` among
+  // the ordinary tchars. Both assertions were measured against the platform's
+  // own `Response.formData()`, which is the authority here — our previous
+  // behaviour was its exact inverse.
+  const CONTENT_TYPE = "multipart/form-data; boundary='abc'";
+
+  it("parses a body delimited by --'abc', quotes included", () => {
+    const body = new TextEncoder().encode(
+      `--'abc'\r\nContent-Disposition: form-data; name="v"\r\n\r\nok\r\n--'abc'--\r\n`,
+    );
+    expect(parseFormBody(body, CONTENT_TYPE).get('v')).toBe('ok');
+  });
+
+  it('yields nothing for a body delimited by --abc, which native also rejects', () => {
+    const body = new TextEncoder().encode(
+      `--abc\r\nContent-Disposition: form-data; name="v"\r\n\r\nok\r\n--abc--\r\n`,
+    );
+    expect([...parseFormBody(body, CONTENT_TYPE).entries()]).toEqual([]);
+  });
+
+  it('still treats a DOUBLE-quoted value as quoted', () => {
+    const body = new TextEncoder().encode(
+      `--a;b\r\nContent-Disposition: form-data; name="v"\r\n\r\nok\r\n--a;b--\r\n`,
+    );
+    expect(parseFormBody(body, 'multipart/form-data; boundary="a;b"').get('v')).toBe('ok');
+  });
+});
+
+describe('the CLOSING delimiter needs trailing context too (review round 2)', () => {
+  it('keeps file data containing a near-miss closing delimiter intact', () => {
+    // Two hyphens before the suffix, so it matches `--<boundary>--` exactly.
+    // Before the fix this truncated to 'AAA' while native returned it whole.
+    const contents = `AAA\r\n--${B}--NOT-A-DELIMITER\r\nBBB`;
+    const form = parseFormBody(
+      multipart([
+        `Content-Disposition: form-data; name="f"; filename="x.bin"\r\n\r\n${contents}`,
+      ]),
+      CT,
+    );
+    expect(new TextDecoder().decode((form.get('f') as FormFile).data)).toBe(contents);
+  });
+
+  it('accepts a real close followed by transport padding and an epilogue', () => {
+    // RFC 2046 §5.1.1: transport padding then CRLF, then arbitrary epilogue.
+    const body = new TextEncoder().encode(
+      `--${B}\r\nContent-Disposition: form-data; name="v"\r\n\r\nok\r\n--${B}--  \r\nepilogue text\r\n`,
+    );
+    expect(parseFormBody(body, CT).get('v')).toBe('ok');
+  });
+
+  it('accepts a close that ends the body with no trailing line break', () => {
+    const body = new TextEncoder().encode(
+      `--${B}\r\nContent-Disposition: form-data; name="v"\r\n\r\nok\r\n--${B}--`,
+    );
+    expect(parseFormBody(body, CT).get('v')).toBe('ok');
+  });
+});

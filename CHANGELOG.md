@@ -49,7 +49,11 @@ All notable changes to this project are documented here. The format follows
   `application/x-www-form-urlencoded-v2` (a suffixed type),
   `text/plain; note="application/x-www-form-urlencoded"` (the type inside an unrelated quoted
   parameter), and `multipart/form-data; xboundary=q` (`boundary=` matching a different parameter
-  name). A quoted boundary containing `;` now parses correctly.
+  name). A quoted boundary containing `;` now parses correctly, ONLY a double quote delimits a
+  quoted value (an apostrophe is an ordinary token character, so `boundary='abc'` delimits with
+  `--'abc'`), and the CLOSING delimiter is validated to its end of line, so file data containing
+  `--<boundary>--` no longer truncates the part. Each behaviour was checked against the platform's
+  own `Response.formData()`.
 - **`@setu-ts/runtime` — `IRequest.formData()` reads the request's PUBLIC headers.** It read the
   native request's headers, so a middleware rewriting `content-type` was ignored on the served path
   while the kernel's `inject()` and `@setu-ts/testing`'s `MockRequest` — which read their public

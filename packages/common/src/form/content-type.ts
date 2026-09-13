@@ -60,11 +60,19 @@ export function parseContentType(contentType: string): ParsedContentType {
 }
 
 /**
- * Splits on `;` while treating a quoted run as opaque.
+ * Splits on `;` while treating a double-quoted run as opaque.
  *
  * A parameter value may legally contain `;` inside quotes
  * (`boundary="a;b"`), so a bare `split(';')` would cut it in half and leave the
  * tail looking like another parameter.
+ *
+ * ONLY the double quote delimits: RFC 9110 §5.6.4 defines `quoted-string` with
+ * DQUOTE, while the apostrophe is an ordinary `tchar` (§5.6.2) and therefore
+ * part of a token'\''s value. Treating it as a quote — which the regex this
+ * module replaced also did — inverted the platform'\''s behaviour exactly:
+ * measured against `Response.formData()`, `boundary='abc'` delimits a body with
+ * `--'abc'`, which native parses and we returned empty for, while we parsed a
+ * `--abc` body that native rejects.
  */
 function splitSegments(value: string): string[] {
   const segments: string[] = [];
@@ -80,7 +88,7 @@ function splitSegments(value: string): string[] {
       else if (char === quote) quote = null;
       continue;
     }
-    if (char === '"' || char === "'") quote = char;
+    if (char === '"') quote = char;
     else if (char === ';') {
       segments.push(value.slice(start, i));
       start = i + 1;
@@ -90,10 +98,9 @@ function splitSegments(value: string): string[] {
   return segments;
 }
 
-/** Strips surrounding quotes and resolves quoted-pair escapes. */
+/** Strips surrounding DOUBLE quotes and resolves quoted-pair escapes. */
 function unquote(value: string): string {
   if (value.length < 2) return value;
-  const first = value[0];
-  if ((first !== '"' && first !== "'") || value[value.length - 1] !== first) return value;
+  if (value[0] !== '"' || value[value.length - 1] !== '"') return value;
   return value.slice(1, -1).replace(/\\(.)/g, '$1');
 }
