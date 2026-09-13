@@ -96,6 +96,20 @@ const STALLED_GROWTH_CAP_BYTES = 8 * MIB;
 const PROXY_PORT = 9010;
 const OBJECT_KEY = 'x45-backpressure-64mib.bin';
 
+/**
+ * Real time, deliberately — NOT `IRuntimeServices`.
+ *
+ * This suite paces a real consumer against a real socket and its conclusions
+ * are denominated in real seconds: an injectable clock is exactly what must not
+ * be possible here, because a fake one would decouple the pacing from the
+ * backend's actual send rate and leave every read-ahead figure meaningless.
+ * Routing through the runtime would also be pure indirection — `hrtime()` is
+ * `return performance.now()` and `setTimeout` is `globalThis.setTimeout`
+ * (`packages/runtime/src/services/cross-runtime.ts:39-47`) — while implying to
+ * a reader that the clock is swappable. The repo's rule targets `Date.now()`,
+ * which mixes wall-clock with monotonic; this file contains none, and uses the
+ * monotonic clock throughout.
+ */
 const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 function toIpv4(url: string): string {
