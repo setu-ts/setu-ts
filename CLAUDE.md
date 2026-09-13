@@ -4849,8 +4849,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `IMessageBroker` change, no new capability token, no broker adapter rewritten, no dependency on
   `@setu-ts/events-plugin`) — complete (PR #287)
 
-- **Next milestone** — **M94** (94a `exceptions`, 94b `common` + `runtime` + storage/session, 94c
-  `session-plugin` — form bodies and error views, the seams M92 surfaced).
+- **Next milestone** — **M94b** (`common` + `runtime` + storage/session — one form-body
+  abstraction).
 
 - **Milestone 94a** (`packages/exceptions` — application-owned caught-error responses):
   `ErrorHandlerOptions.respond(error, ctx)` receives the normalized, masked/hinted, served-status
@@ -4858,6 +4858,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   preserves the formatter's JSON/Problem Details output. Logging retains the original diagnostic and
   the selected response status. The hook stays out of M70f responder terminals, which can lack a
   full request context, and adds no view-plugin dependency — complete (PR #288)
+
+- **Milestone 94c** (`packages/session-plugin` — CSRF token field helper):
+  `csrfTokenField(ctx, options?)` mints through the existing `getCsrfToken` path and returns a
+  complete escaped hidden input under the default `'_csrf'` field or an explicit matching
+  `fieldName`. It keeps session-plugin independent of every view engine: direct HTML responses
+  interpolate its generated markup, while escaping Hono templates use application-level `raw()`. It
+  does not alter the global form-CSRF middleware policy and does not add multipart field parsing,
+  which remains M94b — complete.
 
 ## Verification (run before declaring any work done)
 
