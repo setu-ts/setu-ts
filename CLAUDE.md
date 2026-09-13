@@ -4849,8 +4849,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `IMessageBroker` change, no new capability token, no broker adapter rewritten, no dependency on
   `@setu-ts/events-plugin`) — complete (PR #287)
 
-- **Next milestone** — **M94c** (`session-plugin` — the CSRF token a form does not have to remember:
-  the token field helper and the global-registration documentation; 94a and 94b are complete below).
+- **Next milestone** — **M40** (final polish and release: integration testing across all plugins,
+  performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the
+  Deno/Node/Bun/Workers portability matrix validated end to end. The last ⬜ row in the ROADMAP;
+  M94a, M94b and M94c are all complete below).
 
 - **Milestone 94a** (`packages/exceptions` — application-owned caught-error responses):
   `ErrorHandlerOptions.respond(error, ctx)` receives the normalized, masked/hinted, served-status
@@ -4872,6 +4874,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   file-borne token; the upload middleware consumes the accessor with every bound and refusal
   unchanged (breaking: a no-`filename` part under the field is no longer an upload) — complete
   (feat/m94b-form-data)
+- **Milestone 94c** (`packages/session-plugin` — CSRF token field helper):
+  `csrfTokenField(ctx, options?)` mints through the existing `getCsrfToken` path and returns a
+  complete escaped hidden input under the default `'_csrf'` field or an explicit matching
+  `fieldName`. It keeps session-plugin independent of every view engine: direct HTML responses
+  interpolate its generated markup, while escaping Hono templates use application-level `raw()`. It
+  does not alter the global form-CSRF middleware policy and does not add multipart field parsing,
+  which remains M94b — complete.
 
 ## Verification (run before declaring any work done)
 

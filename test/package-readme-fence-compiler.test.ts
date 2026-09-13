@@ -71,7 +71,8 @@ const READMES: Readonly<Record<string, number>> = {
   // added later cannot slip past unclassified.
   'packages/auth-plugin/README.md': 7,
   'packages/static-plugin/README.md': 3,
-  'packages/session-plugin/README.md': 10,
+  // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
+  'packages/session-plugin/README.md': 11,
   'packages/audit-plugin/README.md': 3,
   'packages/common/README.md': 2,
   // M92: +1 for the @Render example.

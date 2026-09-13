@@ -174,16 +174,36 @@ SessionPlugin({ secret, csrf: {} });
 Render the token into a hidden field:
 
 ```typescript
+import { csrfTokenField } from '@setu-ts/session-plugin';
+
 app.router.get('/login', (ctx) => {
-  const token = getCsrfToken(ctx); // minted on first call, then stable
-  return ctx.response.text(
-    `<form method="post">
-       <input type="hidden" name="_csrf" value="${token}">
-       <button>Sign in</button>
-     </form>`,
+  return ctx.response.html(
+    `<form method="post">${csrfTokenField(ctx)}<button>Sign in</button></form>`,
   );
 });
 ```
+
+`csrfTokenField` mints the session token on its first call and returns the complete trusted hidden
+input. It uses the default `'_csrf'` name; when your `SessionPlugin` configuration customizes
+`csrf.fieldName`, pass the same name as `csrfTokenField(ctx, { fieldName: 'authenticity_token' })`.
+
+Hono's `html` tag escapes interpolated strings. When using it or the view plugin's Hono-backed
+engines, mark this helper's generated markup as raw at the application rendering boundary:
+
+```typescript
+import { html } from '@hono/hono/html';
+import type { IRequestContext } from '@setu-ts/common';
+import { csrfTokenField } from '@setu-ts/session-plugin';
+import { raw } from '@setu-ts/view-plugin';
+
+const LoginForm = (ctx: IRequestContext) =>
+  html`
+    <form method="post">${raw(csrfTokenField(ctx))}<button>Sign in</button></form>
+  `;
+```
+
+The `raw()` call is appropriate only because `csrfTokenField` generates this fixed markup and
+escapes the configured field name; do not use it for application-provided form content.
 
 Options: `fieldName` (default `_csrf`), `headerName` (defaults to `x-csrf-token`, so a `fetch` post
 can present the token in that header without further configuration; an explicit name still wins, and
@@ -308,6 +328,7 @@ arriving while every session reads as absent.
 | Export                          | Kind      |
 | ------------------------------- | --------- |
 | `csrfFormMiddleware`            | function  |
+| `csrfTokenField`                | function  |
 | `getCsrfToken`                  | function  |
 | `getSession`                    | function  |
 | `sessionMiddleware`             | function  |

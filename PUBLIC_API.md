@@ -3340,7 +3340,7 @@ payload server-side and leaves only an opaque id in the cookie, which is what ma
 revocation possible.
 
 ```typescript
-import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
+import { csrfTokenField, getSession, SessionPlugin } from '@setu-ts/session-plugin';
 
 const app = createApplication({
   plugins: [RuntimePlugin(), SessionPlugin({ secret: mySecret, csrf: {} })],
@@ -3352,6 +3352,11 @@ app.router.post('/login', (ctx) => {
   session.regenerate(); // new id, same data — defeats session fixation
   return ctx.response.json({ ok: true });
 });
+
+app.router.get('/login', (ctx) =>
+  ctx.response.html(
+    `<form method="post">${csrfTokenField(ctx)}<button>Sign in</button></form>`,
+  ));
 ```
 
 With `csrf` enabled, that `POST /login` is itself an unsafe method and needs the form token before
@@ -3404,6 +3409,7 @@ package README's "What `SameSite` does not separate".
 | `sessionMiddleware`             | function  | Load/commit middleware (registered at 260; exported for standalone wiring) |
 | `csrfFormMiddleware`            | function  | Synchronizer-token middleware (registered at 275 when `csrf` is present)   |
 | `getCsrfToken`                  | function  | Mints-and-stores on first call, then stable within the session             |
+| `csrfTokenField`                | function  | Renders the minted token as a hidden field for a server-rendered form      |
 | `verifyCsrfToken`               | function  | Standalone verification for handlers and React Router actions              |
 | `CSRF_SESSION_KEY`              | const     | Reserved session key holding the token (`'__csrf'`)                        |
 | `MemorySessionStore`            | class     | `Map`-backed store; requires injected clock and timers                     |
@@ -3486,6 +3492,11 @@ package README's "What `SameSite` does not separate".
   timing-safe comparison. The configured header is read first, so a client that sends it triggers no
   body parse at all, and a non-form request still reports the ordinary mismatch rather than the
   accessor's `415`.
+- **`csrfTokenField(ctx)` is the form carrier for the default field name.** It returns trusted
+  generated markup and escapes a configured `fieldName`; in an escaping Hono template use
+  `raw(csrfTokenField(ctx))` at the application rendering boundary. It does not register or bypass
+  CSRF verification: `SessionPlugin({ csrf: {} })` still globally checks every unsafe method not in
+  `ignoreMethods`, so a form needs the documented safe-render-then-submit sequence.
 - **The `403` body does not disclose the reason.** It would tell an attacker whether the session or
   the token was at fault.
 - **React Router** reaches the session through the Milestone 44 plugin's existing

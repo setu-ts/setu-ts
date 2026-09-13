@@ -17,7 +17,12 @@ import { GrpcPlugin } from '@setu-ts/grpc-plugin';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
-import { CSRF_SESSION_KEY, getCsrfToken, readCsrfToken } from '../../../src/csrf/token.ts';
+import {
+  CSRF_SESSION_KEY,
+  csrfTokenField,
+  getCsrfToken,
+  readCsrfToken,
+} from '../../../src/csrf/token.ts';
 import { verifyCsrfToken } from '../../../src/csrf/verify.ts';
 import { csrfFormMiddleware } from '../../../src/middleware/csrf-form-middleware.ts';
 import { CsrfTokenMismatchError, SessionMiddlewareMissingError } from '../../../src/errors.ts';
@@ -84,6 +89,44 @@ describe('getCsrfToken', () => {
     const { ctx } = await withSession();
     ctx.state.delete(SESSION_STATE_KEY);
     expect(() => getCsrfToken(ctx)).toThrow(SessionMiddlewareMissingError);
+  });
+});
+
+describe('csrfTokenField', () => {
+  it('renders the minted token in the default hidden form field', async () => {
+    const { ctx } = await withSession();
+
+    const field = csrfTokenField(ctx);
+    const token = getCsrfToken(ctx);
+
+    expect(field).toBe(`<input type="hidden" name="_csrf" value="${token}">`);
+  });
+
+  it('uses a configured field name', async () => {
+    const { ctx } = await withSession();
+    const token = getCsrfToken(ctx);
+
+    expect(csrfTokenField(ctx, { fieldName: 'authenticity_token' })).toBe(
+      `<input type="hidden" name="authenticity_token" value="${token}">`,
+    );
+  });
+
+  it('escapes delimiter characters in a configured field name', async () => {
+    const { ctx } = await withSession();
+    const token = getCsrfToken(ctx);
+
+    expect(csrfTokenField(ctx, { fieldName: `x&<>"'` })).toBe(
+      `<input type="hidden" name="x&amp;&lt;&gt;&quot;&#39;" value="${token}">`,
+    );
+  });
+
+  it('escapes a pre-existing token before placing it in the value attribute', async () => {
+    const { ctx, session } = await withSession();
+    session.set(CSRF_SESSION_KEY, 'token-with-"-delimiter');
+
+    expect(csrfTokenField(ctx)).toBe(
+      '<input type="hidden" name="_csrf" value="token-with-&quot;-delimiter">',
+    );
   });
 });
 

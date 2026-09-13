@@ -40,6 +40,16 @@ All notable changes to this project are documented here. The format follows
   as absent (a client chooses freely whether a part carries a `filename`, so a non-string value must
   never reach the timing-safe comparison); a non-form body still reports the ordinary mismatch
   rather than the accessor's `415`; and the urlencoded path is byte-identical to before.
+- **`@setu-ts/session-plugin` — `csrfTokenField(ctx, options?)`** renders the session's existing
+  synchronizer token as a complete hidden form input, so server-rendered forms no longer hand-write
+  its markup. It mints through `getCsrfToken`, escapes a configured field name, and keeps the
+  existing default `'_csrf'`; in an escaping Hono template, application code wraps its trusted
+  generated markup with `raw()`. The helper does not change CSRF policy:
+  `SessionPlugin({ csrf: {} })` still globally verifies unsafe methods. (That entry originally added
+  that a multipart form still had to carry its token in the configured header "until the separate
+  M94b form-body work ships"; M94b ships in this same release, so a multipart FIELD now verifies —
+  see its session-plugin entry above.)
+
 - **`@setu-ts/messaging-plugin` — versioned integration-event contracts over the existing messaging
   capability.** `defineIntegrationEvent<T>({ type, version, topic, parse })` declares a contract and
   refuses a topic that does not end with the exact `.v${version}` suffix, making the versioned-topic

@@ -16,6 +16,8 @@ import type { IRequestContext, IRuntimeServices, ISession } from '@setu-ts/commo
 import { CAPABILITIES } from '@setu-ts/common';
 
 import { toBase64Url } from '../codec/envelope.ts';
+import type { CsrfFormOptions } from '../options.ts';
+import { resolveCsrfConfig } from '../options.ts';
 import { getSession } from '../services/get-session.ts';
 
 /**
@@ -69,6 +71,49 @@ export function getCsrfToken(ctx: IRequestContext): string {
   const token = toBase64Url(runtime.randomBytes(TOKEN_BYTES));
   session.set(CSRF_SESSION_KEY, token);
   return token;
+}
+
+/**
+ * Renders this session's CSRF token as a hidden HTML form field.
+ *
+ * The returned markup uses the same mint-once token path as
+ * {@linkcode getCsrfToken}. Its field name must match the `fieldName` supplied
+ * to `SessionPlugin({ csrf: ... })`; omitting it uses the shared `'_csrf'`
+ * default. In an escaping Hono template, wrap the returned trusted markup with
+ * that template runtime's `raw()` helper.
+ *
+ * @param ctx - The request context
+ * @param options - The field-name option shared with form-CSRF configuration
+ * @returns A hidden input containing the session's CSRF token
+ * @throws {Error} If `SessionPlugin` or `RuntimePlugin` is not registered
+ * @throws {SessionMiddlewareMissingError} If the session middleware did not run
+ * @example
+ * ```typescript
+ * app.router.get('/login', (ctx) => {
+ *   return ctx.response.html(
+ *     `<form method="post">${csrfTokenField(ctx)}<button>Sign in</button></form>`,
+ *   );
+ * });
+ * ```
+ * @since 0.5.0
+ */
+export function csrfTokenField(
+  ctx: IRequestContext,
+  options: Pick<CsrfFormOptions, 'fieldName'> = {},
+): string {
+  const fieldName = escapeHtmlAttribute(resolveCsrfConfig(options).fieldName);
+  const token = escapeHtmlAttribute(getCsrfToken(ctx));
+  return `<input type="hidden" name="${fieldName}" value="${token}">`;
+}
+
+/** Escapes the delimiter characters meaningful in a quoted HTML attribute. */
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /**
