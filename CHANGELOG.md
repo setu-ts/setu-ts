@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/session-plugin` — `csrfTokenField(ctx, options?)`** renders the session's existing
+  synchronizer token as a complete hidden form input, so server-rendered forms no longer hand-write
+  its markup. It mints through `getCsrfToken`, escapes a configured field name, and keeps the
+  existing default `'_csrf'`; in an escaping Hono template, application code wraps its trusted
+  generated markup with `raw()`. The helper does not change CSRF policy:
+  `SessionPlugin({ csrf: {} })` still globally verifies unsafe methods and multipart form fields
+  still require the configured header until the separate M94b form-body work ships.
+
 - **`@setu-ts/messaging-plugin` — versioned integration-event contracts over the existing messaging
   capability.** `defineIntegrationEvent<T>({ type, version, topic, parse })` declares a contract and
   refuses a topic that does not end with the exact `.v${version}` suffix, making the versioned-topic

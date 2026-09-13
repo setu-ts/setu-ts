@@ -1646,7 +1646,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | **Purpose**          | Cookie sessions with pluggable stores and synchronizer-token form CSRF                                                                  |
 | **Responsibilities** | AES-256-GCM / HKDF-SHA256 cookie sealing; rolling / idle timeout; store strategy (memory / cache / custom)                             |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
-| **Public API**       | `SessionPlugin()`; `ISessionService`                                                                                                    |
+| **Public API**       | `SessionPlugin()`; `ISessionService`; `csrfTokenField()`                                                                               |
 | **Extension Points** | Custom `ISessionStore`; custom cookie signing (`mode: 'sign'`)                                                                          |
 | **Rules**            | Zero npm dependencies; `runtime.subtle` for crypto; commit-on-response is sound via `snapshot()` live `Headers`                        |
 

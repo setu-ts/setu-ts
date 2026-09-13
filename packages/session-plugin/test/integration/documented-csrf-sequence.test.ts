@@ -31,7 +31,7 @@ import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
-import { getCsrfToken, getSession, SessionPlugin } from '../../src/index.ts';
+import { csrfTokenField, getCsrfToken, getSession, SessionPlugin } from '../../src/index.ts';
 
 const SECRET = 'documented-csrf-sequence-at-least-32-char';
 
@@ -50,6 +50,12 @@ function buildApp() {
     const session = getSession(ctx);
     const token = getCsrfToken(ctx); // minted on first call, then stable
     return ctx.response.json({ token, id: session.id });
+  });
+
+  app.router.get('/form', (ctx) => {
+    return ctx.response.html(
+      `<form method="post" action="/login">${csrfTokenField(ctx)}<button>Sign in</button></form>`,
+    );
   });
 
   app.router.post('/login', (ctx) => {
@@ -133,6 +139,43 @@ describe('documented CSRF sequence (X33-2)', () => {
         method: 'POST',
         url: 'http://localhost/login',
         headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+        body: `_csrf=${encodeURIComponent(token)}&username=alice`,
+      });
+
+      expect(post.statusCode).toBe(200);
+      expect(post.json<{ ok: boolean }>().ok).toBe(true);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('renders the barrel helper and accepts the field it produced', async () => {
+    const app = buildApp();
+    await app.start();
+    try {
+      const get = await app.inject({ method: 'GET', url: 'http://localhost/form' });
+      expect(get.statusCode).toBe(200);
+      expect(get.headers.get('content-type')).toBe('text/html; charset=utf-8');
+
+      if (get.body === null) {
+        throw new Error('CSRF form response had no body.');
+      }
+      const match = get.body.match(
+        /^<form method="post" action="\/login"><input type="hidden" name="_csrf" value="([A-Za-z0-9_-]+)"><button>Sign in<\/button><\/form>$/,
+      );
+      expect(match).not.toBe(null);
+      const token = match?.[1];
+      if (token === undefined) {
+        throw new Error('CSRF token field was not present in the rendered form.');
+      }
+
+      const post = await app.inject({
+        method: 'POST',
+        url: 'http://localhost/login',
+        headers: {
+          cookie: cookieOf(get.headers),
+          'content-type': 'application/x-www-form-urlencoded',
+        },
         body: `_csrf=${encodeURIComponent(token)}&username=alice`,
       });
 
