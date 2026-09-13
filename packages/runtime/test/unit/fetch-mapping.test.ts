@@ -10,7 +10,21 @@ import {
 } from '../../src/adapters/shared/fetch-mapping.ts';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { ResponseSnapshot } from '@setu-ts/common';
+import type { FormBody, IRequest, ResponseSnapshot } from '@setu-ts/common';
+import { UnsupportedFormEncodingError } from '@setu-ts/common';
+
+/**
+ * Reads the form off a served request. `mapWebRequestToFrameworkRequest`
+ * ALWAYS provides the accessor; the guard keeps the optional member's type
+ * honest at the call site without a non-null assertion.
+ */
+function readForm(request: IRequest): Promise<FormBody> {
+  const read = request.formData;
+  if (read === undefined) {
+    return Promise.reject(new Error('the served request must provide formData()'));
+  }
+  return read.call(request);
+}
 
 // ---------------------------------------------------------------------------
 // mapWebRequestToFrameworkRequest — field mapping
@@ -425,6 +439,84 @@ describe('fetch-mapping | null-body statuses', () => {
     // Yield so the swallowed rejection settles before the test ends; an
     // unhandled rejection here would fail the run.
     await new Promise((r) => setTimeout(r, 0));
+  });
+});
+
+describe('fetch-mapping | formData (M94b)', () => {
+  const enc = new TextEncoder();
+
+  function formRequest(contentType: string, body: string): Request {
+    return new Request('https://example.com/form', {
+      method: 'POST',
+      headers: { 'content-type': contentType },
+      body,
+    });
+  }
+
+  function multipartBody(parts: string[], boundary: string): string {
+    return parts.map((part) => `--${boundary}\r\n${part}\r\n`).join('') +
+      `--${boundary}--\r\n`;
+  }
+
+  it('reads a urlencoded body with web semantics', async () => {
+    const request = mapWebRequestToFrameworkRequest(
+      formRequest('application/x-www-form-urlencoded', 'a=1&b=&a=2'),
+    );
+    const form = await readForm(request);
+    expect(form.get('a')).toBe('1');
+    expect(form.getAll('a')).toEqual(['1', '2']);
+    expect(form.get('b')).toBe('');
+  });
+
+  it('reads a multipart body, discriminating file from text on the filename', async () => {
+    const body = multipartBody([
+      'Content-Disposition: form-data; name="file"; filename="a.txt"\r\nContent-Type: text/plain\r\n\r\nDATA',
+      'Content-Disposition: form-data; name="note"\r\n\r\nhello',
+    ], 'fb');
+    const request = mapWebRequestToFrameworkRequest(
+      formRequest('multipart/form-data; boundary=fb', body),
+    );
+    const form = await readForm(request);
+    expect(form.get('file')).toEqual({
+      filename: 'a.txt',
+      mimeType: 'text/plain',
+      data: enc.encode('DATA'),
+    });
+    expect(form.get('note')).toBe('hello');
+  });
+
+  it('two CONCURRENT formData() calls return the same reference', async () => {
+    // The cache holds the in-flight promise; caching the resolved value
+    // instead would let two concurrent readers each parse its own object.
+    const request = mapWebRequestToFrameworkRequest(
+      formRequest('application/x-www-form-urlencoded', 'a=1'),
+    );
+    const [first, second] = await Promise.all([readForm(request), readForm(request)]);
+    expect(first).toBe(second);
+  });
+
+  it('a rejection is cached: a non-form body keeps rejecting identically', async () => {
+    const request = mapWebRequestToFrameworkRequest(
+      formRequest('application/json', '{}'),
+    );
+    await expect(readForm(request)).rejects.toThrow(UnsupportedFormEncodingError);
+    await expect(readForm(request)).rejects.toThrow(UnsupportedFormEncodingError);
+  });
+
+  it('bytes() still resolves after a form read (the memoized read is shared)', async () => {
+    const request = mapWebRequestToFrameworkRequest(
+      formRequest('application/x-www-form-urlencoded', 'a=1'),
+    );
+    await readForm(request);
+    expect(await request.bytes()).toEqual(enc.encode('a=1'));
+  });
+
+  it('a bodyless GET performs no read, and its form read refuses with the 415', async () => {
+    const request = mapWebRequestToFrameworkRequest(
+      new Request('https://example.com/', { method: 'GET' }),
+    );
+    await expect(readForm(request)).rejects.toThrow(UnsupportedFormEncodingError);
+    expect(await request.bytes()).toEqual(new Uint8Array(0));
   });
 });
 

@@ -87,11 +87,12 @@ describe('upload body cap E2E (V5-1)', () => {
     });
   });
 
-  it('still answers 400 when the PARSE fails, under the cap', async () => {
-    // The discriminating half: the refusal path must not swallow the parse
-    // path, or the fix trades one wrong status for another. A content-type
-    // naming no boundary is the parser's own refusal — an unhinted throw,
-    // reached only because the body was small enough to be read at all.
+  it('a content-type naming no boundary is not a form and passes through (M94b)', async () => {
+    // Changed with M94b: the shared classifier classifies a boundary-less
+    // multipart type as not-a-form — a body that could never be parsed — so
+    // the guard passes the request through instead of parsing into the
+    // parser's bare refusal answered `400`. A caller that wants the fields
+    // gets the accessor's `415`; the size refusal above is untouched.
     await withApp(async (app) => {
       const res = await app.fetch(
         new Request('http://localhost/upload', {
@@ -100,7 +101,7 @@ describe('upload body cap E2E (V5-1)', () => {
           body: multipart(32),
         }),
       );
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(200);
     });
   });
 

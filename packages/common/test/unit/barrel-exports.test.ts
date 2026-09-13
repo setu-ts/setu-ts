@@ -97,6 +97,43 @@ describe('@setu-ts/common barrel — registry factory arm', () => {
   });
 });
 
+describe('@setu-ts/common barrel — M94b form body', () => {
+  it('exports the seven form symbols from the barrel', () => {
+    expect(typeof common.parseFormBody).toBe('function');
+    expect(typeof common.formEncodingOf).toBe('function');
+    expect(typeof common.UnsupportedFormEncodingError).toBe('function');
+
+    // Type-level: declared against the BARREL, not the concrete module —
+    // dropping a re-export stops this file compiling, which no runtime
+    // assertion could detect (the M56 defect class).
+    const body: import('../../src/index.ts').FormBody = common.parseFormBody(
+      new TextEncoder().encode('a=1'),
+      'application/x-www-form-urlencoded',
+    );
+    const encoding: import('../../src/index.ts').FormEncoding | undefined = common
+      .formEncodingOf('application/x-www-form-urlencoded');
+    const file: import('../../src/index.ts').FormFile = {
+      filename: 'a.txt',
+      mimeType: 'text/plain',
+      data: new Uint8Array(1),
+    };
+    const value: import('../../src/index.ts').FormValue | undefined = body.get('a');
+
+    expect(encoding).toBe('urlencoded');
+    expect(file.data.byteLength).toBe(1);
+    expect(value).toBe('1');
+  });
+
+  it('does NOT export the internal parser — pinning §3.3', () => {
+    // `parseFormBody` is the only public entry to form parsing; exporting the
+    // internal parser too would leave it with no consumer outside
+    // `parseFormBody` and its own test — the dead-surface rule. A later
+    // "symmetry" export fails HERE, naming why.
+    expect('parseMultipart' in common).toBe(false);
+    expect('ParsedPart' in common).toBe(false);
+  });
+});
+
 /**
  * Strict identity check: `true` only when `A` and `B` are the same type
  * (mutually assignable in the identity sense), so the pinned shape below fails

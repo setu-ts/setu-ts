@@ -13,6 +13,7 @@ import type { IPrincipal } from './services/auth.ts';
 import type { ITenant } from './services/tenancy.ts';
 import type { ValidationTarget } from './services/validation.ts';
 import { MalformedRequestBodyError } from './errors/malformed-body.ts';
+import type { FormBody } from './form/form-body.ts';
 
 /**
  * Opaque marker returned by {@linkcode IResponse} terminal methods and
@@ -109,6 +110,32 @@ export interface IRequest {
    * @returns The body bytes
    */
   bytes(): Promise<Uint8Array>;
+  /**
+   * Reads the body as a form, for both `application/x-www-form-urlencoded`
+   * and `multipart/form-data` requests.
+   *
+   * The parse is the shared `parseFormBody`, memoized exactly as `json()` is —
+   * the in-flight promise is cached (a rejection with it), so two middleware
+   * reading the same body trigger one parse, not two.
+   *
+   * Optional on the `signal?` / `fs?` / `raw?` precedent: a custom `IRequest`
+   * implementor may omit it. Such a caller falls back to
+   * `parseFormBody(await request.bytes(), request.headers.get('content-type'))`,
+   * the same `common` function the producers call — what the accessor adds
+   * over the fallback is the memoization.
+   *
+   * @returns The parsed form. A multipart body the parser cannot make sense
+   * of yields an EMPTY form rather than a rejection: the promoted parser's
+   * released behaviour, kept so the accessor changes where parsing happens,
+   * never what a parse yields.
+   * @throws {UnsupportedFormEncodingError} If the content-type is neither form
+   * encoding — a JSON body, a missing content-type, or a multipart type with
+   * no `boundary=`. Branded `415`, so an application running `errorHandler`
+   * answers `415 Unsupported Media Type` in its configured format rather than
+   * a masked `500`.
+   * @since 0.5.0
+   */
+  formData?(): Promise<FormBody>;
 }
 
 /**

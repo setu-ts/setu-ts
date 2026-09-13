@@ -4,8 +4,8 @@
  * the site's status, title, and disclosure verbatim (plan §3.5, X4-8).
  *
  * Sites covered: the tenant `400`, the flag-guard `404`, the auth `401`, the
- * upload `400` (malformed), the request-size `413`, and the form-CSRF `403`.
- * Each is asserted under `'rfc9457'` and `'default'`.
+ * upload `400` (too many files), the request-size `413`, and the form-CSRF
+ * `403`. Each is asserted under `'rfc9457'` and `'default'`.
  *
  * @module
  */
@@ -27,9 +27,22 @@ import { errorHandler } from '../../src/middleware/error-handler.ts';
 
 const TENANT = { 'x-tenant-id': 'acme' };
 
-/** A genuinely malformed multipart body (no boundary in the content type). */
-const MALFORMED = 'not a real multipart body';
-const MALFORMED_HEADERS = { 'content-type': 'multipart/form-data' };
+const BOUNDARY = '----setu-x48-boundary';
+
+/**
+ * A well-formed multipart body posting TWO files — one over the
+ * `maxFiles: 1` the upload site is registered with below. Since M94b a
+ * boundary-less multipart content-type is classified as not-a-form and
+ * passes through, so the `400` site is driven the way a real refusal fires.
+ */
+const TOO_MANY_FILES = `--${BOUNDARY}\r\n` +
+  'Content-Disposition: form-data; name="file"; filename="a.txt"\r\n' +
+  'Content-Type: text/plain\r\n\r\nhello\r\n' +
+  `--${BOUNDARY}\r\n` +
+  'Content-Disposition: form-data; name="file"; filename="b.txt"\r\n' +
+  'Content-Type: text/plain\r\n\r\nhello\r\n' +
+  `--${BOUNDARY}--\r\n`;
+const MULTIPART_HEADERS = { 'content-type': `multipart/form-data; boundary=${BOUNDARY}` };
 
 /**
  * A minimal `ISessionService` whose session carries no CSRF token.
@@ -103,7 +116,8 @@ async function allSitesApp(format: 'default' | 'rfc9457'): Promise<IKernelApplic
     { priority: 130, name: 'form-csrf' },
   );
   app.middleware.add(
-    (ctx, next) => ctx.request.path === '/upload' ? createUploadMiddleware()(ctx, next) : next(),
+    (ctx, next) =>
+      ctx.request.path === '/upload' ? createUploadMiddleware({ maxFiles: 1 })(ctx, next) : next(),
     { priority: 140, name: 'upload' },
   );
   app.middleware.add(
@@ -194,12 +208,14 @@ describe('every converted short-circuit site answers in the configured format (X
 
       const upload = await drive(app, '/upload', {
         method: 'POST',
-        headers: { ...TENANT, ...MALFORMED_HEADERS },
-        body: MALFORMED,
+        headers: { ...TENANT, ...MULTIPART_HEADERS },
+        body: TOO_MANY_FILES,
       });
       expect(upload.status).toBe(400);
+      expect(upload.contentType).toBe('application/problem+json');
+      // Canonical status title (STATUS_TITLES), site disclosure verbatim (F1).
       expect(upload.body.title).toBe('Bad Request');
-      expect(upload.body.detail).toBe('Failed to parse multipart body');
+      expect(upload.body.detail).toBe('Maximum 1 file(s) allowed');
     } finally {
       await app.stop();
     }
@@ -255,12 +271,13 @@ describe('every converted short-circuit site answers in the configured format (X
 
       const upload = await drive(app, '/upload', {
         method: 'POST',
-        headers: { ...TENANT, ...MALFORMED_HEADERS },
-        body: MALFORMED,
+        headers: { ...TENANT, ...MULTIPART_HEADERS },
+        body: TOO_MANY_FILES,
       });
       expect(upload.status).toBe(400);
-      expect(upload.body.message).toBe('Bad Request');
-      expect(upload.body.details).toEqual({ detail: 'Failed to parse multipart body' });
+      expect(upload.contentType).toBe('application/json; charset=utf-8');
+      expect(upload.body.message).toBe('Too many files');
+      expect(upload.body.details).toEqual({ detail: 'Maximum 1 file(s) allowed' });
     } finally {
       await app.stop();
     }

@@ -8,6 +8,38 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`@setu-ts/common` — one form-body abstraction.** `IRequest.formData?()` resolves a `FormBody`
+  for both `application/x-www-form-urlencoded` and `multipart/form-data` requests — one read-only
+  `get`/`getAll`/`entries` view with the web `FormData`'s SEMANTICS (ordered `getAll` for repeated
+  names, `entries()` in wire order, file-versus-text discriminated on `filename !== undefined`,
+  `filename=""` still a file) over a framework-owned value whose bytes stay synchronous: the web
+  `File`'s async, copying access would add a second full copy per file part on the upload path this
+  exists to make cheaper, so it is deliberately not adopted (and the shape is named `FormBody`,
+  never `FormData`, so it cannot shadow the global). The parse is `parseFormBody(body, contentType)`
+  — the ONE parse all three producers share, the X37-1 precedent — fed by `formEncodingOf`, the ONE
+  case-folding content-type classifier that deletes the two private `includes()` checks the upload
+  middleware and the CSRF verifier had let drift. A non-form content-type throws the new
+  `UnsupportedFormEncodingError`, self-branded `415 Unsupported Media Type` in the
+  `MalformedRequestBodyError` pattern; an unparseable multipart body yields an EMPTY form — the
+  promoted parser's released behaviour, now stated as the accessor's documented limit. The member is
+  OPTIONAL (`signal?`/`fs?`/`raw?` precedent) and provided by all three in-repo producers (runtime's
+  `FrameworkRequest`, the kernel's `inject()`, `@setu-ts/testing`'s `MockRequest`), each memoizing
+  the in-flight promise exactly as `json()` does; a request without the accessor falls back to the
+  same `parseFormBody`, which is the fallback, not a second implementation. The storage-plugin's
+  private multipart parser moves byte-identically into `common` (`parseMultipart`/`ParsedPart` stay
+  internal — `parseFormBody` is the only public entry), and both first-party consumers now read the
+  shared accessor: `createUploadMiddleware` keeps every bound and refusal where it was, and
+  `extractToken` (see the session-plugin entry).
+- **`@setu-ts/session-plugin` — CSRF tokens can arrive in a `multipart/form-data` FIELD.** The
+  verifier previously read only the configured header for multipart posts, because parsing the body
+  would have meant importing the storage plugin's parser. With the parser promoted into `common`,
+  `extractToken` reads BOTH form encodings through the request's shared `formData` accessor (or the
+  same `parseFormBody` fallback) after the configured header, so a browser form posting a file
+  alongside its token verifies where it previously could only `403`. The header still wins and a
+  client that sends it triggers no body parse; a token submitted as a multipart FILE part is REFUSED
+  as absent (a client chooses freely whether a part carries a `filename`, so a non-string value must
+  never reach the timing-safe comparison); a non-form body still reports the ordinary mismatch
+  rather than the accessor's `415`; and the urlencoded path is byte-identical to before.
 - **`@setu-ts/messaging-plugin` — versioned integration-event contracts over the existing messaging
   capability.** `defineIntegrationEvent<T>({ type, version, topic, parse })` declares a contract and
   refuses a topic that does not end with the exact `.v${version}` suffix, making the versioned-topic
@@ -128,6 +160,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING — `@setu-ts/storage-plugin`: a multipart part with no `filename` under the upload field
+  name is no longer an upload.** It used to be reported as an `UploadedFile` whose `filename` fell
+  back to the field name; since the upload middleware reads forms through the new shared accessor
+  (M94b), a no-`filename` part is a plain form value — the web standard's answer — and only parts
+  that declared a `filename` are delivered, `filename=""` (the empty file input) included.
+  **Migration:** a browser file input always sends a `filename`, even an empty one, so ordinary
+  uploads are unaffected; a non-browser client posting a plain value under the file field should
+  send that value under a non-upload field name (read it from `formData()`), or add a `filename` to
+  the part if it genuinely is a file. Relatedly, a `multipart/form-data` content-type carrying no
+  `boundary=` now passes through the middleware unparsed instead of being answered `400` as a
+  malformed body: the shared classifier classifies it as not-a-form (a body that could never be
+  parsed), and a caller that wants the fields gets the accessor's `415`. Everything else is
+  unchanged: the `Content-Length` check, the `bytes()` read, the `maxBodyBytes` cap, `maxFiles`,
+  `maxSize` and `allowedMimeTypes` refusals and their statuses all stay where they were.
 - **BREAKING — `@setu-ts/kernel`: `IKernelApplication` gains a required
   `unregister(name: string):
   boolean`.** It removes a pending plugin before `start()`, returning

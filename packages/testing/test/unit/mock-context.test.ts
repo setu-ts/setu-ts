@@ -2,8 +2,17 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { _getDefaults, createTestContext, MockResponse } from '../../src/mock-context.ts';
 import { MockServiceRegistry } from '../../src/mock-registry.ts';
-import { httpStatusHintOf, MalformedRequestBodyError } from '@setu-ts/common';
-import type { IRuntimeServices, IServiceRegistry } from '@setu-ts/common';
+import {
+  httpStatusHintOf,
+  MalformedRequestBodyError,
+  UnsupportedFormEncodingError,
+} from '@setu-ts/common';
+import type {
+  FormBody,
+  IRequestContext,
+  IRuntimeServices,
+  IServiceRegistry,
+} from '@setu-ts/common';
 
 // Build a runtime fake where every accessor is verified individually.
 // This covers all DEFAULT_TEST_RUNTIME accessors plus any injected runtime.
@@ -566,5 +575,61 @@ describe('MockResponse', () => {
     const obj = { key: 'val' };
     const ctx = createTestContext({ body: obj });
     expect(await ctx.request.json<{ key: string }>()).toEqual(obj);
+  });
+
+  // --- M94b: MockRequest.formData() ---
+
+  /** Reads the form; the mock ALWAYS provides the accessor (the guard keeps
+   * the optional member's type honest without a non-null assertion). */
+  function readForm(ctx: IRequestContext): Promise<FormBody> {
+    const read = ctx.request.formData;
+    if (read === undefined) {
+      return Promise.reject(new Error('MockRequest must provide formData()'));
+    }
+    return read.call(ctx.request);
+  }
+
+  it('MockRequest.formData() reads a urlencoded string body with web semantics', async () => {
+    const ctx = createTestContext({ body: 'a=1&b=&a=2' });
+    ctx.request.headers.set('content-type', 'application/x-www-form-urlencoded');
+    const form = await readForm(ctx);
+    expect(form.get('a')).toBe('1');
+    expect(form.getAll('a')).toEqual(['1', '2']);
+    expect(form.get('b')).toBe('');
+  });
+
+  it('MockRequest.formData() reads a Uint8Array multipart body', async () => {
+    const body = new TextEncoder().encode(
+      '--fb\r\nContent-Disposition: form-data; name="file"; filename="a.bin"\r\n' +
+        'Content-Type: application/octet-stream\r\n\r\nDATA\r\n--fb--\r\n',
+    );
+    const ctx = createTestContext({ body });
+    ctx.request.headers.set('content-type', 'multipart/form-data; boundary=fb');
+    const form = await readForm(ctx);
+    expect(form.get('file')).toEqual({
+      filename: 'a.bin',
+      mimeType: 'application/octet-stream',
+      data: new TextEncoder().encode('DATA'),
+    });
+  });
+
+  it('MockRequest.formData() memoizes: two awaits return the same reference', async () => {
+    const ctx = createTestContext({ body: 'a=1' });
+    ctx.request.headers.set('content-type', 'application/x-www-form-urlencoded');
+    const [first, second] = await Promise.all([readForm(ctx), readForm(ctx)]);
+    expect(first).toBe(second);
+  });
+
+  it('MockRequest.formData() rejects a non-form content-type with the 415-branded error', async () => {
+    const ctx = createTestContext({ body: '{"a":1}' });
+    ctx.request.headers.set('content-type', 'application/json');
+    await expect(readForm(ctx)).rejects.toThrow(UnsupportedFormEncodingError);
+    let thrown: unknown;
+    try {
+      await readForm(ctx);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(httpStatusHintOf(thrown)?.status).toBe(415);
   });
 });

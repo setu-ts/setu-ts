@@ -8,6 +8,7 @@
  * @module
  */
 import type { IRequestContext } from '@setu-ts/common';
+import { formEncodingOf, parseFormBody } from '@setu-ts/common';
 
 import { timingSafeEqualStrings } from '../codec/timing-safe.ts';
 import { CsrfTokenMismatchError } from '../errors.ts';
@@ -16,9 +17,6 @@ import { resolveCsrfConfig } from '../options.ts';
 import { getSession } from '../services/get-session.ts';
 import { readCsrfToken } from './token.ts';
 import { isCsrfExcluded } from './exclude.ts';
-
-/** Content type carrying a plain HTML form post. */
-const FORM_URLENCODED = 'application/x-www-form-urlencoded';
 
 /**
  * Verifies the request's CSRF token against the session's, throwing on any
@@ -29,9 +27,12 @@ const FORM_URLENCODED = 'application/x-www-form-urlencoded';
  * middleware. The middleware calls exactly this function, so the two can never
  * disagree.
  *
- * Reading the body here is safe: the runtime's request mapping pre-reads it into
- * a buffer, so `text()` is replayable and the handler can still read the body
- * afterwards.
+ * Reading the body here is safe: every body read is memoized (M87), so the
+ * parse is cached and the handler can still read the body afterwards —
+ * including a multipart body, which is read now too (M94b) through the same
+ * shared accessor the upload middleware uses. The configured header is read
+ * first, so a client that sends the token in the header triggers no body read
+ * at all.
  *
  * @param ctx - The request context
  * @param options - CSRF options; defaults match the plugin's
@@ -85,9 +86,19 @@ export async function verifyWithConfig(
 /**
  * Pulls the submitted token from the configured header, then the form body.
  *
- * `multipart/form-data` is deliberately not parsed — that would duplicate the
- * storage plugin's multipart parser, which this package may not import. A
- * multipart form must therefore carry the token in the configured header.
+ * Both form encodings are read (M94b) through the request's `formData`
+ * accessor — falling back to the same shared `parseFormBody` when the request
+ * omits the optional accessor — so a token arriving in a multipart FIELD now
+ * verifies, where previously only the header could carry it. The content-type
+ * is classified first with `formEncodingOf`, so a non-form request never
+ * parses a body and never observes the accessor's `415`: it simply reports
+ * "carried no CSRF token", the mismatch it always reported.
+ *
+ * A value is accepted only when it is a non-empty STRING. That check is a
+ * security requirement, not tidiness: a client chooses freely whether a part
+ * carries a `filename`, so a `FormFile` can be submitted under the token's
+ * field name, and handing a non-string to `timingSafeEqualStrings` would
+ * compare garbage. A file-borne token is refused as absent.
  */
 async function extractToken(
   ctx: IRequestContext,
@@ -100,12 +111,14 @@ async function extractToken(
     }
   }
 
-  const contentType = ctx.request.headers.get('content-type') ?? '';
-  if (!contentType.toLowerCase().includes(FORM_URLENCODED)) {
+  const contentType = ctx.request.headers.get('content-type');
+  if (formEncodingOf(contentType) === undefined) {
     return undefined;
   }
 
-  const body = await ctx.request.text();
-  const value = new URLSearchParams(body).get(config.fieldName);
-  return value === null || value === '' ? undefined : value;
+  const form = ctx.request.formData !== undefined
+    ? await ctx.request.formData()
+    : parseFormBody(await ctx.request.bytes(), contentType);
+  const value = form.get(config.fieldName);
+  return typeof value === 'string' && value !== '' ? value : undefined;
 }

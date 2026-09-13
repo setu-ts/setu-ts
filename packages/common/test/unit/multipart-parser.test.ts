@@ -5,7 +5,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { parseMultipart } from '../../src/multipart/multipart-parser.ts';
+import { parseMultipart } from '../../src/form/multipart-parser.ts';
 
 /** Helper: build a multipart body with a known boundary. */
 function makeBody(

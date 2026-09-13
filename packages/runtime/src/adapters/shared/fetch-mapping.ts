@@ -13,8 +13,8 @@
  * @module
  */
 
-import type { HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
-import { parseJsonBody, withHttpStatusHint } from '@setu-ts/common';
+import type { FormBody, HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
+import { parseFormBody, parseJsonBody, withHttpStatusHint } from '@setu-ts/common';
 
 // Hoisted TextDecoder — avoids per-call allocation (A1 — no slice needed).
 const decoder = new TextDecoder();
@@ -83,6 +83,7 @@ class FrameworkRequest implements IRequest {
   readonly #raw: Request;
   #body: Promise<Uint8Array> | undefined;
   #json: Promise<unknown> | undefined;
+  #form: Promise<FormBody> | undefined;
   #headers: Headers | undefined;
   readonly #maxBodyBytes: number | undefined;
 
@@ -174,6 +175,21 @@ class FrameworkRequest implements IRequest {
    */
   json<T = unknown>(): Promise<T> {
     return (this.#json ??= this.text().then((text) => parseJsonBody(text))) as Promise<T>;
+  }
+
+  /**
+   * Reads the body as a form (`parseFormBody`, M94b). Idempotent.
+   *
+   * The cache holds the in-flight PROMISE like every other body reader, and a
+   * rejection is cached like `json()`'s: a body that is not a form will not
+   * become one on a retry. The content-type is read off the NATIVE request,
+   * never `this.headers`, so a form read does not take the lazy header copy
+   * on a request whose middleware never touches headers.
+   */
+  formData(): Promise<FormBody> {
+    return this.#form ??= this.bytes().then((body) =>
+      parseFormBody(body, this.#raw.headers.get('content-type'))
+    );
   }
 
   /**

@@ -10,6 +10,7 @@ import {
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
   isPromiseLike,
+  parseFormBody,
   parseJsonBody,
   respondWithError,
   serializeError,
@@ -19,6 +20,7 @@ import type {
   CliCommandHandler,
   DecoratorHandler,
   EnvVarSpec,
+  FormBody,
   HealthIndicatorFn,
   IApplication,
   IConfig,
@@ -632,6 +634,12 @@ class Application implements IKernelApplication {
       raw = undefined;
     }
 
+    // The form read is memoized like `json()`'s: the in-flight promise is
+    // cached (a rejection with it), so two middleware reading the same
+    // injected body trigger one parse, and a body that is not a form keeps
+    // rejecting identically on a retry.
+    let form: Promise<FormBody> | undefined;
+
     const syntheticRequest: IRequest = {
       method: request.method as IRequest['method'],
       url: fullUrl,
@@ -653,6 +661,17 @@ class Application implements IKernelApplication {
       },
       bytes(): Promise<Uint8Array> {
         return Promise.resolve(new TextEncoder().encode(bodyStr ?? ''));
+      },
+      formData(): Promise<FormBody> {
+        // The shared parse (M94b): a non-form content-type rejects with the
+        // `415`-branded UnsupportedFormEncodingError, so an injected request
+        // observes what a served request observes. `headers` already carries
+        // the `application/json` default, so a bodyless inject without a
+        // content-type classifies as absent — the same `415`.
+        form ??= Promise.resolve().then(() =>
+          parseFormBody(new TextEncoder().encode(bodyStr ?? ''), headers.get('content-type'))
+        );
+        return form;
       },
     };
 
