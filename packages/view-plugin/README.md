@@ -18,8 +18,25 @@ the application did not concatenate by hand.
 ## Installation
 
 ```bash
-deno add jsr:@setu-ts/view-plugin
+deno add jsr:@setu-ts/view-plugin jsr:@hono/hono
 ```
+
+**`@hono/hono` is required, not optional.** The default `'hono-jsx'` arm compiles JSX through
+`@hono/hono/jsx/jsx-runtime`, and the `'hono-html'` arm imports `@hono/hono/html` — neither resolves
+from a transitive dependency, so a project that installs only this package gets
+`TS2307: Import "@hono/hono/jsx/jsx-runtime" not a dependency and not in import map` on its first
+component. Add the JSX transform to the application manifest alongside it:
+
+```json
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@hono/hono/jsx"
+  }
+}
+```
+
+A project using only the `'hono-html'` arm needs `@hono/hono` but neither compiler option.
 
 ## Usage
 
@@ -73,9 +90,10 @@ class PagesController {
 ```
 
 Components are JSX, so their module is `.tsx` and the application manifest declares `jsx` /
-`jsxImportSource` — the controller itself may stay `.ts` and import them. If you would rather not
-add a JSX toolchain at all, `ViewPlugin({ engine: 'hono-html' })` takes components written with
-hono's `html` tagged template in a plain `.ts` file:
+`jsxImportSource` and depends on `@hono/hono` (see [Installation](#installation)) — the controller
+itself may stay `.ts` and import them. If you would rather not add a JSX toolchain at all,
+`ViewPlugin({ engine: 'hono-html' })` takes components written with hono's `html` tagged template in
+a plain `.ts` file:
 
 ```typescript
 import { html } from '@hono/hono/html';

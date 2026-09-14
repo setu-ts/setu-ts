@@ -70,6 +70,8 @@ export interface DocComponent {
   readonly expectUnsafe: boolean;
   /** True when the component opts out of escaping through `raw()`. */
   readonly usesRaw: boolean;
+  /** Fence-local `const` definitions the component references, in source order. */
+  readonly dependencies: readonly string[];
 }
 
 /** A component whose rendered output did not match its declared safety. */
@@ -100,6 +102,31 @@ export function renderedComponentNames(code: string): readonly string[] {
 }
 
 /**
+ * Advances past a comment at `index`, if one starts there.
+ *
+ * Load-bearing, not defensive. `decorator-plugin`'s README carries a comment
+ * quoting a template literal — ``// `(props) => \`<li>${user}</li>\`` `` — and a
+ * walker that does not skip comments enters quote state on that backtick,
+ * never leaves, and silently stops seeing declarations for the rest of the
+ * fence. The document dropped out of this gate's coverage entirely.
+ *
+ * @param code - The source being scanned
+ * @param index - The current offset
+ * @returns The offset after the comment, or the same offset when none starts here
+ */
+export function skipComment(code: string, index: number): number {
+  if (code[index] === '/' && code[index + 1] === '/') {
+    const end = code.indexOf('\n', index);
+    return end === -1 ? code.length : end;
+  }
+  if (code[index] === '/' && code[index + 1] === '*') {
+    const end = code.indexOf('*/', index + 2);
+    return end === -1 ? code.length : end + 2;
+  }
+  return index;
+}
+
+/**
  * Lifts one `const <name> = …;` statement out of a fence.
  *
  * Scans to the first `;` at nesting depth zero, tracking parentheses, braces,
@@ -114,12 +141,24 @@ export function renderedComponentNames(code: string): readonly string[] {
  * @returns The statement source, or null when absent
  */
 export function extractDefinition(code: string, name: string): string | null {
-  const start = code.search(new RegExp(`\\bconst\\s+${name}\\s*[=:]`));
+  const start = code.search(
+    new RegExp(`\\b(?:const\\s+${name}\\s*[=:]|function\\s+${name}\\s*[(<])`),
+  );
   if (start === -1) return null;
+  // A function declaration has no terminating semicolon: it ends when its body
+  // brace closes.
+  const isFunction = /^\s*function\b/.test(code.slice(start, start + 12));
 
   let depth = 0;
   let quote: string | null = null;
   for (let i = start; i < code.length; i++) {
+    if (quote === null) {
+      const skipped = skipComment(code, i);
+      if (skipped !== i) {
+        i = skipped - 1;
+        continue;
+      }
+    }
     const ch = code[i]!;
     const prev = code[i - 1];
     if (quote !== null) {
@@ -132,7 +171,8 @@ export function extractDefinition(code: string, name: string): string | null {
     }
     if (ch === '(' || ch === '{' || ch === '[') depth++;
     else if (ch === ')' || ch === '}' || ch === ']') depth--;
-    else if (ch === ';' && depth === 0) return code.slice(start, i + 1);
+    else if (!isFunction && ch === ';' && depth === 0) return code.slice(start, i + 1);
+    if (isFunction && ch === '}' && depth === 0) return code.slice(start, i + 1);
   }
   return null;
 }
@@ -166,6 +206,107 @@ export function attachedComment(before: string): string {
 }
 
 /**
+ * Every `const` a fence declares at its TOP level, with its offset.
+ *
+ * Depth matters: a fence's route handler declares its own locals — `const form
+ * = await readForm(ctx)` in `docs/mvc.md` — and lifting one of those into the
+ * probe produced a `ReferenceError` for a helper that only exists inside the
+ * handler. A component and its scaffolding are module-level; a handler's
+ * locals are not.
+ *
+ * @param code - The fence body
+ * @returns One entry per top-level declaration, in source order
+ */
+export function topLevelConsts(code: string): readonly { name: string; index: number }[] {
+  // `const X = …`, `const X: T = …`, `function X(…)` and their `export` forms.
+  // A component written as a function declaration used to be invisible, so a
+  // `@Render(UserList)` naming one was never rendered.
+  const DECLARATION =
+    /^(?:export\s+)?(?:const\s+([A-Za-z_$][\w$]*)\s*[=:]|function\s+([A-Za-z_$][\w$]*)\s*[(<])/;
+  const found: { name: string; index: number }[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < code.length; i++) {
+    if (quote === null) {
+      const skipped = skipComment(code, i);
+      if (skipped !== i) {
+        i = skipped - 1;
+        continue;
+      }
+    }
+    const ch = code[i]!;
+    if (quote !== null) {
+      if (ch === quote && code[i - 1] !== '\\') quote = null;
+      continue;
+    }
+    if (ch === "'" || ch === '"' || ch === '`') {
+      quote = ch;
+      continue;
+    }
+    if (ch === '(' || ch === '{' || ch === '[') {
+      depth++;
+      continue;
+    }
+    if (ch === ')' || ch === '}' || ch === ']') {
+      depth--;
+      continue;
+    }
+    if (depth !== 0 || (ch !== 'c' && ch !== 'f' && ch !== 'e')) continue;
+    const match = DECLARATION.exec(code.slice(i));
+    if (match === null) continue;
+    const before = code[i - 1];
+    if (before !== undefined && /[\w$.]/.test(before)) continue;
+    // `export function X` matches at both `e` and the inner `f`; keep the
+    // outer one. Skipping ahead instead would step over the opening paren and
+    // break the depth tracking every later decision depends on.
+    if (ch === 'f' && /\bexport\s+$/.test(code.slice(Math.max(0, i - 12), i))) continue;
+    found.push({ name: (match[1] ?? match[2])!, index: i });
+  }
+  return found;
+}
+
+/**
+ * The fence-local `const` definitions a component references.
+ *
+ * A component is rarely alone in its fence: `docs/mvc.md`'s `Page` interpolates
+ * a `CLIENT` script defined beside it, and lifting the component without it
+ * left a `ReferenceError` that the gate reported as a defect in the document.
+ * Only definitions the component actually names are lifted, so an unrelated
+ * sibling cannot drag its own failure into the probe.
+ *
+ * @param code - The fence body
+ * @param source - The component's own definition, excluded from the result
+ * @returns The referenced definitions, in the order the fence declares them
+ */
+export function localDependencies(code: string, source: string): readonly string[] {
+  const referenced = new Set(source.match(/[A-Za-z_$][\w$]*/g) ?? []);
+  const found: string[] = [];
+  for (const { name } of topLevelConsts(code)) {
+    if (!referenced.has(name)) continue;
+    const definition = extractDefinition(code, name);
+    if (definition === null || definition === source) continue;
+    found.push(definition);
+  }
+  return found;
+}
+
+/**
+ * Whether a definition is a view component rather than a context-taking helper.
+ *
+ * `renderComponent` renders a `Component<P>` — a function of a PROPS BAG. A
+ * documented helper such as `session-plugin`'s `LoginForm`, whose parameter is
+ * an `IRequestContext`, is neither, and probing it with a synthetic context
+ * only ever produces a throw from the real service it calls. Excluded by its
+ * SIGNATURE rather than by name, so the exclusion cannot quietly widen.
+ *
+ * @param source - The component's definition
+ * @returns True when the definition takes a props bag
+ */
+export function takesProps(source: string): boolean {
+  return !/\(\s*[A-Za-z_$][\w$]*\s*:\s*IRequestContext\b/.test(source);
+}
+
+/**
  * Collects every renderable component defined across a document's fences.
  *
  * @param file - The document's path
@@ -186,13 +327,12 @@ export function collectComponents(file: string, markdown: string): readonly DocC
     // Reintroducing the exact v0.6.0 defect in the second one did not fail
     // this gate until the scope was narrowed.
     const seen = new Set<string>();
-    for (const m of fence.code.matchAll(/\bconst\s+([A-Z][A-Za-z0-9_$]*)\s*=/g)) {
-      const name = m[1]!;
-      if (seen.has(name)) continue;
+    for (const { name, index } of topLevelConsts(fence.code)) {
+      if (!/^[A-Z]/.test(name) || seen.has(name)) continue;
       const source = extractDefinition(fence.code, name);
-      if (source === null || !MARKUP.test(source)) continue;
+      if (source === null || !MARKUP.test(source) || !takesProps(source)) continue;
       seen.add(name);
-      const before = attachedComment(fence.code.slice(0, m.index ?? 0));
+      const before = attachedComment(fence.code.slice(0, index));
       found.push({
         file,
         line: fence.line,
@@ -200,6 +340,7 @@ export function collectComponents(file: string, markdown: string): readonly DocC
         source,
         expectUnsafe: COUNTER_EXAMPLE_MARKERS.some((marker) => before.includes(marker)),
         usesRaw: /\braw\s*\(/.test(source),
+        dependencies: localDependencies(fence.code, source),
       });
     }
   }
@@ -225,6 +366,7 @@ export function buildProbe(components: readonly DocComponent[]): string {
   // checking something the reader will not copy.
   const body = components.map((c, index) =>
     `{
+${c.dependencies.join('\n')}
 ${c.source}
 try {
   const out = await renderComponent(${c.name} as never, props);
@@ -238,10 +380,36 @@ try {
   return `/** @jsxImportSource @hono/hono/jsx */
 import { renderComponent } from '../../packages/view-plugin/src/render/normalize.ts';
 import { html } from '@hono/hono/html';
-import { raw } from '@hono/hono/html';
 
 const HOSTILE = ${JSON.stringify(HOSTILE)};
-const props = new Proxy({}, { get: () => [HOSTILE] }) as never;
+
+// A sentinel that answers EVERY read with itself, so a nested access reaches
+// the payload as readily as a direct one. The first cut returned a plain
+// [HOSTILE] array, which made \`props.values.title\` resolve to \`undefined\` —
+// and \`docs/mvc.md\`'s TaskForm, a plain template literal interpolating
+// SUBMITTED FORM DATA, scored as escaped.
+//
+// Array-backed so \`props.users.map(fn)\` still works, and it stringifies to the
+// payload so a direct interpolation carries it. It is never nullish, so
+// \`props.errors.title ?? ''\` does not fall through to the empty string.
+const hostile: never = new Proxy([HOSTILE], {
+  get(target, key) {
+    if (key === Symbol.toPrimitive) return () => HOSTILE;
+    if (key === 'toString' || key === 'valueOf') return () => HOSTILE;
+    if (key in target) {
+      const value = Reflect.get(target, key) as unknown;
+      return typeof value === 'function' ? value.bind(target) : value;
+    }
+    return hostile;
+  },
+}) as never;
+const props = hostile;
+
+// \`raw()\` is the documented opt-out, so its argument must NOT carry the
+// payload — otherwise the opt-out reports itself as a defect. Stubbed to a
+// benign marker rather than exempting the whole component, which would have
+// stopped checking every OTHER interpolation beside it.
+const raw = (_value: unknown): string => '<!--raw-->';
 void html;
 void raw;
 
@@ -258,7 +426,10 @@ export type ProbeResult =
  * Parses probe output, refusing an incomplete batch.
  *
  * A short batch means the probe died partway, which must fail the gate rather
- * than silently check fewer components than it collected.
+ * than silently check fewer components than it collected. Every field is
+ * validated, and out-of-order or duplicate indices are refused: a record
+ * carrying only `ok` reached {@link compare} with `escaped` undefined, which a
+ * counter-example reads as "still unsafe" — a malformed batch that PASSES.
  *
  * @param stdout - JSON-lines output
  * @param expected - How many components were rendered
@@ -268,14 +439,29 @@ export function parseProbe(stdout: string, expected: number): readonly ProbeResu
   const lines = stdout.trim().length === 0 ? [] : stdout.trim().split('\n');
   if (lines.length !== expected) return null;
   const results: ProbeResult[] = [];
-  for (const line of lines) {
+  for (const [position, line] of lines.entries()) {
+    let decoded: unknown;
     try {
-      const decoded = JSON.parse(line) as ProbeResult;
-      if (typeof decoded !== 'object' || decoded === null || !('ok' in decoded)) return null;
-      results.push(decoded);
+      decoded = JSON.parse(line);
     } catch {
       return null;
     }
+    if (typeof decoded !== 'object' || decoded === null) return null;
+    const record = decoded as Record<string, unknown>;
+    // Each field is checked, and the index must be the one this position
+    // expects. A record carrying only `ok` used to be accepted, and its
+    // missing `escaped` reached `compare` as `undefined` — falsy, which a
+    // counter-example reads as "still unsafe", so a malformed batch could
+    // PASS. Fail closed instead.
+    if (record['index'] !== position) return null;
+    if (typeof record['ok'] !== 'boolean') return null;
+    if (record['ok'] === true) {
+      if (typeof record['escaped'] !== 'boolean') return null;
+      results.push({ index: position, ok: true, escaped: record['escaped'] });
+      continue;
+    }
+    if (typeof record['error'] !== 'string') return null;
+    results.push({ index: position, ok: false, error: record['error'] });
   }
   return results;
 }
@@ -348,8 +534,13 @@ export async function scanDocuments(roots: readonly string[]): Promise<readonly 
     let entries: Deno.DirEntry[];
     try {
       entries = await Array.fromAsync(Deno.readDir(dir));
-    } catch {
-      return;
+    } catch (error) {
+      // A missing root is ordinary — a caller may name one that does not
+      // exist. Anything else (a permission error, an I/O fault) would
+      // silently omit that directory's documents and let the gate pass with
+      // incomplete coverage, so it propagates.
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
     }
     for (const entry of entries) {
       if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
@@ -387,10 +578,12 @@ export async function run(
     }
     components.push(...collectComponents(file, markdown));
   }
-  // A component reaching for `raw()` has opted out of escaping deliberately —
-  // that is the documented escape hatch, and rendering it would report the
-  // opt-out as a defect.
-  const rendered = components.filter((c) => !c.usesRaw);
+  // Every component is rendered, `raw()` included. An earlier cut skipped a
+  // component whose source mentioned `raw` at all, which stopped checking
+  // every OTHER interpolation beside the opted-out one — a component mixing
+  // trusted markup with a user-controlled field was exempt in full. The
+  // opt-out is neutralised per CALL inside the probe instead.
+  const rendered = components;
   if (rendered.length === 0) return [];
 
   await Deno.mkdir(SCRATCH, { recursive: true });
@@ -420,6 +613,13 @@ export async function run(
     return [{ file: PROBE, line: 1, message: 'the render probe timed out' }];
   }
   const stdout = new TextDecoder().decode(outcome.stdout);
+  if (!outcome.success) {
+    // A component can print its result and then fail the process — an
+    // unhandled rejection scheduled during rendering, say. The batch would be
+    // complete and the gate would report success.
+    const stderr = new TextDecoder().decode(outcome.stderr).trim();
+    return [{ file: PROBE, line: 1, message: `the render probe exited non-zero.\n${stderr}` }];
+  }
   const results = parseProbe(stdout, rendered.length);
   if (results === null) {
     const stderr = new TextDecoder().decode(outcome.stderr).trim();

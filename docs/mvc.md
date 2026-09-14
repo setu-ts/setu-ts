@@ -29,8 +29,11 @@ rendering strategy; one engine serves both, and the selected mode is reported by
 indicator. `ViewPlugin()` defaults to the `'hono-jsx'` arm — components authored with
 `@hono/hono/jsx`, escaped by the JSX runtime, zero client JavaScript.
 `ViewPlugin({ engine: 'hono-html' })` selects the `html` tagged-template arm, which needs no
-`jsxImportSource` and works in a plain `.ts` file. The `'custom'` arm registers an
-application-supplied `IViewEngine` verbatim.
+`jsxImportSource` and works in a plain `.ts` file. **Both arms require `@hono/hono` as a direct
+dependency** — `deno add jsr:@hono/hono` — because neither `@hono/hono/jsx/jsx-runtime` nor
+`@hono/hono/html` resolves through a transitive one; see the
+[view-plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/view-plugin/README.md#installation).
+The `'custom'` arm registers an application-supplied `IViewEngine` verbatim.
 
 ## The functional entry point
 
@@ -67,9 +70,10 @@ class PagesController {
     return { users: ['ada', 'grace'] }; // the props bag — the framework answers HTML
   }
 }
-
-app.register(ViewPlugin());
 ```
+
+`ViewPlugin()` is already registered by the application setup above — registering it a second time
+throws `Duplicate plugin name 'view-plugin'` at `start()`.
 
 Both entry points resolve the SAME engine under `CAPABILITIES.VIEW` and answer through the same
 `IResponse.html(...)` write. `@Render` type-checks the handler's return against the component's
@@ -98,6 +102,7 @@ answers `303`, so a refresh does not resubmit.
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IRequestContext, IValidationService, ValidationIssue } from '@setu-ts/common';
+import { html } from '@hono/hono/html';
 import { renderView } from '@setu-ts/view-plugin';
 import { z } from 'zod';
 
@@ -110,17 +115,22 @@ interface TaskFormProps {
   readonly errors: Readonly<Record<string, string>>;
 }
 
+// The `html` tag, NOT a plain template literal: this component redisplays a
+// REJECTED submission, so `props.values.title` is attacker-controlled by
+// definition. A plain literal is a `string` the engine returns unchanged.
 const TaskForm = (props: TaskFormProps) =>
-  `<form method="post" action="/tasks">
+  html`<form method="post" action="/tasks">
      <input name="title" value="${props.values.title}" />
      ${props.errors.title ?? ''}
    </form>`;
 
-/** `IRequest` has no `formData()` — read the body as text and parse it. */
+/** Reads both form encodings through the accessor M94b added to `IRequest`. */
 async function readForm(ctx: IRequestContext): Promise<Record<string, string>> {
-  const params = new URLSearchParams(await ctx.request.text());
+  const form = await ctx.request.formData?.();
   const out: Record<string, string> = {};
-  for (const [key, value] of params) out[key] = value;
+  for (const [key, value] of form?.entries() ?? []) {
+    if (typeof value === 'string') out[key] = value;
+  }
   return out;
 }
 

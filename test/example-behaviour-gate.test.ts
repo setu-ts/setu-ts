@@ -24,6 +24,8 @@ import {
   renderedComponentNames,
   run,
   scanDocuments,
+  skipComment,
+  topLevelConsts,
 } from '../scripts/check-example-behaviour.ts';
 
 const JSX =
@@ -88,6 +90,75 @@ describe('attachedComment', () => {
 
   it('reads a JSDoc block', () => {
     expect(attachedComment('/**\n * DO NOT USE\n */\nconst A =')).toContain('DO NOT USE');
+  });
+});
+
+describe('skipComment — the scanners must not enter quote state inside a comment', () => {
+  it('skips a line comment, backticks and all', () => {
+    // `decorator-plugin`'s README carries exactly this shape. Without the
+    // skip, the walker enters quote state on the comment's backtick, never
+    // leaves, and the document silently drops out of coverage.
+    const code = '// `(props) => `<li>${u}</li>`` \nconst A = 1;';
+    expect(skipComment(code, 0)).toBe(code.indexOf('\n'));
+  });
+
+  it('skips a block comment', () => {
+    expect(skipComment('/* a ` b */x', 0)).toBe(11);
+  });
+
+  it('leaves a non-comment offset alone', () => {
+    expect(skipComment('const A = 1;', 0)).toBe(0);
+  });
+
+  it('runs to the end when a comment is unterminated', () => {
+    expect(skipComment('/* never closed', 0)).toBe(15);
+    expect(skipComment('// to the end', 0)).toBe(13);
+  });
+
+  it('finds a declaration AFTER a backtick-carrying comment', () => {
+    const fence = '// see `<li>${u}</li>`\nconst Widget = (p) => <ul>{p.x}</ul>;';
+    expect(topLevelConsts(fence).map((c) => c.name)).toEqual(['Widget']);
+  });
+});
+
+describe('topLevelConsts', () => {
+  it('ignores a declaration nested inside a function body', () => {
+    // A handler's locals are not component scaffolding: lifting one produced
+    // a ReferenceError for a helper that exists only inside the handler.
+    const fence = 'const A = 1;\nasync function h(ctx) {\n  const form = await readForm(ctx);\n}';
+    // `h` is itself top-level and belongs; the handler's `form` does not.
+    expect(topLevelConsts(fence).map((c) => c.name)).toEqual(['A', 'h']);
+  });
+});
+
+describe('declaration forms — a component is not always `const X = …`', () => {
+  it('finds a function declaration and its export form', () => {
+    const fence =
+      'function Widget(p) { return <ul>{p.x}</ul>; }\nexport function Other(p) { return <p>{p.y}</p>; }';
+    expect(topLevelConsts(fence).map((c) => c.name)).toEqual(['Widget', 'Other']);
+  });
+
+  it('extracts a function declaration whole, to its closing brace', () => {
+    const fence = 'function Widget(p) { return <ul>{p.x}</ul>; }\nconst after = 1;';
+    expect(extractDefinition(fence, 'Widget')).toBe(
+      'function Widget(p) { return <ul>{p.x}</ul>; }',
+    );
+  });
+
+  it('finds an annotated const component', () => {
+    const fence = 'const Widget: Component<P> = (p) => <ul>{p.x}</ul>;';
+    expect(topLevelConsts(fence).map((c) => c.name)).toEqual(['Widget']);
+  });
+
+  it('collects a function-declared component a fence renders', () => {
+    // A `@Render(UserList)` naming a function declaration used to be invisible
+    // to this gate, so the component was never rendered.
+    const markdown = doc(
+      'function UserList(p: { u: string }) { return `<li>${p.u}</li>`; }\n@Render(UserList)',
+    );
+    const found = collectComponents('docs/x.md', markdown);
+    expect(found).toHaveLength(1);
+    expect(found[0]?.name).toBe('UserList');
   });
 });
 
@@ -160,6 +231,7 @@ describe('buildProbe', () => {
     source: `const A = ${PLAIN};`,
     expectUnsafe: false,
     usesRaw: false,
+    dependencies: [],
     ...over,
   });
 
@@ -190,6 +262,25 @@ describe('parseProbe', () => {
     expect(parseProbe('{"nope":1}', 1)).toBeNull();
   });
 
+  it('refuses a record missing the field its branch requires', () => {
+    // `{"ok":true}` used to be accepted, and its missing `escaped` reached
+    // `compare` as undefined — falsy, which a counter-example reads as "still
+    // unsafe". A malformed batch could therefore PASS.
+    expect(parseProbe('{"index":0,"ok":true}', 1)).toBeNull();
+    expect(parseProbe('{"index":0,"ok":false}', 1)).toBeNull();
+    expect(parseProbe('{"index":0,"ok":"yes","escaped":true}', 1)).toBeNull();
+    expect(parseProbe('{"index":0,"ok":true,"escaped":"no"}', 1)).toBeNull();
+    expect(parseProbe('{"index":0,"ok":false,"error":7}', 1)).toBeNull();
+  });
+
+  it('refuses results that arrive out of order or duplicated', () => {
+    const a = '{"index":0,"ok":true,"escaped":true}';
+    const b = '{"index":1,"ok":true,"escaped":true}';
+    expect(parseProbe(`${b}\n${a}`, 2)).toBeNull();
+    expect(parseProbe(`${a}\n${a}`, 2)).toBeNull();
+    expect(parseProbe(`${a}\n${b}`, 2)).toHaveLength(2);
+  });
+
   it('accepts a complete batch', () => {
     expect(parseProbe('{"index":0,"ok":true,"escaped":true}', 1))
       .toEqual([{ index: 0, ok: true, escaped: true }]);
@@ -209,6 +300,7 @@ describe('compare', () => {
     source: 'const A = …;',
     expectUnsafe: false,
     usesRaw: false,
+    dependencies: [],
   };
 
   it('passes a safe component', () => {
@@ -310,6 +402,12 @@ describe('run — end to end, through the real renderer', () => {
     expect(await run([path])).toEqual([]);
   });
 
+  it('propagates an I/O failure rather than omitting a directory', async () => {
+    // Only a missing root is tolerable. Anything else would silently drop a
+    // directory's documents and let the gate pass with partial coverage.
+    await expect(scanDocuments(['deno.json'])).rejects.toThrow();
+  });
+
   it('reports a document it cannot read', async () => {
     const findings = await run([`${dir}/absent.md`]);
     expect(findings[0]?.message).toContain('could not be read');
@@ -335,7 +433,9 @@ describe('run — end to end, through the real renderer', () => {
     );
     const findings = await run([path]);
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.message).toContain('did not report');
+    // Either guard may catch it first — the non-zero exit or the short batch.
+    // What must not happen is a pass.
+    expect(findings[0]?.message).toMatch(/exited non-zero|did not report/);
   });
 
   it('reports a probe that outruns its budget', async () => {
