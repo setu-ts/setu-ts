@@ -303,6 +303,20 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
     expect((await denoCheck(file)).code).toBe(0);
   });
 
+  it('documents the optional formData accessor with its shared-parser fallback', async () => {
+    const guide = 'docs/mvc.md';
+    const markdown = await Deno.readTextFile(guide);
+    const fence = extractFences(guide, markdown).find((candidate) =>
+      candidate.code.includes('async function readForm')
+    );
+
+    expect(fence).not.toBeUndefined();
+    expect(fence?.code).toContain('ctx.request.formData === undefined');
+    expect(fence?.code).toContain('parseFormBody(');
+    expect(fence?.code).toContain("ctx.request.headers.get('content-type')");
+    expect(markdown).toContain('The accessor remains optional');
+  });
+
   it('excluded external-source/pseudocode blocks carry a heading and reason', async () => {
     const all = await allFences();
     const excluded = all.filter(
