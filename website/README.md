@@ -50,19 +50,18 @@ over the built output.
 ## Cloudflare Workers deployment
 
 Cloudflare's current dashboard deploys new static sites through **Workers**
-rather than the legacy Pages flow. The repository-root `wrangler.jsonc`
-deliberately declares only `assets.directory`: the site is fully pre-rendered,
-so it does not need a Worker script or a runtime binding. Keeping this
-configuration at the repository root is required for Cloudflare's Git
-deployment, which runs `wrangler versions upload` from that directory after the
-build.
+rather than the legacy Pages flow. `wrangler.jsonc` deliberately declares only
+`assets.directory`: the site is fully pre-rendered, so it does not need a Worker
+script or a runtime binding.
 
-When configuring a Git-connected Worker, keep the repository root as the build
-directory and use these commands:
+When configuring a Git-connected Worker, set its **Root directory** to
+`website`. Cloudflare's Git deployment runs `wrangler versions upload` from this
+directory after the build, so it must be able to discover this configuration.
+Use these commands:
 
 ```bash
 # Build command
-curl -fsSL https://deno.land/install.sh | sh -s v2.9.6 && export PATH="$HOME/.deno/bin:$PATH" && cd website && deno task install && deno task build
+curl -fsSL https://deno.land/install.sh | sh -s v2.9.6 && export PATH="$HOME/.deno/bin:$PATH" && deno task install && deno task build
 
 # Deploy command
 npx -y wrangler@latest deploy

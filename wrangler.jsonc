@@ -1,8 +1,0 @@
-{
-  "$schema": "./website/node_modules/wrangler/config-schema.json",
-  "name": "setu-ts",
-  "compatibility_date": "2026-09-14",
-  "assets": {
-    "directory": "./website/dist"
-  }
-}
