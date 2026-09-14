@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`@setu-ts/view-plugin`, `@setu-ts/decorator-plugin` — the documented class-based view example
+  did not escape.** `packages/view-plugin/README.md` (the page jsr.io renders) and
+  `docs/migration-nestjs.md` both wrote the component as a PLAIN template literal —
+  `` (props) => `<ul>${props.users.map((u) => `<li>${u}</li>`).join('')}</ul>` `` — which is a
+  `string`, so the engine returns it unchanged and nothing escapes it. Measured against the
+  published `0.6.0` artifact with a hostile name: JSX and hono's `html` tag both emit
+  `&lt;script&gt;`, while the plain literal emits `<script>alert(1)</script>` verbatim. The
+  view-plugin README contradicted itself 58 lines apart, telling the reader to "write views with JSX
+  or the `html` tag" beneath an example that did neither, and the two remaining sites
+  (`docs/mvc.md`, `packages/decorator-plugin/README.md`) used `html` — so no two of the four agreed.
+  **No package source changes**; escaping always belonged to the rendering runtime and always
+  worked.
+- **All four view examples are now JSX**, which is what `ViewPlugin()` selects with no options:
+  `'hono-jsx'` is the default arm and `ViewEngine` does not branch on the arm at all — one class
+  serves both authoring modes — so every example was showing the NON-default mode and its extra
+  `html` import for no reason. The `'hono-html'` arm keeps a worked example as the documented
+  alternative for a project that would rather not add a JSX toolchain.
+- **The fence gate could not have caught it, and now can.** Both fence compilers wrote every fence
+  to `.ts`, and Deno decides whether to PARSE JSX from the extension — so a real JSX fence dies with
+  `SyntaxError: Expected ',', got '.'` before type-checking starts. It held only because every `tsx`
+  fence in the corpus contained no JSX (an `html` tagged template parses as ordinary TypeScript).
+  One shared `fenceExtension(lang)` now decides, so the guide and package-README compilers cannot
+  disagree. Verified to discriminate: breaking the props bag inside a JSX example fails the gate
+  with `TS1241`, which is `@Render` rejecting a handler whose return does not match its component.
+
 ## [0.6.0] — 2026-09-13
 
 ### Added
@@ -5216,6 +5245,7 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
+[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.6.0...HEAD
 [0.6.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.6.0
 [0.5.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.5.0
 [0.4.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.4.0

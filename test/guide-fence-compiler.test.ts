@@ -26,6 +26,7 @@ import {
   allFences,
   denoCheck,
   extractFences,
+  fenceExtension,
   GUIDES,
   TS_ALIASES,
 } from './fixtures/snippets/fence-engine.ts';
@@ -178,7 +179,8 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
     for (const classified of toCompile) {
       const fence = classified.fence;
       const safe = fence.guide.replace(/[/.]/g, '_');
-      const file = `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}.ts`;
+      const file = `${SCRATCH_DIR}/${safe}-f${fence.index}-L${fence.line}` +
+        `.${fenceExtension(fence.lang)}`;
       const { assembleSource } = await import(
         './fixtures/snippets/fence-engine.ts'
       );

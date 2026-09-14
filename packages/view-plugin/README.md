@@ -41,11 +41,11 @@ A functional route renders a component and answers HTML:
 
 ```tsx
 import type { IRequestContext } from '@setu-ts/common';
-import { html } from '@hono/hono/html';
 import { renderView } from '@setu-ts/view-plugin';
 
-const UserList = (props: { readonly users: readonly string[] }) =>
-  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+const UserList = (props: { readonly users: readonly string[] }) => (
+  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+);
 
 export function usersRoute(ctx: IRequestContext) {
   return renderView(ctx, UserList, { users: ['ada', 'grace'] });
@@ -55,11 +55,12 @@ export function usersRoute(ctx: IRequestContext) {
 The class-based style attaches the component to the route; the handler returns the component's
 PROPS, and the framework answers with the rendered markup — never JSON:
 
-```typescript
+```tsx
 import { Controller, Get, Render } from '@setu-ts/decorator-plugin';
 
-const UserList = (props: { readonly users: readonly string[] }) =>
-  `<ul>${props.users.map((user) => `<li>${user}</li>`).join('')}</ul>`;
+const UserList = (props: { readonly users: readonly string[] }) => (
+  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+);
 
 @Controller('/pages')
 class PagesController {
@@ -70,6 +71,22 @@ class PagesController {
   }
 }
 ```
+
+Components are JSX, so their module is `.tsx` and the application manifest declares `jsx` /
+`jsxImportSource` — the controller itself may stay `.ts` and import them. If you would rather not
+add a JSX toolchain at all, `ViewPlugin({ engine: 'hono-html' })` takes components written with
+hono's `html` tagged template in a plain `.ts` file:
+
+```typescript
+import { html } from '@hono/hono/html';
+
+const UserList = (props: { readonly users: readonly string[] }) =>
+  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+```
+
+Both escape every interpolation, and the same engine renders both — the arm names the authoring
+mode, not a rendering strategy. What is NOT safe is a plain template literal: it is a `string`, so
+it is returned unchanged and nothing escapes it (see [Escaping](#escaping)).
 
 `@Render` type-checks the handler's return against the component's props: a wrong props bag is a
 compile error naming the mismatch — strictly stronger than a by-name template checked against

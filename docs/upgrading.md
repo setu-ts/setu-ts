@@ -10,6 +10,44 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Check any view component you copied from the `0.6.0` docs
+
+`@setu-ts/view-plugin`'s README and `docs/migration-nestjs.md` showed the class-based example with a
+PLAIN template literal:
+
+```typescript
+// DO NOT USE — a plain template literal is a `string`, so nothing escapes it.
+const UserList = (props: { readonly users: readonly string[] }) =>
+  `<ul>${props.users.map((user) => `<li>${user}</li>`).join('')}</ul>`;
+```
+
+Escaping belongs to the rendering runtime, and a component that is already a `string` is returned
+unchanged — so any value reaching it is written to the page verbatim. With a user-supplied name of
+`<script>alert(1)</script>` that example emits the script tag, where JSX and hono's `html` tag both
+emit `&lt;script&gt;`.
+
+Nothing in the plugin changed and no version is affected — the engine always behaved this way. What
+changed is the documentation. If you copied that shape, switch to either escaping form:
+
+```tsx
+// JSX — what `ViewPlugin()` selects with no options.
+const UserList = (props: { readonly users: readonly string[] }) => (
+  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+);
+```
+
+```typescript
+// Or hono's `html` tag, for a project with no JSX toolchain.
+import { html } from '@hono/hono/html';
+
+const UserList = (props: { readonly users: readonly string[] }) =>
+  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+```
+
+`raw()` remains the documented opt-out when you genuinely intend to emit trusted markup.
+
 <!-- version:history -->
 
 ## 0.6.0
