@@ -27,6 +27,8 @@ import {
   checkRequiredGuides,
   checkVersionClaims,
   findSwallowedHeadings,
+  POST_ALPHA_MINOR_LINES,
+  postAlphaLineArm,
   publicApiAnchors,
   scanFences,
 } from '../scripts/check-docs.ts';
@@ -1391,6 +1393,32 @@ describe('documentation gate — install-snippet versions', () => {
     expect(outgoing[0]?.message).toContain('0.5.0');
   });
 
+  it('reads the post-alpha 0.6.x line, and still reads 0.5.x as stale beside it', () => {
+    // Stale WITHIN 0.6 — the only case that discriminates. `^0.6.0` clean at
+    // 0.6.0 passes just as well when the gate reads no 0.6 at all.
+    const withinLine = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.6.0\n'),
+      '0.6.1',
+    );
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.6.0');
+    expect(withinLine[0]?.message).toContain('0.6.1');
+
+    expect(
+      checkInstallVersions(doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.6.0\n'), '0.6.0'),
+    ).toEqual([]);
+
+    // The OUTGOING line names the references this release still has to move,
+    // so it must keep reading 0.5 after the widening.
+    const outgoing = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.5.0\n'),
+      '0.6.0',
+    );
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.5.0');
+    expect(outgoing[0]?.message).toContain('0.6.0');
+  });
+
   // SemVer permits a hyphen inside a prerelease identifier and a `+` build
   // suffix, and JSR accepts both — so a narrower class truncates a legal
   // version and reports a correct reference as stale, the same defect one
@@ -1600,6 +1628,52 @@ describe('documentation gate — bare version claims', () => {
     const fiveNoise = 'bound to 127.0.5.1 and 10.0.5.2, requires foo 10.5.1, mask 192.0.5.9\n';
     expect(checkVersionClaims(doc('docs/guide.md', fiveNoise), '0.5.0')).toEqual([]);
     expect(checkVersionClaims(doc('docs/guide.md', fiveNoise), '0.5.1')).toEqual([]);
+  });
+
+  // The alternation must survive reaching `0.10`, which is the one shape a
+  // character class cannot hold: `0\.[23456]` reads `0.10` as `0.1` and then
+  // fails on the second `0`, and adding `0` to the class keeps matching
+  // nothing for that line while looking like the line was added. A silent pass
+  // is exactly what this constant exists to prevent, so the representation is
+  // asserted directly rather than left until the project gets there.
+  it('can express a two-digit minor line, which a character class cannot', () => {
+    const arm = new RegExp(`^(?:${postAlphaLineArm(['0.10'])})$`);
+
+    expect(arm.test('0.10.0')).toBe(true);
+    expect(arm.test('0.10.3')).toBe(true);
+    expect(arm.test('0.10.0-rc.1')).toBe(true);
+
+    // It must claim `0.10` WITHOUT also claiming `0.1`, which is a different
+    // line and one this project shipped only as `0.1.0-alpha.N`.
+    expect(arm.test('0.1.0')).toBe(false);
+    expect(arm.test('0.100.0')).toBe(false);
+
+    // And the shipped list still reads every line it names, one at a time.
+    for (const minor of POST_ALPHA_MINOR_LINES) {
+      const one = new RegExp(`^(?:${postAlphaLineArm([minor])})$`);
+      expect(one.test(`${minor}.0`), `${minor} is unreadable`).toBe(true);
+    }
+  });
+
+  // The bare-claim checker reads its own copy of the alternation, so the 0.6
+  // line is unproven here until asserted here.
+  it('reads the post-alpha 0.6.x line in a bare claim', () => {
+    const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.6.0`\n'), '0.6.1');
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.6.0');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.6.0`\n'), '0.6.0')).toEqual([]);
+
+    const outgoing = checkVersionClaims(doc('README.md', 'ships `v0.5.0`\n'), '0.6.0');
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.5.0');
+
+    // Every string CONTAINS `0.6.N`, so these are what the new arm could
+    // plausibly have started claiming; the boundary lookarounds reject them.
+    // The earlier noise cases cannot cover these digits.
+    const sixNoise = 'bound to 127.0.6.1 and 10.0.6.2, requires foo 10.6.1, mask 192.0.6.9\n';
+    expect(checkVersionClaims(doc('docs/guide.md', sixNoise), '0.6.0')).toEqual([]);
+    expect(checkVersionClaims(doc('docs/guide.md', sixNoise), '0.6.1')).toEqual([]);
   });
 
   // Measured against the real corpus, not guessed. A general `\d+.\d+.\d+`

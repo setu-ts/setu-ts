@@ -13,6 +13,7 @@ import { ViewEngine } from '../../src/engines/view-engine.ts';
 import type { IViewEngine } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { HealthIndicatorFn, IPlugin, IPluginContext } from '@setu-ts/common';
+import manifest from '../../deno.json' with { type: 'json' };
 
 /** A minimal recording context — only `services` and `health.register` are read. */
 function createRecordingContext(): {
@@ -50,7 +51,7 @@ describe('ViewPlugin', () => {
     const plugin: IPlugin = ViewPlugin();
 
     expect(plugin.name).toBe('view-plugin');
-    expect(plugin.version).toBe('0.5.0');
+    expect(plugin.version).toBe(manifest.version);
     expect(plugin.provides).toEqual([CAPABILITIES.VIEW]);
   });
 

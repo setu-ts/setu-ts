@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 <!-- version:history -->
 
-## Unreleased
+## 0.6.0
 
 One change fails `deno check`, and only for a hand-written stand-in. Two change behaviour silently —
 they compile, so the compiler will not point at them: check whether you upload files without a
@@ -97,7 +97,11 @@ const app = await createTestApp({
 
 Nothing about existing tests changes: `createTestApp({ plugins: [...] })` behaves exactly as it did.
 
+<!-- version:history -->
+
 ## 0.5.0
+
+<!-- version:history -->
 
 0.5.0 is a breaking release across several packages. Two changes fail `deno check`; the rest change
 a status code, a response body, a Redis key, a consumer-group name or a CLI exit code, and are

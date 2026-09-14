@@ -1238,6 +1238,8 @@ without extending `BaseRepository`, must supply `findPage`; the in-repo referenc
 `packages/database-plugin/test/fixtures/repository-implementor.ts`, and the reader-side step is in
 [docs/upgrading.md](docs/upgrading.md).
 
+<!-- version:history -->
+
 The concrete `DatabaseService` additionally exposes `readonly isClosed: boolean` (**since 0.5.0**) —
 a lifecycle-only read that reaches no adapter, added for the health indicator's uncached gate.
 `isHealthy()` answers lifecycle AND adapter readiness together; `isClosed` answers lifecycle alone.
@@ -4231,6 +4233,8 @@ the fields the source defines; the cloud brokers split into an _injected-transpo
 production credentials) and a _production_ arm (credentials required, `client` typed `never`). The
 shared `MessagingBrokerType` has eight literals.
 
+<!-- version:history -->
+
 ```typescript
 type MessagingBrokerType =
   | 'memory'
@@ -4286,6 +4290,8 @@ interface RabbitMqMessagingOptions extends MessagingCommonOptions {
 }
 
 // ── NATS (JetStream) ─────────────────────────────────────────────────────────────────
+// version:history — the `@since` below records when the member appeared, not the
+// current release; an `@since` is never bumped.
 interface NatsMessagingOptions extends MessagingCommonOptions {
   broker: 'nats';
   /** NATS connection URL. */
@@ -7120,7 +7126,7 @@ Install it with an explicit binary name, because Deno's default inference would 
 package (`cli`):
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.5.0/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.6.0/main
 ```
 
 `--min-dep-age 0` because Deno refuses a dependency published within the last 24 hours, and the CLI
@@ -10434,7 +10440,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-deno add jsr:@setu-ts/sdk@^0.5.0
+deno add jsr:@setu-ts/sdk@^0.6.0
 ```
 
 ### createClient()

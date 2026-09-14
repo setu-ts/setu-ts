@@ -1457,6 +1457,30 @@ const VERSION_HISTORY_DOCS: readonly string[] = [
  * invisible while `check:docs` stays green — the failure mode is a silent pass,
  * not a red run. `docs/releasing.md` carries this as a release step.
  */
+export const POST_ALPHA_MINOR_LINES: readonly string[] = ['0.2', '0.3', '0.4', '0.5', '0.6'];
+
+/**
+ * The post-alpha arm of {@link SHIPPED_VERSION_LINES}, built from complete
+ * minor lines.
+ *
+ * A list joined into an alternation rather than a character class, because a
+ * class holds single digits and so cannot express a two-digit minor at all:
+ * `0\.[23456]` reads `0.10` as `0.1` and then fails on the second `0`, and the
+ * obvious repair — adding `0` to the class — silently keeps matching nothing
+ * for that line while looking like it was added. That is the one failure this
+ * constant exists to prevent, so the representation has to survive reaching
+ * `0.10` rather than merely fit every line shipped so far.
+ *
+ * @param minors - Complete minor lines, e.g. `['0.2', '0.10']`
+ * @returns A self-contained regex alternative matching those lines' releases
+ */
+export function postAlphaLineArm(minors: readonly string[]): string {
+  const lines = minors.map((minor) => minor.replaceAll('.', String.raw`\.`)).join('|');
+  return `(?:${lines})` + String.raw`\.\d+` +
+    String.raw`(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?` +
+    String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`;
+}
+
 const SHIPPED_VERSION_LINES = [
   String.raw`0\.1\.0-alpha\.\d+`, // v0.1.0-alpha.1 … v0.1.0-alpha.10
   // The post-alpha 0.x lines, ENUMERATED one minor at a time (`0.2`, `0.3`, …)
@@ -1480,9 +1504,7 @@ const SHIPPED_VERSION_LINES = [
   // and `0.2.1+build.7` would capture `0.2.1`. Identifiers require at least
   // one character after each dot, so a trailing sentence period is not
   // swallowed into the version.
-  String.raw`0\.[2345]\.\d+` +
-  String.raw`(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?` +
-  String.raw`(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?`,
+  postAlphaLineArm(POST_ALPHA_MINOR_LINES),
 ].join('|');
 
 /**
