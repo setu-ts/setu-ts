@@ -110,16 +110,11 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   so nothing else checks this. Every package must exist AND carry a repo link:
 
   ```fish
-  deno eval "
-  const m = await import('./scripts/release-packages.ts');
-  for (const path of m.PUBLISHED_PACKAGES) {
-    const name = path.split('/').pop();
-    const r = await fetch(\`https://api.jsr.io/scopes/setu-ts/packages/\${name}\`);
-    if (!r.ok) console.log('MISSING', name);
-    else if (!(await r.json()).githubRepository) console.log('UNLINKED', name);
-  }
-  console.log('checked', m.PUBLISHED_PACKAGES.length);"
+  deno task release:verify-repos
   ```
+
+  The command exits unsuccessfully for a missing package, an absent repository link, or a link to
+  anything other than `setu-ts/setu-ts`.
 
   `view-plugin` (M92) was the last one, in `v0.6.0`. The M35 `sdk` release recorded the same step
   for the one before it — though only the ordering half, because the compat suite did not exist yet
@@ -304,8 +299,13 @@ jsr.io by no other route. Then confirm, because the script's own report is not t
 
 ```fish
 curl -s https://api.jsr.io/scopes/setu-ts/packages/<pkg> |
-  deno eval "const d = await new Response(Deno.stdin.readable).json();
-  console.log(d.description === '' ? 'EMPTY description' : 'ok', d.runtimeCompat);"
+deno eval "const d = await new Response(Deno.stdin.readable).json();
+const emptyDescription = d.description === '';
+const emptyRuntimeCompat = Object.keys(d.runtimeCompat ?? {}).length === 0;
+console.log(
+  emptyDescription ? 'EMPTY description' : emptyRuntimeCompat ? 'EMPTY runtimeCompat' : 'ok',
+  d.runtimeCompat,
+);"
 ```
 
 An empty `description` or a `runtimeCompat` of `{}` means the page is blank for that package.
