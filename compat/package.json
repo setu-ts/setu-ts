@@ -54,6 +54,7 @@
     "@jsr/setu-ts__telemetry-plugin": "latest",
     "@jsr/setu-ts__testing": "latest",
     "@jsr/setu-ts__validation-plugin": "latest",
+    "@jsr/setu-ts__view-plugin": "latest",
     "@jsr/setu-ts__websocket-plugin": "latest",
     "@jsr/setu-ts__worker-pool-plugin": "latest"
   }

@@ -98,13 +98,32 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   which is the backstop — but it reports a broken tree rather than preventing one.
 - **First-time publishers.** A workspace member present in `PUBLISHED_PACKAGES` can still fail to
   publish if the JSR package was never created and the repo never linked — a failure that surfaces
-  only in the release workflow, long after the branch merged. The **`view-plugin`** member (M92) has
-  never been published: before the first release that ships it, run `release:create-packages` (a JSR
-  package must exist before it can be published) and `release:link-repos` (tokenless OIDC publishing
-  requires the repo link). Both are idempotent; the M35 `sdk` release recorded the same step for the
-  last first-time publisher — though only the ordering half of it, because the compat suite did not
-  exist yet when `sdk` first published, which is why the sequencing below was unverified until
-  `view-plugin` hit it.
+  only in the release workflow, long after the branch merged. Before the first release that ships a
+  new member, run `release:create-packages` (a JSR package must exist before it can be published)
+  and `release:link-repos` (tokenless OIDC publishing requires the repo link). Both are idempotent,
+  and both are worth running BEFORE the release PR merges rather than after: nothing about them
+  depends on the merge, and doing it first means the tag run cannot discover a missing package once
+  the PR has already landed.
+
+  Verify rather than trust the script's own report — `release:verify` does not look at the registry,
+  so nothing else checks this. Every package must exist AND carry a repo link:
+
+  ```fish
+  deno eval "
+  const m = await import('./scripts/release-packages.ts');
+  for (const path of m.PUBLISHED_PACKAGES) {
+    const name = path.split('/').pop();
+    const r = await fetch(\`https://api.jsr.io/scopes/setu-ts/packages/\${name}\`);
+    if (!r.ok) console.log('MISSING', name);
+    else if (!(await r.json()).githubRepository) console.log('UNLINKED', name);
+  }
+  console.log('checked', m.PUBLISHED_PACKAGES.length);"
+  ```
+
+  `view-plugin` (M92) was the last one, in `v0.6.0`. The M35 `sdk` release recorded the same step
+  for the one before it — though only the ordering half, because the compat suite did not exist yet
+  when `sdk` first published, which is why the sequencing below was unverified until `view-plugin`
+  hit it.
 
   **And once it has published — in a FOLLOW-UP PR, never in the release PR itself — move it into the
   compat suite.** A package that has never been on JSR sits in `PENDING_FIRST_PUBLISH` in
