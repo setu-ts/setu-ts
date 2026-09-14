@@ -78,22 +78,32 @@ and nothing else.
 
 ## Milestone pipeline order
 
-Architect (plan, then stop) → _[human/Claude reviews the plan]_ → Code (implement, commit) → Verify
-Milestone (report, then stop) → Code (fix findings, commit) → Code Review (ranked findings, then
-stop) → Code (fix any correctness findings, commit) → re-verify and re-review until Code Review
-returns **merge-ready** → _[human pushes and opens the PR]_.
+Architect (plan, then stop) → _[human/Claude reviews the plan]_ → Code (implement, commit the plan
+with it) → Verify Milestone (report, then stop) → Code (fix findings, commit) → **Verify Milestone
+again** → Code Review (ranked findings, then stop) → Code (fix any correctness findings, commit) →
+re-verify and re-review until Code Review returns **merge-ready** → _[human pushes and opens the
+PR]_.
 
-Never advance a step over a dirty tree, and never skip a gate: a milestone is not merge-ready until
-Verify Milestone has returned **verified** AND Code Review has returned **merge-ready**.
+**A gate's verdict covers the commit it read and nothing later**, which is why Verify runs again
+after its own findings are fixed rather than handing straight to Code Review. Skipping it sends Code
+Review a tree no verification has seen, and the fix commit is the least-exercised code in the
+milestone. Never skip a gate: a milestone is not merge-ready until Verify Milestone has returned
+**verified** on the current commit AND Code Review has returned **merge-ready** on it.
 
 ## Committing between steps
 
 - **Every Code-mode pass commits its own work before switching out of Code** (see
   `.roo/rules-code/01-commit-before-done.md`). Check `git status --porcelain` before you switch.
-- **A dirty tree is the gate between one step and the next.** If the tree is dirty when a step ends,
-  the step is not finished: stay in (or switch back to) Code, commit, and only then move on. Both
-  gate modes refuse to run over a dirty tree, and refusing is correct — an uncommitted change can
-  mask the exact defect they are hunting.
+- **No gate mode may run over a dirty tree.** Verify Milestone and Code Review both refuse, and
+  refusing is correct — an uncommitted change can mask the exact defect they are hunting. So if the
+  tree is dirty when a Code pass ends, that pass is not finished: stay in (or switch back to) Code,
+  commit, and only then move to a gate.
+- **The one transition that legitimately starts dirty is Architect → Code.** Architect writes the
+  plan and cannot commit, so the approved plan is uncommitted by construction; Code's first
+  implementation pass commits it along with the work, which is where it belongs anyway — CLAUDE.md
+  requires the plan to ship in the milestone's own PR. Read the rule above as what it is: a
+  constraint on entering a GATE and on leaving Code, not a blanket bar on every switch. Applied
+  blindly it would make the pipeline's opening move impossible.
 
 ## Do not escalate to the human mid-pipeline
 

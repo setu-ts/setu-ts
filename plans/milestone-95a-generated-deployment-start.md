@@ -118,8 +118,15 @@ propagated into nine sites because each new use cited the entry rather than the 
 ### 3.4 The gate builds and runs the image; it never asserts a list
 
 - **Decision:** a new `check:deploy` mode scaffolds a workspace into a temporary directory, builds
-  its generated Dockerfile, and runs the image with `--read-only --network none`, asserting the
-  member reaches a serving state. Absent Docker it exits `SKIP_EXIT_CODE` (77).
+  its generated Dockerfile, and runs the image with `--read-only --network none`. **Success is a
+  served response, not a live process**: the gate polls the member's allocated port until it answers
+  `/health` with a `200`, and fails on timeout. Liveness alone is not enough — the failure this
+  milestone closes kills the process at import, but a warm-list regression could equally leave it
+  running and unable to serve, and a gate that watched only for an exit would call that a pass. (§9
+  excludes HTTP probes from the GENERATED Kubernetes manifest, where they are `tcpSocket` because a
+  member may register no `HealthPlugin`; that is a property of the emitted YAML and places no
+  constraint on what this gate may request of an image it scaffolded itself.) Absent Docker it exits
+  `SKIP_EXIT_CODE` (77).
 - **Why:** the ROADMAP's own warning, and it is the decisive point of the milestone: "A fixed warm
   list in the Dockerfile is exactly what this finding shows cannot be complete, so a gate that
   asserts a hard-coded list would pass while the defect persists." Running under `--read-only`
@@ -139,6 +146,13 @@ propagated into nine sites because each new use cited the entry rather than the 
   slow) start into a crash, so shipping it in generated output trades this milestone's defect for a
   narrower one. The gate needs no such flag: `--network none` already makes an unwarmed specifier
   fail, and it fails the way a real air-gapped cluster does.
+- **Unmeasured half, to be closed by D1:** this rationale assumes the non-`--cached-only` path
+  actually works with egress. It may not. `readOnlyRootFilesystem: true` makes `/deno-dir` read-only
+  too (R8 mounts only `/tmp`), so a package fetched at runtime has nowhere to be stored, and Deno
+  may fail rather than proceed. R6 measured only the `--network none` case. D1 therefore adds one
+  measurement — cold cache, read-only root, egress ALLOWED — and if that also fails, this decision
+  is revisited rather than left standing on a false premise, since `--cached-only`'s only cost would
+  then be a clearer error message for a failure that happens anyway.
 - **Test home:** the compose unit test asserts the flag's ABSENCE, so a later "harden the CMD" edit
   has to read this decision.
 
@@ -188,13 +202,13 @@ flags that already exist (`--workspace`, `--transport`, `--runtime`).
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                | src covered                          | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                           |
-| -------------------------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/cli/test/unit/workspace/compose.test.ts`       | `workspace/compose.ts`               | `workspaceContainerFiles(manifest, transport, profile)` renders a Deno `CMD` containing `--no-lock` and NOT containing `--cached-only` (§3.5); the npm arm's `CMD` contains neither; the rendered file is byte-identical to the pre-change output in every other respect, so the diff is exactly the flag. |
-| `packages/cli/test/unit/workspace/transport.test.ts`     | `workspace/transport.ts`             | Iterating `TRANSPORT_SPECS`, every arm declaring `messagingArgs` or `queueArgs` also declares `warmSpecifiers` (§3.3) — iterated, never a named list, so a tenth transport cannot be added without one. Skipped entirely if D1 shows no warm list is needed.                                               |
-| `packages/cli/test/e2e/workspace-e2e.test.ts` (extended) | the generated Dockerfile, end to end | A scaffolded workspace's `docker/Dockerfile` carries the flag; a second `generate app` rewrites it and it still does (§3.6). Runs with no Docker — it reads the emitted text.                                                                                                                              |
-| `test/deploy-gate.test.ts` (extended)                    | `scripts/check-deploy.ts`            | The new mode is registered and reachable, and is NOT in any skip allowlist, so removing it fails a test rather than silently narrowing the gate (the M37c precedent).                                                                                                                                      |
-| `scripts/check-deploy.ts` (the gate itself)              | the generated image, end to end      | Builds a scaffolded workspace's image and runs it `--read-only --network none`; asserts the member serves. Exits 77 when Docker is absent (R11). This is the only check that discriminates, per §3.4.                                                                                                      |
+| Test file                                                | src covered                          | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/cli/test/unit/workspace/compose.test.ts`       | `workspace/compose.ts`               | `workspaceContainerFiles(manifest, transport, profile)` renders a Deno `CMD` containing `--no-lock` and NOT containing `--cached-only` (§3.5); the npm arm's `CMD` contains neither; the rendered file matches the pre-change output apart from TWO intended deltas — the flag, and the C2 comment rewrite above the build step and the `CMD`. Both are asserted explicitly, since claiming the diff is only the flag would contradict §2 C2 and §5, and a test making that claim could never pass. |
+| `packages/cli/test/unit/workspace/transport.test.ts`     | `workspace/transport.ts`             | Iterating `TRANSPORT_SPECS`, every arm declaring `messagingArgs` or `queueArgs` also declares `warmSpecifiers` (§3.3) — iterated, never a named list, so a tenth transport cannot be added without one. Skipped entirely if D1 shows no warm list is needed.                                                                                                                                                                                                                                        |
+| `packages/cli/test/e2e/workspace-e2e.test.ts` (extended) | the generated Dockerfile, end to end | A scaffolded workspace's `docker/Dockerfile` carries the flag; a second `generate app` rewrites it and it still does (§3.6). Runs with no Docker — it reads the emitted text.                                                                                                                                                                                                                                                                                                                       |
+| `test/deploy-gate.test.ts` (extended)                    | `scripts/check-deploy.ts`            | The new mode is registered and reachable, and is NOT in any skip allowlist, so removing it fails a test rather than silently narrowing the gate (the M37c precedent).                                                                                                                                                                                                                                                                                                                               |
+| `scripts/check-deploy.ts` (the gate itself)              | the generated image, end to end      | Builds a scaffolded workspace's image and runs it `--read-only --network none`; asserts the member serves. Exits 77 when Docker is absent (R11). This is the only check that discriminates, per §3.4.                                                                                                                                                                                                                                                                                               |
 
 **Coverage.** `compose.ts` and `transport.ts` are pure renderers already at the per-file bar; every
 new branch is a rendered string reachable from `workspaceContainerFiles`, so the unit tables above
@@ -232,9 +246,16 @@ deno task release:verify 0.6.0
 - **D1 may not reproduce on this machine.** The ROADMAP run used a re-pinned project against live
   registries, and §1 R2–R4 already failed to reproduce the stated cause. Mitigation: the gate in
   §3.4 is written to be discriminating by construction — it reproduces the failure with an
-  artificially unrecorded specifier (R5's technique) if a natural one cannot be found, so the fix is
-  still proven rather than assumed. If no natural reproduction exists, that is itself a finding and
-  goes in the PR body rather than being papered over.
+  artificially unrecorded specifier (R5's technique) if a natural one cannot be found. **But the two
+  cases prove different things, and the plan does not let one stand in for the other.** A synthetic
+  specifier proves `--no-lock` removes the lockfile write; it proves nothing about whether a
+  scaffolded workspace reaches that state on its own, which is the reported defect. So the
+  acceptance criteria are split: the synthetic case ships as the permanent regression test in both
+  outcomes, while **M95a may be marked fixed only on a natural reproduction** — a scaffolded
+  workspace, re-pinned, crashing under its own generated manifest, and then starting once the fix is
+  applied. If no natural reproduction can be produced, the milestone closes as _mechanism corrected,
+  defect not reproduced_, that wording goes in the PR body and the ROADMAP row, and the High row
+  stays open. It is not closed on synthetic evidence.
 - **The warm list cannot be complete.** Stated by the ROADMAP and accepted. Mitigation: `--no-lock`
   is the load-bearing half (§3.2) and is complete on its own for the lockfile write; the warm list
   only affects whether a start needs the network, and the gate measures exactly that.
