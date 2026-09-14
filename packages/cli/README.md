@@ -187,11 +187,17 @@ setu db:migrate up 3   # positionals after the name reach the handler
 ```
 
 ```typescript
-register(ctx: IPluginContext): void {
-  ctx.cli.register('db:migrate', async (args) => {
-    await migrate(args[0] ?? 'latest');
-  });
-}
+import type { IPlugin, IPluginContext } from '@setu-ts/common';
+
+export const MigrationsPlugin: IPlugin = {
+  name: 'migrations',
+  version: '1.0.0',
+  register(ctx: IPluginContext): void {
+    ctx.cli?.register('db:migrate', async (args) => {
+      await migrate(args[0] ?? 'latest');
+    });
+  },
+};
 ```
 
 Handlers receive positionals only. `setu` consumes its own flags, so pass a plugin command's flags

@@ -32,8 +32,11 @@ const app = createApplication({
 await app.start({ port: 3000 });
 
 const container = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
-container.register(UserService, { scope: 'scoped' });
-const users = container.resolve(UserService);
+
+// A token is a STRING; the class travels in the provider, and the lifecycle in
+// the third argument.
+container.register('user-service', { useClass: UserService }, { scope: 'scoped' });
+const users = container.resolve<UserService>('user-service');
 ```
 
 ## Options

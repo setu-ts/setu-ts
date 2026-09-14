@@ -22,7 +22,7 @@ app.middleware.add(errorHandler({ format: 'rfc9457' }), {
 });
 
 app.router.get('/users/:id', async (ctx) => {
-  const user = await users.find(ctx.request.params.id);
+  const user = await users.find(ctx.params.id);
   if (!user) throw notFound('User not found');
   return ctx.response.json(user);
 });

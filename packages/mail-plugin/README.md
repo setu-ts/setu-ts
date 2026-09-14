@@ -23,7 +23,7 @@ app.register(MailPlugin({
   options: { apiKey: process.env.SENDGRID_API_KEY! },
   defaults: { from: 'no-reply@example.com' },
   templates: {
-    welcome: { subject: 'Welcome', html: '<p>Hello {{ name }}</p>' },
+    welcome: { html: '<p>Hello {{ name }}</p>' },
   },
 }));
 

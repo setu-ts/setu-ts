@@ -145,12 +145,19 @@ export const FRAGMENT_GLOBALS = new Set([
   'createApplication',
   'inject',
   'createTestApp',
+  // M34b: every scaffolded project exports `createApp()` from its
+  // `setu.config.ts`, so a testing example names it without importing it.
+  'createApp',
   'platform',
   'content',
   // Test-harness globals a guide block uses without importing.
   'describe',
   'it',
   'expect',
+  'beforeEach',
+  'afterEach',
+  'beforeAll',
+  'afterAll',
   // Plugin factories referenced without their import line.
   'RuntimePlugin',
   'LoggerPlugin',
@@ -161,6 +168,25 @@ export const FRAGMENT_GLOBALS = new Set([
   'GrpcPlugin',
   'GraphqlPlugin',
   'MyPlugin',
+  'users',
+  'db',
+  'database',
+  'discovery',
+  'fakeMailer',
+  'env',
+  'logger',
+  'resilience',
+  'loadProfile',
+  'dispatchAfterSave',
+  'tokenStore',
+  'vaultToken',
+  'cosmosKey',
+  'betaHandler',
+  'myGet',
+  'api',
+  'User',
+  'isGetUserByIdError',
+  'CreateUserCommand',
   'mockMyService',
   // Illustrative placeholders in the grpc-plugin and graphql-plugin READMEs.
   'MyServiceDescriptor',
@@ -235,6 +261,12 @@ export const FRAGMENT_GLOBALS = new Set([
   'IMiddlewareApi',
   'IContainer',
   'IApplication',
+  'RouteHandler',
+  'IResilienceService',
+  'IMailer',
+  'IServiceDiscovery',
+  'StructuralSchema',
+  'IKernelApplication',
   'IPlugin',
   'IPluginContext',
   'IConfig',
@@ -278,6 +310,9 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
   IRuntimeServices: '@setu-ts/common',
   IServiceRegistry: '@setu-ts/common',
   IApplication: '@setu-ts/common',
+  IMailer: '@setu-ts/common',
+  IServiceDiscovery: '@setu-ts/common',
+  StructuralSchema: '@setu-ts/config-plugin',
   RuntimePlatform: '@setu-ts/common',
   HandlerResult: '@setu-ts/common',
   ResolverMap: '@setu-ts/graphql-plugin',
@@ -360,6 +395,18 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
  */
 const VALUE_EXPORTS: Readonly<Record<string, string>> = {
   RuntimePlugin: '@setu-ts/runtime',
+  // Public factories and functions a README names without an import line.
+  // Real exports, verified against each package's barrel — declaring fakes
+  // here would let a renamed export keep passing.
+  createClient: '@setu-ts/sdk',
+  SecretsPlugin: '@setu-ts/secrets-plugin',
+  OpenApiPlugin: '@setu-ts/openapi-plugin',
+  CloudflarePlugin: '@setu-ts/cloudflare-plugin',
+  ServiceDiscoveryPlugin: '@setu-ts/service-discovery-plugin',
+  createDrizzleDatabase: '@setu-ts/database-plugin',
+  Controller: '@setu-ts/decorator-plugin',
+  requireAuth: '@setu-ts/auth-plugin',
+  PLUGIN_PRIORITY: '@setu-ts/common',
   LoggerPlugin: '@setu-ts/logger-plugin',
   ConfigPlugin: '@setu-ts/config-plugin',
   DatabasePlugin: '@setu-ts/database-plugin',
@@ -404,6 +451,41 @@ const APP_DECLARATIONS: Readonly<Record<string, string>> = {
   CreateUserDto: 'declare class CreateUserDto {}',
   MyPlugin: 'declare function MyPlugin(options: unknown): IPlugin',
   metrics: 'declare const metrics: IMetricsService',
+  // M34b: every scaffolded project exports this from `setu.config.ts`. It
+  // deliberately does NOT start the application — the CLI imports it to find
+  // plugin commands — so a testing example holds an unstarted one.
+  createApp: 'declare function createApp(): IKernelApplication',
+  // Illustrative placeholders a README names to keep an example short. Typed
+  // against the real contract wherever one exists, so a declaration cannot
+  // mask a genuine mismatch in the surrounding call.
+  users: 'declare const users: { find(id: string): Promise<unknown> }',
+  db: 'declare const db: IDatabaseService',
+  database: 'declare const database: IDatabaseService',
+  discovery: 'declare const discovery: IServiceDiscovery',
+  fakeMailer: 'declare const fakeMailer: IMailer',
+  env: 'declare const env: Record<string, unknown>',
+  logger: 'declare const logger: ILogger',
+  resilience: 'declare const resilience: IResilienceService',
+  loadProfile: 'declare function loadProfile(id: string): Promise<unknown>',
+  dispatchAfterSave:
+    'declare function dispatchAfterSave(events: readonly unknown[]): Promise<void>',
+  // The README's own comment calls this an "async provider", and
+  // `createBearerAuthInterceptor` takes `() => Promise<string>`.
+  tokenStore: 'declare const tokenStore: { get(): Promise<string> }',
+  vaultToken: 'declare const vaultToken: string',
+  cosmosKey: 'declare const cosmosKey: string',
+  betaHandler: 'declare const betaHandler: RouteHandler',
+  myGet: 'declare const myGet: (name: string) => Promise<{ SecretString?: string }>',
+  // The SDK's GENERATED client and its per-operation guard: named by the
+  // codegen docs, with nothing in this repository to type them against, so
+  // the declaration is deliberately loose. What those fences assert is the
+  // emitted SHAPE, which the committed codegen fixtures type-check for real.
+  api: 'declare const api: Record<string, (...args: readonly unknown[]) => Promise<unknown>>',
+  isGetUserByIdError:
+    'declare function isGetUserByIdError(e: unknown): e is { status: number; body: { code: string } }',
+  User: 'declare type User = { readonly id: string; readonly name: string }',
+  CreateUserCommand:
+    'declare class CreateUserCommand { constructor(name: string); readonly name: string }',
   mockMyService: 'declare const mockMyService: { findAll(): Promise<unknown[]> }',
   MyServiceDescriptor: 'declare const MyServiceDescriptor: GrpcServiceDefinition',
   MyServiceImpl: 'declare const MyServiceImpl: Record<string, unknown>',
@@ -719,6 +801,60 @@ function wrapperIdFor(
 }
 
 /**
+ * Which application interface a fragment's `app` should be declared as.
+ *
+ * `createApplication()` returns `IKernelApplication`, which extends
+ * `IApplication` with the members a test reaches for — `inject`, `unregister`,
+ * `hasPlugin`. Declaring the narrower `IApplication` unconditionally made a
+ * fence using any of them fail with `Property 'inject' does not exist`, which
+ * is a limitation of this harness and NOT a defect in the document: a reader
+ * following the same README holds the wider type and the call compiles.
+ * `packages/kernel/README.md` is the worked example — its `inject()` fence
+ * failed here while working perfectly against the published package.
+ *
+ * The wider type is used only when the fence actually reaches a kernel-only
+ * member, so a fence needing nothing beyond `IApplication` still documents the
+ * narrower contract a plugin author may assume.
+ *
+ * @param code - The fence body
+ * @returns The interface name to declare `app` as
+ */
+export function appTypeFor(code: string): 'IApplication' | 'IKernelApplication' {
+  return /\bapp\.(?:inject|unregister|hasPlugin)\b/.test(code) ||
+      /\binject\s*\(\s*app\b/.test(code)
+    ? 'IKernelApplication'
+    : 'IApplication';
+}
+
+/**
+ * Writes the project-local modules a fence may legitimately import.
+ *
+ * `setu.config.ts` is the composition root every scaffolded project exports
+ * (M34b), so a `@setu-ts/testing` example importing `createApp` from it is
+ * showing the reader exactly the right thing — and there is no such file in
+ * this repository for the harness to resolve. A stub beside the scratch
+ * directory makes the import resolve without weakening what is checked: the
+ * fence still type-checks `createApp()`'s result against the real
+ * `IKernelApplication`.
+ *
+ * Both fence compilers write their fences one directory below `.tmp`, so one
+ * stub at `.tmp/setu.config.ts` serves `../setu.config.ts` from either.
+ *
+ * @param scratchDir - The directory the caller writes its fences into
+ */
+export async function writeProjectStubs(scratchDir: string): Promise<void> {
+  const parent = scratchDir.replace(/\/[^/]+$/, '');
+  await Deno.mkdir(parent, { recursive: true });
+  await Deno.writeTextFile(
+    `${parent}/setu.config.ts`,
+    "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
+      'export function createApp(): IKernelApplication {\n' +
+      '  return createApplication({ plugins: [] });\n' +
+      '}\n',
+  );
+}
+
+/**
  * Builds the deterministic prelude for a compile-fragment fence. The prelude:
  *   - imports real exported Setu-TS types the fence references unimported
  *     (`import type { … }`), so a wrong object-literal property still fails;
@@ -799,9 +935,10 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // own type and needs no prelude `app`).
   if (
     present.has('app') && !fenceDeclares('app') &&
-    !importsIdentifier(code, 'IApplication')
+    !importsIdentifier(code, 'IApplication') &&
+    !importsIdentifier(code, 'IKernelApplication')
   ) {
-    typeNames.add('IApplication');
+    typeNames.add(appTypeFor(code));
   }
   if (present.has('ctx') && !fenceDeclares('ctx')) {
     const pluginUse =
@@ -882,7 +1019,7 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // declare its own `app` (a fence with `const app = createApplication()`
   // provides its own and would otherwise hit "Cannot redeclare").
   if (present.has('app') && !fenceDeclares('app')) {
-    lines.push('declare const app: IApplication;');
+    lines.push(`declare const app: ${appTypeFor(code)};`);
   }
   // `ctx` — choose exactly one real callback context from the members used.
   // A plugin context wins when a fence also contains a nested route/middleware
@@ -918,6 +1055,15 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     lines.push(
       'declare function it(name: string, fn: () => void | Promise<void>): void;',
     );
+  }
+  // The lifecycle hooks, which a fixture-management example reaches for as
+  // readily as `describe`/`it` — same reason, same shape.
+  for (const hook of ['beforeEach', 'afterEach', 'beforeAll', 'afterAll']) {
+    if (present.has(hook)) {
+      lines.push(
+        `declare function ${hook}(fn: () => void | Promise<void>): void;`,
+      );
+    }
   }
   if (present.has('expect')) {
     lines.push(

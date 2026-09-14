@@ -272,7 +272,10 @@ retained timestamp expires.
 import { ClientRequestContext, ClientRequestInterceptor } from '@setu-ts/sdk';
 
 const loggingInterceptor: ClientRequestInterceptor = (ctx: ClientRequestContext) => {
-  console.log(`${ctx.url.method} ${ctx.url.href}`);
+  // The context carries the resolved `url` and the mutable `headers`; the
+  // method is not part of it.
+  console.log(ctx.url.href);
+  ctx.headers.set('x-request-id', crypto.randomUUID());
 };
 
 const client = createClient({
@@ -287,13 +290,13 @@ execute once in registration order before the outbound attempt sequence.
 ### Response Interceptors
 
 ```typescript
-import { ClientResponse, ClientResponseInterceptor } from '@setu-ts/sdk';
+import { ClientRequestContext, ClientResponse, ClientResponseInterceptor } from '@setu-ts/sdk';
 
 const timingInterceptor: ClientResponseInterceptor<unknown> = (
   response: ClientResponse<unknown>,
-  request: { method: string; path: string },
+  request: ClientRequestContext,
 ) => {
-  console.log(`${request.method} ${request.path} → ${response.status}`);
+  console.log(`${request.url.href} → ${response.status}`);
   return response;
 };
 ```
