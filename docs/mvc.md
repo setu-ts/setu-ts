@@ -85,10 +85,12 @@ the handler and both remedies. A status code alongside a rendered body goes thro
 
 A form is the reason server-rendered HTML exists, and three things about it are not obvious.
 
-**There is no `formData()`.** `IRequest` exposes `json()`, `text()` and `bytes()`, so an
-`application/x-www-form-urlencoded` body is read as text and parsed with the web-standard
-`URLSearchParams` — the same route `session-plugin`'s CSRF verifier takes. The runtime pre-reads the
-body into a buffer, so `text()` is replayable and a later reader still sees it.
+**Read forms through `formData()` — with its compatibility fallback.** `IRequest.formData?()` parses
+both `application/x-www-form-urlencoded` and `multipart/form-data` into the framework's read-only
+`FormBody`. All built-in request producers provide and memoize it. The accessor remains optional so
+custom `IRequest` implementations do not break; when it is absent, parse the replayable bytes with
+the same `parseFormBody` function and the request's public `content-type` header. That preserves the
+same form semantics instead of silently treating a submitted form as empty.
 
 **Validate with the service, not the middleware.** `validateBody(schema)` short-circuits with a
 Problem Details JSON body — correct for an API, useless for a form, which needs its own page back
@@ -100,7 +102,7 @@ from — one template, so the empty state and the error state cannot drift — a
 answers `303`, so a refresh does not resubmit.
 
 ```typescript
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, parseFormBody } from '@setu-ts/common';
 import type { IRequestContext, IValidationService, ValidationIssue } from '@setu-ts/common';
 import { html } from '@hono/hono/html';
 import { renderView } from '@setu-ts/view-plugin';
@@ -124,11 +126,16 @@ const TaskForm = (props: TaskFormProps) =>
      ${props.errors.title ?? ''}
    </form>`;
 
-/** Reads both form encodings through the accessor M94b added to `IRequest`. */
+/** Reads both form encodings, including custom requests without `formData()`. */
 async function readForm(ctx: IRequestContext): Promise<Record<string, string>> {
-  const form = await ctx.request.formData?.();
+  const form = ctx.request.formData === undefined
+    ? parseFormBody(
+      await ctx.request.bytes(),
+      ctx.request.headers.get('content-type'),
+    )
+    : await ctx.request.formData();
   const out: Record<string, string> = {};
-  for (const [key, value] of form?.entries() ?? []) {
+  for (const [key, value] of form.entries()) {
     if (typeof value === 'string') out[key] = value;
   }
   return out;

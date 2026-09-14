@@ -26,6 +26,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **MVC form guidance now matches `IRequest.formData?()`.** The guide no longer says forms lack an
+  accessor: all built-in request producers provide its memoized parser for URL-encoded and multipart
+  bodies. Because custom `IRequest` implementations may omit the optional member, the copyable
+  `readForm` helper now falls back to the same
+  `parseFormBody(await request.bytes(),
+  request.headers.get('content-type'))` path rather than
+  silently returning an empty form. The guide gate executes both fallback encodings and the
+  accessor-present path.
 - **`@setu-ts/view-plugin`, `@setu-ts/decorator-plugin` — the documented class-based view example
   did not escape.** `packages/view-plugin/README.md` (the page jsr.io renders) and
   `docs/migration-nestjs.md` both wrote the component as a PLAIN template literal —
