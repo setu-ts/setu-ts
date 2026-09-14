@@ -271,6 +271,13 @@ const Safe = (props: { readonly name: string }) => html`<p>Hello, ${props.name}<
 Write views with JSX or the `html` tag. Reach for a plain string only when the value is already
 escaped by the engine that produced it.
 
+**This is checked, not just asserted.** `deno task check:docs` runs
+[`scripts/check-example-behaviour.ts`](../scripts/check-example-behaviour.ts), which renders every
+component this repository documents — including the two above — through the framework's own renderer
+with `<script>alert(1)</script>` as its input, and fails when the payload comes back unescaped. A
+component a comment labels `UNSAFE` or `DO NOT USE` is checked in the other direction, so the
+warning above fails the gate if it ever stops being true.
+
 ### An inline `<script>` must use `raw()`
 
 Escaping applies to every interpolation, including the body of a `<script>` element. A client script

@@ -47,6 +47,11 @@ const THRESHOLD = 90;
 export const SCRIPT_TARGETS: readonly string[] = [
   'scripts/check-docs.ts',
   'scripts/check-prose-assertions.ts',
+  // The behaviour gate's pure core: fence selection, definition
+  // extraction, probe assembly and the safe/unsafe comparison. Its
+  // subprocess runner is the thin I/O seam, per the same rule as the
+  // package-exports entry below.
+  'scripts/check-example-behaviour.ts',
   'scripts/generate-api-docs.ts',
   // The pure half of the package-exports tooling. Its subprocess wrapper
   // (`package-export-collection.ts`) is deliberately absent: it is the thin
