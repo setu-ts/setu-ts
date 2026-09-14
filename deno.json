@@ -69,6 +69,7 @@
     "audit:ci": "deno run --allow-run=deno scripts/audit.ts",
     "publish:check": "deno publish --dry-run",
     "release:verify": "deno run --allow-read scripts/verify-release.ts",
+    "release:verify-repos": "deno run --allow-read --allow-net=api.jsr.io scripts/verify-jsr-repos.ts",
     "release:resolved-set": "deno run --allow-read --allow-write scripts/release-resolved-set.ts",
     "dependency:drift": "deno run --allow-read scripts/dependency-drift.ts",
     "release:create-packages": "deno run --allow-read --allow-env=JSR_TOKEN,JSR_API_BASE --allow-net=api.jsr.io scripts/create-jsr-packages.ts",

@@ -453,6 +453,38 @@ jobs:
       - name: Compat suite
         run: bun run test:bun
 
+  # Node and Bun consume JSR's npm-compatible artifacts. This job separately
+  # proves that a fresh Deno consumer can resolve and import the JSR package
+  # added to the compatibility suite, including its transitive `jsr:` graph.
+  deno-view-plugin-resolution:
+    name: Deno view-plugin resolution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.6
+
+      - name: Resolve and import from a clean Deno project
+        run: |
+          temporary="$(mktemp -d)"
+          cd "$temporary"
+          deno init --quiet
+          deno add --minimum-dependency-age=0 jsr:@setu-ts/view-plugin
+          deno eval --allow-read --config deno.json '
+            const config = JSON.parse(await Deno.readTextFile("deno.json"));
+            const specifier = config.imports?.["@setu-ts/view-plugin"];
+            if (typeof specifier !== "string" || !specifier.startsWith("jsr:@setu-ts/view-plugin@")) {
+              throw new Error("deno add did not record the view-plugin JSR dependency");
+            }
+            const lock = JSON.parse(await Deno.readTextFile("deno.lock"));
+            if (!Object.keys(lock.jsr ?? {}).some((key) => key.startsWith("@setu-ts/view-plugin@"))) {
+              throw new Error("deno add did not lock the view-plugin JSR dependency");
+            }
+            await import("@setu-ts/view-plugin");
+          '
+
   audit:
     name: Dependency vulnerability scan
     runs-on: ubuntu-latest
