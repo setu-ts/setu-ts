@@ -9662,6 +9662,189 @@ do, and the `exclude` escape already exists.
 
 ---
 
+## Milestone 95: v0.6.0 Smoke Defect Closeout
+
+**Package(s):** 95a `packages/cli`, `docs/`; 95b `packages/messaging-plugin`; 95c `packages/common`,
+`packages/session-plugin`, `packages/static-plugin`.
+
+The `smoke/` programme's **`v0.6.0` regression run** re-executed the 15 rows the release claims to
+close — every one against a `0.5.0` control that reproduces the defect — and then re-ran the
+exercise catalogue on re-pinned projects: **24 of the 39 built exercises driven end to end**,
+against real PostgreSQL, Redis, RabbitMQ, MinIO, a real **kind cluster**, real **workerd**, real
+**Chrome 152**, a real **pty**, Node 24 and Bun 1.4. **No regressions anywhere.** It produced **five
+new findings, one High**, grouped below by defect **shape** rather than by package — the M70a–M70n /
+M90a–M90j precedent.
+
+> **The reproductions are NOT in this repository.** `smoke/` is excluded locally
+> (`.git/info/exclude`), so the `V060-REGRESSION.md` citations below name a file that exists on the
+> machine the run happened on and not in a clone. The source citations are the durable half, since
+> they point at `packages/`.
+
+| Letter   | Shape                                             | Findings | High | Packages                              |
+| -------- | ------------------------------------------------- | -------- | ---- | ------------------------------------- |
+| **M95a** | A generated deployment cannot start               | 1        | 1    | cli, docs                             |
+| **M95b** | Reachability that fails OPEN                      | 1        | 0    | messaging-plugin                      |
+| **M95c** | A contract its own implementation does not honour | 3        | 0    | common, session-plugin, static-plugin |
+
+**None of the five is a regression.** Each reproduces on a `0.5.0` re-pin or is unreachable there;
+they are new to the register rather than new to the code. **M95a leads** — it is the only High, and
+it is the only one that stops an application running at all.
+
+**One `v0.6.0` defect is deliberately NOT a letter here.** The published
+`@setu-ts/view-plugin@0.6.0` README's class-based example is a plain template literal, which the
+engine returns unchanged, so a reader copying it serves an unescaped `<script>`. It is **already
+fixed on `main`** (CHANGELOG `Unreleased`) and needs no implementation work — but JSR versions are
+immutable, so it stays live on jsr.io for the whole `0.6.0` lifetime. It belongs in the **`0.6.1`
+release notes** as a user-facing advisory, not in a closeout milestone.
+
+### Milestone 95a: A Generated Deployment Cannot Start
+
+**Package(s):** `packages/cli`, `docs/deployment.md`
+
+**Objective:** A `setu`-scaffolded microservice, built with its own generated `docker/Dockerfile`
+and deployed with its own generated Kubernetes manifest, crash-loops before it serves anything:
+
+```
+error: Failed writing lockfile
+Caused by:
+    Read-only file system (os error 30) (for '/srv/deno.lock')
+```
+
+Nothing in that message names a dependency, a plugin, or a driver.
+
+**Mechanism, established with `--frozen` rather than inferred.** The container wants to ADD entries
+to the lockfile at runtime — `npm:amqplib`, `npm:ioredis`. The framework loads driver packages
+**lazily** (AI_GUIDELINES §12.2 — `import('npm:amqplib@0.10.x')` and friends), so they are **not in
+the static graph** the generated Dockerfile's `RUN deno cache main.ts` walks. They appear in the
+lockfile's package section but in **no workspace member's `dependencies` array**; the first lazy
+import must record itself against the running member, which needs a write, which the generated
+manifest's `readOnlyRootFilesystem: true` forbids.
+
+**The package set is not knowable in advance, which is what makes this more than a one-line fix.**
+Three distinct families surfaced, each only after the previous was warmed: the messaging/queue
+drivers; `@aws-sdk/credential-provider-web-identity` via the SNS/SQS clients; and
+`import-in-the-middle`, pulled in by M24b's OpenTelemetry auto-instrumentation. It is also **not
+deterministic between replicas of one image** — with two `orders` replicas from the same image, one
+started cleanly and the other died on `import-in-the-middle`.
+
+**Why it has not been seen before.** A long-lived project's lockfile usually already carries these
+entries, because somebody ran the app locally against a live broker and the lazy import recorded
+itself. Re-pinning (which regenerates the lockfile from static resolution alone) removes them. So
+whether the image works depends on whether a developer happened to run the app before building it —
+a reproducibility trap rather than a stable property.
+
+**Remedies, measured — three were tried and only the last works:**
+
+| Attempt                                                                     | Result                                                               |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `RUN deno cache npm:amqplib@0.10.x npm:ioredis@5.x` at build                | ✗ still crashes — the gap is the member ATTRIBUTION, not the package |
+| Declaring the drivers in the member's `imports` map                         | ✗ still crashes — a dynamic-import specifier is recorded separately  |
+| `RUN rm -f /srv/deno.lock`                                                  | ✗ Deno recreates it                                                  |
+| **Warm the specifiers into `DENO_DIR` at build AND `--no-lock` at runtime** | ✓ starts under `--read-only --network none`                          |
+
+`--no-lock` **alone is worse than the defect**: without a warmed cache the container fetches from
+`registry.npmjs.org` at startup, which is what the generated Dockerfile's own comment says it exists
+to avoid ("so the container starts without reaching the network for its own dependencies") and which
+fails outright in an air-gapped cluster. Both halves are required.
+
+**Deliverables, in preference order.** (1) Have `setu` emit the warm step and `--no-lock` in the
+generated Dockerfile, deriving the specifier list from the plugin arms the project actually
+configures — the CLI already reads the manifest to gate schematics, so it knows which drivers a
+composition can reach. (2) Document it in `docs/deployment.md` beside the `readOnlyRootFilesystem`
+guidance, with the `--frozen` diagnostic, because the error message points at the wrong thing. (3)
+An open question for the maintainer, not a deliverable: whether a lazy import should need a lockfile
+write at all when the package is already in `DENO_DIR`.
+
+**The recurrence gate is the thing to get right.** A fixed warm list in the Dockerfile is exactly
+what this finding shows cannot be complete, so a gate that asserts a hard-coded list would pass
+while the defect persists. The honest gate builds a scaffolded microservice image and runs it under
+`--read-only --network none`, which is what discriminates.
+
+### Milestone 95b: Reachability That Fails OPEN
+
+**Package(s):** `packages/messaging-plugin`
+
+**Objective:** With the Service Bus broker **stopped** — TCP refused — `/health` reports `up` and
+`/ready` answers `200`, while every `publish` throws. Measured as a 2×2 against the live emulator
+and the stopped one:
+
+|         | broker UP              | broker DOWN   |
+| ------- | ---------------------- | ------------- |
+| `0.5.0` | `down` / 503 ❌ (V5-2) | `down` / 503  |
+| `0.6.0` | `up` / 200 ✅          | `up` / 200 ❌ |
+
+So the indicator discriminates in **neither** version against this emulator: `0.5.0` always said
+`down`, `0.6.0` always says `up`. The `v0.6.0` fix for V5-2 was correct for the live case and traded
+a false `down` for a false `up`.
+
+**Mechanism.** `ServiceBusBroker` probes the _management_ endpoint as a proxy for the data plane
+(`service-bus-broker.ts:511`). The emulator's management endpoint has no TLS listener, so the probe
+consumes its full 2 s bound and resolves the V5-2 `fallback: undefined`
+(`service-bus-broker.ts:668-680`) → `reachability()` → `undefined` → the indicator maps `undefined`
+to `up` + `reachable: 'unknown'` (`messaging-plugin.ts:431`). That is the documented rule, so the
+code is self-consistent; the gap is that nothing else notices the data plane is gone.
+
+**The release's stated safety net does not hold, and this half is a straightforward correction.**
+The `v0.6.0` CHANGELOG says a namespace that is genuinely gone "still reports `down` regardless: the
+data client stops being ready, and the indicator checks `isReady()` before it consults the probe."
+Measured, `isReady()` is `true` in **0 ms** for a broker dead for minutes — it is a flag set at
+`connect()` and cleared only by `disconnect()`, not a liveness signal.
+
+**Scope caveat, to be stated rather than implied.** Against real Azure the management endpoint
+answers, so reachability probably discriminates there. What stays exposed is a deployment where the
+management plane is unreachable but the data plane is used — a firewalled management endpoint is an
+ordinary production posture, and it is the exact configuration the V5-2 fix was written for.
+
+**Deliverables.** (1) Correct the `isReady()` claim in CHANGELOG and JSDoc; it is measurably false.
+(2) **A design decision for the maintainer, not a prescribed fix:** whether a _repeated_
+network-layer failure should degrade the indicator rather than hold it at `up` indefinitely, or
+whether the probe should fall back to a data-plane signal — a cheap receiver open, or the outcome of
+the last real publish — so the thing reported on is the thing being used. Either changes a published
+health contract, which is why it is a decision and not a deliverable.
+
+### Milestone 95c: A Contract Its Own Implementation Does Not Honour
+
+**Package(s):** `packages/session-plugin`, `packages/static-plugin`, `packages/common`
+
+**Objective:** Three places where a documented contract and the code disagree, each found by
+following the documentation literally rather than by reading source.
+
+**`csrfTokenField()` ignores the plugin's configured `csrf.fieldName`.** With
+`SessionPlugin({ secret, csrf: { fieldName: 'xsrf' } })` and the README's own recipe —
+`csrfTokenField(ctx)`, no second argument — the helper renders `name="_csrf"` while the verifier
+reads `xsrf`, so **every form post `403`s**. Measured: POST under the rendered name → `403`, POST
+under the configured name → `200`; with the default config both are `200`, so the check
+discriminates. The helper resolves the name from its **own** `options` argument
+(`csrf/token.ts:102-106`, `resolveCsrfConfig(options)`) while the verifier reads the **plugin's**
+resolved config (`csrf/verify.ts:122`). This is the repo's own stated rule — _one capability, one
+implementation; every entry point honours the same config_ — whose worked example is `validateBody`
+ignoring the configured `errorFormat`, in the feature shipped (M94c) to remove hand-written CSRF
+markup. **Fix:** default the helper's `fieldName` to the plugin's resolved value (reachable from
+`ctx`), keep the explicit option as an override, and add the rule's own prescribed guard — a test
+driving BOTH entry points under a non-default `fieldName`.
+
+**A structurally malformed multipart part is promoted to a real field named `unknown`.** Compared
+against the platform's own `Response.formData()` — the reference the release names — a part with no
+`name` is dropped by the platform and becomes a field literally called `unknown` here; so does a
+part whose `Content-Disposition` is outright garbage. It collides with a legitimate field of that
+name (`getAll('unknown')` → `['legit', 'INJECTED']`), and a nameless part carrying a `filename` is
+delivered as an upload under that field. `unknown` is also the sentinel the release itself uses as
+the _failure signal_ for the case-insensitivity defect it fixed, so a nameless part and a part whose
+header failed to parse are indistinguishable. **Fix:** drop a part with no usable `name`, matching
+the platform; if a sentinel must be kept, make it unrepresentable as a real field name.
+
+**The `cacheControl` callback receives the URL path including `urlPrefix`.** With
+`urlPrefix: '/static'` the callback is handed `/static/index.html`; root-mounted it is handed
+`/index.html`. The options table promises "a **leading-slash** root-relative request path", the
+JSDoc says "the root-relative path", the parameter is named `relativePath`, and the README's own
+prefixed example tests `path === '/'` — unreachable under any non-root prefix. Practical impact is
+narrow (`endsWith('.html')` still works, and the shipped content-hash default still matches because
+the hash survives the prefix), so this costs a hand-written callback rather than a default. **Fix:**
+either strip `urlPrefix` before calling — which is what `relativePath` and the `=== '/'` example
+both imply — or correct the three doc sites and the example.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                        |
@@ -9808,3 +9991,6 @@ do, and the `exclude` escape already exists.
 | 94a       | ✅     | exceptions — application-owned error response                                                                  |
 | 94b       | ✅     | common + runtime + storage/session — one form-body abstraction                                                 |
 | 94c       | ✅     | session-plugin — CSRF token field helper                                                                       |
+| 95a       | ⬜     | cli + docs — a generated deployment cannot start (**High**)                                                    |
+| 95b       | ⬜     | messaging-plugin — reachability that fails open                                                                |
+| 95c       | ⬜     | common + session-plugin + static-plugin — a contract its own implementation does not honour                    |

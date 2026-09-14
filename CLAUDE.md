@@ -4849,10 +4849,34 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `IMessageBroker` change, no new capability token, no broker adapter rewritten, no dependency on
   `@setu-ts/events-plugin`) — complete (PR #287)
 
-- **Next milestone** — **M40** (final polish and release: integration testing across all plugins,
+- **Next milestone** — **M95a** (`packages/cli` + `docs/` — a generated deployment cannot start: the
+  only **High** row from the `v0.6.0` smoke run, and the only one that stops an application running
+  at all. A scaffolded microservice crash-loops under its own generated Kubernetes manifest because
+  the framework's lazily-imported drivers are absent from the lockfile the generated Dockerfile
+  builds, and `readOnlyRootFilesystem: true` forbids the write. M95b and M95c follow; each carries a
+  decision for the maintainer rather than a purely mechanical fix.)
+
+- **Also open** — **M40** (final polish and release: integration testing across all plugins,
   performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the
-  Deno/Node/Bun/Workers portability matrix validated end to end. The last ⬜ row in the ROADMAP;
-  M94a, M94b and M94c are all complete below).
+  Deno/Node/Bun/Workers portability matrix validated end to end).
+
+- **Milestone 95** (`packages/cli` + `packages/messaging-plugin` + `packages/common` +
+  `packages/session-plugin` + `packages/static-plugin` + `docs/` — the `v0.6.0` smoke defect
+  closeout) — **open**. The `v0.6.0` regression run re-executed all 15 rows the release claims to
+  close, each against a `0.5.0` control that reproduces the defect, then re-ran the exercise
+  catalogue on re-pinned projects: **24 of the 39 built exercises driven end to end** against real
+  PostgreSQL, Redis, RabbitMQ, MinIO, a real kind cluster, real workerd, real Chrome 152, a real
+  pty, Node 24 and Bun 1.4. **No regressions anywhere**, and several previously-open rows confirmed
+  closed through the exercises that found them — X38-1 (a serialization conflict now answers `409`
+  where it was a masked `500`), X7-6 (RPC is now visible to metrics AND carries security headers),
+  X18-2 (`501`, failing closed), X5-1/F1, and M74's `peek()` taking X3's room leak from 3→53 down to
+  0→0. Five NEW findings, **one High**, grouped by shape as M95a/b/c; **none is a regression** —
+  each reproduces on a `0.5.0` re-pin or is unreachable there. Separately, the published
+  `view-plugin@0.6.0` README teaches an unescaped class-based view: already fixed on `main`, but
+  immutable on JSR, so it belongs in the `0.6.1` release notes as a user-facing advisory rather than
+  in a closeout letter. Reproductions are in `smoke/V060-REGRESSION.md`, which is excluded from the
+  repository — the ROADMAP section carries the mechanism and the source citations, which are the
+  durable half.
 
 - **Milestone 94a** (`packages/exceptions` — application-owned caught-error responses):
   `ErrorHandlerOptions.respond(error, ctx)` receives the normalized, masked/hinted, served-status
