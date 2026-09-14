@@ -1393,6 +1393,17 @@ describe('documentation gate — install-snippet versions', () => {
     expect(outgoing[0]?.message).toContain('0.5.0');
   });
 
+  it('treats a jsx fence as compilable TypeScript, written as .tsx', async () => {
+    const { TS_ALIASES, fenceExtension } = await import('./fixtures/snippets/fence-engine.ts');
+    // `fenceExtension` knew about `jsx` while `TS_ALIASES` did not, so such a
+    // fence was filtered out before its extension could be chosen — skipped by
+    // every compiler and by the forbidden-API scan.
+    expect(TS_ALIASES.has('jsx')).toBe(true);
+    expect(fenceExtension('jsx')).toBe('tsx');
+    expect(fenceExtension('tsx')).toBe('tsx');
+    expect(fenceExtension('typescript')).toBe('ts');
+  });
+
   it('reads the post-alpha 0.6.x line, and still reads 0.5.x as stale beside it', () => {
     // Stale WITHIN 0.6 — the only case that discriminates. `^0.6.0` clean at
     // 0.6.0 passes just as well when the gate reads no 0.6 at all.

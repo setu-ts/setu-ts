@@ -41,7 +41,16 @@
  */
 import { scanFences } from '../../../scripts/check-docs.ts';
 
-/** Language aliases that map to TypeScript for compilation purposes. */
+/**
+ * Language aliases that map to TypeScript for compilation purposes.
+ *
+ * `jsx` is here to match {@linkcode fenceExtension}, which already writes one
+ * as `.tsx`. While the two disagreed a `jsx`-fenced example was classified
+ * non-TypeScript and filtered out BEFORE the extension was chosen, so it would
+ * have been skipped by every fence compiler and by the forbidden-API scan. No
+ * such fence exists today; the inconsistency is removed so none can appear
+ * unchecked.
+ */
 export const TS_ALIASES = new Set(['typescript', 'ts', 'tsx', 'jsx']);
 
 /**
@@ -935,8 +944,11 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // own type and needs no prelude `app`).
   if (
     present.has('app') && !fenceDeclares('app') &&
-    !importsIdentifier(code, 'IApplication') &&
-    !importsIdentifier(code, 'IKernelApplication')
+    // Only the SELECTED type is suppressed. Testing both meant a fence that
+    // imports `IApplication` for its own use while calling `app.inject` had
+    // its `IKernelApplication` import dropped, leaving the declaration below
+    // referring to a name the module never imports.
+    !importsIdentifier(code, appTypeFor(code))
   ) {
     typeNames.add(appTypeFor(code));
   }

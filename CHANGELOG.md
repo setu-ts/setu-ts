@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **A documented example's BEHAVIOUR is now checked, not only its types.** The fence compilers prove
+  an example type-checks; the `v0.6.0` view defect type-checked perfectly and escaped nothing, so
+  every gate was green while the README taught an XSS hole. `scripts/check-example-behaviour.ts`
+  closes that class by RUNNING the documented components: every component a fence defines in a
+  view-rendering document is rendered through the framework's own `renderComponent` with
+  `<script>alert(1)</script>` substituted into its props, and the gate fails if the payload survives
+  unescaped. It derives its work from the documents rather than from an author remembering to write
+  an assertion, so a component documented tomorrow is covered the day it is written; it runs inside
+  `check:docs`. A component whose own comment labels it `UNSAFE` or `DO NOT USE` is checked in the
+  OTHER direction — it must still be unsafe — so a warning that stopped being true fails rather than
+  quietly misinforming. `raw()` is honoured as the documented opt-out. **The first cut of this gate
+  passed against a reintroduction of the exact `v0.6.0` defect**: it deduplicated component names
+  per document, and a README routinely defines the same component twice — once functional, once
+  class-based — so the class-based one, which is where the defect lived, was skipped. Scope is per
+  fence, and the case is pinned.
+
 ### Fixed
 
 - **`@setu-ts/view-plugin`, `@setu-ts/decorator-plugin` — the documented class-based view example

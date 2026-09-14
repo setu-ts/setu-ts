@@ -40,11 +40,41 @@ const HEADER =
 
 const FAILING_COVERAGE = { branchPct: 80.0, functionPct: 70.0, linePct: 60.0 };
 
+/**
+ * A full coverage table, derived from {@link SCRIPT_TARGETS} rather than typed
+ * out.
+ *
+ * Hand-enumerated fixtures drift: adding a seventh target left three of them
+ * one row short, and each failed for a reason unrelated to what it was testing.
+ * `overrides` names the rows that should fail, so a test still states its own
+ * case explicitly.
+ *
+ * @param overrides - Targets to emit below threshold
+ * @returns The `deno coverage` stdout a complete run would print
+ */
+function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
+  const rows = SCRIPT_TARGETS.map((target) =>
+    overrides[target] === true
+      ? row(
+        target,
+        FAILING_COVERAGE.branchPct,
+        FAILING_COVERAGE.functionPct,
+        FAILING_COVERAGE.linePct,
+      )
+      : row(target, 95, 96, 94)
+  );
+  return [HEADER, ...rows].join('\n');
+}
+
 describe('script-coverage target-set completeness', () => {
-  it('has exactly six canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(6);
+  it('has exactly seven canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(7);
     expect(SCRIPT_TARGETS).toContain('scripts/check-docs.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/check-prose-assertions.ts');
+    // The executable behaviour gate's pure core — fence selection, definition
+    // extraction, probe assembly and the safe/unsafe comparison. Its
+    // subprocess runner is the I/O seam.
+    expect(SCRIPT_TARGETS).toContain('scripts/check-example-behaviour.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/generate-api-docs.ts');
     // The pure half of the package-exports tooling. Its subprocess wrapper is
     // deliberately NOT a target — the decidable logic was extracted out of it.
@@ -107,33 +137,16 @@ describe('script-coverage target-set completeness', () => {
   });
 
   it('accepts every target passing (the happy path)', () => {
-    const stdout = HEADER + '\n' +
-      row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
-      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
-      row('scripts/generate-api-docs.ts', 93, 95, 93) + '\n' +
-      row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
-      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
-      row('scripts/version-sweep.ts', 94, 100, 96);
-    const parsed = parseCoverageTable(stdout);
-    const failures = validateTargetSet(parsed);
-    expect(failures).toEqual([]);
-    expect(parsed.byTarget.size).toBe(6);
-    const below = belowThreshold(parsed);
-    expect(below).toEqual([]);
+    const parsed = parseCoverageTable(fullTable());
+    expect(validateTargetSet(parsed)).toEqual([]);
+    expect(parsed.byTarget.size).toBe(SCRIPT_TARGETS.length);
+    expect(belowThreshold(parsed)).toEqual([]);
   });
 
   it('flags one target below threshold while the set is complete', () => {
-    const stdout = HEADER + '\n' +
-      row('scripts/check-docs.ts', 95, 96, 94) + '\n' +
-      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
-      row('scripts/generate-api-docs.ts', 80, 70, 60) + '\n' +
-      row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
-      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
-      row('scripts/version-sweep.ts', 94, 100, 96);
-    const parsed = parseCoverageTable(stdout);
+    const parsed = parseCoverageTable(fullTable({ 'scripts/generate-api-docs.ts': true }));
     // The set is complete — completeness passes.
-    const failures = validateTargetSet(parsed);
-    expect(failures).toEqual([]);
+    expect(validateTargetSet(parsed)).toEqual([]);
     // But one target is below threshold.
     const below = belowThreshold(parsed);
     expect(below.length).toBe(1);
@@ -142,17 +155,12 @@ describe('script-coverage target-set completeness', () => {
   });
 
   it('flags two targets below threshold', () => {
-    const stdout = HEADER + '\n' +
-      row('scripts/check-docs.ts', 80, 70, 60) + '\n' +
-      row('scripts/check-prose-assertions.ts', 98, 97, 96) + '\n' +
-      row('scripts/generate-api-docs.ts', 80, 70, 60) + '\n' +
-      row('scripts/package-exports.ts', 97, 98, 96) + '\n' +
-      row('scripts/npm-specifier-audit.ts', 96, 97, 95) + '\n' +
-      row('scripts/version-sweep.ts', 94, 100, 96);
-    const parsed = parseCoverageTable(stdout);
+    const parsed = parseCoverageTable(fullTable({
+      'scripts/check-docs.ts': true,
+      'scripts/generate-api-docs.ts': true,
+    }));
     expect(validateTargetSet(parsed)).toEqual([]);
-    const below = belowThreshold(parsed);
-    expect(below.length).toBe(2);
+    expect(belowThreshold(parsed).length).toBe(2);
   });
 
   it('parses ANSI-stripped rows correctly (no false OK from color codes)', () => {

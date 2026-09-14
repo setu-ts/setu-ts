@@ -47,28 +47,30 @@ console.log(res.statusCode); // 200
 > `errorHandler(...)` from `@setu-ts/exceptions` is a **middleware**, not a plugin — it cannot be
 > passed to `plugins` (which accepts `IPlugin[]` and would throw
 > `TypeError: plugin.register is not a function` at `start()`). Register it on an un-started app,
-> then start:
->
-> ```typescript
-> import { createTestApp } from '@setu-ts/testing';
-> import { RuntimePlugin } from '@setu-ts/runtime';
-> import { errorHandler } from '@setu-ts/exceptions';
->
-> const app = await createTestApp({
->   plugins: [RuntimePlugin()],
->   autoStart: false,
-> });
->
-> app.middleware.add(errorHandler({ format: 'rfc9457' }), {
->   priority: 0,
->   name: 'error-handler',
-> });
->
-> await app.start();
-> ```
->
-> Once registered, the responder seam governs the kernel's own 404/500 terminals too.
->
+> then start — see the example below the callout.
+
+Registering `errorHandler` on an un-started application:
+
+```typescript
+import { createTestApp } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { errorHandler } from '@setu-ts/exceptions';
+
+const app = await createTestApp({
+  plugins: [RuntimePlugin()],
+  autoStart: false,
+});
+
+app.middleware.add(errorHandler({ format: 'rfc9457' }), {
+  priority: 0,
+  name: 'error-handler',
+});
+
+await app.start();
+```
+
+Once registered, the responder seam governs the kernel's own 404/500 terminals too.
+
 > **The `app:` arm dissolves this.** An application built from the project's own composition root
 > already carries whatever `errorHandler` that root registered, so its error bodies are the ones
 > production serves. This package deliberately installs no responder of its own: it depends on

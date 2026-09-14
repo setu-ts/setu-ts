@@ -111,7 +111,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/runtime/README.md': 3,
   'packages/sdk/README.md': 14,
   'packages/telemetry-plugin/README.md': 2,
-  'packages/testing/README.md': 8,
+  'packages/testing/README.md': 9,
 };
 
 /** Reads every fence the engine would compile from one README. */
@@ -170,7 +170,10 @@ async function everyPackageReadme(): Promise<string[]> {
       if (depth > 0) await walk(path, depth - 1);
     }
   };
-  await walk('packages', 1);
+  // Deep enough for any nesting a package group introduces. At depth 1 a
+  // README below `packages/<group>/<package>/` was in neither list AND
+  // absent from `onDisk`, so the coverage assertion passed over it.
+  await walk('packages', 4);
   return found.sort();
 }
 
@@ -193,6 +196,20 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
       counts[readme] = (await compilableFences(readme)).length;
     }
     expect(counts).toEqual(READMES);
+  });
+
+  it('carries no fence inside a blockquote, which the scanner cannot see', async () => {
+    // `scanFences` reads a fence opener at the start of a line, so a fence
+    // indented behind `> ` is invisible: `packages/testing/README.md` had one
+    // in a callout, and the gate reported its other eight compiling while that
+    // `createTestApp` example was checked by nothing. Cheaper to keep code out
+    // of callouts than to teach every consumer of the scanner about them.
+    const offenders: string[] = [];
+    for (const readme of [...Object.keys(READMES), ...UNGATED]) {
+      const source = await Deno.readTextFile(readme);
+      if (/^>\s*```/m.test(source)) offenders.push(readme);
+    }
+    expect(offenders).toEqual([]);
   });
 
   it('should compile every Setu-TS fence in every listed README', async () => {
