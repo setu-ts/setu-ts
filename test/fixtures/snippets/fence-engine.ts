@@ -42,7 +42,28 @@
 import { scanFences } from '../../../scripts/check-docs.ts';
 
 /** Language aliases that map to TypeScript for compilation purposes. */
-export const TS_ALIASES = new Set(['typescript', 'ts', 'tsx']);
+export const TS_ALIASES = new Set(['typescript', 'ts', 'tsx', 'jsx']);
+
+/**
+ * The file extension a fence must be written to before `deno check` sees it.
+ *
+ * `.tsx` for a JSX fence, `.ts` otherwise. Load-bearing rather than cosmetic:
+ * Deno decides whether to PARSE JSX from the extension, so a fence carrying
+ * real JSX written to `.ts` dies with `SyntaxError: Expected ',', got '.'`
+ * before type-checking begins. Both fence compilers hardcoded `.ts`, which
+ * held only because every `tsx` fence in the corpus happened to contain no JSX
+ * — the `html` tagged template parses as ordinary TypeScript. The first real
+ * JSX example (M92's views, v0.6.0) is what surfaced it.
+ *
+ * One function so the guide and package-README compilers cannot disagree about
+ * which fences are checkable.
+ *
+ * @param lang - The fence's info string, e.g. `tsx`
+ * @returns `'tsx'` or `'ts'`
+ */
+export function fenceExtension(lang: string): 'ts' | 'tsx' {
+  return lang === 'tsx' || lang === 'jsx' ? 'tsx' : 'ts';
+}
 
 /** The eleven curated guides whose copyable fences must compile or be classified. */
 export const GUIDES = [

@@ -36,11 +36,11 @@ application-supplied `IViewEngine` verbatim.
 
 ```tsx
 import type { IRequestContext } from '@setu-ts/common';
-import { html } from '@hono/hono/html';
 import { renderView } from '@setu-ts/view-plugin';
 
-const UserList = (props: { readonly users: readonly string[] }) =>
-  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+const UserList = (props: { readonly users: readonly string[] }) => (
+  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+);
 
 export function usersRoute(ctx: IRequestContext) {
   return renderView(ctx, UserList, { users: ['ada', 'grace'] });
@@ -49,15 +49,15 @@ export function usersRoute(ctx: IRequestContext) {
 
 ## The class-based entry point
 
-```typescript
-import { html } from '@hono/hono/html';
+```tsx
 import { Controller, Get, Render } from '@setu-ts/decorator-plugin';
 import { ViewPlugin } from '@setu-ts/view-plugin';
 
-// The `html` tag escapes every interpolation. A plain
+// JSX escapes every interpolation. A plain
 // `(props) => \`<li>${user}</li>\`` template would NOT — see Escaping below.
-const UserList = (props: { readonly users: readonly string[] }) =>
-  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+const UserList = (props: { readonly users: readonly string[] }) => (
+  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+);
 
 @Controller('/pages')
 class PagesController {

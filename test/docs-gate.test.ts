@@ -1855,6 +1855,17 @@ describe('documentation gate — no nonexistent kernel API in package READMEs (M
       }
     }
   });
+
+  it('scans jsx fences for the forbidden APIs', async () => {
+    const { TS_ALIASES } = await import('./fixtures/snippets/fence-engine.ts');
+    const lines = ['```jsx', 'const app = new Application();', '```'];
+    const { blocks } = scanFences(lines);
+    const block = blocks[0] as { info: string; bodyStart: number; bodyEnd: number };
+    const code = lines.slice(block.bodyStart, block.bodyEnd).join('\n');
+
+    expect(TS_ALIASES.has(block.info)).toBe(true);
+    expect(FORBIDDEN.some((pattern) => pattern.test(code))).toBe(true);
+  });
 });
 
 /**

@@ -604,12 +604,15 @@ provider fails at `register()`, never serving JSON where the author asked for HT
 header alongside a rendered body goes through the positional context source: the return value IS the
 props bag, so `@Render` carries no `status` argument.
 
-```typescript
+```tsx
 import { Controller, Ctx, Get, Params, Render } from '@setu-ts/decorator-plugin';
 import type { IRequestContext } from '@setu-ts/common';
 
-const UserList = (props: { readonly users: readonly string[] }) =>
-  `<ul>${props.users.map((user) => `<li>${user}</li>`).join('')}</ul>`;
+// JSX, so every interpolation is escaped by the rendering runtime. A plain
+// template literal is a `string`, returned unchanged with nothing escaped.
+const UserList = (props: { readonly users: readonly string[] }) => (
+  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+);
 
 @Controller('/pages')
 export class PagesController {
