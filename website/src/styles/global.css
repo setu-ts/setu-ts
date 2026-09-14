@@ -159,6 +159,10 @@ kbd {
   display: none;
 }
 
+.mobile-search-toggle {
+  display: none;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -181,9 +185,27 @@ kbd {
     display: none;
   }
 
+  .mobile-search-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    margin-left: auto;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    background: var(--bg);
+    color: var(--fg);
+  }
+
+  .mobile-search-toggle:hover {
+    background: var(--bg-soft);
+  }
+
   .mobile-navigation {
     display: block;
-    margin-left: auto;
+    margin-left: 0.5rem;
     position: relative;
   }
 
@@ -221,12 +243,6 @@ kbd {
     border-radius: 0.7rem;
     background: var(--bg);
     box-shadow: 0 0.75rem 2rem rgba(16, 24, 32, 0.18);
-  }
-
-  .mobile-search {
-    display: block;
-    grid-column: 1 / -1;
-    width: 100%;
   }
 
   .mobile-navigation-panel a,
@@ -594,6 +610,69 @@ kbd {
   color: #0d1117;
 }
 
+@media (max-width: 48rem) {
+  .hero {
+    padding: 2.5rem 1rem 2rem;
+  }
+
+  .hero-logo .brand {
+    width: min(100%, 18rem);
+  }
+
+  .hero-logo .brand img {
+    width: 100%;
+    height: auto;
+  }
+
+  .hero h1 {
+    max-width: 22rem;
+    margin: 1rem auto 0.75rem;
+    font-size: clamp(1.65rem, 7vw, 2rem);
+    line-height: 1.25;
+  }
+
+  .hero .tagline {
+    max-width: 23rem;
+    margin-bottom: 1.5rem;
+    font-size: 1rem;
+    line-height: 1.55;
+  }
+
+  .install {
+    display: block;
+    width: 100%;
+    max-width: 33rem;
+    margin: 0 auto;
+    padding: 0.9rem 1rem;
+    font-size: 0.77rem;
+  }
+
+  .install pre {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .cta-row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.6rem;
+    margin: 1.5rem auto 0;
+    max-width: 23rem;
+  }
+
+  .cta-row .button {
+    width: 100%;
+  }
+
+  .landing-section {
+    padding: 1.5rem 1rem;
+  }
+
+  .landing-section h2 {
+    font-size: 1.3rem;
+  }
+}
+
 /* ---- Docs layout ---- */
 
 .docs-shell {
@@ -618,12 +697,11 @@ kbd {
 
 @media (max-width: 50rem) {
   .docs-sidebar {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+    display: none;
   }
 }
 
-.docs-sidebar h2 {
+.docs-navigation h2 {
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -631,17 +709,17 @@ kbd {
   margin: 1.25rem 0 0.35rem;
 }
 
-.docs-sidebar h2:first-child {
+.docs-navigation h2:first-child {
   margin-top: 0;
 }
 
-.docs-sidebar ul {
+.docs-navigation ul {
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
-.docs-sidebar a {
+.docs-navigation a {
   display: block;
   padding: 0.2rem 0.5rem;
   border-radius: 0.4rem;
@@ -649,15 +727,86 @@ kbd {
   font-size: 0.92rem;
 }
 
-.docs-sidebar a:hover {
+.docs-navigation a:hover {
   background: var(--bg-soft);
   text-decoration: none;
 }
 
-.docs-sidebar a[aria-current='page'] {
+.docs-navigation a[aria-current='page'] {
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
+}
+
+.docs-mobile-controls {
+  display: none;
+}
+
+@media (max-width: 50rem) {
+  .docs-content {
+    padding-top: 0;
+  }
+
+  .docs-mobile-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    margin: 0 -1.25rem 1.5rem;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-soft);
+  }
+
+  .docs-sidebar-mobile {
+    display: block;
+    position: relative;
+    border-right: 1px solid var(--border);
+  }
+
+  .docs-sidebar-mobile summary,
+  .page-toc summary {
+    display: flex;
+    align-items: center;
+    min-height: 2.35rem;
+    padding: 0.45rem 0.85rem;
+    cursor: pointer;
+    color: var(--fg);
+    font-size: 0.78rem;
+    font-weight: 500;
+    list-style: none;
+  }
+
+  .docs-sidebar-mobile summary {
+    gap: 0.45rem;
+  }
+
+  .page-toc summary {
+    justify-content: space-between;
+  }
+
+  .docs-sidebar-mobile summary::-webkit-details-marker,
+  .page-toc summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .docs-sidebar-mobile summary::marker,
+  .page-toc summary::marker {
+    color: var(--muted);
+  }
+
+  .docs-sidebar-mobile .docs-navigation {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 5;
+    width: min(23rem, calc(100vw - 1.5rem));
+    max-height: min(32rem, calc(100vh - 7rem));
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 0 0 0.6rem 0.6rem;
+    background: var(--bg);
+    box-shadow: 0 0.75rem 2rem rgba(16, 24, 32, 0.18);
+    padding: 1rem 0.85rem 1.25rem;
+  }
 }
 
 .docs-content {
@@ -670,6 +819,84 @@ kbd {
   color: var(--muted);
   margin-bottom: 1.5rem;
   display: inline-block;
+}
+
+.page-toc {
+  margin-bottom: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--bg-soft);
+}
+
+.page-toc summary {
+  display: flex;
+  align-items: center;
+  min-height: 2.8rem;
+  padding: 0.55rem 0.85rem;
+  cursor: pointer;
+  color: var(--fg);
+  font-weight: 700;
+}
+
+.page-toc summary::marker {
+  color: var(--muted);
+}
+
+.page-toc nav {
+  border-top: 1px solid var(--border);
+  padding: 0.5rem 0.85rem 0.75rem;
+}
+
+.page-toc ul {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.page-toc a {
+  display: block;
+  padding: 0.35rem 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.page-toc a:hover {
+  color: var(--accent);
+}
+
+.page-toc .toc-level-3 {
+  padding-left: 1rem;
+}
+
+@media (max-width: 50rem) {
+  .docs-content {
+    padding-top: 0;
+  }
+
+  .page-toc {
+    position: relative;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .page-toc nav {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 5;
+    width: min(23rem, calc(100vw - 1.5rem));
+    max-height: min(32rem, calc(100vh - 7rem));
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 0 0 0.6rem 0.6rem;
+    background: var(--bg);
+    box-shadow: 0 0.75rem 2rem rgba(16, 24, 32, 0.18);
+    padding: 0.5rem 0.85rem 0.75rem;
+  }
 }
 
 /* ---- Prose (rendered docs Markdown) ---- */

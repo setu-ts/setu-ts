@@ -1,15 +1,18 @@
 ---
 import Base from './Base.astro';
-import { DOCS_NAV } from '../lib/docs-nav';
+import DocsNavigation from '../components/DocsNavigation.astro';
+import type { TableOfContentsItem } from '../lib/docs-links';
 
 interface Props {
   title: string;
   description?: string;
   /** Canonical file in docs/, for the "edit on GitHub" link. */
   source?: string;
+  /** Headings in the rendered article, for in-page navigation. */
+  tableOfContents?: TableOfContentsItem[];
 }
 
-const { title, description, source } = Astro.props;
+const { title, description, source, tableOfContents = [] } = Astro.props;
 const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/docs';
 const sourceFile = source?.toLowerCase() === 'readme' ? 'README' : source;
 const editUrl = source
@@ -19,31 +22,49 @@ const editUrl = source
 
 <Base title={title} description={description}>
   <div class="docs-shell">
-    <nav class="docs-sidebar" aria-label="Documentation">
-      <h2><a href="/docs/">Documentation</a></h2>
-      {
-        DOCS_NAV.map((group) => (
-          <>
-            <h2>{group.label}</h2>
-            <ul>
-              {group.items.map((item) => (
-                <li>
-                  <a
-                    href={`/docs/${item.slug}/`}
-                    aria-current={
-                      currentPath === `/docs/${item.slug}` ? 'page' : undefined
-                    }
-                  >
-                    {item.label}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </>
-        ))
-      }
-    </nav>
+    <aside class="docs-sidebar">
+      <DocsNavigation currentPath={currentPath} />
+    </aside>
     <div class="docs-content">
+      <div class="docs-mobile-controls">
+        <details class="docs-sidebar-mobile">
+          <summary>
+            <svg
+              aria-hidden="true"
+              width="14"
+              height="14"
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-width="1.8"
+            >
+              <path d="M3 5.5h14M3 10h14M3 14.5h14"></path>
+            </svg>
+            Menu
+          </summary>
+          <DocsNavigation currentPath={currentPath} />
+        </details>
+        {
+          tableOfContents.length > 0 && (
+          <details class="page-toc">
+            <summary>
+              On this page
+              <span aria-hidden="true">›</span>
+            </summary>
+            <nav aria-label="On this page">
+              <ul>
+                {tableOfContents.map((item) => (
+                  <li class:list={[`toc-level-${item.level}`]}>
+                    <a href={`#${item.id}`}>{item.title}</a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </details>
+          )
+        }
+      </div>
       {
         editUrl && (
           <a class="edit-page" href={editUrl}>

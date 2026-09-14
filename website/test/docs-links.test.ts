@@ -2,6 +2,7 @@ import { expect } from '@std/expect';
 import { describe, it } from '@std/testing/bdd';
 import {
   extractDescription,
+  extractTableOfContents,
   extractTitle,
   resolvedMdToRoute,
   rewriteDocsHtml,
@@ -129,5 +130,22 @@ describe('extractDescription', () => {
 
   it('returns undefined without a paragraph', () => {
     expect(extractDescription('<h1>only</h1>')).toBeUndefined();
+  });
+});
+
+describe('extractTableOfContents', () => {
+  it('reads rendered h2 and h3 headings with their generated anchors', () => {
+    expect(
+      extractTableOfContents(
+        '<h1 id="guide">Guide</h1><h2 id="install">Install</h2><p>Text</p><h3 id="deno">Deno</h3>',
+      ),
+    ).toEqual([
+      { id: 'install', level: 2, title: 'Install' },
+      { id: 'deno', level: 3, title: 'Deno' },
+    ]);
+  });
+
+  it('skips headings without a generated anchor', () => {
+    expect(extractTableOfContents('<h2>Missing anchor</h2>')).toEqual([]);
   });
 });

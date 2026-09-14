@@ -100,6 +100,25 @@ const isDocs = Astro.url.pathname.startsWith('/docs');
             >
           </button>
         </nav>
+        <button
+          class="mobile-search-toggle"
+          type="button"
+          aria-label="Search docs"
+        >
+          <svg
+            aria-hidden="true"
+            width="20"
+            height="20"
+            viewBox="0 0 20 20"
+            fill="none"
+            stroke="currentColor"
+            stroke-linecap="round"
+            stroke-width="1.8"
+          >
+            <circle cx="8.5" cy="8.5" r="4.75"></circle>
+            <path d="m12 12 4.25 4.25"></path>
+          </svg>
+        </button>
         <details class="mobile-navigation">
           <summary aria-label="Open navigation">
             <svg
@@ -117,10 +136,6 @@ const isDocs = Astro.url.pathname.startsWith('/docs');
             <span class="visually-hidden">Open navigation</span>
           </summary>
           <div class="mobile-navigation-panel">
-            <pagefind-modal-trigger
-              class="mobile-search"
-              placeholder="Search docs"
-            ></pagefind-modal-trigger>
             <a href="/docs/" aria-current={isDocs ? 'page' : undefined}>Docs</a>
             <a href="/api/">API</a>
             <a href="/docs/examples/">Examples</a>
@@ -179,6 +194,10 @@ const isDocs = Astro.url.pathname.startsWith('/docs');
     <pagefind-modal reset-on-close></pagefind-modal>
 
     <script>
+      document.querySelector('.mobile-search-toggle')?.addEventListener('click', () => {
+        document.querySelector('pagefind-modal')?.open();
+      });
+
       document.querySelectorAll('.theme-toggle').forEach((toggle) => {
         toggle.addEventListener('click', () => {
           const next =
