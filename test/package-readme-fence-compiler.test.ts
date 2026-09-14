@@ -42,6 +42,7 @@ import {
   extractFences,
   fenceExtension,
   TS_ALIASES,
+  writeProjectStubs,
 } from './fixtures/snippets/fence-engine.ts';
 
 const SCRATCH_DIR = '.tmp/package-readme-fences';
@@ -90,6 +91,27 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/starters/rest-starter/README.md': 7,
   'packages/starters/microservice-starter/README.md': 6,
   'packages/starters/full-stack-starter/README.md': 7,
+  // v0.6.0 follow-up: half of the package READMEs had never had a single fence
+  // compiled — the list only ever grew when a milestone happened to touch a
+  // README, so `kernel`, `runtime`, `sdk`, `exceptions` and `testing` sat
+  // unchecked. These are the ones that compiled clean once the harness stopped
+  // producing false failures of its own; the nine still outstanding are named
+  // in the ungated-coverage assertion below so the gap cannot be forgotten.
+  'packages/cache-plugin/README.md': 2,
+  'packages/config-plugin/README.md': 4,
+  'packages/di-plugin/README.md': 2,
+  'packages/exceptions/README.md': 2,
+  'packages/feature-flags-plugin/README.md': 2,
+  'packages/health-plugin/README.md': 2,
+  'packages/http-security-plugin/README.md': 2,
+  'packages/kernel/README.md': 2,
+  'packages/logger-plugin/README.md': 2,
+  'packages/mail-plugin/README.md': 2,
+  'packages/metrics-plugin/README.md': 2,
+  'packages/runtime/README.md': 3,
+  'packages/sdk/README.md': 14,
+  'packages/telemetry-plugin/README.md': 2,
+  'packages/testing/README.md': 8,
 };
 
 /** Reads every fence the engine would compile from one README. */
@@ -103,12 +125,68 @@ async function compilableFences(readme: string) {
     );
 }
 
+/**
+ * Package READMEs whose fences are NOT yet compiled, and why the list exists.
+ *
+ * Half the package READMEs were in neither list before v0.6.0 — the gated set
+ * only ever grew when a milestone happened to touch a README, so `kernel`,
+ * `runtime`, `sdk`, `exceptions` and `testing` had never had a single example
+ * type-checked. That is how `mail-plugin` shipped a `subject` field its own
+ * `MailTemplate` does not have, `di-plugin` documented `register(Class, …)`
+ * against a `register(token: string, …)` signature, and `exceptions` told
+ * readers to use `ctx.request.params` — the exact mistake M34's drift gate
+ * caught in generated code.
+ *
+ * Each entry here is a KNOWN GAP, not an exemption: the assertion below
+ * requires every package README to be in exactly one of the two lists, so a
+ * new package cannot be silently uncovered and an entry cannot be dropped
+ * from the gated set without becoming visible here.
+ */
+const UNGATED: readonly string[] = [
+  'packages/cli/README.md',
+  'packages/cloudflare-plugin/README.md',
+  'packages/cqrs-plugin/README.md',
+  'packages/database-plugin/README.md',
+  'packages/events-plugin/README.md',
+  'packages/notification-plugin/README.md',
+  'packages/openapi-plugin/README.md',
+  'packages/secrets-plugin/README.md',
+  'packages/service-discovery-plugin/README.md',
+];
+
+/** Every package README on disk, so neither list can drift from reality. */
+async function everyPackageReadme(): Promise<string[]> {
+  const found: string[] = [];
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    for await (const entry of Deno.readDir(dir)) {
+      if (!entry.isDirectory) continue;
+      const path = `${dir}/${entry.name}`;
+      try {
+        await Deno.stat(`${path}/README.md`);
+        found.push(`${path}/README.md`);
+      } catch {
+        // no README here; a grouping directory such as packages/starters
+      }
+      if (depth > 0) await walk(path, depth - 1);
+    }
+  };
+  await walk('packages', 1);
+  return found.sort();
+}
+
 describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
   it('should carry the expected number of compilable fences per README', async () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(24);
+    expect(Object.keys(READMES)).toHaveLength(39);
+
+    // And pin the COVERAGE: every package README is gated or explicitly named
+    // as a known gap. Half of them were in neither before v0.6.0, which is how
+    // three READMEs shipped examples that could not compile.
+    const onDisk = await everyPackageReadme();
+    const accounted = [...Object.keys(READMES), ...UNGATED].sort();
+    expect(accounted).toEqual(onDisk);
 
     const counts: Record<string, number> = {};
     for (const readme of Object.keys(READMES)) {
@@ -119,6 +197,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
 
   it('should compile every Setu-TS fence in every listed README', async () => {
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await writeProjectStubs(SCRATCH_DIR);
     const failures: string[] = [];
 
     for (const readme of Object.keys(READMES)) {

@@ -29,6 +29,7 @@ import {
   fenceExtension,
   GUIDES,
   TS_ALIASES,
+  writeProjectStubs,
 } from './fixtures/snippets/fence-engine.ts';
 
 const SCRATCH_DIR = '.tmp/guide-fences';
@@ -175,6 +176,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
     );
     expect(toCompile.length).toBeGreaterThan(0);
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await writeProjectStubs(SCRATCH_DIR);
     const failures: string[] = [];
     for (const classified of toCompile) {
       const fence = classified.fence;
@@ -262,6 +264,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
       "ctx.services.register('app:test', {}, { singleton: true, lazy: true });",
     ];
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await writeProjectStubs(SCRATCH_DIR);
     for (const [index, code] of cases.entries()) {
       const fence = {
         guide: 'docs/programmatic-api.md',
@@ -294,6 +297,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
     // compiler rejects it — proving the gate is not a no-op.
     const file = `${SCRATCH_DIR}/controlled-negative.ts`;
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await writeProjectStubs(SCRATCH_DIR);
     await Deno.writeTextFile(
       file,
       [
@@ -335,6 +339,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
       original.kind === 'compile-fragment'
     ) {
       await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+      await writeProjectStubs(SCRATCH_DIR);
       const origFile = `${SCRATCH_DIR}/b1-cloudflare-original.ts`;
       const origSource = assembleSource(cfFence!, original);
       await Deno.writeTextFile(origFile, origSource);
@@ -360,6 +365,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
       mutated.kind === 'compile-complete' || mutated.kind === 'compile-fragment'
     ) {
       await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+      await writeProjectStubs(SCRATCH_DIR);
       const mutFile = `${SCRATCH_DIR}/b1-cloudflare-mutated.ts`;
       const mutSource = assembleSource(mutatedFence, mutated);
       await Deno.writeTextFile(mutFile, mutSource);
@@ -379,6 +385,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
   it('B2: Mutating RuntimePlugin with INVALID_OPTION fails', async () => {
     const file = `${SCRATCH_DIR}/b2-runtime-mutated.ts`;
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await writeProjectStubs(SCRATCH_DIR);
     await Deno.writeTextFile(
       file,
       [
@@ -393,6 +400,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
   it('B3: Mutating createApplication with bad option fails', async () => {
     const file = `${SCRATCH_DIR}/b3-app-mutated.ts`;
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await writeProjectStubs(SCRATCH_DIR);
     await Deno.writeTextFile(
       file,
       [
@@ -407,6 +415,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
   it('B4: ctx.metrics.register() returning value fails (register returns void)', async () => {
     const file = `${SCRATCH_DIR}/b4-metrics-void.ts`;
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await writeProjectStubs(SCRATCH_DIR);
     await Deno.writeTextFile(
       file,
       [
@@ -434,6 +443,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
   it('B7: app.start() with invalid option fails', async () => {
     const file = `${SCRATCH_DIR}/b7-start-invalid.ts`;
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await writeProjectStubs(SCRATCH_DIR);
     await Deno.writeTextFile(
       file,
       [
@@ -453,6 +463,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
   it('B9: AuthPlugin rejects an invalid JWT secret type', async () => {
     const file = `${SCRATCH_DIR}/b9-auth-missing.ts`;
     await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await writeProjectStubs(SCRATCH_DIR);
     await Deno.writeTextFile(
       file,
       [
