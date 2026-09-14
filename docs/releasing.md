@@ -103,7 +103,8 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   and `release:link-repos` (tokenless OIDC publishing requires the repo link). Both are idempotent,
   and both are worth running BEFORE the release PR merges rather than after: nothing about them
   depends on the merge, and doing it first means the tag run cannot discover a missing package once
-  the PR has already landed.
+  the PR has already landed. A third token step, `release:set-metadata`, runs AFTER the publish and
+  is covered in step 4 — a new package's page is blank without it.
 
   Verify rather than trust the script's own report — `release:verify` does not look at the registry,
   so nothing else checks this. Every package must exist AND carry a repo link:
@@ -277,6 +278,37 @@ not want a tag claiming otherwise. Once it succeeds:
 git tag v0.3.0
 git push origin v0.3.0
 ```
+
+### 4. Set the page metadata — every release, not only a first publish
+
+```fish
+env JSR_TOKEN=jsrp_… deno task release:set-metadata
+```
+
+**This is the easiest step in the whole runbook to forget, and forgetting it is invisible everywhere
+but jsr.io.** A package's description and its "Works with" runtime flags live on the PACKAGE, never
+in a published version: `deno publish` uploads a tarball and never touches them, so they stay empty
+however many times a package publishes. Nothing local can see it — the tarball is correct, every
+gate is green, and `release:verify` reads manifests with `--allow-read` and no network, so it cannot
+look at the registry at all. It is the same class of loss as the suppressed READMEs at
+`v0.1.0-alpha.2`.
+
+`v0.6.0` shipped exactly this way: `@setu-ts/view-plugin` published green and its page showed a
+blank description and six greyed-out `?` runtime badges, while all 47 older packages showed both.
+The metadata table was complete and correct the whole time — the script had simply never been run,
+because this step did not exist here. The maintainer found it by opening the page.
+
+Run it on **every** release, not only one that adds a package: it is idempotent (a package already
+matching is reported and skipped), and an edited description in `scripts/jsr-metadata.ts` reaches
+jsr.io by no other route. Then confirm, because the script's own report is not the registry's:
+
+```fish
+curl -s https://api.jsr.io/scopes/setu-ts/packages/<pkg> |
+  deno eval "const d = await new Response(Deno.stdin.readable).json();
+  console.log(d.description === '' ? 'EMPTY description' : 'ok', d.runtimeCompat);"
+```
+
+An empty `description` or a `runtimeCompat` of `{}` means the page is blank for that package.
 
 ### Publishing from CI instead
 
