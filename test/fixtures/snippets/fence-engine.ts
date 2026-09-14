@@ -42,7 +42,7 @@
 import { scanFences } from '../../../scripts/check-docs.ts';
 
 /** Language aliases that map to TypeScript for compilation purposes. */
-export const TS_ALIASES = new Set(['typescript', 'ts', 'tsx']);
+export const TS_ALIASES = new Set(['typescript', 'ts', 'tsx', 'jsx']);
 
 /**
  * The file extension a fence must be written to before `deno check` sees it.

@@ -24,6 +24,8 @@ import { expect } from '@std/expect';
 
 import {
   allFences,
+  assembleSource,
+  classify,
   denoCheck,
   extractFences,
   fenceExtension,
@@ -275,6 +277,27 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
       await Deno.writeTextFile(file, assembleSource(fence, classify(fence)));
       expect((await denoCheck(file)).code).not.toBe(0);
     }
+  });
+
+  it('compiles a jsx fence as TSX instead of skipping it', async () => {
+    const fence = {
+      guide: 'docs/mvc.md',
+      index: 0,
+      line: 1,
+      heading: 'JSX regression',
+      lang: 'jsx',
+      code: 'const UserList = () => <ul><li>safe</li></ul>;',
+    };
+    const classified = classify(fence);
+
+    expect(TS_ALIASES.has(fence.lang)).toBe(true);
+    expect(fenceExtension(fence.lang)).toBe('tsx');
+    expect(classified.kind).toBe('compile-complete');
+
+    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    const file = `${SCRATCH_DIR}/jsx-regression.${fenceExtension(fence.lang)}`;
+    await Deno.writeTextFile(file, assembleSource(fence, classified));
+    expect((await denoCheck(file)).code).toBe(0);
   });
 
   it('excluded external-source/pseudocode blocks carry a heading and reason', async () => {
