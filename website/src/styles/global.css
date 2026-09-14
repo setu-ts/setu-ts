@@ -155,19 +155,106 @@ kbd {
   color: var(--accent);
 }
 
+.mobile-navigation {
+  display: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 @media (max-width: 48rem) {
   .site-header .inner {
-    flex-wrap: wrap;
+    min-height: 3.75rem;
+    padding: 0.4rem 0.9rem;
   }
 
   .site-nav {
-    width: 100%;
-    margin-left: 0;
-    flex-wrap: wrap;
+    display: none;
   }
 
-  .site-search {
-    flex: 1 1 12rem;
+  .mobile-navigation {
+    display: block;
+    margin-left: auto;
+    position: relative;
+  }
+
+  .mobile-navigation summary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.4rem;
+    height: 2.4rem;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    color: var(--fg);
+    list-style: none;
+  }
+
+  .mobile-navigation summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .mobile-navigation[open] summary {
+    background: var(--bg-soft);
+  }
+
+  .mobile-navigation-panel {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    right: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.4rem;
+    width: min(22rem, calc(100vw - 1.8rem));
+    padding: 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 0.7rem;
+    background: var(--bg);
+    box-shadow: 0 0.75rem 2rem rgba(16, 24, 32, 0.18);
+  }
+
+  .mobile-search {
+    display: block;
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .mobile-navigation-panel a,
+  .mobile-theme-toggle {
+    display: flex;
+    align-items: center;
+    min-height: 2.5rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 0.45rem;
+    color: var(--fg);
+    font: inherit;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .mobile-navigation-panel a[aria-current='page'] {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .mobile-navigation-panel .mobile-theme-toggle {
+    width: 100%;
+    height: auto;
+    gap: 0.45rem;
+    background: var(--bg-soft);
+    cursor: pointer;
   }
 }
 
