@@ -21,24 +21,25 @@ In Architect mode, for a milestone start, do exactly this and nothing more:
    `deno task check:plan` until it lints clean. Apply the prose judgment in the CLAUDE.md "Writing a
    milestone plan" section (contracts verified from SOURCE, a test file for every `src/` file, real
    npm specifiers, token grammar, resolved doc conflicts, no dead options/surface).
-4. **STOP.** Hand back the plan path + the clean `deno task check:plan` output + a short summary of
+4. **STOP.** Present the plan path + the clean `deno task check:plan` output + a short summary of
    the key design decisions, and wait for review/approval.
 
 ## Hard constraints during a milestone-start pass
 
 - **Produce the ONE plan file only.** Do NOT write, edit, or scaffold any `src/` or `test/` code,
-  and do NOT create a `deno.json`, a broker/service class, or a test file in this pass. (Architect
-  mode's markdown-only editing is intentional — respect it; do not switch to Code mode to get around
-  it.)
-- **Do NOT switch to Code mode or begin implementing** until the plan has been reviewed and
-  approved. A plan that fails the checklist is fixed as a plan first, never "fixed during
+  and do NOT create a `deno.json`, a broker/service class, or a test file in this pass. Architect
+  mode's markdown-only editing is intentional — respect it.
+- **Do NOT switch to Code mode or begin implementing until the plan has been reviewed and
+  approved.** Orchestration here works by switching modes rather than by spawning subtasks (see
+  `.roo/rules-orchestrator/01-switch-modes.md`), which makes this constraint a rule rather than a
+  mechanical impossibility: the switch is available and you must not take it early. The plan-review
+  gate is the one point in the pipeline where a human decides, so a switch that skips it skips the
+  review. A plan that fails the checklist is fixed as a plan first, never "fixed during
   implementation."
-- **If the pass needs an action you cannot take, end the subtask — do not ask to be switched.**
-  Running as a delegated subtask, your only two endings are the finished plan or an immediate
-  `attempt_completion` naming the exact blocked action (e.g. "this needs a `src/` edit"). Asking the
-  user for permission to switch to Code mode stalls the pipeline on a human who is not watching; the
-  orchestrator spawns the Code subtask from your blocked return instead (see
-  `.roo/rules-orchestrator/01-delegate-only.md`).
+- **If the pass needs an action Architect cannot take, say so and stop — do not ask to be
+  switched.** Name the exact blocked action (e.g. "this needs a `src/` edit") and hand back what you
+  have. Asking the user for permission stalls on a human who is not watching; the switch to Code
+  mode is taken from that stated blocker once the plan is approved.
 - Only ONE plan file per milestone at `plans/` root (`plans/milestone-<N>-<desc>.md`). Continuation
   notes, fix-round prompts, and hand-off scratch go in a scratch dir, NEVER under `plans/` and never
   `git add`-ed.

@@ -20,19 +20,20 @@ and this one runs first: there is no point reviewing the shape of code that does
   expresses intent, and the `command` group can technically write anywhere, so the rule is
   behavioral, not just mechanical: **do not edit a non-scratch file by any means, shell redirects
   included.** If you find yourself wanting to fix something, that is a finding to report — the
-  orchestrator routes it to a Code-mode subtask on the same `feat/…` branch (see
-  `.roo/rules-orchestrator/01-delegate-only.md`).
+  pipeline switches to Code mode on the same `feat/…` branch AFTER your report exists (see
+  `.roo/rules-orchestrator/01-switch-modes.md`). Switching yourself to Code mode mid-run is the same
+  violation as editing, and the next rule says why.
 - **Fixing what you verify voids the verification.** A verifier who patches a defect mid-run then
   re-runs the probe against its own patch is grading its own homework, and the fix never reaches
   `main` unless someone else commits it. That is the whole reason this mode exists as its own mode
-  rather than a Code subtask: Code mode could always silently repair what it was sent to check.
+  rather than work done in Code mode, which could always silently repair what it was sent to check.
 - **Verify the COMMITTED tree.** Confirm you are on the milestone's `feat/…` branch
   (`git branch --show-current`), never `main`, and record `git rev-parse HEAD` in the report. If
-  `git status --short` is non-empty, **STOP and `attempt_completion` as blocked**, naming the dirty
-  paths — do NOT `git stash`, and do NOT verify around it. (This overrides the stash instruction in
-  `SKILL.md` Step 1, which is written for a mode that can commit.) An uncommitted change can mask
-  the exact defect you are hunting, and a stash left behind by a subtask that ends early loses work.
-  Committing is a Code-mode subtask; the orchestrator already refuses to advance over a dirty tree.
+  `git status --short` is non-empty, **STOP and report as blocked**, naming the dirty paths — do NOT
+  `git stash`, and do NOT verify around it. (This overrides the stash instruction in `SKILL.md` Step
+  1, which is written for a mode that can commit.) An uncommitted change can mask the exact defect
+  you are hunting, and a stash left behind by a run that ends early loses work. Committing belongs
+  to Code mode, and the pipeline already refuses to advance over a dirty tree.
 - **Never push or open a PR.** Those are human-only steps.
 
 ## Start from "this does not work" — proving otherwise is the whole job
@@ -102,6 +103,6 @@ nit), or `not verified`. **If you did not run a behavioral probe with production
 its raw output, the verdict is `not verified` by default** — absence of evidence is not
 verification.
 
-Close by listing every finding as a discrete, actionable item with its file path, since the
-orchestrator turns each one into a Code-mode subtask. A finding you fixed yourself is a rule
-violation; a finding you left implicit in prose is one the pipeline will drop.
+Close by listing every finding as a discrete, actionable item with its file path, since each one
+becomes a Code-mode fix once this report exists. A finding you fixed yourself is a rule violation; a
+finding you left implicit in prose is one the pipeline will drop.

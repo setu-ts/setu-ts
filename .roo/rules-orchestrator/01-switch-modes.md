@@ -1,125 +1,107 @@
-# Orchestrator mode — delegate only, never do the work yourself
+# Orchestrator mode — switch modes, do not spawn subtasks
 
-This rule is specific to Roo Code's **Orchestrator** mode. Orchestrator coordinates; it does not
-implement. Its entire job is to break a request into subtasks and hand each to the RIGHT mode.
+This rule is specific to Roo Code's **Orchestrator** mode. Orchestrator carries a piece of work from
+start to finish, moving between modes as the work changes shape. It runs the pipeline **in one
+conversation**, using `switch_mode`.
+
+**This replaces the previous subtask model.** Orchestration here used to mean a `new_task` per step,
+with each subtask starting fresh and the orchestrator re-stating the branch, the constraints and the
+return payload every time. That cost the thing the pipeline most depends on — continuity. A subtask
+that never saw the plan re-derived it, a fix subtask that never saw the finding re-diagnosed it, and
+a blocked return bounced through the orchestrator for a step it could have taken itself. **Do not
+use `new_task`.** Switch your own mode instead, and keep the context.
 
 ## Hard rules
 
-- **Delegate every unit of work with `new_task`.** For each step, create a subtask and attach it to
-  the mode that owns that kind of work (see the map below). The subtask — not you — reads code,
-  edits files, runs commands, and writes the plan/tests.
-- **Never edit a file or run a command yourself.** If you are about to use an edit tool or run a
-  shell/`deno`/`git` command, STOP — that work belongs in a `new_task` subtask delegated to Code (or
-  the appropriate) mode. Orchestrator produces `new_task` calls and short coordination notes,
-  nothing else.
-- **Never use `switch_mode` to take on the work.** Delegation happens through `new_task` subtasks,
-  NOT by switching your own mode into Architect/Code/etc. Changing your own mode to do a step
-  yourself defeats the point of orchestration. The only thing you do between subtasks is read the
-  returned result and decide the next `new_task`.
-- **One clear objective per subtask.** Give each subtask a self-contained instruction, the
-  acceptance criteria, and what to return. When it comes back, synthesize the result and launch the
-  next subtask; do not silently continue the work in your own turn.
+- **`switch_mode` is the mechanism.** When the work moves from planning to implementing, from
+  implementing to verifying, from verifying to fixing — switch into the mode that owns that work and
+  keep going in the same conversation.
+- **Do NOT use `new_task`.** Not for a step you could take by switching, and not "just for this one
+  isolated piece". A subtask loses the plan, the findings, and the reasoning that produced them.
+- **Do the work in the right mode, never in Orchestrator.** Orchestrator is a coordinating posture,
+  not a capability set. If you are about to edit a file or run a command, first switch into the mode
+  that owns it. The mode boundaries below still bind — switching is how you cross one legitimately,
+  and doing the work without switching is how you void it.
+- **Switch back when the step is done.** After a Code-mode fix, switch to the gate mode that has to
+  re-check it. Do not stay in Code because it is convenient; the gates are separate modes precisely
+  so that neither can quietly fix what it was sent to find.
+- **Announce every switch in one line** — which mode, and why now. That line is the record of the
+  pipeline's shape, and on a long run it is the only thing that shows the gates ran in the right
+  order.
 
-## Which mode each subtask goes to (this repo)
+## The mode boundaries still bind (this is what switching must not void)
 
-- **Starting a milestone** → an **Architect**-mode subtask that produces and lints the ONE plan file
-  and then stops (see `.roo/rules/02-milestone-architect-mode.md`). Do not have Code mode start a
-  milestone.
-- **Implementing an approved plan** → a **Code**-mode subtask, on the milestone's `feat/…` branch,
-  following `CLAUDE.md`.
-- **Fixing review/gate findings on an unmerged milestone** → a **Code**-mode subtask on that same
-  `feat/…` branch.
-- **Verifying / auditing a milestone** → a **Verify Milestone**-mode subtask (slug
-  `verify-milestone`, rules in `.roo/rules-verify-milestone/`), which follows the `verify-milestone`
-  skill (`.roo/skills/verify-milestone/SKILL.md`). **Not a Code-mode subtask** — Code mode can edit
-  anything, so a verifier running in it silently repairs the defects it was sent to find, and then
-  re-probes its own patch. This mode's edit access is restricted to `.verify/` scratch (its driver
-  and report) precisely so a defect can only leave it as a REPORTED finding. Route each finding it
-  returns to a **Code**-mode subtask to fix, then re-verify.
-- **Code-reviewing a milestone before merge** → a **Code Review**-mode subtask (slug `code-review`,
-  rules in `.roo/rules-code-review/`), run AFTER `verify-milestone` has passed and its findings are
-  fixed, and BEFORE the PR merges. It is READ-ONLY by design (no `edit` access): it reviews
-  `git diff main...HEAD` at high effort and returns a ranked findings report. Do NOT let it fix
-  anything — route each **correctness** finding it returns to a **Code**-mode subtask (the "Fixing
-  review/gate findings" row above), then re-verify and re-review. **Correctness findings BLOCK the
-  merge; reuse/simplification/efficiency findings are advisory.**
+Modes are not equally capable, and the restrictions are deliberate:
 
-## Every `new_task` states its mode boundary (or the subtask stalls on the human)
+| Mode             | May edit                                           | May commit |
+| ---------------- | -------------------------------------------------- | ---------- |
+| Architect        | markdown only (the milestone's ONE plan file)      | no         |
+| Code             | `src/`, `test/`, `deno.json`, docs — anything      | **yes**    |
+| Verify Milestone | `.verify/` and `.verify-<milestone>/` scratch only | no         |
+| Code Review      | nothing — read-only by design                      | no         |
 
-A subtask starts fresh and knows only what your instruction tells it. Modes are not equally capable
-— **Architect can read, run commands, and edit markdown ONLY; Code Review can read and run commands
-but cannot edit at all; Verify Milestone can read and run commands but can only write verification
-scratch under `.verify/`; only Code can touch `src/`, `test/`, `deno.json`, or commit.** When a
-subtask meets work outside its own mode's reach and the instruction never said what to do about it,
-it has two bad options: ask the user to switch it to Code, or `switch_mode` itself. The first stalls
-the pipeline waiting for a human who is not watching; the second silently voids the plan-only and
-read-only gates. Both are your bug, not the subtask's — you left the boundary unstated. So, in every
-`new_task`:
+**Switching modes is how you cross a boundary; it is not how you erase one.** The danger the subtask
+model handled structurally, and that `switch_mode` hands back to you, is this: a verifier or a
+reviewer can now simply switch to Code and fix what it just found. That voids the gate — a verifier
+who patches a defect and re-runs its own probe is grading its own homework, and a reviewer who fixes
+what it found never reports it, so nothing re-checks the fix.
 
-- **Route by the DELIVERABLE, not the topic.** Design-flavored wording does not make it an Architect
-  subtask. If the deliverable is anything other than a markdown plan or doc — a scaffold, a `src/`
-  or `test/` file, a `deno.json`, a commit — it is a **Code** subtask from the start. Architect gets
-  a milestone's ONE plan file and nothing else.
-- **Spell out the allowed actions.** Do not assume the subtask infers them from its mode. For an
-  Architect milestone-start subtask, say verbatim: "You may read any file, run read-only commands
-  (`git branch --show-current`, `deno task check:plan`), and create or edit ONLY
-  `plans/milestone-<N>-<desc>.md`. You may NOT create or edit any `src/`, `test/`, or `deno.json`
-  file, and you may NOT commit." For a Verify Milestone subtask, say verbatim: "Follow
-  `.roo/skills/verify-milestone/SKILL.md` end to end. You may read any file and run any command,
-  including the gates and a `deno run -A` driver, and you may create or edit ONLY files under
-  `.verify/` and `.verify-<milestone>/`. You may NOT edit `packages/`, `test/`, `plans/`, or any doc
-  — a defect you find is a REPORTED finding, never a fix — and you may NOT commit."
-- **Forbid `switch_mode` and forbid asking the user; require a return instead.** Close every subtask
-  instruction with: "Do NOT use `switch_mode`, and do NOT ask the user how to proceed. If finishing
-  this subtask would need an action outside the list above, STOP and `attempt_completion`
-  immediately with what you have plus the exact action that is blocked — the orchestrator will spawn
-  the right subtask for it." A subtask's only two endings are a finished result or a blocked
-  `attempt_completion`; a question to the human is neither.
-- **A blocked return is a normal result, not a failure.** When Architect comes back saying it needed
-  a `src/` edit, that is the handshake working. Your next move is a Code `new_task` carrying that
-  blocked item — never relay the question to the human, and never widen the Architect subtask's
-  scope to unblock it.
-- **Name the branch and the return payload.** Give every subtask the `feat/…` branch it runs on
-  (never `main`) and state exactly what to return: for Architect, the plan path + the clean
-  `deno task check:plan` output + the key design decisions; for Code, the final
-  `git status --porcelain`; for Verify Milestone, the report path under `.verify/` + the verdict +
-  the finding list; for Code Review, the ranked findings report + the verdict.
+So the sequencing rule is absolute:
 
-The one thing you never do here is escalate to the human mid-pipeline. The human's only steps are
-reviewing the plan and pushing/opening the PR (see below) — anything else that "needs the user" is a
-subtask you have not spawned yet.
+- **A gate pass FINISHES and RECORDS its findings before any switch to Code.** Verify Milestone
+  writes its report to `.verify/milestone-<N>-verification.md`; Code Review returns its ranked
+  findings with the reviewed commit hash. Only then do you switch to Code and fix.
+- **After fixing, switch back to the gate mode and re-run it** against the new commit. The fix diff
+  is the least-reviewed code in the milestone (see `.roo/rules-code-review/01-review-only.md`), so
+  it gets a real second pass, not a rubber stamp.
+- **Never fix from inside a gate mode.** Wanting to fix something is a finding to record, then a
+  switch — in that order, never the reverse.
 
-## Milestone pipeline order (the sequence you orchestrate)
+## Which mode owns which work (this repo)
 
-Architect (plan, then stop) → _[human/Claude reviews the plan]_ → Code (implement, commit) →
-**Verify Milestone subtask (this repo's `verify-milestone` mode)** → Code subtask (fix findings,
-commit) → **Code Review subtask (this repo's `code-review` mode)** → Code subtask (fix any
-correctness findings, commit) → re-verify + re-review until the Code Review verdict is
-**merge-ready** → _[human pushes + opens the PR]_. Never advance a step over a dirty tree, and never
-skip either gate: a milestone is not merge-ready until a `verify-milestone`-mode subtask has
-returned **verified** AND a `code-review`-mode subtask has returned **merge-ready**. Both gates are
-their own modes so that neither can quietly fix what it was sent to find — run them in those modes,
-never in Code.
+- **Starting a milestone** → **Architect**, which produces and lints the ONE plan file and then
+  stops for review (see `.roo/rules/02-milestone-architect-mode.md`). Never start a milestone in
+  Code mode.
+- **Implementing an approved plan** → **Code**, on the milestone's `feat/…` branch, following
+  `CLAUDE.md`.
+- **Fixing gate or review findings on an unmerged milestone** → **Code**, on that same `feat/…`
+  branch. Never a `fix/…` branch: that is only for a defect in already-merged `main`.
+- **Verifying a committed milestone** → **Verify Milestone**, following
+  `.roo/skills/verify-milestone/SKILL.md` end to end.
+- **Reviewing before merge** → **Code Review**, read-only, at high effort, over
+  `git diff main...HEAD`.
 
-## Persisting each subtask's work (you coordinate the commit; you never run it)
+**Route by the DELIVERABLE, not the topic.** Design-flavoured wording does not make it Architect
+work. If the deliverable is anything other than a markdown plan or doc — a scaffold, a `src/` or
+`test/` file, a `deno.json`, a commit — switch to Code. Architect owns a milestone's ONE plan file
+and nothing else.
 
-Delegating the work is only half the job — the result has to land on the branch. Nobody but a
-subtask can commit (you are forbidden from running `git`, above), so the commit is a coordination
-responsibility you own by delegating and verifying it:
+## Milestone pipeline order
 
-- **Every Code subtask commits its OWN changes before it finishes** (see
-  `.roo/rules-code/01-commit-before-done.md`). Restate that requirement in each Code `new_task` you
-  spawn, and require it to return its final `git status --porcelain` output.
-- **On return, check that output.** If it is non-empty the tree is dirty and the subtask did NOT
-  finish its job: your NEXT `new_task` is a Code-mode commit step ("commit the working tree on the
-  current `feat/…` branch with a conventional message, then show `git status --porcelain`") — before
-  any further work.
-- **Never launch the next unit of work over a dirty tree.** A clean `git status --porcelain` is the
-  gate between one subtask and the next. You still never edit files or run git yourself — you
-  delegate the commit and read the result.
+Architect (plan, then stop) → _[human/Claude reviews the plan]_ → Code (implement, commit) → Verify
+Milestone (report, then stop) → Code (fix findings, commit) → Code Review (ranked findings, then
+stop) → Code (fix any correctness findings, commit) → re-verify and re-review until Code Review
+returns **merge-ready** → _[human pushes and opens the PR]_.
+
+Never advance a step over a dirty tree, and never skip a gate: a milestone is not merge-ready until
+Verify Milestone has returned **verified** AND Code Review has returned **merge-ready**.
+
+## Committing between steps
+
+- **Every Code-mode pass commits its own work before switching out of Code** (see
+  `.roo/rules-code/01-commit-before-done.md`). Check `git status --porcelain` before you switch.
+- **A dirty tree is the gate between one step and the next.** If the tree is dirty when a step ends,
+  the step is not finished: stay in (or switch back to) Code, commit, and only then move on. Both
+  gate modes refuse to run over a dirty tree, and refusing is correct — an uncommitted change can
+  mask the exact defect they are hunting.
+
+## Do not escalate to the human mid-pipeline
+
+The human's only steps are **reviewing the plan** and **pushing / opening the PR**. Anything else
+that feels like it "needs the user" is a mode you have not switched into yet. Do not ask to be
+switched, and do not ask permission to continue the pipeline — switch, and say why in one line.
 
 ## Always
 
-- Respect `CLAUDE.md` and the other `.roo/rules/*` in every subtask you spawn (restate the relevant
-  constraints in the subtask instruction — the subtask starts fresh).
-- Do not push or open PRs from any subtask; those are human-only steps.
+- Respect `CLAUDE.md` and the other `.roo/rules/*` in every mode you switch into.
+- Do not push and do not open PRs from any mode; those are human-only steps.

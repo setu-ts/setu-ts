@@ -12,10 +12,11 @@ probes never exercise.
 ## Hard rules
 
 - **Read-only by design — you have no `edit` access, and that is intentional.** You produce a
-  findings report; you do NOT modify source, tests, or docs, and you do NOT commit. Fixing is a
-  Code-mode subtask the orchestrator spawns from your report (see
-  `.roo/rules-orchestrator/01-delegate-only.md`). If you find yourself wanting to edit a file, that
-  is a finding to report, not a fix to make.
+  findings report; you do NOT modify source, tests, or docs, and you do NOT commit. Fixing happens
+  AFTER you report: the pipeline switches to Code mode carrying your findings (see
+  `.roo/rules-orchestrator/01-switch-modes.md`). If you find yourself wanting to edit a file, that
+  is a finding to report, not a fix to make — and switching yourself to Code mode to make it voids
+  this gate exactly as editing would, because nothing then re-checks the fix.
 - **Scope is the whole milestone diff, `git diff main...HEAD`** on the milestone's `feat/…` branch —
   not just the latest commit. Confirm you are on the `feat/…` branch (`git branch --show-current`),
   never `main`, and that the tree is committed (`git status --short` empty) before reviewing.
@@ -108,8 +109,8 @@ drift into — it is a conclusion you may only reach after a deliberate hunt has
 inventing them, padding the report, or promoting a vague unease to correctness so the review looks
 rigorous. Every correctness finding must carry a concrete failure scenario you traced in the code —
 inputs/state → wrong output. If you cannot write that scenario, you have a suspicion, not a finding:
-dig until it becomes one, or drop it and say so. A speculative finding burns a real fix cycle in a
-Code subtask and teaches the pipeline to discount your report — which is how a true finding gets
+dig until it becomes one, or drop it and say so. A speculative finding burns a real fix cycle in
+Code mode and teaches the pipeline to discount your report — which is how a true finding gets
 ignored later. Reporting "no correctness findings" is entirely legitimate; reporting it without
 having hunted is not.
 
@@ -125,8 +126,8 @@ Sort every finding into one of two buckets:
   the CLAUDE.md "Self-review checklist" and "Before reporting a task done" bug classes — re-read
   them and check each against the diff.
 - **Cleanups (advisory, never block).** Reuse (dedupe into an existing helper), simplification,
-  efficiency, altitude. Report them so a Code-mode subtask can apply the low-risk ones; they do not
-  hold the merge.
+  efficiency, altitude. Report them so a later Code-mode pass can apply the low-risk ones; they do
+  not hold the merge.
 
 ## The bookkeeping no gate can see
 
@@ -154,14 +155,14 @@ is a cleanup, and none may be downgraded to one.
 
 ## On a re-review, the fix diff is the least-reviewed code in the milestone
 
-When the orchestrator sends you back after a Code-mode subtask has fixed your findings, the scope is
-still `git diff main...HEAD` — but the part of it you have never seen is the fix, and that is the
-part most likely to be wrong. Those lines exist because something subtle was already wrong there,
-they were written last and under pressure to close the milestone, and the gates re-run after them
-cannot see a concurrency, lifecycle, or contract-honesty defect. **Two consecutive milestones here
-shipped a defect that lived only in their own review fix**, each found afterwards by an external
-reviewer on the PR; in one, the fix replaced two lines with a six-command sequence against shared
-Redis state and introduced an interleaving bug that stranded data permanently.
+When you are sent back after a Code-mode pass has fixed your findings, the scope is still
+`git diff main...HEAD` — but the part of it you have never seen is the fix, and that is the part
+most likely to be wrong. Those lines exist because something subtle was already wrong there, they
+were written last and under pressure to close the milestone, and the gates re-run after them cannot
+see a concurrency, lifecycle, or contract-honesty defect. **Two consecutive milestones here shipped
+a defect that lived only in their own review fix**, each found afterwards by an external reviewer on
+the PR; in one, the fix replaced two lines with a six-command sequence against shared Redis state
+and introduced an interleaving bug that stranded data permanently.
 
 So on any pass after the first, isolate the fix and hunt it as new code by someone else. The
 boundary is the commit hash the PREVIOUS review reported (see "The report you hand back" — recording
@@ -174,9 +175,9 @@ git log --oneline "$PREV"..HEAD   # every commit added since that review
 git diff "$PREV"..HEAD            # those commits as one reviewable diff
 ```
 
-If no previous report recorded a hash, say so and fall back to the fix commits named in the
-orchestrator's subtask handoff — but treat the missing hash as a process defect worth reporting,
-because without it the next pass is guessing too.
+If no previous report recorded a hash, say so and fall back to the fix commits named in the handoff
+— but treat the missing hash as a process defect worth reporting, because without it the next pass
+is guessing too.
 
 Apply the same dimensions, and weight the three the fix most likely introduced: a fix that adds
 awaited commands gets the interleaving question, a fix that adds a member gets the lifecycle-mirror
@@ -201,7 +202,7 @@ cleanup), **file:line**, a one-line **summary**, and for every correctness findi
   branch, the awaited sequences you interleaved, and — on a re-review — the fix range you hunted. A
   bare "merge-ready" with no account of the search is indistinguishable from not having looked, and
   is not an acceptable report.
-- **blocked** — one or more confirmed correctness findings. List them; each must go to a Code-mode
-  subtask to fix, after which the milestone is re-verified and re-reviewed.
+- **blocked** — one or more confirmed correctness findings. List them; each is fixed in a Code-mode
+  pass, after which the milestone is re-verified and re-reviewed.
 
 A correctness finding is NEVER downgraded to a cleanup to unblock a merge.
