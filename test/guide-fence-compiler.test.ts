@@ -303,7 +303,7 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
     expect((await denoCheck(file)).code).toBe(0);
   });
 
-  it('documents the optional formData accessor with its shared-parser fallback', async () => {
+  it('executes the documented formData fallback for both encodings and the accessor path', async () => {
     const guide = 'docs/mvc.md';
     const markdown = await Deno.readTextFile(guide);
     const fence = extractFences(guide, markdown).find((candidate) =>
@@ -311,9 +311,67 @@ describe('actual-fence compiler — all ten guides (shared engine)', () => {
     );
 
     expect(fence).not.toBeUndefined();
-    expect(fence?.code).toContain('ctx.request.formData === undefined');
-    expect(fence?.code).toContain('parseFormBody(');
-    expect(fence?.code).toContain("ctx.request.headers.get('content-type')");
+    const start = fence?.code.indexOf('/** Reads both form encodings') ?? -1;
+    const end = fence?.code.indexOf('\n\nfunction firstMessagePerField') ?? -1;
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+
+    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    const file = `${SCRATCH_DIR}/mvc-form-fallback.ts`;
+    const readForm = fence!.code.slice(start, end);
+    await Deno.writeTextFile(
+      file,
+      [
+        "import { parseFormBody } from '@setu-ts/common';",
+        "import type { IRequestContext } from '@setu-ts/common';",
+        '',
+        readForm,
+        '',
+        'const encoder = new TextEncoder();',
+        'const urlencoded = await readForm({',
+        '  request: {',
+        "    headers: new Headers({ 'content-type': 'application/x-www-form-urlencoded' }),",
+        "    bytes: () => Promise.resolve(encoder.encode('title=Encoded&tag=one')),",
+        '  },',
+        '} as unknown as IRequestContext);',
+        "if (urlencoded.title !== 'Encoded' || urlencoded.tag !== 'one') {",
+        "  throw new Error('urlencoded fallback lost a field');",
+        '}',
+        '',
+        "const boundary = 'MvcFallback';",
+        "const multipartBody = ['--MvcFallback', 'Content-Disposition: form-data; name=\"title\"', '', 'Multipart', '--MvcFallback', 'Content-Disposition: form-data; name=\"tag\"', '', 'two', '--MvcFallback--', ''].join('\\r\\n');",
+        'const multipart = await readForm({',
+        '  request: {',
+        "    headers: new Headers({ 'content-type': `multipart/form-data; boundary=${boundary}` }),",
+        '    bytes: () => Promise.resolve(encoder.encode(multipartBody)),',
+        '  },',
+        '} as unknown as IRequestContext);',
+        "if (multipart.title !== 'Multipart' || multipart.tag !== 'two') {",
+        "  throw new Error('multipart fallback lost a field');",
+        '}',
+        '',
+        'let formDataCalls = 0;',
+        'const accessor = await readForm({',
+        '  request: {',
+        "    headers: new Headers({ 'content-type': 'application/x-www-form-urlencoded' }),",
+        "    bytes: () => { throw new Error('accessor path read bytes'); },",
+        '    formData: () => {',
+        '      formDataCalls++;',
+        "      return Promise.resolve(parseFormBody(encoder.encode('title=Accessor'), 'application/x-www-form-urlencoded'));",
+        '    },',
+        '  },',
+        '} as unknown as IRequestContext);',
+        "if (formDataCalls !== 1 || accessor.title !== 'Accessor') {",
+        "  throw new Error('accessor path was not used');",
+        '}',
+      ].join('\n'),
+    );
+
+    const result = await new Deno.Command('deno', {
+      args: ['run', '--quiet', '--config', 'test/fixtures/snippets/deno.json', file],
+    }).output();
+    expect(result.code).toBe(0);
+    expect(new TextDecoder().decode(result.stderr)).toBe('');
     expect(markdown).toContain('The accessor remains optional');
   });
 
