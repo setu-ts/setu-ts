@@ -96,6 +96,9 @@
     "apps/full-stack/build"
   ],
   "lint": {
+    "exclude": [
+      "website"
+    ],
     "rules": {
       "tags": [
         "recommended"
@@ -118,7 +121,8 @@
       ".verify",
       ".verify-milestone",
       "k8s/chart/templates",
-      "k8s/manifests"
+      "k8s/manifests",
+      "website"
     ]
   },
   "imports": {

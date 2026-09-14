@@ -1,0 +1,68 @@
+name: Website
+
+# The public website is an isolated npm build under website/ (outside the Deno
+# workspace). This workflow adds ONLY website-justified checks; every existing job in
+# ci.yml / release.yml / drift.yml is untouched and keeps its meaning.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'docs/**'
+      - 'assets/**'
+      - 'scripts/generate-api-docs.ts'
+      - 'deno.json'
+      - '.github/workflows/website.yml'
+  pull_request:
+    paths:
+      - 'website/**'
+      - 'docs/**'
+      - 'assets/**'
+      - 'scripts/generate-api-docs.ts'
+      - 'deno.json'
+      - '.github/workflows/website.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build / links / accessibility / performance
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+
+      # Two toolchains, each load-bearing:
+      # - Deno regenerates the API reference (deno task docs:api) and runs the site's
+      #   package manager + build (the apps/full-stack precedent: the frontend build
+      #   runs under Deno's npm support, so no npm binary is required).
+      # - Node exists only for Lighthouse CI (npx), which drives a real Chrome.
+      - uses: denoland/setup-deno@v2
+        with:
+          # Keep in step with ci.yml's pin and DOC_LINT_BASELINE_DENO: the generated
+          # API reference must come from the same toolchain the docs gates measure.
+          deno-version: 2.9.6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install site dependencies
+        run: deno task install
+
+      # The website build regenerates API docs from HEAD before Astro validates the
+      # rewritten documentation-link graph and grafts the generated reference.
+      - name: Build site
+        run: deno task build
+
+      - name: Link-rewriting unit tests
+        run: deno task test
+
+      - name: Website formatting and linting
+        run: deno task fmt:check && deno task lint
+
+      - name: Lighthouse (accessibility + performance budgets)
+        run: npx -y @lhci/cli@0.14.0 autorun

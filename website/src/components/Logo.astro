@@ -1,0 +1,34 @@
+---
+/**
+ * The brand logo pair, mirroring the root README's <picture> mechanism
+ * (prefers-color-scheme-aware) while also following the manual theme toggle:
+ * CSS in global.css shows exactly one of the two images per active theme.
+ * The dark variant is aria-hidden because it duplicates the same mark.
+ */
+interface Props {
+  width?: number;
+}
+const { width = 200 } = Astro.props;
+---
+
+<span class="brand">
+  <img
+    src="/setu-ts-logo-light-680.webp"
+    alt="Setu-TS"
+    width={width}
+    height="auto"
+    class="logo-light"
+    loading="eager"
+    decoding="async"
+  />
+  <img
+    src="/setu-ts-logo-dark-680.webp"
+    alt=""
+    aria-hidden="true"
+    width={width}
+    height="auto"
+    class="logo-dark"
+    loading="eager"
+    decoding="async"
+  />
+</span>
