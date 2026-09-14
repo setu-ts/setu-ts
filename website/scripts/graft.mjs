@@ -75,6 +75,12 @@ const apiHeaderStyles = `<style id="setu-api-header-styles">
   }
 </style>`;
 
+/**
+ * Checks whether a file-system path is available without surfacing a missing-path error.
+ *
+ * @param {string} target - Absolute path to probe.
+ * @returns {Promise<boolean>} Whether the path exists and can be accessed.
+ */
 async function exists(target) {
   try {
     await access(target);

@@ -100,25 +100,12 @@ const isDocs = Astro.url.pathname.startsWith('/docs');
             >
           </button>
         </nav>
-        <button
+        <pagefind-modal-trigger
           class="mobile-search-toggle"
-          type="button"
+          compact
+          hide-shortcut
           aria-label="Search docs"
-        >
-          <svg
-            aria-hidden="true"
-            width="20"
-            height="20"
-            viewBox="0 0 20 20"
-            fill="none"
-            stroke="currentColor"
-            stroke-linecap="round"
-            stroke-width="1.8"
-          >
-            <circle cx="8.5" cy="8.5" r="4.75"></circle>
-            <path d="m12 12 4.25 4.25"></path>
-          </svg>
-        </button>
+        ></pagefind-modal-trigger>
         <details class="mobile-navigation">
           <summary aria-label="Open navigation">
             <svg
@@ -194,22 +181,20 @@ const isDocs = Astro.url.pathname.startsWith('/docs');
     <pagefind-modal reset-on-close></pagefind-modal>
 
     <script>
-      document.querySelector('.mobile-search-toggle')?.addEventListener('click', () => {
-        document.querySelector('pagefind-modal')?.open();
-      });
+      /** Switches the colour theme and retains the choice when storage is available. */
+      function toggleTheme() {
+        const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+        document.documentElement.dataset.theme = next;
+        try {
+          localStorage.setItem('setu-theme', next);
+        } catch {
+          // Private mode: the toggle still works for this page view.
+        }
+      }
 
-      document.querySelectorAll('.theme-toggle').forEach((toggle) => {
-        toggle.addEventListener('click', () => {
-          const next =
-            document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-          document.documentElement.dataset.theme = next;
-          try {
-            localStorage.setItem('setu-theme', next);
-          } catch {
-            // Private mode: the toggle still works for this page view.
-          }
-        });
-      });
+      for (const toggle of document.querySelectorAll('.theme-toggle')) {
+        toggle.addEventListener('click', toggleTheme);
+      }
     </script>
   </body>
 </html>

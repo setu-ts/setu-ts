@@ -762,6 +762,11 @@ kbd {
     border-right: 1px solid var(--border);
   }
 
+  .docs-sidebar-mobile:only-child {
+    grid-column: 1 / -1;
+    border-right: 0;
+  }
+
   .docs-sidebar-mobile summary,
   .page-toc summary {
     display: flex;
