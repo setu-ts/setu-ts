@@ -61,6 +61,14 @@ compat/bun.lockb
 # `npx prisma@7.10.0 generate` from packages/database-plugin/test/fixtures.
 packages/database-plugin/test/fixtures/prisma-client-generated/
 
+# Website build output and Astro's generated types (the isolated npm build under
+# website/, outside the Deno workspace — see website/README.md). node_modules/ is
+# already ignored above; deno.lock is gitignored deliberately, on the same reasoning
+# as apps/full-stack/deno.lock: CI resolves the declared ranges fresh.
+website/dist/
+website/.astro/
+website/deno.lock
+
 # VSCode workspace settings. Kept local: the MCP-discovery entry an IDE writes
 # here is a per-developer editor preference, not a project setting.
 .vscode/

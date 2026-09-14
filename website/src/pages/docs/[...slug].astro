@@ -1,0 +1,71 @@
+---
+/**
+ * The docs renderer. Every curated guide in the canonical docs/ directory is read IN
+ * PLACE by the glob loader (src/content.config.ts) and rendered here with its
+ * repository-relative links rewritten to site routes (src/lib/docs-links.ts) — the
+ * canonical Markdown itself is never copied or modified. The hub (docs/README.md)
+ * renders at /docs/.
+ */
+import { getCollection, type CollectionEntry } from 'astro:content';
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { extractDescription, extractTitle, rewriteDocsHtml } from '../../lib/docs-links';
+import { NAV_SLUGS } from '../../lib/docs-nav';
+
+type DocEntry = CollectionEntry<'docs'>;
+
+export async function getStaticPaths() {
+  const entries = await getCollection('docs');
+  const missing = [...NAV_SLUGS].filter((slug) => !entries.some((entry) => entry.id === slug));
+  if (missing.length > 0) {
+    throw new Error(
+      `docs-nav.ts references guides that do not exist in ../docs: ${missing.join(', ')}`,
+    );
+  }
+  return entries.map((entry) => ({
+    // The glob loader slugifies ids, so the hub arrives as 'readme', not 'README';
+    // normalize on case-insensitive comparison and emit it at /docs/ itself.
+    params: { slug: entry.id.toLowerCase() === 'readme' ? undefined : entry.id },
+    props: { entry },
+  }));
+}
+
+interface Props {
+  entry: DocEntry;
+}
+
+const { entry } = Astro.props;
+
+// The glob loader ships compiled HTML for Markdown entries; if that ever changes,
+// fail the build loudly rather than publishing an unrewritten page.
+const rendered = entry.rendered;
+if (!rendered || typeof rendered.html !== 'string') {
+  throw new Error(`docs/${entry.id}.md produced no rendered HTML from the glob loader`);
+}
+
+const html = rewriteDocsHtml(rendered.html, entry.id);
+
+// Astro's build-time link check matches ROUTE PATTERNS, not emitted pages — a link to
+// a docs page that no entry produced would pass it. Validate the rewritten /docs/
+// links against the routes this build actually emits.
+const allEntries = await getCollection('docs');
+const emitted = new Set(
+  allEntries.map((candidate) =>
+    candidate.id.toLowerCase() === 'readme' ? '/docs/' : `/docs/${candidate.id}/`,
+  ),
+);
+const deadLinks = [...html.matchAll(/href="(\/docs\/[^"#]*)"/g)]
+  .map((match) => match[1])
+  .filter((link) => !emitted.has(link));
+if (deadLinks.length > 0) {
+  throw new Error(
+    `docs/${entry.id}.md links to docs pages this build does not render: ${[...new Set(deadLinks)].join(', ')}`,
+  );
+}
+
+const title = entry.data.title ?? extractTitle(html) ?? 'Setu-TS documentation';
+const description = extractDescription(html) ?? undefined;
+---
+
+<DocsLayout title={`${title} — Setu-TS`} description={description} source={entry.id}>
+  <article class="prose" set:html={html} />
+</DocsLayout>

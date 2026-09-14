@@ -1,0 +1,162 @@
+---
+/**
+ * Landing page. Content is a condensed rendering of the root README's positioning
+ * (Why This Exists, Core Principles, feature areas, install, quick example) — the
+ * README stays the canonical source; this page summarizes and links into the docs.
+ */
+import Base from '../layouts/Base.astro';
+import FeatureIcon from '../components/FeatureIcon.astro';
+import Logo from '../components/Logo.astro';
+
+const capabilities = [
+  {
+    name: 'Core',
+    icon: 'core',
+    detail: 'Plugin kernel, middleware pipeline, Hono routing, runtime abstraction, RFC 9457 exceptions, test utilities.',
+  },
+  {
+    name: 'Request path',
+    icon: 'request',
+    detail: 'Logging, configuration, validation, security headers/CSRF, JWT & API-key auth with RBAC, GraphQL over HTTP.',
+  },
+  {
+    name: 'Data',
+    icon: 'data',
+    detail: 'Repositories over memory, Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable, D1; caching; storage; multi-tenancy.',
+  },
+  {
+    name: 'Messaging & background',
+    icon: 'messaging',
+    detail: 'Domain events, CQRS, seven message brokers, queues & cron scheduling, CPU-bound worker pools.',
+  },
+  {
+    name: 'Service-to-service',
+    icon: 'services',
+    detail: 'Service discovery (Consul, Kubernetes, DNS), gRPC/Connect co-serving, Cloudflare bindings, static files.',
+  },
+  {
+    name: 'Real-time & rendering',
+    icon: 'realtime',
+    detail: 'SSE, WebSocket rooms, cross-replica backplane, React Router SSR, server-rendered views.',
+  },
+  {
+    name: 'Operations',
+    icon: 'operations',
+    detail: 'Health probes, Prometheus metrics, OpenTelemetry tracing, OpenAPI 3.1, audit trail, resilience patterns, secrets.',
+  },
+  {
+    name: 'Delivery & ergonomics',
+    icon: 'delivery',
+    detail: 'Mail, notifications, feature flags, optional DI and decorators, the setu CLI, client SDK, starter bundles.',
+  },
+];
+
+const principles = [
+  ['Plugin-first', 'Every capability is a plugin; the kernel ships with zero features.'],
+  ['Runtime independent', 'Node.js, Deno, Bun, and Cloudflare Workers — business logic never touches runtime APIs.'],
+  ['Optional DI & decorators', 'Dependency injection and decorators are plugins, not requirements. Everything has a programmatic API.'],
+  ['Type safe', 'Strict TypeScript throughout; no any in public APIs; tree-shakeable ES modules.'],
+];
+---
+
+<Base title="Setu-TS — Plugin-first enterprise backend framework built on Hono">
+  <section class="hero">
+    <div class="hero-logo">
+      <Logo width={340} />
+    </div>
+    <h1>Enterprise architecture without the weight. Runtime freedom without the chaos.</h1>
+    <p class="tagline">
+      Setu-TS combines Hono's performance, runtime independence, and a plugin-first
+      architecture with the enterprise patterns large organizations need — CQRS,
+      multi-tenancy, audit trails, and more.
+    </p>
+    <div class="install">
+      <div class="label">Deno</div>
+      <pre><code>deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime</code></pre>
+      <div class="label">Node</div>
+      <pre><code>npx jsr add @setu-ts/kernel @setu-ts/runtime</code></pre>
+    </div>
+    <div class="cta-row">
+      <a class="button primary" href="/docs/getting-started/">Get started</a>
+      <a class="button" href="/docs/">Documentation</a>
+      <a class="button" href="https://github.com/setu-ts/setu-ts">GitHub</a>
+    </div>
+  </section>
+
+  <section class="landing-section" aria-labelledby="why-heading">
+    <h2 id="why-heading">Why Setu-TS exists</h2>
+    <p>
+      Hono is fast and portable but intentionally minimal. NestJS is feature-rich but
+      Node-only and decorator-mandatory. Fastify is quick but lacks enterprise
+      abstractions. Setu-TS resolves the compromise: plugin-first capabilities on a small
+      kernel, running on all four runtimes.
+    </p>
+  </section>
+
+  <section class="landing-section" aria-labelledby="principles-heading">
+    <h2 id="principles-heading">Core principles</h2>
+    <ul class="card-grid">
+      {
+        principles.map(([name, detail]) => (
+          <li class="card">
+            <h3>{name}</h3>
+            <p>{detail}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  <section class="landing-section" aria-labelledby="capabilities-heading">
+    <h2 id="capabilities-heading">Capabilities</h2>
+    <p>
+      48 published packages — the core, 37 plugins, three starters, the SDK, the test
+      utilities, and the <code>setu</code> CLI. Add only what you use; heavy dependencies
+      are injected or lazily loaded, never installed by default.
+    </p>
+    <ul class="card-grid">
+      {
+        capabilities.map((capability) => (
+          <li class="card">
+            <FeatureIcon name={capability.icon} />
+            <h3>{capability.name}</h3>
+            <p>{capability.detail}</p>
+          </li>
+        ))
+      }
+    </ul>
+  </section>
+
+  <section class="landing-section" aria-labelledby="example-heading">
+    <h2 id="example-heading">Quick example</h2>
+    <p>The smallest possible application — just the kernel and a runtime:</p>
+    <div class="code-editor" aria-label="app.ts TypeScript example">
+      <div class="code-editor-titlebar">
+        <div class="window-controls" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="code-editor-tab"><span class="ts-badge">TS</span> app.ts</div>
+        <span class="code-editor-language">TypeScript</span>
+      </div>
+      <pre class="code-editor-code"><code><span class="line"><span class="line-number">1</span><span class="syntax-keyword">import</span> &#123; <span class="syntax-function">createApplication</span> &#125; <span class="syntax-keyword">from</span> <span class="syntax-string">'@setu-ts/kernel'</span>;</span>
+<span class="line"><span class="line-number">2</span><span class="syntax-keyword">import</span> &#123; <span class="syntax-function">RuntimePlugin</span> &#125; <span class="syntax-keyword">from</span> <span class="syntax-string">'@setu-ts/runtime'</span>;</span>
+<span class="line"><span class="line-number">3</span><span class="syntax-keyword">import</span> &#123; <span class="syntax-function">LoggerPlugin</span> &#125; <span class="syntax-keyword">from</span> <span class="syntax-string">'@setu-ts/logger-plugin'</span>;</span>
+<span class="line"><span class="line-number">4</span></span>
+<span class="line"><span class="line-number">5</span><span class="syntax-keyword">const</span> <span class="syntax-variable">app</span> = <span class="syntax-function">createApplication</span>(&#123;</span>
+<span class="line"><span class="line-number">6</span>  plugins: [<span class="syntax-function">RuntimePlugin</span>(), <span class="syntax-function">LoggerPlugin</span>(&#123; level: <span class="syntax-string">'info'</span> &#125;)],</span>
+<span class="line"><span class="line-number">7</span>&#125;);</span>
+<span class="line"><span class="line-number">8</span></span>
+<span class="line"><span class="line-number">9</span>app.router.<span class="syntax-function">get</span>(<span class="syntax-string">'/'</span>, (ctx) =&gt; &#123;</span>
+<span class="line"><span class="line-number">10</span>  <span class="syntax-keyword">return</span> ctx.response.<span class="syntax-function">json</span>(&#123; message: <span class="syntax-string">'Hello, World!'</span> &#125;);</span>
+<span class="line"><span class="line-number">11</span>&#125;);</span>
+<span class="line"><span class="line-number">12</span></span>
+<span class="line"><span class="line-number">13</span><span class="syntax-keyword">await</span> app.<span class="syntax-function">start</span>(&#123; port: <span class="syntax-number">3000</span> &#125;);</span></code></pre>
+    </div>
+    <p>
+      No decorators. No DI. No modules. Add capabilities as you need them — see
+      <a href="/docs/getting-started/">Getting started</a> and the
+      <a href="/docs/plugins/">plugin catalog</a>.
+    </p>
+  </section>
+
+</Base>

@@ -1,0 +1,19 @@
+{
+  "nodeModulesDir": "auto",
+  "imports": {
+    "@std/expect": "jsr:@std/expect@^1.0.20",
+    "@std/testing/bdd": "jsr:@std/testing@^1.0.19/bdd"
+  },
+  "fmt": {
+    "singleQuote": true
+  },
+  "tasks": {
+    "install": "deno install --min-dep-age 0",
+    "dev": "ASTRO_TELEMETRY_DISABLED=1 deno run -A npm:astro dev",
+    "build": "cd .. && deno task docs:api && cd website && ASTRO_TELEMETRY_DISABLED=1 deno run -A npm:astro build && deno run -A scripts/graft.mjs && deno run -A npm:pagefind@^1.5.2 --site dist",
+    "preview": "deno run -A npm:astro preview",
+    "test": "deno test -A test/",
+    "lint": "deno lint src test scripts",
+    "fmt:check": "deno fmt --check src test scripts *.mjs"
+  }
+}

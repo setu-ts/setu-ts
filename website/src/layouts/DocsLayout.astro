@@ -1,0 +1,57 @@
+---
+import Base from './Base.astro';
+import { DOCS_NAV } from '../lib/docs-nav';
+
+interface Props {
+  title: string;
+  description?: string;
+  /** Canonical file in docs/, for the "edit on GitHub" link. */
+  source?: string;
+}
+
+const { title, description, source } = Astro.props;
+const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/docs';
+const sourceFile = source?.toLowerCase() === 'readme' ? 'README' : source;
+const editUrl = source
+  ? `https://github.com/setu-ts/setu-ts/edit/main/docs/${sourceFile}.md`
+  : undefined;
+---
+
+<Base title={title} description={description}>
+  <div class="docs-shell">
+    <nav class="docs-sidebar" aria-label="Documentation">
+      <h2><a href="/docs/">Documentation</a></h2>
+      {
+        DOCS_NAV.map((group) => (
+          <>
+            <h2>{group.label}</h2>
+            <ul>
+              {group.items.map((item) => (
+                <li>
+                  <a
+                    href={`/docs/${item.slug}/`}
+                    aria-current={
+                      currentPath === `/docs/${item.slug}` ? 'page' : undefined
+                    }
+                  >
+                    {item.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </>
+        ))
+      }
+    </nav>
+    <div class="docs-content">
+      {
+        editUrl && (
+          <a class="edit-page" href={editUrl}>
+            Edit this page on GitHub
+          </a>
+        )
+      }
+      <slot />
+    </div>
+  </div>
+</Base>
