@@ -299,10 +299,10 @@ command document and reads no result. **Probed against the pinned driver, not as
 against that signature — the real
 `Db.command(command: Document, options?: RunCommandOptions &
 Abortable): Promise<Document>`
-(`mongodb.d.ts:3941`) is assignable to it, so the §6 compile-time assertion traverses the new member
-rather than merely tolerating it. **This edits `mongo-client-types.ts`, which M95c also edits**
-(`IMongoClient.connect` → `Promise<unknown>`) — the two letters must rebase rather than merge blind,
-and §0 records it.
+(`mongodb.d.ts:4012` in 6.21.0) is assignable to it, so the §6 compile-time assertion traverses the
+new member rather than merely tolerating it. **This edits `mongo-client-types.ts`, which M95c also
+edits** (`IMongoClient.connect` → `Promise<unknown>`) — the two letters must rebase rather than
+merge blind, and §0 records it.
 
 **What stays exposed, stated plainly rather than buried:** a Cosmos, Bigtable or DynamoDB
 application keeps reporting `up` for an unreachable backend after this letter. That is the status
