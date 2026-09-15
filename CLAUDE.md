@@ -4861,15 +4861,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `deno install --frozen` diagnostic; the ROADMAP's static-graph mechanism paragraph is corrected to
   the measured one) — complete
 
-- **Next milestone** — **M95b** (`packages/database-plugin` + `packages/messaging-plugin` —
-  reachability that fails open, and now the milestone's **second High**. Three rows, one mechanism:
-  a lifecycle or fault flag reported as liveness. With the Service Bus broker stopped, `/health`
-  says `up` and `/ready` answers `200` while every `publish` throws; `DatabaseService.isHealthy()`
-  returns the lifecycle `adapter.isReady()`, so a stopped database reports `up`, `/ready` stays
-  `200`, and every request that touches data answers `500` — the probe the CLI's own generated k8s
-  manifests point at; and `RabbitMqBroker.isHealthy()` reads a fault flag, so a HUNG broker reports
-  `reachable: true` while a stopped one is reported correctly. Carries a design decision for the
-  maintainer rather than a mechanical fix.)
+- **Next milestone** — **M95b** (`packages/common` + `packages/database-plugin` +
+  `packages/messaging-plugin` — reachability that fails open, and now the milestone's **second
+  High**. Three rows, one mechanism: a lifecycle or fault flag reported as liveness. With the
+  Service Bus broker stopped, `/health` says `up` and `/ready` answers `200` while every `publish`
+  throws; `DatabaseService.isHealthy()` returns the lifecycle `adapter.isReady()`, so a stopped
+  database reports `up`, `/ready` stays `200`, and every request that touches data answers `500` —
+  the probe the CLI's own generated k8s manifests point at; and `RabbitMqBroker.isHealthy()` reads a
+  fault flag, so a HUNG broker reports `reachable: true` while a stopped one is reported correctly.
+  Carries a design decision for the maintainer rather than a mechanical fix.)
 
 - **Then M95c and M95d** — the rest of the `v0.6.0` closeout, which now covers **two** runs against
   that version: the regression run (5 findings) and **Part 11, X46–X51** (8 more), the exercise

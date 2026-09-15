@@ -10,6 +10,13 @@ is correct and a reader following the documentation still ends up wrong**. That 
 and this letter holds it to M90h's standard: a claim is corrected where it is made, and where a gate
 could have caught it the gate is extended rather than the claim reworded.
 
+> **On the version literals in this letter** (PR #309 finding 6): `v0.5.0` and `v0.6.0` name a
+> historical boundary — the releases these findings were produced against — not a moving target. The
+> repository's convention for text a version bump must not rewrite is the `version:history` marker
+> `check-docs.ts` already honours, and the ROADMAP's Part 11 paragraph carries the same literals for
+> the same reason. Both are records of what was run, so a bump that rewrote them would make them
+> false; they are deliberately not parameterised.
+
 1. **A user-supplied `javascript:` URL survives escaping and executes** — `docs/mvc.md`'s otherwise
    thorough §Escaping builds the belief that JSX makes user data safe in a view, and that belief is
    false for a URL attribute. Demonstrated in real Chrome 152.
@@ -89,6 +96,19 @@ prop, and assert on the OUTPUT — a rendered `href="javascript:…"` fails rega
 it. That needs no per-component knowledge, cannot drift as components change, and catches a
 component that routes a differently-named prop into an attribute.
 
+**Two blind spots are inherited from the existing props model and must be stated, not discovered**
+(corrected after review, PR #309 finding 9). The probe builds props as a `Proxy` over `[HOSTILE]`
+whose `get` returns the proxy for any key (`check-example-behaviour.ts:395-406`), and it stubs
+`raw()` to a benign `'<!--raw-->'` marker (`:412`) so the documented opt-out does not report itself
+as a defect. Consequently: a component that routes a URL through **`raw()`** renders the marker, not
+the payload; and **`{...props}`** spreads the proxy's array-backed own keys rather than named props,
+so `<a {...props} />` produces no `href`. Both limits apply to the existing `HOSTILE` check exactly
+as they do to the new URL payload — this row inherits them rather than introducing them — and the
+gate's claim is scoped accordingly: it proves a component that interpolates a prop into a URL
+attribute directly, and proves nothing about one that launders it through `raw()` or a spread.
+Widening the props model is a change to the existing gate's core and is named here rather than
+smuggled in.
+
 A documented example that deliberately demonstrates the hazard is handled the way the existing gate
 already handles one: `COUNTER_EXAMPLE_MARKERS` (`check-example-behaviour.ts:48`) is
 `['UNSAFE', 'DO
@@ -114,23 +134,36 @@ The worked example carries `ctx.response.status(error.statusCode)` on its own li
 `renderView` gives that statement nowhere else to live, and D4 shows the guide already teaches the
 technique two sections earlier.
 
-### 3.4 The `@since` gate compares the tag to the version that shipped the symbol
+### 3.4 The `@since` gate compares the tag to the version that shipped the SYMBOL
 
-A new `scripts/check-since-tags.ts`, run from `check:docs`. For each `@since X.Y.Z` in
-`packages/*/src`, it resolves whether the containing FILE exists in the published tarball for
-`X.Y.Z` and fails when it does not.
+A new `scripts/check-since-tags.ts`, run from `check:docs`.
 
-**The registry is queried once per version, not once per tag**, and the result is cached for the
-run; an unpublished version (a tag ahead of the registry, which is the normal state on a release
-branch) is skipped rather than failed, so the gate cannot block a release PR. A file that exists at
-the claimed version is accepted without inspecting the symbol — the check is deliberately
-file-level, because that is the granularity D10 could establish by probe and it is enough to catch
-the whole D12 class.
+**It scans every published package, and the glob is the part to get right** (corrected after review,
+PR #309 finding 12). `packages/*/src` **misses the three starters**, which live at
+`packages/starters/*/src` — so a "repository-wide audit" would have silently skipped a whole package
+family. The scan derives its roots from the workspace member list in the root `deno.json`, which is
+the one place that already knows every published package and cannot drift as packages are added.
 
-**Offline behaviour is a decision, not an accident:** with no network the gate SKIPS with a recorded
-reason rather than passing silently, following the exit-77 convention `check:apps` uses
-(`scripts/check-apps.ts:4`, `SKIP_EXIT_CODE = 77`), so an unreachable registry can never read as a
-clean run.
+**The check is symbol-level, not file-level** (corrected after review, PR #309 finding 4). The first
+draft resolved only whether the containing FILE existed at the claimed version, and deliberately
+said so — but that misses the commonest drift by construction: a symbol added to a long-lived file
+passes with any `@since` at all, and `packages/common/src/http.ts` has accumulated members across a
+dozen releases. For each `@since X.Y.Z`, the gate fetches that file at that version from the
+registry and fails when the exported name is absent from it. A file that does not exist at the
+version fails the same way, so D10's case is still covered as the degenerate one.
+
+**The registry is queried once per (package, version) pair**, not once per tag, and the result is
+cached for the run. An unpublished version — a tag ahead of the registry, the normal state on a
+release branch — is skipped rather than failed, so the gate cannot block a release PR.
+
+**Offline behaviour cannot be exit 77 here, and the first draft was wrong about it** (corrected
+after review, PR #309 finding 5). `check:docs` is an `&&` chain of `deno run` invocations, so ANY
+non-zero status fails the task — exit 77 included. `check-apps.ts` gets away with the convention
+because it _handles_ the code itself; nothing handles it inside an `&&` chain, so a transient
+registry outage would fail the documentation job and block release PRs. Instead the gate **reports
+the skip on stderr and exits 0**, and — so that silence is never mistaken for a pass — it prints the
+number of tags it verified on every run, which is zero when it skipped. `test/docs-gate.test.ts`
+asserts a skipped run says so.
 
 ### 3.5 Row 4's six tags are corrected in the same change as the gate
 
@@ -204,8 +237,15 @@ arrangement for documentation tooling.
    package surface moves, so both must be green with no new findings.
 6. **The barrels are byte-identical.** `git diff -- 'packages/*/src/index.ts'` must be empty, which
    is §4's claim stated as a command.
-7. **No package logic changed.** `git diff --stat -- 'packages/*/src'` shows JSDoc-only lines in
-   `packages/common/src/form/`, and nothing else.
+7. **No package logic changed**, and this is a CHECK rather than a report (corrected after review,
+   PR #309 finding 7). The first draft used `git diff --stat`, which prints and always exits 0, so a
+   stray source edit would have passed every listed gate. The letter's only `packages/*/src` change
+   is JSDoc — six `@since` values — so the gate is:
+   `git diff -U0 origin/main...HEAD -- 'packages/*/src'` must contain no added or removed line
+   outside a comment. Implemented as a step in the PR checklist and verified by inspection, NOT as a
+   new repo task: a general docs-only task would have to be correct for every future milestone,
+   which is a larger design than this letter needs and would be dead surface for all three other M95
+   letters.
 
 ## 8. Risks & mitigations
 

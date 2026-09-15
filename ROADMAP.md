@@ -9664,7 +9664,7 @@ do, and the `exclude` escape already exists.
 
 ## Milestone 95: v0.6.0 Smoke Defect Closeout
 
-**Package(s):** 95a `packages/cli`, `docs/`; 95b `packages/database-plugin`,
+**Package(s):** 95a `packages/cli`, `docs/`; 95b `packages/common`, `packages/database-plugin`,
 `packages/messaging-plugin`; 95c `packages/common`, `packages/database-plugin`, `packages/kernel`,
 `packages/session-plugin`, `packages/static-plugin`; 95d `docs/`, `packages/common`,
 `packages/view-plugin`, `scripts/`.
@@ -10262,6 +10262,6 @@ nothing).
 | 94b       | ✅     | common + runtime + storage/session — one form-body abstraction                                                         |
 | 94c       | ✅     | session-plugin — CSRF token field helper                                                                               |
 | 95a       | ✅     | cli + docs — a generated deployment cannot start (**High**)                                                            |
-| 95b       | ⬜     | database-plugin + messaging-plugin — reachability that fails open (**High**)                                           |
+| 95b       | ⬜     | common + database-plugin + messaging-plugin — reachability that fails open (**High**)                                  |
 | 95c       | ⬜     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
 | 95d       | ⬜     | docs + common + view-plugin + scripts — documentation that survives contact                                            |

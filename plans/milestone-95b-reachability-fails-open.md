@@ -218,10 +218,28 @@ pod keeps taking traffic". Those have different fixes, and only the first one is
    finding, on every adapter, with no client facade widened.
 2. **The probe** — an adapter that CAN answer should say so, which upgrades `degraded` to `up`.
 
-`IDatabaseAdapter` gains an OPTIONAL `isHealthy?(): Promise<boolean>` (the `fs?`/`workers?`/`dns?`
-precedent, so no out-of-repo adapter breaks). `DatabaseService.isHealthy()` keeps its lifecycle gate
-unchanged and delegates when the member exists, inside the `createCachedProbe` (5 s TTL, 2 s bound)
-the indicator already builds. The indicator publishes `reachable`:
+**`IDatabaseAdapter` lives in `packages/common/src/services/database.ts:367`, not in
+`database-plugin`** — M52c promoted it, and `database-plugin/src/interfaces/index.ts` only imports
+it (`:9`). Corrected after review (PR #309, finding 8): the first draft's implementation table named
+the importing file, so following the plan literally would have left the contract every adapter
+implements unchanged. **This letter therefore carries a `common` change**, and the package list in
+§0 and the ROADMAP umbrella say so.
+
+`IDatabaseAdapter` gains an OPTIONAL `isHealthy?(): Promise<boolean>` there (the `fs?`/`workers?`/
+`dns?` precedent, so no out-of-repo adapter breaks). **The indicator needs two reads, not one, and
+the first draft's single boolean could not carry both** (PR #309, finding 3): `Promise<boolean>`
+cannot distinguish "this adapter has no probe" from "the probe did not answer in time", which the
+table below maps to different statuses. So `DatabaseService` exposes:
+
+- `hasReachabilityProbe: boolean` — a synchronous read of `typeof adapter.isHealthy === 'function'`,
+  which is the only way absence is observable at all once the call is wrapped.
+- `reachability(): Promise<boolean | undefined>` — the bounded probe, `undefined` on timeout. This
+  mirrors `IMessageBroker.reachability()` exactly (M70c's tri-state), so the two capabilities report
+  through one shape rather than two.
+
+`DatabaseService.isHealthy()` keeps its lifecycle gate and its published `Promise<boolean>`
+signature unchanged; `reachability()` is the new member the indicator reads. The indicator publishes
+`reachable`:
 
 | adapter probe  | `reachable` | `status`   |
 | -------------- | ----------- | ---------- |
@@ -276,21 +294,51 @@ quo rather than a regression, and it is preferred to the alternative — a mappi
 readiness for every one of them on upgrade. Each needs one optional member on its own client facade,
 which is a follow-on this letter names rather than performs.
 
-### 3.6 The RabbitMQ probe performs a round trip instead of reading its fault flag
+### 3.6 The RabbitMQ probe opens its OWN channel, and the indicator bounds it
 
-`isHealthy()` becomes a real interaction inside the bound the probe already has — a `checkQueue` on
-a queue the broker declared at connect, which is a passive AMQP method that creates nothing and
-answers in one round trip. A paused broker cannot answer it, so the flag's blind spot closes; a
-stopped one still faults, so the existing `outage-real.test.ts` sequence is unaffected.
+> **Redesigned after review (PR #309, findings 1 and 2). The first draft was unimplementable**, and
+> both halves were falsified by source this plan should have read:
+>
+> - It said `checkQueue` on "a queue the broker declared at connect". **`connect()` declares no
+>   queue** — it is `resolveClient` → `#createChannel` → `#reassertExchange`
+>   (`rabbitmq-broker.ts:189-199`), an EXCHANGE only, and a producer-only application never declares
+>   one. Worse, a passive declare against a missing queue raises an AMQP **channel exception**,
+>   which closes the channel — and `#channel` is the single shared channel every `publish` and every
+>   subscription uses. Running the health check would have disabled the broker it was reporting on.
+> - It said the round trip runs "inside the bound the probe already has". **There is no bound.** The
+>   indicator does `const reachable = await broker.reachability()` (`messaging-plugin.ts:427`) — a
+>   direct await, no `createCachedProbe`. Service Bus builds its own internally; RabbitMQ's
+>   `reachability()` (`:258`) just reads the flag, so it never needed one. An unbounded round trip
+>   there means a paused broker hangs `/health` and `/ready` indefinitely, which is worse than the
+>   `up` it currently reports.
 
-The supervisor's fault flag is kept as a **short-circuit**, not as the answer: if it is already
-faulted the probe resolves `false` without a round trip, which preserves today's cost for the case
-it already handles correctly.
+**The probe opens a throwaway channel and closes it.** `connection.createChannel()` is a real round
+trip that a paused broker cannot answer and a stopped one fails immediately; it needs no queue, no
+exchange and no permissions beyond those the broker already holds; and because the channel is its
+own, a failure cannot touch `#channel`. The probe closes it in a `finally` — a leaked channel per
+poll would be its own defect.
 
-**The scope limit, stated rather than implied:** this is the one broker whose probe reads a flag.
-The other four reply-capable arms were re-verified per arm for this plan rather than assumed — the
-Redis-backed ports call `ping()`, S3 issues `head('')`, SMTP calls `transport.verify?.()` — and all
-four were measured correct under the hung condition.
+```
+isHealthy():
+  if (this.#supervisor.faulted) return false      // short-circuit, no round trip
+  if (this.#connection === null) return false
+  ch = await this.#connection.createChannel()     // the round trip
+  try { return true } finally { await ch.close() }
+  // on throw: return false
+```
+
+**The bound is added at the indicator, not inside the broker**, because that is where every other
+probe in this letter is bounded and where the finding's blast radius sits. `messaging-plugin.ts`
+wraps `broker.reachability()` in the same `createCachedProbe` (5 s TTL, 2 s bound) the Service Bus
+broker builds internally, with `fallback: undefined` → `reachable: 'unknown'`. **This changes
+behaviour for all seven broker arms**, so it is stated as such rather than slipped in under the
+RabbitMQ row: a probe that exceeds the bound now reports `'unknown'` instead of hanging the
+endpoint. No arm's success or failure mapping changes.
+
+**No facade widening is needed** — `IAmqpConnection` already declares
+`createChannel(): Promise<unknown>` (`messaging-plugin/src/interfaces/index.ts:66`), verified rather
+than assumed. The returned channel is `unknown`, so the probe closes it through a narrow structural
+check (`{ close(): Promise<void> }`) rather than a cast.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -314,22 +362,23 @@ introduced: a switch to disable the window would be a way to ask for the defect 
 
 ## 5. Implementation files
 
-| File                                                          | Purpose                                                                                                                                             |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/messaging-plugin/src/index.ts`                      | Unchanged — no barrel export moves (§4).                                                                                                            |
-| `packages/database-plugin/src/interfaces/index.ts`            | §3.5 — the optional `isHealthy?()` member on `IDatabaseAdapter` (X51-1).                                                                            |
-| `packages/database-plugin/src/services/database-service.ts`   | §3.5 — `isHealthy()` delegates to the adapter's probe when present; the lifecycle gate is unchanged.                                                |
-| `packages/database-plugin/src/plugin/database-plugin.ts`      | §3.5 — the indicator publishes `reachable` from the bounded probe; `up` is never the answer for an unanswerable one.                                |
-| `packages/database-plugin/src/adapters/**`                    | §3.5 — a per-adapter `isHealthy?()` using the cheap command R17 names; omitted where an injected client cannot answer.                              |
-| `packages/messaging-plugin/src/brokers/rabbitmq-broker.ts`    | §3.6 — a real round trip inside the existing bound, replacing the fault-flag read (X51-2).                                                          |
-| `packages/database-plugin/README.md`                          | The `database` health payload gains `reachable`; state what `unknown` means.                                                                        |
-| `packages/messaging-plugin/src/brokers/service-bus-broker.ts` | C1 JSDoc correction (§3.1); the data-plane evidence window and its use in `reachability()` (§3.2); the recording call in `publishWithHeaders` (R9). |
-| `packages/messaging-plugin/README.md`                         | C3 status table and the plane distinction.                                                                                                          |
-| `PUBLIC_API.md`                                               | C2 plane distinction, C3 status table, and the exposed posture from §8.                                                                             |
-| `CHANGELOG.md`                                                | C1 correction of the published `v0.6.0` entry, plus an `Unreleased` entry recording both the correction and the behaviour change.                   |
-| `docs/messaging-emulators.md`                                 | How to run the §3.3 suite locally, beside the existing Service Bus instructions.                                                                    |
-| `PUBLIC_API.md` (Messaging health + options)                  | §4.1's `dataPlaneEvidenceMs` and its default — reachable through the exported `ServiceBusOptions`.                                                  |
-| `ROADMAP.md`                                                  | The §3.2 approval record, and the M95b status flip in this same PR.                                                                                 |
+| File                                                          | Purpose                                                                                                                                                     |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/messaging-plugin/src/index.ts`                      | Unchanged — no barrel export moves (§4).                                                                                                                    |
+| `packages/common/src/services/database.ts`                    | §3.5 — the optional `isHealthy?()` member on `IDatabaseAdapter`, which is declared HERE (`:367`), not in `database-plugin` (X51-1).                         |
+| `packages/database-plugin/src/services/database-service.ts`   | §3.5 — the new `hasReachabilityProbe` read and the bounded `reachability()`; `isHealthy()`'s published signature is unchanged.                              |
+| `packages/database-plugin/src/plugin/database-plugin.ts`      | §3.5 — the indicator publishes `reachable` from the bounded probe; `up` is never the answer for an unanswerable one.                                        |
+| `packages/database-plugin/src/adapters/**`                    | §3.5 — a per-adapter `isHealthy?()` using the cheap command R17 names; omitted where an injected client cannot answer.                                      |
+| `packages/messaging-plugin/src/brokers/rabbitmq-broker.ts`    | §3.6 — a throwaway-channel round trip replacing the fault-flag read, with the flag kept as a short-circuit (X51-2).                                         |
+| `packages/messaging-plugin/src/plugin/messaging-plugin.ts`    | §3.6 — the indicator wraps `broker.reachability()` in `createCachedProbe`; today it awaits directly (`:427`) and nothing bounds it. Affects all seven arms. |
+| `packages/database-plugin/README.md`                          | The `database` health payload gains `reachable`; state what `unknown` means.                                                                                |
+| `packages/messaging-plugin/src/brokers/service-bus-broker.ts` | C1 JSDoc correction (§3.1); the data-plane evidence window and its use in `reachability()` (§3.2); the recording call in `publishWithHeaders` (R9).         |
+| `packages/messaging-plugin/README.md`                         | C3 status table and the plane distinction.                                                                                                                  |
+| `PUBLIC_API.md`                                               | C2 plane distinction, C3 status table, and the exposed posture from §8.                                                                                     |
+| `CHANGELOG.md`                                                | C1 correction of the published `v0.6.0` entry, plus an `Unreleased` entry recording both the correction and the behaviour change.                           |
+| `docs/messaging-emulators.md`                                 | How to run the §3.3 suite locally, beside the existing Service Bus instructions.                                                                            |
+| `PUBLIC_API.md` (Messaging health + options)                  | §4.1's `dataPlaneEvidenceMs` and its default — reachable through the exported `ServiceBusOptions`.                                                          |
+| `ROADMAP.md`                                                  | The §3.2 approval record, and the M95b status flip in this same PR.                                                                                         |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
