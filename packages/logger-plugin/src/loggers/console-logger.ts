@@ -10,11 +10,18 @@
 import type { ILogger, IRuntimeServices, LogLevel, LogMetadata } from '@setu-ts/common';
 
 import { normalizeMetadata } from './normalize-metadata.ts';
+import { safeStringify } from './safe-stringify.ts';
 
 /**
  * Numeric severity ranking. Lower numbers are more severe (so a configured
  * level allows any entry whose rank is `<=` the configured rank).
  */
+/**
+ * Stands in for metadata that threw while being read. Emitted in place of the
+ * metadata so the entry still reaches the operator and says why it is thin.
+ */
+const UNSERIALIZABLE_METADATA = '[unserializable metadata]';
+
 const LEVEL_RANK: Readonly<Record<LogLevel, number>> = Object.freeze({
   fatal: 60,
   error: 50,
@@ -151,7 +158,12 @@ export class ConsoleLogger implements ILogger {
     if (this.#pretty) {
       this.#prettyPrint(level, message, redacted);
     } else {
-      console.log(JSON.stringify(entry));
+      // A log call emits exactly one line and never throws. When the metadata
+      // cannot be serialized even with cycles and bigints neutralized — caller
+      // code that throws while being read — the entry is emitted WITHOUT it
+      // rather than lost, because the level, time and message are usually the
+      // half an operator is looking for and are always serializable.
+      console.log(safeStringify(entry) ?? this.#unserializableLine(level, message));
     }
   }
 
@@ -203,9 +215,30 @@ export class ConsoleLogger implements ILogger {
    * @param message - Log message
    * @param metadata - Structured context
    */
+  /**
+   * Builds the JSON line used when an entry's metadata could not be serialized.
+   *
+   * Every field here is a primitive this class produced, so this cannot fail
+   * for the reason the entry it replaces did.
+   *
+   * @param level - Severity of the entry
+   * @param message - Log message
+   * @returns A JSON line carrying the entry minus its metadata
+   */
+  #unserializableLine(level: LogLevel, message: string): string {
+    return JSON.stringify({
+      level,
+      time: this.#runtime.now(),
+      msg: message,
+      metadata: UNSERIALIZABLE_METADATA,
+    });
+  }
+
   #prettyPrint(level: LogLevel, message: string, metadata: Record<string, unknown>): void {
     const ts = new Date(this.#runtime.now()).toISOString();
-    const meta = Object.keys(metadata).length > 0 ? ` ${JSON.stringify(metadata)}` : '';
+    const meta = Object.keys(metadata).length > 0
+      ? ` ${safeStringify(metadata) ?? UNSERIALIZABLE_METADATA}`
+      : '';
     console.log(`${ts} [${level.toUpperCase()}] ${message}${meta}`);
   }
 }
