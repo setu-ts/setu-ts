@@ -10125,6 +10125,169 @@ nothing).
 
 ---
 
+## Milestone 96: Redaction — One Seam for Every Egress Path
+
+**Package(s):** `packages/common`, `packages/logger-plugin`, `packages/telemetry-plugin`,
+`packages/audit-plugin`
+
+**Objective:** Give the framework one answer to "where does sensitive data leave this process, and
+what happens to it on the way out". Three first-party components export application data to
+somewhere an operator did not write — logs, spans, an audit trail — and each of them answers that
+question differently: one has an opt-in dot-path list, one has nothing at all, and one is the
+subject of a committed claim that is not true. This milestone makes it one port, resolved once,
+consulted at every egress.
+
+**This is not a compliance feature and must not be documented as one.** PII, PHI and cardholder data
+are properties of a deployment, not of a library; a `hipaa-plugin` would be a liability. What a
+framework can own is the mechanism — classify a field once, decide what leaving looks like, and make
+every exporter honour it — and that is the whole scope here.
+
+### The gap is mechanical, and four of its five parts are defects
+
+`grep -rnwE "PII|PHI|PCI|HIPAA|GDPR|DSS" packages/*/src docs/*.md *.md` returns **nothing**, which
+is correct and stays that way. The gap is not vocabulary; it is that the three exporters disagree.
+
+1. **Telemetry exports the full URL, query string included.**
+   `telemetry-plugin/src/middleware/telemetry-middleware.ts:59` sets `http.url` to `request.url` —
+   the complete URL — unconditionally and with no hook. M24c's collector fan-out then ships it to
+   Datadog, New Relic and Azure Monitor simultaneously, so `GET /search?email=…&dob=…` reaches three
+   third parties. The contrast is one line below: `http.route` uses `request.path`, which
+   `common/src/http.ts:42` guarantees carries no query string. The safe field is already there,
+   beside the unsafe one. The span **name** (`telemetry-middleware.ts:42`) is `${method} ${path}`,
+   so a concrete identifier in a path is exported twice over.
+2. **The console logger's nested redaction mutates the caller's object.**
+   `console-logger.ts:165-196`: `#redactFields` shallow-clones with `{ ...data }`, then
+   `#redactPath` walks into `clone[segment]` — the _same reference_ the caller passed — and assigns
+   `'[Redacted]'` to the leaf. So `logger.info('x', { auth: user })` under `redact: ['auth.token']`
+   writes `'[Redacted]'` into the application's own `user` object. The walk also returns early on
+   `Array.isArray(next)`, so a path through an array silently redacts nothing.
+3. **The two loggers honour different syntaxes for the same option.** `ConsoleLogger` matches
+   literal dot-path segments only (`console-logger.ts:182-196`), while `PinoLogger` forwards
+   `redact` straight to pino (`pino-logger.ts:209-210`), which supports wildcards and array
+   notation. One `LoggerPlugin({ redact: ['*.password'] })` therefore redacts on pino and silently
+   does nothing on the default logger — the same configuration, two behaviours, no diagnostic.
+4. **Three committed documents claim redaction is on by default. It is off.** `ARCHITECTURE.md:2461`
+   lists "Secret redaction in logs: enabled by default" under Secure Defaults, `AI_GUIDELINES.md`
+   §13.3 states "The logger redacts known secret fields", and `common/src/services/secrets.ts:12`
+   repeats it. `console-logger.ts:73` is `options?.redact ?? []` and `pino-logger.ts:209` sets
+   pino's `redact` only when the option is supplied: the default is an empty list on both, so a
+   field named `password` is logged in full out of the box.
+5. **The audit trail has no seam at all.** `AuditEntry.before`/`after` are whole resource states
+   (`common/src/services/audit.ts:24-27`), and `AuditService.log` copies them verbatim into the
+   stored record and deep-freezes it (`audit-service.ts:38-44`). An audit trail is usually the store
+   with the longest retention and the broadest read access, so it is the worst place for an
+   unfiltered copy of a row — and today it is the only one of the three with no filter whatsoever.
+
+### Three facts were established from source before the design was fixed, and two changed it
+
+- **Redaction must be synchronous, which rules out HMAC.** `ILogger.fatal`/`error`/… return `void`
+  (`common/src/services/logger.ts:38-73`), so anything on the logging path must complete
+  synchronously. Web Crypto's `subtle.sign` is async and `IRuntimeServices` exposes no sync digest,
+  so the correlation-preserving redactor .NET ships as `HmacRedactor` **cannot be built here** on
+  the logger path. The framework therefore ships `erase` and `mask` only, and correlation-preserving
+  redaction is an application-supplied `Redactor` through the extension point rather than a weak
+  built-in hash wearing a strong name. A 32-bit FNV-1a — the one synchronous hash already in the
+  tree (`feature-flags-plugin/src/evaluation/flag-evaluator.ts:12-24`) — is trivially reversible
+  over an identifier-sized domain and would have been exactly that.
+- **Classification cannot ride the Zod schema, although the channel exists.** M70m's
+  `RouteValidationMetadata` already carries `schema: unknown` "exactly as the caller supplied it"
+  (`common/src/http.ts:758-763`), branded onto the middleware so `openapi-plugin` reads it without
+  importing `validation-plugin` — which makes schema-borne classification look free. It is not:
+  `common/src/services/validation.ts:5` records that schemas are `unknown` at that layer precisely
+  so `common` carries no validator dependency, so `common` cannot walk one; and the brand covers
+  **request** targets, while every leak above is on the **response** side, where nothing is
+  validated at all. The policy is therefore declared against field paths, independent of any
+  validator.
+- **A capability token would have had nothing to resolve it, and the precedent cited for one was
+  wrong.** An earlier draft shipped a `@setu-ts/redaction-plugin` providing a
+  `CAPABILITIES.REDACTION` token, "the M47 `realtime-backplane-plugin` shape exactly". It is not
+  that shape: `realtime-backplane-plugin.ts:60-107` has `async register`,
+  `await
+  backplane.connect()`, a health indicator and an `onClose` — real resources — while
+  redaction is a pure synchronous transform whose implementation must live in `common` anyway, since
+  three plugins consume it and §2.2 forbids plugin-to-plugin imports. The package would therefore
+  have contained no implementation at all, and its only purpose — making the service resolvable by
+  name — has no consumer: the three exporters can be handed it, and an application already holds the
+  POLICY, which is the source of truth. The true precedent is M90a's `createPathMatcher`, a pure
+  function in `common` adopted directly by four call sites with no plugin and no token. The service
+  therefore arrives through one `redaction` option on each consumer's existing plugin options, and
+  the decision is reversible in the direction that matters: adding a token later is additive, while
+  deleting a published package is not, because JSR versions are immutable.
+
+### The design
+
+**One port, one policy, one implementation, and no new package.** `common` gains the
+`IRedactionService` port, the `DataClassification` and `RedactionPolicy` vocabulary, a compiled
+field-path matcher, the two built-in redactors and the `createRedactionService` factory — all pure,
+in the `createPathMatcher` (M90a) and `parseFormBody` (M94b) tradition of pure utilities living in
+`common` so packages that may not import each other still agree byte-for-byte. Each of the three
+exporters gains one optional `redaction?: RedactionPolicy | IRedactionService` member on its
+existing options; an application builds the policy once and passes the same value to the plugins it
+wants covered. **No capability token and no registration**, so there is no plugin-ordering question
+to get wrong, and an application that supplies nothing sees behaviour identical to today.
+
+**A classification names an intent, not a mechanism.** `'pii'`, `'phi'`, `'pci'` and `'secret'` ship
+as constants and an application may declare its own; each maps to a `Redactor`, so the same field
+can be erased in one deployment and masked in another without touching a call site. That indirection
+is the reason the design is worth more than a longer `redact` list: teams switch redaction off when
+it erases the field they are debugging, and `mask` — keep the last four characters — is both the
+debuggable answer and what PCI DSS actually requires for a displayed PAN.
+
+**The default becomes true rather than the claim becoming softer.** Finding 4 is resolved in favour
+of the documents: `LoggerPlugin`'s `redact` defaults to a built-in secret-field pattern set instead
+of `[]`, so the three committed claims are true as written. This is a breaking behaviour change — a
+field named `password` that used to appear in logs now reads `[Redacted]` — and `redact: []`
+restores the previous behaviour exactly.
+
+**The `http.url` repair is independent of the port**, because a defect fix may not require opting
+in: with no `redaction` option supplied the attribute carries the origin and path and drops the
+query string outright, matching what `http.route` beside it already does. Supplying one upgrades
+that to per-parameter redaction, so a query string can be kept where the policy says it is safe.
+
+### Deliverables
+
+- `common`: `IRedactionService`, `createRedactionService`, `Redactor`, `RedactionContext`,
+  `RedactionPolicy`, `DataClassification`, `DATA_CLASSIFICATIONS`, `DEFAULT_SECRET_FIELD_PATTERNS`,
+  `eraseRedactor`, `createMaskRedactor`. `CAPABILITIES` gains nothing, and `common` is the only
+  barrel that changes.
+- One `redaction` option each on `LoggerPluginOptions`, `TelemetryPluginOptions` and
+  `AuditPluginOptions`. No new package, so the publishable set stays at **48** and no release-list,
+  workspace or first-publish step is needed.
+- `logger-plugin`: one shared redaction implementation behind both loggers (fixing findings 2 and
+  3), the secret-pattern default (finding 4), and the service applied immediately after
+  `normalizeMetadata` — inside the concrete loggers rather than as a decorator around them, because
+  that file states the normalise-before-redact ordering is load-bearing.
+- `telemetry-plugin`: the `http.url` repair (finding 1) and classified span attributes.
+- `audit-plugin`: `before`/`after`/`metadata` through the service before the deep-freeze (finding
+  5).
+- Docs: `ARCHITECTURE.md` §14 Plugin Responsibilities rows plus the Secure Defaults correction, a
+  `PUBLIC_API.md` section, `docs/telemetry-collector-fanout.md` amended to say what now reaches the
+  collector, and CHANGELOG migration text for both breaking changes.
+
+### Out of scope
+
+- **The storage half.** Cache (`cache-middleware.ts:136-137`), queue (`redis-queue.ts:192`),
+  messaging envelopes and `FileAuditStorage` all persist plaintext copies to external stores.
+  Field-level encryption and erasure fan-out across them are a separate, larger design and are named
+  here rather than half-built.
+- **Key management.** `session-plugin/src/codec/crypto.ts` already exports `KeyRing`,
+  `deriveKeyRing`, `seal` and `open` with nothing session-specific in them — the ASP.NET Data
+  Protection analogue, ready to promote. That is its own milestone, and it is what would make a
+  cryptographic redactor possible.
+- **A build-time classification report.** `Microsoft.Extensions.AuditReports` works because .NET
+  classifies _types_ a compiler can see; our policy is runtime data, so the same artifact is not
+  reproducible and a framework-side script would report nothing about a user's application. Runtime
+  introspection of the registered policy is the replacement, and it is deferred with that reasoning
+  recorded rather than filed as a missing feature.
+- **`http.route` carrying a concrete path rather than the matched template.** Fixing it properly
+  needs the matched pattern, which M70l records the middleware never receives, so it is a kernel
+  change.
+- **OpenTelemetry semantic-convention drift** (`http.url` → `url.full`, `http.method` →
+  `http.request.method`). Renaming is a second breaking change that would invalidate existing
+  dashboards, and it is unrelated to the leak.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                |
@@ -10275,3 +10438,4 @@ nothing).
 | 95b       | ⬜     | common + database-plugin + messaging-plugin — reachability that fails open (**High**)                                  |
 | 95c       | ⬜     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
 | 95d       | ⬜     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
+| 96        | ⬜     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
