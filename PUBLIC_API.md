@@ -1207,6 +1207,24 @@ callback that throws, or one whose counters violate the documented shape (a nega
 `idle` exceeding `total`, which counts idle + in use), is dropped the same way: capacity is omitted
 for that poll and the indicator's own lifecycle and reachability answer stands.
 
+**Since M95b** the payload also carries `reachable` whenever the adapter carries a liveness probe
+(the optional `IDatabaseAdapter.isHealthy?()`): `true` — the backend answered; `false` — `down`; a
+probe that exists and did not answer inside the 2-second bound reports `'unknown'` and the status
+`degraded`, **never `up`** — the claim that put a dead-database pod back in rotation (X51-1: the
+indicator used to read the lifecycle `isReady()`, which reports that `connect()` once succeeded and
+says nothing about the backend now). An adapter that ships NO probe reports `up` with `reachable`
+OMITTED and `/ready` answering 200 — the deliberate no-change row: a probe that was never written is
+evidence of nothing, and mapping a missing probe to `degraded` would fail `/ready` for every healthy
+Cosmos, Bigtable and DynamoDB application on upgrade (`degraded` already answers 503). Shipped
+probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe
+for instances without `execute()`), memory (`true` — the process is the backend). Cosmos, Bigtable
+and DynamoDB omit the probe pending one optional member on their own client facades; their payload
+is unchanged. The concrete `DatabaseService` exposes the seam the indicator reads:
+`hasReachabilityProbe` (a synchronous presence read) and `reachability()`
+(`Promise<boolean |
+undefined>` — the bounded probe, `undefined` when no answer was produced), the
+database twin of `IMessageBroker.reachability()`.
+
 ### Database Interface
 
 ```typescript
@@ -1337,6 +1355,7 @@ The port to implement:
 ```typescript
 interface IDatabaseAdapter extends IOrmAdapter {
   transactionIsolationLevels?: readonly TransactionIsolationLevel[];
+  isHealthy?(): Promise<boolean>;
   createDataSource(entity: string): IDataSource;
   beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction>;
   rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]>;
@@ -1369,6 +1388,22 @@ fields must handle both forms.
 `findPage` is **optional**. Every adapter this framework ships implements it; an adapter that cannot
 page by cursor omits it, and the repository refuses by name rather than returning an empty page — so
 absence means "this backend cannot page by cursor", never "there are no more rows".
+
+**`isHealthy?` is optional (M95b).** It answers "is the backend reachable right now" — the liveness
+read the inherited lifecycle member `isReady()` was mistaken for. `true` means the backend answered;
+`false` means it was contacted and refused or failed; an adapter that cannot probe honestly omits
+the member, and the health indicator then reports `up` with `reachable` omitted rather than
+inventing an answer. Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional
+`IMongoDatabase.command?` facade member), Prisma and Drizzle (`rawQuery('SELECT 1')`), memory
+(`true`).
+
+**`isHealthy?` is optional (M95b).** It answers "is the backend reachable right now" — the liveness
+read the inherited lifecycle member `isReady()` was mistaken for. `true` means the backend answered;
+`false` means it was contacted and refused or failed; an adapter that cannot probe honestly omits
+the member, and the health indicator then reports `up` with `reachable` omitted rather than
+inventing an answer. Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional
+`IMongoDatabase.command?` facade member), Prisma and Drizzle (`rawQuery('SELECT 1')`), memory
+(`true`).
 
 ### Composite keys, nested paths and cursor pagination (M79)
 
@@ -4414,7 +4449,15 @@ interface ServiceBusRetryOptions {
   mode?: 'fixed' | 'exponential';
   timeoutInMs?: number;
 }
+```
 
+`ServiceBusOptions` — the exported options type of a directly constructed `ServiceBusBroker` —
+carries one more member (**since M95b**): `dataPlaneEvidenceMs?: number`, how long a recorded
+data-plane outcome stays authoritative. Default `5000`, matching the management probe's TTL so the
+two signals age together. It is a broker option rather than a plugin-wide one because no other
+broker has two planes to choose between; the plugin arm does not forward it.
+
+```typescript
 /** Azure Service Bus options — exclusive union of injected and production arms. */
 type ServiceBusMessagingOptions =
   | ServiceBusMessagingOptionsInjected
@@ -4822,6 +4865,24 @@ at most one round trip per TTL.
 | `down` | The broker is not connected, or is connected but unreachable.                            |
 
 `data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
+
+**Since M95b** reachability reads the plane the application actually uses. The Service Bus broker
+records the outcome of every real publish — the **data plane** — in a small evidence window and
+`reachability()` consults it FIRST: a recent success resolves `true`, a recent network-layer failure
+(a rejection carrying no `statusCode`; a rejected topic or a quota error is an application-level
+fact, never an outage) resolves `false`, and with no recent evidence the management probe answers
+exactly as before. `ServiceBusOptions.dataPlaneEvidenceMs` (default `5000`, matching the probe's
+TTL) bounds how long an outcome stays authoritative. The plane distinction is the substance: the
+management round trip proves the **management** plane is reachable — evidence about the data plane,
+never proof of it — and that gap is what let a stopped namespace report `up` while every publish
+threw. Two further changes: every arm's probe is bounded by the indicator's `createCachedProbe`
+(5-second TTL, 2-second bound), so a probe that cannot answer — a **hung** broker, the condition a
+stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health` open; and
+the RabbitMQ probe is a real round trip (a throwaway channel open/close), replacing the
+connection-fault flag read that a hung broker never trips. Residual exposure, stated rather than
+implied: a deployment whose Service Bus management plane is unreachable and that publishes nothing
+keeps reporting `reachable: 'unknown'` with status `up` until its first publish — an operator who
+needs the signal can publish synthetically.
 
 ### Integration event contracts
 

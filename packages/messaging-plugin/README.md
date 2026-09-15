@@ -605,6 +605,24 @@ broker restarted under us". An unprobeable broker (e.g. the `custom` arm without
 
 `data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
 
+**Since M95b** reachability reads the plane the application actually uses. The Service Bus broker
+records the outcome of every real publish — the **data plane** — in a small evidence window and
+`reachability()` consults it FIRST: a recent success resolves `true`, a recent network-layer failure
+(a rejection carrying no `statusCode`; a rejected topic or a quota error is an application-level
+fact, never an outage) resolves `false`, and with no recent evidence the management probe answers
+exactly as before. `ServiceBusOptions.dataPlaneEvidenceMs` (default `5000`, matching the probe's
+TTL) bounds how long an outcome stays authoritative. The plane distinction is the substance: the
+management round trip proves the **management** plane is reachable — evidence about the data plane,
+never proof of it — and that gap is what let a stopped namespace report `up` while every publish
+threw. Two further changes: every arm's probe is bounded by the indicator's `createCachedProbe`
+(5-second TTL, 2-second bound), so a probe that cannot answer — a **hung** broker, the condition a
+stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health` open; and
+the RabbitMQ probe is a real round trip (a throwaway channel open/close), replacing the
+connection-fault flag read that a hung broker never trips. Residual exposure, stated rather than
+implied: a deployment whose Service Bus management plane is unreachable and that publishes nothing
+keeps reporting `reachable: 'unknown'` with status `up` until its first publish — an operator who
+needs the signal can publish synthetically.
+
 ## Exports
 
 | Export                            | Kind      |

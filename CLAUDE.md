@@ -4861,15 +4861,21 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `deno install --frozen` diagnostic; the ROADMAP's static-graph mechanism paragraph is corrected to
   the measured one) — complete
 
-- **Next milestone** — **M95b** (`packages/common` + `packages/database-plugin` +
-  `packages/messaging-plugin` — reachability that fails open, and now the milestone's **second
-  High**. Three rows, one mechanism: a lifecycle or fault flag reported as liveness. With the
-  Service Bus broker stopped, `/health` says `up` and `/ready` answers `200` while every `publish`
-  throws; `DatabaseService.isHealthy()` returns the lifecycle `adapter.isReady()`, so a stopped
-  database reports `up`, `/ready` stays `200`, and every request that touches data answers `500` —
-  the probe the CLI's own generated k8s manifests point at; and `RabbitMqBroker.isHealthy()` reads a
-  fault flag, so a HUNG broker reports `reachable: true` while a stopped one is reported correctly.
-  Carries a design decision for the maintainer rather than a mechanical fix.)
+- **Milestone 95b** (`packages/common` + `packages/database-plugin` + `packages/messaging-plugin` —
+  reachability that fails open: all three rows closed. The Service Bus release-claim correction
+  (struck from the published `0.6.0` section with an `Unreleased` record), the maintainer-approved
+  data-plane evidence window (§3.2 approval recorded in the ROADMAP M95b section), the
+  bounded-everywhere messaging indicator, the RabbitMQ round-trip probe, and the database adapter
+  probes that stop `/ready` lying — gated by a real Mongo outage suite (`/ready` 200 → 503 → 200
+  through a real `docker stop`/`start`), the real-emulator Service Bus 2×2, and the real RabbitMQ 4
+  hung arm; plan negative controls 1–5 and 4b each observed failing and reverted) — complete (PR
+  pending)
+
+- **Next milestone** — **M95c** (`packages/common` + `packages/database-plugin` +
+  `packages/kernel` + `packages/session-plugin` + `packages/static-plugin` — a contract its own
+  implementation does not honour: five documented contracts the code disagrees with, two of them at
+  the boundary seam. The Mongo facade drift X47-1 edits `mongo-client-types.ts`, which M95b's
+  `command?` addition also touched — M95c must rebase on this branch rather than merge blind.)
 
 - **Then M95c and M95d** — the rest of the `v0.6.0` closeout, which now covers **two** runs against
   that version: the regression run (5 findings) and **Part 11, X46–X51** (8 more), the exercise

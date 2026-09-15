@@ -256,6 +256,23 @@ describe('real-backend CI wiring', () => {
     expect(workflow).toContain('AWS_SECRET_ACCESS_KEY: test');
   });
 
+  it('keeps the M95b Service Bus outage suite deliberately local-only (M95b §3.4)', async () => {
+    // R11: the emulator is not repeatable against a persistent container (a
+    // second consecutive run fails with RequestTimeoutError, so a CI job
+    // would need a restart between runs) and the image is large. The Cosmos
+    // suite (M81) is local-only for the same reason. What keeps a
+    // local-only suite honest is that its absence from CI is ASSERTED here
+    // rather than implicit — a later reader must not mistake it for an
+    // oversight — and that the doc keeps naming the guard variable and the
+    // run command the suite is guarded on.
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    expect(workflow).not.toContain('servicebus-emulator');
+    expect(workflow).not.toContain('SERVICEBUS_CONNECTION_STRING');
+    const doc = await Deno.readTextFile('docs/messaging-emulators.md');
+    expect(doc).toContain('service-bus-outage-real.test.ts');
+    expect(doc).toContain('SERVICEBUS_CONNECTION_STRING');
+  });
+
   it('pins the RabbitMQ service at major version 4 (M70l §3.1)', async () => {
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
     const rabbitLine = workflow

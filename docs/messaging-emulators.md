@@ -75,8 +75,22 @@ until docker logs he-sb 2>&1 | grep -q 'Application started'; do sleep 2; done
 SERVICEBUS_CONNECTION_STRING='Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' \
   deno test --allow-all packages/messaging-plugin/test/e2e/service-bus-emulator.test.ts
 
+SERVICEBUS_CONNECTION_STRING='Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' \
+  deno test --allow-all packages/messaging-plugin/test/integration/service-bus-outage-real.test.ts
+
 docker rm -f he-sb he-sqledge && docker network rm he-sbnet
 ```
+
+The **outage suite** (M95b §3.3) drives the broker through a real `docker
+stop`/`start` and asserts
+the 2×2 the `v0.6.0` health claim turned on: `up` while running, `down` while stopped, `up` again
+after restart — and that the two states get DIFFERENT answers. Its publishes are load-bearing, not
+setup: against this emulator the management probe resolves `unknown` in both states, so the
+data-plane evidence window is the only signal, and each health answer is preceded by the publish
+that populates it. Unlike the e2e suite, this one restarts `he-sb` itself and leaves it running, so
+a second consecutive run works. It is deliberately **local-only** — the emulator is not repeatable
+against a persistent container and the image is large — and `test/apps-gate.test.ts` asserts that
+absence so it reads as a recorded decision rather than a gap.
 
 **What it proves that a fake cannot:** that `createReceiver(topicName, subscriptionName)` with
 `autoCompleteMessages: false` really hands settlement to the receiver, that `completeMessage` and

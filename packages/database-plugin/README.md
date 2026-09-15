@@ -761,6 +761,34 @@ The transaction and concurrency errors (`MongoTransactionUnavailableError`,
 deliberately keep the masked `500`: they may quote backend state, and a concurrency conflict is
 transient rather than permanent. Branch on them with `instanceof` — every one is exported.
 
+## Health reporting
+
+The `database` indicator gates on the service's lifecycle first (a closed database reads `down`
+immediately), then reports reachability from the adapter's own probe. **Since M95b** the payload
+carries `reachable` whenever the adapter can probe:
+
+| `reachable` | Status     | `/ready` |
+| ----------- | ---------- | -------- |
+| `true`      | `up`       | 200      |
+| `false`     | `down`     | 503      |
+| `'unknown'` | `degraded` | 503      |
+| omitted     | `up`       | 200      |
+
+The rows are the whole decision. A probe that **exists and did not answer** inside the 2-second
+bound is evidence of trouble and reports `degraded` — never `up`, which is the claim that let a
+stopped database keep taking traffic (X51-1: the indicator used to read the lifecycle `isReady()`,
+which only says `connect()` once succeeded). An adapter that ships **no probe** is the opposite
+case: a probe that was never written is evidence of nothing, so the payload omits `reachable` and
+the status is today's — mapping a missing probe to `degraded` would fail `/ready` for every healthy
+Cosmos, Bigtable and DynamoDB application on upgrade.
+
+Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
+facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without
+`execute()`), memory (`true` — the process is the backend). Cosmos, Bigtable and DynamoDB omit the
+probe until each gains one optional member on its own client facade; their payloads are unchanged. A
+custom adapter opts in by declaring `isHealthy?(): Promise<boolean>` on the adapter — `true` when
+the backend answered, `false` when it refused, or omit the member rather than inventing an answer.
+
 ## Transactions
 
 `IUnitOfWork` groups repository work into one transaction. Prisma exposes only callback-style

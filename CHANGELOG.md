@@ -26,6 +26,37 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING (for out-of-repo adapter implementors) — `@setu-ts/common` +
+  `@setu-ts/database-plugin`: `IDatabaseAdapter` gains the optional `isHealthy?(): Promise<boolean>`
+  liveness member, and the `database` indicator stops reporting `up` for a backend it cannot vouch
+  for.** X51-1 (High): the indicator read the lifecycle `adapter.isReady()`, so a stopped MongoDB
+  reported `up`, `/ready` answered `200`, and a rolling deploy rolled forward over a pod answering
+  `500` to every request that touches data. The payload now carries `reachable` when the adapter
+  probes: `true`/`up`, `false`/`down`, and a probe that exists but does not answer inside the
+  2-second bound reports `'unknown'`/`degraded` — never `up`. An adapter with NO probe is the
+  deliberate no-change row: `reachable` omitted, `up`, `/ready` 200 — mapping a missing probe to
+  `degraded` would fail `/ready` for every healthy Cosmos/Bigtable/DynamoDB application on upgrade.
+  Shipped probes: MongoDB (`db.command({ ping: 1 })` via the new optional `IMongoDatabase.command?`
+  facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits it for instances without
+  `execute()`), memory (`true`). `DatabaseService` exposes `hasReachabilityProbe` and a bounded
+  `reachability()` (the `IMessageBroker.reachability()` twin); `isHealthy()` keeps its published
+  lifecycle signature. **Migration:** none for callers; a hand-written adapter that can probe should
+  declare `isHealthy?()`, one that cannot should omit it. Verified against a real MongoDB container
+  through a `docker stop`/`start` outage gate.
+- **`@setu-ts/messaging-plugin`: broker reachability reads the plane the application uses, and every
+  arm's probe is bounded.** The Service Bus indicator said `up` while every publish threw: the
+  management probe resolves `unknown` against an unreachable management plane in both states, and
+  `unknown` maps to `up`. The broker now records the outcome of real publishes — the DATA plane — in
+  an evidence window that `reachability()` consults first, narrowed twice (only `transport.send`
+  rejections count, and only status-less ones: a deleted topic or quota error is an application
+  fact, never an outage); `ServiceBusOptions.dataPlaneEvidenceMs` (default `5000`) bounds the
+  window. The RabbitMQ probe is a real round trip (a throwaway channel open/close) replacing the
+  fault-flag read a HUNG broker never trips, and the indicator bounds ALL seven arms' probes
+  (5-second TTL, 2-second bound): a probe that cannot answer now settles `reachable: 'unknown'`
+  instead of holding `/health` open forever. Residual posture, documented rather than implied: an
+  idle Service Bus deployment with an unreachable management plane stays `reachable: 'unknown'`
+  until its first publish. Verified against the real Service Bus emulator (`docker stop`/`start` 2×2
+  gate) and real RabbitMQ 4 (`docker pause` hung arm).
 - **The Setu-TS website now identifies each page to social and search crawlers.** The shared layout
   publishes the page's canonical URL as `og:url` and SoftwareApplication JSON-LD describing the
   framework, its supported runtimes, and its free offering.
