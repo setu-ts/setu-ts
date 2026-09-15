@@ -255,6 +255,17 @@ export class MemoryAdapter implements IDatabaseAdapter {
     return this._connected && !this._closed;
   }
 
+  /**
+   * Liveness probe (M95b §3.5): the process IS the backend, so an
+   * in-process adapter always answers. Honest, not a special case —
+   * without it the indicator would omit `reachable` for the one backend it
+   * can actually vouch for.
+   */
+  // deno-lint-ignore require-await -- the answer is unconditional
+  async isHealthy(): Promise<boolean> {
+    return true;
+  }
+
   /** @inheritdoc */
   beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     if (!this.isReady()) {

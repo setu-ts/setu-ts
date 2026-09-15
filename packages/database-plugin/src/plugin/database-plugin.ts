@@ -158,6 +158,21 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         clearTimer: (handle) => ctx.runtime.clearTimeout(handle),
       });
 
+      // M95b §3.5: the adapter's OWN liveness probe, cached and bounded like
+      // the lifecycle probe above. Consulted only when the adapter carries
+      // `isHealthy?()`; the mapping gives "an answerable probe that did not
+      // answer" `degraded` — never `up`, which is the claim that put a
+      // dead-database pod back in rotation.
+      const reachabilityProbe = createCachedProbe<boolean | undefined>({
+        probe: () => service.reachability(),
+        fallback: undefined,
+        ttlMs: PROBE_TTL_MS,
+        timeoutMs: PROBE_TIMEOUT_MS,
+        hrtime: () => ctx.runtime.hrtime(),
+        setTimer: (fn, ms) => ctx.runtime.setTimeout(fn, ms),
+        clearTimer: (handle) => ctx.runtime.clearTimeout(handle),
+      });
+
       ctx.health.register(`${token}`, async () => {
         const capacity = readPoolCapacity(adapter);
         const data = {
@@ -168,19 +183,40 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         if (service.isClosed) {
           return { status: 'down', data };
         }
-        const healthy = await probe();
-        // Read the gate AGAIN. `close()` sets its flag synchronously and only
-        // then awaits `disconnect()`, so a poll that passed the gate and then
-        // awaited can be holding an answer the probe computed — or cached —
-        // BEFORE the close, and would publish `up` for a database that has
-        // begun closing. That is precisely what the uncached gate exists to
-        // prevent, so it has to hold for a concurrent poll too, not only for
-        // one that starts after the close. The re-read costs one field and
-        // reaches no adapter.
+        // M95b §3.5 row (d) — the deliberate no-change row: an adapter with
+        // no probe is evidence of nothing. Byte-identical to 0.6.0 — status
+        // from the lifecycle read alone and `reachable` OMITTED — so a
+        // healthy probe-less application (Cosmos, Bigtable, DynamoDB, a
+        // minimal injected client) never leaves rotation on upgrade.
+        // Mapping a MISSING probe to `degraded` would fail `/ready` for
+        // every one of them: a guaranteed outage, strictly worse than the
+        // finding.
+        if (!service.hasReachabilityProbe) {
+          const healthy = await probe();
+          // Read the gate AGAIN. `close()` sets its flag synchronously and
+          // only then awaits `disconnect()`, so a poll that passed the gate
+          // and then awaited can be holding an answer the probe computed —
+          // or cached — BEFORE the close, and would publish `up` for a
+          // database that has begun closing. The re-read costs one field
+          // and reaches no adapter.
+          if (service.isClosed) {
+            return { status: 'down', data };
+          }
+          return { status: healthy ? 'up' : 'down', data };
+        }
+        const reachable = await reachabilityProbe();
         if (service.isClosed) {
           return { status: 'down', data };
         }
-        return { status: healthy ? 'up' : 'down', data };
+        if (reachable === false) {
+          return { status: 'down', data: { ...data, reachable: false } };
+        }
+        if (reachable === undefined) {
+          // A probe that EXISTS and did not answer is evidence of trouble:
+          // `degraded`, and `/ready` fails with it (`degraded` is not 'up').
+          return { status: 'degraded', data: { ...data, reachable: 'unknown' } };
+        }
+        return { status: 'up', data: { ...data, reachable: true } };
       });
 
       // Register shutdown hook.

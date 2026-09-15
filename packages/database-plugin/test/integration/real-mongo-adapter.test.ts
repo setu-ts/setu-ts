@@ -15,7 +15,9 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { MongoClient } from 'mongodb';
 import { MongoAdapter } from '../../src/adapters/mongo/mongo-adapter.ts';
+import type { IMongoDatabase } from '../../src/adapters/mongo/mongo-client-types.ts';
 import { DatabaseService } from '../../src/index.ts';
 import { classifyDriverError } from '../../src/errors/classify.ts';
 import { SerializationConflictError } from '../../src/errors.ts';
@@ -49,6 +51,24 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
 
 /** A per-run discriminator keeping this run's documents from any other's. */
 const suffix = crypto.randomUUID().replaceAll('-', '');
+
+describe('IMongoDatabase facade static type fixture (M95b §3.5)', () => {
+  it('the real driver satisfies command() — the member the probe reads', () => {
+    // The plan's compile-time assertion, scoped to the member THIS letter
+    // adds: the real `Db.command(command: Document, options?):
+    // Promise<Document>` must stay assignable to the optional
+    // `IMongoDatabase.command?` the reachability probe sends `{ ping: 1 }`
+    // through. A driver-side signature change fails `deno check` HERE
+    // rather than silently leaving every Mongo application probe-less.
+    // (Whole-object assignability of `Db` to `IMongoDatabase` is the X47-1
+    // facade-drift row M95c owns — `collection()`'s shape is its letter,
+    // not this one.) Constructing a client performs no I/O, so this runs
+    // unguarded.
+    const driverDb = new MongoClient('mongodb://127.0.0.1:27017').db('setu_m95b');
+    const command: IMongoDatabase['command'] = driverDb.command.bind(driverDb);
+    expect(typeof command).toBe('function');
+  });
+});
 
 describe('MongoAdapter against a real MongoDB server (guarded)', () => {
   it('lazily imports the driver and reads CRUD operations back through IDataSource', {

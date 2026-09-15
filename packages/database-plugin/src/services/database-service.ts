@@ -41,6 +41,27 @@ import {
 import { classifyDriverError } from '../errors/classify.ts';
 
 /**
+ * Reachability-probe bound (M95b §3.5), in ms. A probe that has not
+ * answered within it is reported `undefined` — could not determine —
+ * never `true`.
+ */
+const REACHABILITY_TIMEOUT_MS = 2000;
+
+/**
+ * Timer fallbacks for a DIRECTLY constructed service (tests, hand-wired
+ * applications). The plugin always injects `ctx.runtime`'s arms, so
+ * production never reads a global timer here — the `_now` fallback carries
+ * the same precedent.
+ */
+function defaultSetTimer(fn: () => void, ms: number): unknown {
+  return setTimeout(fn, ms);
+}
+
+function defaultClearTimer(handle: unknown): void {
+  clearTimeout(handle as number);
+}
+
+/**
  * Reads DynamoDB's optional access-path diagnostic without widening the
  * portable data-source contract all adapters implement.
  */
@@ -121,6 +142,10 @@ export class DatabaseService implements IDatabaseService {
       // Fallback for tests that do not inject; uses the global monotonic clock.
       return typeof performance !== 'undefined' ? performance.now() : 0;
     },
+    /** Timer arm for the bounded reachability probe — injected from `ctx.runtime`. */
+    private readonly _setTimer: (fn: () => void, ms: number) => unknown = defaultSetTimer,
+    /** Timer clearance arm — injected from `ctx.runtime`. */
+    private readonly _clearTimer: (handle: unknown) => void = defaultClearTimer,
   ) {}
 
   /** Returns a repository bound to the named entity on the outer database scope. */
@@ -254,6 +279,55 @@ export class DatabaseService implements IDatabaseService {
   isHealthy(): Promise<boolean> {
     if (this._closed) return Promise.resolve(false);
     return Promise.resolve(this._adapter.isReady());
+  }
+
+  /**
+   * Whether the adapter carries a reachability probe at all (M95b §3.5) —
+   * a synchronous read, because once the call is wrapped in the bound this
+   * is the only way absence is observable. The indicator maps absence to
+   * today's behaviour (`up`, `reachable` OMITTED, `/ready` 200): a probe
+   * that was never written is evidence of nothing.
+   */
+  get hasReachabilityProbe(): boolean {
+    return typeof this._adapter.isHealthy === 'function';
+  }
+
+  /**
+   * Bounded backend liveness (M95b §3.5) — the database twin of
+   * `IMessageBroker.reachability()` (M70c's tri-state), so the two
+   * capabilities report through one shape.
+   *
+   * `undefined` when the adapter carries no probe at all, when the probe
+   * has not answered within the 2 s bound, or when it rejects: "could not
+   * determine" is a different fact from "contacted and refused", and the
+   * indicator maps the two differently (`degraded` vs `down`).
+   * {@linkcode DatabaseService.isHealthy} keeps its lifecycle gate and its
+   * published signature; this is the member the indicator reads.
+   *
+   * @returns `true`/`false` from the adapter's probe, `undefined` when no
+   *   answer was produced inside the bound
+   */
+  async reachability(): Promise<boolean | undefined> {
+    const isHealthy = this._adapter.isHealthy;
+    if (typeof isHealthy !== 'function') {
+      return undefined;
+    }
+    return await new Promise<boolean | undefined>((resolve) => {
+      let settled = false;
+      const settle = (value: boolean | undefined): void => {
+        if (settled) return;
+        settled = true;
+        this._clearTimer(timer);
+        resolve(value);
+      };
+      const timer = this._setTimer(() => settle(undefined), REACHABILITY_TIMEOUT_MS);
+      isHealthy
+        .call(this._adapter)
+        .then(
+          (value) => settle(value === true),
+          () => settle(undefined),
+        );
+    });
   }
 
   /** @inheritdoc */

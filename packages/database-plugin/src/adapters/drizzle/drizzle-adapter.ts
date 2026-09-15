@@ -223,6 +223,14 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   private _connected = false;
   private readonly _options: DatabaseAdapterOptions | undefined;
   private _operators: DrizzleOperators | null = null;
+  /**
+   * The reachability probe (M95b §3.5), assigned at `connect()` ONLY when
+   * the configured instance can execute raw SQL. A SQLite-Proxy/libsql
+   * instance — which the adapter already refuses `rawQuery` for — leaves
+   * the member absent, and the service reports `hasReachabilityProbe:
+   * false` instead of shipping a probe that can only fail.
+   */
+  isHealthy?: () => Promise<boolean>;
 
   constructor(options?: DatabaseAdapterOptions) {
     this._options = options ?? undefined;
@@ -325,6 +333,14 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       }
     }
 
+    // M95b §3.5: the probe exists only when the instance can execute raw
+    // SQL. A SQLite-Proxy/libsql instance has no execute() and the adapter
+    // already refuses `rawQuery` for that shape — the member is OMITTED
+    // for it rather than shipping a probe that can only fail.
+    if (typeof (this._db as { execute?: unknown } | null)?.execute === 'function') {
+      this.isHealthy = () => this.#probeWithRawQuery();
+    }
+
     this._connected = true;
   }
 
@@ -340,6 +356,21 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   /** @inheritdoc */
   isReady(): boolean {
     return this._connected && this._db !== null;
+  }
+
+  /**
+   * Liveness probe (M95b §3.5): one `SELECT 1` through the adapter's own
+   * `rawQuery`, so the probe cannot diverge from the query path. `false`
+   * for an adapter that lost its connection or was refused, so an outage
+   * reads as a fact.
+   */
+  async #probeWithRawQuery(): Promise<boolean> {
+    try {
+      await this.rawQuery('SELECT 1');
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /** Provide the exact configured instance to the package's typed Drizzle accessor. */

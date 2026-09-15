@@ -250,4 +250,20 @@ export interface IMongoDatabase {
    * @param name - The collection name
    */
   collection(name: string): IMongoCollection;
+
+  /**
+   * Runs a database command against this database (optional, M95b).
+   *
+   * The reachability probe sends `{ ping: 1 }` through it — the one cheap
+   * liveness round trip the driver exposes. The real driver's
+   * `Db.command(command: Document, options?): Promise<Document>` is
+   * assignable to this shape, pinned by the committed static type fixture;
+   * an injected facade that omits the member simply has no probe, and the
+   * adapter reports its absence rather than failing readiness for a
+   * backend it never asked.
+   *
+   * @param command - The command document (for example `{ ping: 1 }`)
+   * @returns The driver's reply, unread by the probe
+   */
+  command?(command: Record<string, unknown>): Promise<unknown>;
 }
