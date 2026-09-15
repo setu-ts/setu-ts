@@ -9,8 +9,26 @@ permissions:
   contents: read
 
 jobs:
-  # Fork PRs remain visible for maintainer triage but consume no runner or service resources. Once a
-  # contribution is accepted, a maintainer can validate it from a trusted repository branch.
+  # This is deliberately the only job a fork PR can run. It does not check out contributor code,
+  # start a service, or receive secrets. A failure prevents GitHub from treating the skipped,
+  # resource-intensive jobs below as successful required checks.
+  fork-contribution-policy:
+    name: Fork contribution policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require validation from a repository branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        env:
+          BASE_REPOSITORY: ${{ github.repository }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "$HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]; then
+            echo "Fork pull requests are proposals only. After accepting a contribution, a maintainer must reproduce it in a repository branch, where the full validation suite runs."
+            exit 1
+          fi
+
+  # Fork PRs remain visible for maintainer triage but do not start repository validation jobs or
+  # service containers. An accepted contribution is validated from a trusted repository branch.
   deno:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Format / Lint / Check / Test (Deno)

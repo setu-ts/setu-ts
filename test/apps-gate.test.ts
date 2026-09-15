@@ -50,6 +50,41 @@ describe('application gate configuration', () => {
     expect(allowSkip).not.toContain('realtime-clients');
   });
 
+  it('keeps fork pull requests as no-checkout proposals', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const policyStart = workflow.indexOf('\n  fork-contribution-policy:');
+    const denoStart = workflow.indexOf('\n  deno:');
+    const policyJob = workflow.slice(policyStart, denoStart);
+
+    expect(policyStart).not.toBe(-1);
+    expect(denoStart).toBeGreaterThan(policyStart);
+    expect(policyJob).toContain('name: Fork contribution policy');
+    expect(policyJob).toContain('runs-on: ubuntu-latest');
+    expect(policyJob).toContain("github.event_name == 'pull_request'");
+    expect(policyJob).toContain(
+      'github.event.pull_request.head.repo.full_name != github.repository',
+    );
+    expect(policyJob).not.toContain('actions/checkout');
+    expect(policyJob).not.toContain('services:');
+
+    const repositoryBranchOnly =
+      "if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository";
+    for (
+      const job of [
+        'deno',
+        'boundary-compatibility',
+        'deploy',
+        'publish-dry-run',
+        'node-compat',
+        'bun-compat',
+        'deno-view-plugin-resolution',
+        'audit',
+      ]
+    ) {
+      expect(workflow).toContain(`  ${job}:\n    ${repositoryBranchOnly}`);
+    }
+  });
+
   it('keeps a documented smoke skip distinct from a passing smoke check', () => {
     expect(classifySmokeExitCode({ code: 77, success: false, signal: null }))
       .toBe('skipped');

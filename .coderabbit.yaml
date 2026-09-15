@@ -1,6 +1,8 @@
 # External pull requests must not consume automatic CodeRabbit reviews. A maintainer adds the
 # `maintainer-review` label only after accepting a contribution for review.
 reviews:
+  # Suppress the bot's "review skipped" status comment when this PR has not yet been approved.
+  review_status: false
   auto_review:
     enabled: false
     auto_incremental_review: false

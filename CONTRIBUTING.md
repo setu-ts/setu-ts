@@ -37,12 +37,15 @@ Maintainers decide the public API, architecture, and release scope.
 ## Pull-request validation
 
 Setu-TS runs a substantial validation suite. Pull requests from forks deliberately do **not** start
-the repository's GitHub Actions jobs or automatic CodeRabbit review. This prevents untriaged,
-untrusted changes from consuming project resources.
+the repository's validation jobs, service containers, website build, or automatic CodeRabbit review.
+They receive only a small policy check that does not check out contributor code and prevents skipped
+checks from satisfying merge protection. This prevents untriaged, untrusted changes from consuming
+project resources or being merged as if they had been validated.
 
-After accepting a contribution, a maintainer may validate the change in a trusted repository branch
-and request CodeRabbit review. Please do not ask maintainers to run those services before the change
-has been accepted for review.
+After accepting a contribution, a maintainer reproduces the change in a trusted repository branch,
+where the full validation suite and an optional CodeRabbit review can run. Fork PRs are proposals;
+the validated repository-branch PR is the one that can merge. Please do not ask maintainers to run
+those services before the change has been accepted for review.
 
 For work performed in a repository branch, the relevant checks are:
 

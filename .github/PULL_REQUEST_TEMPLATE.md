@@ -11,9 +11,11 @@ Closes #
 - [ ] I added or updated tests when behaviour changed.
 - [ ] I updated documentation and public-contract material when needed.
 - [ ] I removed credentials, private data, and security-sensitive details.
-- [ ] I did not invoke GitHub Actions or CodeRabbit; maintainers request validation after triage.
+- [ ] I understand that a fork PR is a proposal only; an accepted change is reproduced and validated
+      by a maintainer in a repository branch.
 
 ## Notes for maintainers
 
-State any API, runtime, dependency, migration, or release impact. A maintainer may reproduce this
-change on a trusted branch before requesting the project's full CI or CodeRabbit review.
+State any API, runtime, dependency, migration, or release impact. A maintainer reproduces an
+accepted fork contribution on a trusted branch before requesting the project's full CI or CodeRabbit
+review.
