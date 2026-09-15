@@ -4885,6 +4885,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the
   Deno/Node/Bun/Workers portability matrix validated end to end).
 
+- **Also open** — **M96** (`common` + `redaction-plugin` (new) + `logger-plugin` +
+  `telemetry-plugin` + `audit-plugin` — one redaction seam for every egress path. Three components
+  export application data somewhere an operator did not write, and each answers differently: the
+  logger has an opt-in dot-path list whose two implementations disagree and whose nested walk
+  mutates the caller's object, telemetry ships the full request URL — query string included — to
+  Datadog, New Relic and Azure Monitor, and the audit trail has no filter at all. Adds
+  `CAPABILITIES.REDACTION`, an `IRedactionService` port, one pure implementation in `common`, and
+  wires all three exporters to it. A mechanism, not a compliance feature: no regulation is named in
+  any shipped identifier, and a gate keeps it that way. Plan:
+  `plans/milestone-96-redaction-seam.md`).
+
 - **Milestone 95** (`packages/cli` + `packages/messaging-plugin` + `packages/common` +
   `packages/session-plugin` + `packages/static-plugin` + `docs/` — the `v0.6.0` smoke defect
   closeout) — **open**. The `v0.6.0` regression run re-executed all 15 rows the release claims to
