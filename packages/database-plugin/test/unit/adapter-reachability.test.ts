@@ -304,4 +304,46 @@ describe('DatabaseService reachability seam (M95b §3.5)', () => {
     );
     expect(await service.reachability()).toBeUndefined();
   });
+
+  it('the PLUGIN arms the bound on the INJECTED runtime timers (code-review fix)', async () => {
+    // The M51b defect class, caught in review: the plugin constructed the
+    // service WITHOUT the timer arms, so the production bound armed on
+    // wall-clock globals while the same indicator's two cached probes ran
+    // on ctx.runtime — a two-clock mix, and a runtime whose timers are
+    // manually advanced (this fake) could not bound the plugin path at
+    // all. Discriminator: against a never-settling probe, the bound may
+    // only fire from the INJECTED fake's timers — if the bound is on
+    // globals, fireTimers() is a no-op and the pending promise never
+    // settles, which fails the race below instead of hanging the suite.
+    const manual = makeManualRuntime();
+    const { ctx, services } = makeContext(manual.runtime);
+    await DatabasePlugin({
+      type: 'custom',
+      adapter: makeAdapter(() => new Promise<boolean>(() => {})),
+    }).register(ctx);
+
+    const service = services.get(CAPABILITIES.DATABASE) as {
+      reachability(): Promise<boolean | undefined>;
+    };
+    const pending = service.reachability();
+
+    // Drain microtasks: the probe has been called and the bound armed, so
+    // nothing may have settled yet.
+    let settled: string | undefined;
+    void pending.then(() => {
+      settled = 'settled';
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).toBeUndefined();
+
+    // Fire the INJECTED timer: the bound answers through it.
+    manual.advance(2_000);
+    manual.fireTimers();
+    const result = await Promise.race([
+      pending.then(() => 'settled' as const),
+      new Promise<'never-fired'>((resolve) => setTimeout(() => resolve('never-fired'), 250)),
+    ]);
+    expect(result).toBe('settled');
+    expect(await pending).toBeUndefined();
+  });
 });

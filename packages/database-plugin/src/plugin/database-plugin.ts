@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { ILogger, IPlugin, IPluginContext } from '@setu-ts/common';
+import type { ILogger, IPlugin, IPluginContext, TimerHandle } from '@setu-ts/common';
 import {
   CAPABILITIES,
   createCachedProbe,
@@ -132,6 +132,13 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
         adapterOptions,
         logger,
         now,
+        // M95b (code review): the reachability bound's timer arms ride
+        // `ctx.runtime` like the two cached probes below — the module
+        // defaults are for a DIRECTLY constructed service, and a plugin
+        // path that armed the bound on wall-clock globals would mix two
+        // clocks inside one indicator (the M51b defect class).
+        (fn, ms) => ctx.runtime.setTimeout(fn, ms),
+        (handle) => ctx.runtime.clearTimeout(handle as TimerHandle),
       );
 
       // Register the database service.
