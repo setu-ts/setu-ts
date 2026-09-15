@@ -10156,7 +10156,7 @@ is correct and stays that way. The gap is not vocabulary; it is that the three e
    beside the unsafe one. The span **name** (`telemetry-middleware.ts:42`) is `${method} ${path}`,
    so a concrete identifier in a path is exported twice over.
 2. **The console logger's nested redaction mutates the caller's object. — FIXED ahead of this
-   milestone (PR pending).** `#redactFields` shallow-cloned with `{ ...data }`, then `#redactPath`
+   milestone (PR #312).** `#redactFields` shallow-cloned with `{ ...data }`, then `#redactPath`
    walked into `clone[segment]` — the _same reference_ the caller passed — and assigned
    `'[Redacted]'` to the leaf, so `logger.info('x', { auth: user })` under `redact: ['auth.token']`
    wrote `'[Redacted]'` into the application's own `user` object. The damage outlived the log call:
