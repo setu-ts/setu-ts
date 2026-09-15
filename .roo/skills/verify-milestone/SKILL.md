@@ -33,11 +33,10 @@ every probe, then ships broken because the patch was never committed. Before run
 clean commit, then `git stash pop`. State in the report which commit hash you verified
 (`git rev-parse HEAD`). A verification run against a dirty tree is void.
 
-**In Roo's Verify Milestone mode, do NOT stash — stop and return blocked instead**, naming the dirty
-paths, and let the orchestrator spawn a Code-mode subtask to commit (see
+**In Roo's Verify Milestone mode, do NOT stash — stop and report blocked instead**, naming the dirty
+paths, so the pipeline can switch to Code mode and commit (see
 `.roo/rules-verify-milestone/01-verify-only.md`). That mode cannot commit, so a stash it takes is a
-stash nobody pops if the subtask ends early. The stash route above is for an agent that owns the
-tree.
+stash nobody pops if the run ends early. The stash route above is for an agent that owns the tree.
 
 Then read, in order:
 

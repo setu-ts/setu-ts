@@ -25,10 +25,9 @@ is nothing else to update here.
 
 ## Paths are workspace-relative — never absolute
 
-Every path in these rules, in `CLAUDE.md`, and in any subtask instruction is relative to the
-workspace root: `CLAUDE.md`, `AI_GUIDELINES.md`, `ROADMAP.md`, `ARCHITECTURE.md`, `PUBLIC_API.md`,
-`plans/…`, `packages/…`, `.roo/…`. Write and read them with **no leading slash**, and cite them the
-same way in every subtask you spawn.
+Every path in these rules and in `CLAUDE.md` is relative to the workspace root: `CLAUDE.md`,
+`AI_GUIDELINES.md`, `ROADMAP.md`, `ARCHITECTURE.md`, `PUBLIC_API.md`, `plans/…`, `packages/…`,
+`.roo/…`. Write and read them with **no leading slash**, and cite them the same way in every mode.
 
 A leading slash resolves to the root of the machine's filesystem, not the repo root, so a read of an
 absolute project-doc path fails. If a doc read comes back "not found", that is almost always the
