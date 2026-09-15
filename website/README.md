@@ -10,7 +10,9 @@ on the `chore/website` branch.
   root `deno.json`, and no JSR-published package depends on anything here. All
   site dependencies live in `package.json` and are installed through Deno's npm
   support (`nodeModulesDir: auto`) — the same precedent as `apps/full-stack`,
-  and the reason this works on machines without a global npm binary.
+  and the reason this works on machines without a global npm binary. The Deno
+  tasks run Astro and Pagefind with Node after installation so their transitive
+  npm dependencies use Node's package resolver rather than Deno's import map.
 - The root `deno.json` excludes `website/` from `deno fmt` and `deno lint`; the
   site is governed by its own gates (build-time dead-link check, Lighthouse
   assertions).

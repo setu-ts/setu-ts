@@ -37,9 +37,10 @@ jobs:
 
       # Two toolchains, each load-bearing:
       # - Deno regenerates the API reference (deno task docs:api) and runs the site's
-      #   package manager + build (the apps/full-stack precedent: the frontend build
-      #   runs under Deno's npm support, so no npm binary is required).
-      # - Node exists only for Lighthouse CI (npx), which drives a real Chrome.
+      #   package manager (the apps/full-stack precedent: no npm binary is required).
+      # - Node runs the installed Astro and Pagefind CLIs so their transitive npm
+      #   dependencies use Node's resolver; it also runs Lighthouse CI. Node 24 meets
+      #   the website package's Node >=22 requirement.
       - uses: denoland/setup-deno@v2
         with:
           # Keep in step with ci.yml's pin and DOC_LINT_BASELINE_DENO: the generated
@@ -50,6 +51,8 @@ jobs:
         with:
           node-version: 24
 
+      # A fresh GitHub checkout has no node_modules, so this and the following build
+      # validate the same clean dependency-install and resolver path Cloudflare uses.
       - name: Install site dependencies
         run: deno task install
 
