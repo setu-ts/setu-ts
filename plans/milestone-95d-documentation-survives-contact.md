@@ -96,18 +96,37 @@ prop, and assert on the OUTPUT — a rendered `href="javascript:…"` fails rega
 it. That needs no per-component knowledge, cannot drift as components change, and catches a
 component that routes a differently-named prop into an attribute.
 
-**Two blind spots are inherited from the existing props model and must be stated, not discovered**
-(corrected after review, PR #309 finding 9). The probe builds props as a `Proxy` over `[HOSTILE]`
-whose `get` returns the proxy for any key (`check-example-behaviour.ts:395-406`), and it stubs
-`raw()` to a benign `'<!--raw-->'` marker (`:412`) so the documented opt-out does not report itself
-as a defect. Consequently: a component that routes a URL through **`raw()`** renders the marker, not
-the payload; and **`{...props}`** spreads the proxy's array-backed own keys rather than named props,
-so `<a {...props} />` produces no `href`. Both limits apply to the existing `HOSTILE` check exactly
-as they do to the new URL payload — this row inherits them rather than introducing them — and the
-gate's claim is scoped accordingly: it proves a component that interpolates a prop into a URL
-attribute directly, and proves nothing about one that launders it through `raw()` or a spread.
-Widening the props model is a change to the existing gate's core and is named here rather than
-smuggled in.
+**Two blind spots are inherited from the existing props model, and the gate is made to REPORT them
+rather than pass over them** (corrected after review, PR #309 finding 9, then strengthened when the
+first correction only documented them). The probe builds props as a `Proxy` over `[HOSTILE]` whose
+`get` returns the proxy for any key (`check-example-behaviour.ts:395-406`), and it stubs `raw()` to
+a benign `'<!--raw-->'` marker (`:412`) so the documented opt-out does not report itself as a
+defect. Consequently: a component that routes a URL through **`raw()`** renders the marker, not the
+payload; and **`{...props}`** spreads the proxy's array-backed own keys rather than named props, so
+`<a {...props} />` produces no `href`. Both limits apply to the existing `HOSTILE` check exactly as
+they do to the new URL payload — this row inherits them rather than introducing them.
+
+**A documented limit that nothing detects is a limit that grows**, and for a security gate the
+failure mode is the worst available: the check reports a clean render for a component it could not
+have rendered the payload into. So the gate gains a third outcome beside pass and fail —
+**`unchecked`** — raised when a component's own source routes a value through `raw(` or spreads an
+identifier into an element (`{...`). An `unchecked` component FAILS the gate unless it carries an
+explicit exemption naming the reason, reusing the `COUNTER_EXAMPLE_MARKERS` machinery below rather
+than adding a second convention. Measured against the tree as it stands: `{...` appears in **no**
+documented component, and `raw(` in **three** — `docs/mvc.md:315`, which raws a module-level
+constant rather than a prop; `packages/view-plugin/README.md:161`, the opt-out's own worked example;
+and `packages/session-plugin/README.md:201`, whose `LoginForm` raws `csrfTokenField(ctx)`, markup
+the helper itself escapes. All three are exempted by name with that reason recorded, so the
+exemption list is three entries long and a fourth arrival is a failing gate rather than a silent
+gap. (The first draft of this paragraph said two — it had been grepped over `docs/` and one README
+rather than over `SCAN_ROOTS`, which is `['docs', 'packages', '.']`.)
+
+This is deliberately a **detector, not a widened props model**. Making the proxy enumerable enough
+for a spread, or making `raw()` carry a distinguishable URL payload, changes what every existing
+`HOSTILE` assertion renders — a change to the gate's core, and one whose blast radius is every
+documented component rather than this row. The detector costs one source scan and converts the blind
+spot from invisible to loud, which is what the finding asks for; widening the model is named as its
+own follow-on with that reasoning attached.
 
 A documented example that deliberately demonstrates the hazard is handled the way the existing gate
 already handles one: `COUNTER_EXAMPLE_MARKERS` (`check-example-behaviour.ts:48`) is
@@ -207,21 +226,27 @@ No `packages/*/src` logic changes, so the per-file bar applies to the two script
 package. `scripts/script-coverage.ts` enforces ≥90% branch/function/line on both, which is the M38
 arrangement for documentation tooling.
 
-| Test file                                              | Covered                              | Key assertions                                                                                                                                                                                                               |
-| ------------------------------------------------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/unit/check-since-tags.test.ts` (new)             | `scripts/check-since-tags.ts`        | A tag naming a version whose tarball lacks the file FAILS; a tag naming one that has it passes; a version ahead of the registry is SKIPPED, not failed; a network error SKIPS with a reason and a non-zero-is-not-pass exit. |
-| `test/unit/check-example-behaviour.test.ts` (extended) | `scripts/check-example-behaviour.ts` | A component rendering a prop into `href` FAILS under the URL payload; one rendering the same prop as a text child passes; an `UNSAFE`-labelled component is still checked in the other direction (§3.2).                     |
-| `test/docs-gate.test.ts` (extended)                    | CI wiring                            | Pins that `check:docs` composes both scripts, so dropping one is a failing test rather than a silent loss of coverage.                                                                                                       |
-| The doc fences themselves                              | `docs/mvc.md`, both READMEs          | The new error-page example and the corrected escaping examples are fence-compiled by the existing guide and package-README gates, so they type-check as committed evidence.                                                  |
+| Test file                                              | Covered                              | Key assertions                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/unit/check-since-tags.test.ts` (new)             | `scripts/check-since-tags.ts`        | A tag naming a version whose tarball lacks the file FAILS (exit non-zero); a tag naming one that has it passes; a version ahead of the registry is SKIPPED, not failed; **an injected network failure exits `0`** with the reason on stderr and `verified: 0` on stdout — asserted as the literal exit code, since exit 77 inside `check:docs`' `&&` chain is what finding 5 reports.                                                                               |
+| `test/unit/check-example-behaviour.test.ts` (extended) | `scripts/check-example-behaviour.ts` | A component rendering a prop into `href` FAILS under the URL payload; one rendering the same prop as a text child passes; an `UNSAFE`-labelled component is still checked in the other direction; **a component laundering a value through `raw(` or spreading `{...` into an element is reported `unchecked` and FAILS**, and the same component with an exemption passes — so the blind spot is observable and its exemption list is the only way past it (§3.2). |
+| `test/docs-gate.test.ts` (extended)                    | CI wiring                            | Pins that `check:docs` composes both scripts, so dropping one is a failing test rather than a silent loss of coverage.                                                                                                                                                                                                                                                                                                                                              |
+| The doc fences themselves                              | `docs/mvc.md`, both READMEs          | The new error-page example and the corrected escaping examples are fence-compiled by the existing guide and package-README gates, so they type-check as committed evidence.                                                                                                                                                                                                                                                                                         |
 
 **Negative controls** (each observed failing, then reverted, and the result recorded in the PR):
 
 1. Revert the six `@since` corrections → `check:since-tags` fails naming `packages/common/src/form/`
    and the version. This is the control that proves the gate would have caught D12/D13.
 2. Revert §3.2's URL payload → the new behaviour case passes with a component that renders
-   `href="javascript:alert(1)"`, reproducing exactly why the existing gate could not see row 1.
+   `href="javascript:alert(1)"`, reproducing exactly why the existing gate could not see row 1. 2b.
+   Remove the `unchecked` detector → a component routing the payload through `raw()` into an `href`
+   reports CLEAN, which is finding 9 reproduced: the gate does not see the value, and says so by
+   staying silent.
 3. Point `check:since-tags` at a version ahead of the registry → it SKIPS rather than failing,
-   proving a release branch cannot be blocked by it.
+   proving a release branch cannot be blocked by it. Then make its fetch fail outright and run the
+   WHOLE `deno task check:docs` chain: it must still exit `0`. Restoring the exit-77 convention
+   fails that run, which is finding 5 reproduced at the level it actually bites — the chain, not the
+   script.
 4. Remove the new error-page section's status line from its example → the fence still compiles,
    which is the honest result: it records that no gate can catch row 3, and that the example IS the
    control.
@@ -241,11 +266,18 @@ arrangement for documentation tooling.
    PR #309 finding 7). The first draft used `git diff --stat`, which prints and always exits 0, so a
    stray source edit would have passed every listed gate. The letter's only `packages/*/src` change
    is JSDoc — six `@since` values — so the gate is:
-   `git diff -U0 origin/main...HEAD -- 'packages/*/src'` must contain no added or removed line
-   outside a comment. Implemented as a step in the PR checklist and verified by inspection, NOT as a
-   new repo task: a general docs-only task would have to be correct for every future milestone,
-   which is a larger design than this letter needs and would be dead surface for all three other M95
-   letters.
+
+   ```
+   git diff -U0 origin/main...HEAD -- 'packages/*/src' \
+     | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' \
+     | grep -vE '^[+-][[:space:]]*(\*|//|/\*)'
+   ```
+
+   **must print nothing**, exactly as item 6's `git diff` must be empty. That is a command with an
+   observable result rather than an inspection, which is what the finding asked for; what it is NOT
+   is a new repo task, because a general docs-only task would have to be correct for every future
+   milestone — a larger design than this letter needs, and dead surface for all three other M95
+   letters, every one of which changes source deliberately.
 
 ## 8. Risks & mitigations
 
