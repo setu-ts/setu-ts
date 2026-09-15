@@ -27,6 +27,9 @@ permissions:
 
 jobs:
   build:
+    # Website builds are expensive enough to reserve for repository branches. Fork PRs can still be
+    # reviewed as diffs, then validated from a trusted branch after maintainer triage.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Build / links / accessibility / performance
     runs-on: ubuntu-latest
     defaults:

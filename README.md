@@ -401,46 +401,24 @@ Each package also carries its own README with options, semantics, and a worked e
 
 - New to the framework? Read the [Getting Started guide](docs/getting-started.md) or
   **PUBLIC_API.md** for usage examples.
-- Want to contribute? Read **ARCHITECTURE.md** then **AI_GUIDELINES.md**.
+- Need help, want to share beta feedback, or have an idea? Visit
+  [GitHub Discussions](https://github.com/setu-ts/setu-ts/discussions).
+- Found a reproducible problem?
+  [Open a bug report](https://github.com/setu-ts/setu-ts/issues/new?template=bug-report.yml).
+- Want to contribute? Read [CONTRIBUTING.md](CONTRIBUTING.md).
 - Want to understand the plan? Read **ROADMAP.md**.
 
 ---
 
 ## Contributing
 
-Contributions are welcome. The foundation is complete, so the most useful contributions right now
-are bug reports against the current release, and plugins built on the capability model.
+We welcome beta feedback, reproducible bug reports, documentation corrections, focused fixes, and
+plugins built on the capability model. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for the channel
+to use, the maintainer-triaged pull-request flow, and the engineering requirements for accepted
+implementation work.
 
-### Before You Write Code
-
-1. **Read [ARCHITECTURE.md](ARCHITECTURE.md)** — Understand how the framework works internally.
-2. **Read [AI_GUIDELINES.md](AI_GUIDELINES.md)** — Understand the engineering rules.
-3. **Read [PUBLIC_API.md](PUBLIC_API.md)** — Understand the public API contract.
-4. **Check [ROADMAP.md](ROADMAP.md)** — See what is planned and what is in progress.
-
-### Key Rules
-
-- Every package must compile with strict TypeScript — no `any`.
-- Every package must maintain 90%+ test coverage.
-- Every public API must have JSDoc.
-- No runtime-specific APIs outside the `runtime` package.
-- No circular dependencies between packages.
-- No breaking changes without a major version bump.
-- Prefer composition over inheritance.
-- Prefer adapters over implementations.
-- Prefer interfaces over concrete types.
-- Everything must have a programmatic API.
-
-### Process
-
-The monorepo is built with the **Deno toolchain** (Deno 2 workspaces). Packages are published to
-**JSR** under `@setu-ts` and are consumable from Node and Bun via JSR's npm compatibility layer.
-
-1. Open an issue to discuss the change.
-2. Fork the repository and create a feature branch.
-3. Implement with tests and documentation.
-4. Ensure `deno task check`, `deno task test`, `deno task lint`, and `deno task fmt:check` all pass.
-5. Submit a pull request with a clear description.
+Please report security concerns privately through [SECURITY.md](SECURITY.md), and follow the
+[Code of Conduct](CODE_OF_CONDUCT.md) in every project space.
 
 ---
 
