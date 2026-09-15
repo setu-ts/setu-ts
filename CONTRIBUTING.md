@@ -6,14 +6,15 @@ that use the published capability model.
 
 ## Choose the right channel
 
-| You have                                       | Start here                                                                                                |
-| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| A question, adoption concern, or beta feedback | [GitHub Discussions](https://github.com/setu-ts/setu-ts/discussions)                                      |
-| A feature or API idea                          | The [Ideas discussion category](https://github.com/setu-ts/setu-ts/discussions/categories/ideas)          |
-| A reproducible defect                          | A [Bug Report](https://github.com/setu-ts/setu-ts/issues/new?template=bug-report.yml)                     |
-| A runtime compatibility problem                | A [Compatibility Report](https://github.com/setu-ts/setu-ts/issues/new?template=compatibility-report.yml) |
-| A security vulnerability                       | [SECURITY.md](SECURITY.md) — do not create a public issue or discussion                                   |
-| Conduct concern                                | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)                                                                  |
+| You have                             | Start here                                                                                                |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------- |
+| A question or setup concern          | The [Q&A discussion category](https://github.com/setu-ts/setu-ts/discussions/categories/q-a)              |
+| Adoption experience or beta feedback | The [Beta feedback category](https://github.com/setu-ts/setu-ts/discussions/categories/beta-feedback)     |
+| A feature or API idea                | The [Ideas discussion category](https://github.com/setu-ts/setu-ts/discussions/categories/ideas)          |
+| A reproducible defect                | A [Bug Report](https://github.com/setu-ts/setu-ts/issues/new?template=bug-report.yml)                     |
+| A runtime compatibility problem      | A [Compatibility Report](https://github.com/setu-ts/setu-ts/issues/new?template=compatibility-report.yml) |
+| A security vulnerability             | [SECURITY.md](SECURITY.md) — do not create a public issue or discussion                                   |
+| Conduct concern                      | [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)                                                                  |
 
 Search existing discussions and issues before opening a new one. Keep conversations constructive and
 focused on the behaviour, documentation, or proposal at hand.
@@ -38,9 +39,11 @@ Maintainers decide the public API, architecture, and release scope.
 
 Setu-TS runs a substantial validation suite. Pull requests from forks deliberately do **not** start
 the repository's validation jobs, service containers, website build, or automatic CodeRabbit review.
-They receive only a small policy check that does not check out contributor code and prevents skipped
-checks from satisfying merge protection. This prevents untriaged, untrusted changes from consuming
-project resources or being merged as if they had been validated.
+GitHub requires maintainer approval before any outside contributor's fork workflow can begin. If a
+maintainer explicitly approves one, it receives only a small policy check that does not check out
+contributor code and prevents skipped checks from satisfying merge protection. This prevents
+untriaged, untrusted changes from consuming project resources or being merged as if they had been
+validated.
 
 After accepting a contribution, a maintainer reproduces the change in a trusted repository branch,
 where the full validation suite and an optional CodeRabbit review can run. Fork PRs are proposals;

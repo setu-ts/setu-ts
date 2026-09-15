@@ -11,8 +11,9 @@ All notable changes to this project are documented here. The format follows
 - **Public contribution intake is now maintainer-triaged and protected from untrusted automation.**
   GitHub Discussions, focused issue forms, a contribution guide, code of conduct, security policy,
   and pull-request template direct beta feedback, questions, compatibility reports, and proposed
-  work into an explicit maintainership flow. Fork pull requests are proposals only: they do not run
-  the repository's validation jobs, services, website build, or automatic CodeRabbit review; a
+  work into an explicit maintainership flow. Fork pull requests are proposals only: GitHub requires
+  maintainer approval before any outside contributor workflow begins, and an approved fork does not
+  run the repository's validation jobs, services, website build, or automatic CodeRabbit review; a
   minimal no-checkout policy gate prevents skipped jobs from satisfying merge protection, and an
   accepted contribution is reproduced and validated in a trusted repository branch.
 - **A documented example's BEHAVIOUR is now checked, not only its types.** The fence compilers prove
