@@ -1,4 +1,6 @@
 // deno-lint-ignore-file no-console -- this CI script reports progress, drift and skips.
+import { fromFileUrl } from 'jsr:@std/path@^1.1.6';
+
 /**
  * @module
  *
@@ -491,14 +493,52 @@ async function checkCompose(): Promise<CheckOutcome> {
 const GENERATED_WORKSPACE = 'acme';
 const GENERATED_MEMBER = 'orders';
 const GENERATED_PORT = 3000;
-const GENERATED_IMAGE = 'setu/generated-gate:m95a';
-const GENERATED_CONTAINER = 'setu-generated-gate';
+const GENERATED_IMAGE_PREFIX = 'setu/generated-gate:m95a';
+const GENERATED_CONTAINER_PREFIX = 'setu-generated-gate';
 const GENERATED_PROBE_ATTEMPTS = 120;
 const GENERATED_PROBE_INTERVAL_MS = 1_000;
 
+/**
+ * Converts a file URL into the native path `Deno.Command` expects.
+ *
+ * `URL.pathname` deliberately retains percent encoding, which makes a checkout path containing a
+ * space become a nonexistent `%20` path when it is passed to `deno run`.
+ *
+ * @param fileUrl - The source file URL
+ * @returns The decoded native filesystem path
+ */
+export function nativeFilePath(fileUrl: URL): string {
+  return fromFileUrl(fileUrl);
+}
+
 /** The CLI's executable entry (`main.ts` owns the process boundary), absolute: scaffold steps
  * run with the WORKSPACE as their cwd. */
-const CLI_ENTRY = new URL('../packages/cli/src/main.ts', import.meta.url).pathname;
+const CLI_ENTRY = nativeFilePath(new URL('../packages/cli/src/main.ts', import.meta.url));
+
+/** Resources owned by one generated-deployment gate invocation. */
+export interface GeneratedResources {
+  /** Unique Docker image tag for this invocation. */
+  readonly image: string;
+  /** Unique Docker container name for this invocation. */
+  readonly container: string;
+}
+
+/**
+ * Gives a generated-deployment check Docker resources it alone owns.
+ *
+ * Parallel checks share a Docker daemon in CI and locally, so a fixed name lets one run delete
+ * another's container. Docker layer caching remains content-addressed even though the final tag
+ * is unique.
+ *
+ * @returns The image tag and container name for this invocation
+ */
+export function generatedResources(): GeneratedResources {
+  const suffix = crypto.randomUUID();
+  return {
+    image: `${GENERATED_IMAGE_PREFIX}-${suffix}`,
+    container: `${GENERATED_CONTAINER_PREFIX}-${suffix}`,
+  };
+}
 
 /**
  * Proves the deployment a user actually gets, which until M95a nothing did.
@@ -529,6 +569,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
 
   const workspace = await Deno.makeTempDir({ prefix: 'setu-generated-' });
   const root = `${workspace}/${GENERATED_WORKSPACE}`;
+  const resources = generatedResources();
   try {
     // Scaffold exactly what a user gets, with the real CLI as a subprocess. Scaffolding writes
     // files and resolves nothing: the framework packages resolve later, inside the image build —
@@ -571,7 +612,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
       '--build-arg',
       `MEMBER=${GENERATED_MEMBER}`,
       '-t',
-      GENERATED_IMAGE,
+      resources.image,
       root,
     ], { quiet: true });
     if (!built.success) {
@@ -582,20 +623,20 @@ async function checkGenerated(): Promise<CheckOutcome> {
 
     // Deliberately WITHOUT --rm: a container that crash-loops at import is the failure this
     // gate exists to catch, and its logs — the only record of which specifier Deno tried to
-    // record — must survive until they are read below.
-    await run(['docker', 'rm', '-f', GENERATED_CONTAINER], { quiet: true });
+    // record — must survive until they are read below. `resources.container` is unique to this
+    // invocation, so cleanup can never remove a concurrent check's container.
     const started = await run([
       'docker',
       'run',
       '-d',
       '--name',
-      GENERATED_CONTAINER,
+      resources.container,
       '--read-only',
       '--network',
       'none',
       '--tmpfs',
       '/tmp',
-      GENERATED_IMAGE,
+      resources.image,
     ], { quiet: true });
     if (!started.success) {
       console.error('  ✗ the image did not start');
@@ -608,7 +649,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
       const probe = await run([
         'docker',
         'exec',
-        GENERATED_CONTAINER,
+        resources.container,
         'wget',
         '-q',
         '-O',
@@ -622,14 +663,14 @@ async function checkGenerated(): Promise<CheckOutcome> {
       // A container that exited is the defect, caught early: read its logs instead of polling
       // a corpse for the remaining attempts.
       const state = await run(
-        ['docker', 'inspect', '-f', '{{.State.Running}}', GENERATED_CONTAINER],
+        ['docker', 'inspect', '-f', '{{.State.Running}}', resources.container],
         { quiet: true },
       );
       if (state.stdout.trim() !== 'true') break;
       await new Promise((resolve) => setTimeout(resolve, GENERATED_PROBE_INTERVAL_MS));
     }
 
-    const logs = await run(['docker', 'logs', GENERATED_CONTAINER], { quiet: true });
+    const logs = await run(['docker', 'logs', resources.container], { quiet: true });
     if (!served) {
       console.error('  ✗ the member never served /health under --read-only --network none');
       console.error(logs.stdout + logs.stderr);
@@ -638,7 +679,8 @@ async function checkGenerated(): Promise<CheckOutcome> {
     console.log('  ✓ served /health under --read-only --network none');
     return 'passed';
   } finally {
-    await run(['docker', 'rm', '-f', GENERATED_CONTAINER], { quiet: true });
+    await run(['docker', 'rm', '-f', resources.container], { quiet: true });
+    await run(['docker', 'image', 'rm', '-f', resources.image], { quiet: true });
     await Deno.remove(workspace, { recursive: true });
   }
 }
