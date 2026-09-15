@@ -301,6 +301,25 @@ describe('workspace scaffolding — end to end', () => {
     }
   });
 
+  // M95a: the generated Dockerfile was the one artifact no gate built — the
+  // repository's own was exercised by check:deploy, the GENERATED one by
+  // nobody, and the flag that keeps a read-only root filesystem from crashing
+  // the start lives in its emitted text. Read, not run: the image-level proof
+  // is `check:deploy --generated`, which needs Docker; this one needs nothing.
+  it('emits a Dockerfile whose start survives the generated read-only posture', async () => {
+    const ws = await twoMembers();
+    const dockerfilePath = `${ws}/docker/Dockerfile`;
+    expect(await Deno.readTextFile(dockerfilePath)).toContain('"run", "--no-lock"');
+
+    // The file is emitted `managed`, so regeneration re-renders it — an
+    // existing workspace picks the change up on its next `generate app` with
+    // no migration step.
+    expect(await run(['g', 'app', 'shipping', '--template', 'microservice', '--dir', ws])).toBe(
+      0,
+    );
+    expect(await Deno.readTextFile(dockerfilePath)).toContain('"run", "--no-lock"');
+  });
+
   it('does not start a dependent until its prerequisite answers /ready', async () => {
     expect(await run(['new', 'acme', '--workspace', '--port', String(base)])).toBe(0);
     const ws = `${root}/acme`;

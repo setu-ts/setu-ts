@@ -9712,20 +9712,24 @@ Caused by:
 
 Nothing in that message names a dependency, a plugin, or a driver.
 
-**Mechanism, established with `--frozen` rather than inferred.** The container wants to ADD entries
-to the lockfile at runtime — `npm:amqplib`, `npm:ioredis`. The framework loads driver packages
-**lazily** (AI_GUIDELINES §12.2 — `import('npm:amqplib@0.10.x')` and friends), so they are **not in
-the static graph** the generated Dockerfile's `RUN deno cache main.ts` walks. They appear in the
-lockfile's package section but in **no workspace member's `dependencies` array**; the first lazy
-import must record itself against the running member, which needs a write, which the generated
-manifest's `readOnlyRootFilesystem: true` forbids.
+**Mechanism, established by measurement (M95a D1), not inference — and it corrects the earlier
+static-graph story.** What the runtime wants is to ADD two dependency EDGES to the lockfile —
+`npm:amqplib` and `npm:ioredis` under the `@setu-ts/messaging-plugin` entry — the first time
+`MessagingPlugin` registers. The earlier explanation (lazily-imported drivers outside the static
+graph the generated Dockerfile's `RUN deno cache main.ts` walks) did not reproduce: that step DOES
+download every driver package and record it in the lockfile's package section. What it leaves out is
+the jsr entry's edge list, and the first registration import must write those two edges — a write
+the generated manifest's `readOnlyRootFilesystem: true` forbids, so the container dies at import,
+before serving anything. D1 reproduced this from a plain fresh scaffold with no re-pin, and
+identified the edges by diffing the in-image lockfile before and after a writable start.
 
-**The package set is not knowable in advance, which is what makes this more than a one-line fix.**
-Three distinct families surfaced, each only after the previous was warmed: the messaging/queue
-drivers; `@aws-sdk/credential-provider-web-identity` via the SNS/SQS clients; and
-`import-in-the-middle`, pulled in by M24b's OpenTelemetry auto-instrumentation. It is also **not
-deterministic between replicas of one image** — with two `orders` replicas from the same image, one
-started cleanly and the other died on `import-in-the-middle`.
+**Why no warm list is part of the remedy.** The packages the graph can reach — including all three
+families the original exercise had to warm (messaging/queue drivers,
+`@aws-sdk/credential-provider-web-identity`, `import-in-the-middle`) — are already downloaded by the
+build step; with the lockfile write removed they resolve from `DENO_DIR` offline. A warm list with
+no measured specifier behind it would be dead surface. The non-determinism between replicas noted in
+the original run (one started, one died on `import-in-the-middle`) is consistent with a pure
+lockfile-write mechanism: whichever replica reached a missing edge first wrote first.
 
 **Why it has not been seen before.** A long-lived project's lockfile usually already carries these
 entries, because somebody ran the app locally against a live broker and the lazy import recorded
@@ -9747,13 +9751,14 @@ a reproducibility trap rather than a stable property.
 to avoid ("so the container starts without reaching the network for its own dependencies") and which
 fails outright in an air-gapped cluster. Both halves are required.
 
-**Deliverables, in preference order.** (1) Have `setu` emit the warm step and `--no-lock` in the
-generated Dockerfile, deriving the specifier list from the plugin arms the project actually
-configures — the CLI already reads the manifest to gate schematics, so it knows which drivers a
-composition can reach. (2) Document it in `docs/deployment.md` beside the `readOnlyRootFilesystem`
-guidance, with the `--frozen` diagnostic, because the error message points at the wrong thing. (3)
-An open question for the maintainer, not a deliverable: whether a lazy import should need a lockfile
-write at all when the package is already in `DENO_DIR`.
+**Deliverables, as landed.** (1) `setu` emits `--no-lock` in the generated Deno `CMD`, and no warm
+list: D1 measured that the build-time cache already holds every package the runtime reaches, so a
+derived specifier list would name packages that are already present. (2) Documented in
+`docs/deployment.md` beside the read-only-root guidance, with the `deno install
+--frozen`
+diagnostic, because the runtime error points at the wrong thing. (3) An open question for the
+maintainer, not a deliverable: whether a lazy import should need a lockfile write at all when the
+package is already in `DENO_DIR`.
 
 **The recurrence gate is the thing to get right.** A fixed warm list in the Dockerfile is exactly
 what this finding shows cannot be complete, so a gate that asserts a hard-coded list would pass
@@ -9991,6 +9996,6 @@ both imply — or correct the three doc sites and the example.
 | 94a       | ✅     | exceptions — application-owned error response                                                                  |
 | 94b       | ✅     | common + runtime + storage/session — one form-body abstraction                                                 |
 | 94c       | ✅     | session-plugin — CSRF token field helper                                                                       |
-| 95a       | ⬜     | cli + docs — a generated deployment cannot start (**High**)                                                    |
+| 95a       | ✅     | cli + docs — a generated deployment cannot start (**High**)                                                    |
 | 95b       | ⬜     | messaging-plugin — reachability that fails open                                                                |
 | 95c       | ⬜     | common + session-plugin + static-plugin — a contract its own implementation does not honour                    |

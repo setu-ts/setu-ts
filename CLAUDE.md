@@ -4849,12 +4849,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `IMessageBroker` change, no new capability token, no broker adapter rewritten, no dependency on
   `@setu-ts/events-plugin`) — complete (PR #287)
 
-- **Next milestone** — **M95a** (`packages/cli` + `docs/` — a generated deployment cannot start: the
-  only **High** row from the `v0.6.0` smoke run, and the only one that stops an application running
-  at all. A scaffolded microservice crash-loops under its own generated Kubernetes manifest because
-  the framework's lazily-imported drivers are absent from the lockfile the generated Dockerfile
-  builds, and `readOnlyRootFilesystem: true` forbids the write. M95b and M95c follow; each carries a
-  decision for the maintainer rather than a purely mechanical fix.)
+- **Milestone 95a** (`packages/cli` + `docs/` — a generated deployment cannot start: the only
+  **High** row from the `v0.6.0` smoke run. The generated Deno `CMD` gains `--no-lock` — measured
+  from a plain fresh scaffold (no re-pin), the crash was Deno's first lockfile WRITE at
+  `MessagingPlugin` registration (the `npm:amqplib`/`npm:ioredis` edges, identified by diffing the
+  in-image lockfile), while every package is already in the build-time cache the Dockerfile's
+  `deno cache main.ts` warms; so the write is removed rather than the cache extended, and no warm
+  list is emitted. `check:deploy` gains `--generated`: scaffold → build the GENERATED Dockerfile →
+  pass only on a served `/health` under `--read-only --network none` — the first gate anywhere that
+  builds what a user deploys. `docs/deployment.md` documents the finding and the
+  `deno
+  install --frozen` diagnostic; the ROADMAP's static-graph mechanism paragraph is corrected
+  to the measured one) — complete
+
+- **Next milestone** — **M95b** (`packages/messaging-plugin` — reachability that fails open: with
+  the Service Bus broker stopped, `/health` says `up` and `/ready` answers `200` while every
+  `publish` throws. Carries a design decision for the maintainer rather than a mechanical fix;
+  M95c's three contract-fidelity rows follow.)
 
 - **Also open** — **M40** (final polish and release: integration testing across all plugins,
   performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the

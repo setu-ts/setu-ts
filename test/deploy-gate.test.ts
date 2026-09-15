@@ -321,6 +321,31 @@ describe('skip contract', () => {
   });
 });
 
+describe('generated mode (M95a)', () => {
+  it('runs in the default set and is selectable by flag', () => {
+    // The scaffold-build-serve proof is the ONLY check that exercises what a
+    // user deploys, so it must not be an opt-in mode a routine run forgets.
+    expect(parseModes([]).generated).toBe(true);
+
+    const only = parseModes(['--generated']);
+    expect(only.generated).toBe(true);
+    expect(only.render).toBe(false);
+    expect(only.build).toBe(false);
+    expect(only.compose).toBe(false);
+    expect(only.cluster).toBe(false);
+  });
+
+  it('is absent from CI\u2019s only skip allowlist, so a dropped proof cannot read as a pass', async () => {
+    // The M37c lesson: an exemption is a one-word edit, and a bare grep cannot
+    // see its own allowlist grow. CI runs this gate (`deno task check:deploy`)
+    // with no skip allowance at all — a skip must surface as exit 77, never as
+    // a listed name.
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const allowSkip = /ALLOW_SKIP:\s*(.+)/.exec(workflow)?.[1] ?? '';
+    expect(allowSkip).not.toContain('generated');
+  });
+});
+
 describe('graceful shutdown in the containerized examples', () => {
   const MATRIX_ENTRY_POINTS = [
     'apps/minimal/main.ts',

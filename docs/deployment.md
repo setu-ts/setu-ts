@@ -367,8 +367,38 @@ NAMESPACE=acme WORKSPACE=acme envsubst < k8s/members.yaml | kubectl apply -f -
 ```
 
 They carry the findings on this page rather than repeating the mistakes: the build context is the
-workspace root, the base image tag is pinned, the user is numeric, permissions are explicit, and the
-grace period is real because the generated entry handles `SIGTERM`.
+workspace root, the base image tag is pinned, the user is numeric, permissions are explicit, the
+grace period is real because the generated entry handles `SIGTERM`, and the start writes no lockfile
+— so the generated manifest's own read-only root filesystem cannot crash it.
+
+### The image is the member's only dependency source at runtime
+
+The generated Deno image resolves the whole module graph at build time (`deno cache main.ts`
+downloads every package the member's plugins can reach) and its start command runs with `--no-lock`.
+Both halves close one measured failure: the first time `MessagingPlugin` registers, Deno adds its
+driver edges (`npm:amqplib`, `npm:ioredis`) to `deno.lock` — a write, which the generated manifest's
+`readOnlyRootFilesystem: true` forbids, so a scaffolded member used to crash-loop before serving
+anything:
+
+```
+error: Failed writing lockfile
+Caused by:
+    Read-only file system (os error 30) (for '/srv/deno.lock')
+```
+
+The message points at the wrong remedy. This is not a volume to mount and not the cache being
+incomplete — the packages are already in the image. It is a lockfile doing a job it no longer has
+inside an image, where resolution already happened against the committed one and the module cache is
+immutable. `--no-lock` removes the write; the build-time cache is what keeps the start offline. To
+inspect a checkout's lockfile state without running anything, `deno install --frozen` exits non-zero
+and names the entries resolution would have added — the diagnostic the runtime error should have
+given you.
+
+Do not mount a volume over the image's `DENO_DIR` (the generated Deployment mounts only `/tmp` for
+exactly this reason): measured, a cold cache fails identically with and without network egress,
+because fetched packages have nowhere to persist under a read-only root. The cache baked into the
+image IS the dependency source, which is why the `--generated` gate below proves a scaffolded member
+serves under `--read-only --network none`.
 
 ### Sibling addresses come from the environment
 
@@ -409,16 +439,23 @@ application through `CloudflarePlugin`. Nothing on this page — probes, gracefu
 ## The deployment gate
 
 ```bash
-deno task check:deploy              # render drift + image builds + compose model
-deno task check:deploy --render     # just the manifest/chart drift check
-deno task check:deploy --cluster    # real kind cluster: apply, roll out, serve, check RBAC
-deno task deploy:render             # regenerate k8s/manifests/ from the chart
+deno task check:deploy               # render drift + image builds + compose + generated
+deno task check:deploy --render      # just the manifest/chart drift check
+deno task check:deploy --cluster     # real kind cluster: apply, roll out, serve, check RBAC
+deno task check:deploy --generated   # scaffold a workspace, build ITS image, serve it air-gapped
+deno task deploy:render              # regenerate k8s/manifests/ from the chart
 ```
 
 `--cluster` creates a kind cluster, loads the locally built image, applies the **committed**
 manifests, waits for the rollout (which only completes if the readiness probe passes), serves a
 request through the Service, and asserts the ServiceAccount can list and watch EndpointSlices. Set
 `KEEP_CLUSTER=1` to keep the cluster for debugging.
+
+`--generated` covers the deployment a USER gets, which no other check built: it scaffolds a
+workspace with the CLI into a temporary directory, builds the workspace's **generated** Dockerfile,
+and runs the image under the posture the generated manifest sets — read-only root, one writable
+`/tmp`, no network. It passes only when the member **serves** `/health`: a start that dies at import
+and one that boots but cannot serve must both fail. Absent Docker it exits 77 like the rest.
 
 When the required tooling is absent the gate exits **77**, the same "reported a skip" code the apps
 gate uses, so a missing prerequisite can never be mistaken for a pass.
@@ -430,6 +467,7 @@ failing:
 | --------------------------------------------- | ------------------------------------------------------------------------------------- |
 | Probe path → `/health/live`                   | Rollout never completes; ready replicas stay 0.                                       |
 | Remove `COPY deno.json` from the Dockerfile   | Build fails resolving `@setu-ts/common`.                                              |
+| Drop `--no-lock` from the generated `CMD`     | The `--generated` run dies writing `deno.lock` on the read-only root.                 |
 | Hand-edit a committed manifest                | `--render` fails and names the file.                                                  |
 | Drop `watch` from the discovery Role          | `kubectl auth can-i watch` answers `no`.                                              |
 | Point the Service selector at a missing label | Endpoints go empty and the request is refused — while `kubectl apply` still succeeds. |

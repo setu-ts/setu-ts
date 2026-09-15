@@ -137,11 +137,19 @@ COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
 WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 
 # Resolve the whole module graph at build time, so the container starts without
-# reaching the network for its own dependencies. The chown FOLDS into this same
-# RUN (X10-5): a standalone \`chown -R\` rewrites metadata on every file the cache
-# layer created, so overlayfs copies the ENTIRE module cache into a second
-# layer — measured at 563 MB vs 362 MB with the fold, paid on every push and
-# every node pull.
+# reaching the network for its own dependencies and without ever writing
+# deno.lock: the CMD below runs --no-lock because a read-only root filesystem
+# turns Deno's first missing lockfile entry (measured: the messaging plugin's
+# driver edges) into a crash before the first request. The lockfile has no job
+# left inside an image — resolution already happened against the committed one,
+# this cache is immutable, and the packages it needs are already here. Both
+# halves are proven by \`check:deploy --generated\`, which builds a scaffolded
+# workspace's image and serves /health from it under --read-only --network none.
+#
+# The chown FOLDS into this same RUN (X10-5): a standalone \`chown -R\` rewrites
+# metadata on every file the cache layer created, so overlayfs copies the
+# ENTIRE module cache into a second layer — measured at 563 MB vs 362 MB with
+# the fold, paid on every push and every node pull.
 RUN deno cache main.ts && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
@@ -157,7 +165,11 @@ USER ${DENO_UID}:${DENO_UID}
 # an image should not hand its process every capability. The set mirrors the
 # member's own generated \`start\` task, plus \`--allow-sys\` for the hostname and
 # platform probes the health and metrics plugins make.
-CMD ["run", "--allow-net", "--allow-env", "--allow-read", "--allow-sys", "main.ts"]
+#
+# --no-lock is the runtime half of the guarantee above: every package the graph
+# can reach is already in the build-time cache, so dropping the lockfile removes
+# the one write a read-only root cannot serve.
+CMD ["run", "--no-lock", "--allow-net", "--allow-env", "--allow-read", "--allow-sys", "main.ts"]
 `;
 }
 
