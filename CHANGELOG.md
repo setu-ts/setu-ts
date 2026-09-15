@@ -24,6 +24,14 @@ All notable changes to this project are documented here. The format follows
   class-based — so the class-based one, which is where the defect lived, was skipped. Scope is per
   fence, and the case is pinned.
 
+### Changed
+
+- **The Setu-TS website now identifies each page to social and search crawlers.** The shared layout
+  publishes the page's canonical URL as `og:url` and SoftwareApplication JSON-LD describing the
+  framework, its supported runtimes, and its free offering.
+- **The root README no longer foregrounds the obsolete Hono Enterprise migration notice.** The
+  historical release record remains in this changelog for users maintaining legacy installations.
+
 ### Fixed
 
 - **A scaffolded workspace's generated deployment now starts under its own security posture.** A

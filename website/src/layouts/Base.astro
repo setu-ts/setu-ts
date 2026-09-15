@@ -10,6 +10,20 @@ const { title, description = 'Plugin-first enterprise backend framework built on
   Astro.props;
 const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : Astro.url.pathname;
 const isDocs = Astro.url.pathname.startsWith('/docs');
+const softwareApplicationSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'SoftwareApplication',
+  name: 'Setu-TS',
+  operatingSystem: 'Cross-platform',
+  applicationCategory: 'DeveloperApplication',
+  description:
+    'Plugin-first enterprise backend framework built on Hono for Node.js, Deno, Bun, and Cloudflare Workers.',
+  offers: {
+    '@type': 'Offer',
+    price: '0',
+    priceCurrency: 'USD',
+  },
+};
 ---
 
 <!doctype html>
@@ -20,12 +34,14 @@ const isDocs = Astro.url.pathname.startsWith('/docs');
     <title>{title}</title>
     <meta name="description" content={description} />
     <link rel="canonical" href={canonical} />
+    <meta property="og:url" content={canonical} />
     <link rel="icon" href="/setu-ts-favicon-64.png" type="image/png" />
     <link rel="stylesheet" href="/pagefind/pagefind-component-ui.css" />
     <meta property="og:type" content="website" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:site_name" content="Setu-TS" />
+    <script type="application/ld+json" set:html={JSON.stringify(softwareApplicationSchema)}></script>
     <script src="/pagefind/pagefind-component-ui.js" type="module"></script>
     <script is:inline>
       // Set the theme before first paint to avoid a flash of the wrong palette.

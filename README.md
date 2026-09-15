@@ -29,12 +29,6 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 >
 > <!-- version:history -->
 >
-> **`v0.1.0-alpha.5` renamed the project from Hono Enterprise to Setu-TS**, and every package moved
-> from the `@hono-enterprise` scope to `@setu-ts`. Upgrading from `alpha.4` or earlier means
-> rewriting every import specifier — there is no path that leaves them untouched. The
-> `@hono-enterprise` packages are archived and receive no further versions; existing pinned installs
-> keep working. See [CHANGELOG.md](CHANGELOG.md) for the full set of breaking changes.
->
 > The kernel, the runtime layer, 37 plugins, the three starters, the test utilities, the client SDK,
 > and the `setu` CLI are implemented, tested, and documented.
 >
