@@ -241,16 +241,21 @@ table below maps to different statuses. So `DatabaseService` exposes:
 signature unchanged; `reachability()` is the new member the indicator reads. The indicator publishes
 `reachable`:
 
-| adapter probe  | `reachable` | `status`   |
-| -------------- | ----------- | ---------- |
-| resolves true  | `true`      | `up`       |
-| resolves false | `false`     | `down`     |
-| times out      | `'unknown'` | `degraded` |
-| member absent  | `'unknown'` | `degraded` |
+> **SUPERSEDED — do not implement this table.** Its last row is wrong and the next subsection says
+> why. It is kept because the correction is the milestone's sharpest finding and deleting it would
+> hide how the outage was nearly shipped; the table to implement is the four-column one below.
+
+| adapter probe     | `reachable`     | `status`       |
+| ----------------- | --------------- | -------------- |
+| resolves true     | `true`          | `up`           |
+| resolves false    | `false`         | `down`         |
+| times out         | `'unknown'`     | `degraded`     |
+| ~~member absent~~ | ~~`'unknown'`~~ | ~~`degraded`~~ |
 
 **`degraded` rather than `up` for an unanswerable probe is the load-bearing line**, and it needs no
 `common` change — `HealthStatus` already admits it (R8). It is the narrowest change that fixes the
-finding, because `up` is the claim that put a dead-database pod back in rotation.
+finding, because `up` is the claim that put a dead-database pod back in rotation. **That reasoning
+holds for a probe that EXISTS and did not answer, and only for that** — see immediately below.
 
 #### The mapping applies where a probe EXISTS; absent keeps today's behaviour
 
@@ -282,11 +287,22 @@ evidence of nothing, and must be reported as neither health nor failure.
 | `bigtable` | omitted — behaviour UNCHANGED        | As above.                                                                                                                                                                  |
 | `dynamo`   | omitted — behaviour UNCHANGED        | As above.                                                                                                                                                                  |
 
-**`IMongoDatabase` gains an optional `command?(spec): Promise<unknown>`.** R18 established the
-facade has only `collection(name)`, so there is no way to reach a ping without it; it is OPTIONAL,
-so an injected double that omits it simply has no probe and lands in the last row. **This edits
-`mongo-client-types.ts`, which M95c also edits** (`IMongoClient.connect` → `Promise<unknown>`) — the
-two letters must rebase rather than merge blind, and §0 records it.
+**`IMongoDatabase` gains an optional
+`command?(command: Record<string, unknown>): Promise<unknown>`.** R18 established the facade has
+only `collection(name)`, so there is no way to reach a ping without it; it is OPTIONAL, so an
+injected double that omits it simply has no probe and lands in the last row. The parameter is typed
+rather than left bare (corrected after review, PR #309, CodeRabbit): an untyped `spec` is an
+implicit `any`, which `strict` refuses and AI_GUIDELINES bans outright — a plan that writes one
+specifies a defect. `Record<string, unknown>` is the minimum the probe needs, since it sends a
+command document and reads no result. **Probed against the pinned driver, not assumed**: with
+`npm:mongodb@^6.21.0`, `const facade: IMongoDatabase = new MongoClient(url).db('x')` type-checks
+against that signature — the real
+`Db.command(command: Document, options?: RunCommandOptions &
+Abortable): Promise<Document>`
+(`mongodb.d.ts:3941`) is assignable to it, so the §6 compile-time assertion traverses the new member
+rather than merely tolerating it. **This edits `mongo-client-types.ts`, which M95c also edits**
+(`IMongoClient.connect` → `Promise<unknown>`) — the two letters must rebase rather than merge blind,
+and §0 records it.
 
 **What stays exposed, stated plainly rather than buried:** a Cosmos, Bigtable or DynamoDB
 application keeps reporting `up` for an unreachable backend after this letter. That is the status
@@ -392,9 +408,25 @@ introduced: a switch to disable the window would be a way to ask for the defect 
 | `packages/messaging-plugin/test/integration/outage-real.test.ts` (extended)        | `brokers/rabbitmq-broker.ts`                                | A **hung** arm beside the existing stop arm: `docker pause` → the indicator must not answer `up`, **and must answer at all within the bound** — the elapsed time of the `/health` request is asserted under a ceiling well below the suite's own timeout, since "not `up`" alone passes for a request that never returns (finding 2); `docker unpause` → `up`. Plus the §3.6 shared-channel guard: after N health polls against the RUNNING broker, a publish and a subscription still round-trip, which fails if the probe ever touches `#channel` or leaks one channel per poll. This is the condition R20 shows nothing in `packages/` drives today, and it is the gate for §3.6.                                                                                                   |
 | `test/apps-gate.test.ts` (extended)                                                | CI wiring                                                   | Pins that the new suite is deliberately local-only and names the doc that says how to run it (§3.4), so its absence from CI is a recorded decision rather than a silent gap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 
-**Coverage.** `service-bus-broker.ts` is the only `src` file with new branches, and every arm of the
-evidence window is reachable through the injected transport, so the unit table above takes it to the
-per-file bar without relying on the guarded suite.
+**Coverage.** Corrected after review (PR #309, CodeRabbit) — this paragraph predated the letter's
+widening and still named one file. Every `src` file that gains a branch is accounted for here, and
+each one's branches are reachable from the UNIT table above, so no file depends on a guarded suite
+to reach the per-file bar:
+
+| `src` file with new branches                               | Covered by                                                                                                                                                                                |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `messaging-plugin/src/brokers/service-bus-broker.ts`       | `service-bus-reachability.test.ts` — every arm of the evidence window, through the injected transport                                                                                     |
+| `messaging-plugin/src/brokers/rabbitmq-broker.ts`          | a unit case per §3.6 arm against an injected `IAmqpConnection`: the faulted short-circuit, the null connection, a `createChannel` that resolves, one that throws, and the `finally` close |
+| `messaging-plugin/src/plugin/messaging-plugin.ts`          | `messaging-plugin-health.test.ts` — the four mapping arms plus the never-settling and cache-sharing cases                                                                                 |
+| `database-plugin/src/services/database-service.ts`         | `adapter-reachability.test.ts` — `hasReachabilityProbe` both ways, and `reachability()` true / false / timeout                                                                            |
+| `database-plugin/src/plugin/database-plugin.ts`            | `adapter-reachability.test.ts` — all four rows of the mapping table, including the `/ready` status each produces                                                                          |
+| `database-plugin/src/adapters/mongo/mongo-adapter.ts`      | `adapter-reachability.test.ts` — `command?()` present and resolving, present and rejecting, and ABSENT (the R18 degenerate row)                                                           |
+| `database-plugin/src/adapters/{prisma,drizzle}-adapter.ts` | `adapter-reachability.test.ts` — `rawQuery` resolving and rejecting; Drizzle additionally with an instance that refuses `rawQuery`, which is the omitted-member shape                     |
+| `database-plugin/src/adapters/memory-adapter.ts`           | one assertion — it resolves `true` unconditionally                                                                                                                                        |
+
+`memory-adapter.ts` aside, no adapter that keeps today's behaviour (`cosmos`, `bigtable`, `dynamo`)
+gains a branch, so their numbers must not move — which is itself checked by re-reading the per-file
+table after the change.
 
 **Negative controls** (each observed failing, then reverted, and the result recorded in the PR):
 

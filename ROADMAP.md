@@ -9842,9 +9842,19 @@ extended package by package across three separate merged changes — M70c (six p
 them.
 
 **Fix:** give `IDatabaseAdapter` the optional `isHealthy?()` the other ports have and report
-`reachable` from it — `MongoAdapter` has `db.command({ ping: 1 })`, the SQL adapters `SELECT 1`.
-Where an adapter cannot answer, report `unknown` (the `createCachedProbe` `fallback` M90b
-generalised for exactly this), never `up`.
+`reachable` from it — `MongoAdapter` through one optional `command?()` on its client facade (which
+declares only `collection(name)` today), Prisma and Drizzle through the `rawQuery('SELECT 1')` each
+already supports. A probe that EXISTS and does not answer reports `unknown` and `degraded`, never
+`up` (the `createCachedProbe` `fallback` M90b generalised for exactly this).
+
+**An adapter with no probe is the opposite case, and the distinction is load-bearing.** Cosmos,
+Bigtable and DynamoDB refuse `rawQuery` and their client facades expose no verified liveness call,
+so this letter leaves them exactly as they are: `reachable` OMITTED, status `up`, `/ready` 200.
+Mapping "no probe" to `unknown` would be worse than the finding — `health-plugin.ts:214` computes
+readiness as `report.status === 'up' ? 200 : 503`, so `degraded` already fails it, and every healthy
+Cosmos, Bigtable and DynamoDB application would leave rotation on upgrade. A probe that was never
+written is evidence of nothing. Each of those three needs one optional member on its own facade,
+which M95b names as a follow-on rather than performs.
 
 #### X51-2 — a HUNG RabbitMQ broker reports `reachable: true`
 
