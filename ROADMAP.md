@@ -10155,12 +10155,22 @@ is correct and stays that way. The gap is not vocabulary; it is that the three e
    `common/src/http.ts:42` guarantees carries no query string. The safe field is already there,
    beside the unsafe one. The span **name** (`telemetry-middleware.ts:42`) is `${method} ${path}`,
    so a concrete identifier in a path is exported twice over.
-2. **The console logger's nested redaction mutates the caller's object.**
-   `console-logger.ts:165-196`: `#redactFields` shallow-clones with `{ ...data }`, then
-   `#redactPath` walks into `clone[segment]` — the _same reference_ the caller passed — and assigns
-   `'[Redacted]'` to the leaf. So `logger.info('x', { auth: user })` under `redact: ['auth.token']`
-   writes `'[Redacted]'` into the application's own `user` object. The walk also returns early on
-   `Array.isArray(next)`, so a path through an array silently redacts nothing.
+2. **The console logger's nested redaction mutates the caller's object. — FIXED ahead of this
+   milestone (PR pending).** `#redactFields` shallow-cloned with `{ ...data }`, then `#redactPath`
+   walked into `clone[segment]` — the _same reference_ the caller passed — and assigned
+   `'[Redacted]'` to the leaf, so `logger.info('x', { auth: user })` under `redact: ['auth.token']`
+   wrote `'[Redacted]'` into the application's own `user` object. The damage outlived the log call:
+   a later **unredacted** log of the same object emitted the placeholder, and anything persisting it
+   stored that literal string. That is application-data corruption rather than a redaction-design
+   gap, so it was repaired on a `fix/…` branch rather than held for this milestone; every object on
+   the way to a redacted leaf is now copied before the leaf is assigned. **This milestone therefore
+   no longer owns it**, and the shared implementation it builds must preserve the property — a
+   caller-mutation case is pinned in `console-logger.test.ts` and will fail if the rewrite
+   reintroduces it. The one half still open is the walk's early return on `Array.isArray(next)`, so
+   a path through an array silently redacts nothing; that was left deliberately, because pino
+   resolves an array element with bracket notation (`'users[*].token'`) and would equally not match
+   the dotted form, so descending on the console side alone would have made one option mean two
+   things depending on transport. It is finding 3's business, not a second defect.
 3. **The two loggers honour different syntaxes for the same option.** `ConsoleLogger` matches
    literal dot-path segments only (`console-logger.ts:182-196`), while `PinoLogger` forwards
    `redact` straight to pino (`pino-logger.ts:209-210`), which supports wildcards and array
@@ -10253,10 +10263,11 @@ that to per-parameter redaction, so a query string can be kept where the policy 
 - One `redaction` option each on `LoggerPluginOptions`, `TelemetryPluginOptions` and
   `AuditPluginOptions`. No new package, so the publishable set stays at **48** and no release-list,
   workspace or first-publish step is needed.
-- `logger-plugin`: one shared redaction implementation behind both loggers (fixing findings 2 and
-  3), the secret-pattern default (finding 4), and the service applied immediately after
-  `normalizeMetadata` — inside the concrete loggers rather than as a decorator around them, because
-  that file states the normalise-before-redact ordering is load-bearing.
+- `logger-plugin`: one shared redaction implementation behind both loggers (fixing finding 3, and
+  carrying forward the caller-mutation property finding 2's fix established), the secret-pattern
+  default (finding 4), and the service applied immediately after `normalizeMetadata` — inside the
+  concrete loggers rather than as a decorator around them, because that file states the
+  normalise-before-redact ordering is load-bearing.
 - `telemetry-plugin`: the `http.url` repair (finding 1) and classified span attributes.
 - `audit-plugin`: `before`/`after`/`metadata` through the service before the deep-freeze (finding
   5).
