@@ -815,7 +815,10 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     if (recorded === null) {
       return undefined;
     }
-    if (this.#runtime.hrtime() - recorded.at > this.#evidenceMs) {
+    // Strictly-within-the-window is authoritative — the same half-open
+    // interval the management probe's TTL uses, so the two signals age on
+    // one convention rather than disagreeing at the exact boundary.
+    if (this.#runtime.hrtime() - recorded.at >= this.#evidenceMs) {
       this.#evidence = null;
       return undefined;
     }

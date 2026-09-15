@@ -218,6 +218,32 @@ describe('DatabasePlugin reachability indicator mapping (M95b §3.5)', () => {
     expect('reachable' in (result.data as Record<string, unknown>)).toBe(false);
   });
 
+  it('(e2) a hostile Mongo facade whose db() throws connects without a probe (cleanup A)', async () => {
+    // Pre-cleanup-A, the probe build ran db() unguarded at connect(), so a
+    // hostile injected facade failed STARTUP for the probe's sake — where
+    // 0.6.0 connected fine. The adapter must report no probe instead.
+    const hostile = {
+      connect: () => Promise.resolve(),
+      close: () => Promise.resolve(),
+      db: () => {
+        throw new Error('hostile facade');
+      },
+      startSession: () => {
+        throw new Error('hostile facade');
+      },
+    };
+    const { ctx, indicators, services } = makeContext();
+    await DatabasePlugin({
+      type: 'mongodb',
+      options: { client: hostile as unknown as FakeMongoClient, database: 'test' },
+    }).register(ctx);
+    const service = services.get(CAPABILITIES.DATABASE) as { hasReachabilityProbe: boolean };
+    expect(service.hasReachabilityProbe).toBe(false);
+    const result = await indicatorFor(indicators);
+    expect(result.status).toBe('up');
+    expect('reachable' in (result.data as Record<string, unknown>)).toBe(false);
+  });
+
   it('(e) a Mongo adapter whose facade omits command() lands in (d), not a throw', async () => {
     // FakeMongoDatabase declares collection() only — no command? — so the
     // adapter assigns no probe and the indicator takes the no-change row.

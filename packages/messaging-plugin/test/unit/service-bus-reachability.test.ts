@@ -118,12 +118,14 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
     expect(await broker.reachability()).toBe(true);
     expect(probes).toBe(0);
 
-    // age === window: still authoritative.
-    manual.advance(10);
+    // age strictly within the window: authoritative (the same half-open
+    // interval the management probe's TTL uses, so both signals age on one
+    // convention — cleanup B).
+    manual.advance(9);
     expect(await broker.reachability()).toBe(true);
     expect(probes).toBe(0);
 
-    // age past the window: the probe owns the answer again.
+    // age === window: expired, the probe owns the answer again.
     manual.advance(1);
     expect(await broker.reachability()).toBeUndefined();
     expect(probes).toBe(1);

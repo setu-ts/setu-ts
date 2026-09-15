@@ -271,7 +271,13 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * its own, so its failure cannot touch `#channel`, and it is closed in a
    * `finally` — a leaked channel per poll would be its own defect. The
    * health indicator bounds this probe, so a broker that cannot answer
-   * leaves the endpoint at `unknown` instead of holding it open.
+   * leaves the endpoint at `unknown` instead of holding it open. One
+   * bounded-window cost is named rather than hidden: against a PAUSED
+   * broker the channel open itself never settles, so each abandoned poll
+   * leaves one pending open that the `finally` cannot yet run for; the
+   * pending opens settle and close on recovery (or with the connection at
+   * `disconnect()`), and amqplib buffers them, so the window is transient
+   * rather than a leak.
    *
    * @returns `true` when the broker answers a channel open, `false` when
    *   it is faulted, unconnected, or refuses the round trip

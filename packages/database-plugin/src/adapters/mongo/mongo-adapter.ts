@@ -185,7 +185,15 @@ export class MongoAdapter implements IDatabaseAdapter {
     if (client === null) {
       return undefined;
     }
-    const database = client.db(this.#resolveDatabaseName());
+    let database: import('./mongo-client-types.ts').IMongoDatabase;
+    try {
+      database = client.db(this.#resolveDatabaseName());
+    } catch {
+      // A hostile injected facade whose db() throws must not fail connect()
+      // for the probe's sake: connect() connected fine before M95b, and the
+      // adapter reports no probe rather than refusing to start.
+      return undefined;
+    }
     const command = database.command;
     if (typeof command !== 'function') {
       return undefined;
