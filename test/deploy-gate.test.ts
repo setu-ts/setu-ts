@@ -4,8 +4,10 @@ import {
   BUILD_MATRIX,
   type DriftReport,
   EXCLUDED_EXAMPLES,
+  generatedResources,
   isClean,
   missingTools,
+  nativeFilePath,
   parseModes,
   pathCandidates,
   renderDrift,
@@ -318,6 +320,49 @@ describe('skip contract', () => {
     }).output();
 
     expect(result.code).toBe(SKIP_EXIT_CODE);
+  });
+});
+
+describe('generated mode (M95a)', () => {
+  it('uses isolated Docker resources for each generated-deployment run', () => {
+    const first = generatedResources();
+    const second = generatedResources();
+
+    expect(first).not.toEqual(second);
+    expect(first.image).toMatch(/^setu\/generated-gate:m95a-[0-9a-f-]{36}$/);
+    expect(first.container).toMatch(/^setu-generated-gate-[0-9a-f-]{36}$/);
+  });
+
+  it('converts encoded file URLs to native CLI paths', () => {
+    // The gate runs its own CLI source through `deno run`. URL.pathname leaves `%20` encoded;
+    // converting through fromFileUrl keeps a checkout whose path contains spaces usable.
+    const path = nativeFilePath(new URL('file:///tmp/setu%20workspace/main.ts'));
+    expect(path).not.toContain('%20');
+    expect(path).toContain('setu workspace');
+    expect(path).toMatch(/main\.ts$/);
+  });
+
+  it('runs in the default set and is selectable by flag', () => {
+    // The scaffold-build-serve proof is the ONLY check that exercises what a
+    // user deploys, so it must not be an opt-in mode a routine run forgets.
+    expect(parseModes([]).generated).toBe(true);
+
+    const only = parseModes(['--generated']);
+    expect(only.generated).toBe(true);
+    expect(only.render).toBe(false);
+    expect(only.build).toBe(false);
+    expect(only.compose).toBe(false);
+    expect(only.cluster).toBe(false);
+  });
+
+  it('is absent from CI\u2019s only skip allowlist, so a dropped proof cannot read as a pass', async () => {
+    // The M37c lesson: an exemption is a one-word edit, and a bare grep cannot
+    // see its own allowlist grow. CI runs this gate (`deno task check:deploy`)
+    // with no skip allowance at all — a skip must surface as exit 77, never as
+    // a listed name.
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const allowSkip = /ALLOW_SKIP:\s*(.+)/.exec(workflow)?.[1] ?? '';
+    expect(allowSkip).not.toContain('generated');
   });
 });
 

@@ -1,7 +1,8 @@
 # Milestone 95a — CLI (`@setu-ts/cli`) + `docs/deployment.md`
 
-> **Status:** Planning. Branch: `feat/m95a-generated-deployment-start`. `main` is protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete — implemented and verified (commit `2de8b577`). Branch:
+> `feat/m95a-generated-deployment-start`. `main` is protected — all work (implementation + fixes)
+> stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 

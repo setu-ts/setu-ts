@@ -26,6 +26,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **A scaffolded workspace's generated deployment now starts under its own security posture.** A
+  `setu new --workspace` microservice, built with its own generated `docker/Dockerfile` and deployed
+  under its own generated Kubernetes manifest (`readOnlyRootFilesystem: true`), crash-looped before
+  serving anything: the first time `MessagingPlugin` registered, Deno tried to add its driver edges
+  (`npm:amqplib`, `npm:ioredis`) to `deno.lock` and died on the read-only root —
+  `error: Failed writing lockfile … Read-only file system (os error 30)`. The generated Deno `CMD`
+  now runs with `--no-lock`: every package the graph reaches is already in the build-time module
+  cache (the Dockerfile's `deno cache main.ts` step), so the lockfile has no job left inside an
+  image and the start resolves offline. No warm list is emitted — measured on a fresh scaffold, the
+  build-time cache already holds every package the runtime reaches, so a derived specifier list
+  would name packages that are already present. An existing workspace picks the fix up on its next
+  `setu generate app` (the file is regenerated, no migration step). `docs/deployment.md` documents
+  the finding, the `deno install --frozen` diagnostic the runtime error should have given you, and
+  the rule that the image's module cache is the member's only dependency source at runtime; and
+  `check:deploy` gains a `--generated` mode that scaffolds a workspace, builds its generated
+  Dockerfile — previously built by no gate — and passes only when the member serves `/health` under
+  `--read-only --network none`. Measured to discriminate: without the flag the new mode reproduces
+  the crash; with it the member serves.
 - **MVC form guidance now matches `IRequest.formData?()`.** The guide no longer says forms lack an
   accessor: all built-in request producers provide its memoized parser for URL-encoded and multipart
   bodies. Because custom `IRequest` implementations may omit the optional member, the copyable

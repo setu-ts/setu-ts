@@ -1,4 +1,6 @@
 // deno-lint-ignore-file no-console -- this CI script reports progress, drift and skips.
+import { fromFileUrl } from 'jsr:@std/path@^1.1.6';
+
 /**
  * @module
  *
@@ -6,13 +8,18 @@
  * still match the chart they are rendered from, the Compose model resolves, and — with a real
  * cluster — that the manifests actually deploy and serve.
  *
+ * Since M95a it also proves the deployment a USER gets: a workspace the CLI scaffolds is built
+ * with its own generated Dockerfile and must serve `/health` under the security posture the
+ * generated manifest sets — read-only root filesystem, no network.
+ *
  * Modes are separable so the fast structural checks stay usable on every run while the slow
  * cluster proof is opt-in locally and mandatory in CI:
  *
  * ```
- * deno task check:deploy                 # render + build + compose
+ * deno task check:deploy                 # render + build + compose + generated
  * deno task check:deploy --render        # rendered manifests match the chart
  * deno task check:deploy --cluster       # real kind apply + serve + RBAC
+ * deno task check:deploy --generated     # scaffold → build its image → serve it air-gapped
  * ```
  *
  * A mode whose tooling is absent exits with {@linkcode SKIP_EXIT_CODE} (77) — the same code
@@ -143,6 +150,12 @@ export interface ModeSet {
   readonly compose: boolean;
   readonly cluster: boolean;
   /**
+   * Scaffold a workspace with the CLI, build its GENERATED Dockerfile, and run the image under
+   * `--read-only --network none` until it serves `/health` (M95a). Every other mode proves this
+   * repository's own deployment objects; this is the only one that proves what a user deploys.
+   */
+  readonly generated: boolean;
+  /**
    * Render mode rewrites `k8s/manifests/` instead of failing on drift.
    *
    * One implementation serves both directions — the `scripts/generate-api-docs.ts` precedent —
@@ -169,6 +182,7 @@ const DEFAULT_MODES: ModeSet = {
   build: true,
   compose: true,
   cluster: false,
+  generated: true,
   write: false,
 };
 
@@ -177,6 +191,7 @@ const ALL_MODE_FLAGS = [
   '--build',
   '--compose',
   '--cluster',
+  '--generated',
   '--write',
 ] as const;
 
@@ -212,6 +227,7 @@ export function parseModes(args: readonly string[]): ModeSet {
     build: args.includes('--build'),
     compose: args.includes('--compose'),
     cluster: args.includes('--cluster'),
+    generated: args.includes('--generated'),
     write: args.includes('--write'),
   };
 }
@@ -312,11 +328,12 @@ async function onPath(tool: string): Promise<boolean> {
 
 async function run(
   command: readonly string[],
-  options: { readonly quiet?: boolean } = {},
+  options: { readonly quiet?: boolean; readonly cwd?: string } = {},
 ): Promise<{ success: boolean; stdout: string; stderr: string }> {
   const quiet = options.quiet === true;
   const output = await new Deno.Command(command[0], {
     args: [...command.slice(1)],
+    ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
     stdout: quiet ? 'piped' : 'inherit',
     stderr: quiet ? 'piped' : 'inherit',
   }).output();
@@ -463,6 +480,209 @@ async function checkCompose(): Promise<CheckOutcome> {
     if (!result.success) ok = false;
   }
   return ok ? 'passed' : 'failed';
+}
+
+/**
+ * Parameters of the generated-deployment proof, fixed rather than derived.
+ *
+ * Every value is a CONSTANT so two runs produce byte-identical scaffolds: Docker layers key on
+ * file content, so an identical `deno.json` turns the second run's build into cache hits instead
+ * of a second full jsr.io resolution. A different port or workspace name per run would be
+ * uncacheable by construction.
+ */
+const GENERATED_WORKSPACE = 'acme';
+const GENERATED_MEMBER = 'orders';
+const GENERATED_PORT = 3000;
+const GENERATED_IMAGE_PREFIX = 'setu/generated-gate:m95a';
+const GENERATED_CONTAINER_PREFIX = 'setu-generated-gate';
+const GENERATED_PROBE_ATTEMPTS = 120;
+const GENERATED_PROBE_INTERVAL_MS = 1_000;
+
+/**
+ * Converts a file URL into the native path `Deno.Command` expects.
+ *
+ * `URL.pathname` deliberately retains percent encoding, which makes a checkout path containing a
+ * space become a nonexistent `%20` path when it is passed to `deno run`.
+ *
+ * @param fileUrl - The source file URL
+ * @returns The decoded native filesystem path
+ */
+export function nativeFilePath(fileUrl: URL): string {
+  return fromFileUrl(fileUrl);
+}
+
+/** The CLI's executable entry (`main.ts` owns the process boundary), absolute: scaffold steps
+ * run with the WORKSPACE as their cwd. */
+const CLI_ENTRY = nativeFilePath(new URL('../packages/cli/src/main.ts', import.meta.url));
+
+/** Resources owned by one generated-deployment gate invocation. */
+export interface GeneratedResources {
+  /** Unique Docker image tag for this invocation. */
+  readonly image: string;
+  /** Unique Docker container name for this invocation. */
+  readonly container: string;
+}
+
+/**
+ * Gives a generated-deployment check Docker resources it alone owns.
+ *
+ * Parallel checks share a Docker daemon in CI and locally, so a fixed name lets one run delete
+ * another's container. Docker layer caching remains content-addressed even though the final tag
+ * is unique.
+ *
+ * @returns The image tag and container name for this invocation
+ */
+export function generatedResources(): GeneratedResources {
+  const suffix = crypto.randomUUID();
+  return {
+    image: `${GENERATED_IMAGE_PREFIX}-${suffix}`,
+    container: `${GENERATED_CONTAINER_PREFIX}-${suffix}`,
+  };
+}
+
+/**
+ * Proves the deployment a user actually gets, which until M95a nothing did.
+ *
+ * Every other mode exercises this repository's own `docker/` and `k8s/`; the files a scaffolded
+ * workspace deploys with were generated, managed, and never once built by a gate. This mode
+ * scaffolds a real workspace with the real CLI, builds its generated Dockerfile, and runs the
+ * image under the posture the generated Kubernetes manifest sets — `readOnlyRootFilesystem: true`
+ * with exactly one writable path (`/tmp`, mirrored here as a tmpfs) — and no network, which is
+ * an air-gapped cluster's reachability. Success is a SERVED `/health` response, not a live
+ * process: the failure this closes kills the process at import, but a warm-list regression
+ * could equally leave it running and unable to serve, and a gate that watched only for an exit
+ * would call that a pass.
+ *
+ * The probe runs INSIDE the container because `--network none` leaves no interface a host
+ * poll could reach; the container that dies at import is caught by its state check, and its
+ * logs are printed before the failure is reported.
+ *
+ * @returns The outcome of the generated-deployment check
+ */
+async function checkGenerated(): Promise<CheckOutcome> {
+  console.log('\n▸ generated: a scaffolded workspace serves under its own security posture');
+
+  if (!(await onPath('docker'))) {
+    console.log('  SKIP — missing tool(s): docker');
+    return 'skipped';
+  }
+
+  const workspace = await Deno.makeTempDir({ prefix: 'setu-generated-' });
+  const root = `${workspace}/${GENERATED_WORKSPACE}`;
+  const resources = generatedResources();
+  try {
+    // Scaffold exactly what a user gets, with the real CLI as a subprocess. Scaffolding writes
+    // files and resolves nothing: the framework packages resolve later, inside the image build —
+    // the same order a user's first `docker build` sees.
+    const cli = (args: readonly string[]) =>
+      run([Deno.execPath(), 'run', '-A', CLI_ENTRY, ...args], { quiet: true, cwd: workspace });
+    const created = await cli([
+      'new',
+      GENERATED_WORKSPACE,
+      '--workspace',
+      '--port',
+      String(GENERATED_PORT),
+    ]);
+    const member = await cli([
+      'g',
+      'app',
+      GENERATED_MEMBER,
+      '--template',
+      'microservice',
+      '--dir',
+      root,
+    ]);
+    if (!created.success || !member.success) {
+      console.error('  ✗ scaffolding the workspace failed');
+      if (!created.success) console.error(created.stderr);
+      if (!member.success) console.error(member.stderr);
+      return 'failed';
+    }
+
+    // The GENERATED Dockerfile, not this repository's own — the defect lives in what `setu`
+    // emits. Framework resolution from jsr.io happens here, on the build's network; the run
+    // below is the part that must not need one.
+    console.log('  building the generated image (jsr.io resolution happens here) …');
+    const built = await run([
+      'docker',
+      'build',
+      '--quiet',
+      '-f',
+      `${root}/docker/Dockerfile`,
+      '--build-arg',
+      `MEMBER=${GENERATED_MEMBER}`,
+      '-t',
+      resources.image,
+      root,
+    ], { quiet: true });
+    if (!built.success) {
+      console.error('  ✗ the generated Dockerfile failed to build');
+      console.error(built.stderr);
+      return 'failed';
+    }
+
+    // Deliberately WITHOUT --rm: a container that crash-loops at import is the failure this
+    // gate exists to catch, and its logs — the only record of which specifier Deno tried to
+    // record — must survive until they are read below. `resources.container` is unique to this
+    // invocation, so cleanup can never remove a concurrent check's container.
+    const started = await run([
+      'docker',
+      'run',
+      '-d',
+      '--name',
+      resources.container,
+      '--read-only',
+      '--network',
+      'none',
+      '--tmpfs',
+      '/tmp',
+      resources.image,
+    ], { quiet: true });
+    if (!started.success) {
+      console.error('  ✗ the image did not start');
+      console.error(started.stderr);
+      return 'failed';
+    }
+
+    let served = false;
+    for (let attempt = 0; attempt < GENERATED_PROBE_ATTEMPTS; attempt += 1) {
+      const probe = await run([
+        'docker',
+        'exec',
+        resources.container,
+        'wget',
+        '-q',
+        '-O',
+        '/dev/null',
+        `http://127.0.0.1:${GENERATED_PORT}/health`,
+      ], { quiet: true });
+      if (probe.success) {
+        served = true;
+        break;
+      }
+      // A container that exited is the defect, caught early: read its logs instead of polling
+      // a corpse for the remaining attempts.
+      const state = await run(
+        ['docker', 'inspect', '-f', '{{.State.Running}}', resources.container],
+        { quiet: true },
+      );
+      if (state.stdout.trim() !== 'true') break;
+      await new Promise((resolve) => setTimeout(resolve, GENERATED_PROBE_INTERVAL_MS));
+    }
+
+    const logs = await run(['docker', 'logs', resources.container], { quiet: true });
+    if (!served) {
+      console.error('  ✗ the member never served /health under --read-only --network none');
+      console.error(logs.stdout + logs.stderr);
+      return 'failed';
+    }
+    console.log('  ✓ served /health under --read-only --network none');
+    return 'passed';
+  } finally {
+    await run(['docker', 'rm', '-f', resources.container], { quiet: true });
+    await run(['docker', 'image', 'rm', '-f', resources.image], { quiet: true });
+    await Deno.remove(workspace, { recursive: true });
+  }
 }
 
 const MANIFEST_DIR = 'k8s/manifests';
@@ -687,6 +907,7 @@ async function main(): Promise<void> {
   if (modes.render) results.push(await checkRender(modes.write));
   if (modes.build) results.push(await checkBuild());
   if (modes.compose) results.push(await checkCompose());
+  if (modes.generated) results.push(await checkGenerated());
   if (modes.cluster) results.push(await checkCluster());
 
   if (results.includes('failed')) {

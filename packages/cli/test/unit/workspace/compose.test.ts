@@ -117,6 +117,36 @@ describe('workspaceContainerFiles', () => {
     it('copies every shared library, tolerating a workspace with none', () => {
       expect(dockerfile()).toContain('COPY lib[s] ./libs/');
     });
+
+    // M95a: under the generated manifest's `readOnlyRootFilesystem: true`, the
+    // first runtime code path whose lockfile edge is missing tries to WRITE it
+    // and the container dies before serving — measured on this machine, from a
+    // workspace this very file's output built: `Failed writing lockfile` /
+    // `os error 30` on `/srv/deno.lock`. Every package the graph reaches is
+    // already in the build-time cache, so the runtime needs the lockfile for
+    // nothing and the flag removes the write instead of the crash.
+    it('starts with --no-lock, so the read-only root cannot crash the start', () => {
+      expect(dockerfile()).toContain('"run", "--no-lock"');
+    });
+
+    // Considered and rejected (plan §3.5), then MEASURED: with a cold cache and
+    // a read-only root, a runtime fetch fails identically with and without
+    // egress — fetched packages have nowhere to persist. --cached-only would
+    // change the error message and nothing else, so its absence is pinned to
+    // make any later "harden the CMD" edit read this record first.
+    it('does not carry --cached-only, which could not work under a read-only root', () => {
+      expect(dockerfile()).not.toContain('--cached-only');
+    });
+
+    // The comment rewrite (plan §2 C2): the guarantee above the build step now
+    // names BOTH halves — no network, no lockfile write — and cites the gate
+    // that proves them, so the promise is checkable prose. The strings below
+    // exist only in comments; the flag itself is asserted by the first test.
+    it('states the no-network, no-lockfile-write guarantee the generated gate proves', () => {
+      const contents = dockerfile();
+      expect(contents).toContain('--read-only --network none');
+      expect(contents).toContain('check:deploy --generated');
+    });
   });
 
   describe('the ignore file', () => {
@@ -319,6 +349,18 @@ describe('workspaceContainerFiles', () => {
       expect(contents).toContain('RUN bun install');
       expect(contents).toContain('USER 1000:1000');
       expect(contents).toContain('CMD ["sh", "-c", "bun run main.ts"]');
+    });
+
+    // R7 (plan §1): this arm resolves through node_modules and writes no
+    // deno.lock, so it cannot reach the read-only lockfile crash. The Deno-arm
+    // flags are pinned ABSENT so a copy-paste cannot spread them to an arm
+    // where they are noise.
+    it('carries neither Deno-arm runtime flag', () => {
+      for (const runtime of ['node', 'bun'] as const) {
+        const contents = dockerfileFor(runtime);
+        expect(contents).not.toContain('--no-lock');
+        expect(contents).not.toContain('--cached-only');
+      }
     });
   });
 });
