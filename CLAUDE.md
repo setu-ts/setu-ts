@@ -4861,10 +4861,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `deno install --frozen` diagnostic; the ROADMAP's static-graph mechanism paragraph is corrected to
   the measured one) — complete
 
-- **Next milestone** — **M95b** (`packages/messaging-plugin` — reachability that fails open: with
-  the Service Bus broker stopped, `/health` says `up` and `/ready` answers `200` while every
-  `publish` throws. Carries a design decision for the maintainer rather than a mechanical fix;
-  M95c's three contract-fidelity rows follow.)
+- **Next milestone** — **M95b** (`packages/database-plugin` + `packages/messaging-plugin` —
+  reachability that fails open, and now the milestone's **second High**. Three rows, one mechanism:
+  a lifecycle or fault flag reported as liveness. With the Service Bus broker stopped, `/health`
+  says `up` and `/ready` answers `200` while every `publish` throws; `DatabaseService.isHealthy()`
+  returns the lifecycle `adapter.isReady()`, so a stopped database reports `up`, `/ready` stays
+  `200`, and every request that touches data answers `500` — the probe the CLI's own generated k8s
+  manifests point at; and `RabbitMqBroker.isHealthy()` reads a fault flag, so a HUNG broker reports
+  `reachable: true` while a stopped one is reported correctly. Carries a design decision for the
+  maintainer rather than a mechanical fix.)
+
+- **Then M95c and M95d** — the rest of the `v0.6.0` closeout, which now covers **two** runs against
+  that version: the regression run (5 findings) and **Part 11, X46–X51** (8 more), the exercise
+  block built for the seven milestones between `v0.5.0` and `v0.6.0` because the regression run had
+  driven M91–M94c at probe level only. The two sets are folded together **by defect shape rather
+  than by run**, which is why no `M96` was opened — X51-1/X51-2 are M95b's mechanism on other
+  packages and X47-1/X50-1 are M95c's title on other packages, so a separate milestone would have
+  put two of them on one shape. **M95d is new** (documentation that survives contact, the M90h
+  precedent) and is the only letter carrying gate work — a URL-scheme payload for
+  `check-example-behaviour.ts`, and a `@since`-vs-shipping-version check, which nothing does today.)
 
 - **Also open** — **M40** (final polish and release: integration testing across all plugins,
   performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the
