@@ -9,6 +9,7 @@ import type {
 } from '@setu-ts/common';
 import {
   CAPABILITIES,
+  createCachedProbe,
   createCapabilityToken,
   PLUGIN_PRIORITY,
   resolveRegistryEntry,
@@ -50,6 +51,12 @@ import denoJson from '../../deno.json' with { type: 'json' };
 function createNamedToken(name: string): string {
   return createCapabilityToken(`messaging.${name}`);
 }
+
+/** Reachability-probe cache lifetime at the indicator (M95b §3.6), in ms. */
+const INDICATOR_PROBE_TTL_MS = 5000;
+
+/** Per-probe timeout at the indicator (M95b §3.6), in ms. */
+const INDICATOR_PROBE_TIMEOUT_MS = 2000;
 
 /**
  * Creates a capability token for a named messaging plugin.
@@ -420,11 +427,32 @@ export function MessagingPlugin(
       // under us". An unprobeable broker (custom arm without `isHealthy`) is
       // `up` with `data.reachable: 'unknown'`, honestly reporting "we did not
       // check".
+      // M95b §3.6: the indicator bounds EVERY arm's probe through the same
+      // `createCachedProbe` the Service Bus broker builds internally (5 s
+      // TTL, 2 s bound, `undefined` fallback). Before this, the indicator
+      // awaited `broker.reachability()` directly — an unbounded direct
+      // await — so a probe that never settled, the condition a HUNG backend
+      // (docker pause) produces and a stopped one never does, held `/health`
+      // and `/ready` open indefinitely. A probe exceeding the bound now
+      // reports `reachable: 'unknown'` instead of hanging the endpoint; no
+      // arm's success or failure mapping changes. Built ONCE at registration
+      // (§14: hoist per-request work), so polling shares one cache.
+      const boundedReachability = createCachedProbe<boolean | undefined>({
+        probe: () => broker.reachability(),
+        // A probe that times out or rejects has told us nothing, not that
+        // the backend is gone — the V5-2 rule at the indicator too.
+        fallback: undefined,
+        ttlMs: INDICATOR_PROBE_TTL_MS,
+        timeoutMs: INDICATOR_PROBE_TIMEOUT_MS,
+        hrtime: ctx.runtime.hrtime.bind(ctx.runtime),
+        setTimer: (fn, ms) => ctx.runtime.setTimeout(fn, ms),
+        clearTimer: (handle) => ctx.runtime.clearTimeout(handle),
+      });
       const healthIndicator: HealthIndicatorFn = async () => {
         if (!broker.isReady()) {
           return { status: 'down', data: { broker: brokerType, reachable: false } };
         }
-        const reachable = await broker.reachability();
+        const reachable = await boundedReachability();
         if (reachable === false) {
           return { status: 'down', data: { broker: brokerType, reachable: false } };
         }

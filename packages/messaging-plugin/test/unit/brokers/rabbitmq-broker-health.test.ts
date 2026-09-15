@@ -64,10 +64,16 @@ interface FakeAmqp {
   fire: (event: string) => void;
   /** Number of consume() calls across all channels (replay re-subscribes). */
   consumeCount: () => number;
+  /** Number of createChannel() calls on the CONNECTION (M95b §3.6 probe counting). */
+  channelOpens: () => number;
+  /** Number of channel close() calls (the probe must close every channel it opens). */
+  channelCloses: () => number;
 }
 
 function makeAmqp(): FakeAmqp {
   let consumeCalls = 0;
+  let openCalls = 0;
+  let closeCalls = 0;
   const listeners = new Map<string, Array<(err?: unknown) => void>>();
 
   const makeChannel = () => ({
@@ -82,10 +88,18 @@ function makeAmqp(): FakeAmqp {
     nack: () => {},
     cancel: () => Promise.resolve(),
     deleteQueue: () => Promise.resolve(),
+    publish: () => true,
+    close: () => {
+      closeCalls++;
+      return Promise.resolve();
+    },
   });
 
   const client = {
-    createChannel: () => Promise.resolve(makeChannel()),
+    createChannel: () => {
+      openCalls++;
+      return Promise.resolve(makeChannel());
+    },
     close: () => Promise.resolve(),
     on: (event: string, listener: (err?: unknown) => void) => {
       const arr = listeners.get(event) ?? [];
@@ -109,6 +123,8 @@ function makeAmqp(): FakeAmqp {
       }
     },
     consumeCount: () => consumeCalls,
+    channelOpens: () => openCalls,
+    channelCloses: () => closeCalls,
   };
 }
 
@@ -117,9 +133,11 @@ describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
     const { client } = makeAmqp();
     const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
     expect(broker.isReady()).toBe(false);
-    // No fault has occurred, so the probe is true; the indicator maps the
-    // not-started lifecycle to down via isReady.
-    expect(await broker.reachability()).toBe(true);
+    // M95b §3.6: with no open connection there is nothing to round-trip, so
+    // the probe says false. The indicator still gates on isReady() first, so
+    // the observable not-started report is unchanged: down either way.
+    expect(await broker.reachability()).toBe(false);
+    expect(await broker.isHealthy()).toBe(false);
   });
 
   it('reports up while connected with no fault', async () => {
@@ -297,5 +315,79 @@ describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
     await expect(broker.connect()).rejects.toThrow(
       'Injected AMQP client does not match the required structural shape',
     );
+  });
+
+  describe('the probe is a real round trip (M95b §3.6)', () => {
+    it('opens a channel, answers true, and closes the throwaway channel', async () => {
+      const { client, channelOpens, channelCloses } = makeAmqp();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+      await broker.connect();
+
+      const opensBefore = channelOpens();
+      expect(await broker.reachability()).toBe(true);
+      // The probe is the round trip — one open per poll...
+      expect(channelOpens()).toBe(opensBefore + 1);
+      // ...and the finally closed the channel it opened. A leaked channel
+      // per poll would be its own defect.
+      expect(channelCloses()).toBe(1);
+    });
+
+    it('the faulted short-circuit answers false with NO round trip', async () => {
+      const { client, fire, channelOpens } = makeAmqp();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+      await broker.connect();
+      fire('close');
+      const opensBefore = channelOpens();
+      expect(await broker.reachability()).toBe(false);
+      expect(await broker.isHealthy()).toBe(false);
+      // The fault window is a positively known outage: probing through a
+      // dying connection would only burn it.
+      expect(channelOpens()).toBe(opensBefore);
+    });
+
+    it('answers false with no open connection and no round trip', async () => {
+      const { client, channelOpens } = makeAmqp();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+      expect(await broker.reachability()).toBe(false);
+      expect(channelOpens()).toBe(0);
+    });
+
+    it('answers false when the broker refuses the channel', async () => {
+      const { client } = makeAmqp();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+      await broker.connect();
+      (client as unknown as { createChannel: () => Promise<unknown> }).createChannel = () =>
+        Promise.reject(new Error('CHANNEL_ERROR - refused'));
+      expect(await broker.reachability()).toBe(false);
+      expect(await broker.isHealthy()).toBe(false);
+    });
+
+    it('answers false when the throwaway channel refuses to close', async () => {
+      const { client } = makeAmqp();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+      await broker.connect();
+      (client as unknown as { createChannel: () => Promise<unknown> }).createChannel = () =>
+        Promise.resolve({
+          assertExchange: () => Promise.resolve(),
+          close: () => Promise.reject(new Error('close failed')),
+        });
+      // The finally close rejects, the rejection escapes the inner try, and
+      // the outer catch answers false: a channel that cannot be released is
+      // not a proven-healthy broker.
+      expect(await broker.reachability()).toBe(false);
+    });
+
+    it('health polls never touch the shared channel: publish still works after N polls', async () => {
+      const { client } = makeAmqp();
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+      await broker.connect();
+
+      for (let i = 0; i < 5; i++) {
+        expect(await broker.reachability()).toBe(true);
+      }
+      // The probe's channel is its own; if any poll had touched (or leaked a
+      // fault into) #channel, the publish below would fail.
+      await broker.publish('orders.created', { id: 1 });
+    });
   });
 });

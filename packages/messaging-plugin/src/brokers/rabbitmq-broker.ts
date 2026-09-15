@@ -52,6 +52,17 @@ export function validateClient(client: unknown): client is IAmqpConnection {
 }
 
 /**
+ * Structural check for the one member the reachability probe needs off a
+ * fresh channel (M95b §3.6): `close(): Promise<void>`. The probe closes its
+ * throwaway channel through this check rather than a cast, and a channel
+ * without it is skipped rather than forced.
+ */
+function isCloseableChannel(value: unknown): value is { close(): Promise<void> } {
+  return typeof value === 'object' && value !== null &&
+    typeof (value as { close?: unknown }).close === 'function';
+}
+
+/**
  * Resolve the AMQP connection: prefer injected client, then lazy-load amqplib.
  *
  * @param url - RabbitMQ connection URL
@@ -243,31 +254,64 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Tri-state backend reachability (M70c).
+   * Backend reachability (M70c; a real round trip since M95b §3.6).
    *
    * `false` while the supervisor is in a fault window (the connection
-   * dropped and the drive-mode reconnect has not yet succeeded); `true`
-   * otherwise. This reads the fault flag directly — it is a zero-cost,
-   * always-current value, so caching it (as the I/O probes do) would make the
-   * signal stale exactly when it matters.
+   * dropped and the drive-mode reconnect has not yet succeeded) — that
+   * short-circuit performs no round trip — and `false` with no open
+   * connection. Otherwise the probe opens a THROWAWAY channel and closes
+   * it: the real round trip a fault flag could not provide. The M70c probe
+   * was `Promise.resolve(!this.#supervisor.faulted)` — a flag read, which
+   * a HUNG broker never trips (a paused broker keeps its socket; only a
+   * stopped one drops it), so a paused broker reported `reachable: true`
+   * while no AMQP handshake could complete. The round trip needs no queue
+   * and no exchange: `connect()` declares an EXCHANGE only, and a passive
+   * queue declare would raise a channel exception that closes the SHARED
+   * channel every publish and subscription uses. The probe's channel is
+   * its own, so its failure cannot touch `#channel`, and it is closed in a
+   * `finally` — a leaked channel per poll would be its own defect. The
+   * health indicator bounds this probe, so a broker that cannot answer
+   * leaves the endpoint at `unknown` instead of holding it open.
    *
-   * @returns `true` when reachable, `false` when the broker is in a fault
-   *   window
+   * @returns `true` when the broker answers a channel open, `false` when
+   *   it is faulted, unconnected, or refuses the round trip
    * @since 0.1.0
    */
-  reachability(): Promise<boolean> {
-    return Promise.resolve(!this.#supervisor.faulted);
+  async reachability(): Promise<boolean> {
+    // Short-circuit, no round trip: a fault window is a positively known
+    // outage, and probing through a dying connection would only burn it.
+    if (this.#supervisor.faulted) {
+      return false;
+    }
+    const connection = this.#connection;
+    if (connection === null) {
+      return false;
+    }
+    try {
+      const channel = await connection.createChannel();
+      try {
+        return true;
+      } finally {
+        if (isCloseableChannel(channel)) {
+          await channel.close();
+        }
+      }
+    } catch {
+      // The round trip failed: a stopped broker fails it outright, and a
+      // hung one is left to the indicator's bound.
+      return false;
+    }
   }
 
   /**
    * Boolean port member (M70c): `false` only when positively unreachable.
    *
-   * @returns `true` when reachable or unprobeable, `false` when the broker
-   *   is in a fault window
+   * @returns `true` when the broker answers the probe, `false` when it is
+   *   faulted, unconnected, or refuses it
    * @since 0.1.0
    */
-  isHealthy(): Promise<boolean> {
-    return Promise.resolve(!this.#supervisor.faulted);
+  async isHealthy(): Promise<boolean> {
+    return await this.reachability();
   }
 
   /**
