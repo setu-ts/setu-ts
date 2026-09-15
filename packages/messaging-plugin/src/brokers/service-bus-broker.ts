@@ -260,8 +260,13 @@ const NAMESPACE_ANSWERED_STATUSES: ReadonlySet<number> = new Set([401, 403]);
  * Reporting `down` for either shape drains a replica whose data plane is
  * publishing 200s — that is V5-2, and the 429 arm is the same defect reached
  * through a status code instead of a socket error. A namespace that is
- * genuinely gone still reports `down`: the data client stops being ready, and
- * the indicator checks `isReady()` before it ever consults this probe.
+ * genuinely gone is NOT caught here, and `isReady()` does not catch it
+ * either: that member is LIFECYCLE state — set when `connect()` succeeds,
+ * cleared only by `disconnect()` — with no liveness input, so a namespace
+ * dead for minutes still answers `isReady() === true` in 0 ms (the claimed
+ * gate does not exist; corrected M95b). What catches a dead data plane is
+ * the broker's data-plane evidence window: a recent publish failure resolves
+ * `reachability()` `false`, which the indicator maps to `down`.
  *
  * @param error - The caught probe error
  * @returns `true` reachable, `false` positively absent, `undefined` unknown

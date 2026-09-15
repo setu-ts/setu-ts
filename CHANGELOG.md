@@ -84,6 +84,17 @@ All notable changes to this project are documented here. The format follows
   One shared `fenceExtension(lang)` now decides, so the guide and package-README compilers cannot
   disagree. Verified to discriminate: breaking the props bag inside a JSX example fails the gate
   with `TS1241`, which is `@Render` rejecting a handler whose return does not match its component.
+- **`messaging-plugin` — the `v0.6.0` release notes claimed a safety net that does not exist; both
+  copies of the claim are corrected in place.** The `0.6.0` section above (and the probe's own
+  JSDoc) said a namespace that is genuinely gone "still reports `down` regardless: the data client
+  stops being ready, and the indicator checks `isReady()` before it consults the probe." Measured
+  against the emulator `docs/messaging-emulators.md` documents: `isReady()` is LIFECYCLE state — set
+  when `connect()` succeeds, cleared only by `disconnect()` — with no liveness input, so a broker
+  dead for minutes answers `isReady() === true` in 0 ms; nothing gated the probe, and a stopped
+  namespace reported `up` with `/ready` answering `200` while every publish threw. This milestone
+  ships what actually catches a dead data plane — the broker records recent data-plane outcomes and
+  `reachability()` consults that evidence before the management probe (M95b) — and the false
+  sentence is struck from the published section and the source.
 
 ## [0.6.0] — 2026-09-13
 
@@ -349,9 +360,13 @@ All notable changes to this project are documented here. The format follows
   at all, and a management-plane status that establishes nothing — a `429`, which Azure documents as
   temporary throttling or a conflicting management operation, or a `5xx`. Those last two previously
   answered `down`, which is the same defect as the network-failure case reached through a status
-  code instead of a socket error. A namespace that is genuinely gone still reports `down`
-  regardless: the data client stops being ready, and the indicator checks `isReady()` before it
-  consults the probe. `IServiceBusTransport.isHealthy?` widens to `Promise<boolean | undefined>`; an
+  code instead of a socket error. (This entry originally continued: "A namespace that is genuinely
+  gone still reports `down` regardless: the data client stops being ready, and the indicator checks
+  `isReady()` before it consults the probe." That sentence was measurably false and is corrected in
+  place: `isReady()` is LIFECYCLE state — set when `connect()` succeeds, cleared only by
+  `disconnect()` — with no liveness input, so it answers `true` in 0 ms for a broker dead for
+  minutes. A genuinely-gone namespace is caught by the data-plane evidence window (M95b), not by
+  `isReady()`.) `IServiceBusTransport.isHealthy?` widens to `Promise<boolean | undefined>`; an
   implementation resolving a plain `boolean` satisfies it unchanged.
 
 - **`audit-plugin`** — the `audit` health indicator reported `storage.isReady()` alone, which is a
