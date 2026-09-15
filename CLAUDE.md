@@ -4858,9 +4858,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   list is emitted. `check:deploy` gains `--generated`: scaffold → build the GENERATED Dockerfile →
   pass only on a served `/health` under `--read-only --network none` — the first gate anywhere that
   builds what a user deploys. `docs/deployment.md` documents the finding and the
-  `deno
-  install --frozen` diagnostic; the ROADMAP's static-graph mechanism paragraph is corrected
-  to the measured one) — complete
+  `deno install --frozen` diagnostic; the ROADMAP's static-graph mechanism paragraph is corrected to
+  the measured one) — complete
 
 - **Next milestone** — **M95b** (`packages/messaging-plugin` — reachability that fails open: with
   the Service Bus broker stopped, `/health` says `up` and `/ready` answers `200` while every

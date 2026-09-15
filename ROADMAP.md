@@ -9754,8 +9754,7 @@ fails outright in an air-gapped cluster. Both halves are required.
 **Deliverables, as landed.** (1) `setu` emits `--no-lock` in the generated Deno `CMD`, and no warm
 list: D1 measured that the build-time cache already holds every package the runtime reaches, so a
 derived specifier list would name packages that are already present. (2) Documented in
-`docs/deployment.md` beside the read-only-root guidance, with the `deno install
---frozen`
+`docs/deployment.md` beside the read-only-root guidance, with the `deno install --frozen`
 diagnostic, because the runtime error points at the wrong thing. (3) An open question for the
 maintainer, not a deliverable: whether a lazy import should need a lockfile write at all when the
 package is already in `DENO_DIR`.
