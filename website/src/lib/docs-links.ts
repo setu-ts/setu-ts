@@ -173,6 +173,34 @@ export function extractDescription(html: string): string | undefined {
   return text.length <= 160 ? text : `${text.slice(0, 159)}…`;
 }
 
+/** A navigable heading from a rendered documentation page. */
+export interface TableOfContentsItem {
+  id: string;
+  level: 2 | 3;
+  title: string;
+}
+
+/**
+ * Extract the section headings that form the in-page navigation. Markdown headings
+ * receive stable IDs from Astro's renderer, so no alternate slugging algorithm is
+ * introduced here.
+ */
+export function extractTableOfContents(html: string): TableOfContentsItem[] {
+  const items: TableOfContentsItem[] = [];
+  const headingPattern = /<h([23])\b([^>]*)>([\s\S]*?)<\/h\1>/gi;
+
+  for (const match of html.matchAll(headingPattern)) {
+    const id = /\bid="([^"]+)"/i.exec(match[2])?.[1];
+    const title = extractText(match[3]).replace(/\s+/g, ' ').trim();
+    if (!id || title === '') {
+      continue;
+    }
+    items.push({ id, level: Number(match[1]) as 2 | 3, title });
+  }
+
+  return items;
+}
+
 /**
  * Join `rel` onto the rooted `base` and POSIX-normalize the result (collapsing `.`
  * and `..` segments), always returning a path with a leading slash. Overshooting the

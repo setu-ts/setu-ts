@@ -1,0 +1,32 @@
+---
+import { DOCS_NAV } from '../lib/docs-nav';
+
+interface Props {
+  currentPath: string;
+}
+
+const { currentPath } = Astro.props;
+---
+
+<nav class="docs-navigation" aria-label="Documentation">
+  <h2><a href="/docs/">Documentation</a></h2>
+  {
+    DOCS_NAV.map((group) => (
+      <>
+        <h2>{group.label}</h2>
+        <ul>
+          {group.items.map((item) => (
+            <li>
+              <a
+                href={`/docs/${item.slug}/`}
+                aria-current={currentPath === `/docs/${item.slug}` ? 'page' : undefined}
+              >
+                {item.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </>
+    ))
+  }
+</nav>

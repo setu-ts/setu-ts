@@ -25,7 +25,62 @@ const repoRoot = path.dirname(websiteRoot);
 const dist = path.join(websiteRoot, 'dist');
 const generatedApiDocs = path.join(repoRoot, 'docs', 'api');
 const apiTarget = path.join(dist, 'api');
+const apiHeaderStyles = `<style id="setu-api-header-styles">
+  #topnav .contextLink {
+    align-items: center;
+    display: inline-flex;
+    flex-shrink: 0;
+    gap: 0.45rem;
+    white-space: nowrap;
+  }
 
+  #topnav .contextLink img {
+    display: block;
+    height: 1.35rem;
+    width: 1.35rem;
+  }
+
+  @media (max-width: 30rem) {
+    #topnav .h-full {
+      gap: 0.5rem;
+      min-width: 0;
+    }
+
+    #topnav .contextLink {
+      font-size: 0.85rem;
+    }
+
+    #topnav .breadcrumbs {
+      flex-wrap: nowrap;
+      min-width: 0;
+      word-break: normal;
+    }
+
+    #topnav > .h-full > .flex:first-child,
+    #topnav .breadcrumbs > li:first-child {
+      flex: 0 0 auto;
+    }
+
+    #topnav > .h-full > .flex:last-child {
+      flex: 1 1 auto;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+
+    #topnav #searchbar {
+      flex: 1 1 auto;
+      min-width: 0;
+      width: 100%;
+    }
+  }
+</style>`;
+
+/**
+ * Checks whether a file-system path is available without surfacing a missing-path error.
+ *
+ * @param {string} target - Absolute path to probe.
+ * @returns {Promise<boolean>} Whether the path exists and can be accessed.
+ */
 async function exists(target) {
   try {
     await access(target);
@@ -54,24 +109,31 @@ async function integrateApiHtml(directory) {
     // a canonical page, which this function processes separately.
     if (source.includes('<meta http-equiv="refresh"')) continue;
 
-    const withHomeLink = source.replace(
+    const withBrandHeader = source.replace(
       /<a href="[^"]*" class="contextLink">Setu-TS<\/a>/,
-      '<a href="/" class="contextLink">Setu-TS home</a>',
+      '<a href="/" class="contextLink"><img src="/setu-ts-favicon-64.png" alt="" width="22" height="22"><span>Setu-TS</span></a>',
     );
-    if (withHomeLink === source) {
+    if (withBrandHeader === source) {
       throw new Error(
         `graft: API page ${target} has no expected context link.`,
       );
     }
-    const integrated = withHomeLink.replace(
+    const withContentBoundary = withBrandHeader.replace(
       '<div id="content">',
       '<div id="content" data-pagefind-body>',
     );
 
-    if (integrated === withHomeLink) {
+    if (withContentBoundary === withBrandHeader) {
       throw new Error(
         `graft: API page ${target} has no expected content container.`,
       );
+    }
+    const integrated = withContentBoundary.replace(
+      '</head>',
+      `${apiHeaderStyles}</head>`,
+    );
+    if (integrated === withContentBoundary) {
+      throw new Error(`graft: API page ${target} has no closing head tag.`);
     }
     await writeFile(target, integrated);
   }

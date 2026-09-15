@@ -2,7 +2,7 @@
   "ci": {
     "collect": {
       "staticDistDir": "./dist",
-      "numberOfRuns": 1,
+      "numberOfRuns": 3,
       "url": [
         "http://localhost/",
         "http://localhost/docs/getting-started/",
