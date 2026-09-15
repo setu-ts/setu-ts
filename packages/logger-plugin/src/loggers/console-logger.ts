@@ -156,10 +156,21 @@ export class ConsoleLogger implements ILogger {
   }
 
   /**
-   * Returns a shallow-cloned record with redacted paths replaced by
-   * `'[Redacted]'`. Supports dot-paths into nested objects.
+   * Returns a copy of `data` with redacted paths replaced by `'[Redacted]'`.
+   * Supports dot-paths into nested objects.
    *
-   * @param data - The record to redact
+   * The caller's metadata is never written to, at any depth: every object on
+   * the way to a redacted leaf is replaced by a copy this method owns before
+   * the leaf is assigned (see {@linkcode ConsoleLogger.#redactPath}).
+   *
+   * A path segment that reaches an array stops the walk, so `'users.token'`
+   * redacts nothing when `users` is an array. That is a deliberate limit
+   * rather than an oversight: pino resolves an array element with bracket
+   * notation (`'users[*].token'`) and would equally not match the dotted
+   * form, so descending here would make one option mean two different things
+   * depending on the configured transport.
+   *
+   * @param data - The record to redact (never mutated)
    * @returns A redacted copy
    */
   #redactFields(data: Record<string, unknown>): Record<string, unknown> {
@@ -174,9 +185,19 @@ export class ConsoleLogger implements ILogger {
   }
 
   /**
-   * Redacts a single dot-path within `target`, mutating it in place.
+   * Redacts a single dot-path within `target`, mutating `target` in place.
    *
-   * @param target - The record to mutate
+   * `target` is a copy this logger owns, but its nested values are still the
+   * CALLER's objects — `#redactFields` shallow-clones, and `normalizeMetadata`
+   * before it does too. Descending into one and assigning the leaf would write
+   * `'[Redacted]'` into the application's own object, so every intermediate
+   * object is replaced by a copy before the walk continues into it.
+   *
+   * The clone is unconditional rather than deferred until the leaf is known to
+   * exist: the surplus copy is confined to this method's own output, whereas
+   * deciding first would mean walking the path twice.
+   *
+   * @param target - The record to mutate (owned by this logger)
    * @param path - Dot-separated path (e.g. `'auth.token'`)
    */
   #redactPath(target: Record<string, unknown>, path: string): void {
@@ -188,7 +209,9 @@ export class ConsoleLogger implements ILogger {
       if (typeof next !== 'object' || next === null || Array.isArray(next)) {
         return;
       }
-      current = next as Record<string, unknown>;
+      const owned: Record<string, unknown> = { ...next as Record<string, unknown> };
+      current[segment] = owned;
+      current = owned;
     }
     const leaf = segments[segments.length - 1]!;
     if (leaf in current) {
