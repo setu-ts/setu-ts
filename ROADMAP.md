@@ -10127,8 +10127,8 @@ nothing).
 
 ## Milestone 96: Redaction — One Seam for Every Egress Path
 
-**Package(s):** `packages/common`, `packages/redaction-plugin` (new), `packages/logger-plugin`,
-`packages/telemetry-plugin`, `packages/audit-plugin`
+**Package(s):** `packages/common`, `packages/logger-plugin`, `packages/telemetry-plugin`,
+`packages/audit-plugin`
 
 **Objective:** Give the framework one answer to "where does sensitive data leave this process, and
 what happens to it on the way out". Three first-party components export application data to
@@ -10198,24 +10198,33 @@ is correct and stays that way. The gap is not vocabulary; it is that the three e
   **request** targets, while every leak above is on the **response** side, where nothing is
   validated at all. The policy is therefore declared against field paths, independent of any
   validator.
-- **`optionalDependencies` is a real topological edge, so ordering needs no priority games.**
-  `kernel/src/registry/plugin-resolver.ts:49-53` pushes an edge for every optional token with a
-  registered provider, so a consumer declaring `CAPABILITIES.REDACTION` is ordered after the plugin
-  providing it. `RedactionPlugin` declares no optional dependency of its own — in particular not on
-  the logger — so no cycle is possible. That is the M90i trap avoided by construction:
-  `LoggerPlugin` already appears in `TelemetryPlugin`'s optional set, and a second edge back would
-  have made every application registering both fail at `start()`.
+- **A capability token would have had nothing to resolve it, and the precedent cited for one was
+  wrong.** An earlier draft shipped a `@setu-ts/redaction-plugin` providing a
+  `CAPABILITIES.REDACTION` token, "the M47 `realtime-backplane-plugin` shape exactly". It is not
+  that shape: `realtime-backplane-plugin.ts:60-107` has `async register`,
+  `await
+  backplane.connect()`, a health indicator and an `onClose` — real resources — while
+  redaction is a pure synchronous transform whose implementation must live in `common` anyway, since
+  three plugins consume it and §2.2 forbids plugin-to-plugin imports. The package would therefore
+  have contained no implementation at all, and its only purpose — making the service resolvable by
+  name — has no consumer: the three exporters can be handed it, and an application already holds the
+  POLICY, which is the source of truth. The true precedent is M90a's `createPathMatcher`, a pure
+  function in `common` adopted directly by four call sites with no plugin and no token. The service
+  therefore arrives through one `redaction` option on each consumer's existing plugin options, and
+  the decision is reversible in the direction that matters: adding a token later is additive, while
+  deleting a published package is not, because JSR versions are immutable.
 
 ### The design
 
-**One port, one policy, one implementation.** `common` gains `CAPABILITIES.REDACTION`, the
+**One port, one policy, one implementation, and no new package.** `common` gains the
 `IRedactionService` port, the `DataClassification` and `RedactionPolicy` vocabulary, a compiled
-field-path matcher, and the two built-in redactors — all pure, in the `createPathMatcher` (M90a) and
-`parseFormBody` (M94b) tradition of pure utilities living in `common` so packages that may not
-import each other still agree byte-for-byte. The new `@setu-ts/redaction-plugin` registers the
-service under the token; it is the M47 `realtime-backplane-plugin` shape exactly — a small package
-providing one token that existing plugins resolve **optionally**, so an application that does not
-register it sees behaviour identical to today.
+field-path matcher, the two built-in redactors and the `createRedactionService` factory — all pure,
+in the `createPathMatcher` (M90a) and `parseFormBody` (M94b) tradition of pure utilities living in
+`common` so packages that may not import each other still agree byte-for-byte. Each of the three
+exporters gains one optional `redaction?: RedactionPolicy | IRedactionService` member on its
+existing options; an application builds the policy once and passes the same value to the plugins it
+wants covered. **No capability token and no registration**, so there is no plugin-ordering question
+to get wrong, and an application that supplies nothing sees behaviour identical to today.
 
 **A classification names an intent, not a mechanism.** `'pii'`, `'phi'`, `'pci'` and `'secret'` ship
 as constants and an application may declare its own; each maps to a `Redactor`, so the same field
@@ -10231,19 +10240,19 @@ field named `password` that used to appear in logs now reads `[Redacted]` — an
 restores the previous behaviour exactly.
 
 **The `http.url` repair is independent of the port**, because a defect fix may not require opting
-in: with no redaction service registered the attribute carries the origin and path and drops the
-query string outright, matching what `http.route` beside it already does. A registered service
-upgrades that to per-parameter redaction, so a query string can be kept where the policy says it is
-safe.
+in: with no `redaction` option supplied the attribute carries the origin and path and drops the
+query string outright, matching what `http.route` beside it already does. Supplying one upgrades
+that to per-parameter redaction, so a query string can be kept where the policy says it is safe.
 
 ### Deliverables
 
-- `common`: `CAPABILITIES.REDACTION`, `IRedactionService`, `Redactor`, `DataClassification`,
-  `DATA_CLASSIFICATIONS`, `RedactionPolicy`, `createFieldMatcher`, `redactRecord`, `eraseRedactor`,
-  `maskRedactor`.
-- `packages/redaction-plugin` (new): `RedactionPlugin`, `RedactionService`, README, workspace
-  member, `scripts/release-packages.ts` Tier 2 entry — and, because it publishes for the first time,
-  the `release:create-packages` / `release:link-repos` step in `docs/releasing.md`.
+- `common`: `IRedactionService`, `createRedactionService`, `Redactor`, `RedactionContext`,
+  `RedactionPolicy`, `DataClassification`, `DATA_CLASSIFICATIONS`, `DEFAULT_SECRET_FIELD_PATTERNS`,
+  `eraseRedactor`, `createMaskRedactor`. `CAPABILITIES` gains nothing, and `common` is the only
+  barrel that changes.
+- One `redaction` option each on `LoggerPluginOptions`, `TelemetryPluginOptions` and
+  `AuditPluginOptions`. No new package, so the publishable set stays at **48** and no release-list,
+  workspace or first-publish step is needed.
 - `logger-plugin`: one shared redaction implementation behind both loggers (fixing findings 2 and
   3), the secret-pattern default (finding 4), and the service applied immediately after
   `normalizeMetadata` — inside the concrete loggers rather than as a decorator around them, because
@@ -10251,9 +10260,9 @@ safe.
 - `telemetry-plugin`: the `http.url` repair (finding 1) and classified span attributes.
 - `audit-plugin`: `before`/`after`/`metadata` through the service before the deep-freeze (finding
   5).
-- Docs: `ARCHITECTURE.md` §8 package node and §14 Plugin Responsibilities row plus the Secure
-  Defaults correction, a `PUBLIC_API.md` section, `docs/telemetry-collector-fanout.md` amended to
-  say what now reaches the collector, and CHANGELOG migration text for both breaking changes.
+- Docs: `ARCHITECTURE.md` §14 Plugin Responsibilities rows plus the Secure Defaults correction, a
+  `PUBLIC_API.md` section, `docs/telemetry-collector-fanout.md` amended to say what now reaches the
+  collector, and CHANGELOG migration text for both breaking changes.
 
 ### Out of scope
 
@@ -10429,4 +10438,4 @@ safe.
 | 95b       | ⬜     | common + database-plugin + messaging-plugin — reachability that fails open (**High**)                                  |
 | 95c       | ⬜     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
 | 95d       | ⬜     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
-| 96        | ⬜     | common + redaction-plugin + logger/telemetry/audit — one seam for every egress path                                    |
+| 96        | ⬜     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
