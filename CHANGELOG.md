@@ -34,6 +34,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`ConsoleLogger` no longer writes `'[Redacted]'` into the application's own objects.** A nested
+  redact path corrupted the caller's data: `#redactFields` shallow-clones the metadata record, so
+  `logger.info('login', { auth: user })` under `redact: ['auth.token']` walked into `user` — still
+  the application's own object — and assigned the placeholder to its `token`. The damage outlived
+  the log call and was silent: a later **unredacted** log of the same object emitted `'[Redacted]'`,
+  and anything persisting it afterwards stored that literal string. Only paths of two or more
+  segments were affected; a top-level path was already safe, because the shallow clone stood between
+  the walk and the caller. Every object on the way to a redacted leaf is now replaced by a copy the
+  logger owns before the leaf is assigned, so the emitted entry is byte-identical and the caller's
+  metadata is untouched at any depth. The existing nested-path tests could not have caught this —
+  each built its metadata inline, so nothing held a reference to read back; the regression cases
+  keep the object a caller would have kept, and four of the five fail without the fix. A path
+  through an ARRAY still redacts nothing and that is unchanged and now documented rather than
+  silent: pino resolves an array element with bracket notation (`'users[*].token'`) and would
+  equally not match the dotted form, so descending would make one option behave differently per
+  transport. Unifying the two syntaxes belongs to the redaction seam milestone, not to this fix.
+
 - **A scaffolded workspace's generated deployment now starts under its own security posture.** A
   `setu new --workspace` microservice, built with its own generated `docker/Dockerfile` and deployed
   under its own generated Kubernetes manifest (`readOnlyRootFilesystem: true`), crash-looped before
