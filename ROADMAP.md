@@ -10245,9 +10245,9 @@ safe.
   member, `scripts/release-packages.ts` Tier 2 entry — and, because it publishes for the first time,
   the `release:create-packages` / `release:link-repos` step in `docs/releasing.md`.
 - `logger-plugin`: one shared redaction implementation behind both loggers (fixing findings 2 and
-  3), the secret-pattern default (finding 4), and a `RedactingLogger` decorator that consults the
-  service — decorating `child()` too, which is the M90i lesson about the framework's own request
-  logger calling it.
+  3), the secret-pattern default (finding 4), and the service applied immediately after
+  `normalizeMetadata` — inside the concrete loggers rather than as a decorator around them, because
+  that file states the normalise-before-redact ordering is load-bearing.
 - `telemetry-plugin`: the `http.url` repair (finding 1) and classified span attributes.
 - `audit-plugin`: `before`/`after`/`metadata` through the service before the deep-freeze (finding
   5).
