@@ -193,14 +193,26 @@ kbd {
     height: 2.4rem;
     margin-left: auto;
     cursor: pointer;
-    border: 1px solid var(--border);
-    border-radius: 0.5rem;
-    background: var(--bg);
-    color: var(--fg);
+    --pf-background: var(--bg);
+    --pf-border: var(--border);
+    --pf-border-focus: var(--accent);
+    --pf-input-height: 2.4rem;
+    --pf-text-muted: var(--fg);
+    --pf-border-radius: 0.5rem;
   }
 
   .mobile-search-toggle:hover {
-    background: var(--bg-soft);
+    --pf-background: var(--bg-soft);
+  }
+
+  .mobile-search-toggle .pf-trigger-btn {
+    justify-content: center !important;
+    padding: 0 !important;
+  }
+
+  .mobile-search-toggle .pf-trigger-icon {
+    width: 1rem !important;
+    height: 1rem !important;
   }
 
   .mobile-navigation {
