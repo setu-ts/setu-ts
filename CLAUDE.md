@@ -4868,8 +4868,47 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   bounded-everywhere messaging indicator, the RabbitMQ round-trip probe, and the database adapter
   probes that stop `/ready` lying — gated by a real Mongo outage suite (`/ready` 200 → 503 → 200
   through a real `docker stop`/`start`), the real-emulator Service Bus 2×2, and the real RabbitMQ 4
-  hung arm; plan negative controls 1–5 and 4b each observed failing and reverted) — complete (PR
-  pending)
+  hung arm; plan negative controls 1–5 and 4b each observed failing and reverted.
+
+  **Code review then found eight defects that all four gates, both publish gates and the per-file
+  bar had passed, and the headline one is the letter's own fix reaching a package nobody checked.**
+  §3.6 put the RabbitMQ bound at the messaging indicator "because that is where the finding's blast
+  radius sits"; it is not. `realtime-backplane-plugin`'s `'messaging'` transport calls
+  `broker.isHealthy()` DIRECTLY and documents at `messaging-backplane.ts:76` that it deliberately
+  keeps no cache — "it retains the resolved broker's own probe cache" — which held only while that
+  probe was a flag read. Measured through a real kernel app with an injected AMQP client: three
+  `/health` polls inside one 5 s TTL cost **+3 channel opens** (the messaging indicator costs 0),
+  and against a never-settling `createChannel` — the `docker pause` shape X51-2 exists for —
+  `/health` took **5002 ms** and that indicator reported `down`/`timeout`, taking `/ready` to 503
+  for a fan-out failure `realtime-backplane-plugin.ts:89` says is `degraded` at worst. Both were
+  unreachable before this letter. The cache and the bound moved INTO `RabbitMqBroker` (the
+  `ServiceBusBroker` precedent), which fixes both at once for every caller and makes the backplane's
+  documented assumption true again: measured **+0** opens and **2001 ms / `up`**. `reachability()`
+  widens to the committed `boolean | undefined` tri-state and `isHealthy()` reports "not known down"
+  for an unanswerable probe, matching `ServiceBusBroker` exactly.
+
+  Also: **two of the four shipped probes had no test at all** — `PrismaAdapter.isHealthy` and
+  `DrizzleAdapter.#probeWithRawQuery` were wholly uncovered and `adapter-reachability.test.ts`
+  mentioned neither adapter, though the plan's §6 table commits both rows; that is why
+  `drizzle-adapter.ts` sat at exactly **90.2 % function** with no margin (now 94.1).
+  **`dataPlaneEvidenceMs` was unvalidated and failed open** — `NaN`, which `Number(env.X)` yields
+  for an unset variable, froze the window so evidence never aged out (probed: `reachability()` still
+  `true` at t = 24 h after one boot-time publish), and `0`/negative disabled it, the switch §4.1
+  says must not exist; it is refused at construction now (the M90a precedent). **The indicator had
+  dropped the lifecycle read** for probe-carrying adapters and `MemoryAdapter.isHealthy()` answered
+  `true` unconditionally, so a disconnected adapter reported `up`/200 while `service.isHealthy()`
+  answered `false` — the gate is back and the memory probe reports its own lifecycle.
+  `reachability()` rejected rather than resolving `undefined` for a synchronously-throwing probe
+  (the M52b/M52c/M70j class, on a barrel-exported member). The Mongo outage suite cleared its
+  `stopped` flag while the container was still down, so a failure in the next three assertions
+  stranded `he-mongo` for every later suite — contradicting its own comment. **`deno task lint` was
+  already RED at the branch's HEAD**: both M95b-added outage files carried an unused `no-console`
+  ignore. And the ROADMAP section carried **24 lines duplicated byte-for-byte** (the M51
+  GraphQL-section-twice class) while its `Package(s)` line omitted `common`, contradicting both its
+  own progress row and the plan's §3.5 commitment. Six negative controls were each observed failing
+  and reverted, and the first is the instructive one: reverting the broker cache fails the
+  round-trip count with 3-vs-2 AND leaves the hung test **never settling**, which is the defect
+  itself) — complete (PR pending)
 
 - **Next milestone** — **M95c** (`packages/common` + `packages/database-plugin` +
   `packages/kernel` + `packages/session-plugin` + `packages/static-plugin` — a contract its own
