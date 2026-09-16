@@ -124,7 +124,7 @@ describe('the cacheControl callback receives the full request path (R13)', () =>
     expect(h.received.at(-1)).toBe('/index.html');
   });
 
-  it('never receives the literal "/" — a directory delivers its index (R14)', async () => {
+  it('for a directory root, never receives the literal "/" — the index is resolved (R14)', async () => {
     for (const urlPrefix of ['/assets', '/']) {
       const h = harness(urlPrefix);
       await serve(h, urlPrefix);
@@ -133,5 +133,40 @@ describe('the cacheControl callback receives the full request path (R13)', () =>
       expect(h.received.length).toBe(3);
       expect(h.received).not.toContain('/');
     }
+  });
+
+  it('the one exception: a root pointing at a FILE does deliver "/" — outside root\'s contract', async () => {
+    // R14's guarantee is scoped to a directory `root`, which is what the option
+    // documents. With a file, `stat(root).isFile` skips the directory branch
+    // and `callbackPath('/')` is handed through verbatim. Pinned so the three
+    // doc sites read as scoped rather than absolute, and so a later change that
+    // makes this unreachable is a deliberate one.
+    const received: string[] = [];
+    const fs = {
+      realPath: (path: string) => Promise.resolve(path),
+      readFile: () => Promise.resolve(encoder.encode('<html></html>')),
+      stat: (path: string) =>
+        path === '/root/only.html'
+          ? Promise.resolve({ isFile: true, isDirectory: false, size: 13 })
+          : Promise.reject(new Error('ENOENT')),
+      writeFile: () => Promise.resolve(),
+      mkdir: () => Promise.resolve(),
+      readdir: () => Promise.resolve([]),
+      rm: () => Promise.resolve(),
+    };
+    const handler = createStaticHandler({
+      // deno-lint-ignore no-explicit-any
+      fs: fs as any,
+      root: '/root/only.html',
+      urlPrefix: '/',
+      index: 'index.html',
+      cacheControl: (requestPath) => {
+        received.push(requestPath);
+        return 'public, max-age=60';
+      },
+    }) as RouteHandler;
+
+    await serve({ handler, received }, '/');
+    expect(received).toEqual(['/']);
   });
 });

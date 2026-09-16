@@ -654,11 +654,12 @@ class Application implements IKernelApplication {
     // than throwing out of `inject()` here.
     let raw: Request | undefined;
     try {
-      // `BodyInit`'s BufferSource is ArrayBuffer-backed — a SharedArrayBuffer
-      // view is not a legal Request body — so the bytes get a plain
-      // ArrayBuffer-backed view here. `inject()` is an in-process test entry
-      // point and the pre-M95c path re-encoded the body on every call, so the
-      // copy is not a regression.
+      // A second copy, deliberately: `coerceInjectBody` already returned bytes
+      // the caller cannot alias, and this keeps `ctx.request.raw`'s body
+      // independent of the array `bytes()` hands the handler, so a handler that
+      // mutates what it read cannot change what `raw` reports. `inject()` is an
+      // in-process test entry point and the pre-M95c path re-encoded the body
+      // on every call, so the copy is not a regression.
       const requestBody = bodyBytes === undefined ? undefined : new Uint8Array(bodyBytes);
       raw = new Request(fullUrl, {
         method: request.method,

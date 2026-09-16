@@ -42,10 +42,12 @@ export interface CoercedInjectBody {
 /**
  * Coerces an injected body to the bytes the synthetic request carries.
  *
- * Bytes pass through unchanged, a `Blob` is awaited to bytes, a
- * `URLSearchParams` is serialised with its own `toString()`, and only a plain
- * object reaches `JSON.stringify` — an array, a `Date`, a class instance or
- * any other shape rejects with a `TypeError` naming the received type.
+ * Bytes pass through with their exact contents — copied, never aliased to the
+ * caller's `Uint8Array` or `ArrayBuffer`, since `bytes()` hands the result
+ * straight to the handler — a `Blob` is awaited to bytes, a `URLSearchParams`
+ * is serialised with its own `toString()`, and only a plain object reaches
+ * `JSON.stringify`. An array, a `Date`, a class instance or any other shape
+ * rejects with a `TypeError` naming the received type.
  *
  * @param body - The caller-supplied body, if any
  * @returns The coerced bytes and the content-type default for the shape
@@ -68,10 +70,18 @@ export async function coerceInjectBody(
     };
   }
   if (body instanceof Uint8Array) {
-    return { bytes: body, defaultContentType: undefined };
+    // A COPY, not the caller's array. `bytes()` hands this straight to the
+    // handler, so aliasing would let a handler that mutates the body it read
+    // corrupt the fixture the test passed in — and a fixture reused across two
+    // injected requests would carry the first request's mutation into the
+    // second. `slice()` also guarantees a plain ArrayBuffer-backed view, which
+    // `BodyInit` requires and a SharedArrayBuffer-backed argument would not be.
+    return { bytes: body.slice(), defaultContentType: undefined };
   }
   if (body instanceof ArrayBuffer) {
-    return { bytes: new Uint8Array(body), defaultContentType: undefined };
+    // `new Uint8Array(buffer)` is a VIEW over the caller's buffer, not a copy —
+    // same aliasing hazard as above, one indirection further out.
+    return { bytes: new Uint8Array(body.slice(0)), defaultContentType: undefined };
   }
   if (body instanceof Blob) {
     return { bytes: new Uint8Array(await body.arrayBuffer()), defaultContentType: undefined };

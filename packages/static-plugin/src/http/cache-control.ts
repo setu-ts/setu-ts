@@ -53,9 +53,13 @@ export type CacheControlOptions = {
    * policy is about the URL the client caches under, so the served path is the
    * input, never the prefix-stripped server path and never the absolute
    * filesystem path. A directory request delivers its resolved index path
-   * (`/index.html` under a root mount), so the callback NEVER receives the
-   * literal `'/'`. It is never the `.br`/`.gz` sidecar path either, so a
-   * hashed asset keeps its policy whichever encoding is negotiated.
+   * (`/index.html` under a root mount), so for a `root` that is a directory —
+   * what `root` documents — the callback never receives the literal `'/'`.
+   * (Point `root` at a FILE instead and a request for the mount root does
+   * deliver `'/'`; that configuration is outside the option's contract and is
+   * noted so the guarantee reads as scoped rather than absolute.) It is never
+   * the `.br`/`.gz` sidecar path either, so a hashed asset keeps its policy
+   * whichever encoding is negotiated.
    */
   cacheControl?: string | ((requestPath: string) => string) | undefined;
 };

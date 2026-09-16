@@ -45,13 +45,13 @@ All notable changes to this project are documented here. The format follows
   whose header cannot parse — is DROPPED, matching the platform, where the previous code promoted it
   to a real field literally named `unknown` that collided with a legitimate field of that name; the
   sentinel is removed outright, so a nameless part and a field named `unknown` are distinguishable
-  again. `name=""` (a quoted EMPTY value) is a defined name and is KEPT, as an empty-named field /
-  empty filename — the web standard's file-versus-text discriminator depends on it. **Migration:**
-  an application reading a form field named `unknown` was reading parts no correct client sends (the
-  platform discards them); read the part's real name now, or accept that malformed parts are
-  dropped. An unquoted `NAME=x` uppercase part is now delivered where Deno's own
-  `Response.formData()` drops it — the runtimes disagree on this row, and delivering is the side
-  that loses no data; the full normative table is pinned by
+  again. An EMPTY value in either spelling — `name=""` or `name=` — is a defined name and is KEPT,
+  as an empty-named field / empty filename: the web standard's file-versus-text discriminator is the
+  PRESENCE of `filename`, not its truthiness. **Migration:** an application reading a form field
+  named `unknown` was reading parts no correct client sends (the platform discards them); read the
+  part's real name now, or accept that malformed parts are dropped. An unquoted `NAME=x` uppercase
+  part is now delivered where Deno's own `Response.formData()` drops it — the runtimes disagree on
+  this row, and delivering is the side that loses no data; the full normative table is pinned by
   `packages/common/test/unit/form/multipart-platform-parity.test.ts`.
 - **`csrfTokenField(ctx)` now renders the plugin's configured `csrf.fieldName` by default**, not
   always `'_csrf'`. The `csrfFormMiddleware` publishes its resolved configuration into `ctx.state`
@@ -71,14 +71,16 @@ All notable changes to this project are documented here. The format follows
   byte-ish shapes pass through verbatim with NO content-type default (only the caller knows whether
   bytes are multipart, JSON, or an image), a `URLSearchParams` is serialised with its own
   `toString()` and defaults `application/x-www-form-urlencoded`, and a plain object (JSON) and a
-  bare string keep the `application/json` default. Previously a `Uint8Array` arrived as
-  `{"0":97,…}`, an `ArrayBuffer`/`Blob`/`URLSearchParams` each arrived as the two bytes `{}`, and
-  the same release named `inject()` a producer of `IRequest.formData?()` — so an injected multipart
-  upload parsed as an empty form. **Migration:** TypeScript callers are compile-checked. A
-  JavaScript caller passing an array, `Date`, class instance or number must convert first: arrays
-  and plain data to a plain object, `Date` to a string or number, binary data to `Uint8Array`.
-  Per-shape bytes and content-type defaults are pinned by
-  `packages/kernel/test/unit/inject-body-shapes.test.ts`.
+  bare string keep the `application/json` default. A byte body is COPIED rather than aliased, so a
+  handler that mutates what `ctx.request.bytes()` returned cannot corrupt the
+  `Uint8Array`/`ArrayBuffer` the test passed in, and a fixture reused across two injected requests
+  carries none of the first request's mutation. Previously a `Uint8Array` arrived as `{"0":97,…}`,
+  an `ArrayBuffer`/`Blob`/`URLSearchParams` each arrived as the two bytes `{}`, and the same release
+  named `inject()` a producer of `IRequest.formData?()` — so an injected multipart upload parsed as
+  an empty form. **Migration:** TypeScript callers are compile-checked. A JavaScript caller passing
+  an array, `Date`, class instance or number must convert first: arrays and plain data to a plain
+  object, `Date` to a string or number, binary data to `Uint8Array`. Per-shape bytes and
+  content-type defaults are pinned by `packages/kernel/test/unit/inject-body-shapes.test.ts`.
 
 - **BREAKING (for out-of-repo adapter implementors) — `@setu-ts/common` +
   `@setu-ts/database-plugin`: `IDatabaseAdapter` gains the optional `isHealthy?(): Promise<boolean>`
@@ -131,6 +133,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`@setu-ts/static-plugin`: the `cacheControl` callback's documented input matches what it
+  receives, and the published option says so.** The callback has always been handed the FULL
+  leading-slash request path INCLUDING `urlPrefix` (`/assets/app-A9acsx54.js`), deliberately — a
+  cache policy is about the URL the client caches under. Three doc sites described it as the
+  "root-relative path" and named the parameter `relativePath`, and the README's own worked example
+  branched on `path === '/'`, which a directory request can never deliver because the index is
+  resolved first. The behaviour is unchanged (stripping the prefix would silently change what every
+  existing callback matches, AI_GUIDELINES §9.4); the parameter is renamed `requestPath` everywhere
+  it is declared — including the barrel-exported `StaticPluginOptions`, which is the spelling a
+  consumer's editor shows — the three doc sites are corrected, and the dead example branch is
+  replaced. The exact string delivered for each mount shape is pinned by
+  `packages/static-plugin/test/unit/cache-control-path.test.ts`, including the one configuration
+  that does deliver a bare `'/'` (a `root` pointing at a file rather than a directory, outside what
+  `root` documents), so the guarantee reads as scoped rather than absolute.
 - **The Mongo injection seam admits the real `mongodb` driver.** X47-1: `PUBLIC_API.md` presented
   `IMongoClient` as the seam a real `MongoClient` is supplied through and claimed the driver
   implements its structural shapes — false, so the documented arm needed the cast this repository

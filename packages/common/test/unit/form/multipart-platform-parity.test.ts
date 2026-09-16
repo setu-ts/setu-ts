@@ -109,6 +109,35 @@ describe('multipart Content-Disposition — the §3.4 normative table', () => {
     expect(parts[0].name).toBe('ok');
   });
 
+  it('an UNQUOTED empty value is a defined empty name too, not an absent one', () => {
+    // The kept-empty rule is about the value being DEFINED, not about the
+    // quoting: `name=` and `name=""` are the same field. A bare `name` token
+    // with no `=` at all carries no value and is absent, so its part drops.
+    expect(parse(['form-data; name=']).map((p) => p.name)).toEqual(['']);
+    expect(parse(['form-data; name'])).toEqual([]);
+  });
+
+  it('filename="" keeps the part a FILE — the web discriminator is presence, not truthiness', () => {
+    // An empty file input sends `filename=""`; a truthiness test here would
+    // demote it to a text field, which is the discriminator `FormBody` and the
+    // upload middleware both read.
+    const parts = parse(['form-data; name="f"; filename=""']);
+    expect(parts.length).toBe(1);
+    expect(parts[0].filename).toBe('');
+  });
+
+  it('an unterminated quote ends the scan, so a later parameter is NOT invented', () => {
+    // Everything after the opening quote is inside a string that never closes,
+    // so the `name=real` below is quoted text rather than a parameter. Reading
+    // it would deliver a field the client never sent under that name; the part
+    // drops instead, like any disposition the parser cannot read.
+    expect(parse(['form-data; filename="x; name=real'])).toEqual([]);
+    expect(parse(['form-data; name="a; filename=b.txt'])).toEqual([]);
+    // A sibling with a readable disposition is untouched.
+    const mixed = parse(['form-data; name="ok"', 'form-data; name="a; filename=b']);
+    expect(mixed.map((p) => p.name)).toEqual(['ok']);
+  });
+
   it('a quoted value keeps its exact bytes, including semicolons', () => {
     const boundary = 'm95c-quoted';
     const body = bodyWith(['form-data; name="a;b"'], boundary);

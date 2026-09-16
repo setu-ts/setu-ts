@@ -99,7 +99,9 @@ it. Under a root mount the prefix is empty, so the whole request path is the sto
 `/app-A9acsx54.js` and `/index.html`. It is never the prefix-stripped server path, never the
 absolute filesystem path, and never the `.br`/`.gz` sidecar path, so a hashed asset keeps its policy
 whichever encoding is negotiated. The prefix inclusion is deliberate: a cache policy is about the
-URL the client caches under, so the served path is the input.
+URL the client caches under, so the served path is the input. (The one way to see a bare `'/'` is to
+point `root` at a FILE rather than a directory, which is outside what `root` documents; with a
+directory the index is always resolved first.)
 
 ## SPA Fallback
 

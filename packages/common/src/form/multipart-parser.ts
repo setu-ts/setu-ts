@@ -18,8 +18,8 @@ export interface ParsedPart {
    * either its quoted (`name="…"`) or unquoted (`name=x`) form — the parameter
    * NAME is matched case-insensitively. A part whose Content-Disposition
    * carries no `name` parameter at all is DROPPED by {@linkcode parseMultipart}
-   * rather than renamed; `name=""` (a quoted empty value) is a defined name and
-   * is kept.
+   * rather than renamed; an EMPTY value in either spelling — `name=""` or
+   * `name=` — is a defined (empty) name and is kept.
    */
   readonly name: string;
   /**
@@ -103,8 +103,9 @@ export function parseMultipart(
     // platform discards a nameless part; the previous `'unknown'` sentinel was
     // a REAL field name, so a nameless part collided with a legitimate
     // `unknown` field and a part whose header failed to parse was
-    // indistinguishable from a field of that name. `name=""` is a defined
-    // (empty) name and is kept; only an ABSENT `name` parameter drops.
+    // indistinguishable from a field of that name. An EMPTY value in either
+    // spelling (`name=""` or `name=`) is a defined name and is kept; only an
+    // ABSENT `name` parameter drops.
     if (headers.name !== undefined) {
       // Omit `filename` when absent (exactOptionalPropertyTypes forbids `undefined`).
       parts.push(
@@ -207,11 +208,13 @@ function parseHeaders(block: Uint8Array): { name?: string; mime?: string; filena
  * an uppercase `NAME=x` part, Node delivers it — this parser delivers, the
  * side that loses no data (M95c §3.4).
  *
- * A quoted empty value is a DEFINED empty string: `name=""` is a legitimate
+ * An empty value is a DEFINED empty string in EITHER spelling — quoted
+ * `name=""` and unquoted `name=` both yield `''` — so `name=` is a legitimate
  * empty-named field and `filename=""` is the empty file input the web
  * standard's file-versus-text discriminator depends on. An ABSENT parameter
  * yields `undefined`, which is what makes {@linkcode parseMultipart} drop a
- * part rather than rename it.
+ * part rather than rename it; a parameter with no `=` at all (a bare `name`
+ * token) is absent by that rule.
  *
  * @param value - The header value after the colon
  * @param parameter - The parameter name to read, lower-case
@@ -240,8 +243,13 @@ function dispositionParameter(value: string, parameter: string): string | undefi
     if (value[index] === '"') {
       const closing = value.indexOf('"', index + 1);
       if (closing === -1) {
-        // Unterminated quote: no usable value for THIS parameter; skip the
-        // remainder rather than aborting the remaining parameters.
+        // An unterminated quote makes the REST of the header unparseable, not
+        // just this parameter: everything after the opening quote is inside a
+        // string that never closes, so a `;` beyond it separates nothing and a
+        // later `name=` is quoted text rather than a parameter. Scanning on
+        // would invent parameters the client did not send. Ending the scan
+        // yields `undefined`, which for `name` makes `parseMultipart` drop the
+        // part — the same answer it gives any disposition it cannot read.
         index = length;
         continue;
       }

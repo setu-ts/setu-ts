@@ -10041,15 +10041,16 @@ cast is removed. (2) `inject()` carries bytes verbatim (no content-type default)
 through its own serialisation (urlencoded default), and JSON only for a plain object — anything else
 is refused by name, the runtime half pinning what the type-level union cannot enforce on a
 JavaScript caller. (3) `csrfFormMiddleware` publishes its resolved config under the exported
-`CSRF_CONFIG_STATE_KEY` before its short-circuits, and `csrfTokenField` reads it: explicit argument
-
-> published config > `'_csrf'`, with the no-middleware fallback byte-identical. (4) The parser
-> accepts the unquoted, case-insensitive parameter form (R9 semantics), drops a part with no usable
-> name, keeps `name=""`, and the `unknown` sentinel is gone; the §3.4 table is asserted against
-> LITERALS because R18 measured the runtimes disagreeing on three of six rows. (5) The callback
-> parameter is renamed `requestPath`, the three doc sites corrected to the deliberate full-path
-> behaviour, and the dead `'/'` README example replaced. All five negative controls (§6) were each
-> observed failing and reverted; both corrected READMEs are covered by the existing fence compiler.
+`CSRF_CONFIG_STATE_KEY` before its short-circuits, and `csrfTokenField` reads it, with an explicit
+argument beating the published config, which beats `'_csrf'`, and the no-middleware fallback
+byte-identical. (4) The parser accepts the unquoted, case-insensitive parameter form (R9 semantics),
+drops a part with no usable name, keeps an empty value in either spelling, and the `unknown`
+sentinel is gone; the §3.4 table is asserted against LITERALS because R18 measured the runtimes
+disagreeing on three of six rows. (5) The callback parameter is renamed `requestPath` everywhere it
+is declared — including the barrel-exported `StaticPluginOptions`, which is the spelling a consumer
+sees — and the three doc sites corrected to the deliberate full-path behaviour, with the dead `'/'`
+README example replaced. All five negative controls (§6) were each observed failing and reverted;
+both corrected READMEs are covered by the existing fence compiler.
 
 ### Milestone 95d: Documentation That Survives Contact
 

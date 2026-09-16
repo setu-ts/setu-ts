@@ -11667,17 +11667,17 @@ app.register(StaticPlugin({
 
 ### Options
 
-| Option           | Type                                  | Default                                | Description                                                                                                                                                          |
-| ---------------- | ------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `root`           | `string`                              | (required)                             | Directory to serve files from                                                                                                                                        |
-| `urlPrefix`      | `string`                              | `'/'`                                  | URL prefix for static routes                                                                                                                                         |
-| `index`          | `string`                              | `'index.html'`                         | Index file for directories                                                                                                                                           |
-| `fallback`       | `string`                              | `undefined`                            | SPA fallback file                                                                                                                                                    |
-| `cacheControl`   | `string \| ((requestPath) => string)` | Hashed→immutable, else must-revalidate | Cache-Control header. A callback receives the full **leading-slash request path including `urlPrefix`** — never `'/'` (a directory delivers its resolved index path) |
-| `etag`           | `boolean`                             | `true`                                 | Enable ETag generation                                                                                                                                               |
-| `ranges`         | `boolean`                             | `true`                                 | Enable Range requests                                                                                                                                                |
-| `compressed`     | `boolean`                             | `true`                                 | Negotiate .br/.gz sidecars                                                                                                                                           |
-| `maxBufferBytes` | `number`                              | `1048576`                              | Threshold for streaming                                                                                                                                              |
+| Option           | Type                                  | Default                                | Description                                                                                                                                                                                  |
+| ---------------- | ------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `root`           | `string`                              | (required)                             | Directory to serve files from                                                                                                                                                                |
+| `urlPrefix`      | `string`                              | `'/'`                                  | URL prefix for static routes                                                                                                                                                                 |
+| `index`          | `string`                              | `'index.html'`                         | Index file for directories                                                                                                                                                                   |
+| `fallback`       | `string`                              | `undefined`                            | SPA fallback file                                                                                                                                                                            |
+| `cacheControl`   | `string \| ((requestPath) => string)` | Hashed→immutable, else must-revalidate | Cache-Control header. A callback receives the full **leading-slash request path including `urlPrefix`** — for a directory `root`, never `'/'` (a directory delivers its resolved index path) |
+| `etag`           | `boolean`                             | `true`                                 | Enable ETag generation                                                                                                                                                                       |
+| `ranges`         | `boolean`                             | `true`                                 | Enable Range requests                                                                                                                                                                        |
+| `compressed`     | `boolean`                             | `true`                                 | Negotiate .br/.gz sidecars                                                                                                                                                                   |
+| `maxBufferBytes` | `number`                              | `1048576`                              | Threshold for streaming                                                                                                                                                                      |
 
 ### Exports
 
@@ -11715,13 +11715,14 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
   stat rather than the uncompressed source representation
 - `Cache-Control` is resolved from the **full leading-slash request path, INCLUDING `urlPrefix`** —
   `/assets/app-A9acsx54.js` for a file under that prefix, `/assets/index.html` for a directory
-  request against it, and `/index.html` under a root mount; the callback NEVER receives the literal
-  `'/'` (a directory is served by resolving its index), never the prefix-stripped server path, never
-  the absolute filesystem path, and never the `.br`/`.gz` sidecar path — so a content-hashed asset
-  keeps its `immutable` policy whichever encoding is negotiated. The leading slash is guaranteed for
-  both a file and a resolved index. The prefix inclusion is deliberate (M95c C3): a cache policy is
-  about the URL the client caches under, so the served path is the input, and stripping it would
-  silently change what every existing callback matches.
+  request against it, and `/index.html` under a root mount; for a `root` that is a directory — what
+  `root` documents — the callback never receives the literal `'/'` (a directory is served by
+  resolving its index), never the prefix-stripped server path, never the absolute filesystem path,
+  and never the `.br`/`.gz` sidecar path — so a content-hashed asset keeps its `immutable` policy
+  whichever encoding is negotiated. The leading slash is guaranteed for both a file and a resolved
+  index. The prefix inclusion is deliberate (M95c C3): a cache policy is about the URL the client
+  caches under, so the served path is the input, and stripping it would silently change what every
+  existing callback matches.
 - A `HEAD` opens no body stream, so it cannot leak a file descriptor on a file above
   `maxBufferBytes`
 - An explicit `Accept-Encoding` entry overrides the wildcard, so `br;q=0, *` refuses brotli

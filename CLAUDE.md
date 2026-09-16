@@ -4932,23 +4932,60 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   §3.4 normative table is asserted against LITERALS because R18 measured the runtimes disagreeing on
   three of six rows. **Static:** the `cacheControl` callback parameter is renamed `requestPath` and
   all three doc sites corrected to the deliberate full-path-including-prefix behaviour (C3 decided
-  for the docs side, §9.4), the README's dead `path === '/'` example replaced) — complete (PR
-  pending)
+  for the docs side, §9.4), the README's dead `path === '/'` example replaced.
+
+  **Verification and code review then found ten things every gate had passed, and the first is the
+  milestone's own row 1 pointed back at itself.** The widened `InjectRequest.body` union had a
+  compile-time guard for what it REFUSES (`@ts-expect-error` rows) and none for what it ACCEPTS:
+  deleting `ArrayBuffer` and `Blob` from the published union left `deno check` clean and the ENTIRE
+  2149-test suite green, because `inject-body-shapes.test.ts`'s helper took `body: unknown` and
+  laundered it through `as Parameters<typeof app.inject>[0]` — the same shape as the cast this
+  milestone removed from `mongo-client-seam.test.ts` two files over, and the reason row 1 needed a
+  static type fixture at all. The helper now takes the published union and every arm carries a named
+  `const _accepts…: InjectBody = …` assertion, so a narrowing is a `TS2322` on the matching line.
+  Second, C3's rename reached the INTERNAL `CacheControlOptions` and missed the PUBLISHED
+  `StaticPluginOptions.cacheControl` — the barrel-exported one, the spelling a consumer's editor
+  shows — which still read `relativePath` under JSDoc saying "the root-relative path", the exact
+  wording §3.6 identifies as "the half that actually misleads"; three more internal copies were
+  unrenamed too, and the whole correction had NO CHANGELOG entry. Third, the `never receives '/'`
+  guarantee is not absolute: measured, a `root` pointing at a FILE under a root mount serves `GET /`
+  and hands the callback `'/'` — outside what `root` documents, so the four doc sites are scoped
+  rather than the behaviour changed, and the counterexample is pinned so a later change to it is
+  deliberate. Fourth, `dispositionParameter`'s unterminated-quote comment claimed it skips "rather
+  than aborting the remaining parameters" while `index = length` aborts them — the behaviour is
+  right (everything past an unclosed quote is inside a string that never closes, so scanning on
+  would INVENT parameters the client never sent) and the comment said the opposite. Fifth,
+  `inject()`'s `bytes()` returned the CALLER's own array, so a handler mutating what it read
+  corrupted the test's fixture and a fixture reused across two requests carried the first mutation —
+  both byte arms now copy. Also: the `name=""` wording was narrower than the code, which keeps an
+  empty value in EITHER spelling; `filename=""` and the unterminated-quote arm were documented and
+  untested; `packages/session-plugin` — the ONLY package whose barrel changed — had no
+  `barrel-exports.test.ts`, so dropping `CSRF_CONFIG_STATE_KEY` left `deno check` and all 45 session
+  tests green (`check:docs` DID catch it, via the README export-table drift check, so the hole was
+  covered by a different gate than §4 named); and the ROADMAP "Shipped." paragraph rendered half of
+  itself as a BLOCKQUOTE, because `deno fmt` wrapped the precedence chain
+  `explicit argument > published config > '_csrf'` so that `>` began a line. Every fix carries a
+  test verified to fail without it, and §6's five negative controls were re-run alongside two more:
+  reverting `connect()` reproduces the verbatim X47-1 `TS2322` at `mongo-seam.assert.ts:29`, proving
+  the type fixture is genuinely reached by `deno check packages`. One finding was DECLINED rather
+  than fixed: §6's test table named `test/unit/csrf-token-field.test.ts` and the cases landed in
+  `test/unit/csrf/csrf.test.ts` — equivalent coverage, a better home beside the other CSRF tests,
+  and moving them would be churn against an archived plan) — complete (PR pending)
 - **Next milestone** — **M95d** (`docs/` + `packages/common` + `packages/view-plugin` + `scripts/` —
   documentation that survives contact: the M90h precedent, four findings where the code is correct
   and a reader following the documentation still ends up wrong. The only letter carrying gate work —
   a URL-scheme payload for `check-example-behaviour.ts` and a `@since`-vs-shipping-version check.
   Plan: `plans/milestone-95d-documentation-survives-contact.md`.)
 
-- **Then M95c and M95d** — the rest of the `v0.6.0` closeout, which now covers **two** runs against
-  that version: the regression run (5 findings) and **Part 11, X46–X51** (8 more), the exercise
-  block built for the seven milestones between `v0.5.0` and `v0.6.0` because the regression run had
-  driven M91–M94c at probe level only. The two sets are folded together **by defect shape rather
-  than by run**, which is why no `M96` was opened — X51-1/X51-2 are M95b's mechanism on other
-  packages and X47-1/X50-1 are M95c's title on other packages, so a separate milestone would have
-  put two of them on one shape. **M95d is new** (documentation that survives contact, the M90h
-  precedent) and is the only letter carrying gate work — a URL-scheme payload for
-  `check-example-behaviour.ts`, and a `@since`-vs-shipping-version check, which nothing does today.)
+- **Then M95d** — the rest of the `v0.6.0` closeout, which now covers **two** runs against that
+  version: the regression run (5 findings) and **Part 11, X46–X51** (8 more), the exercise block
+  built for the seven milestones between `v0.5.0` and `v0.6.0` because the regression run had driven
+  M91–M94c at probe level only. The two sets are folded together **by defect shape rather than by
+  run**, which is why no `M96` was opened — X51-1/X51-2 are M95b's mechanism on other packages and
+  X47-1/X50-1 are M95c's title on other packages, so a separate milestone would have put two of them
+  on one shape. **M95d is new** (documentation that survives contact, the M90h precedent) and is the
+  only letter carrying gate work — a URL-scheme payload for `check-example-behaviour.ts`, and a
+  `@since`-vs-shipping-version check, which nothing does today.)
 
 - **Also open** — **M40** (final polish and release: integration testing across all plugins,
   performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the

@@ -40,11 +40,19 @@ export type StaticPluginOptions = {
   fallback?: string;
 
   /**
-   * Cache-Control header configuration (default: function returning immutable for hashed assets, must-revalidate for others).
+   * Cache-Control header configuration (default: function returning immutable
+   * for hashed assets, must-revalidate for others).
    * - A string is used verbatim for all responses.
-   * - A function is called per request with the root-relative path.
+   * - A function is called per request with the FULL leading-slash request
+   *   path INCLUDING `urlPrefix` (`/assets/app-A9acsx54.js` for
+   *   `urlPrefix: '/assets'`) — a cache policy is about the URL the client
+   *   caches under, so the served path is the input, never the prefix-stripped
+   *   server path and never the absolute filesystem path. A directory request
+   *   delivers its resolved index path, and the path is never the `.br`/`.gz`
+   *   sidecar's, so a hashed asset keeps its policy whichever encoding is
+   *   negotiated. See `CacheControlOptions` for the full contract.
    */
-  cacheControl?: string | ((relativePath: string) => string);
+  cacheControl?: string | ((requestPath: string) => string);
 
   /**
    * Enable ETag generation (default: true).

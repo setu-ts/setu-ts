@@ -16,12 +16,12 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 A multipart part whose `Content-Disposition` carries no `name` parameter is now DROPPED, where it
 used to be delivered as a real field literally named `unknown` — colliding with any legitimate field
-of that name. `name=""` (a quoted EMPTY value) is still a field, with an empty name. If you read a
-form field named `unknown`, you were reading parts no correct client sends (the platform discards
-them); read the part's real name now. In exchange, a part your client sends with the unquoted form —
-`name=x` rather than `name="x"` — now arrives under its REAL name instead of `unknown`, and an
-upload sent with an unquoted `filename=a.txt` now reaches `getUploadedFile()` instead of arriving as
-a text field. The full table of accepted spellings is pinned by
+of that name. An EMPTY value in either spelling — `name=""` or `name=` — is still a field, with an
+empty name. If you read a form field named `unknown`, you were reading parts no correct client sends
+(the platform discards them); read the part's real name now. In exchange, a part your client sends
+with the unquoted form — `name=x` rather than `name="x"` — now arrives under its REAL name instead
+of `unknown`, and an upload sent with an unquoted `filename=a.txt` now reaches `getUploadedFile()`
+instead of arriving as a text field. The full table of accepted spellings is pinned by
 `packages/common/test/unit/form/multipart-platform-parity.test.ts`.
 
 ### Drop the cast around an injected `MongoClient`

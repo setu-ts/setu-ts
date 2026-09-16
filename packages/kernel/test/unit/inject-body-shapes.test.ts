@@ -21,6 +21,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 import { createApplication } from '../../src/application/application.ts';
+import type { InjectRequest } from '../../src/application/application.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 const encoder = new TextEncoder();
@@ -60,21 +61,47 @@ interface Echoed {
   readonly contentType: string | null;
 }
 
-async function echo(body: unknown, headers?: Record<string, string>): Promise<Echoed> {
+/**
+ * The happy-path table's body parameter is the PUBLISHED union itself, with no
+ * cast — so narrowing `InjectRequest.body` is a compile error here rather than
+ * a silently smaller surface. Before this was typed, dropping `ArrayBuffer` and
+ * `Blob` from the union left `deno check` and the entire suite green: the
+ * widening's REFUSALS were pinned (by the `@ts-expect-error` rows below) while
+ * its ACCEPTANCES were pinned by nothing. Row 1 of this same milestone exists
+ * because a type-level claim needs a type-level guard.
+ */
+type InjectBody = NonNullable<InjectRequest['body']>;
+
+async function echo(body: InjectBody, headers?: Record<string, string>): Promise<Echoed> {
   const app = await buildApp();
-  const res = await app.inject(
-    {
-      method: 'POST',
-      url: '/echo',
-      ...(headers === undefined ? {} : { headers }),
-      // The table entries are each valid `InjectBody` members; the refusal rows
-      // carry their own `@ts-expect-error` with the reason.
-      body,
-    } as Parameters<typeof app.inject>[0],
-  );
+  const res = await app.inject({
+    method: 'POST',
+    url: '/echo',
+    ...(headers === undefined ? {} : { headers }),
+    body,
+  });
   expect(res.statusCode).toBe(200);
   return res.json<Echoed>();
 }
+
+// Every arm of the published union, asserted at COMPILE time. A row deleted
+// from `InjectRequest.body` fails `deno task check` on the matching line — the
+// `echo()` calls below exercise the same arms at runtime, but a test helper can
+// always be re-typed, so the union's shape is pinned here independently.
+const _acceptsString: InjectBody = 'a=1';
+const _acceptsBytes: InjectBody = new Uint8Array([1]);
+const _acceptsArrayBuffer: InjectBody = new ArrayBuffer(1);
+const _acceptsBlob: InjectBody = new Blob([new Uint8Array([1])]);
+const _acceptsSearchParams: InjectBody = new URLSearchParams('a=1');
+const _acceptsPlainObject: InjectBody = { a: 1 };
+void [
+  _acceptsString,
+  _acceptsBytes,
+  _acceptsArrayBuffer,
+  _acceptsBlob,
+  _acceptsSearchParams,
+  _acceptsPlainObject,
+];
 
 describe('inject() carries each documented body shape', () => {
   it('carries a string verbatim and keeps the JSON content-type default', async () => {
@@ -122,6 +149,41 @@ describe('inject() carries each documented body shape', () => {
     });
     expect(echoed.body).toBe('x');
     expect(echoed.contentType).toBe('multipart/form-data; boundary=m95c');
+  });
+});
+
+describe("inject() copies a byte body rather than aliasing the caller's", () => {
+  it('does not let a handler that mutates bytes() corrupt the array it was passed', async () => {
+    const app = await buildApp();
+    const fixture = encoder.encode('abc');
+
+    app.router.post('/mutate', async (ctx) => {
+      const bytes = await ctx.request.bytes();
+      bytes[0] = 0x5a;
+      return ctx.response.json({ seen: new TextDecoder().decode(bytes) });
+    });
+
+    const first = await app.inject({ method: 'POST', url: '/mutate', body: fixture });
+    expect(first.json<{ seen: string }>().seen).toBe('Zbc');
+    // The caller's fixture is untouched, so reusing it in a second request
+    // carries none of the first request's mutation.
+    expect(new TextDecoder().decode(fixture)).toBe('abc');
+
+    const second = await app.inject({ method: 'POST', url: '/mutate', body: fixture });
+    expect(second.json<{ seen: string }>().seen).toBe('Zbc');
+  });
+
+  it('does not alias an ArrayBuffer body either — new Uint8Array(buffer) is a view', async () => {
+    const app = await buildApp();
+    const buffer = encoder.encode('abc').buffer;
+
+    app.router.post('/mutate-ab', async (ctx) => {
+      (await ctx.request.bytes())[0] = 0x5a;
+      return ctx.response.json({ ok: true });
+    });
+
+    await app.inject({ method: 'POST', url: '/mutate-ab', body: buffer });
+    expect(new TextDecoder().decode(new Uint8Array(buffer))).toBe('abc');
   });
 });
 
