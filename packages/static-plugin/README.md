@@ -44,7 +44,7 @@ await app.start({ port: 3000 });
 | Option           | Type                                        | Default        | Description                                                                                                         |
 | ---------------- | ------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------- |
 | `root`           | `string`                                    | (required)     | The filesystem directory to serve files from                                                                        |
-| `urlPrefix`      | `string`                                    | `'/`'`         | URL prefix for static routes                                                                                        |
+| `urlPrefix`      | `string`                                    | `'/'`          | URL prefix for static routes                                                                                        |
 | `index`          | `string`                                    | `'index.html'` | Index file to serve for directories. Set to `''` to disable                                                         |
 | `fallback`       | `string`                                    | `undefined`    | Fallback file for SPA routing (served when Accept includes text/html)                                               |
 | `cacheControl`   | `string \| (requestPath: string) => string` | auto           | Cache-Control header. A callback receives the full **leading-slash request path including `urlPrefix`** — see below |
