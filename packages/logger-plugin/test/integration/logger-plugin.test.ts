@@ -10,8 +10,9 @@ import type {
   MiddlewareOptions,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { createRedactionService } from '@setu-ts/common';
 
-import { LoggerPlugin } from '../../src/plugin/logger-plugin.ts';
+import { composeLoggerRedaction, LoggerPlugin } from '../../src/plugin/logger-plugin.ts';
 import { NoopLogger } from '../../src/loggers/noop-logger.ts';
 import { ConsoleLogger } from '../../src/loggers/console-logger.ts';
 import { TraceEnrichedLogger } from '../../src/loggers/trace-enriched-logger.ts';
@@ -176,6 +177,34 @@ describe('LoggerPlugin (integration)', () => {
     expect((logger as TraceEnrichedLogger).inner).toBeInstanceOf(ConsoleLogger);
     // `level` passes through the decorator unchanged.
     expect(logger.level).toBe('debug');
+  });
+
+  it('accepts both policy and service redaction option arms', async () => {
+    const policyPlugin = LoggerPlugin({ redaction: { fields: { password: 'secret' } } });
+    const policyContext = createFakeContext(runtime);
+    await policyPlugin.register(policyContext.ctx);
+    expect(getLogger(policyContext.registeredServices)).toBeDefined();
+
+    const servicePlugin = LoggerPlugin({
+      redaction: createRedactionService({ fields: { password: 'secret' } }),
+    });
+    const serviceContext = createFakeContext(runtime);
+    await servicePlugin.register(serviceContext.ctx);
+    expect(getLogger(serviceContext.registeredServices)).toBeDefined();
+  });
+
+  it('applies legacy redaction after a policy for both service methods', () => {
+    const service = composeLoggerRedaction(
+      createRedactionService({ fields: { card: 'pci' }, defaultRedactor: () => 'masked' }),
+      ['password'],
+    );
+
+    expect(service.redactValue('card', '1234')).toBe('masked');
+    expect(service.redactValue('password', 'secret')).toBe('[Redacted]');
+    expect(service.redactRecord({ password: 'secret', card: '1234' })).toEqual({
+      password: '[Redacted]',
+      card: 'masked',
+    });
   });
 
   it('registers a PinoLogger when transport is pino', async () => {

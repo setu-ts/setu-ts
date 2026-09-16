@@ -595,6 +595,38 @@ describe('TelemetryPlugin with instrumentations (24b)', () => {
     };
   }
 
+  it('warns and omits query strings when redact mode has no service', async () => {
+    const mock = createMockContext();
+    const { lines, logger } = createRecordingLogger();
+    (mock.ctx as { logger: unknown }).logger = logger;
+
+    await TelemetryPlugin({ serviceName: 'test', queryParameters: 'redact' }).register(mock.ctx);
+
+    expect(lines.some((line) => line.level === 'warn' && line.message.includes('query-parameter')))
+      .toBe(true);
+  });
+
+  it('accepts policy and service redaction option arms', async () => {
+    const policyMock = createMockContext();
+    await TelemetryPlugin({
+      serviceName: 'test',
+      queryParameters: 'redact',
+      redaction: { fields: { 'query.email': 'secret' } },
+    }).register(policyMock.ctx);
+    expect(policyMock.middlewareAdded).toHaveLength(1);
+
+    const serviceMock = createMockContext();
+    await TelemetryPlugin({
+      serviceName: 'test',
+      queryParameters: 'redact',
+      redaction: {
+        redactValue: (_path: string, value: unknown) => value,
+        redactRecord: (value) => value,
+      },
+    }).register(serviceMock.ctx);
+    expect(serviceMock.middlewareAdded).toHaveLength(1);
+  });
+
   it('reports instrumentation outcomes through ctx.logger read at call time', async () => {
     // The plugin factory has no ctx, so the reporter cannot capture a logger at
     // construction. It reads ctx.logger at call time — a logger present on the

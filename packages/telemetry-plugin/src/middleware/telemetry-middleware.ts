@@ -10,6 +10,7 @@
  */
 
 import type {
+  IRedactionService,
   IRequestContext,
   ITelemetryService,
   MiddlewareFunction,
@@ -19,6 +20,7 @@ import type {
 import type { TracerHost } from '../interfaces/index.ts';
 import { TELEMETRY_SPAN_KEY } from '../interfaces/index.ts';
 import { contextToTraceparent } from '@setu-ts/common';
+import { sanitizeUrl } from '../attributes/sanitize-url.ts';
 
 /**
  * Creates the request-span middleware.
@@ -36,6 +38,8 @@ import { contextToTraceparent } from '@setu-ts/common';
 export function telemetryMiddleware(
   service: ITelemetryService,
   tracerHost: TracerHost,
+  queryParameters: 'omit' | 'redact' = 'omit',
+  redaction?: IRedactionService,
 ): MiddlewareFunction {
   return async (ctx: IRequestContext, next: NextFunction): Promise<void> => {
     const request = ctx.request;
@@ -56,7 +60,7 @@ export function telemetryMiddleware(
 
         // Set HTTP attributes.
         span.setAttribute('http.method', request.method);
-        span.setAttribute('http.url', request.url);
+        span.setAttribute('http.url', sanitizeUrl(request.url, queryParameters, redaction));
         span.setAttribute('http.route', request.path);
 
         // When next() throws, control propagates out of this callback to

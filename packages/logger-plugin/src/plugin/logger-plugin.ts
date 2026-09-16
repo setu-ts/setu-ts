@@ -8,11 +8,18 @@ import type {
   ILogger,
   IPlugin,
   IPluginContext,
+  IRedactionService,
   IRuntimeServices,
   ITelemetryService,
   LogLevel,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createRedactionService,
+  DEFAULT_SECRET_FIELD_PATTERNS,
+  PLUGIN_PRIORITY,
+} from '@setu-ts/common';
+import type { RedactionPolicy } from '@setu-ts/common';
 
 import { ConsoleLogger } from '../loggers/console-logger.ts';
 import { NoopLogger } from '../loggers/noop-logger.ts';
@@ -48,6 +55,8 @@ export interface LoggerPluginOptions {
   readonly pretty?: boolean;
   /** Dot-paths to redact from metadata (e.g. `['password', 'token']`). */
   readonly redact?: readonly string[];
+  /** A policy or service applied to every structured log record. */
+  readonly redaction?: RedactionPolicy | IRedactionService;
   /** When `true`, register automatic request/response logging middleware. */
   readonly requestLogging?: boolean;
   /** Requests slower than this (ms) trigger a `warn` entry. Defaults to `5000`. */
@@ -98,6 +107,11 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
   const level = options?.level ?? DEFAULT_LEVEL;
   const transport = options?.transport ?? 'console';
   const requestLogging = options?.requestLogging ?? false;
+  const redaction = resolveRedaction(options?.redaction);
+  const loggerRedaction = composeLoggerRedaction(
+    redaction,
+    options?.redact ?? DEFAULT_SECRET_FIELD_PATTERNS,
+  );
 
   return {
     name: PLUGIN_NAME,
@@ -108,7 +122,14 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
 
     async register(ctx: IPluginContext): Promise<void> {
       const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-      const logger = await createLogger(transport, level, runtime, options);
+      const logger = await createLogger(
+        transport,
+        level,
+        runtime,
+        options,
+        redaction,
+        loggerRedaction,
+      );
 
       // X34-2: every record names the trace it was emitted in, so an operator
       // holding a trace id can find the log lines and vice versa.
@@ -160,15 +181,17 @@ async function createLogger(
   level: LogLevel,
   runtime: IRuntimeServices,
   options?: LoggerPluginOptions,
+  redaction?: IRedactionService,
+  loggerRedaction?: IRedactionService,
 ): Promise<ILogger> {
   switch (transport) {
     case 'noop':
       return new NoopLogger({ level });
     case 'pino':
-      return await PinoLogger.create(buildPinoLoggerOptions(level, options));
+      return await PinoLogger.create(buildPinoLoggerOptions(level, options, loggerRedaction));
     case 'console':
     default:
-      return new ConsoleLogger(runtime, buildConsoleOptions(level, options));
+      return new ConsoleLogger(runtime, buildConsoleOptions(level, options, redaction));
   }
 }
 
@@ -183,18 +206,19 @@ async function createLogger(
 function buildPinoLoggerOptions(
   level: LogLevel,
   options?: LoggerPluginOptions,
+  redaction?: IRedactionService,
 ): PinoLoggerOptions {
   const base: {
     level: LogLevel;
     redact?: readonly string[];
     pinoFactory?: PinoFactory;
+    redaction?: IRedactionService;
   } = { level };
-  if (options?.redact !== undefined) {
-    base.redact = options.redact;
-  }
+  if (options?.redact !== undefined) base.redact = options.redact;
   if (options?.pinoFactory !== undefined) {
     base.pinoFactory = options.pinoFactory;
   }
+  if (redaction !== undefined) base.redaction = redaction;
   return base as PinoLoggerOptions;
 }
 
@@ -209,15 +233,65 @@ function buildPinoLoggerOptions(
 function buildConsoleOptions(
   level: LogLevel,
   options?: LoggerPluginOptions,
-): { level: LogLevel; pretty?: boolean; redact?: readonly string[] } {
-  const base: { level: LogLevel; pretty?: boolean; redact?: readonly string[] } = { level };
+  redaction?: IRedactionService,
+): {
+  level: LogLevel;
+  pretty?: boolean;
+  redact?: readonly string[];
+  redaction?: IRedactionService;
+} {
+  const base: {
+    level: LogLevel;
+    pretty?: boolean;
+    redact?: readonly string[];
+    redaction?: IRedactionService;
+  } = {
+    level,
+    redact: options?.redact ?? DEFAULT_SECRET_FIELD_PATTERNS,
+  };
   if (options?.pretty !== undefined) {
     base.pretty = options.pretty;
   }
-  if (options?.redact !== undefined) {
-    base.redact = options.redact;
+  if (redaction !== undefined) {
+    base.redaction = redaction;
   }
   return base;
+}
+
+function resolveRedaction(
+  redaction: RedactionPolicy | IRedactionService | undefined,
+): IRedactionService | undefined {
+  return redaction === undefined
+    ? undefined
+    : 'redactRecord' in redaction
+    ? redaction
+    : createRedactionService(redaction);
+}
+
+/**
+ * Combines an optional policy service with the legacy logger path list.
+ * Internal test seam; not re-exported from the package barrel.
+ *
+ * @param policy - Optional application policy service
+ * @param paths - Legacy logger paths, applied after the policy
+ * @returns Combined service
+ */
+export function composeLoggerRedaction(
+  policy: IRedactionService | undefined,
+  paths: readonly string[],
+): IRedactionService {
+  const legacy = createRedactionService(
+    { fields: Object.fromEntries(paths.map((path) => [path, 'secret'])) },
+    { caseSensitive: true },
+  );
+  return {
+    redactValue(path: string, value: unknown): unknown {
+      return legacy.redactValue(path, policy?.redactValue(path, value) ?? value);
+    },
+    redactRecord(record: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+      return legacy.redactRecord(policy?.redactRecord(record) ?? record);
+    },
+  };
 }
 
 /**

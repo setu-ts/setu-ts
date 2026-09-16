@@ -82,6 +82,21 @@ never turn logging into the fault.
 > transport, so `instanceof ConsoleLogger` on the resolved capability does not hold. `ILogger` is
 > the contract.
 
+## Redaction
+
+Loggers apply `redaction` after normalizing metadata and before the legacy `redact` list. Supply a
+shared `RedactionPolicy` (or an `IRedactionService`) to use the same policy in other egress plugins:
+
+```typescript
+LoggerPlugin({
+  redaction: { fields: { 'user.email': 'private' } },
+});
+```
+
+The legacy `redact` option remains supported and wins when it overlaps a policy. With no explicit
+`redact` list, common secret-shaped fields are redacted by default; set `redact: []` to restore the
+previous no-default-redaction behaviour.
+
 ## Exports
 
 | Export                          | Kind      |

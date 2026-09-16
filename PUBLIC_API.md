@@ -9273,6 +9273,17 @@ app.register({
 The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
 the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
 
+### Redaction
+
+`createRedactionService(policy)` compiles a synchronous `RedactionPolicy` once and returns an
+`IRedactionService`. Policies classify dot paths (`*` matches one segment and `**` matches any
+number) and map classifications to a `Redactor`. Matching is case-insensitive for policies;
+`eraseRedactor` replaces values with `'[Redacted]'`, while `createMaskRedactor({ keep: 4 })`
+preserves a trailing suffix of strings. `redactRecord()` is clone-on-write: it never mutates caller
+metadata, preserves unclassified subtrees by identity, and descends only into plain objects and
+arrays. The logger, telemetry, and audit plugins accept either a policy or an `IRedactionService`
+through their `redaction` option; this is an option-passed pure utility, not a capability token.
+
 ### Values (runtime exports)
 
 | Export                                                 | Kind     | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |

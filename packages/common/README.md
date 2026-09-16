@@ -116,11 +116,14 @@ package fits the plugin architecture.
 | `contextToTraceparent`            | function  |
 | `createCachedProbe`               | function  |
 | `createCapabilityToken`           | function  |
+| `createMaskRedactor`              | function  |
 | `createPathMatcher`               | function  |
+| `createRedactionService`          | function  |
 | `decodeCursor`                    | function  |
 | `decodeFrameData`                 | function  |
 | `encodeCursor`                    | function  |
 | `encodeFrameData`                 | function  |
+| `eraseRedactor`                   | function  |
 | `err`                             | function  |
 | `errorResponderOf`                | function  |
 | `extractContextFromHeaders`       | function  |
@@ -172,6 +175,8 @@ package fits the plugin architecture.
 | `UnsupportedFormEncodingError`    | class     |
 | `CAPABILITIES`                    | const     |
 | `CLIENT_IP_STATE_KEY`             | const     |
+| `DATA_CLASSIFICATIONS`            | const     |
+| `DEFAULT_SECRET_FIELD_PATTERNS`   | const     |
 | `ERROR_RESPONDER_BRAND`           | const     |
 | `ERROR_RESPONDER_STATE_KEY`       | const     |
 | `HTTP_STATUS_HINT`                | const     |
@@ -273,6 +278,7 @@ package fits the plugin architecture.
 | `IQueryHandler`                   | interface |
 | `IQueue`                          | interface |
 | `IRealtimeBackplane`              | interface |
+| `IRedactionService`               | interface |
 | `IRequest`                        | interface |
 | `IRequestContext`                 | interface |
 | `IResilienceService`              | interface |
@@ -309,6 +315,7 @@ package fits the plugin architecture.
 | `IWorkerPool`                     | interface |
 | `JwtSignOptions`                  | interface |
 | `MailMessage`                     | interface |
+| `MaskOptions`                     | interface |
 | `MessageMetadata`                 | interface |
 | `MetricConfig`                    | interface |
 | `MetricOptions`                   | interface |
@@ -326,6 +333,8 @@ package fits the plugin architecture.
 | `RbacConfig`                      | interface |
 | `RealtimeFrame`                   | interface |
 | `RecurringOptions`                | interface |
+| `RedactionContext`                | interface |
+| `RedactionPolicy`                 | interface |
 | `RegisterOptions`                 | interface |
 | `RequestOptions`                  | interface |
 | `RetryOptions`                    | interface |
@@ -379,6 +388,7 @@ package fits the plugin architecture.
 | `Component`                       | type      |
 | `Constructor`                     | type      |
 | `CursorValue`                     | type      |
+| `DataClassification`              | type      |
 | `DecoratorHandler`                | type      |
 | `EntityKey`                       | type      |
 | `EventHandler`                    | type      |
@@ -411,6 +421,7 @@ package fits the plugin architecture.
 | `Provider`                        | type      |
 | `RealtimeFrameHandler`            | type      |
 | `RealtimeFrameKind`               | type      |
+| `Redactor`                        | type      |
 | `RegistryFactory`                 | type      |
 | `RequestHandler`                  | type      |
 | `ResilientCall`                   | type      |

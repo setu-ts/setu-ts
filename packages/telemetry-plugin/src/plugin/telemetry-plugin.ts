@@ -11,11 +11,13 @@
 import type {
   ILogger,
   IPlugin,
+  IRedactionService,
   ITelemetryService,
   MiddlewareFunction,
   TelemetryContext,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, createRedactionService } from '@setu-ts/common';
+import type { RedactionPolicy } from '@setu-ts/common';
 import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';
@@ -130,6 +132,8 @@ function createActivationReporter(ctx: { logger?: ILogger }): ContextActivationR
  */
 export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
   const middlewareEnabled = options.middleware !== false;
+  const queryParameters = options.queryParameters ?? 'omit';
+  const redaction = resolveRedaction(options.redaction);
 
   return {
     name: 'telemetry-plugin',
@@ -192,10 +196,20 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
 
       // Register middleware if enabled
       if (middlewareEnabled) {
+        if (queryParameters === 'redact' && redaction === undefined) {
+          ctx.logger?.warn(
+            'Telemetry query-parameter redaction requested without a policy; omitting query strings',
+          );
+        }
         // Pass tracerHost to middleware for context extraction/injection (C1/C2/R2).
         // In noop mode, create a minimal TracerHost that still supports extractContext/injectContext.
         const host = tracerHost ?? createNoopTracerHost();
-        const middleware: MiddlewareFunction = telemetryMiddleware(service, host);
+        const middleware: MiddlewareFunction = telemetryMiddleware(
+          service,
+          host,
+          queryParameters,
+          redaction,
+        );
         ctx.middleware.add(middleware, {
           priority: MIDDLEWARE_PRIORITY.TELEMETRY,
           name: 'telemetry-middleware',
@@ -203,6 +217,16 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
       }
     },
   };
+}
+
+function resolveRedaction(
+  redaction: RedactionPolicy | IRedactionService | undefined,
+): IRedactionService | undefined {
+  return redaction === undefined
+    ? undefined
+    : 'redactRecord' in redaction
+    ? redaction
+    : createRedactionService(redaction);
 }
 
 /**
