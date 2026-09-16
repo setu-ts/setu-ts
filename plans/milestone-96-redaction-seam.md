@@ -175,23 +175,25 @@ or option, and the `grep` that proves it stays empty is a deliverable.
   `Error` case asserting that a policy path and an equivalent `redact` path redact identically,
   which fails under the decorator ordering.
 
-### 3.6 The two logger defects — fixed by routing both through `common`'s one implementation
+### 3.6 The logger syntax divergence — fixed by routing both through `common`'s one implementation
 
 - **Decision:** `ConsoleLogger`'s `#redactFields`/`#redactPath` are deleted and replaced by a
   `createRedactionService` built from the `redact` paths (classification `secret`, redactor
   `eraseRedactor`). `PinoLogger` continues to forward `redact` to pino **unchanged** and
   additionally applies the same service.
-- **Why:** one walk implementation satisfies §11.1 and fixes both defects at once — the shared walk
-  clones every level it descends, so the caller's nested object is no longer mutated, and it
-  understands `*`/`**`, so a wildcard pattern stops silently doing nothing on the default logger.
-  Continuing to forward to pino keeps pino's exotic bracket syntax working, so nothing released
-  breaks (§9.4). **Precedence is service first, `redact` second**, and that ordering is a decision
-  rather than an accident: the two passes are NOT idempotent in general — a policy that `mask`s a
-  path and a `redact` entry naming the same path disagree, and pino always applies its own `redact`
-  last, so running ours last on the console side is what keeps the two loggers agreeing. An explicit
-  `redact` path therefore always ends as `'[Redacted]'` and wins over a policy that would merely
-  mask it. The residual — pino-only bracket syntax still has no console equivalent — is documented
-  rather than claimed fixed.
+- **Why:** one walk implementation satisfies §11.1 and understands `*`/`**`, so a wildcard pattern
+  stops silently doing nothing on the default logger. It must also **carry forward**, not
+  re-establish, the caller-mutation property: finding 2 was repaired separately before this
+  milestone (it is data corruption, not a redaction-design gap), so the walk replacing
+  `#redactFields`/`#redactPath` inherits a pinned regression case and this is a rewrite that must
+  not regress rather than a fix to make. Continuing to forward to pino keeps pino's exotic bracket
+  syntax working, so nothing released breaks (§9.4). **Precedence is service first, `redact`
+  second**, and that ordering is a decision rather than an accident: the two passes are NOT
+  idempotent in general — a policy that `mask`s a path and a `redact` entry naming the same path
+  disagree, and pino always applies its own `redact` last, so running ours last on the console side
+  is what keeps the two loggers agreeing. An explicit `redact` path therefore always ends as
+  `'[Redacted]'` and wins over a policy that would merely mask it. The residual — pino-only bracket
+  syntax still has no console equivalent — is documented rather than claimed fixed.
 - **Test home:** `logger-plugin/test/unit/console-logger-redaction.test.ts`, with a regression case
   asserting the caller's object is unmodified and a case asserting an array path redacts.
 
@@ -261,11 +263,12 @@ or option, and the `grep` that proves it stays empty is a deliverable.
   and shallow-copying it yields `{}`, silently destroying a value the policy never named, and a
   cyclic object — an ordinary shape for a domain entity with a back-reference — would recurse
   forever and hang every log call rather than failing loudly. Clone-on-write is also what actually
-  fixes the §0 finding 2 mutation defect: "clone every level" would be correct and wasteful, while
-  copying only matched paths keeps an unmatched record allocation-free, which matters because this
-  runs on every log line. The depth bound is preferred to a visited `Set` because it costs nothing
-  per node on the overwhelmingly common shallow record, and truncating a pathological object is a
-  better failure than allocating a set per log call.
+  preserves the caller-mutation property finding 2's fix established, without which this rewrite
+  would silently reintroduce it: "clone every level" would be correct and wasteful, while copying
+  only matched paths keeps an unmatched record allocation-free, which matters because this runs on
+  every log line. The depth bound is preferred to a visited `Set` because it costs nothing per node
+  on the overwhelmingly common shallow record, and truncating a pathological object is a better
+  failure than allocating a set per log call.
 - **Test home:** `common/test/unit/redaction-service.test.ts` — a cyclic record returns rather than
   hanging, a `Date` survives `instanceof Date`, an unmatched subtree is `===` to the input's, and a
   matched sibling does not disturb it.

@@ -197,6 +197,186 @@ describe('ConsoleLogger', () => {
       const entry = JSON.parse(output[0]!);
       expect(entry.foo).toBe('bar');
     });
+
+    // The suite's other nested cases build their metadata inline, so nothing
+    // held a reference to read back — which is why the mutation below shipped.
+    // Every case here keeps the object the caller would have kept.
+    it("does not write into the caller's nested object", () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['auth.token'],
+      });
+      const user = { token: 'secret-abc', name: 'bob' };
+
+      const { output } = captureConsole(() => {
+        logger.info('login', { auth: user });
+      });
+
+      // Redacted on the way out ...
+      expect(JSON.parse(output[0]!).auth.token).toBe('[Redacted]');
+      // ... and the application's own object is untouched.
+      expect(user.token).toBe('secret-abc');
+      expect(user.name).toBe('bob');
+    });
+
+    it('leaves a later unredacted log of the same object intact', () => {
+      const { runtime } = createFakeRuntime();
+      const redacting = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['auth.token'],
+      });
+      const plain = new ConsoleLogger(runtime, { level: 'info' });
+      const user = { token: 'secret-abc' };
+
+      const { output } = captureConsole(() => {
+        redacting.info('login', { auth: user });
+        plain.info('audit', { auth: user });
+      });
+
+      expect(JSON.parse(output[0]!).auth.token).toBe('[Redacted]');
+      // The corruption was durable: this read '[Redacted]' before the fix,
+      // so anything persisting `user` afterwards stored the literal string.
+      expect(JSON.parse(output[1]!).auth.token).toBe('secret-abc');
+    });
+
+    it('leaves every intermediate object intact on a deep path', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['x.b.c.d'],
+      });
+      const deep = { b: { c: { d: 'deep-secret', e: 'keep' } } };
+
+      const { output } = captureConsole(() => {
+        logger.info('msg', { x: deep });
+      });
+
+      const entry = JSON.parse(output[0]!);
+      expect(entry.x.b.c.d).toBe('[Redacted]');
+      expect(entry.x.b.c.e).toBe('keep');
+      expect(deep.b.c.d).toBe('deep-secret');
+    });
+
+    it('redacts two paths sharing a prefix without mutating the caller', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['a.token', 'a.secret'],
+      });
+      const account = { token: 't', secret: 's', keep: 'k' };
+
+      const { output } = captureConsole(() => {
+        logger.info('msg', { a: account });
+      });
+
+      const entry = JSON.parse(output[0]!);
+      expect(entry.a.token).toBe('[Redacted]');
+      expect(entry.a.secret).toBe('[Redacted]');
+      expect(entry.a.keep).toBe('k');
+      expect(account).toEqual({ token: 't', secret: 's', keep: 'k' });
+    });
+
+    // A configured path that traverses a value but finds no leaf must leave
+    // that value exactly as it was. Copying on the way DOWN rather than once
+    // the leaf is confirmed spreads the traversed value into a plain record,
+    // so a Date emits as {} and a class instance loses its toJSON — changing
+    // output for a path that redacts nothing.
+    it('leaves a Date untouched when the path traverses it and misses', () => {
+      const { runtime } = createFakeRuntime();
+      const when = new Date('2026-01-02T03:04:05.000Z');
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['eventTime.missing'],
+      });
+      const control = new ConsoleLogger(runtime, { level: 'info' });
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { eventTime: when });
+        control.info('m', { eventTime: when });
+      });
+
+      expect(JSON.parse(output[0]!).eventTime).toBe('2026-01-02T03:04:05.000Z');
+      // Byte-identical to the same entry with no redaction configured.
+      expect(output[0]).toBe(output[1]);
+    });
+
+    it('preserves a custom toJSON when the path traverses it and misses', () => {
+      const { runtime } = createFakeRuntime();
+      class Money {
+        constructor(readonly cents: number) {}
+        toJSON(): string {
+          return `$${this.cents / 100}`;
+        }
+      }
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['amount.missing'],
+      });
+      const control = new ConsoleLogger(runtime, { level: 'info' });
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { amount: new Money(1250) });
+        control.info('m', { amount: new Money(1250) });
+      });
+
+      expect(JSON.parse(output[0]!).amount).toBe('$12.5');
+      expect(output[0]).toBe(output[1]);
+    });
+
+    it('leaves the traversed value untouched in pretty mode too', () => {
+      const { runtime } = createFakeRuntime();
+      const when = new Date('2026-01-02T03:04:05.000Z');
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        pretty: true,
+        redact: ['eventTime.missing'],
+      });
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { eventTime: when });
+      });
+
+      expect(output[0]).toContain('2026-01-02T03:04:05.000Z');
+    });
+
+    it('does not write onto a caller value a matched path runs through', () => {
+      const { runtime } = createFakeRuntime();
+      const when = new Date('2026-01-02T03:04:05.000Z');
+      // `toJSON` is inherited, so `leaf in current` is satisfied and the write
+      // happens. Before the fix this assigned onto the caller's own Date.
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['t.toJSON'],
+      });
+
+      captureConsole(() => {
+        logger.info('m', { t: when });
+      });
+
+      expect(Object.keys(when)).toEqual([]);
+      expect(when.toISOString()).toBe('2026-01-02T03:04:05.000Z');
+    });
+
+    it("stops at an array, matching pino's dotted-path behaviour", () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['users.token'],
+      });
+
+      const { output } = captureConsole(() => {
+        logger.info('list', { users: [{ token: 'a' }, { token: 'b' }] });
+      });
+
+      // Pins the documented limit: pino needs `users[*].token` for an array
+      // and would equally not match the dotted form, so descending here would
+      // make one option behave differently per transport. Unifying the two
+      // syntaxes is M96's, not this fix's.
+      const entry = JSON.parse(output[0]!);
+      expect(entry.users[0].token).toBe('a');
+      expect(entry.users[1].token).toBe('b');
+    });
   });
 
   describe('pretty mode', () => {

@@ -42,6 +42,32 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`ConsoleLogger` no longer writes `'[Redacted]'` into the application's own objects.** A nested
+  redact path corrupted the caller's data: `#redactFields` shallow-clones the metadata record, so
+  `logger.info('login', { auth: user })` under `redact: ['auth.token']` walked into `user` — still
+  the application's own object — and assigned the placeholder to its `token`. The damage outlived
+  the log call and was silent: a later **unredacted** log of the same object emitted `'[Redacted]'`,
+  and anything persisting it afterwards stored that literal string. Only paths of two or more
+  segments were affected; a top-level path was already safe, because the shallow clone stood between
+  the walk and the caller. The path is now walked READ-ONLY and nothing is copied until the leaf is
+  known to exist; the traversed objects are then replaced top-down by copies the logger owns, so the
+  caller's metadata is untouched at any depth. Deferring the copy is a correctness requirement
+  rather than an optimization — copying on the way down spreads every traversed value into a plain
+  record, so a `Date` beneath a path that matches nothing emits as `{}` and a class instance loses
+  the `toJSON` that produced its output, changing a value the configuration never named. An entry
+  whose configured paths match nothing is therefore byte-identical to the same entry logged with no
+  redaction configured, asserted against that control. The one behaviour that does change is a path
+  which ACTUALLY redacts through a non-plain object: the emitted copy is a plain object, so a class
+  instance's own enumerable properties are emitted rather than its `toJSON` output. A copy is the
+  only way to write the leaf without corrupting the caller, and the previous behaviour there was to
+  assign onto the caller's own instance. The existing nested-path tests could not have caught this —
+  each built its metadata inline, so nothing held a reference to read back; the regression cases
+  keep the object a caller would have kept, and four of the five fail without the fix. A path
+  through an ARRAY still redacts nothing and that is unchanged and now documented rather than
+  silent: pino resolves an array element with bracket notation (`'users[*].token'`) and would
+  equally not match the dotted form, so descending would make one option behave differently per
+  transport. Unifying the two syntaxes belongs to the redaction seam milestone, not to this fix.
+
 - **A scaffolded workspace's generated deployment now starts under its own security posture.** A
   `setu new --workspace` microservice, built with its own generated `docker/Dockerfile` and deployed
   under its own generated Kubernetes manifest (`readOnlyRootFilesystem: true`), crash-looped before
