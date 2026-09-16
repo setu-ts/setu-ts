@@ -31,16 +31,17 @@ logger.info('server ready', { port: 3000 });
 
 ## Options
 
-| Option                 | Type                     | Default     | Description                                                                                             |
-| ---------------------- | ------------------------ | ----------- | ------------------------------------------------------------------------------------------------------- |
-| `level`                | `LogLevel`               | `'info'`    | Minimum level to emit.                                                                                  |
-| `transport`            | `LoggerTransport`        | `'console'` | Implementation: `'console'`, `'pino'`, or `'noop'`.                                                     |
-| `pretty`               | `boolean`                | `false`     | Pretty-print entries (console transport only).                                                          |
-| `redact`               | `readonly string[]`      | `[]`        | Dot-paths to strip from metadata.                                                                       |
-| `requestLogging`       | `boolean`                | `false`     | Register request/response logging middleware.                                                           |
-| `slowRequestThreshold` | `number`                 | `5000`      | Requests slower than this (ms) log at `warn`.                                                           |
-| `excludePaths`         | `readonly PathPattern[]` | `[]`        | Paths excluded from request logging. A string is an EXACT match; a `RegExp` is tested against the path. |
-| `pinoFactory`          | `PinoFactory`            | —           | Inject a pre-loaded Pino factory, skipping the import.                                                  |
+| Option                 | Type                                   | Default               | Description                                                                                             |
+| ---------------------- | -------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `level`                | `LogLevel`                             | `'info'`              | Minimum level to emit.                                                                                  |
+| `transport`            | `LoggerTransport`                      | `'console'`           | Implementation: `'console'`, `'pino'`, or `'noop'`.                                                     |
+| `pretty`               | `boolean`                              | `false`               | Pretty-print entries (console transport only).                                                          |
+| `redact`               | `readonly string[]`                    | Secret-field patterns | Dot-paths to redact from metadata; pass `[]` to opt out of the secure defaults.                         |
+| `redaction`            | `RedactionPolicy \| IRedactionService` | —                     | Shared policy or service applied before log egress.                                                     |
+| `requestLogging`       | `boolean`                              | `false`               | Register request/response logging middleware.                                                           |
+| `slowRequestThreshold` | `number`                               | `5000`                | Requests slower than this (ms) log at `warn`.                                                           |
+| `excludePaths`         | `readonly PathPattern[]`               | `[]`                  | Paths excluded from request logging. A string is an EXACT match; a `RegExp` is tested against the path. |
+| `pinoFactory`          | `PinoFactory`                          | —                     | Inject a pre-loaded Pino factory, skipping the import.                                                  |
 
 ## Pino
 

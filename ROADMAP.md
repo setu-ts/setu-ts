@@ -10190,10 +10190,10 @@ every exporter honour it — and that is the whole scope here.
 
 ### The gap is mechanical, and four of its five parts are defects
 
-`grep -rnwE "HIPAA|GDPR|DSS" packages/*/src docs/*.md *.md` returns **nothing**, which is correct
-and stays that way. Standard field classifications such as PII, PHI and PCI are mechanism
-vocabulary, not a claim that this framework implements a regulation. The gap is that the three
-exporters disagree.
+`grep -rnwE "HIPAA|GDPR|DSS" packages/*/src docs/*.md` returns **nothing**, which is correct and
+stays that way. Planning records are intentionally outside this scan. Standard field classifications
+such as PII, PHI and PCI are mechanism vocabulary, not a claim that this framework implements a
+regulation. The gap is that the three exporters disagree.
 
 1. **Telemetry exports the full URL, query string included.**
    `telemetry-plugin/src/middleware/telemetry-middleware.ts:59` sets `http.url` to `request.url` —

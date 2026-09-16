@@ -12,6 +12,14 @@ describe('sanitizeUrl', () => {
       );
   });
 
+  it('omits URL credentials before telemetry export', () => {
+    expect(sanitizeUrl(
+      'https://operator:secret@example.test/search?email=a@b.test#details',
+      'omit',
+      undefined,
+    )).toBe('https://example.test/search');
+  });
+
   it('redacts classified query values and retains unclassified values', () => {
     const service = createRedactionService({
       fields: { 'query.card': 'pci' },

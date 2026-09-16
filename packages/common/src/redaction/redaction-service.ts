@@ -31,42 +31,62 @@ export function createRedactionService(
     const classification = match(path);
     if (classification === undefined) return value;
     const context: RedactionContext = { path, classification };
-    const redactor: Redactor = policy.redactors?.[classification] ?? defaultRedactor;
+    const redactor: Redactor = policy.redactors !== undefined &&
+        Object.hasOwn(policy.redactors, classification)
+      ? policy.redactors[classification]!
+      : defaultRedactor;
     return redactor(value, context);
   };
   return {
     redactValue,
     redactRecord(record: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-      return redactNode(record, '', 0, redactValue) as Readonly<Record<string, unknown>>;
+      return redactNode(record, '', 0, redactValue, new Map()) as Readonly<Record<string, unknown>>;
     },
   };
 }
 
+/** Redacts a traversable node without mutating its caller-owned graph. */
 function redactNode(
   value: unknown,
   path: string,
   depth: number,
   redactValue: (path: string, value: unknown) => unknown,
+  active: Map<object, unknown[] | Record<string, unknown>>,
 ): unknown {
   const direct = path === '' ? value : redactValue(path, value);
-  if (direct !== value || depth >= MAX_REDACTION_DEPTH || !isTraversable(direct)) return direct;
+  if (direct !== value || !isTraversable(direct)) return direct;
+  if (depth >= MAX_REDACTION_DEPTH) {
+    return eraseRedactor(direct, { path, classification: '' });
+  }
+  const activeCopy = active.get(direct);
+  if (activeCopy !== undefined) return activeCopy;
+
+  const copy: unknown[] | Record<string, unknown> = Array.isArray(direct)
+    ? [...direct]
+    : { ...direct };
+  active.set(direct, copy);
   const entries = Array.isArray(direct) ? direct.entries() : Object.entries(direct);
-  let copy: unknown[] | Record<string, unknown> | undefined;
-  for (const [key, child] of entries) {
-    const childPath = path === '' ? String(key) : `${path}.${String(key)}`;
-    const redacted = redactNode(child, childPath, depth + 1, redactValue);
-    if (redacted !== child) {
-      copy ??= Array.isArray(direct) ? [...direct] : { ...direct };
-      if (Array.isArray(copy)) {
-        copy[Number(key)] = redacted;
-      } else {
-        copy[String(key)] = redacted;
+  let changed = false;
+  try {
+    for (const [key, child] of entries) {
+      const childPath = path === '' ? String(key) : `${path}.${String(key)}`;
+      const redacted = redactNode(child, childPath, depth + 1, redactValue, active);
+      if (redacted !== child) {
+        if (Array.isArray(copy)) {
+          copy[Number(key)] = redacted;
+        } else {
+          copy[String(key)] = redacted;
+        }
+        changed = true;
       }
     }
+  } finally {
+    active.delete(direct);
   }
-  return copy ?? direct;
+  return changed ? copy : direct;
 }
 
+/** Limits structural traversal to arrays and dictionary-like objects. */
 function isTraversable(value: unknown): value is Record<string, unknown> | unknown[] {
   if (typeof value !== 'object' || value === null) return false;
   if (Array.isArray(value)) return true;

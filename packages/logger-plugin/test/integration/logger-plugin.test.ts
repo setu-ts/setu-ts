@@ -232,6 +232,18 @@ describe('LoggerPlugin (integration)', () => {
     });
   });
 
+  it('preserves an intentional nullish policy redaction result', () => {
+    const service = composeLoggerRedaction(
+      {
+        redactValue: () => undefined,
+        redactRecord: (record) => record,
+      },
+      [],
+    );
+
+    expect(service.redactValue('token', 'secret')).toBeUndefined();
+  });
+
   it('registers a PinoLogger when transport is pino', async () => {
     // Inject a fake Pino factory via the pinoFactory option.
     const fakePino = {

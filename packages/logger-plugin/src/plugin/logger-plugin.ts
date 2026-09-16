@@ -258,6 +258,7 @@ function buildConsoleOptions(
   return base;
 }
 
+/** Compiles a policy option or returns an already-compiled redaction service. */
 function resolveRedaction(
   redaction: RedactionPolicy | IRedactionService | undefined,
 ): IRedactionService | undefined {
@@ -286,7 +287,10 @@ export function composeLoggerRedaction(
   );
   return {
     redactValue(path: string, value: unknown): unknown {
-      return legacy.redactValue(path, policy?.redactValue(path, value) ?? value);
+      return legacy.redactValue(
+        path,
+        policy === undefined ? value : policy.redactValue(path, value),
+      );
     },
     redactRecord(record: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
       return legacy.redactRecord(policy?.redactRecord(record) ?? record);

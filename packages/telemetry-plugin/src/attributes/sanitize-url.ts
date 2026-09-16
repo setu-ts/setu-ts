@@ -21,6 +21,8 @@ export function sanitizeUrl(
   try {
     const parsed = new URL(url);
     parsed.hash = '';
+    parsed.username = '';
+    parsed.password = '';
     if (mode === 'omit' || redaction === undefined) {
       parsed.search = '';
       return parsed.toString();

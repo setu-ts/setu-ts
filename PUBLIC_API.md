@@ -9277,7 +9277,9 @@ the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSD
 
 `createRedactionService(policy)` compiles a synchronous `RedactionPolicy` once and returns an
 `IRedactionService`. Policies classify dot paths (`*` matches one segment and `**` matches any
-number) and map classifications to a `Redactor`. Matching is case-insensitive for policies;
+number) and map classifications to a `Redactor`. Matching is case-insensitive by default;
+`createRedactionService(policy, { caseSensitive: true })` enables case-sensitive matching. When
+patterns overlap, the most specific match wins; equally specific patterns retain declaration order.
 `eraseRedactor` replaces values with `'[Redacted]'`, while `createMaskRedactor({ keep: 4 })`
 preserves a trailing suffix of strings. `redactRecord()` is clone-on-write: it never mutates caller
 metadata, preserves unclassified subtrees by identity, and descends only into plain objects and

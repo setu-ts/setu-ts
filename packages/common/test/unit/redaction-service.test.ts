@@ -2,6 +2,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createMaskRedactor, createRedactionService } from '../../src/index.ts';
+import type { Redactor } from '../../src/index.ts';
 
 describe('createRedactionService', () => {
   it('redacts literal, wildcard, and array paths without mutating input', () => {
@@ -57,6 +58,36 @@ describe('createRedactionService', () => {
     });
   });
 
+  it('selects the most specific matching field pattern', () => {
+    const service = createRedactionService({
+      fields: { '**': 'pii', 'auth.token': 'secret' },
+      redactors: { pii: () => 'broad', secret: () => 'specific' },
+    });
+
+    expect(service.redactValue('auth.token', 'value')).toBe('specific');
+    expect(service.redactValue('profile.email', 'value')).toBe('broad');
+  });
+
+  it('uses only own redactor entries for application-defined classifications', () => {
+    const fallback = () => 'fallback';
+    const inherited = createRedactionService({
+      fields: { constructor: 'constructor', prototype: '__proto__' },
+      redactors: { custom: () => 'not-selected' },
+      defaultRedactor: fallback,
+    });
+    const redactors: Record<string, Redactor> = Object.create(null);
+    Object.defineProperty(redactors, '__proto__', { value: () => 'custom', enumerable: true });
+    const custom = createRedactionService({
+      fields: { value: '__proto__' },
+      redactors,
+      defaultRedactor: fallback,
+    });
+
+    expect(inherited.redactValue('constructor', 'secret')).toBe('fallback');
+    expect(inherited.redactValue('prototype', 'secret')).toBe('fallback');
+    expect(custom.redactValue('value', 'secret')).toBe('custom');
+  });
+
   it('fails closed when a mask suffix is not a non-negative safe integer', () => {
     for (const keep of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
       expect(
@@ -65,14 +96,31 @@ describe('createRedactionService', () => {
     }
   });
 
-  it('does not descend into non-plain objects or cycles', () => {
+  it('preserves cycle topology while failing closed for deep subtrees', () => {
     const date = new Date(0);
-    const cycle: Record<string, unknown> = { date };
+    const cycle: Record<string, unknown> = { date, token: 'secret' };
     cycle.self = cycle;
-    const service = createRedactionService({ fields: { missing: 'secret' } });
+    const service = createRedactionService({ fields: { token: 'secret' } });
 
-    const result = service.redactRecord(cycle);
-    expect(result).toBe(cycle);
+    const result = service.redactRecord(cycle) as Record<string, unknown>;
+    expect(result).not.toBe(cycle);
     expect(result.date).toBe(date);
+    expect(result.token).toBe('[Redacted]');
+    expect(result.self).toBe(result);
+
+    const deep: Record<string, unknown> = {};
+    let cursor = deep;
+    for (let index = 0; index < 32; index++) {
+      const child: Record<string, unknown> = {};
+      cursor.child = child;
+      cursor = child;
+    }
+    cursor.token = 'secret';
+
+    let redactedCursor = service.redactRecord(deep) as Record<string, unknown>;
+    for (let index = 0; index < 31; index++) {
+      redactedCursor = redactedCursor.child as Record<string, unknown>;
+    }
+    expect(redactedCursor.child).toBe('[Redacted]');
   });
 });

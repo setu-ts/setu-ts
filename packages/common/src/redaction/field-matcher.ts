@@ -20,10 +20,45 @@ export function createFieldMatcher(
     const segments = path.split('.').map((
       segment,
     ) => (caseSensitive ? segment : segment.toLowerCase()));
-    return patterns.find((pattern) => matches(pattern.segments, segments))?.classification;
+    let selected: Pattern | undefined;
+    for (const pattern of patterns) {
+      if (
+        matches(pattern.segments, segments) &&
+        (selected === undefined || isMoreSpecific(pattern, selected))
+      ) {
+        selected = pattern;
+      }
+    }
+    return selected?.classification;
   };
 }
 
+/** Returns whether one matching pattern is more constrained than another. */
+function isMoreSpecific(candidate: Pattern, current: Pattern): boolean {
+  const candidateScore = specificity(candidate.segments);
+  const currentScore = specificity(current.segments);
+  for (let index = 0; index < candidateScore.length; index++) {
+    const difference = candidateScore[index]! - currentScore[index]!;
+    if (difference !== 0) return difference > 0;
+  }
+  // Equal patterns retain their declaration order for backwards compatibility.
+  return false;
+}
+
+/** Scores literals over `*`, and `*` over the unbounded `**` wildcard. */
+function specificity(segments: readonly string[]): readonly number[] {
+  let literalCount = 0;
+  let wildcardCount = 0;
+  let globstarCount = 0;
+  for (const segment of segments) {
+    if (segment === '**') globstarCount++;
+    else if (segment === '*') wildcardCount++;
+    else literalCount++;
+  }
+  return [literalCount, wildcardCount, -globstarCount, segments.length];
+}
+
+/** Tests a normalized path against a compiled wildcard pattern. */
 function matches(
   pattern: readonly string[],
   path: readonly string[],
