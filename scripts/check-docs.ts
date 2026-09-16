@@ -377,6 +377,60 @@ function hasUnescapedPipe(text: string): boolean {
 }
 
 /**
+ * Counts a row's cells the way its author intended them, treating each code
+ * span as opaque.
+ *
+ * GFM splits a cell at every unescaped `|`, code span or not — that is the
+ * whole premise of this check. But the count wanted here is the INTENDED one:
+ * a header whose own span holds a raw pipe reports an inflated rendered count
+ * that would never match its delimiter, and skipping such a block would turn
+ * rule 1 off for the row most worth reporting. Reading spans as opaque asks
+ * "how many cells would this row have had, written correctly?", which is the
+ * question {@linkcode findMalformedTableRows} needs to decide whether a block
+ * was meant to be a table at all.
+ *
+ * An unterminated span runs to the end of the line, so nothing after it can
+ * open a cell.
+ *
+ * @param text - The trimmed row
+ * @returns The cell count, at least 1
+ */
+function countCells(text: string): number {
+  let body = text;
+  if (body.startsWith('|')) {
+    body = body.slice(1);
+  }
+  // A trailing pipe is dropped whether or not it is escaped: an escaped one is
+  // the last cell's own content, and either reading leaves the count the same.
+  if (body.endsWith('|')) {
+    body = body.slice(0, -1);
+  }
+
+  let cells = 1;
+  let index = 0;
+  while (index < body.length) {
+    if (body[index] === '\\') {
+      index += 2;
+      continue;
+    }
+    if (body[index] === '`') {
+      const span = readCodeSpan(body, index);
+      if (span === null) {
+        return cells;
+      }
+      index = span.next;
+      continue;
+    }
+    if (body[index] === '|') {
+      cells++;
+    }
+    index++;
+  }
+
+  return cells;
+}
+
+/**
  * Classifies one table row, reporting at most one reason.
  *
  * Walks the row span by span rather than counting backticks. Counting is the
@@ -446,14 +500,28 @@ function classifyRow(text: string): MalformedRowReason | null {
  * second, independent instance of rule 2, writing the `urlPrefix` default as
  * `` `'/`'` ``.
  *
- * A row counts only when its block actually contains a delimiter row, and that
- * is not pedantry: `deno fmt` wraps a long paragraph mid-line, so an inline
- * union such as `` `string | number | boolean | null` `` can leave a `|` at the
- * start of a continuation line. `CHANGELOG.md`'s `SseMessage.data` entry is
- * exactly that, and is not a table. (Cited by content rather than by line: this
- * file grows at the top, so a line number into it rots on the next release —
- * these citations were already stale once, by the CHANGELOG entry announcing
- * this very check.)
+ * A row counts only from a real GFM header/delimiter pair, and that is not
+ * pedantry: `deno fmt` wraps a long paragraph mid-line, so an inline union such
+ * as `` `string | number | boolean | null` `` can leave a `|` at the start of a
+ * continuation line. `CHANGELOG.md`'s `SseMessage.data` entry is exactly that,
+ * and is not a table. (Cited by content rather than by line: this file grows at
+ * the top, so a line number into it rots on the next release — these citations
+ * were already stale once, by the CHANGELOG entry announcing this very check.)
+ *
+ * Requiring the pair — rather than a delimiter anywhere in the block — is what
+ * keeps a two-cell header carrying an open span, sitting above a one-cell
+ * delimiter, from being read as a table at all. GFM does not recognise that as
+ * a table, because a header must match its delimiter in cell count, so
+ * reporting the open span there would block CI on a paragraph. The widths
+ * are compared with {@linkcode countCells}, which reads spans as opaque, so a
+ * header whose own span holds a raw pipe still matches its delimiter and is
+ * still reported; comparing rendered widths instead would silently exempt the
+ * one row where this defect does the most damage. A block whose leading lines
+ * are prose keeps them out of the table they precede, since the scan starts at
+ * the pair.
+ *
+ * A table written without leading pipes is out of scope — `deno fmt` normalises
+ * every table in this repository to carry them, and the block scan keys on that.
  *
  * Backslash escapes are skipped, so `` \` `` and `\|` are inert, and spans are
  * matched by run length rather than counted — see {@linkcode classifyRow} for
@@ -486,10 +554,21 @@ export function findMalformedTableRows(
       end++;
     }
 
-    const run = lines.slice(index, end);
-    if (run.some((line) => TABLE_DELIMITER.test(line.trim()))) {
-      for (const [offset, line] of run.entries()) {
-        const text = line.trim();
+    const run = lines.slice(index, end).map((line) => line.trim());
+
+    // GFM starts a table at a header whose NEXT line is a delimiter of the
+    // same width; anything above that pair is an ordinary paragraph. Scanning
+    // for the pair rather than for a delimiter anywhere in the run is what
+    // keeps a pipe-leading prose line out of the table it happens to precede.
+    const header = run.findIndex((text, offset) => {
+      const next = run[offset + 1];
+      return next !== undefined && TABLE_DELIMITER.test(next) &&
+        countCells(text) === countCells(next);
+    });
+
+    if (header !== -1) {
+      for (let offset = header; offset < run.length; offset++) {
+        const text = run[offset] as string;
         if (TABLE_DELIMITER.test(text)) {
           continue;
         }

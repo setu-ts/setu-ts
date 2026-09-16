@@ -239,6 +239,50 @@ describe('documentation gate — malformed table rows', () => {
     );
   });
 
+  it('ignores a header whose delimiter does not match it in width', () => {
+    // GFM refuses the whole block when the header and delimiter disagree on
+    // cell count, so this renders as a paragraph and there is no table to
+    // report against. Scanning for a delimiter anywhere in the run flagged the
+    // open span here and would have blocked CI on correct prose.
+    expectReasons(['| A | `B', '| --- |'].join('\n'), []);
+  });
+
+  it('ignores a delimiter that does not immediately follow its header', () => {
+    // The pair is `| bar` over `| --- |`; the line above it is a paragraph GFM
+    // never folds into the table, so its open span is not this gate's business.
+    expectReasons(['| foo `a', '| bar', '| --- |'].join('\n'), []);
+  });
+
+  it('keeps a prose line out of the table it happens to precede', () => {
+    // The scan starts at the pair, so only the data row is reported — the
+    // stray line above the header is prose and carries its own open span.
+    expectReasons(
+      ['| a stray `prose pipe line', '| A | B |', '| --- | --- |', '| x | `a|b` |'].join('\n'),
+      ['unescaped-pipe'],
+    );
+  });
+
+  it('counts an escaped pipe in a header as the cell content it is', () => {
+    // The escape is what makes this header two cells rather than three, so a
+    // count that ignored it would mismatch the delimiter and dismiss the whole
+    // table — taking the genuine defect on the data row with it.
+    expectReasons(
+      ['| A \\| B | C |', '| --- | --- |', '| x | `p|q` |'].join('\n'),
+      ['unescaped-pipe'],
+    );
+  });
+
+  it('reports a header whose own span holds a raw pipe', () => {
+    // The row most worth reporting, and the one a naive width fix would lose:
+    // the raw pipe inflates the RENDERED count to 4 against a 3-cell delimiter,
+    // so comparing rendered widths would dismiss the block as "not a table".
+    // `countCells` reads spans as opaque, giving the intended 3, which matches.
+    expectReasons(
+      ['| A | `x|y` | C |', '| --- | --- | --- |'].join('\n'),
+      ['unescaped-pipe'],
+    );
+  });
+
   it('reports the row through checkDocument, with a remedy in the message', () => {
     const findings = checkDocument(
       'sample.md',
