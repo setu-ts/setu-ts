@@ -277,6 +277,87 @@ describe('ConsoleLogger', () => {
       expect(account).toEqual({ token: 't', secret: 's', keep: 'k' });
     });
 
+    // A configured path that traverses a value but finds no leaf must leave
+    // that value exactly as it was. Copying on the way DOWN rather than once
+    // the leaf is confirmed spreads the traversed value into a plain record,
+    // so a Date emits as {} and a class instance loses its toJSON — changing
+    // output for a path that redacts nothing.
+    it('leaves a Date untouched when the path traverses it and misses', () => {
+      const { runtime } = createFakeRuntime();
+      const when = new Date('2026-01-02T03:04:05.000Z');
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['eventTime.missing'],
+      });
+      const control = new ConsoleLogger(runtime, { level: 'info' });
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { eventTime: when });
+        control.info('m', { eventTime: when });
+      });
+
+      expect(JSON.parse(output[0]!).eventTime).toBe('2026-01-02T03:04:05.000Z');
+      // Byte-identical to the same entry with no redaction configured.
+      expect(output[0]).toBe(output[1]);
+    });
+
+    it('preserves a custom toJSON when the path traverses it and misses', () => {
+      const { runtime } = createFakeRuntime();
+      class Money {
+        constructor(readonly cents: number) {}
+        toJSON(): string {
+          return `$${this.cents / 100}`;
+        }
+      }
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['amount.missing'],
+      });
+      const control = new ConsoleLogger(runtime, { level: 'info' });
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { amount: new Money(1250) });
+        control.info('m', { amount: new Money(1250) });
+      });
+
+      expect(JSON.parse(output[0]!).amount).toBe('$12.5');
+      expect(output[0]).toBe(output[1]);
+    });
+
+    it('leaves the traversed value untouched in pretty mode too', () => {
+      const { runtime } = createFakeRuntime();
+      const when = new Date('2026-01-02T03:04:05.000Z');
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        pretty: true,
+        redact: ['eventTime.missing'],
+      });
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { eventTime: when });
+      });
+
+      expect(output[0]).toContain('2026-01-02T03:04:05.000Z');
+    });
+
+    it('does not write onto a caller value a matched path runs through', () => {
+      const { runtime } = createFakeRuntime();
+      const when = new Date('2026-01-02T03:04:05.000Z');
+      // `toJSON` is inherited, so `leaf in current` is satisfied and the write
+      // happens. Before the fix this assigned onto the caller's own Date.
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['t.toJSON'],
+      });
+
+      captureConsole(() => {
+        logger.info('m', { t: when });
+      });
+
+      expect(Object.keys(when)).toEqual([]);
+      expect(when.toISOString()).toBe('2026-01-02T03:04:05.000Z');
+    });
+
     it("stops at an array, matching pino's dotted-path behaviour", () => {
       const { runtime } = createFakeRuntime();
       const logger = new ConsoleLogger(runtime, {

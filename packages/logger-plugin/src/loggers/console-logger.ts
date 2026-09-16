@@ -190,33 +190,53 @@ export class ConsoleLogger implements ILogger {
    * `target` is a copy this logger owns, but its nested values are still the
    * CALLER's objects — `#redactFields` shallow-clones, and `normalizeMetadata`
    * before it does too. Descending into one and assigning the leaf would write
-   * `'[Redacted]'` into the application's own object, so every intermediate
-   * object is replaced by a copy before the walk continues into it.
+   * `'[Redacted]'` into the application's own object, so the path is walked
+   * READ-ONLY first and nothing is copied until the leaf is known to exist.
    *
-   * The clone is unconditional rather than deferred until the leaf is known to
-   * exist: the surplus copy is confined to this method's own output, whereas
-   * deciding first would mean walking the path twice.
+   * Deferring the copy is what keeps a non-matching path free of side effects,
+   * and that is a correctness requirement rather than an optimization: copying
+   * eagerly spreads every traversed value into a plain record, so a `Date`
+   * beneath an unmatched path emits as `{}` and a class instance loses the
+   * `toJSON` that produced its output — silently changing a value the
+   * configuration never named.
+   *
+   * When the path DOES match, the traversed values are replaced by plain-object
+   * copies, because a copy is the only way to write the leaf without touching
+   * the caller's object. A redacted path running through a class instance
+   * therefore emits that instance's own enumerable properties rather than its
+   * `toJSON` output. That is the narrow, deliberate cost of not corrupting the
+   * caller, and it applies only to a path that actually redacts.
    *
    * @param target - The record to mutate (owned by this logger)
    * @param path - Dot-separated path (e.g. `'auth.token'`)
    */
   #redactPath(target: Record<string, unknown>, path: string): void {
     const segments = path.split('.');
+    // Read-only walk. Nothing is written until the leaf is confirmed.
+    const traversed: Record<string, unknown>[] = [target];
     let current: Record<string, unknown> = target;
     for (let i = 0; i < segments.length - 1; i++) {
-      const segment = segments[i]!;
-      const next = current[segment];
+      const next = current[segments[i]!];
       if (typeof next !== 'object' || next === null || Array.isArray(next)) {
         return;
       }
-      const owned: Record<string, unknown> = { ...next as Record<string, unknown> };
-      current[segment] = owned;
-      current = owned;
+      current = next as Record<string, unknown>;
+      traversed.push(current);
     }
     const leaf = segments[segments.length - 1]!;
-    if (leaf in current) {
-      current[leaf] = '[Redacted]';
+    if (!(leaf in current)) {
+      return;
     }
+    // The leaf exists, so a write will happen. Copy top-down — `traversed[0]`
+    // is `target`, which this logger already owns — and assign each copy into
+    // the copy above it, so the caller's chain is left untouched.
+    let owner: Record<string, unknown> = target;
+    for (let i = 1; i < traversed.length; i++) {
+      const copy: Record<string, unknown> = { ...traversed[i]! };
+      owner[segments[i - 1]!] = copy;
+      owner = copy;
+    }
+    owner[leaf] = '[Redacted]';
   }
 
   /**

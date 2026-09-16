@@ -41,9 +41,18 @@ All notable changes to this project are documented here. The format follows
   the log call and was silent: a later **unredacted** log of the same object emitted `'[Redacted]'`,
   and anything persisting it afterwards stored that literal string. Only paths of two or more
   segments were affected; a top-level path was already safe, because the shallow clone stood between
-  the walk and the caller. Every object on the way to a redacted leaf is now replaced by a copy the
-  logger owns before the leaf is assigned, so the emitted entry is byte-identical and the caller's
-  metadata is untouched at any depth. The existing nested-path tests could not have caught this —
+  the walk and the caller. The path is now walked READ-ONLY and nothing is copied until the leaf is
+  known to exist; the traversed objects are then replaced top-down by copies the logger owns, so the
+  caller's metadata is untouched at any depth. Deferring the copy is a correctness requirement
+  rather than an optimization — copying on the way down spreads every traversed value into a plain
+  record, so a `Date` beneath a path that matches nothing emits as `{}` and a class instance loses
+  the `toJSON` that produced its output, changing a value the configuration never named. An entry
+  whose configured paths match nothing is therefore byte-identical to the same entry logged with no
+  redaction configured, asserted against that control. The one behaviour that does change is a path
+  which ACTUALLY redacts through a non-plain object: the emitted copy is a plain object, so a class
+  instance's own enumerable properties are emitted rather than its `toJSON` output. A copy is the
+  only way to write the leaf without corrupting the caller, and the previous behaviour there was to
+  assign onto the caller's own instance. The existing nested-path tests could not have caught this —
   each built its metadata inline, so nothing held a reference to read back; the regression cases
   keep the object a caller would have kept, and four of the five fail without the fix. A path
   through an ARRAY still redacts nothing and that is unchanged and now documented rather than
