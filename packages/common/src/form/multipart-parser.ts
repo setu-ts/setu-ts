@@ -9,11 +9,24 @@
 
 import { parseContentType } from './content-type.ts';
 
-/** A single parsed part from a multipart body. */
+/**
+ * A single parsed part from a multipart body.
+ */
 export interface ParsedPart {
-  /** The form field name (Content-Disposition `name="…"`). */
+  /**
+   * The form field name, from the Content-Disposition `name` parameter in
+   * either its quoted (`name="…"`) or unquoted (`name=x`) form — the parameter
+   * NAME is matched case-insensitively. A part whose Content-Disposition
+   * carries no `name` parameter at all is DROPPED by {@linkcode parseMultipart}
+   * rather than renamed; an EMPTY value in either spelling — `name=""` or
+   * `name=` — is a defined (empty) name and is kept.
+   */
   readonly name: string;
-  /** The client-provided file name (Content-Disposition `filename="…"`), when present. */
+  /**
+   * The client-provided file name (Content-Disposition `filename`), when
+   * present — in either its quoted or unquoted form. Presence of this member
+   * is what makes a part a file rather than a text field.
+   */
   readonly filename?: string;
   readonly data: Uint8Array;
   readonly mimeType: string;
@@ -72,7 +85,6 @@ export function parseMultipart(
 
     const headerBlock = body.slice(offset, headerEnd);
     const headers = parseHeaders(headerBlock);
-    const name = headers.name ?? 'unknown';
     const mimeType = headers.mime ?? MIME_DEFAULT;
     const filename = headers.filename;
 
@@ -87,12 +99,21 @@ export function parseMultipart(
     const dataEnd = nextBoundary - precedingLineBreakLength(body, nextBoundary);
     const partData = body.slice(dataStart, dataEnd > dataStart ? dataEnd : dataStart);
 
-    // Omit `filename` when absent (exactOptionalPropertyTypes forbids `undefined`).
-    parts.push(
-      filename !== undefined
-        ? { name, filename, data: partData, mimeType }
-        : { name, data: partData, mimeType },
-    );
+    // A part with no usable name is DROPPED, not renamed (M95c §3.4/§3.5). The
+    // platform discards a nameless part; the previous `'unknown'` sentinel was
+    // a REAL field name, so a nameless part collided with a legitimate
+    // `unknown` field and a part whose header failed to parse was
+    // indistinguishable from a field of that name. An EMPTY value in either
+    // spelling (`name=""` or `name=`) is a defined name and is kept; only an
+    // ABSENT `name` parameter drops.
+    if (headers.name !== undefined) {
+      // Omit `filename` when absent (exactOptionalPropertyTypes forbids `undefined`).
+      parts.push(
+        filename !== undefined
+          ? { name: headers.name, filename, data: partData, mimeType }
+          : { name: headers.name, data: partData, mimeType },
+      );
+    }
     offset = nextBoundary;
   }
 
@@ -140,9 +161,16 @@ function findDoubleCrlf(body: Uint8Array, offset: number): number {
  * case-insensitive like every other HTTP header. The previous implementation
  * matched the exact strings `Content-Disposition` and `Content-Type`, so a
  * client sending `content-disposition` (legal, and what several HTTP libraries
- * emit) lost the field name, the filename discriminator and the MIME type —
- * measured: the part arrived under the name `'unknown'`, so a CSRF token was
- * never found and an upload was never delivered.
+ * emit) lost the field name, the filename discriminator and the MIME type
+ * entirely — measured before that was fixed, a CSRF token was never found and
+ * an upload was never delivered.
+ *
+ * The Content-Disposition parameters are read by
+ * {@linkcode dispositionParameter}, which admits the unquoted token form and
+ * matches the parameter NAME case-insensitively; the previous quoted-only,
+ * case-sensitive regexes silently discarded the name of a part a client sent
+ * as `name=x` (the platform delivers it) and demoted an upload sent with an
+ * unquoted `filename=a.txt` to a text field.
  */
 function parseHeaders(block: Uint8Array): { name?: string; mime?: string; filename?: string } {
   const text = new TextDecoder().decode(block);
@@ -155,16 +183,87 @@ function parseHeaders(block: Uint8Array): { name?: string; mime?: string; filena
     const value = line.slice(colon + 1).trim();
 
     if (field === 'content-disposition') {
-      const nameMatch = value.match(/(?:^|;)\s*name="([^"]*)"/);
-      if (nameMatch) result.name = nameMatch[1];
-      const fileMatch = value.match(/(?:^|;)\s*filename="([^"]*)"/);
-      if (fileMatch) result.filename = fileMatch[1];
+      const name = dispositionParameter(value, 'name');
+      if (name !== undefined) result.name = name;
+      const filename = dispositionParameter(value, 'filename');
+      if (filename !== undefined) result.filename = filename;
     } else if (field === 'content-type') {
       result.mime = value;
     }
   }
 
   return result;
+}
+
+/**
+ * Reads one `Content-Disposition` parameter's value, quoted or unquoted.
+ *
+ * Both spellings are accepted: the quoted form `name="x"`, and the unquoted
+ * token form `name=x`, whose value runs to the next `;` or the end of the
+ * header and is then trimmed — measured against the platform,
+ * `name=hello world` → `hello world`, `name=x` → `x`, `name=x;` → `x`. The
+ * parameter NAME is matched case-insensitively (RFC 2183 header-parameter
+ * semantics, and what Node does); the header FIELD name above is
+ * case-insensitive as it always was. Where the runtimes disagree — Deno drops
+ * an uppercase `NAME=x` part, Node delivers it — this parser delivers, the
+ * side that loses no data (M95c §3.4).
+ *
+ * An empty value is a DEFINED empty string in EITHER spelling — quoted
+ * `name=""` and unquoted `name=` both yield `''` — so `name=` is a legitimate
+ * empty-named field and `filename=""` is the empty file input the web
+ * standard's file-versus-text discriminator depends on. An ABSENT parameter
+ * yields `undefined`, which is what makes {@linkcode parseMultipart} drop a
+ * part rather than rename it; a parameter with no `=` at all (a bare `name`
+ * token) is absent by that rule.
+ *
+ * @param value - The header value after the colon
+ * @param parameter - The parameter name to read, lower-case
+ * @returns The parameter's value, or `undefined` when the parameter is absent
+ */
+function dispositionParameter(value: string, parameter: string): string | undefined {
+  let index = 0;
+  const length = value.length;
+
+  while (index < length) {
+    // Skip whitespace and the semicolons separating parameters.
+    const char = value[index];
+    if (char === ' ' || char === '\t' || char === ';') {
+      index++;
+      continue;
+    }
+
+    // Read the parameter name up to `=`; a valueless token is skipped.
+    const nameStart = index;
+    while (index < length && value[index] !== '=' && value[index] !== ';') index++;
+    const name = value.slice(nameStart, index).trim().toLowerCase();
+    if (index >= length || value[index] === ';') continue;
+
+    index++; // the `=`
+
+    if (value[index] === '"') {
+      const closing = value.indexOf('"', index + 1);
+      if (closing === -1) {
+        // An unterminated quote makes the REST of the header unparseable, not
+        // just this parameter: everything after the opening quote is inside a
+        // string that never closes, so a `;` beyond it separates nothing and a
+        // later `name=` is quoted text rather than a parameter. Scanning on
+        // would invent parameters the client did not send. Ending the scan
+        // yields `undefined`, which for `name` makes `parseMultipart` drop the
+        // part — the same answer it gives any disposition it cannot read.
+        index = length;
+        continue;
+      }
+      if (name === parameter) return value.slice(index + 1, closing);
+      index = closing + 1;
+    } else {
+      const stop = value.indexOf(';', index);
+      const end = stop === -1 ? length : stop;
+      if (name === parameter) return value.slice(index, end).trim();
+      index = end;
+    }
+  }
+
+  return undefined;
 }
 
 /**

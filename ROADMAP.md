@@ -9943,7 +9943,7 @@ messaging indicator bounds every arm's probe through `createCachedProbe` so a hu
 the real emulator; the hung arm passed against real RabbitMQ 4; negative controls 1–5 and 4b were
 each observed failing and reverted.
 
-### Milestone 95c: A Contract Its Own Implementation Does Not Honour
+### Milestone 95c: A Contract Its Own Implementation Does Not Honour ✅ COMPLETE
 
 **Package(s):** `packages/common`, `packages/database-plugin`, `packages/kernel`,
 `packages/session-plugin`, `packages/static-plugin`
@@ -10030,6 +10030,27 @@ narrow (`endsWith('.html')` still works, and the shipped content-hash default st
 the hash survives the prefix), so this costs a hand-written callback rather than a default. **Fix:**
 either strip `urlPrefix` before calling — which is what `relativePath` and the `=== '/'` example
 both imply — or correct the three doc sites and the example.
+
+**Shipped.** All five rows are closed. (1) The seam admits the real driver —
+`connect():
+Promise<unknown>` — and the compile-time fixture (`test/types/mongo-seam.assert.ts`, a
+static import, no cast) did exactly its job on first run: the real driver still failed on
+`ClientSession.startTransaction(options?): void` and on the `Sort` union of `find`/`findOne`, both
+reconciled in the same widening spirit and each pinned by the fixture; the seam test's laundering
+cast is removed. (2) `inject()` carries bytes verbatim (no content-type default), `URLSearchParams`
+through its own serialisation (urlencoded default), and JSON only for a plain object — anything else
+is refused by name, the runtime half pinning what the type-level union cannot enforce on a
+JavaScript caller. (3) `csrfFormMiddleware` publishes its resolved config under the exported
+`CSRF_CONFIG_STATE_KEY` before its short-circuits, and `csrfTokenField` reads it, with an explicit
+argument beating the published config, which beats `'_csrf'`, and the no-middleware fallback
+byte-identical. (4) The parser accepts the unquoted, case-insensitive parameter form (R9 semantics),
+drops a part with no usable name, keeps an empty value in either spelling, and the `unknown`
+sentinel is gone; the §3.4 table is asserted against LITERALS because R18 measured the runtimes
+disagreeing on three of six rows. (5) The callback parameter is renamed `requestPath` everywhere it
+is declared — including the barrel-exported `StaticPluginOptions`, which is the spelling a consumer
+sees — and the three doc sites corrected to the deliberate full-path behaviour, with the dead `'/'`
+README example replaced. All five negative controls (§6) were each observed failing and reverted;
+both corrected READMEs are covered by the existing fence compiler.
 
 ### Milestone 95d: Documentation That Survives Contact
 
@@ -10472,6 +10493,6 @@ that to per-parameter redaction, so a query string can be kept where the policy 
 | 94c       | ✅     | session-plugin — CSRF token field helper                                                                               |
 | 95a       | ✅     | cli + docs — a generated deployment cannot start (**High**)                                                            |
 | 95b       | ✅     | common + database-plugin + messaging-plugin — reachability that fails open (**High**)                                  |
-| 95c       | ⬜     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
+| 95c       | ✅     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
 | 95d       | ⬜     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
 | 96        | ⬜     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |

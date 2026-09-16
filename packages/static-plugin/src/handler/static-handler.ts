@@ -36,8 +36,11 @@ export type StaticHandlerOptions = {
   index: string;
   /** The fallback file to serve for missing paths */
   fallback?: string | undefined;
-  /** Cache-Control configuration */
-  cacheControl?: string | ((relativePath: string) => string) | undefined;
+  /**
+   * Cache-Control configuration. A callback receives the FULL leading-slash
+   * request path INCLUDING `urlPrefix` — see `CacheControlOptions`.
+   */
+  cacheControl?: string | ((requestPath: string) => string) | undefined;
   /** Whether to generate ETags (default: true) */
   etag?: boolean | undefined;
   /** Whether to handle Range requests (default: true) */
@@ -107,9 +110,11 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     const normalizedPath = relativePath === '' ? '/' : relativePath;
 
     // The path handed to a user-supplied `cacheControl` callback: the FULL
-    // leading-slash request path INCLUDING the URL prefix, per the documented
-    // contract (`/assets/app.js`, never the prefix-stripped `/app.js`).
-    // Internal resolution below keeps using the stripped form.
+    // leading-slash request path INCLUDING the URL prefix — the documented
+    // contract (M95c C3: a cache policy is about the URL the client caches
+    // under, so `/assets/app.js`, never the prefix-stripped `/app.js`), a
+    // behaviour measured deliberate, not an oversight. Internal resolution
+    // below keeps using the stripped form.
     const callbackPath = (rootRelative: string): string =>
       normalizedPrefix === '/' ? rootRelative : `${normalizedPrefix}${rootRelative}`;
 
@@ -163,7 +168,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
             if (fallbackStat.isFile) {
               return serveFile(ctx, fs, fallbackPath, fallbackStat, {
                 cacheControl,
-                relativePath: callbackPath(`/${fallback}`),
+                requestPath: callbackPath(`/${fallback}`),
                 etag,
                 ranges,
                 maxBufferBytes,
@@ -186,7 +191,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
           if (indexStat.isFile) {
             return serveFile(ctx, fs, indexPath, indexStat, {
               cacheControl,
-              relativePath: callbackPath(
+              requestPath: callbackPath(
                 rootRelative === '/' ? `/${index}` : `${rootRelative}/${index}`,
               ),
               etag,
@@ -204,7 +209,7 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     // Serve the file
     return serveFile(ctx, fs, fullPath, stat, {
       cacheControl,
-      relativePath: callbackPath(rootRelative),
+      requestPath: callbackPath(rootRelative),
       etag,
       ranges,
       maxBufferBytes,
@@ -230,9 +235,14 @@ async function serveFile(
   fullPath: string,
   stat: StatResult,
   options: {
-    cacheControl?: string | ((relativePath: string) => string) | undefined;
-    /** Root-relative path of the ORIGINAL resource, leading '/' — drives Cache-Control. */
-    relativePath: string;
+    cacheControl?: string | ((requestPath: string) => string) | undefined;
+    /**
+     * The FULL request path of the ORIGINAL resource, leading '/' and INCLUDING
+     * `urlPrefix` — drives Cache-Control. `callbackPath` has already prepended
+     * the prefix, and this is never the `.br`/`.gz` sidecar's path, so a hashed
+     * asset keeps its policy whichever encoding is negotiated.
+     */
+    requestPath: string;
     etag?: boolean | undefined;
     ranges?: boolean | undefined;
     compressed?: boolean | undefined;
@@ -241,7 +251,7 @@ async function serveFile(
 ): Promise<ReturnType<RouteHandler>> {
   const {
     cacheControl,
-    relativePath,
+    requestPath,
     etag = true,
     ranges = true,
     compressed = true,
@@ -283,7 +293,7 @@ async function serveFile(
     if (shouldReturn304({ etag: true, stat: selected.stat, ifNoneMatch, ifModifiedSince })) {
       const response = ctx.response.status(304).header(
         'Cache-Control',
-        resolveCacheControl(relativePath, { cacheControl }),
+        resolveCacheControl(requestPath, { cacheControl }),
       ).header('Vary', 'Accept-Encoding');
       const etagValue = computeETag(selected.stat);
       response.header('ETag', etagValue);
@@ -301,7 +311,7 @@ async function serveFile(
     cacheControl,
     // The ORIGINAL path, so a hashed asset keeps `immutable` when a sidecar is
     // negotiated. The sidecar path never matches the content-hash pattern.
-    relativePath,
+    requestPath,
     etag,
     ranges,
     maxBufferBytes,
@@ -339,9 +349,14 @@ async function serveCompressedFile(
   stat: StatResult,
   contentEncoding: string | undefined,
   options: {
-    cacheControl?: string | ((relativePath: string) => string) | undefined;
-    /** Root-relative path of the ORIGINAL resource, leading '/' — drives Cache-Control. */
-    relativePath: string;
+    cacheControl?: string | ((requestPath: string) => string) | undefined;
+    /**
+     * The FULL request path of the ORIGINAL resource, leading '/' and INCLUDING
+     * `urlPrefix` — drives Cache-Control. `callbackPath` has already prepended
+     * the prefix, and this is never the `.br`/`.gz` sidecar's path, so a hashed
+     * asset keeps its policy whichever encoding is negotiated.
+     */
+    requestPath: string;
     etag?: boolean | undefined;
     ranges?: boolean | undefined;
     maxBufferBytes?: number | undefined;
@@ -350,7 +365,7 @@ async function serveCompressedFile(
 ): Promise<ReturnType<RouteHandler>> {
   const {
     cacheControl,
-    relativePath,
+    requestPath,
     etag = true,
     ranges = true,
     maxBufferBytes = 1_048_576,
@@ -358,7 +373,7 @@ async function serveCompressedFile(
   } = options;
 
   const fileContentType = contentType ?? contentTypeFor(fullPath);
-  const cacheControlValue = resolveCacheControl(relativePath, { cacheControl });
+  const cacheControlValue = resolveCacheControl(requestPath, { cacheControl });
   const etagValue = etag ? computeETag(stat) : undefined;
 
   // Check Range request

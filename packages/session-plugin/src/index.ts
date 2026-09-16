@@ -42,7 +42,13 @@ export { getSession } from './services/get-session.ts';
 
 // CSRF
 export { csrfFormMiddleware } from './middleware/csrf-form-middleware.ts';
-export { CSRF_SESSION_KEY, csrfTokenField, getCsrfToken } from './csrf/token.ts';
+export {
+  CSRF_CONFIG_STATE_KEY,
+  CSRF_SESSION_KEY,
+  csrfTokenField,
+  getCsrfToken,
+} from './csrf/token.ts';
+export type { PublishedCsrfConfig } from './csrf/token.ts';
 export { verifyCsrfToken } from './csrf/verify.ts';
 
 // Session middleware (exported for standalone wiring, e.g. `autoStart: false` test apps)

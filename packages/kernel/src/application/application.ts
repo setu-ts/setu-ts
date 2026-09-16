@@ -52,6 +52,7 @@ import { isPathDecodable } from '../router/route-matcher.ts';
 import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
+import { coerceInjectBody } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
 
 /** Options for {@linkcode createApplication}. */
@@ -72,8 +73,32 @@ export interface InjectRequest {
   url: string;
   /** Request headers. */
   headers?: Record<string, string> | Headers;
-  /** Request body (will be stringified if not a string). */
-  body?: unknown;
+  /**
+   * Request body. Carried VERBATIM for the byte-ish shapes (`Uint8Array`,
+   * `ArrayBuffer`, `Blob`) — with no content-type default, since only the
+   * caller knows whether those bytes are multipart, JSON, or an image. A
+   * `URLSearchParams` is serialised with its own `toString()` and defaults the
+   * content type to `application/x-www-form-urlencoded`; a plain object is
+   * JSON-serialised and a bare `string` is carried as-is, both defaulting to
+   * `application/json`. An explicitly supplied content type always wins.
+   *
+   * Any other shape — an array, a `Date`, a class instance, a number — is
+   * REFUSED with a `TypeError` naming the received type, rather than silently
+   * JSON-stringified as before (which turned a `Uint8Array` into
+   * `{"0":97,…}` and every other non-string into `{}`).
+   *
+   * The last arm is deliberately `Record<string, unknown>`, not `object`:
+   * `object` admits arrays, `Date`s, streams and every class instance, so the
+   * union would go on accepting exactly the values that used to silently
+   * JSON-coerce.
+   */
+  body?:
+    | string
+    | Uint8Array
+    | ArrayBuffer
+    | Blob
+    | URLSearchParams
+    | Record<string, unknown>;
 }
 
 /**
@@ -592,18 +617,24 @@ class Application implements IKernelApplication {
 
   /** Synthesizes an inject request and runs it through the full pipeline. */
   async inject(request: InjectRequest): Promise<InjectResponse> {
-    const bodyStr = typeof request.body === 'string'
-      ? request.body
-      : request.body !== undefined
-      ? JSON.stringify(request.body)
-      : undefined;
+    // Per-shape coercion (M95c §3.9): bytes verbatim, Blob awaited,
+    // URLSearchParams through its own serialisation, JSON only for a plain
+    // object — and a named refusal for anything else, since a JavaScript
+    // caller can still hand `inject()` a value the type cannot see.
+    const { bytes: bodyBytes, defaultContentType } = await coerceInjectBody(request.body);
 
     const headers = request.headers instanceof Headers
       ? request.headers
       : new Headers(request.headers ?? {});
 
-    if (bodyStr !== undefined && !headers.has('content-type')) {
-      headers.set('content-type', 'application/json');
+    // The default is PER SHAPE: a URLSearchParams body defaulting to
+    // `application/json` would arrive as a non-form and the form parse would
+    // refuse the input this widening exists to carry, and a byte-ish body
+    // gets NO default at all because only the caller knows its encoding.
+    if (
+      bodyBytes !== undefined && defaultContentType !== undefined && !headers.has('content-type')
+    ) {
+      headers.set('content-type', defaultContentType);
     }
 
     // Normalize relative paths to a full URL so createRequestContext can parse
@@ -623,11 +654,18 @@ class Application implements IKernelApplication {
     // than throwing out of `inject()` here.
     let raw: Request | undefined;
     try {
+      // A second copy, deliberately: `coerceInjectBody` already returned bytes
+      // the caller cannot alias, and this keeps `ctx.request.raw`'s body
+      // independent of the array `bytes()` hands the handler, so a handler that
+      // mutates what it read cannot change what `raw` reports. `inject()` is an
+      // in-process test entry point and the pre-M95c path re-encoded the body
+      // on every call, so the copy is not a regression.
+      const requestBody = bodyBytes === undefined ? undefined : new Uint8Array(bodyBytes);
       raw = new Request(fullUrl, {
         method: request.method,
         headers,
-        ...(bodyStr !== undefined && request.method !== 'GET' && request.method !== 'HEAD'
-          ? { body: bodyStr }
+        ...(requestBody !== undefined && request.method !== 'GET' && request.method !== 'HEAD'
+          ? { body: requestBody }
           : {}),
       });
     } catch {
@@ -654,22 +692,24 @@ class Application implements IKernelApplication {
         // same failure the served path produces. The empty-body arm keeps its
         // `{}` default — an in-process inject that sent no body is not a
         // malformed body.
-        return Promise.resolve().then(() => parseJsonBody(bodyStr ?? '{}') as T);
+        return Promise.resolve().then(() =>
+          parseJsonBody(bodyBytes === undefined ? '{}' : new TextDecoder().decode(bodyBytes)) as T
+        );
       },
       text(): Promise<string> {
-        return Promise.resolve(bodyStr ?? '');
+        return Promise.resolve(bodyBytes === undefined ? '' : new TextDecoder().decode(bodyBytes));
       },
       bytes(): Promise<Uint8Array> {
-        return Promise.resolve(new TextEncoder().encode(bodyStr ?? ''));
+        return Promise.resolve(bodyBytes ?? new Uint8Array(0));
       },
       formData(): Promise<FormBody> {
         // The shared parse (M94b): a non-form content-type rejects with the
         // `415`-branded UnsupportedFormEncodingError, so an injected request
-        // observes what a served request observes. `headers` already carries
-        // the `application/json` default, so a bodyless inject without a
-        // content-type classifies as absent — the same `415`.
+        // observes what a served request observes. A byte-ish body sets NO
+        // default content type (M95c §3.9), so an injected multipart must
+        // supply its own — exactly what a served request requires.
         form ??= Promise.resolve().then(() =>
-          parseFormBody(new TextEncoder().encode(bodyStr ?? ''), headers.get('content-type'))
+          parseFormBody(bodyBytes ?? new Uint8Array(0), headers.get('content-type'))
         );
         return form;
       },

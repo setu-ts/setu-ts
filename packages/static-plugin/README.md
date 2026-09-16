@@ -41,17 +41,17 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option           | Type                                 | Default        | Description                                                                              |
-| ---------------- | ------------------------------------ | -------------- | ---------------------------------------------------------------------------------------- |
-| `root`           | `string`                             | (required)     | The filesystem directory to serve files from                                             |
-| `urlPrefix`      | `string`                             | `'/`'`         | URL prefix for static routes                                                             |
-| `index`          | `string`                             | `'index.html'` | Index file to serve for directories. Set to `''` to disable                              |
-| `fallback`       | `string`                             | `undefined`    | Fallback file for SPA routing (served when Accept includes text/html)                    |
-| `cacheControl`   | `string \| (path: string) => string` | auto           | Cache-Control header. A callback receives a **leading-slash** root-relative request path |
-| `etag`           | `boolean`                            | `true`         | Enable ETag generation                                                                   |
-| `ranges`         | `boolean`                            | `true`         | Enable Range request handling                                                            |
-| `compressed`     | `boolean`                            | `true`         | Enable precompressed sidecar negotiation                                                 |
-| `maxBufferBytes` | `number`                             | `1048576`      | Maximum file size to read fully into memory (1MB)                                        |
+| Option           | Type                                        | Default        | Description                                                                                                         |
+| ---------------- | ------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `root`           | `string`                                    | (required)     | The filesystem directory to serve files from                                                                        |
+| `urlPrefix`      | `string`                                    | `'/'`          | URL prefix for static routes                                                                                        |
+| `index`          | `string`                                    | `'index.html'` | Index file to serve for directories. Set to `''` to disable                                                         |
+| `fallback`       | `string`                                    | `undefined`    | Fallback file for SPA routing (served when Accept includes text/html)                                               |
+| `cacheControl`   | `string \| (requestPath: string) => string` | auto           | Cache-Control header. A callback receives the full **leading-slash request path including `urlPrefix`** — see below |
+| `etag`           | `boolean`                                   | `true`         | Enable ETag generation                                                                                              |
+| `ranges`         | `boolean`                                   | `true`         | Enable Range request handling                                                                                       |
+| `compressed`     | `boolean`                                   | `true`         | Enable precompressed sidecar negotiation                                                                            |
+| `maxBufferBytes` | `number`                                    | `1048576`      | Maximum file size to read fully into memory (1MB)                                                                   |
 
 ### A root `urlPrefix` claims the bare wildcard
 
@@ -87,15 +87,21 @@ StaticPlugin({
 StaticPlugin({
   root: './public',
   urlPrefix: '/assets',
-  cacheControl: (path) =>
-    path === '/' || path.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000',
+  cacheControl: (requestPath) =>
+    requestPath.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000',
 });
 ```
 
-**The callback's `path` argument is the leading-slash root-relative request path** —
-`/assets/app-A9acsx54.js` for a file under the prefix above, and the literal `'/'` when the request
-equals the prefix root. It is never the absolute filesystem path and never the `.br`/`.gz` sidecar
-path, so a hashed asset keeps its policy whichever encoding is negotiated.
+**The callback's `requestPath` argument is the full leading-slash request path, INCLUDING
+`urlPrefix`** — `/assets/app-A9acsx54.js` for a file under the prefix above, and
+`/assets/index.html` (the resolved index, never the literal `'/'`) for a directory request against
+it. Under a root mount the prefix is empty, so the whole request path is the story:
+`/app-A9acsx54.js` and `/index.html`. It is never the prefix-stripped server path, never the
+absolute filesystem path, and never the `.br`/`.gz` sidecar path, so a hashed asset keeps its policy
+whichever encoding is negotiated. The prefix inclusion is deliberate: a cache policy is about the
+URL the client caches under, so the served path is the input. (The one way to see a bare `'/'` is to
+point `root` at a FILE rather than a directory, which is outside what `root` documents; with a
+directory the index is always resolved first.)
 
 ## SPA Fallback
 

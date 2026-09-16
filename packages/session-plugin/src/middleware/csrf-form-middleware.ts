@@ -20,6 +20,8 @@ import { respondWithError } from '@setu-ts/common';
 import { CsrfTokenMismatchError } from '../errors.ts';
 import type { CsrfFormOptions } from '../options.ts';
 import { resolveCsrfConfig } from '../options.ts';
+import { CSRF_CONFIG_STATE_KEY } from '../csrf/token.ts';
+import type { PublishedCsrfConfig } from '../csrf/token.ts';
 import { isCsrfExcluded } from '../csrf/exclude.ts';
 import { verifyWithConfig } from '../csrf/verify.ts';
 
@@ -56,6 +58,23 @@ export function csrfFormMiddleware(options: CsrfFormOptions = {}): MiddlewareFun
     ctx: IRequestContext,
     next: NextFunction,
   ): Promise<void | HandlerResult> => {
+    // Publish the field name BEFORE the short-circuits below (M95c §3.2):
+    // `csrfTokenField` reads it to render the form, and the request that
+    // renders the form is a GET — an ignored method. A write placed after the
+    // `ignoreMethods` branch would never be visible to the one request that
+    // needs it. The verifier below keeps reading its registration-time
+    // resolution, so the hot path is unchanged.
+    //
+    // A FROZEN per-request object, never `config` itself: `config` is resolved
+    // once at registration and shared by every request, so publishing it handed
+    // the verifier's own configuration to any handler holding the context —
+    // measured, one `…get(CSRF_CONFIG_STATE_KEY).ignoreMethods.add('POST')`
+    // turned a 403 into a 200 for every later request in the process. Only
+    // `fieldName` is published, which is all `csrfTokenField` reads and is a
+    // string, so there is nothing left to mutate.
+    const published: PublishedCsrfConfig = Object.freeze({ fieldName: config.fieldName });
+    ctx.state.set(CSRF_CONFIG_STATE_KEY, published);
+
     if (
       config.ignoreMethods.has(ctx.request.method.toUpperCase()) ||
       isCsrfExcluded(ctx, options.exclude)

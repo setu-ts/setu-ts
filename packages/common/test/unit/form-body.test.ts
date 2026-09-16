@@ -183,3 +183,30 @@ describe('parseFormBody — the 415 refusal (§3.4)', () => {
     expectUnsupported(body, 'multipart/form-data');
   });
 });
+
+describe('parseFormBody — the R5 collision arithmetic (M95c §3.5)', () => {
+  it('yields ONE "unknown" entry for a nameless part beside a legitimate "unknown" field', () => {
+    const boundary = 'm95c-r5';
+    const body = new TextEncoder().encode(
+      `--${boundary}\r\n` +
+        'Content-Disposition: form-data; name="unknown"\r\n\r\n' +
+        'legit\r\n' +
+        `--${boundary}\r\n` +
+        'Content-Disposition: form-data\r\n\r\n' +
+        'ORPHAN\r\n' +
+        `--${boundary}--\r\n`,
+    );
+
+    const form = parseFormBody(body, `multipart/form-data; boundary=${boundary}`);
+
+    // The removed `'unknown'` sentinel produced ["unknown=ORPHAN", "unknown=legit"]
+    // here — a nameless part colliding with a REAL field, which is why the
+    // sentinel is removed outright rather than made "unrepresentable". Dropped,
+    // the count is one and the value is the sibling's.
+    const entries = [...form.entries()];
+    expect(entries.length).toBe(1);
+    expect(entries[0][0]).toBe('unknown');
+    expect(entries[0][1]).toBe('legit');
+    expect(form.getAll('unknown')).toEqual(['legit']);
+  });
+});

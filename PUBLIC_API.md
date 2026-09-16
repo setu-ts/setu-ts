@@ -231,6 +231,17 @@ For testing, prefer `createTestApp()` — it calls `start()` automatically (with
 so you can call `inject()` or `fetch()` directly. See
 [Testing Package](#testing-package-setu-tstesting) for the full API.
 
+`inject()` carries the body shapes a request actually has (M95c): a `Uint8Array`, an `ArrayBuffer`
+and a `Blob` pass through VERBATIM — with no content-type default, since only the caller knows
+whether those bytes are multipart, JSON, or an image; a `URLSearchParams` is serialised with its own
+`toString()` and defaults `content-type` to `application/x-www-form-urlencoded`; a plain object is
+JSON-serialised and a bare `string` is carried as-is, both defaulting to `application/json`. An
+explicitly supplied content type always wins. Any other shape — an array, a `Date`, a class
+instance, a number — is refused with a `TypeError` naming the received type, not silently
+JSON-stringified: the previous behaviour turned a `Uint8Array` into `{"0":97,…}` and every other
+non-string into `{}` while answering 200, which made an injected multipart upload parse as an empty
+form.
+
 ---
 
 ## RuntimePlugin() (`@setu-ts/runtime`)
@@ -1619,11 +1630,18 @@ application reaches the injected client directly for native commands, exactly as
 Prisma raw query. Transactions use a `startSession()` and are refused at `beginTransaction()` with
 `MongoTransactionUnavailableError` on a deployment that is not a replica set, never at `connect()`.
 
-`IMongoClient` and `IMongoObjectIdCtor` are the exported injection seam. The real driver implements
-their structural shapes. The types the client's members reference — `IMongoDatabase`,
-`IMongoSession`, and the `IMongoObjectId` instance shape — are exported alongside them so the seam's
-return types are nameable from the package entry, as are the collection-level shapes
-`IMongoDatabase.collection()` reaches (`IMongoCollection`, `IMongoCursor`,
+`IMongoClient` and `IMongoObjectIdCtor` are the exported injection seam, and the real driver
+implements their structural shapes: `IMongoClient.connect()` is `Promise<unknown>` because the
+driver's own `connect(): Promise<this>` is not assignable to `Promise<void>`, and the adapter binds
+nothing; the same reconciliation admits the driver's `startTransaction(options?): void` (the session
+member is `(options?: unknown) => unknown`) and its string-and-array `Sort` union (`sort?` is
+`unknown` on `find`/`findOne`, where the adapter builds a `Record`). The claim is pinned by a
+compile-time fixture — `packages/database-plugin/test/types/mongo-seam.assert.ts` assigns a real
+`new MongoClient(...)` to `IMongoClient` with NO cast under a static import of the driver, and fails
+`deno task check` the moment the seam drifts again. The types the client's members reference —
+`IMongoDatabase`, `IMongoSession`, and the `IMongoObjectId` instance shape — are exported alongside
+them so the seam's return types are nameable from the package entry, as are the collection-level
+shapes `IMongoDatabase.collection()` reaches (`IMongoCollection`, `IMongoCursor`,
 `IMongoCollectionFindOneAndUpdateOptions`, and the `MongoOptions`/`MongoWriteOptions` option bags).
 
 ### DynamoDB backend (`'dynamodb'` arm)
@@ -3433,30 +3451,32 @@ package README's "What `SameSite` does not separate".
 
 ### Exports
 
-| Export                          | Kind      | Purpose                                                                    |
-| ------------------------------- | --------- | -------------------------------------------------------------------------- |
-| `SessionPlugin`                 | function  | The plugin factory                                                         |
-| `SessionService`                | class     | `ISessionService` implementation registered under the token                |
-| `getSession`                    | function  | The single accessor: `getSession(ctx): ISession`                           |
-| `sessionMiddleware`             | function  | Load/commit middleware (registered at 260; exported for standalone wiring) |
-| `csrfFormMiddleware`            | function  | Synchronizer-token middleware (registered at 275 when `csrf` is present)   |
-| `getCsrfToken`                  | function  | Mints-and-stores on first call, then stable within the session             |
-| `csrfTokenField`                | function  | Renders the minted token as a hidden field for a server-rendered form      |
-| `verifyCsrfToken`               | function  | Standalone verification for handlers and React Router actions              |
-| `CSRF_SESSION_KEY`              | const     | Reserved session key holding the token (`'__csrf'`)                        |
-| `MemorySessionStore`            | class     | `Map`-backed store; requires injected clock and timers                     |
-| `CacheSessionStore`             | class     | Store over any `ICacheStore` resolved from `CAPABILITIES.CACHE`            |
-| `SessionSecretMissingError`     | class     | Thrown during `register()` when no adequate secret resolves                |
-| `SessionMiddlewareMissingError` | class     | Thrown by `getSession` when the middleware did not run                     |
-| `CsrfTokenMismatchError`        | class     | Thrown by `verifyCsrfToken`; the middleware converts it to `403`           |
-| `SessionTooLargeError`          | class     | Thrown when a committed cookie would exceed `maxCookieBytes`               |
-| `SessionMode`                   | type      | `'encrypt' \| 'sign'`                                                      |
-| `SessionPluginOptions`          | interface | The factory's parameter                                                    |
-| `SessionCookieOptions`          | interface | The `cookie` block                                                         |
-| `CsrfFormOptions`               | interface | The `csrf` block, and `verifyCsrfToken`'s options                          |
-| `SessionServiceDeps`            | interface | Runtime capabilities the service is constructed with                       |
-| `MemorySessionStoreDeps`        | interface | The memory store's required clock and timer injection                      |
-| `CacheSessionStoreOptions`      | interface | The cache store's key namespacing                                          |
+| Export                          | Kind      | Purpose                                                                                                                                                                                                    |
+| ------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SessionPlugin`                 | function  | The plugin factory                                                                                                                                                                                         |
+| `SessionService`                | class     | `ISessionService` implementation registered under the token                                                                                                                                                |
+| `getSession`                    | function  | The single accessor: `getSession(ctx): ISession`                                                                                                                                                           |
+| `sessionMiddleware`             | function  | Load/commit middleware (registered at 260; exported for standalone wiring)                                                                                                                                 |
+| `csrfFormMiddleware`            | function  | Synchronizer-token middleware (registered at 275 when `csrf` is present)                                                                                                                                   |
+| `getCsrfToken`                  | function  | Mints-and-stores on first call, then stable within the session                                                                                                                                             |
+| `csrfTokenField`                | function  | Renders the minted token as a hidden field; the name follows the plugin's configured `csrf.fieldName` (an explicit argument is an override; with no published config the shared `'_csrf'` default applies) |
+| `verifyCsrfToken`               | function  | Standalone verification for handlers and React Router actions                                                                                                                                              |
+| `CSRF_SESSION_KEY`              | const     | Reserved session key holding the token (`'__csrf'`)                                                                                                                                                        |
+| `CSRF_CONFIG_STATE_KEY`         | const     | `ctx.state` key under which `csrfFormMiddleware` publishes its resolved config for `csrfTokenField` to read (`'session-plugin:csrf-config'`)                                                               |
+| `MemorySessionStore`            | class     | `Map`-backed store; requires injected clock and timers                                                                                                                                                     |
+| `CacheSessionStore`             | class     | Store over any `ICacheStore` resolved from `CAPABILITIES.CACHE`                                                                                                                                            |
+| `SessionSecretMissingError`     | class     | Thrown during `register()` when no adequate secret resolves                                                                                                                                                |
+| `SessionMiddlewareMissingError` | class     | Thrown by `getSession` when the middleware did not run                                                                                                                                                     |
+| `CsrfTokenMismatchError`        | class     | Thrown by `verifyCsrfToken`; the middleware converts it to `403`                                                                                                                                           |
+| `SessionTooLargeError`          | class     | Thrown when a committed cookie would exceed `maxCookieBytes`                                                                                                                                               |
+| `SessionMode`                   | type      | `'encrypt' \| 'sign'`                                                                                                                                                                                      |
+| `SessionPluginOptions`          | interface | The factory's parameter                                                                                                                                                                                    |
+| `SessionCookieOptions`          | interface | The `cookie` block                                                                                                                                                                                         |
+| `CsrfFormOptions`               | interface | The `csrf` block, and `verifyCsrfToken`'s options                                                                                                                                                          |
+| `SessionServiceDeps`            | interface | Runtime capabilities the service is constructed with                                                                                                                                                       |
+| `MemorySessionStoreDeps`        | interface | The memory store's required clock and timer injection                                                                                                                                                      |
+| `PublishedCsrfConfig`           | interface | The shape published under `CSRF_CONFIG_STATE_KEY` — a frozen, request-local `{ fieldName }`, never the middleware's own shared config                                                                      |
+| `CacheSessionStoreOptions`      | interface | The cache store's key namespacing                                                                                                                                                                          |
 
 ### Notes
 
@@ -3524,11 +3544,23 @@ package README's "What `SameSite` does not separate".
   timing-safe comparison. The configured header is read first, so a client that sends it triggers no
   body parse at all, and a non-form request still reports the ordinary mismatch rather than the
   accessor's `415`.
-- **`csrfTokenField(ctx)` is the form carrier for the default field name.** It returns trusted
-  generated markup and escapes a configured `fieldName`; in an escaping Hono template use
-  `raw(csrfTokenField(ctx))` at the application rendering boundary. It does not register or bypass
-  CSRF verification: `SessionPlugin({ csrf: {} })` still globally checks every unsafe method not in
-  `ignoreMethods`, so a form needs the documented safe-render-then-submit sequence.
+- **`csrfTokenField(ctx)` is the form carrier for the plugin's configured field name.** The
+  `csrfFormMiddleware` publishes the field name it will verify into `ctx.state` under
+  `CSRF_CONFIG_STATE_KEY` — before its `ignoreMethods`/`exclude` short-circuits, because the GET
+  that renders the form is itself an ignored method — and the helper reads it, so the rendered field
+  name and the verified field name are ONE resolution. The published value is a frozen,
+  request-local `PublishedCsrfConfig` (`{ fieldName }`) and deliberately NOT the middleware's own
+  `ResolvedCsrfConfig`: that object is resolved once at registration and shared by every request, so
+  publishing it would hand the verifier's configuration to any handler holding the context — one
+  `ctx.state.get(CSRF_CONFIG_STATE_KEY).ignoreMethods.add('POST')` turned a `403` into a `200` for
+  every later request in the process. An explicit `csrfTokenField(ctx, { fieldName })` argument is
+  an override (for a standalone middleware on a different name); with no published config and no
+  argument — a request the middleware never saw, such as a React Router action — the shared
+  `'_csrf'` default applies. The helper returns trusted generated markup and escapes the name it
+  renders; in an escaping Hono template use `raw(csrfTokenField(ctx))` at the application rendering
+  boundary. It does not register or bypass CSRF verification: `SessionPlugin({ csrf: {} })` still
+  globally checks every unsafe method not in `ignoreMethods`, so a form needs the documented
+  safe-render-then-submit sequence.
 - **The `403` body does not disclose the reason.** It would tell an attacker whether the session or
   the token was at fault.
 - **React Router** reaches the session through the Milestone 44 plugin's existing
@@ -9568,12 +9600,12 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 
 ### Types
 
-| Export               | Kind | Purpose                                                                                          |
-| -------------------- | ---- | ------------------------------------------------------------------------------------------------ |
-| `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                                      |
-| `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)` |
-| `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }`)                      |
-| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)               |
+| Export               | Kind | Purpose                                                                                                                                                                                                                                    |
+| -------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                                                                                                                                                                                |
+| `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)`                                                                                                                                           |
+| `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }` — byte-ish bodies verbatim with no content-type default, `URLSearchParams` urlencoded-defaulted, plain object and string JSON-defaulted, anything else refused) |
+| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)                                                                                                                                                         |
 
 Contract notes:
 
@@ -10079,7 +10111,7 @@ carry full JSDoc.
 | `UseGuards`/`UseInterceptors`/`UseFilters`                   | function | Class/method pipeline decorators                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `ValidateBody`/`ValidateQuery`/`ValidateParams`              | function | Method decorators — attach validation schemas. ENFORCED when a `CAPABILITIES.VALIDATION` provider is registered and `enforceSchemas` is not `false`: the capability's middleware is appended LAST in the route's chain (after guards), answering `400` before the handler while preserving guard `401`/`403` precedence. Without such a provider the schemas stay description-only and `DecoratorPlugin` logs one warning per affected route                                                                                                                                                                                    |
 | `Render`                                                     | function | Method decorator — attaches a view component to the route; the handler returns the component's PROPS bag and the framework answers `text/html; charset=utf-8`, never JSON. The handler's return is type-checked against the component's props. The engine is resolved from `CAPABILITIES.VIEW` once at `register()` (the token joins `optionalDependencies`), and a rendered route with no provider FAILS at `register()` naming the controller, the handler and both remedies. A status or header alongside a rendered body goes through `@Params(Ctx())` (M92)                                                                |
-| `RenderDecorator`                                            | type     | The type `Render` returns: a standard method decorator whose `value` parameter is narrowed to `(...args: never[]) => P                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `RenderDecorator`                                            | type     | The type `Render` returns: a standard method decorator whose `value` parameter is narrowed to `(...args: never[]) => P \| HandlerResult \| Promise<P \| HandlerResult>`                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `ApiTags`                                                    | function | Class decorator — OpenAPI tags                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `ApiOperation`/`ApiResponse`                                 | function | Method decorators — OpenAPI operation metadata                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `Module`                                                     | function | Class decorator grouping controllers, providers, and imported modules for `DecoratorPlugin({ modules })`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -11641,17 +11673,17 @@ app.register(StaticPlugin({
 
 ### Options
 
-| Option           | Type                           | Default                                | Description                                                                              |
-| ---------------- | ------------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `root`           | `string`                       | (required)                             | Directory to serve files from                                                            |
-| `urlPrefix`      | `string`                       | `'/'`                                  | URL prefix for static routes                                                             |
-| `index`          | `string`                       | `'index.html'`                         | Index file for directories                                                               |
-| `fallback`       | `string`                       | `undefined`                            | SPA fallback file                                                                        |
-| `cacheControl`   | `string \| ((path) => string)` | Hashed→immutable, else must-revalidate | Cache-Control header. A callback receives a **leading-slash** root-relative request path |
-| `etag`           | `boolean`                      | `true`                                 | Enable ETag generation                                                                   |
-| `ranges`         | `boolean`                      | `true`                                 | Enable Range requests                                                                    |
-| `compressed`     | `boolean`                      | `true`                                 | Negotiate .br/.gz sidecars                                                               |
-| `maxBufferBytes` | `number`                       | `1048576`                              | Threshold for streaming                                                                  |
+| Option           | Type                                  | Default                                | Description                                                                                                                                                                                  |
+| ---------------- | ------------------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `root`           | `string`                              | (required)                             | Directory to serve files from                                                                                                                                                                |
+| `urlPrefix`      | `string`                              | `'/'`                                  | URL prefix for static routes                                                                                                                                                                 |
+| `index`          | `string`                              | `'index.html'`                         | Index file for directories                                                                                                                                                                   |
+| `fallback`       | `string`                              | `undefined`                            | SPA fallback file                                                                                                                                                                            |
+| `cacheControl`   | `string \| ((requestPath) => string)` | Hashed→immutable, else must-revalidate | Cache-Control header. A callback receives the full **leading-slash request path including `urlPrefix`** — for a directory `root`, never `'/'` (a directory delivers its resolved index path) |
+| `etag`           | `boolean`                             | `true`                                 | Enable ETag generation                                                                                                                                                                       |
+| `ranges`         | `boolean`                             | `true`                                 | Enable Range requests                                                                                                                                                                        |
+| `compressed`     | `boolean`                             | `true`                                 | Negotiate .br/.gz sidecars                                                                                                                                                                   |
+| `maxBufferBytes` | `number`                              | `1048576`                              | Threshold for streaming                                                                                                                                                                      |
 
 ### Exports
 
@@ -11687,13 +11719,16 @@ serve(ctx: IRequestContext): Promise<HandlerResult>;
 - Precompressed sidecars: `.br` preferred over `.gz`, sent as `Content-Encoding: br` and
   `Content-Encoding: gzip` respectively; ETag and conditional evaluation use the selected sidecar
   stat rather than the uncompressed source representation
-- `Cache-Control` is resolved from the **original root-relative request path with a leading slash**,
-  never the absolute filesystem path and never the `.br`/`.gz` sidecar path — so a content-hashed
-  asset keeps its `immutable` policy whichever encoding is negotiated. A `cacheControl` function
-  receives `/assets/app-A9acsx54.js` (not `assets/app-…`, not `/srv/assets/app-…`), and the literal
-  `'/'` when the request equals the prefix root. The leading slash is guaranteed for BOTH shapes —
-  before it was normalised, a file arrived slash-less while the prefix root arrived as `'/'`, so a
-  callback written against one observed shape was silently wrong for the other.
+- `Cache-Control` is resolved from the **full leading-slash request path, INCLUDING `urlPrefix`** —
+  `/assets/app-A9acsx54.js` for a file under that prefix, `/assets/index.html` for a directory
+  request against it, and `/index.html` under a root mount; for a `root` that is a directory — what
+  `root` documents — the callback never receives the literal `'/'` (a directory is served by
+  resolving its index), never the prefix-stripped server path, never the absolute filesystem path,
+  and never the `.br`/`.gz` sidecar path — so a content-hashed asset keeps its `immutable` policy
+  whichever encoding is negotiated. The leading slash is guaranteed for both a file and a resolved
+  index. The prefix inclusion is deliberate (M95c C3): a cache policy is about the URL the client
+  caches under, so the served path is the input, and stripping it would silently change what every
+  existing callback matches.
 - A `HEAD` opens no body stream, so it cannot leak a file descriptor on a file above
   `maxBufferBytes`
 - An explicit `Accept-Encoding` entry overrides the wildcard, so `br;q=0, *` refuses brotli
