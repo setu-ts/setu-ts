@@ -286,6 +286,73 @@ describe('ConsoleLogger', () => {
       expect(output.length).toBe(3);
     });
 
+    // The getter cases above nest the hostile object one level down, so the
+    // throw happens inside JSON.stringify. A getter on the TOP-LEVEL metadata
+    // fires during the spread in #log instead — before normalizeMetadata,
+    // before redaction, and before the serializer sees the object at all.
+    it('survives a throwing getter on the top-level metadata object', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info' });
+      const hostile = {
+        get x(): never {
+          throw new Error('boom');
+        },
+      };
+
+      const { output } = captureConsole(() => {
+        logger.error('payment failed', hostile);
+      });
+
+      expect(output.length).toBe(1);
+      const entry = JSON.parse(output[0]!);
+      expect(entry.msg).toBe('payment failed');
+      expect(entry.level).toBe('error');
+      expect(entry.metadata).toBe('[unserializable metadata]');
+    });
+
+    it('survives a top-level throwing getter in pretty mode', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info', pretty: true });
+      const hostile = {
+        get x(): never {
+          throw new Error('boom');
+        },
+      };
+
+      const { output } = captureConsole(() => {
+        logger.info('m', hostile);
+      });
+
+      expect(output.length).toBe(1);
+      expect(output[0]).toContain('[unserializable metadata]');
+      expect(output[0]).toContain('m');
+    });
+
+    // A getter one level DOWN survives the spread — which copies `outer` by
+    // reference without reading through it — and fires inside #redactFields
+    // when the redact path walks into it. That is a third distinct reader,
+    // after the spread and the serializer. (A getter on the top-level object
+    // cannot reach it: the spread throws first.)
+    it('survives a throwing getter reached by a redact path', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['outer.a.b'],
+      });
+      const outer = {
+        get a(): never {
+          throw new Error('boom');
+        },
+      };
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { outer });
+      });
+
+      expect(output.length).toBe(1);
+      expect(JSON.parse(output[0]!).metadata).toBe('[unserializable metadata]');
+    });
+
     it('survives the same inputs in pretty mode', () => {
       const { runtime } = createFakeRuntime();
       const logger = new ConsoleLogger(runtime, { level: 'info', pretty: true });

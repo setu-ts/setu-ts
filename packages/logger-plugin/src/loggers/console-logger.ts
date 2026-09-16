@@ -140,30 +140,60 @@ export class ConsoleLogger implements ILogger {
     if (LEVEL_RANK[level] < LEVEL_RANK[this.level]) {
       return;
     }
-    const merged: Record<string, unknown> = {
-      ...this.#bindings,
-      ...metadata,
-    };
-    // Normalize raw `Error` values BEFORE redaction (X2-5): a redact path such
-    // as `error.token` must see the normalized object, and an un-normalized
-    // `Error` would otherwise reach `JSON.stringify` and render as `{}`.
-    const normalized = normalizeMetadata(merged);
-    const redacted = this.#redactFields(normalized);
-    const entry = {
-      level,
-      time: this.#runtime.now(),
-      msg: message,
-      ...redacted,
-    };
+    // Everything that READS the caller's metadata is inside this guard, not
+    // just serialization. An own enumerable getter fires during the spread
+    // below — before `normalizeMetadata`, before redaction and before
+    // `safeStringify` can see the value at all — so guarding the serializer
+    // alone would still let the throw escape from the first line that touches
+    // the object. `normalizeMetadata` and `#redactFields` read properties too.
+    try {
+      const merged: Record<string, unknown> = {
+        ...this.#bindings,
+        ...metadata,
+      };
+      // Normalize raw `Error` values BEFORE redaction (X2-5): a redact path
+      // such as `error.token` must see the normalized object, and an
+      // un-normalized `Error` would otherwise reach `JSON.stringify` and
+      // render as `{}`.
+      const normalized = normalizeMetadata(merged);
+      const redacted = this.#redactFields(normalized);
+      if (this.#pretty) {
+        this.#prettyPrint(level, message, redacted);
+      } else {
+        const entry = {
+          level,
+          time: this.#runtime.now(),
+          msg: message,
+          ...redacted,
+        };
+        // The entry is emitted WITHOUT its metadata rather than lost, because
+        // the level, time and message are usually the half an operator is
+        // looking for and are always serializable.
+        console.log(safeStringify(entry) ?? this.#unserializableLine(level, message));
+      }
+    } catch {
+      this.#emitUnserializable(level, message);
+    }
+  }
+
+  /**
+   * Emits an entry whose metadata could not be read or serialized at all.
+   *
+   * Reached only when the caller's own code threw while its metadata was being
+   * read. Every value used here is a primitive this class produced, so it
+   * cannot fail for the reason the entry it replaces did — which is what makes
+   * "a log call emits exactly one line and never throws" true rather than
+   * merely intended.
+   *
+   * @param level - Severity of the entry
+   * @param message - Log message
+   */
+  #emitUnserializable(level: LogLevel, message: string): void {
     if (this.#pretty) {
-      this.#prettyPrint(level, message, redacted);
+      const ts = new Date(this.#runtime.now()).toISOString();
+      console.log(`${ts} [${level.toUpperCase()}] ${message} ${UNSERIALIZABLE_METADATA}`);
     } else {
-      // A log call emits exactly one line and never throws. When the metadata
-      // cannot be serialized even with cycles and bigints neutralized — caller
-      // code that throws while being read — the entry is emitted WITHOUT it
-      // rather than lost, because the level, time and message are usually the
-      // half an operator is looking for and are always serializable.
-      console.log(safeStringify(entry) ?? this.#unserializableLine(level, message));
+      console.log(this.#unserializableLine(level, message));
     }
   }
 
