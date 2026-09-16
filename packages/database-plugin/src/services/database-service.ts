@@ -321,8 +321,16 @@ export class DatabaseService implements IDatabaseService {
         resolve(value);
       };
       const timer = this._setTimer(() => settle(undefined), REACHABILITY_TIMEOUT_MS);
-      isHealthy
-        .call(this._adapter)
+      // `Promise.resolve().then(...)` rather than a bare call: an adapter
+      // whose `isHealthy` THROWS SYNCHRONOUSLY despite its `Promise` return
+      // type would otherwise throw out of this executor, rejecting a method
+      // documented to resolve `undefined` for exactly that case and leaving
+      // the bound's timer to fire against an already-rejected promise. A
+      // third-party adapter is the likely source, and this member is public
+      // API, so the guarantee has to hold at the seam rather than only at
+      // the health indicator (whose `createCachedProbe` catches it too).
+      Promise.resolve()
+        .then(() => isHealthy.call(this._adapter))
         .then(
           (value) => settle(value === true),
           () => settle(undefined),

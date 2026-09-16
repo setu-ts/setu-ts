@@ -380,6 +380,13 @@ export interface IDatabaseAdapter extends IOrmAdapter, Partial<ITransactionIsola
    * Optional on the `fs?`/`workers?`/`dns?` precedent, so an out-of-repo
    * adapter without it is unaffected.
    *
+   * An implementation SHOULD answer `false` once it has been disconnected,
+   * rather than reporting on a connection it no longer holds. The health
+   * indicator gates this probe behind the lifecycle read as well, so a
+   * probe that forgets to is not a readiness defect — but this member is
+   * also read directly through `DatabaseService.reachability()`, where
+   * nothing else is watching.
+   *
    * @returns `true` when the backend answered, `false` when it did not
    */
   isHealthy?(): Promise<boolean>;

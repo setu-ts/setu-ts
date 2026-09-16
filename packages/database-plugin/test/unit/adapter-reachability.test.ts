@@ -200,6 +200,10 @@ describe('DatabasePlugin reachability indicator mapping (M95b §3.5)', () => {
       adapter: makeAdapter(() => new Promise<boolean>(() => {})),
     }).register(ctx);
     const pending = indicatorFor(indicators);
+    // Let the lifecycle gate settle first — it runs ahead of the probe, so
+    // the reachability bound's timer is armed a microtask later than the
+    // indicator is called.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     manual.advance(2_000);
     manual.fireTimers();
     const result = await pending;
@@ -371,5 +375,61 @@ describe('DatabaseService reachability seam (M95b §3.5)', () => {
     ]);
     expect(result).toBe('settled');
     expect(await pending).toBeUndefined();
+  });
+});
+
+describe('the lifecycle read still gates the probe (M95b review)', () => {
+  it('an adapter whose probe ignores its own lifecycle still reports down once not ready', async () => {
+    // The bundled MemoryAdapter re-derives readiness, but the contract does
+    // not require an implementor to, so the gate has to live at the
+    // indicator where it holds for every adapter. Without it a torn-down
+    // connection reported `up` with /ready 200.
+    let ready = true;
+    const adapter = makeAdapter(() => Promise.resolve(true));
+    adapter.isReady = () => ready;
+    const manual = makeManualRuntime();
+    const { ctx, indicators } = makeContext(manual.runtime);
+    await DatabasePlugin({ type: 'custom', adapter }).register(ctx);
+    const indicator = indicators.get('database') as () => Promise<
+      { status: string; data: Record<string, unknown> }
+    >;
+
+    expect((await indicator()).status).toBe('up');
+
+    ready = false;
+    // Past both cached probes' 5 s TTL, so this poll is a fresh read
+    // rather than the cached `up`.
+    manual.advance(6_000);
+    const after = await indicator();
+    expect(after.status).toBe('down');
+    expect(after.data.reachable).toBe(false);
+  });
+
+  it('the memory adapter probe reports its own lifecycle, not an unconditional true', async () => {
+    const { MemoryAdapter } = await import('../../src/index.ts');
+    const memory = new MemoryAdapter();
+    expect(await memory.isHealthy()).toBe(false);
+    await memory.connect();
+    expect(await memory.isHealthy()).toBe(true);
+    await memory.disconnect();
+    // "Is the backend reachable" and "am I connected to it" are the same
+    // question for an in-process store.
+    expect(await memory.isHealthy()).toBe(false);
+  });
+});
+
+describe('reachability() never rejects (M95b review)', () => {
+  it('an adapter probe that throws SYNCHRONOUSLY resolves undefined, not a rejection', async () => {
+    // The M52b/M52c/M70j sync-throw class: a member typed `Promise<boolean>`
+    // that throws before returning one. The JSDoc promises `undefined` for
+    // a probe that cannot answer, and `DatabaseService` is barrel-exported,
+    // so a direct caller must get that rather than a throw.
+    const adapter = makeAdapter();
+    adapter.isHealthy = (): Promise<boolean> => {
+      throw new Error('sync throw from isHealthy');
+    };
+    const service = new DatabaseService(adapter, () => emptySource(), 'custom');
+    expect(service.hasReachabilityProbe).toBe(true);
+    expect(await service.reachability()).toBeUndefined();
   });
 });

@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
 /**
  * Real MongoDB outage gate (M95b §3.5 / X51-1).
  *
@@ -117,7 +116,6 @@ describe('REAL MongoDB outage (M95b §3.5 / X51-1)', {
       await docker(['stop', containerId]);
       stopped = true;
       await waitUntil(readyStatus, 503, 'stopped ready 503', 60_000);
-      stopped = false;
       const stoppedHealth = await healthBody();
       expect(stoppedHealth.status).not.toBe('up');
       // The database check reports WHY: either the probe answered false
@@ -127,8 +125,14 @@ describe('REAL MongoDB outage (M95b §3.5 / X51-1)', {
         expect(['down', 'degraded']).toContain(dbCheck.status);
       }
 
-      // (restart) the backend returns and readiness recovers.
+      // (restart) the backend returns and readiness recovers. The flag is
+      // cleared only HERE — after the container is actually back — so every
+      // assertion above exits through the `finally` with it still set. It
+      // used to be cleared the moment the 503 arrived, which left the three
+      // assertions in between able to strand the container for everything
+      // else that shares it, contradicting the comment above.
       await docker(['start', containerId]);
+      stopped = false;
       await waitUntil(readyStatus, 200, 'recovered ready 200', 60_000);
       expect((await healthBody()).status).toBe('up');
     } finally {

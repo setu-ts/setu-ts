@@ -1217,13 +1217,15 @@ OMITTED and `/ready` answering 200 — the deliberate no-change row: a probe tha
 evidence of nothing, and mapping a missing probe to `degraded` would fail `/ready` for every healthy
 Cosmos, Bigtable and DynamoDB application on upgrade (`degraded` already answers 503). Shipped
 probes: MongoDB (`db.command({ ping: 1 })`), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe
-for instances without `execute()`), memory (`true` — the process is the backend). Cosmos, Bigtable
-and DynamoDB omit the probe pending one optional member on their own client facades; their payload
-is unchanged. The concrete `DatabaseService` exposes the seam the indicator reads:
-`hasReachabilityProbe` (a synchronous presence read) and `reachability()`
+for instances without `execute()`), memory (its own connection state — the process is the backend).
+Cosmos, Bigtable and DynamoDB omit the probe pending one optional member on their own client
+facades; their payload is unchanged. The concrete `DatabaseService` exposes the seam the indicator
+reads: `hasReachabilityProbe` (a synchronous presence read) and `reachability()`
 (`Promise<boolean |
 undefined>` — the bounded probe, `undefined` when no answer was produced), the
-database twin of `IMessageBroker.reachability()`.
+database twin of `IMessageBroker.reachability()`. The lifecycle read still gates the probe, so an
+adapter whose own probe does not re-derive `isReady()` cannot report `up` for a connection it has
+already dropped.
 
 ### Database Interface
 

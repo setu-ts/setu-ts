@@ -378,16 +378,92 @@ describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
     });
 
     it('health polls never touch the shared channel: publish still works after N polls', async () => {
-      const { client } = makeAmqp();
-      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { client });
+      const clock = makeClock();
+      const { client, channelOpens } = makeAmqp();
+      const broker = new RabbitMqBroker(makeRuntime(clock), new JsonSerializer(), { client });
       await broker.connect();
 
+      const opensBefore = channelOpens();
       for (let i = 0; i < 5; i++) {
+        // Past the TTL each time, so all five are REAL round trips rather
+        // than four cache hits — otherwise this guard would only ever
+        // exercise one poll and could not see a probe that corrupts the
+        // shared channel on its second use.
+        clock.advance(6000);
         expect(await broker.reachability()).toBe(true);
       }
+      expect(channelOpens()).toBe(opensBefore + 5);
       // The probe's channel is its own; if any poll had touched (or leaked a
       // fault into) #channel, the publish below would fail.
       await broker.publish('orders.created', { id: 1 });
+    });
+  });
+
+  describe('the probe is cached and bounded IN THE BROKER (M95b review)', () => {
+    it('two polls inside the TTL issue ONE round trip', async () => {
+      const clock = makeClock();
+      const { client, channelOpens } = makeAmqp();
+      const broker = new RabbitMqBroker(makeRuntime(clock), new JsonSerializer(), { client });
+      await broker.connect();
+
+      const opensBefore = channelOpens();
+      expect(await broker.reachability()).toBe(true);
+      clock.advance(4999);
+      expect(await broker.reachability()).toBe(true);
+      // The bound and the cache live in the broker, not only at the health
+      // indicator, because the indicator is not the only caller: the
+      // realtime backplane delegates to `isHealthy()` directly and keeps no
+      // cache of its own. Uncached, this is one AMQP channel open per health
+      // poll per replica, forever.
+      expect(channelOpens()).toBe(opensBefore + 1);
+
+      clock.advance(1);
+      expect(await broker.reachability()).toBe(true);
+      expect(channelOpens()).toBe(opensBefore + 2);
+    });
+
+    it('a HUNG broker resolves undefined inside the bound instead of never settling', async () => {
+      const clock = makeClock();
+      const { client } = makeAmqp();
+      const broker = new RabbitMqBroker(makeRuntime(clock), new JsonSerializer(), { client });
+      await broker.connect();
+
+      // The `docker pause` shape: the socket stays open and the channel open
+      // never settles. Before the broker-level bound this promise never
+      // resolved, so `realtime-backplane-plugin` — which awaits
+      // `isHealthy()` with no bound of its own — hit HealthPlugin's
+      // indicator deadline and reported `down`, taking /ready to 503 for a
+      // fan-out failure its own contract says is `degraded` at worst.
+      (client as unknown as { createChannel: () => Promise<unknown> }).createChannel = () =>
+        new Promise<unknown>(() => {});
+
+      clock.advance(6000);
+      const pending = broker.reachability();
+      clock.advance(2000);
+      expect(await pending).toBeUndefined();
+
+      // The boolean port member reports "not known down" for an
+      // unanswerable probe (the committed M70c rule), so a hung broker no
+      // longer drains a replica through the backplane indicator.
+      clock.advance(6000);
+      const health = broker.isHealthy();
+      clock.advance(2000);
+      expect(await health).toBe(true);
+    });
+
+    it('disconnect drops the cache, so a stale true cannot outlive the connection', async () => {
+      const clock = makeClock();
+      const { client, channelOpens } = makeAmqp();
+      const broker = new RabbitMqBroker(makeRuntime(clock), new JsonSerializer(), { client });
+      await broker.connect();
+      expect(await broker.reachability()).toBe(true);
+
+      await broker.disconnect();
+      const opensAfterDisconnect = channelOpens();
+      // Inside what WOULD still be the TTL: the answer must be `false`
+      // (no connection), never the cached `true`, and it must fire no I/O.
+      expect(await broker.reachability()).toBe(false);
+      expect(channelOpens()).toBe(opensAfterDisconnect);
     });
   });
 });

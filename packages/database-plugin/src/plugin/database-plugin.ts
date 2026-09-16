@@ -211,6 +211,16 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
           }
           return { status: healthy ? 'up' : 'down', data };
         }
+        // The LIFECYCLE read still gates the probe. It is free — it reaches
+        // no adapter — and dropping it would mean an adapter whose own probe
+        // does not re-derive `isReady()` reports `up` for a connection it
+        // has already torn down. Three of the four bundled probes happen to
+        // re-derive it; the contract does not require an implementor to, so
+        // the gate belongs here where it holds for every adapter.
+        const healthy = await probe();
+        if (!healthy) {
+          return { status: 'down', data: { ...data, reachable: false } };
+        }
         const reachable = await reachabilityProbe();
         if (service.isClosed) {
           return { status: 'down', data };

@@ -9685,7 +9685,7 @@ M90a–M90j precedent.
 | Letter   | Shape                                             | Findings | High | Packages                                                       |
 | -------- | ------------------------------------------------- | -------- | ---- | -------------------------------------------------------------- |
 | **M95a** | A generated deployment cannot start               | 1        | 1    | cli, docs                                                      |
-| **M95b** | Reachability that fails OPEN                      | 3        | 1    | database-plugin, messaging-plugin                              |
+| **M95b** | Reachability that fails OPEN                      | 3        | 1    | common, database-plugin, messaging-plugin                      |
 | **M95c** | A contract its own implementation does not honour | 5        | 0    | common, database-plugin, kernel, session-plugin, static-plugin |
 | **M95d** | Documentation that survives contact               | 4        | 0    | docs, common, view-plugin, scripts                             |
 
@@ -9790,7 +9790,7 @@ while the defect persists. The honest gate builds a scaffolded microservice imag
 
 ### Milestone 95b: Reachability That Fails OPEN
 
-**Package(s):** `packages/database-plugin`, `packages/messaging-plugin`
+**Package(s):** `packages/common`, `packages/database-plugin`, `packages/messaging-plugin`
 
 Three findings, one mechanism: **a lifecycle flag is reported as liveness.** A probe that was set at
 `connect()` and is cleared only by `disconnect()` answers `true` for a backend that has been dead
@@ -9917,31 +9917,6 @@ network-layer failure should degrade the indicator rather than hold it at `up` i
 whether the probe should fall back to a data-plane signal — a cheap receiver open, or the outcome of
 the last real publish — so the thing reported on is the thing being used. Either changes a published
 health contract, which is why it is a decision and not a deliverable.
-
-**§10.2 approval (M95b).** The maintainer directed the milestone to proceed as planned; the approved
-design is the plan's §3.2 recommendation — the broker records the outcome of real data-plane
-publishes in an evidence window that `reachability()` consults first, with the management probe kept
-as the no-evidence fallback (`dataPlaneEvidenceMs`, default the probe TTL). Rejected with cause by
-the plan and not shipped: degrading on repeated probe failure (still reads the management plane —
-reintroduces V5-2) and a synthetic receiver open per probe (billed operations to learn what a real
-publish already knows).
-
-**Shipped.** All three rows are closed. (1) The false `isReady()` safety-net claim is struck from
-the published `0.6.0` CHANGELOG entry and the probe JSDoc, corrected in place with an `Unreleased`
-record. (2) X51-1 (High): `IDatabaseAdapter` gains the optional `isHealthy?()` (in `common`, where
-M52c promoted the port); `DatabaseService` exposes `hasReachabilityProbe` and a bounded
-`reachability()`; the indicator maps probe `true`/`false`/timeout to `up`/`down`/`degraded` — never
-`up` for an unanswerable probe — and a MISSING probe stays exactly today's behaviour (`reachable`
-OMITTED, `up`), because `degraded` already answers 503 and mapping absence to it would drain every
-healthy Cosmos/Bigtable/DynamoDB application on upgrade. Shipped probes: Mongo
-(`db.command({ ping: 1 })` via a new optional `IMongoDatabase.command?`), Prisma and Drizzle
-(`SELECT 1`; Drizzle omits it for execute-less instances), memory (`true`). Gated by a real MongoDB
-`docker stop`/`start` outage suite asserting `/ready` 200 → 503 → 200. (3) X51-2: the RabbitMQ probe
-is a real round trip (a throwaway channel open/close, fault-flag short-circuit kept), and the
-messaging indicator bounds every arm's probe through `createCachedProbe` so a hung broker settles
-`reachable: 'unknown'` instead of holding `/health` open. The Service Bus 2×2 gate passed against
-the real emulator; the hung arm passed against real RabbitMQ 4; negative controls 1–5 and 4b were
-each observed failing and reverted.
 
 **§10.2 approval (M95b).** The maintainer directed the milestone to proceed as planned; the approved
 design is the plan's §3.2 recommendation — the broker records the outcome of real data-plane

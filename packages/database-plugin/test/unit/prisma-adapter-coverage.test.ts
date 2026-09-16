@@ -9,6 +9,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createPrismaDataSource, PrismaAdapter } from '../../src/adapters/prisma/prisma-adapter.ts';
 import { createFakePrismaClient } from '../fixtures/fake-prisma-client.ts';
+import type { RecordedCall } from '../fixtures/fake-prisma-client.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
 import { normalizeQuery } from '../../src/query/query-builder.ts';
@@ -235,5 +236,41 @@ describe('PrismaAdapter — CRUD data-source coverage', () => {
       );
       await expect(noClient.connect()).rejects.toThrow('requires options.prismaClient');
     });
+  });
+});
+
+describe('PrismaAdapter reachability probe (M95b §3.5)', () => {
+  const rawCalls = (client: ReturnType<typeof createFakePrismaClient>): RecordedCall[] =>
+    client.recordedCalls.filter((call) => call.model === '_queryRawUnsafe');
+
+  it('answers true when the SELECT 1 round trip succeeds, through the same funnel as rawQuery', async () => {
+    // The probe the release notes advertise as shipped. It goes through the
+    // client's `$queryRawUnsafe`, which is what `rawQuery` uses, so the probe
+    // cannot diverge from the query path.
+    const client = createFakePrismaClient();
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+
+    expect(await adapter.isHealthy()).toBe(true);
+    const raw = rawCalls(client);
+    expect(raw.length).toBe(1);
+    expect(raw[0].args.sql).toBe('SELECT 1');
+  });
+
+  it('answers false when the round trip is refused, so an outage reads as a fact', async () => {
+    const client = createFakePrismaClient();
+    (client as unknown as { $queryRawUnsafe: () => Promise<unknown[]> }).$queryRawUnsafe = () =>
+      Promise.reject(new Error('ECONNREFUSED'));
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+
+    expect(await adapter.isHealthy()).toBe(false);
+  });
+
+  it('answers false before connect, without reaching the client', async () => {
+    const client = createFakePrismaClient();
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    expect(await adapter.isHealthy()).toBe(false);
+    expect(rawCalls(client)).toHaveLength(0);
   });
 });

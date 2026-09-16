@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-console -- guarded skip tests log SKIP messages.
 /**
  * Real Service Bus outage gate (M95b §3.3) — the 2×2 the letter was opened
  * for. Against this emulator the management probe resolves `undefined` in

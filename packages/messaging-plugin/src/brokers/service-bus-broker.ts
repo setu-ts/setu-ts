@@ -216,6 +216,15 @@ export interface ServiceBusOptions {
    * signals age together: below the age the broker's evidence window
    * answers `reachability()` directly, above it the management probe
    * answers exactly as it did before this option existed.
+   *
+   * Must be a positive integer; a non-finite, fractional, zero or negative
+   * value is REFUSED at construction rather than accepted (M95b review).
+   * `NaN` — what `Number(env.X)` yields for an unset variable — would
+   * otherwise freeze the window so recorded evidence never ages out, and
+   * `0` would disable it entirely, reinstating the pre-M95b behaviour. The
+   * option has no disable arm by design.
+   *
+   * @throws {Error} If the value is not a positive integer
    */
   dataPlaneEvidenceMs?: number;
   /** Optional logger. */
@@ -319,6 +328,41 @@ function classifyProbeFailure(error: unknown): boolean | undefined {
  * @param error - The caught send error
  * @returns `true` when the failure is data-plane evidence
  */
+/**
+ * Validates {@linkcode ServiceBusOptions.dataPlaneEvidenceMs} at construction
+ * (M95b review), refusing a value outside its domain rather than reading as
+ * configured while the window silently misbehaves.
+ *
+ * The two out-of-domain cases each reinstate a defect this broker exists to
+ * close, and both arrive from ordinary configuration. **`NaN`** — what
+ * `Number(env.X)` yields for an unset or misspelled variable — makes every
+ * `elapsed >= window` comparison `false`, so recorded evidence NEVER ages
+ * out and one publish at boot pins `reachability()` at its outcome
+ * indefinitely: the fail-open shape X51 was filed for. **`0` or negative**
+ * discards every outcome instantly, so `reachability()` always falls
+ * through to the management probe — the pre-M95b behaviour, i.e. a switch
+ * that asks for the defect back, which is why the option deliberately has
+ * no disable arm.
+ *
+ * @param value - The configured window, or `undefined` for the default
+ * @returns The validated window in ms
+ * @throws {Error} If the value is not a finite integer of at least 1 ms
+ */
+function resolveEvidenceMs(value: number | undefined): number {
+  if (value === undefined) {
+    return PROBE_TTL_MS;
+  }
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(
+      `ServiceBusBroker: dataPlaneEvidenceMs must be a positive integer of ` +
+        `milliseconds, received ${String(value)}. Omit the option for the ` +
+        `default ${PROBE_TTL_MS}ms; there is no value that disables the ` +
+        `data-plane evidence window.`,
+    );
+  }
+  return value;
+}
+
 function isDataPlaneNetworkFailure(error: unknown): boolean {
   if (typeof error === 'object' && error !== null) {
     const statusCode = (error as { statusCode?: unknown }).statusCode;
@@ -626,7 +670,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
     this.#logger = options?.logger;
     this.#retryOptions = options?.retryOptions;
-    this.#evidenceMs = options?.dataPlaneEvidenceMs ?? PROBE_TTL_MS;
+    this.#evidenceMs = resolveEvidenceMs(options?.dataPlaneEvidenceMs);
     this.#subscriptions = new Map();
     this.#rr = new RequestReplyCore({
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),

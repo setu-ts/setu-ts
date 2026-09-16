@@ -784,10 +784,14 @@ Cosmos, Bigtable and DynamoDB application on upgrade.
 
 Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?`
 facade member), Prisma and Drizzle (`SELECT 1`; Drizzle omits the probe for instances without
-`execute()`), memory (`true` — the process is the backend). Cosmos, Bigtable and DynamoDB omit the
-probe until each gains one optional member on its own client facade; their payloads are unchanged. A
-custom adapter opts in by declaring `isHealthy?(): Promise<boolean>` on the adapter — `true` when
-the backend answered, `false` when it refused, or omit the member rather than inventing an answer.
+`execute()`), memory (its own connection state — the process is the backend). Cosmos, Bigtable and
+DynamoDB omit the probe until each gains one optional member on its own client facade; their
+payloads are unchanged. A custom adapter opts in by declaring `isHealthy?(): Promise<boolean>` on
+the adapter — `true` when the backend answered, `false` when it refused, or omit the member rather
+than inventing an answer. The lifecycle read still gates the probe, so an adapter whose probe
+forgets to re-derive `isReady()` cannot report `up` for a connection it has already dropped; a probe
+SHOULD still answer `false` once disconnected, because `DatabaseService.reachability()` is also read
+directly.
 
 ## Transactions
 

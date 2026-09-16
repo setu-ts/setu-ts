@@ -188,3 +188,48 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
     expect(await broker.reachability()).toBeUndefined();
   });
 });
+
+describe('dataPlaneEvidenceMs is validated at construction (M95b review)', () => {
+  const make = (evidenceMs: number): ServiceBusBroker =>
+    new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
+      connectionString: 'Endpoint=sb://test/',
+      client: makeTransport(),
+      dataPlaneEvidenceMs: evidenceMs,
+    });
+
+  it('refuses NaN, which would freeze the window so evidence never ages out', () => {
+    // `Number(env.DATA_PLANE_EVIDENCE_MS)` for an unset variable is exactly
+    // NaN, and `elapsed >= NaN` is always false — one publish at boot would
+    // pin `reachability()` at its outcome indefinitely, which is the
+    // fail-open shape this broker exists to close.
+    expect(() => make(Number.NaN)).toThrow('dataPlaneEvidenceMs must be a positive integer');
+  });
+
+  it('refuses 0 and negative, which would disable the window entirely', () => {
+    // Discarding every outcome instantly makes `reachability()` always fall
+    // through to the management probe — the pre-M95b behaviour. The option
+    // deliberately has no disable arm.
+    expect(() => make(0)).toThrow('there is no value that disables');
+    expect(() => make(-1)).toThrow('dataPlaneEvidenceMs must be a positive integer');
+  });
+
+  it('refuses Infinity and a fractional value', () => {
+    expect(() => make(Number.POSITIVE_INFINITY)).toThrow('must be a positive integer');
+    expect(() => make(1.5)).toThrow('must be a positive integer');
+  });
+
+  it('accepts a positive integer, and omitting it takes the 5s default', async () => {
+    const custom = make(10);
+    await custom.connect();
+    await custom.publish('t', { a: 1 });
+    expect(await custom.reachability()).toBe(true);
+
+    const defaulted = new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
+      connectionString: 'Endpoint=sb://test/',
+      client: makeTransport(),
+    });
+    await defaulted.connect();
+    await defaulted.publish('t', { a: 1 });
+    expect(await defaulted.reachability()).toBe(true);
+  });
+});
