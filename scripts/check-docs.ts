@@ -29,6 +29,14 @@
  *     "Table of Contents" must link every one of its own `##` sections.
  *     `PUBLIC_API.md` had sixteen with no entry at all, mostly plugins whose
  *     milestone added the section and forgot the row.
+ *   - **Malformed table row** — a later addition, from the same family: a
+ *     committed table that does not render as written. `PUBLIC_API.md`'s
+ *     `RenderDecorator` row wrote a union type inside a code span with its
+ *     pipes UNESCAPED, so the cell split, GFM dropped the excess, and the
+ *     published signature rendered with its whole return type missing from M92
+ *     until 2026-09-16. `packages/static-plugin/README.md` independently wrote
+ *     a default value as `` `'/`'` ``. Both were found by a reviewer and a
+ *     hand-written sweep; nothing in the toolchain looked.
  *
  * Fence tracking follows CommonMark rather than toggling on every ``` line: a
  * fence is closed only by a line of the SAME character, at least as long as the
@@ -293,8 +301,210 @@ export function collectAnchorLinks(
   return links;
 }
 
+/** A delimiter row: `| --- |`, `|:---|---:|`, and the pipe-less variants. */
+const TABLE_DELIMITER = /^\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?$/;
+
+/** Why a table row is malformed. */
+export type MalformedRowReason = 'unterminated-span' | 'unescaped-pipe';
+
+/** One offending table row. */
+export interface MalformedRow {
+  /** 1-based line. */
+  readonly line: number;
+  /** The trimmed row text. */
+  readonly text: string;
+  /** Which rule fired. */
+  readonly reason: MalformedRowReason;
+}
+
 /**
- * Runs all three checks over one document.
+ * Reads a code span starting at the backtick run at `start`.
+ *
+ * GFM opens a span with a run of N backticks and closes it with the next run of
+ * exactly N, which is why this counts runs rather than toggling on every
+ * backtick.
+ *
+ * @param row - The row text
+ * @param start - Index of the first backtick of the opening run
+ * @returns The span's inner text and the index just past its closing run, or
+ * `null` when the run never closes
+ */
+function readCodeSpan(
+  row: string,
+  start: number,
+): { readonly inner: string; readonly next: number } | null {
+  let openLength = 0;
+  while (row[start + openLength] === '`') {
+    openLength++;
+  }
+  const innerStart = start + openLength;
+
+  let cursor = innerStart;
+  while (cursor < row.length) {
+    if (row[cursor] !== '`') {
+      cursor++;
+      continue;
+    }
+    let runLength = 0;
+    while (row[cursor + runLength] === '`') {
+      runLength++;
+    }
+    if (runLength === openLength) {
+      return { inner: row.slice(innerStart, cursor), next: cursor + runLength };
+    }
+    cursor += runLength;
+  }
+  return null;
+}
+
+/**
+ * Whether `text` contains a `|` that is not backslash-escaped.
+ *
+ * @param text - The text to scan
+ * @returns `true` when a raw pipe is present
+ */
+function hasUnescapedPipe(text: string): boolean {
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] === '\\') {
+      index++;
+      continue;
+    }
+    if (text[index] === '|') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Classifies one table row, reporting at most one reason.
+ *
+ * Walks the row span by span rather than counting backticks. Counting is the
+ * obvious implementation and it is UNSOUND: `` `` ` `` `` — a double-backtick
+ * span holding a literal backtick, which is how this repository's own prose
+ * shows one — has five backticks and would be reported as unterminated. The
+ * walk consumes each span through {@linkcode readCodeSpan}, which matches the
+ * opening run's length, so that row parses cleanly and a genuinely unclosed run
+ * is still caught.
+ *
+ * Whichever defect appears FIRST wins, and a row yields at most one finding:
+ * once a row is damaged, a raw pipe further along is a symptom of the same
+ * break rather than a second defect.
+ *
+ * @param text - The trimmed row text
+ * @returns The rule that fired, or `null` when the row is well-formed
+ */
+function classifyRow(text: string): MalformedRowReason | null {
+  let index = 0;
+  while (index < text.length) {
+    if (text[index] === '\\') {
+      // A backslash escape, `\|` or `` \` `` — neither char can open a span.
+      index += 2;
+      continue;
+    }
+    if (text[index] !== '`') {
+      index++;
+      continue;
+    }
+    const span = readCodeSpan(text, index);
+    if (span === null) {
+      return 'unterminated-span';
+    }
+    if (hasUnescapedPipe(span.inner)) {
+      return 'unescaped-pipe';
+    }
+    index = span.next;
+  }
+
+  return null;
+}
+
+/**
+ * Finds table rows whose code spans will not render as written.
+ *
+ * Two rules, which are the same defect at two stages of its life. Both real
+ * instances came from a `|` the author did not escape — a pipe ends a table
+ * cell even inside a code span, and GFM then DROPS the cells beyond the
+ * header's width:
+ *
+ * 1. **`unescaped-pipe`** — a span still holding a raw `|`, caught before the
+ *    damage is visible. Written as `` `A | B` `` the cell splits and the tail
+ *    is dropped; written as `` `A \| B` `` it renders whole.
+ * 2. **`unterminated-span`** — a span opened and never closed. That is what the
+ *    damage looks like AFTER the fact, once the dropped cells have taken the
+ *    closing backtick with them.
+ *
+ * `PUBLIC_API.md`'s `RenderDecorator` row is why both exist. It held
+ * `` `(...args: never[]) => P | HandlerResult | Promise<P | HandlerResult>` ``
+ * unescaped, so the visible cell ended mid-span at `=> P` and the published
+ * signature rendered with its entire return union missing, from M92 until
+ * 2026-09-16. A later `deno fmt` normalised the row back to its table's cell
+ * count, which is why a cell-count check cannot find it — measured on the
+ * committed text, that row carries exactly as many pipes as every other row in
+ * its table. Rule 2 is what still catches it; rule 1 is what would have caught
+ * it the day it was written. `packages/static-plugin/README.md` supplied a
+ * second, independent instance of rule 2, writing the `urlPrefix` default as
+ * `` `'/`'` ``.
+ *
+ * A row counts only when its block actually contains a delimiter row, and that
+ * is not pedantry: `deno fmt` wraps a long paragraph mid-line, so an inline
+ * union such as `` `string | number | boolean | null` `` can leave a `|` at the
+ * start of a continuation line. `CHANGELOG.md:2491` is exactly that, and is not
+ * a table.
+ *
+ * Backslash escapes are skipped, so `` \` `` and `\|` are inert, and spans are
+ * matched by run length rather than counted — see {@linkcode classifyRow} for
+ * why counting is unsound. Both allowances exist because a false positive here
+ * blocks CI on correct prose.
+ *
+ * @param lines - The document's lines
+ * @param fenced - Per-line fenced flags from {@linkcode scanFences}
+ * @returns One entry per offending row, at most one per row
+ */
+export function findMalformedTableRows(
+  lines: readonly string[],
+  fenced: readonly boolean[],
+): readonly MalformedRow[] {
+  const rows: MalformedRow[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    if (fenced[index] === true || !(lines[index] as string).trim().startsWith('|')) {
+      index++;
+      continue;
+    }
+
+    // Consume the whole run of pipe-leading, unfenced lines.
+    let end = index;
+    while (
+      end < lines.length && fenced[end] !== true &&
+      (lines[end] as string).trim().startsWith('|')
+    ) {
+      end++;
+    }
+
+    const run = lines.slice(index, end);
+    if (run.some((line) => TABLE_DELIMITER.test(line.trim()))) {
+      for (const [offset, line] of run.entries()) {
+        const text = line.trim();
+        if (TABLE_DELIMITER.test(text)) {
+          continue;
+        }
+        const reason = classifyRow(text);
+        if (reason !== null) {
+          rows.push({ line: index + offset + 1, text, reason });
+        }
+      }
+    }
+
+    index = end;
+  }
+
+  return rows;
+}
+
+/**
+ * Runs every per-document check over one document.
  *
  * @param file - Path used in findings
  * @param source - The document's full text
@@ -343,6 +553,21 @@ export function checkDocument(file: string, source: string): readonly Finding[] 
         message: `Link [${link.label}](#${link.target}) matches no heading in this file.`,
       });
     }
+  }
+
+  for (const row of findMalformedTableRows(lines, fenced)) {
+    const excerpt = row.text.length > 120 ? `${row.text.slice(0, 120)}…` : row.text;
+    findings.push({
+      file,
+      line: row.line,
+      message: row.reason === 'unescaped-pipe'
+        ? `Table row has a \`|\` inside a code span: ${excerpt} — a pipe ends the cell even ` +
+          `inside backticks, so the cell splits and GFM drops whatever runs past the header's ` +
+          `width. Escape it as \`\\|\`.`
+        : `Table row has an unterminated code span: ${excerpt} — usually a ` +
+          `\`|\` inside a span that was not escaped as \`\\|\`, which took the closing backtick ` +
+          `with the dropped cells; otherwise a misplaced backtick.`,
+    });
   }
 
   const hasToc = headings.some((h) => /^table of contents$/i.test(h.text.trim()));
