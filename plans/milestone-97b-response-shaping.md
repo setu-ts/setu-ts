@@ -53,16 +53,21 @@ handler must accept an unrelated parameter to say one thing about its response.
 
 ## 3. Design decisions
 
-### 3.1 Three decorators, applied in `createHandler` before the JSON and render branches
+### 3.1 Three decorators, applied in `createHandler` BEFORE the handler method is invoked
 
 - **Decision:** `@HttpCode(status: number)`, `@ResponseHeader(name: string, value: string)`
   (repeatable), and `@Redirect(url: string, status?: number)` are method decorators recording into
   the existing route metadata. `createHandler` applies the recorded status and headers to
-  `ctx.response` before it reaches the `isHandlerResult` test.
-- **Why:** Applying before the test is what makes the `@Render` case work: the render branch returns
-  `ctx.response.html(...)` on a builder that has already been given its status, so a rendered `201`
-  needs no special case. Applying after would leave `@Render` unreachable for a custom status, which
-  is the sharp edge the milestone exists to remove.
+  `ctx.response` **before `method(...)` is invoked** — before the `await` at
+  `decorator-plugin.ts:340`, not merely before the `isHandlerResult` test below it.
+- **Why:** Two things depend on the exact position and an earlier draft of this plan pinned only one
+  of them. (a) Writing before the `isHandlerResult` test is what makes `@Render` work: the render
+  branch returns `ctx.response.html(...)` on a builder already given its status, so a rendered `201`
+  needs no special case. (b) Writing before `method(...)` runs is what makes §3.2's precedence true
+  — the handler's own `ctx.response.status(202)` then overwrites the decorator's value. Writing
+  after the method satisfies (a) and INVERTS (b), silently making `@HttpCode` beat an explicit
+  runtime call. The draft said only "before the `isHandlerResult` test", which both positions
+  satisfy.
 - **Test home:** `test/unit/response-shaping.test.ts` for each decorator alone;
   `test/integration/render-with-status.test.ts` for `@Render` + `@HttpCode` together.
 
@@ -71,9 +76,10 @@ handler must accept an unrelated parameter to say one thing about its response.
 - **Decision:** A handler that returns `ctx.response.status(202).json(...)` answers `202` even under
   `@HttpCode(201)`.
 - **Why:** The explicit runtime value is the more specific statement, and §1 establishes that
-  `HandlerResult` carries no status — so this falls out of ordering (the decorator writes to the
-  builder, then the handler's own call overwrites it) rather than needing a comparison. Pinning it
-  as a decision means the precedence is intended rather than an accident of where the write lands.
+  `HandlerResult` carries no status — so this falls out of §3.1's ordering (the decorator writes to
+  the builder, then the handler's own call overwrites it) rather than needing a comparison. It is
+  therefore only true while §3.1's write stays before `method(...)`, which is why that position is
+  part of that decision rather than an implementation detail.
 - **Test home:** `test/unit/response-shaping.test.ts` — a case asserting `202`, with a comment
   naming this decision.
 
@@ -135,6 +141,19 @@ handler must accept an unrelated parameter to say one thing about its response.
 - **Test home:** `derive-response-status.test.ts` asserts the `3xx` key appears and that no
   `headers` object is emitted for a `@ResponseHeader` route.
 
+### 3.8 Derivation happens at the operation builder, not inside `#buildResponses`
+
+- **Decision:** `#deriveResponseStatus(route)` is called from the operation builder at
+  `openapi-generator.ts:705`, which already has `route` in scope, and its result re-keys the map
+  `#buildResponses` returned. `#buildResponses`'s signature is unchanged.
+- **Why:** `#buildResponses(responseSchema, operationId)` receives no route
+  (`openapi-generator.ts:975-977`), so it cannot read the brand; the call site can, which is exactly
+  how `#deriveSecurity(route)` is reached at `:729`. An earlier draft of this plan left this as a
+  slash between two mechanisms in §4.1, which is the undecided seam §3's own template comment
+  forbids — recorded here rather than silently resolved.
+- **Test home:** `packages/openapi-plugin/test/integration/derive-response-status.test.ts`, whose
+  byte-identity case for `deriveResponseStatus: false` is what proves the re-key is the only change.
+
 ## 4. Exported surface — every symbol names its consumer
 
 | Exported symbol         | Kind                  | Consumer / real code path that READS it                                                                                                                                |
@@ -149,11 +168,11 @@ handler must accept an unrelated parameter to say one thing about its response.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                                   | Consumer                                                             | Behavior (per implementation)                                                                                                             |
-| -------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `OpenApiGeneratorOptions.deriveResponseStatus?: boolean` | `#buildResponses` / the operation builder in `openapi-generator.ts`. | Default `true`. `false` skips the derivation entirely, reproducing the pre-milestone document byte-for-byte — asserted, not assumed (§6). |
-| `@HttpCode(status)` argument                             | `createHandler` → `ctx.response.status(...)`.                        | The success status for a plain return. Overridden by a returned `HandlerResult` (§3.2).                                                   |
-| `@Redirect(url, status?)` arguments                      | `createHandler` → `status` + `Location` header.                      | `status` defaults to `302`, matching `IResponse.redirect`'s documented default (`common/src/http.ts:248`).                                |
+| Option                                                   | Consumer                                                                             | Behavior (per implementation)                                                                                                             |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `OpenApiGeneratorOptions.deriveResponseStatus?: boolean` | The operation builder at `openapi-generator.ts:705`, never `#buildResponses` (§3.8). | Default `true`. `false` skips the derivation entirely, reproducing the pre-milestone document byte-for-byte — asserted, not assumed (§6). |
+| `@HttpCode(status)` argument                             | `createHandler` → `ctx.response.status(...)`.                                        | The success status for a plain return. Overridden by a returned `HandlerResult` (§3.2).                                                   |
+| `@Redirect(url, status?)` arguments                      | `createHandler` → `status` + `Location` header.                                      | `status` defaults to `302`, matching `IResponse.redirect`'s documented default (`common/src/http.ts:248`).                                |
 
 ## 5. Implementation files
 
@@ -173,6 +192,7 @@ handler must accept an unrelated parameter to say one thing about its response.
 | `packages/common/test/unit/response-metadata.test.ts`                     | `common/src/http.ts` additions                         | Brand round-trips; a foreign value under the same global symbol is treated as absent (the `VALIDATION_METADATA` behaviour at `http.ts:718-719`); the property is non-enumerable; a cross-copy case with a vacuity guard (§3.4).                                                                                                                                               |
 | `packages/common/test/unit/barrel-exports.test.ts` (extended)             | `common/src/index.ts`                                  | Compile-time assertions declared against the barrel, not the concrete module — M70m's review found that dropping a type export left every runtime assertion green.                                                                                                                                                                                                            |
 | `packages/decorator-plugin/test/unit/response-shaping.test.ts`            | `decorators/response.ts`, `plugin/decorator-plugin.ts` | `@HttpCode(201)` yields `201`; repeated `@ResponseHeader` yields both headers; `@Redirect` sets status + `Location` and the handler body still ran (§3.3); a returned `HandlerResult` wins (§3.2). Calls type-check against `SetuMethodDecorator`.                                                                                                                            |
+| `packages/decorator-plugin/test/unit/response-shaping-order.test.ts`      | `plugin/decorator-plugin.ts`                           | §3.1: the write lands BEFORE `method(...)` — a handler reading `ctx.response` observes the decorator's status, and its own `status(202)` then wins. Moving the write to after the method must fail this; a test asserting only the final status would pass regardless.                                                                                                        |
 | `packages/decorator-plugin/test/integration/render-with-status.test.ts`   | `plugin/decorator-plugin.ts`                           | `@Render` + `@HttpCode(201)` answers `201` with the rendered HTML body and `text/html` — driven through `app.fetch`, not `inject()`, because `inject()` exposes no response headers (the M51 `Allow` lesson).                                                                                                                                                                 |
 | `packages/decorator-plugin/test/unit/barrel-exports.test.ts` (extended)   | `decorator-plugin/src/index.ts`                        | The barrel gains exactly the three decorators.                                                                                                                                                                                                                                                                                                                                |
 | `packages/openapi-plugin/test/integration/derive-response-status.test.ts` | `openapi-generator.ts`                                 | Derived `201` replaces the default `200`; a DECLARED `response` map wins; `deriveResponseStatus: false` reproduces the previous document byte-for-byte; a `@Redirect` route emits its `3xx`; a `@ResponseHeader` route emits no `headers`. Drives the REAL `decorator-plugin` through a real kernel application so the two packages are proven to agree on the symbol (§3.5). |

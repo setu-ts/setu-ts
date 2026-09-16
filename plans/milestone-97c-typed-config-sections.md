@@ -59,11 +59,21 @@ safety improvement, and it is the ASP.NET `IOptions<T>` row.
   `IConfig` in `common` is **unchanged**, so there is no `common` edit and no breaking change for
   any implementor.
 - **Why:** §1 establishes that adding a required member follows M74 and is breaking for
-  implementors. The cost buys nothing here: the section's parsed value is computed at startup and
-  cached on the plugin side, so the accessor needs no privileged access to `ConfigService`'s private
-  `data` — it reads through the public `get`. A free function also keeps `common` free of the
+  implementors, and the cost buys nothing here. A free function also keeps `common` free of the
   section concept, which matters because `common` must not acquire a validator dependency (the
   reason `StructuralSchema` lives in `config-plugin` at all).
+- **Where the parsed value lives — added in review, because an earlier draft left this undefined.**
+  That draft said the value is "cached on the plugin side" AND that the accessor "reads through the
+  public `get`", which are two different mechanisms with neither chosen — the M10 shape, where an
+  unspecified core seam gets improvised at implementation time. The decision is a **module-level**
+  **`WeakMap<IConfig, Map<ConfigSection, unknown>>`** owned by `sections/config-section.ts`: startup
+  validation writes each section's parsed value into it keyed by the `IConfig` instance, and
+  `getConfigSection` reads it. Not a reserved store key, which would pollute a namespace the
+  application also writes and would be reachable through `get`; not a parse per call, which
+  contradicts §3.3. A `WeakMap` module registry is established practice here — M69 added exactly one
+  in `drizzle-database.ts` to map a witness back to its database. A section read for an `IConfig`
+  the plugin never validated throws naming the prefix, because that means the section was never
+  declared in `ConfigPluginOptions.sections`.
 - **Test home:** `test/unit/config-section.test.ts` plus a compile-time assertion that `IConfig`
   still declares exactly its four members.
 
@@ -71,11 +81,16 @@ safety improvement, and it is the ASP.NET `IOptions<T>` row.
 
 - **Decision:** `defineConfigSection<T>({ prefix, schema })` returns an opaque `ConfigSection<T>`
   carrying both. `prefix` selects the flat keys belonging to the section (`DATABASE_` selects
-  `DATABASE_URL`, `DATABASE_POOL_SIZE`), and `schema` parses the selected subset.
+  `DATABASE_URL`, `DATABASE_POOL_SIZE`), and `schema` parses the selected subset **with the prefix
+  STRIPPED** — the schema declares `{ URL: …, POOL_SIZE: … }`, not `{ DATABASE_URL: … }`.
 - **Why:** The store is flat string keys from the environment (§1), so a section is a prefix over
   that flat space rather than a nested object — there is no nesting in the source data to address.
   Naming the prefix rather than a list of keys is what makes the schema the single statement of the
-  section's shape.
+  section's shape. **Stripping** is the half an earlier draft left unstated, and it is not cosmetic:
+  it decides what every user's schema literally looks like, and repeating the prefix inside the
+  schema would state it twice with nothing checking the two agree. The cost is that a section's
+  schema is not reusable as a whole-store `validationSchema`, which the README states rather than
+  leaving to discovery.
 - **Test home:** `test/unit/config-section.test.ts` — prefix selection, and a key outside the prefix
   not reaching the schema.
 
@@ -154,6 +169,7 @@ safety improvement, and it is the ASP.NET `IOptions<T>` row.
 | Test file                                     | src covered                                                | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                          |
 | --------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test/unit/config-section.test.ts`            | `sections/config-section.ts`                               | Prefix selection includes only matching keys; `getConfigSection` returns the parsed value typed as the schema's output; a key outside the prefix never reaches the schema. Calls type-check against `StructuralSchema<T>` from §1 — a test passing a bare object literal as a schema is a plan defect.    |
+| `test/unit/config-section-cache.test.ts`      | `sections/config-section.ts`                               | §3.1a: the `WeakMap` is keyed by the `IConfig` instance, so two applications in one process do not share a section value; reading a section for an `IConfig` the plugin never validated throws naming the prefix.                                                                                         |
 | `test/unit/config-section-startup.test.ts`    | `sections/validate-sections.ts`, `services/load-config.ts` | §3.3: `register()` throws for an unparseable section. §3.4: both `loadConfig` paths validate, including `options.instance`. §3.5: the message names the prefix, contains no configuration value, and carries no `cause`. Parsed exactly once across repeated accessor calls.                              |
 | `test/unit/config-section-ordering.test.ts`   | `services/load-config.ts`                                  | §3.6: a section schema expecting a number succeeds over a store whose `validationSchema` coerced it, and the reverse ordering is shown to fail — so the decision is proven rather than asserted.                                                                                                          |
 | `test/unit/barrel-exports.test.ts` (extended) | `src/index.ts`                                             | The barrel gains exactly the three symbols; `ConfigSection<T>` is nameable by a consumer (§4). A compile-time assertion pins that `IConfig` still declares four members (§3.1).                                                                                                                           |
