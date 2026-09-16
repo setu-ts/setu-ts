@@ -295,7 +295,6 @@ export const FRAGMENT_GLOBALS = new Set([
   'data',
   'UserRepository',
   'verifyToken',
-  'HttpException',
   'loggerMiddleware',
   'CustomLoggerPlugin',
   'myMiddleware',
@@ -543,8 +542,6 @@ const APP_DECLARATIONS: Readonly<Record<string, string>> = {
   UserRepository:
     'declare class UserRepository { findByName(name: string): Promise<unknown | null>; save(entity: unknown): Promise<unknown> }',
   verifyToken: 'declare function verifyToken(token: string): unknown',
-  HttpException:
-    'declare class HttpException extends Error { status: number; constructor(message: string, status?: number) }',
   loggerMiddleware: 'declare const loggerMiddleware: MiddlewareFunction',
   CustomLoggerPlugin: 'declare function CustomLoggerPlugin(options?: unknown): IPlugin',
   myMiddleware: 'declare const myMiddleware: MiddlewareFunction',

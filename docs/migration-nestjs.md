@@ -21,7 +21,7 @@ flexible.
 
 ```typescript
 import { NestFactory } from '@nestjs/core';
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Module } from '@nestjs/common';
 
 @Controller()
 class AppController {
@@ -31,11 +31,14 @@ class AppController {
   }
 }
 
+@Module({ controllers: [AppController] })
+class AppModule {}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   await app.listen(3000);
 }
-bootstrap();
+void bootstrap();
 ```
 
 ### Setu-TS (Programmatic)
@@ -87,8 +90,14 @@ await app.start({ port: 3000 });
 ### NestJS
 
 ```typescript
+import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { CreateUserDto } from './create-user.dto';
+import { UserService } from './user.service';
+
 @Controller('users')
 export class UsersController {
+  constructor(private readonly userService: UserService) {}
+
   @Get()
   findAll() {
     return this.userService.findAll();
@@ -109,19 +118,23 @@ export class UsersController {
 ### Setu-TS (Programmatic)
 
 ```typescript
+import { createCapabilityToken } from '@setu-ts/common';
+
+const USER_SERVICE = createCapabilityToken('user-service');
+
 app.router.get('/users', async (ctx) => {
-  const userService = ctx.services.get<UserService>('userService');
+  const userService = ctx.services.get<UserService>(USER_SERVICE);
   return ctx.response.json(await userService.findAll());
 });
 
 app.router.get('/users/:id', async (ctx) => {
-  const userService = ctx.services.get<UserService>('userService');
+  const userService = ctx.services.get<UserService>(USER_SERVICE);
   const id = ctx.params.id;
   return ctx.response.json(await userService.findById(id));
 });
 
 app.router.post('/users', async (ctx) => {
-  const userService = ctx.services.get<UserService>('userService');
+  const userService = ctx.services.get<UserService>(USER_SERVICE);
   const dto = await ctx.request.json();
   return ctx.response.status(201).json(await userService.create(dto));
 });
@@ -133,7 +146,7 @@ app.router.post('/users', async (ctx) => {
 import { Body, Controller, Get, Inject, Param, Params, Post } from '@setu-ts/decorator-plugin';
 
 @Controller('/users')
-@Inject('UserService')
+@Inject('user-service')
 export class UsersController {
   constructor(private readonly userService: UserService) {}
 
@@ -161,6 +174,10 @@ export class UsersController {
 ### NestJS
 
 ```typescript
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import type { Repository } from 'typeorm';
+
 @Injectable()
 export class UserService {
   constructor(@InjectRepository(User) private readonly userRepository: Repository<User>) {}
@@ -172,14 +189,14 @@ export class UserService {
 ```typescript
 import { Inject, Injectable } from '@setu-ts/decorator-plugin';
 
-@Injectable({ token: 'UserService' })
-@Inject('UserRepository')
+@Injectable({ token: 'user-service' })
+@Inject('user-repository')
 export class UserService {
   constructor(private readonly userRepository: UserRepository) {}
 }
 
 // Register the service with the DecoratorPlugin, or programmatically:
-ctx.services.register('UserService', new UserService(userRepository));
+ctx.services.register('user-service', new UserService(userRepository));
 ```
 
 ## Modules vs Plugins
@@ -187,6 +204,8 @@ ctx.services.register('UserService', new UserService(userRepository));
 ### NestJS
 
 ```typescript
+import { Module } from '@nestjs/common';
+
 @Module({
   controllers: [UsersController],
   providers: [UserService],
@@ -229,18 +248,25 @@ Use a plugin factory instead for a self-contained capability that owns lifecycle
 capability, or should be reusable across applications:
 
 ```typescript
+import { CAPABILITIES, createCapabilityToken } from '@setu-ts/common';
+import type { IPlugin } from '@setu-ts/common';
+import { DatabasePlugin } from '@setu-ts/database-plugin';
+
+const USER_SERVICE = createCapabilityToken('user-service');
+
 export function UsersPlugin(): IPlugin {
   return {
     name: 'users',
     version: '1.0.0',
     dependencies: [CAPABILITIES.RUNTIME, CAPABILITIES.DATABASE],
+    provides: [USER_SERVICE],
     async register(ctx) {
       // Register services
-      ctx.services.register('UserService', new UserService());
+      ctx.services.register(USER_SERVICE, new UserService());
 
       // Register routes directly
       ctx.router.get('/users', async (requestCtx) => {
-        const userService = requestCtx.services.get<UserService>('UserService');
+        const userService = requestCtx.services.get<UserService>(USER_SERVICE);
         return requestCtx.response.json(await userService.findAll());
       });
     },
@@ -257,14 +283,22 @@ app.register(DatabasePlugin());
 ### NestJS
 
 ```typescript
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(private readonly jwtService: JwtService) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<{ headers: { authorization?: string } }>();
     const token = this.extractTokenFromHeader(request);
     return !!token;
+  }
+
+  private extractTokenFromHeader(request: { headers: { authorization?: string } }): string | null {
+    const [kind, token] = request.headers.authorization?.split(' ') ?? [];
+    return kind === 'Bearer' && token !== undefined ? token : null;
   }
 }
 ```
@@ -272,6 +306,8 @@ export class AuthGuard implements CanActivate {
 ### Setu-TS
 
 ```typescript
+import type { MiddlewareFunction } from '@setu-ts/common';
+
 export const authMiddleware: MiddlewareFunction = async (ctx, next) => {
   const authHeader = ctx.request.headers.get('Authorization');
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -296,9 +332,13 @@ app.middleware.add(authMiddleware);
 ### NestJS
 
 ```typescript
+import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import { map, type Observable } from 'rxjs';
+
 @Injectable()
 export class TransformInterceptor implements NestInterceptor {
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    void context;
     return next.handle().pipe(
       map((data) => ({
         success: true,
@@ -312,13 +352,15 @@ export class TransformInterceptor implements NestInterceptor {
 ### Setu-TS
 
 ```typescript
+import type { MiddlewareFunction } from '@setu-ts/common';
+
 export const transformMiddleware: MiddlewareFunction = async (ctx, next) => {
   await next();
 
   // Transform response
   const snapshot = ctx.response.snapshot();
-  if (!snapshot.streaming && snapshot.body) {
-    const data = JSON.parse(snapshot.body as string);
+  if (!snapshot.streaming && typeof snapshot.body === 'string') {
+    const data = JSON.parse(snapshot.body);
     const transformed = { success: true, data };
     return ctx.response.json(transformed);
   }
@@ -330,6 +372,9 @@ export const transformMiddleware: MiddlewareFunction = async (ctx, next) => {
 ### NestJS
 
 ```typescript
+import { ArgumentsHost, Catch, type ExceptionFilter, HttpException } from '@nestjs/common';
+import type { Request, Response } from 'express';
+
 @Catch(HttpException)
 export class HttpExceptionFilter implements ExceptionFilter {
   catch(exception: HttpException, host: ArgumentsHost) {
@@ -353,14 +398,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
 ### Setu-TS
 
 ```typescript
+import type { MiddlewareFunction } from '@setu-ts/common';
+import { HttpError } from '@setu-ts/exceptions';
+
 export const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
   try {
     await next();
   } catch (error) {
-    if (error instanceof HttpException) {
-      return ctx.response.status(error.status).json(
+    if (error instanceof HttpError) {
+      return ctx.response.status(error.statusCode).json(
         {
-          statusCode: error.status,
+          statusCode: error.statusCode,
           timestamp: new Date().toISOString(),
           path: new URL(ctx.request.url).pathname,
           message: error.message,
@@ -386,6 +434,8 @@ export const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
 ### NestJS
 
 ```typescript
+import { Body, Post, UsePipes, ValidationPipe } from '@nestjs/common';
+
 @Post()
 @UsePipes(new ValidationPipe())
 async create(@Body() createDto: CreateCatDto) {
@@ -397,12 +447,13 @@ async create(@Body() createDto: CreateCatDto) {
 
 ```typescript
 import { validateBody } from '@setu-ts/validation-plugin';
+import { validatedStateKey } from '@setu-ts/common';
 
 app.router.post('/users', {
   middleware: [validateBody(CreateUserDto)],
   handler: async (ctx) => {
-    const dto = await ctx.request.json();
-    // dto is validated
+    const dto = ctx.state.get(validatedStateKey('body'));
+    // dto is the value validated and parsed by the middleware
     return ctx.response.json({ created: dto });
   },
 });
@@ -413,6 +464,9 @@ app.router.post('/users', {
 ### NestJS
 
 ```typescript
+import { Injectable, Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -424,12 +478,16 @@ app.router.post('/users', {
 export class AppModule {}
 
 // Usage
-constructor(@InjectConfig() private readonly config: ConfigService) {}
+@Injectable()
+export class AppService {
+  constructor(private readonly config: ConfigService) {}
+}
 ```
 
 ### Setu-TS
 
 ```typescript
+import { CAPABILITIES, type IConfig } from '@setu-ts/common';
 import { ConfigPlugin } from '@setu-ts/config-plugin';
 
 app.register(ConfigPlugin({
@@ -450,6 +508,10 @@ const port = config.get('PORT');
 ### NestJS (TypeORM)
 
 ```typescript
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Column, Entity, PrimaryGeneratedColumn, Repository } from 'typeorm';
+
 @Entity()
 export class User {
   @PrimaryGeneratedColumn()
@@ -472,7 +534,8 @@ export class UserService {
 ### Setu-TS (Database Plugin)
 
 ```typescript
-import { DatabasePlugin } from '@setu-ts/database-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import { DatabasePlugin, type IDatabaseService } from '@setu-ts/database-plugin';
 
 // The built-in arm selects the ORM via `type`; adapter-specific config lives
 // under `options` (a `DatabaseAdapterOptions`), not a top-level `prisma`
@@ -502,11 +565,17 @@ const users = await usersRepo.findAll();
 ### NestJS
 
 ```typescript
-@Injectable()
-@CacheTTL(300)
-export class UserService {
-  async findAll() {
-    // Result cached for 300 seconds
+import { Controller, Get, UseInterceptors } from '@nestjs/common';
+import { CacheInterceptor, CacheTTL } from '@nestjs/cache-manager';
+
+@Controller('users')
+@UseInterceptors(CacheInterceptor)
+@CacheTTL(300_000)
+export class UsersController {
+  @Get()
+  findAll() {
+    // GET responses are cached for five minutes.
+    return [];
   }
 }
 ```
@@ -526,7 +595,7 @@ app.register(CachePlugin({
 
 // Usage — ICacheStore uses the token 'cache' (CAPABILITIES.CACHE), stores value
 // with numeric TTL seconds (not an options bag), and deletes with delete().
-import type { ICacheStore } from '@setu-ts/common';
+import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';
 const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
 const users: unknown[] = [];
 await cache.set('users:all', users, 300);
@@ -539,6 +608,8 @@ await cache.delete('users:all');
 ### NestJS
 
 ```typescript
+import { IsEmail, IsString, MinLength } from 'class-validator';
+
 class CreateUserDto {
   @IsString()
   @MinLength(3)
@@ -552,7 +623,8 @@ class CreateUserDto {
 ### Setu-TS
 
 ```typescript
-import { z } from '@std/zod';
+import { z } from 'zod';
+import { ValidationPlugin } from '@setu-ts/validation-plugin';
 
 const CreateUserDto = z.object({
   name: z.string().min(3),
@@ -568,7 +640,7 @@ app.register(ValidationPlugin({
 app.router.post('/users', async (ctx) => {
   const result = CreateUserDto.safeParse(await ctx.request.json());
   if (!result.success) {
-    return ctx.response.status(400).json({ errors: result.error.errors });
+    return ctx.response.status(400).json({ errors: result.error.issues });
   }
   const dto = result.data;
   return ctx.response.status(201).json({ created: dto });
@@ -584,12 +656,17 @@ is checked against nothing — a typo in the template name or a missing props fi
 runtime.
 
 ```typescript
+import { Controller, Get, Render } from '@nestjs/common';
+import { UserService } from './user.service';
+
 @Controller('pages')
 export class PagesController {
+  constructor(private readonly usersService: UserService) {}
+
   @Get('users')
   @Render('users/index')
-  users() {
-    return { users: this.usersService.findAll() };
+  async users() {
+    return { users: await this.usersService.findAll() };
   }
 }
 ```
@@ -637,8 +714,14 @@ export class PagesController {
 ### NestJS
 
 ```typescript
+import { Server, Socket } from 'socket.io';
+import { SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+
 @WebSocketGateway()
 export class EventsGateway {
+  @WebSocketServer()
+  private readonly server: Server;
+
   @SubscribeMessage('message')
   handleMessage(client: Socket, payload: string): void {
     this.server.emit('response', payload);
@@ -656,6 +739,7 @@ import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
 // rooms are application-level, registered on the WebSocketService after the
 // plugin (no `rooms` plugin option exists).
 app.register(WebSocketPlugin({ heartbeatMs: 30_000 }));
+await app.start({ port: 3000 });
 
 const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
 ws.route('/ws', {
@@ -674,12 +758,22 @@ ws.route('/ws', {
 ### NestJS
 
 ```typescript
+import { Test } from '@nestjs/testing';
+
 describe('UsersController', () => {
   let controller: UsersController;
 
   beforeEach(async () => {
     const module = await Test.createTestingModule({
       controllers: [UsersController],
+      providers: [{
+        provide: UserService,
+        useValue: {
+          findAll: () => [],
+          findById: (_id: string) => null,
+          create: (_dto: CreateUserDto) => ({}),
+        },
+      }],
     }).compile();
 
     controller = module.get<UsersController>(UsersController);
@@ -694,6 +788,7 @@ describe('UsersController', () => {
 ### Setu-TS
 
 ```typescript
+import { RuntimePlugin } from '@setu-ts/runtime';
 import { createTestApp, inject } from '@setu-ts/testing';
 
 describe('Users', () => {
@@ -724,6 +819,8 @@ describe('Users', () => {
 ### NestJS
 
 ```typescript
+import { Injectable, Scope } from '@nestjs/common';
+
 @Injectable({ scope: Scope.REQUEST })
 export class RequestScopedService {}
 ```
@@ -744,7 +841,6 @@ export class RequestScopedService {}
 ```typescript
 app.use(loggerMiddleware);
 app.use(cors());
-app.use(app.getHttpAdapter().getInstance());
 ```
 
 ### Setu-TS
@@ -752,7 +848,7 @@ app.use(app.getHttpAdapter().getInstance());
 ```typescript
 // Middleware runs in priority order (lower first)
 app.middleware.add(loggerMiddleware); // Default priority: 500
-app.middleware.add(loggerMiddleware, { priority: 25 }); // Runs before default
+app.middleware.add(myMiddleware, { priority: 25 }); // Runs before default
 ```
 
 ## Migration Checklist

@@ -100,7 +100,7 @@ The React Router Vite plugin also **requires a real config file**: passing `conf
 
 ```typescript
 import * as vite from 'vite';
-import { createRequestHandler, RouterContextProvider } from 'react-router';
+import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';
@@ -116,6 +116,11 @@ const viteServer = await vite.createServer({
 });
 await viteServer.listen();
 
+// Vite types a loaded module as Record<string, any>; this virtual module is
+// React Router's ServerBuild by contract.
+const loadServerBuild = async (): Promise<ServerBuild> =>
+  await viteServer.ssrLoadModule('virtual:react-router/server-build') as ServerBuild;
+
 const app = createApplication();
 app.register(RuntimePlugin());
 app.register(ReactRouterPlugin({
@@ -124,16 +129,17 @@ app.register(ReactRouterPlugin({
   serverBuildPath: 'virtual:react-router/server-build',
   mode: 'development',
   // Omit assetsDir in dev: there is no build/client, and Vite serves the client graph.
-  loadRequestHandler: (_path, mode) =>
-    Promise.resolve({
-      handler: createRequestHandler(
-        () => viteServer.ssrLoadModule('virtual:react-router/server-build'),
-        mode,
-      ),
+  loadRequestHandler: (_path, mode) => {
+    const handler = createRequestHandler(loadServerBuild, mode);
+    return Promise.resolve({
+      // The plugin supplies the instance returned by createLoadContext below.
+      // Its public handler type uses unknown so it can stay React Router-free.
+      handler: (request, loadContext) => handler(request, loadContext as RouterContextProvider),
       // Must come from the same react-router module as the handler — RR checks
       // `context instanceof RouterContextProvider` nominally.
       createLoadContext: () => new RouterContextProvider(),
-    }),
+    });
+  },
 }));
 ```
 
@@ -192,7 +198,7 @@ and let it use the default loader.
 
 ```typescript
 app.register(ReactRouterPlugin({
-  serverBuildPath: './build/server/index.js',
+  serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
   assetsDir: './build/client/assets',
   mode: 'production',
 }));
