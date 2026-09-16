@@ -9965,7 +9965,17 @@ Contract notes:
   unmasked diagnostic and records the selected response status. This hook is deliberately limited to
   `errorHandler`'s caught-error path: the M70f responder still formats unmatched-path `404`,
   malformed-request `400`, shutdown-drain `503`, and other responder-based terminals, including when
-  no full request context exists.
+  no full request context exists. The status ownership is the part easiest to lose — `renderView`
+  takes no status, so the natural spelling serves `200` for every branded error, and the one-line
+  fix belongs in the hook:
+
+  ```typescript
+  async respond(error, ctx): Promise<HandlerResult | undefined> {
+    if (!wantsHtml(ctx)) return undefined; // API clients keep Problem Details
+    ctx.response.status(error.statusCode); // the callback owns the status — without it, 200
+    return await renderView(ctx, ErrorPage, { status: error.statusCode });
+  }
+  ```
 - **RFC 9457 compliance**: when `format: 'rfc9457'`, the response body carries `type`, `title`,
   `status`, `detail` (and `instance` from the request path) with
   `Content-Type: application/problem+json`. The `message` field is **absent** in this mode (Problem

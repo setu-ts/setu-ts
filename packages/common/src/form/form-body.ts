@@ -41,7 +41,7 @@ const FORM_URLENCODED = 'application/x-www-form-urlencoded';
  * encoding (the CSRF verifier and the upload middleware both do) reads this
  * before touching the body, so a non-form request never reaches a throw.
  *
- * @since 0.5.0
+ * @since 0.6.0
  */
 export type FormEncoding = 'urlencoded' | 'multipart';
 
@@ -55,7 +55,7 @@ export type FormEncoding = 'urlencoded' | 'multipart';
  * parser's own synchronous view — no `await`, no copy. `size` is deliberately
  * omitted: `data.byteLength` is the same number.
  *
- * @since 0.5.0
+ * @since 0.6.0
  */
 export interface FormFile {
   /** The client-provided file name (`Content-Disposition` `filename="…"`). */
@@ -74,7 +74,7 @@ export interface FormFile {
  * wherever a value is consumed as text: a client chooses whether a part
  * carries a `filename` freely.
  *
- * @since 0.5.0
+ * @since 0.6.0
  */
 export type FormValue = string | FormFile;
 
@@ -95,7 +95,7 @@ export type FormValue = string | FormFile;
  *   // No usable token — the value was a file or absent.
  * }
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export interface FormBody {
   /**
@@ -161,7 +161,7 @@ export interface FormBody {
  * const encoding = formEncodingOf(request.headers.get('content-type'));
  * if (encoding === undefined) return; // not a form — branch, don't parse
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export function formEncodingOf(contentType: string | null): FormEncoding | undefined {
   if (contentType === null) return undefined;
@@ -197,7 +197,7 @@ export function formEncodingOf(contentType: string | null): FormEncoding | undef
  * `boundary=`. A multipart BODY that is unparseable is NOT a throw: it yields
  * an empty `FormBody`, which is the promoted parser's released behaviour and
  * is documented as the accessor's limit rather than hidden behind a status.
- * @since 0.5.0
+ * @since 0.6.0
  */
 export function parseFormBody(body: Uint8Array, contentType: string | null): FormBody {
   const encoding = formEncodingOf(contentType);

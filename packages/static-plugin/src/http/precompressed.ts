@@ -29,7 +29,7 @@ export const CONTENT_ENCODINGS: Record<string, string> = {
  *
  * @param format - The sidecar filename format
  * @returns The HTTP Content-Encoding token
- * @since 0.4.0
+ * @since 0.5.0
  */
 export function contentEncodingFor(format: string): string {
   return CONTENT_ENCODINGS[format] ?? format;

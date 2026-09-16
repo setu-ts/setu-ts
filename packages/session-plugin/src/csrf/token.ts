@@ -149,7 +149,7 @@ export interface PublishedCsrfConfig {
  *   );
  * });
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export function csrfTokenField(
   ctx: IRequestContext,

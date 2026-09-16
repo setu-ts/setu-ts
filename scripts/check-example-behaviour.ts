@@ -28,6 +28,41 @@ import { classify, extractFences, TS_ALIASES } from '../test/fixtures/snippets/f
 export const HOSTILE = '<script>alert(1)</script>';
 
 /**
+ * The second payload, substituted into every prop for the URL check: a scheme
+ * hostile enough to matter and free of HTML metacharacters, which is exactly
+ * why the escaping that neutralises {@linkcode HOSTILE} does nothing to it.
+ * X46-1: `<a href={props.note.link}>` with a stored `javascript:alert(1)`
+ * kept the scheme verbatim in real Chrome, and clicking it executed.
+ */
+export const URL_PAYLOAD = 'javascript:alert(1)';
+
+/**
+ * The output-side assertion for {@linkcode URL_PAYLOAD}. The payload goes into
+ * EVERY prop — the gate cannot know which one a component routes into a URL —
+ * so the defect is decided on the OUTPUT: the scheme is a finding only when
+ * the rendered markup carries it in a URL attribute. In a text child, or in a
+ * non-navigational attribute (`value`, `title`), a scheme is inert in a
+ * browser and is not a finding. `xlink:href` matches on the suffix.
+ */
+export const URL_SCHEME_PATTERN = /(?:href|src|action)\s*=\s*(["']?)\s*javascript:/i;
+
+/**
+ * The comment label exempting a component from probe coverage.
+ *
+ * The probe delivers its payloads through a props `Proxy` and stubs `raw()`
+ * to a benign marker, so a component whose own source routes a value through
+ * `raw(...)` — or spreads an identifier into an element (`{...props}`) — is
+ * rendered WITHOUT its real data path: the gate cannot have delivered either
+ * payload into the output, and reporting a clean render for it would be the
+ * worst failure mode a security gate has. Such a component is therefore
+ * reported `unchecked` and FAILS, unless its own attached comment carries this
+ * label with the reason spelled out — the same convention as
+ * {@linkcode COUNTER_EXAMPLE_MARKERS}, so the exemption travels with the
+ * example in the document instead of in a per-file list in here.
+ */
+export const UNCHECKED_EXEMPT_MARKERS: readonly string[] = ['UNCHECKED-EXEMPT'];
+
+/**
  * Documents scanned for renderable components.
  *
  * Every Markdown file the repository publishes, so a component documented in a
@@ -70,8 +105,25 @@ export interface DocComponent {
   readonly expectUnsafe: boolean;
   /** True when the component opts out of escaping through `raw()`. */
   readonly usesRaw: boolean;
+  /** True when the component spreads an identifier into an element (`{...`). */
+  readonly spreads: boolean;
+  /**
+   * True when the component's own comment carries an exemption label
+   * ({@linkcode UNCHECKED_EXEMPT_MARKERS}) naming the reason its data path is
+   * allowed to sit outside what the probe can check.
+   */
+  readonly exempt: boolean;
   /** Fence-local `const` definitions the component references, in source order. */
   readonly dependencies: readonly string[];
+}
+
+/** A view-shaped definition the probe will never render, so cannot check. */
+export interface BlindSpot {
+  readonly file: string;
+  readonly line: number;
+  readonly name: string;
+  /** True when the definition's own comment carries an exemption label. */
+  readonly exempt: boolean;
 }
 
 /** A component whose rendered output did not match its declared safety. */
@@ -340,6 +392,8 @@ export function collectComponents(file: string, markdown: string): readonly DocC
         source,
         expectUnsafe: COUNTER_EXAMPLE_MARKERS.some((marker) => before.includes(marker)),
         usesRaw: /\braw\s*\(/.test(source),
+        spreads: /\{\.\.\./.test(source),
+        exempt: UNCHECKED_EXEMPT_MARKERS.some((marker) => before.includes(marker)),
         dependencies: localDependencies(fence.code, source),
       });
     }
@@ -348,7 +402,74 @@ export function collectComponents(file: string, markdown: string): readonly DocC
 }
 
 /**
- * Builds the probe module that renders each component with hostile input.
+ * Collects view-shaped definitions the probe will NOT render, whose source
+ * still routes a value through `raw()` or an element spread.
+ *
+ * The renderer only probes components taking a props bag — a helper whose
+ * parameter is an `IRequestContext` is excluded by signature (see
+ * {@linkcode takesProps}). Exclusion is the right rendering decision and the
+ * wrong coverage decision: such a helper can carry exactly the same hazards
+ * into the page, invisible to both payloads. Each one is reported so the
+ * gate's blind spots stay enumerated rather than silent; only an exemption
+ * label on the definition's own comment keeps it from failing the run.
+ *
+ * @param file - The document's path
+ * @param markdown - Its contents
+ * @returns One entry per unrenderable definition whose data path the probe cannot check
+ */
+export function collectUnrenderedBlindSpots(
+  file: string,
+  markdown: string,
+): readonly BlindSpot[] {
+  const found: BlindSpot[] = [];
+  if (!RENDERS_VIEWS.test(markdown)) return found;
+
+  for (const fence of extractFences(file, markdown)) {
+    if (!TS_ALIASES.has(fence.lang)) continue;
+    if (classify(fence).kind === 'skip') continue;
+    const seen = new Set<string>();
+    for (const { name, index } of topLevelConsts(fence.code)) {
+      if (!/^[A-Z]/.test(name) || seen.has(name)) continue;
+      const source = extractDefinition(fence.code, name);
+      if (source === null || !MARKUP.test(source) || takesProps(source)) continue;
+      seen.add(name);
+      if (!/\braw\s*\(/.test(source) && !/\{\.\.\./.test(source)) continue;
+      const before = attachedComment(fence.code.slice(0, index));
+      found.push({
+        file,
+        line: fence.line,
+        name,
+        exempt: UNCHECKED_EXEMPT_MARKERS.some((marker) => before.includes(marker)),
+      });
+    }
+  }
+  return found;
+}
+
+/**
+ * One finding per unexempted definition the probe can never render.
+ *
+ * @param spots - The blind spots collected across the scanned documents
+ * @returns A finding for each spot whose comment carries no exemption
+ */
+export function blindSpotFindings(spots: readonly BlindSpot[]): readonly Finding[] {
+  return spots
+    .filter((spot) => !spot.exempt)
+    .map((spot) => ({
+      file: spot.file,
+      line: spot.line,
+      message: `${spot.name} is UNCHECKED: it is not a props component, so the probe never ` +
+        `renders it, and its source routes a value through raw() or an element spread — ` +
+        `the gate cannot see what reaches the page. Carry an ` +
+        `// ${UNCHECKED_EXEMPT_MARKERS[0]}: <reason> comment above it, or reshape it into ` +
+        `a props component the gate can render.`,
+    }));
+}
+
+/**
+ * Builds the probe module that renders each component twice — once with
+ * {@linkcode HOSTILE} in every prop, once with {@linkcode URL_PAYLOAD} — and
+ * prints one JSON line per component carrying both verdicts.
  *
  * The props object is one `Proxy` answering every read with a single-element
  * array holding the payload. That satisfies both shapes a documented component
@@ -370,7 +491,13 @@ ${c.dependencies.join('\n')}
 ${c.source}
 try {
   const out = await renderComponent(${c.name} as never, props);
-  console.log(JSON.stringify({ index: ${index}, ok: true, escaped: !out.includes(HOSTILE) }));
+  const outUrl = await renderComponent(${c.name} as never, urlProps);
+  console.log(JSON.stringify({
+    index: ${index},
+    ok: true,
+    escaped: !out.includes(HOSTILE),
+    scheme: URL_SCHEME.test(outUrl),
+  }));
 } catch (error) {
   console.log(JSON.stringify({ index: ${index}, ok: false, error: String(error) }));
 }
@@ -382,6 +509,8 @@ import { renderComponent } from '../../packages/view-plugin/src/render/normalize
 import { html } from '@hono/hono/html';
 
 const HOSTILE = ${JSON.stringify(HOSTILE)};
+const URL_PAYLOAD = ${JSON.stringify(URL_PAYLOAD)};
+const URL_SCHEME = /(?:href|src|action)\\s*=\\s*(["']?)\\s*javascript:/i;
 
 // A sentinel that answers EVERY read with itself, so a nested access reaches
 // the payload as readily as a direct one. The first cut returned a plain
@@ -392,18 +521,22 @@ const HOSTILE = ${JSON.stringify(HOSTILE)};
 // Array-backed so \`props.users.map(fn)\` still works, and it stringifies to the
 // payload so a direct interpolation carries it. It is never nullish, so
 // \`props.errors.title ?? ''\` does not fall through to the empty string.
-const hostile: never = new Proxy([HOSTILE], {
-  get(target, key) {
-    if (key === Symbol.toPrimitive) return () => HOSTILE;
-    if (key === 'toString' || key === 'valueOf') return () => HOSTILE;
-    if (key in target) {
-      const value = Reflect.get(target, key) as unknown;
-      return typeof value === 'function' ? value.bind(target) : value;
-    }
-    return hostile;
-  },
-}) as never;
-const props = hostile;
+const makeProps = (payload: string): never => {
+  const props: never = new Proxy([payload], {
+    get(target, key) {
+      if (key === Symbol.toPrimitive) return () => payload;
+      if (key === 'toString' || key === 'valueOf') return () => payload;
+      if (key in target) {
+        const value = Reflect.get(target, key) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+      return props;
+    },
+  }) as never;
+  return props;
+};
+const props = makeProps(HOSTILE);
+const urlProps = makeProps(URL_PAYLOAD);
 
 // \`raw()\` is the documented opt-out, so its argument must NOT carry the
 // payload — otherwise the opt-out reports itself as a defect. Stubbed to a
@@ -419,7 +552,12 @@ ${body}
 
 /** One component's rendered outcome, as reported by the probe. */
 export type ProbeResult =
-  | { readonly index: number; readonly ok: true; readonly escaped: boolean }
+  | {
+    readonly index: number;
+    readonly ok: true;
+    readonly escaped: boolean;
+    readonly scheme: boolean;
+  }
   | { readonly index: number; readonly ok: false; readonly error: string };
 
 /**
@@ -457,7 +595,13 @@ export function parseProbe(stdout: string, expected: number): readonly ProbeResu
     if (typeof record['ok'] !== 'boolean') return null;
     if (record['ok'] === true) {
       if (typeof record['escaped'] !== 'boolean') return null;
-      results.push({ index: position, ok: true, escaped: record['escaped'] });
+      if (typeof record['scheme'] !== 'boolean') return null;
+      results.push({
+        index: position,
+        ok: true,
+        escaped: record['escaped'],
+        scheme: record['scheme'],
+      });
       continue;
     }
     if (typeof record['error'] !== 'string') return null;
@@ -468,6 +612,17 @@ export function parseProbe(stdout: string, expected: number): readonly ProbeResu
 
 /**
  * Compares each rendered outcome with what its document claims.
+ *
+ * Three verdicts per component. The ESCAPE verdict against {@linkcode HOSTILE}
+ * — reversed for a labelled counter-example, whose warning must stay true.
+ * The URL verdict — a component carrying no counter-example label must not
+ * render {@linkcode URL_PAYLOAD} into a URL attribute (a labelled one is
+ * demonstrating the escape hazard and its comment already owns the warning).
+ * And UNCHECKED — a component whose own source routes a value through `raw()`
+ * or an element spread is reported and fails unless its comment carries an
+ * exemption label, because the probe stubs that path out and could not have
+ * delivered either payload through it: silence there would read as a pass for
+ * a component the gate never actually checked.
  *
  * @param components - The components rendered, in probe order
  * @param results - The probe's report
@@ -490,6 +645,19 @@ export function compare(
       });
       continue;
     }
+    const unchecked: string[] = [];
+    if (component.usesRaw) unchecked.push('`raw()`');
+    if (component.spreads) unchecked.push('an element spread (`{...`)');
+    if (unchecked.length > 0 && !component.exempt) {
+      findings.push({
+        file: component.file,
+        line: component.line,
+        message: `${component.name} is UNCHECKED: its own source routes a value through ` +
+          `${unchecked.join(' and ')}, which the probe stubs out — neither payload provably ` +
+          `reached its output, so a clean render here means nothing. Remove the indirection, ` +
+          `or carry an // ${UNCHECKED_EXEMPT_MARKERS[0]}: <reason> comment above the component.`,
+      });
+    }
     if (component.expectUnsafe && result.escaped) {
       findings.push({
         file: component.file,
@@ -499,6 +667,17 @@ export function compare(
           `update the warning, or drop the entry.`,
       });
       continue;
+    }
+    if (!component.expectUnsafe && result.scheme) {
+      findings.push({
+        file: component.file,
+        line: component.line,
+        message: `${component.name} renders ${JSON.stringify(URL_PAYLOAD)} into a URL ` +
+          `attribute (href, src or action). Escaping protects HTML structure, not URL ` +
+          `schemes — a metacharacter-free payload survives it intact, and clicking the ` +
+          `link executes. Validate the scheme of a user-supplied URL before it reaches ` +
+          `the view.`,
+      });
     }
     if (!component.expectUnsafe && !result.escaped) {
       findings.push({
@@ -569,6 +748,7 @@ export async function run(
   const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
   const documents = files.length > 0 ? files : await scanDocuments(SCAN_ROOTS);
   const components: DocComponent[] = [];
+  const blindSpots: BlindSpot[] = [];
   for (const file of documents) {
     let markdown: string;
     try {
@@ -577,6 +757,7 @@ export async function run(
       return [{ file, line: 1, message: 'could not be read' }];
     }
     components.push(...collectComponents(file, markdown));
+    blindSpots.push(...collectUnrenderedBlindSpots(file, markdown));
   }
   // Every component is rendered, `raw()` included. An earlier cut skipped a
   // component whose source mentioned `raw` at all, which stopped checking
@@ -584,7 +765,7 @@ export async function run(
   // trusted markup with a user-controlled field was exempt in full. The
   // opt-out is neutralised per CALL inside the probe instead.
   const rendered = components;
-  if (rendered.length === 0) return [];
+  if (rendered.length === 0) return blindSpotFindings(blindSpots);
 
   await Deno.mkdir(SCRATCH, { recursive: true });
   await Deno.writeTextFile(PROBE, buildProbe(rendered));
@@ -629,7 +810,7 @@ export async function run(
       message: `the render probe did not report ${rendered.length} result(s).\n${stderr}`,
     }];
   }
-  return compare(rendered, results);
+  return [...compare(rendered, results), ...blindSpotFindings(blindSpots)];
 }
 
 if (import.meta.main) {
@@ -641,5 +822,8 @@ if (import.meta.main) {
     }
     Deno.exit(1);
   }
-  console.log('Example behaviour check passed: every documented view component escapes its input.');
+  console.log(
+    'Example behaviour check passed: every documented view component escapes its input, ' +
+      `carries no ${URL_PAYLOAD} into a URL attribute, and nothing documented is unchecked.`,
+  );
 }

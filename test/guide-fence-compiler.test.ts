@@ -121,9 +121,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // plain template literal with the `html` tag, because two reviewers
     // independently found that a plain `(props) => string` component escapes
     // nothing while the guide claimed escaping was on by default.
-    total: 9,
-    ts: 9,
-    compile: 9,
+    // +2 in M95d: the Escaping subsection's URL-scheme demonstration (stored
+    // value as a comment, so the behaviour gate is not fed a live hostile
+    // component) and the Error pages worked example, which compiles as a
+    // fragment through the committed `app` prelude.
+    total: 11,
+    ts: 11,
+    compile: 11,
     external: 0,
     pseudocode: 0,
     skipped: 0,
@@ -162,9 +166,11 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // compiling Setu-TS fence. 265 once mvc.md gained its Forms section (+2) and
   // the `raw()` script opt-out (+1) — all three compile. 266 once the Escaping
   // section gained the plain-string-is-not-escaped contrast (+1, compiling).
-  total: 266,
-  ts: 220,
-  compile: 187,
+  // 268 in M95d: the URL-scheme demonstration and the Error pages example
+  // (+2, both compiling).
+  total: 268,
+  ts: 222,
+  compile: 189,
   external: 33,
   pseudocode: 0,
   skipped: 46,

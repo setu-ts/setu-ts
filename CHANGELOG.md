@@ -31,6 +31,26 @@ All notable changes to this project are documented here. The format follows
   per document, and a README routinely defines the same component twice — once functional, once
   class-based — so the class-based one, which is where the defect lived, was skipped. Scope is per
   fence, and the case is pinned.
+- **The behaviour gate substitutes a second payload — `javascript:alert(1)` — into every prop and
+  asserts on the RENDERED OUTPUT (M95d, X46-1).** Escaping neutralises `<script>alert(1)</script>`
+  because that payload is made of HTML metacharacters; a URL scheme needs none, so it survived both
+  authoring arms verbatim and executed on click in real Chrome. The gate now fails when the scheme
+  reaches a rendered `href`, `src` or `action` — decided on the output, not the prop name, so it
+  cannot drift as components change. A component whose own source routes a value through `raw()` —
+  or spreads `{...props}` into an element — is reported `unchecked` and FAILS: the probe stubs that
+  path out, so it could not have delivered either payload, and a clean render there would mean
+  nothing. The only way past is an explicit `// UNCHECKED-EXEMPT: <reason>` comment on the
+  component; the three legitimate sites in the corpus are labelled in their documents, so a fourth
+  arrival is a failing gate rather than a silent gap.
+- **`@since` tags are now gated against the version that shipped the SYMBOL, at symbol level
+  (`scripts/check-since-tags.ts`, composed into `check:docs` as `check:since-tags`; M95d, X50-2).**
+  For every `@since X.Y.Z` the gate resolves the declaration the tag sits on, fetches that file at
+  that version from the jsr.io registry, and fails when the symbol is absent — a file-level check
+  would pass any tag on a long-lived file, so the symbol is the unit. Scan roots derive from the
+  root `deno.json` workspace list, so the three starters are covered where a `packages/*/src` glob
+  would silently skip them. A version ahead of the registry is skipped, not failed, so a release
+  branch cannot be blocked; a registry outage is reported on stderr and the run exits 0 with
+  `verified N` printed — exit 77 would fail `check:docs`' `&&` chain.
 
 ### Changed
 
@@ -274,6 +294,28 @@ All notable changes to this project are documented here. The format follows
   ships what actually catches a dead data plane — the broker records recent data-plane outcomes and
   `reachability()` consults that evidence before the management probe (M95b) — and the false
   sentence is struck from the published section and the source.
+- **Twelve `@since` tags named versions that do not ship what they claim; all corrected against the
+  registry (M95d, X50-2 plus the gate's first full run).** Six in `packages/common/src/form/` named
+  `0.5.0`, a release whose tarball does not contain the module — the module is new in `0.6.0`, and
+  the miss is PR #286's named cause repeated: the sweep's branch was cut before the module landed.
+  The gate's first full run then surfaced six more, each verified present at its corrected version
+  before the edit: `UnsupportedFormEncodingError` (common, `0.5.0` → `0.6.0`), `ProbeTiming` and
+  `resolveProbeTiming` (common, `0.4.0` → `0.5.0`), `UnsupportedMigrationError` (database-plugin,
+  `0.4.0` → `0.5.0`), `csrfTokenField` (session-plugin, `0.5.0` → `0.6.0`), and `contentEncodingFor`
+  (static-plugin, `0.4.0` → `0.5.0`). The corrected run verifies 736 tags.
+- **The documentation now states what the code does at the three places a reader following it ended
+  up wrong (M95d, X46-1 / X49-1 / X49-2).** `docs/mvc.md` §Escaping states the boundary — escaping
+  protects HTML structure, not URL schemes, a difference BETWEEN rendering runtimes (React
+  neutralises the payload, hono's runtime passes it through) — with the application-side remedy
+  (validate the scheme before it reaches `href`/`src`/`action`) and a cross-reference from the
+  inline-`<script>` section noting that `'unsafe-inline'` is exactly the CSP that does not block a
+  `javascript:` URL; and a new §Error pages carries the one-sentence rule (`respond` covers what
+  `errorHandler` catches; every responder terminal is outside it) beside the list of what that
+  leaves serving raw Problem Details into a browser. `packages/exceptions/README.md` gains the
+  worked `respond` example whose `ctx.response.status(error.statusCode)` line is the whole fix —
+  `renderView` takes no status, so the natural spelling served `200` for every branded error —
+  `packages/view-plugin/README.md` states the URL-scheme boundary where a reader of the package
+  lands, and `PUBLIC_API.md`'s `respond` contract note carries the one-line status fix.
 
 ## [0.6.0] — 2026-09-13
 

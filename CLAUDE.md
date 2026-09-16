@@ -4971,11 +4971,32 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   than fixed: §6's test table named `test/unit/csrf-token-field.test.ts` and the cases landed in
   `test/unit/csrf/csrf.test.ts` — equivalent coverage, a better home beside the other CSRF tests,
   and moving them would be churn against an archived plan) — complete (PR #322)
-- **Next milestone** — **M95d** (`docs/` + `packages/common` + `packages/view-plugin` + `scripts/` —
-  documentation that survives contact: the M90h precedent, four findings where the code is correct
-  and a reader following the documentation still ends up wrong. The only letter carrying gate work —
-  a URL-scheme payload for `check-example-behaviour.ts` and a `@since`-vs-shipping-version check.
-  Plan: `plans/milestone-95d-documentation-survives-contact.md`.)
+- **Milestone 95d** (`docs/` + `packages/common` + `packages/view-plugin` + `scripts/` —
+  documentation that survives contact: four findings where the code is correct and a reader
+  following the documentation still ends up wrong; the only letter carrying gate work. **Row 1
+  (X46-1):** the behaviour gate substitutes `javascript:alert(1)` into EVERY prop and asserts on the
+  rendered OUTPUT — the scheme is a finding only in a URL attribute (`href`, `src`, `action`) — and
+  reports `unchecked` for any component whose own source routes a value through `raw()` or an
+  element spread, failing it unless its comment carries `// UNCHECKED-EXEMPT: <reason>`; the
+  corpus's three legitimate sites are labelled where they live. **Rows 2/3 (X49-1/X49-2):**
+  `docs/mvc.md` gains the error-pages section — the one-sentence rule (`respond` covers what
+  `errorHandler` catches; every responder terminal is outside it), the browser-facing failures that
+  leaves uncovered, and the worked example whose `ctx.response.status(error.statusCode)` line is the
+  fix for the natural `respond` spelling serving `200` — with the same example in the exceptions
+  README and the status fix in `PUBLIC_API.md`'s `respond` contract note; §Escaping states the
+  structure-vs-scheme boundary (React neutralises the payload, hono passes it through) and the
+  inline-`<script>` section cross-references the CSP it implies. **Row 4 (X50-2) plus the gate:**
+  six `@since 0.5.0` tags in `packages/common/src/form/` corrected to `0.6.0` — a release whose
+  tarball lacks the module — and the new `scripts/check-since-tags.ts` (`check:since-tags`, composed
+  into `check:docs`) verifies every tag at SYMBOL level against the jsr.io registry: scan roots from
+  the root `deno.json` workspace so the starters are covered, per-artifact caching,
+  ahead-of-registry versions skipped so a release branch cannot be blocked, and a registry outage
+  reported on stderr with exit 0 and `verified N` printed — exit 77 would die inside the `&&` chain.
+  Its first full run verified 736 tags and surfaced six MORE wrong ones, each corrected against the
+  registry. All six negative controls observed failing and reverted, including the file-level
+  reduction that passes a symbol-absent tag and the exit-77 convention that would block the whole
+  `check:docs` chain) — complete (PR pending)
+- **Next milestone** — **M96** (see below), with M40's final polish also open.)
 
 - **Then M95d** — the rest of the `v0.6.0` closeout, which now covers **two** runs against that
   version: the regression run (5 findings) and **Part 11, X46–X51** (8 more), the exercise block
@@ -4983,9 +5004,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   M91–M94c at probe level only. The two sets are folded together **by defect shape rather than by
   run**, which is why no `M96` was opened — X51-1/X51-2 are M95b's mechanism on other packages and
   X47-1/X50-1 are M95c's title on other packages, so a separate milestone would have put two of them
-  on one shape. **M95d is new** (documentation that survives contact, the M90h precedent) and is the
-  only letter carrying gate work — a URL-scheme payload for `check-example-behaviour.ts`, and a
-  `@since`-vs-shipping-version check, which nothing does today.)
+  on one shape. **M95d** (documentation that survives contact, the M90h precedent) is the letter
+  that carried the gate work — the URL-scheme payload for `check-example-behaviour.ts` and the
+  `@since`-vs-shipping-version check, which nothing did before it.)
 
 - **Also open** — **M40** (final polish and release: integration testing across all plugins,
   performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the

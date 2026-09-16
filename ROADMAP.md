@@ -10169,6 +10169,15 @@ manual sweep has now demonstrably failed to hold, **gate it**: nothing in `scrip
 `@since` tag against the version that shipped the symbol (`grep -rln '@since' scripts/*.ts` returns
 nothing).
 
+**Shipped.** The two gates and the four rows landed as planned, plus six tags the gate's first full
+run added to row 4's six. The URL payload asserts on the rendered `href`/`src`/`action` — the X46-1
+shape fails with the component rendered through the real renderer — and the `unchecked` verdict
+reports every `raw()`/spread data path the probe cannot reach, with the corpus's three sites
+exempted by label in their own documents. `check:since-tags` verifies 736 tags at symbol level from
+the manifest-derived roots, skips versions ahead of the registry, and answers a registry outage with
+exit 0 and `verified 0` printed. All six negative controls (§6) were each observed failing and
+reverted.
+
 ---
 
 ## Milestone 96: Redaction — One Seam for Every Egress Path
@@ -10494,5 +10503,5 @@ that to per-parameter redaction, so a query string can be kept where the policy 
 | 95a       | ✅     | cli + docs — a generated deployment cannot start (**High**)                                                            |
 | 95b       | ✅     | common + database-plugin + messaging-plugin — reachability that fails open (**High**)                                  |
 | 95c       | ✅     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
-| 95d       | ⬜     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
+| 95d       | ✅     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
 | 96        | ⬜     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |

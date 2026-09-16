@@ -158,8 +158,20 @@ hand-written literal like `` (p) => `<p>${p.name}</p>` ``. Write views with JSX 
 import { html } from '@hono/hono/html';
 import { raw } from '@setu-ts/view-plugin';
 
+// UNCHECKED-EXEMPT: this fence IS the opt-out's documentation — raw() is the
+// feature being shown, and the probe's raw() stub hides exactly what it must.
 const Snippet = (props: { readonly markup: string }) => html`<div>${raw(props.markup)}</div>`;
 ```
+
+The boundary has one exception-shaped hole worth naming: **escaping protects HTML structure, not URL
+schemes.** A `javascript:alert(1)` carries none of the characters the escape pass rewrites, so it
+survives both arms intact and executes when the link is clicked. This is a difference between
+rendering runtimes — React's server renderer rewrites the same attribute, hono's passes it through —
+so a correct-for-React mental model is wrong here. The remedy is application-side: validate a
+user-supplied URL's scheme (`http:` / `https:`) before it reaches an `href`, `src` or `action`, and
+keep a CSP without `'unsafe-inline'` as the defence in depth. The full worked example and the
+repository's own check live in
+[docs/mvc.md](https://github.com/setu-ts/setu-ts/blob/main/docs/mvc.md#escaping-protects-html-structure-not-url-schemes).
 
 ## Suspense is refused, not served as a fallback
 

@@ -244,7 +244,7 @@ export class UnsupportedRawQueryError extends Error {
  *   }
  * }
  * ```
- * @since 0.4.0
+ * @since 0.5.0
  */
 export class UnsupportedMigrationError extends Error {
   /** Discriminant for consumers that cannot use `instanceof` across realms. */

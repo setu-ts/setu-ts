@@ -197,7 +197,7 @@ export function createCachedProbe<T = boolean>(
  * The clock-and-timer surface {@linkcode createCachedProbe} runs on, bound to
  * a runtime.
  *
- * @since 0.4.0
+ * @since 0.5.0
  */
 export interface ProbeTiming {
   /**
@@ -238,7 +238,7 @@ export interface ProbeTiming {
  *   ...resolveProbeTiming(ctx.runtime),
  * });
  * ```
- * @since 0.4.0
+ * @since 0.5.0
  */
 export function resolveProbeTiming(runtime: IRuntimeServices): ProbeTiming {
   return {

@@ -161,6 +161,20 @@ describe('documentation gate — CI wiring', () => {
     expect(checkDocs).toContain('check-docs.ts');
     expect(checkDocs).toContain('generate-api-docs.ts');
   });
+
+  it('check:docs composes the behaviour gate and the @since gate', async () => {
+    // Dropping either script from the chain is a failing test rather than a
+    // silent loss of coverage (M95d).
+    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
+      tasks: Record<string, string>;
+    };
+    const checkDocs = manifest.tasks['check:docs'];
+    expect(checkDocs).toContain('scripts/check-example-behaviour.ts');
+    expect(checkDocs).toContain('scripts/check-since-tags.ts');
+    // And the @since gate stays runnable in isolation, which is how its
+    // skip-on-network behaviour is negative-controlled.
+    expect(manifest.tasks['check:since-tags']).toContain('scripts/check-since-tags.ts');
+  });
 });
 
 describe('documentation gate — required guides', () => {

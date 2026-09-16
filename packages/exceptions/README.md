@@ -50,6 +50,54 @@ result's status, headers, and body. The log retains the unmasked diagnostic and 
 that result serves. It applies only to errors caught by `errorHandler`, not responder-based
 terminals such as an unmatched-path `404`.
 
+The natural spelling of the hook omits the one statement that matters and serves `200` for every
+branded error: `renderView(ctx, Component, props)` takes no status, and nothing else sets it. The
+callback owns the status, so the example carries that line on its own:
+
+```tsx
+import { errorHandler, statusTitle } from '@setu-ts/exceptions';
+import type { HandlerResult, IRequestContext } from '@setu-ts/common';
+import { renderView } from '@setu-ts/view-plugin';
+
+interface ErrorPageProps {
+  readonly status: number;
+  readonly title: string;
+}
+
+const ErrorPage = (props: ErrorPageProps) => (
+  <main>
+    <h1>{props.status}</h1>
+    <p>{props.title}</p>
+  </main>
+);
+
+function wantsHtml(ctx: IRequestContext): boolean {
+  return (ctx.request.headers.get('accept') ?? '').includes('text/html');
+}
+
+app.middleware.add(
+  errorHandler({
+    format: 'rfc9457',
+    async respond(error, ctx): Promise<HandlerResult | undefined> {
+      if (!wantsHtml(ctx)) return undefined; // API clients keep Problem Details
+      // The callback owns the result's status, and renderView takes none —
+      // without this line every branded error answers 200.
+      ctx.response.status(error.statusCode);
+      return await renderView(ctx, ErrorPage, {
+        status: error.statusCode,
+        title: statusTitle(error.statusCode),
+      });
+    },
+  }),
+  { priority: 0, name: 'error-handler' },
+);
+```
+
+What the hook does NOT cover is stated by the rule in
+[docs/mvc.md](https://github.com/setu-ts/setu-ts/blob/main/docs/mvc.md#error-pages): every responder
+terminal — an unmatched-path `404`, a guard's `401`, the rate limiter's `429` — is emitted outside
+`errorHandler`, so each keeps its formatter's JSON no matter what this callback renders.
+
 ## What it exports
 
 - **`HttpError`** — the error type, carrying a status, a title, and optional validation details.
