@@ -6,7 +6,6 @@
  */
 import Base from '../layouts/Base.astro';
 import FeatureIcon from '../components/FeatureIcon.astro';
-import Logo from '../components/Logo.astro';
 
 const capabilities = [
   {
@@ -61,36 +60,23 @@ const principles = [
 
 <Base title="Setu-TS — Plugin-first enterprise backend framework built on Hono">
   <section class="hero">
-    <div class="hero-logo">
-      <Logo width={340} />
-    </div>
-    <h1>Enterprise architecture without the weight. Runtime freedom without the chaos.</h1>
+    <p class="hero-eyebrow">Plugin-first TypeScript backend framework</p>
+    <h1>Enterprise architecture for every JavaScript runtime.</h1>
     <p class="tagline">
-      Setu-TS combines Hono's performance, runtime independence, and a plugin-first
-      architecture with the enterprise patterns large organizations need — CQRS,
-      multi-tenancy, audit trails, and more.
+      Build on a small, composable kernel with the enterprise capabilities you need —
+      across Node.js, Deno, Bun, and Cloudflare Workers.
     </p>
+    <div class="cta-row">
+      <a class="button primary" href="/docs/getting-started/">Get started</a>
+      <a class="button" href="/docs/">Documentation</a>
+      <a class="button" href="https://github.com/setu-ts/setu-ts">GitHub</a>
+    </div>
     <div class="install">
       <div class="label">Deno</div>
       <pre><code>deno add jsr:@setu-ts/kernel jsr:@setu-ts/runtime</code></pre>
       <div class="label">Node</div>
       <pre><code>npx jsr add @setu-ts/kernel @setu-ts/runtime</code></pre>
     </div>
-    <div class="cta-row">
-      <a class="button primary" href="/docs/getting-started/">Get started</a>
-      <a class="button" href="/docs/">Documentation</a>
-      <a class="button" href="https://github.com/setu-ts/setu-ts">GitHub</a>
-    </div>
-  </section>
-
-  <section class="landing-section" aria-labelledby="why-heading">
-    <h2 id="why-heading">Why Setu-TS exists</h2>
-    <p>
-      Hono is fast and portable but intentionally minimal. NestJS is feature-rich but
-      Node-only and decorator-mandatory. Fastify is quick but lacks enterprise
-      abstractions. Setu-TS resolves the compromise: plugin-first capabilities on a small
-      kernel, running on all four runtimes.
-    </p>
   </section>
 
   <section class="landing-section" aria-labelledby="principles-heading">
