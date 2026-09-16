@@ -306,14 +306,41 @@ export class MyService {
 import { Injectable } from '@setu-ts/decorator-plugin';
 
 @Injectable({ scope: 'scoped' })
-export class RequestScopedService {}
+export class PerScopeService {}
 ```
 
 **Scopes:**
 
-- `'singleton'` (default): Single instance per container
-- `'scoped'`: New instance per request scope
-- `'transient'`: New instance every injection
+- `'singleton'` (default): one instance for the application lifetime
+- `'scoped'`: one instance per `IContainer.createScope()` scope
+- `'transient'`: a new instance per resolution
+
+**A scope is not a request.** A scope is a child container the application creates and disposes
+itself, and **the framework creates no scope per request** — so a `'scoped'` service is not
+re-created on every HTTP request, and behaves as a singleton until something calls `createScope()`.
+This is what `ServiceScope` in `@setu-ts/common` and the
+[DI plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/di-plugin/README.md) both
+state, and it is the one place the lifecycle differs from the framework you may be arriving from.
+
+To get per-request instances, create the scope yourself in middleware and resolve through it:
+
+```typescript
+import { CAPABILITIES, type IContainer } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+
+const app = createApplication();
+
+app.middleware.add(async (ctx, next) => {
+  const root = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+  const scope = root.createScope();
+  ctx.state.set('app:request-scope', scope);
+  await next();
+});
+```
+
+[`apps/di-decorators`](https://github.com/setu-ts/setu-ts/tree/main/apps/di-decorators) serves a
+`/lifetimes` route that demonstrates the difference between the three lifetimes across two explicit
+scopes.
 
 ## Request Data Access
 
