@@ -1395,17 +1395,10 @@ absence means "this backend cannot page by cursor", never "there are no more row
 read the inherited lifecycle member `isReady()` was mistaken for. `true` means the backend answered;
 `false` means it was contacted and refused or failed; an adapter that cannot probe honestly omits
 the member, and the health indicator then reports `up` with `reachable` omitted rather than
-inventing an answer. Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional
-`IMongoDatabase.command?` facade member), Prisma and Drizzle (`rawQuery('SELECT 1')`), memory
-(`true`).
-
-**`isHealthy?` is optional (M95b).** It answers "is the backend reachable right now" — the liveness
-read the inherited lifecycle member `isReady()` was mistaken for. `true` means the backend answered;
-`false` means it was contacted and refused or failed; an adapter that cannot probe honestly omits
-the member, and the health indicator then reports `up` with `reachable` omitted rather than
-inventing an answer. Shipped probes: MongoDB (`db.command({ ping: 1 })` through the optional
-`IMongoDatabase.command?` facade member), Prisma and Drizzle (`rawQuery('SELECT 1')`), memory
-(`true`).
+inventing an answer. The lifecycle read still gates the probe, so an adapter whose own probe does
+not re-derive `isReady()` cannot report `up` for a connection it has already dropped. Shipped
+probes: MongoDB (`db.command({ ping: 1 })` through the optional `IMongoDatabase.command?` facade
+member), Prisma and Drizzle (`rawQuery('SELECT 1')`), memory (its own connection state).
 
 ### Composite keys, nested paths and cursor pagination (M79)
 
@@ -4458,6 +4451,14 @@ carries one more member (**since M95b**): `dataPlaneEvidenceMs?: number`, how lo
 data-plane outcome stays authoritative. Default `5000`, matching the management probe's TTL so the
 two signals age together. It is a broker option rather than a plugin-wide one because no other
 broker has two planes to choose between; the plugin arm does not forward it.
+
+**It must be a safe positive integer, and the constructor REFUSES anything else** rather than
+accepting a value that reads as configured while the window misbehaves. `NaN` — what `Number(env.X)`
+yields for an unset or misspelled variable — would freeze the window so recorded evidence never ages
+out, pinning `reachability()` at one boot-time publish's outcome indefinitely; `0` or a negative
+value would discard every outcome instantly, so `reachability()` always fell through to the
+management probe, which is the behaviour the window exists to replace. The option therefore has no
+disable arm: omit it for the default.
 
 ```typescript
 /** Azure Service Bus options — exclusive union of injected and production arms. */

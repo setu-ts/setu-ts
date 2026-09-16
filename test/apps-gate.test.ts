@@ -257,10 +257,14 @@ describe('real-backend CI wiring', () => {
   });
 
   it('keeps the M95b Service Bus outage suite deliberately local-only (M95b §3.4)', async () => {
-    // R11: the emulator is not repeatable against a persistent container (a
-    // second consecutive run fails with RequestTimeoutError, so a CI job
-    // would need a restart between runs) and the image is large. The Cosmos
-    // suite (M81) is local-only for the same reason. What keeps a
+    // Corrected in code review: the ORIGINAL reason recorded here — "a second
+    // consecutive run fails with RequestTimeoutError" — is R11, and it is a
+    // property of the E2E suite's RPC step, not of this outage suite, which
+    // restarts `he-sb` itself. Measured: two consecutive outage runs against a
+    // 21-minute-old container both pass with no restart between them. The two
+    // reasons that DO hold are the image size and the emulator's absent
+    // administration endpoint, which no CI service container would change.
+    // The Cosmos suite (M81) is local-only on image size too. What keeps a
     // local-only suite honest is that its absence from CI is ASSERTED here
     // rather than implicit — a later reader must not mistake it for an
     // oversight — and that the doc keeps naming the guard variable and the

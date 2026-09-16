@@ -614,14 +614,19 @@ exactly as before. `ServiceBusOptions.dataPlaneEvidenceMs` (default `5000`, matc
 TTL) bounds how long an outcome stays authoritative. The plane distinction is the substance: the
 management round trip proves the **management** plane is reachable — evidence about the data plane,
 never proof of it — and that gap is what let a stopped namespace report `up` while every publish
-threw. Two further changes: every arm's probe is bounded by the indicator's `createCachedProbe`
-(5-second TTL, 2-second bound), so a probe that cannot answer — a **hung** broker, the condition a
-stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health` open; and
-the RabbitMQ probe is a real round trip (a throwaway channel open/close), replacing the
-connection-fault flag read that a hung broker never trips. Residual exposure, stated rather than
-implied: a deployment whose Service Bus management plane is unreachable and that publishes nothing
-keeps reporting `reachable: 'unknown'` with status `up` until its first publish — an operator who
-needs the signal can publish synthetically.
+threw. Two further changes, and the first has **two layers** because the health indicator is not the
+only caller. The indicator wraps every arm's `reachability()` in its own `createCachedProbe`
+(5-second TTL, 2-second bound), which is the universal outer bound: a probe that cannot answer — a
+**hung** broker, the condition a stopped one never produces — settles `reachable: 'unknown'` instead
+of holding `/health` open. `RabbitMqBroker` and `ServiceBusBroker` additionally build their own
+cached, bounded probes, which is what `isHealthy()` reads; that inner layer is what protects a
+**direct** caller, such as `realtime-backplane-plugin`'s `'messaging'` transport, which resolves the
+broker itself and never passes through this indicator. Second, the RabbitMQ probe is a real round
+trip (a throwaway channel open/close), replacing the connection-fault flag read that a hung broker
+never trips. Residual exposure, stated rather than implied: a deployment whose Service Bus
+management plane is unreachable and that publishes nothing keeps reporting `reachable: 'unknown'`
+with status `up` until its first publish — an operator who needs the signal can publish
+synthetically.
 
 ## Exports
 
