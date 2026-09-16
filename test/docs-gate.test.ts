@@ -26,12 +26,14 @@ import {
   checkReadmeApiLink,
   checkRequiredGuides,
   checkVersionClaims,
+  findMalformedTableRows,
   findSwallowedHeadings,
   POST_ALPHA_MINOR_LINES,
   postAlphaLineArm,
   publicApiAnchors,
   scanFences,
 } from '../scripts/check-docs.ts';
+import type { MalformedRowReason } from '../scripts/check-docs.ts';
 import { collectApiEntrypoints } from '../scripts/generate-api-docs.ts';
 import { PUBLISHED_PACKAGES } from '../scripts/release-packages.ts';
 import {
@@ -90,6 +92,208 @@ describe('documentation gate — swallowed headings', () => {
     const lines = ['```json', '{ "a": 1 }', '## Only one', '```'];
     const { blocks } = scanFences(lines);
     expect(findSwallowedHeadings(lines, blocks).length).toBe(0);
+  });
+});
+
+describe('documentation gate — malformed table rows', () => {
+  /**
+   * Asserts the reasons a document body yields, in document order.
+   *
+   * `expected` is typed as the exported union, which is what makes a mistyped
+   * reason a COMPILE error. Passing the same literal to `toEqual` would not:
+   * that parameter is `unknown`, so `'unescaped-pipeXX'` type-checks cleanly
+   * and then simply never matches — an assertion that can only fail for the
+   * wrong reason. Probed both ways rather than assumed; the first version of
+   * this helper RETURNED the union instead of accepting it, and caught nothing.
+   */
+  function expectReasons(source: string, expected: readonly MalformedRowReason[]): void {
+    const lines = source.split('\n');
+    const { fenced } = scanFences(lines);
+    const actual = findMalformedTableRows(lines, fenced).map((row) => row.reason);
+    expect(actual).toEqual(expected);
+  }
+
+  it('catches a raw pipe inside a code span — the root cause, before fmt hides it', () => {
+    // `PUBLIC_API.md`'s `RenderDecorator` row was written this way. A pipe ends
+    // the cell even inside backticks, so the cell splits and GFM drops whatever
+    // runs past the header's width.
+    expectReasons(
+      [
+        '| Export | Purpose |',
+        '| ------ | ------- |',
+        '| `Foo`  | `P | HandlerResult` |',
+      ].join('\n'),
+      ['unescaped-pipe'],
+    );
+  });
+
+  it('catches a span that never closes — the same defect after the fact', () => {
+    // What the static-plugin README carried: `'/`'` renders a span holding `'/`
+    // plus a stray quote and a dangling backtick.
+    expectReasons(
+      [
+        '| Option      | Default |',
+        '| ----------- | ------- |',
+        "| `urlPrefix` | `'/`'`  |",
+      ].join('\n'),
+      ['unterminated-span'],
+    );
+  });
+
+  it('reports at most one reason per row, in document order', () => {
+    expectReasons(
+      [
+        '| A | B |',
+        '| - | - |',
+        "| `x` | `'/`'` |",
+        '| `y` | `P | Q` |',
+      ].join('\n'),
+      ['unterminated-span', 'unescaped-pipe'],
+    );
+  });
+
+  it('accepts a pipe that IS escaped, which is the whole remedy', () => {
+    expectReasons(
+      [
+        '| Option | Type |',
+        '| ------ | ---- |',
+        '| `a`    | `string \\| ((p: string) => string)` |',
+      ].join('\n'),
+      [],
+    );
+  });
+
+  it('accepts a double-backtick span holding a literal backtick', () => {
+    // Counting backticks is the obvious implementation and it is UNSOUND: this
+    // row has five, and a counting check calls it unterminated. Matching the
+    // opening run's length is what makes it parse.
+    expectReasons(
+      [
+        '| Syntax  | Meaning           |',
+        '| ------- | ----------------- |',
+        '| `` ` `` | a literal backtick |',
+      ].join('\n'),
+      [],
+    );
+  });
+
+  it('accepts a backslash-escaped backtick', () => {
+    expectReasons(
+      [
+        '| Syntax | Meaning            |',
+        '| ------ | ------------------ |',
+        '| \\`     | a literal backtick |',
+      ].join('\n'),
+      [],
+    );
+  });
+
+  it('ignores a pipe outside any code span', () => {
+    expectReasons(
+      [
+        '| A       | B     |',
+        '| ------- | ----- |',
+        '| a \\| b  | plain |',
+      ].join('\n'),
+      [],
+    );
+  });
+
+  it('ignores a wrapped prose line that merely begins with a pipe', () => {
+    // `deno fmt` wraps a long paragraph mid-line, so an inline union type can
+    // leave a `|` at the start of a continuation line. `CHANGELOG.md`'s
+    // `SseMessage.data` entry is exactly this. Requiring a delimiter row is what
+    // keeps it out — without that requirement this is a day-one false positive
+    // on correct prose, which is why the case is pinned here rather than left to
+    // the corpus, where a later edit could remove the only live instance.
+    expectReasons(
+      [
+        '- **`SseMessage.data` accepts any JSON-serializable value**:',
+        '  `string | number | boolean',
+        '  | null | readonly unknown[] | Record<string, unknown>`. The encoder',
+        '  already handled all of them.',
+      ].join('\n'),
+      [],
+    );
+  });
+
+  it('ignores a broken row inside a fenced block', () => {
+    expectReasons(
+      [
+        '```markdown',
+        "| `urlPrefix` | `'/`'` |",
+        '| ----------- | ------ |',
+        '```',
+      ].join('\n'),
+      [],
+    );
+  });
+
+  it('ignores a pipe-leading run with no delimiter row', () => {
+    expectReasons(
+      [
+        '| not a table `x',
+        '| still not one',
+      ].join('\n'),
+      [],
+    );
+  });
+
+  it('ignores a header whose delimiter does not match it in width', () => {
+    // GFM refuses the whole block when the header and delimiter disagree on
+    // cell count, so this renders as a paragraph and there is no table to
+    // report against. Scanning for a delimiter anywhere in the run flagged the
+    // open span here and would have blocked CI on correct prose.
+    expectReasons(['| A | `B', '| --- |'].join('\n'), []);
+  });
+
+  it('ignores a delimiter that does not immediately follow its header', () => {
+    // The pair is `| bar` over `| --- |`; the line above it is a paragraph GFM
+    // never folds into the table, so its open span is not this gate's business.
+    expectReasons(['| foo `a', '| bar', '| --- |'].join('\n'), []);
+  });
+
+  it('keeps a prose line out of the table it happens to precede', () => {
+    // The scan starts at the pair, so only the data row is reported — the
+    // stray line above the header is prose and carries its own open span.
+    expectReasons(
+      ['| a stray `prose pipe line', '| A | B |', '| --- | --- |', '| x | `a|b` |'].join('\n'),
+      ['unescaped-pipe'],
+    );
+  });
+
+  it('counts an escaped pipe in a header as the cell content it is', () => {
+    // The escape is what makes this header two cells rather than three, so a
+    // count that ignored it would mismatch the delimiter and dismiss the whole
+    // table — taking the genuine defect on the data row with it.
+    expectReasons(
+      ['| A \\| B | C |', '| --- | --- |', '| x | `p|q` |'].join('\n'),
+      ['unescaped-pipe'],
+    );
+  });
+
+  it('reports a header whose own span holds a raw pipe', () => {
+    // The row most worth reporting, and the one a naive width fix would lose:
+    // the raw pipe inflates the RENDERED count to 4 against a 3-cell delimiter,
+    // so comparing rendered widths would dismiss the block as "not a table".
+    // `countCells` reads spans as opaque, giving the intended 3, which matches.
+    expectReasons(
+      ['| A | `x|y` | C |', '| --- | --- | --- |'].join('\n'),
+      ['unescaped-pipe'],
+    );
+  });
+
+  it('reports the row through checkDocument, with a remedy in the message', () => {
+    const findings = checkDocument(
+      'sample.md',
+      ['| Export | Purpose |', '| ------ | ------- |', '| `Foo`  | `P | Q` |'].join('\n'),
+    );
+
+    expect(findings.length).toBe(1);
+    expect(findings[0]?.line).toBe(3);
+    expect(findings[0]?.message).toContain('inside a code span');
+    // The remedy, not just the diagnosis.
+    expect(findings[0]?.message).toContain('\\|');
   });
 });
 
