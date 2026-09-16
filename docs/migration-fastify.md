@@ -216,7 +216,10 @@ const myMiddleware: MiddlewareFunction = async (ctx, next) => {
 app.middleware.add(myMiddleware);
 
 // Route-specific middleware
-// Route-specific middleware is not supported in Setu-TS; use a middleware that checks ctx.request.path instead.
+app.router.get('/api/users', {
+  middleware: [myMiddleware],
+  handler: async (ctx) => ctx.response.json([]),
+});
 ```
 
 ## Decorators
@@ -238,19 +241,32 @@ app.get('/', async (request, reply) => {
 ### Setu-TS
 
 ```typescript
-// Register as a service
+import { createCapabilityToken, type IPlugin } from '@setu-ts/common';
+
 interface MyUtil {
   formatDate(date: Date): string;
 }
-ctx.services.register<MyUtil>('myUtil', {
-  formatDate: (date: Date) => date.toISOString(),
-});
 
-// Use service
-app.router.get('/', async (ctx) => {
-  const myUtil = ctx.services.get<MyUtil>('myUtil');
-  return ctx.response.json({ date: myUtil.formatDate(new Date()) });
-});
+const MY_UTIL = createCapabilityToken('my-util');
+
+export function UtilitiesPlugin(): IPlugin {
+  return {
+    name: 'utilities',
+    version: '1.0.0',
+    register(ctx) {
+      ctx.services.register<MyUtil>(MY_UTIL, {
+        formatDate: (date: Date) => date.toISOString(),
+      });
+
+      ctx.router.get('/', async (requestCtx) => {
+        const myUtil = requestCtx.services.get<MyUtil>(MY_UTIL);
+        return requestCtx.response.json({ date: myUtil.formatDate(new Date()) });
+      });
+    },
+  };
+}
+
+app.register(UtilitiesPlugin());
 ```
 
 ## Validation
@@ -280,18 +296,18 @@ app.post('/users', {
 ### Setu-TS
 
 ```typescript
-import { z } from '@std/zod';
+import { z } from 'zod';
 
 const userSchema = z.object({
   name: z.string(),
   email: z.string().email(),
 });
 
-// Using validation plugin
+// Manual Zod validation
 app.router.post('/users', async (ctx) => {
   const result = userSchema.safeParse(await ctx.request.json());
   if (!result.success) {
-    return ctx.response.status(400).json({ errors: result.error.errors });
+    return ctx.response.status(400).json({ errors: result.error.issues });
   }
   const body = result.data;
   return ctx.response.status(201).json({ created: true });
@@ -313,12 +329,15 @@ app.setErrorHandler((error, request, reply) => {
 ### Setu-TS
 
 ```typescript
+import type { MiddlewareFunction } from '@setu-ts/common';
+import { HttpError } from '@setu-ts/exceptions';
+
 const errorMiddleware: MiddlewareFunction = async (ctx, next) => {
   try {
     await next();
   } catch (error) {
-    if (error instanceof HttpException) {
-      return ctx.response.status(error.status).json(
+    if (error instanceof HttpError) {
+      return ctx.response.status(error.statusCode).json(
         { error: error.message },
       );
     }

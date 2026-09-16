@@ -140,8 +140,11 @@ ctx.middleware.add(myMiddleware);
 // Add with priority
 ctx.middleware.add(myMiddleware, { priority: 25 });
 
-// Add to specific routes
-// Route-specific middleware is not supported in Setu-TS; use a middleware that checks ctx.request.path instead.
+// Add to a specific route
+ctx.router.get('/reports', {
+  middleware: [myMiddleware],
+  handler: async (requestCtx) => requestCtx.response.json({ ok: true }),
+});
 ```
 
 ### Routes

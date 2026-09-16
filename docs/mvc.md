@@ -101,10 +101,9 @@ short-circuiting, so the handler decides what to render.
 from — one template, so the empty state and the error state cannot drift — and a successful one
 answers `303`, so a refresh does not resubmit.
 
-```typescript
+```tsx
 import { CAPABILITIES, parseFormBody } from '@setu-ts/common';
 import type { IRequestContext, IValidationService, ValidationIssue } from '@setu-ts/common';
-import { html } from '@hono/hono/html';
 import { renderView } from '@setu-ts/view-plugin';
 import { z } from 'zod';
 
@@ -117,14 +116,14 @@ interface TaskFormProps {
   readonly errors: Readonly<Record<string, string>>;
 }
 
-// The `html` tag, NOT a plain template literal: this component redisplays a
-// REJECTED submission, so `props.values.title` is attacker-controlled by
-// definition. A plain literal is a `string` the engine returns unchanged.
-const TaskForm = (props: TaskFormProps) =>
-  html`<form method="post" action="/tasks">
-     <input name="title" value="${props.values.title}" />
-     ${props.errors.title ?? ''}
-   </form>`;
+// JSX escapes every interpolation. This component redisplays a REJECTED
+// submission, so `props.values.title` is attacker-controlled by definition.
+const TaskForm = (props: TaskFormProps) => (
+  <form method='post' action='/tasks'>
+    <input name='title' value={props.values.title} />
+    {String(props.errors.title ?? '')}
+  </form>
+);
 
 /** Reads both form encodings, including custom requests without `formData()`. */
 async function readForm(ctx: IRequestContext): Promise<Record<string, string>> {
@@ -172,8 +171,7 @@ short-circuits before the view runs, so no HTML body is produced. `HandlerResult
 widening the return union costs no type safety: a props bag of the wrong shape is still a compile
 error.
 
-```typescript
-import { html } from '@hono/hono/html';
+```tsx
 import { Controller, Ctx, Get, Params, Post, Render } from '@setu-ts/decorator-plugin';
 import type { HandlerResult, IRequestContext } from '@setu-ts/common';
 
@@ -182,7 +180,7 @@ interface TaskFormProps {
   readonly errors: Readonly<Record<string, string>>;
 }
 
-const TaskForm = (props: TaskFormProps) => html`<form>${props.values.title}</form>`;
+const TaskForm = (props: TaskFormProps) => <form>{props.values.title}</form>;
 
 @Controller('/tasks')
 class TasksController {
@@ -223,17 +221,16 @@ A layout is an ordinary component that accepts `children`:
 
 ```tsx
 import type { Child } from '@hono/hono/jsx';
-import { html } from '@hono/hono/html';
 
 function Layout(props: { readonly title: string; readonly children: Child }) {
-  return html`
+  return (
     <html>
       <head>
-        <title>${props.title}</title>
+        <title>{props.title}</title>
       </head>
-      <body>${props.children}</body>
+      <body>{props.children}</body>
     </html>
-  `;
+  );
 }
 
 export { Layout };
