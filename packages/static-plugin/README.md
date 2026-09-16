@@ -41,17 +41,17 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option           | Type                                 | Default        | Description                                                                              |
-| ---------------- | ------------------------------------ | -------------- | ---------------------------------------------------------------------------------------- |
-| `root`           | `string`                             | (required)     | The filesystem directory to serve files from                                             |
-| `urlPrefix`      | `string`                             | `'/`'`         | URL prefix for static routes                                                             |
-| `index`          | `string`                             | `'index.html'` | Index file to serve for directories. Set to `''` to disable                              |
-| `fallback`       | `string`                             | `undefined`    | Fallback file for SPA routing (served when Accept includes text/html)                    |
-| `cacheControl`   | `string \| (path: string) => string` | auto           | Cache-Control header. A callback receives a **leading-slash** root-relative request path |
-| `etag`           | `boolean`                            | `true`         | Enable ETag generation                                                                   |
-| `ranges`         | `boolean`                            | `true`         | Enable Range request handling                                                            |
-| `compressed`     | `boolean`                            | `true`         | Enable precompressed sidecar negotiation                                                 |
-| `maxBufferBytes` | `number`                             | `1048576`      | Maximum file size to read fully into memory (1MB)                                        |
+| Option           | Type                                        | Default        | Description                                                                                                         |
+| ---------------- | ------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `root`           | `string`                                    | (required)     | The filesystem directory to serve files from                                                                        |
+| `urlPrefix`      | `string`                                    | `'/`'`         | URL prefix for static routes                                                                                        |
+| `index`          | `string`                                    | `'index.html'` | Index file to serve for directories. Set to `''` to disable                                                         |
+| `fallback`       | `string`                                    | `undefined`    | Fallback file for SPA routing (served when Accept includes text/html)                                               |
+| `cacheControl`   | `string \| (requestPath: string) => string` | auto           | Cache-Control header. A callback receives the full **leading-slash request path including `urlPrefix`** — see below |
+| `etag`           | `boolean`                                   | `true`         | Enable ETag generation                                                                                              |
+| `ranges`         | `boolean`                                   | `true`         | Enable Range request handling                                                                                       |
+| `compressed`     | `boolean`                                   | `true`         | Enable precompressed sidecar negotiation                                                                            |
+| `maxBufferBytes` | `number`                                    | `1048576`      | Maximum file size to read fully into memory (1MB)                                                                   |
 
 ### A root `urlPrefix` claims the bare wildcard
 

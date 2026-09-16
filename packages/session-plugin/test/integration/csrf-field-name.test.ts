@@ -19,7 +19,7 @@ import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
-import { csrfTokenField, SessionPlugin } from '../../src/index.ts';
+import { CSRF_CONFIG_STATE_KEY, csrfTokenField, SessionPlugin } from '../../src/index.ts';
 
 const SECRET = 'csrf-field-name-integration-at-least-32-chars';
 
@@ -120,5 +120,57 @@ describe('csrfTokenField honours the plugin’s configured csrf.fieldName', () =
       body: new URLSearchParams({ xsrf: token as string }),
     });
     expect(evil.statusCode).toBe(403);
+  });
+});
+
+describe('the published CSRF config cannot poison the verifier', () => {
+  it('a handler mutating it leaves every LATER request verified', async () => {
+    // The middleware resolves its config ONCE at registration and every request
+    // shares it. Publishing that object put the verifier's own configuration in
+    // reach of any handler holding the context: before this was a per-request
+    // copy, one `GET /poison` turned the 403 below into a 200 for the rest of
+    // the process — measured, with a fresh `ctx.state` map on each request.
+    const app = createApplication({
+      plugins: [RuntimePlugin(), SessionPlugin({ secret: SECRET, csrf: {} })],
+    });
+
+    app.router.get('/poison', (ctx) => {
+      const published = ctx.state.get(CSRF_CONFIG_STATE_KEY) as {
+        ignoreMethods?: Set<string>;
+        fieldName: string;
+      };
+      // Only `fieldName` is published, so the set the verifier reads is not
+      // reachable from here at all — this is the assertion that keeps it so.
+      expect(published.ignoreMethods).toBeUndefined();
+      expect(Object.isFrozen(published)).toBe(true);
+      // And the object that IS published refuses a write rather than silently
+      // detaching from what the verifier checks (ESM is strict mode).
+      expect(() => {
+        (published as { fieldName: string }).fieldName = 'hijacked';
+      }).toThrow();
+      return ctx.response.json({ fieldName: published.fieldName });
+    });
+
+    app.router.post('/submit', (ctx) => ctx.response.json({ ok: true }));
+    await app.start();
+
+    const before = await app.inject({
+      method: 'POST',
+      url: '/submit',
+      body: new URLSearchParams({}),
+    });
+    expect(before.statusCode).toBe(403);
+
+    const poison = await app.inject({ method: 'GET', url: '/poison' });
+    expect(poison.statusCode).toBe(200);
+    expect(poison.json<{ fieldName: string }>().fieldName).toBe('_csrf');
+
+    // A later, unrelated request with its own state map.
+    const after = await app.inject({
+      method: 'POST',
+      url: '/submit',
+      body: new URLSearchParams({}),
+    });
+    expect(after.statusCode).toBe(403);
   });
 });

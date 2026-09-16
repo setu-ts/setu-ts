@@ -3475,6 +3475,7 @@ package README's "What `SameSite` does not separate".
 | `CsrfFormOptions`               | interface | The `csrf` block, and `verifyCsrfToken`'s options                                                                                                                                                          |
 | `SessionServiceDeps`            | interface | Runtime capabilities the service is constructed with                                                                                                                                                       |
 | `MemorySessionStoreDeps`        | interface | The memory store's required clock and timer injection                                                                                                                                                      |
+| `PublishedCsrfConfig`           | interface | The shape published under `CSRF_CONFIG_STATE_KEY` — a frozen, request-local `{ fieldName }`, never the middleware's own shared config                                                                      |
 | `CacheSessionStoreOptions`      | interface | The cache store's key namespacing                                                                                                                                                                          |
 
 ### Notes
@@ -3544,17 +3545,22 @@ package README's "What `SameSite` does not separate".
   body parse at all, and a non-form request still reports the ordinary mismatch rather than the
   accessor's `415`.
 - **`csrfTokenField(ctx)` is the form carrier for the plugin's configured field name.** The
-  `csrfFormMiddleware` publishes its already-resolved configuration into `ctx.state` under
+  `csrfFormMiddleware` publishes the field name it will verify into `ctx.state` under
   `CSRF_CONFIG_STATE_KEY` — before its `ignoreMethods`/`exclude` short-circuits, because the GET
   that renders the form is itself an ignored method — and the helper reads it, so the rendered field
-  name and the verified field name are ONE resolution. An explicit
-  `csrfTokenField(ctx, { fieldName })` argument is an override (for a standalone middleware on a
-  different name); with no published config and no argument — a request the middleware never saw,
-  such as a React Router action — the shared `'_csrf'` default applies. The helper returns trusted
-  generated markup and escapes the name it renders; in an escaping Hono template use
-  `raw(csrfTokenField(ctx))` at the application rendering boundary. It does not register or bypass
-  CSRF verification: `SessionPlugin({ csrf: {} })` still globally checks every unsafe method not in
-  `ignoreMethods`, so a form needs the documented safe-render-then-submit sequence.
+  name and the verified field name are ONE resolution. The published value is a frozen,
+  request-local `PublishedCsrfConfig` (`{ fieldName }`) and deliberately NOT the middleware's own
+  `ResolvedCsrfConfig`: that object is resolved once at registration and shared by every request, so
+  publishing it would hand the verifier's configuration to any handler holding the context — one
+  `ctx.state.get(CSRF_CONFIG_STATE_KEY).ignoreMethods.add('POST')` turned a `403` into a `200` for
+  every later request in the process. An explicit `csrfTokenField(ctx, { fieldName })` argument is
+  an override (for a standalone middleware on a different name); with no published config and no
+  argument — a request the middleware never saw, such as a React Router action — the shared
+  `'_csrf'` default applies. The helper returns trusted generated markup and escapes the name it
+  renders; in an escaping Hono template use `raw(csrfTokenField(ctx))` at the application rendering
+  boundary. It does not register or bypass CSRF verification: `SessionPlugin({ csrf: {} })` still
+  globally checks every unsafe method not in `ignoreMethods`, so a form needs the documented
+  safe-render-then-submit sequence.
 - **The `403` body does not disclose the reason.** It would tell an attacker whether the session or
   the token was at fault.
 - **React Router** reaches the session through the Milestone 44 plugin's existing

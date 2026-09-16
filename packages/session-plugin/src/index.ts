@@ -48,6 +48,7 @@ export {
   csrfTokenField,
   getCsrfToken,
 } from './csrf/token.ts';
+export type { PublishedCsrfConfig } from './csrf/token.ts';
 export { verifyCsrfToken } from './csrf/verify.ts';
 
 // Session middleware (exported for standalone wiring, e.g. `autoStart: false` test apps)

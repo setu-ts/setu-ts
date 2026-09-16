@@ -74,24 +74,51 @@ export function getCsrfToken(ctx: IRequestContext): string {
 }
 
 /**
- * The `ctx.state` key under which {@linkcode csrfFormMiddleware} publishes its
- * already-resolved form-CSRF configuration.
+ * The `ctx.state` key under which {@linkcode csrfFormMiddleware} publishes the
+ * field name it will verify, for {@linkcode csrfTokenField} to render.
  *
  * The middleware resolves the plugin's `csrf` block ONCE at registration, and
- * this key is how {@linkcode csrfTokenField} reads that resolution instead of
- * re-deriving the field name from its own argument — which is how the helper
- * came to render `'_csrf'` on a form the same plugin verified under a
- * configured `fieldName`, 403-ing every post (X47-2). Written before the
- * middleware's `ignoreMethods`/`exclude` short-circuits, because the GET that
- * renders the form is itself an ignored method. Read it only through
- * {@linkcode csrfTokenField}; the value's type is an internal
- * `ResolvedCsrfConfig`.
+ * this key is how the helper reads that resolution instead of re-deriving the
+ * name from its own argument — which is how it came to render `'_csrf'` on a
+ * form the same plugin verified under a configured `fieldName`, 403-ing every
+ * post (X47-2). Written before the middleware's `ignoreMethods`/`exclude`
+ * short-circuits, because the GET that renders the form is itself an ignored
+ * method.
+ *
+ * The published value is a FROZEN, request-local {@linkcode PublishedCsrfConfig}
+ * carrying only `fieldName` — deliberately not the middleware's own
+ * `ResolvedCsrfConfig`. That object is resolved once at registration and shared
+ * by every request, so publishing it handed a reference to the verifier's own
+ * configuration to any handler holding the context: measured, one
+ * `ctx.state.get(CSRF_CONFIG_STATE_KEY).ignoreMethods.add('POST')` turned a
+ * `403` into a `200` for every LATER request in the process, with a fresh state
+ * map each time. A per-request copy closes that, and narrowing to the one
+ * member the helper reads makes it structurally impossible rather than merely
+ * detached — a string cannot be mutated — while leaving no published member
+ * without a reader.
  *
  * Keyed per the M71 state-key convention (`<owner-package>:<kebab-key>`).
  *
  * @since 0.6.1
  */
 export const CSRF_CONFIG_STATE_KEY = 'session-plugin:csrf-config';
+
+/**
+ * What {@linkcode csrfFormMiddleware} publishes under
+ * {@linkcode CSRF_CONFIG_STATE_KEY}: the resolved form field name, and nothing
+ * else the middleware also holds.
+ *
+ * Read it through {@linkcode csrfTokenField}; an application rendering its own
+ * markup may read it directly, which is why the shape is named rather than
+ * anonymous. The object is frozen, so a stray write throws under ESM's strict
+ * mode instead of silently detaching from what the verifier checks.
+ *
+ * @since 0.6.1
+ */
+export interface PublishedCsrfConfig {
+  /** The form field the verifier will read on an unsafe method. */
+  readonly fieldName: string;
+}
 
 /**
  * Renders this session's CSRF token as a hidden HTML form field.

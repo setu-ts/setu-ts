@@ -60,9 +60,14 @@ All notable changes to this project are documented here. The format follows
   README's own recipe (render with the helper bare, post the form) no longer 403s on every post when
   `fieldName` is customized. An explicit `csrfTokenField(ctx, { fieldName })` argument is an
   override; with no published config and no argument — a request the middleware never saw, such as a
-  React Router action — the shared `'_csrf'` default is unchanged. Migration: none needed; if you
-  passed the configured name manually to work around the mismatch, the workaround is now optional
-  and may be deleted.
+  React Router action — the shared `'_csrf'` default is unchanged. What is published is a frozen,
+  request-local `PublishedCsrfConfig` (`{ fieldName }`), never the middleware's own
+  `ResolvedCsrfConfig`: that object is resolved once at registration and shared by every request, so
+  publishing it put the verifier's configuration in reach of any handler holding the context —
+  measured, one `ctx.state.get(CSRF_CONFIG_STATE_KEY).ignoreMethods.add('POST')` turned a `403` into
+  a `200` for every LATER request in the process, each with a fresh state map. Migration: none
+  needed; if you passed the configured name manually to work around the mismatch, the workaround is
+  now optional and may be deleted.
 - **BREAKING (for JavaScript callers and `unknown`-typed call sites) — `inject()` carries the body
   shapes a request actually has and refuses every other by name.** `InjectRequest.body` widens from
   an anything-goes `unknown` (documented "will be stringified if not a string", implemented as

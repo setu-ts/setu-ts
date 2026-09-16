@@ -54,7 +54,14 @@ describe('barrel exports', () => {
 
   it('erases its types at runtime', () => {
     const keys = Object.keys(exports);
-    for (const type of ['SessionPluginOptions', 'CsrfFormOptions', 'SessionMode']) {
+    for (
+      const type of [
+        'SessionPluginOptions',
+        'CsrfFormOptions',
+        'SessionMode',
+        'PublishedCsrfConfig',
+      ]
+    ) {
       expect(keys).not.toContain(type);
     }
   });

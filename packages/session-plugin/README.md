@@ -351,6 +351,7 @@ arriving while every session reads as absent.
 | `CacheSessionStoreOptions`      | interface |
 | `CsrfFormOptions`               | interface |
 | `MemorySessionStoreDeps`        | interface |
+| `PublishedCsrfConfig`           | interface |
 | `SessionCookieOptions`          | interface |
 | `SessionPluginOptions`          | interface |
 | `SessionServiceDeps`            | interface |
