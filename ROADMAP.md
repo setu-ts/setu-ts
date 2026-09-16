@@ -10580,8 +10580,10 @@ merging beyond what the schema itself expresses.
   does, deliberately and manually. This is a kernel and container change with a real cost (a
   container per request), not sugar over an existing seam, so it fails this milestone's own test and
   wants its own. `docs/migration-nestjs.md:833` presents `@Injectable({ scope: 'scoped' })` as the
-  `Scope.REQUEST` equivalent, which it is not; that doc claim is a defect and is repaired separately
-  rather than waiting for the capability.
+  `Scope.REQUEST` equivalent, and `docs/decorators.md:315` states "new instance per request scope"
+  outright. Both are defects — M70d corrected the `ServiceScope` JSDoc and swept neither guide — and
+  both are repaired in [#325](https://github.com/setu-ts/setu-ts/pull/325) rather than waiting for
+  the capability.
 - **`ParseIntPipe`-style parameter transformation and `{id:int}` route constraints.** Narrower than
   it looks: `resolveParameter` prefers a validated value for `@Body`/`@Query`/`@Param`
   (`decorator-plugin/src/resolvers/parameter-resolver.ts:150`), so `z.coerce.number()` through
