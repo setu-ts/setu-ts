@@ -10347,8 +10347,14 @@ that to per-parameter redaction, so a query string can be kept where the policy 
 
 ## Milestone 97: Ergonomics — Sugar Over Seams That Already Exist
 
-**Package(s):** 97a `packages/decorator-plugin`, `packages/common`; 97b `packages/decorator-plugin`,
-`packages/common`, `packages/openapi-plugin`; 97c `packages/config-plugin`, `packages/common`.
+**Package(s):** 97a `packages/decorator-plugin`, `packages/cli`; 97b `packages/decorator-plugin`,
+`packages/common`, `packages/openapi-plugin`; 97c `packages/config-plugin`.
+
+**Only 97b touches `common`,** and the other two lists were corrected from an earlier draft once
+their plans resolved the seam (the M70b/M70g/M70k precedent): 97a puts the ingress map on the
+concrete `MetadataStore` rather than widening `IMetadataStore` (the M36b `ctorInject` precedent),
+and 97c ships a free function rather than a required `IConfig` member. 97a gains `packages/cli`
+because its schematics are a deliverable rather than a follow-on.
 
 **Objective:** Close three places where a capability is complete, its registration surface is
 public, and the developer still hand-writes the wiring. None of the three needs a new capability
@@ -10376,7 +10382,9 @@ below re-measures the rows it relies on before its section's prose is fixed.
 
 ### Milestone 97a: Decorators for Non-HTTP Ingress
 
-**Package(s):** `packages/decorator-plugin`, `packages/common`
+**Package(s):** `packages/decorator-plugin`, `packages/cli`
+
+**Plan:** `plans/milestone-97a-ingress-decorators.md`
 
 **Objective:** Give the five non-HTTP ingress paths the class-based registration surface HTTP has
 had since M9, so `--template class-based` describes a whole application rather than its HTTP sixth.
@@ -10472,6 +10480,8 @@ class list is explicit, as `controllers` is.
 
 **Package(s):** `packages/decorator-plugin`, `packages/common`, `packages/openapi-plugin`
 
+**Plan:** `plans/milestone-97b-response-shaping.md`
+
 **Objective:** Let a decorated handler state its success status and its response headers in its
 declaration, rather than taking `@Ctx()` and mutating the response builder to say `201`.
 
@@ -10514,7 +10524,9 @@ second spelling would be the dead-surface rule. No content negotiation.
 
 ### Milestone 97c: Typed Configuration Sections
 
-**Package(s):** `packages/config-plugin`, `packages/common`
+**Package(s):** `packages/config-plugin`
+
+**Plan:** `plans/milestone-97c-typed-config-sections.md`
 
 **Objective:** Make a configuration read return a value whose type was checked, rather than a value
 whose type the caller asserted.
@@ -10536,12 +10548,14 @@ improvement, and it is the ASP.NET `IOptions<T>` row.
 
 **Deliverables.**
 
-- **A typed section accessor.** `defineConfigSection({ key, schema })` produces a definition, and
-  `IConfig` gains a member that resolves one to its parsed type. The plan decides between widening
-  `IConfig` (a **required** member — breaking for an implementor, the M74 precedent, with the
-  framework's own service the only one in-repo) and a free function taking the resolved `IConfig`,
-  and records the blast radius of whichever it picks. `ConfigPluginOptions.validationSchema` keeps
-  its current meaning; sections compose with it rather than replacing it.
+- **A typed section accessor.** `defineConfigSection({ prefix, schema })` produces a definition and
+  the free function `getConfigSection(config, definition)` resolves one to its parsed type. **A
+  required `IConfig.getSection` member was considered and declined** — it is breaking for an
+  implementor (the M74 precedent) and buys nothing, because the parsed value is cached at startup
+  and the accessor reads through the public `get`; keeping the section concept out of `common` also
+  keeps `common` free of the validator dependency that put `StructuralSchema` in `config-plugin` in
+  the first place. `ConfigPluginOptions.validationSchema` keeps its current meaning and runs FIRST;
+  sections parse their prefix subsets out of its output.
 - **Sections validate at startup, not at first read.** A missing or unparseable section fails
   `register()` naming the section, which is the property that makes the typed read honest — a
   read-time parse would mean a configuration error surfaces on the first request that happens to
@@ -10734,6 +10748,6 @@ merging beyond what the schema itself expresses.
 | 95c       | ✅     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
 | 95d       | ⬜     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
 | 96        | ⬜     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
-| 97a       | ⬜     | decorator-plugin + common — decorators for non-HTTP ingress                                                            |
+| 97a       | ⬜     | decorator-plugin + cli — decorators for non-HTTP ingress                                                               |
 | 97b       | ⬜     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                   |
-| 97c       | ⬜     | config-plugin + common — typed configuration sections                                                                  |
+| 97c       | ⬜     | config-plugin — typed configuration sections                                                                           |
