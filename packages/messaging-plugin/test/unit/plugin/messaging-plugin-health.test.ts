@@ -32,7 +32,38 @@ function makeRuntime(): IRuntimeServices {
   };
 }
 
-function makeContext(): {
+/**
+ * Runtime with a MANUALLY advanced monotonic clock and MANUALLY fired
+ * timers, so the 2s probe bound is driven by the test rather than the wall
+ * clock (M95b §3.6 finding 2: the bound is asserted, not assumed).
+ */
+function makeManualRuntime(): {
+  runtime: IRuntimeServices;
+  advance: (ms: number) => void;
+  fireTimers: () => void;
+} {
+  let clock = 0;
+  const timers: Array<{ at: number; fn: () => void }> = [];
+  const base = makeRuntime();
+  const runtime: IRuntimeServices = {
+    ...base,
+    hrtime: () => clock,
+    setTimeout: (fn: () => void, ms: number) => {
+      timers.push({ at: clock + ms, fn });
+      return { manual: timers.length } as unknown as { id: number };
+    },
+    clearTimeout: (_handle: { id: number }) => {},
+  };
+  return {
+    runtime,
+    advance: (ms: number) => void (clock += ms),
+    fireTimers: () => {
+      for (const timer of timers.splice(0)) timer.fn();
+    },
+  };
+}
+
+function makeContext(runtime?: IRuntimeServices): {
   ctx: IPluginContext;
   indicators: Map<string, unknown>;
 } {
@@ -79,7 +110,7 @@ function makeContext(): {
     openapi: { addSchema: () => {} },
     decorators: { register: () => {} },
     cli: { register: () => {} },
-    runtime: makeRuntime(),
+    runtime: runtime ?? makeRuntime(),
     options: {},
     app: null as unknown as IPluginContext['app'],
   };
@@ -175,5 +206,79 @@ describe('MessagingPlugin health indicator four arms (M70c)', () => {
     const data = result.data as Record<string, unknown>;
     expect('broker' in data).toBe(true);
     expect('reachable' in data).toBe(true);
+  });
+
+  describe('the indicator bounds the probe (M95b §3.6)', () => {
+    it('a probe that NEVER settles resolves reachable unknown and the indicator SETTLES', async () => {
+      // X51-2's blast radius: before M95b the indicator did
+      // `await broker.reachability()` directly, so a hung backend held
+      // `/health` and `/ready` open indefinitely. Reverting the
+      // `createCachedProbe` wrapper leaves this case pending forever —
+      // which is the finding's own reproduction.
+      const manual = makeManualRuntime();
+      // Hoisted into a variable (the excess-property rule: a fresh literal
+      // is checked against IMessageBroker, a variable is not). It carries
+      // the FULL internal seam so `asBrokerAdapter` returns it unchanged —
+      // a partial seam would be wrapped and its `reachability` never read,
+      // which made this test's first draft pass vacuously.
+      const instance = {
+        connect: () => Promise.resolve(),
+        disconnect: () => Promise.resolve(),
+        publish: () => Promise.resolve(),
+        subscribe: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+        request: () => Promise.resolve(null as never),
+        respond: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+        publishWithHeaders: () => Promise.resolve(),
+        subscribeWithHeaders: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+        requestWithHeaders: () => Promise.resolve(null as never),
+        isReady: () => true,
+        reachability: () => new Promise<boolean>(() => {}), // never settles
+        isHealthy: () => new Promise<boolean>(() => {}),
+      };
+      const { ctx, indicators } = makeContext(manual.runtime);
+      await MessagingPlugin({ broker: 'custom', instance }).register(ctx);
+
+      const pending = indicatorFor(indicators);
+      // Fire the deadline timer the bound armed.
+      manual.advance(2_000);
+      manual.fireTimers();
+      const result = await pending;
+      expect(result.status).toBe('up');
+      expect(result.data).toEqual({ broker: 'custom', reachable: 'unknown' });
+    });
+
+    it('two polls inside the TTL issue ONE probe call', async () => {
+      const manual = makeManualRuntime();
+      const calls = { count: 0 };
+      const instance = {
+        connect: () => Promise.resolve(),
+        disconnect: () => Promise.resolve(),
+        publish: () => Promise.resolve(),
+        subscribe: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+        request: () => Promise.resolve(null as never),
+        respond: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+        publishWithHeaders: () => Promise.resolve(),
+        subscribeWithHeaders: () => Promise.resolve({ unsubscribe: () => Promise.resolve() }),
+        requestWithHeaders: () => Promise.resolve(null as never),
+        isReady: () => true,
+        reachability: () => {
+          calls.count++;
+          return Promise.resolve(true);
+        },
+        isHealthy: () => Promise.resolve(true),
+      };
+      const { ctx, indicators } = makeContext(manual.runtime);
+      await MessagingPlugin({ broker: 'custom', instance }).register(ctx);
+
+      await indicatorFor(indicators);
+      await indicatorFor(indicators);
+      // Both answered from the one cached outcome.
+      expect(calls.count).toBe(1);
+
+      // Past the TTL the probe is consulted again.
+      manual.advance(5_001);
+      await indicatorFor(indicators);
+      expect(calls.count).toBe(2);
+    });
   });
 });

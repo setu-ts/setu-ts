@@ -7,6 +7,7 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
+import { createCachedProbe } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError } from './describe-error.ts';
@@ -49,6 +50,23 @@ export function validateClient(client: unknown): client is IAmqpConnection {
     }
   }
   return true;
+}
+
+/** Reachability-probe cache lifetime (M95b review), in ms. */
+const PROBE_TTL_MS = 5000;
+
+/** Per-probe timeout (M95b review), in ms. */
+const PROBE_TIMEOUT_MS = 2000;
+
+/**
+ * Structural check for the one member the reachability probe needs off a
+ * fresh channel (M95b §3.6): `close(): Promise<void>`. The probe closes its
+ * throwaway channel through this check rather than a cast, and a channel
+ * without it is skipped rather than forced.
+ */
+function isCloseableChannel(value: unknown): value is { close(): Promise<void> } {
+  return typeof value === 'object' && value !== null &&
+    typeof (value as { close?: unknown }).close === 'function';
 }
 
 /**
@@ -136,6 +154,24 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   #activeConsumers: Map<string, ActiveConsumer>;
   #rr: RequestReplyCore;
   #supervisor: ReconnectSupervisor;
+  /**
+   * The cached, bounded reachability probe (M95b review), built at
+   * `connect()` and dropped at `disconnect()`.
+   *
+   * The bound lives HERE rather than only at the health indicator, because
+   * the indicator is not the only caller: `realtime-backplane-plugin`'s
+   * `'messaging'` transport delegates straight to `broker.isHealthy()`
+   * (`transports/messaging-backplane.ts`) and documents that it deliberately
+   * adds no cache of its own, "retaining the resolved broker's own probe
+   * cache". That held while this probe was a flag read; once §3.6 made it a
+   * real AMQP round trip it meant one channel open per health poll, and a
+   * HUNG broker — the `docker pause` condition X51-2 exists for — left that
+   * indicator to hit `HealthPlugin`'s `indicatorTimeoutMs` and report `down`,
+   * taking `/ready` to 503 for a fan-out failure its own contract says is
+   * `degraded` at worst. Caching in the broker is what makes the backplane's
+   * documented assumption true again, for every caller at once.
+   */
+  #probe: (() => Promise<boolean | undefined>) | null = null;
 
   /**
    * Creates a new RabbitMQ broker.
@@ -193,6 +229,18 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     this.#connection = await resolveClient(this.#url, this.#injectedClient);
     this.#channel = await this.#createChannel();
     await this.#reassertExchange();
+    this.#probe = createCachedProbe<boolean | undefined>({
+      probe: () => this.#openThrowawayChannel(),
+      // A probe that could not answer inside the bound has told us nothing,
+      // not that the broker is gone — the V5-2 rule. `false` (the helper's
+      // default) would report a hung broker as positively unreachable.
+      fallback: undefined,
+      ttlMs: PROBE_TTL_MS,
+      timeoutMs: PROBE_TIMEOUT_MS,
+      hrtime: this.#runtime.hrtime.bind(this.#runtime),
+      setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+      clearTimer: (handle) => this.#runtime.clearTimeout(handle),
+    });
     this.#ready = true;
     this.#supervisor.start();
   }
@@ -225,6 +273,10 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       }
     }
     this.#connection = null;
+    // Drop the cached probe WITH the connection (the M90b Service Bus rule):
+    // a surviving cache would serve a stale `true` inside its TTL for a
+    // broker that no longer exists, and then fire real I/O at a closed one.
+    this.#probe = null;
     this.#ready = false;
   }
 
@@ -243,31 +295,103 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Tri-state backend reachability (M70c).
+   * Backend reachability (M70c; a real round trip since M95b §3.6).
    *
    * `false` while the supervisor is in a fault window (the connection
-   * dropped and the drive-mode reconnect has not yet succeeded); `true`
-   * otherwise. This reads the fault flag directly — it is a zero-cost,
-   * always-current value, so caching it (as the I/O probes do) would make the
-   * signal stale exactly when it matters.
+   * dropped and the drive-mode reconnect has not yet succeeded) — that
+   * short-circuit performs no round trip and is read ahead of the cache —
+   * and `false` with no open connection. Otherwise the answer comes from
+   * {@linkcode RabbitMqBroker.#openThrowawayChannel}, cached 5 s and
+   * bounded 2 s, resolving `undefined` — could not determine — for a probe
+   * that does not answer inside the bound.
    *
-   * @returns `true` when reachable, `false` when the broker is in a fault
-   *   window
+   * The M70c probe was `Promise.resolve(!this.#supervisor.faulted)` — a
+   * flag read, which a HUNG broker never trips (a paused broker keeps its
+   * socket; only a stopped one drops it), so a paused broker reported
+   * `reachable: true` while no AMQP handshake could complete.
+   *
+   * **The cache and the bound live here rather than only at the health
+   * indicator**, because the indicator is not the only caller: the realtime
+   * backplane's `'messaging'` transport delegates to `isHealthy()` directly
+   * and documents that it keeps no cache of its own. Without this, a real
+   * round trip fired once per health poll and a paused broker left that
+   * caller waiting on a promise that never settled.
+   *
+   * One bounded-window cost is named rather than hidden: against a PAUSED
+   * broker the channel open itself never settles, so each abandoned poll
+   * leaves one pending open that the `finally` cannot yet run for; the
+   * pending opens settle and close on recovery (or with the connection at
+   * `disconnect()`), and amqplib buffers them, so the window is transient
+   * rather than a leak. The 5 s cache also bounds how many such pending
+   * opens a polling endpoint can accumulate.
+   *
+   * @returns `true` when the broker answers a channel open, `false` when
+   *   it is faulted, unconnected, or refuses the round trip, `undefined`
+   *   when the round trip did not answer inside the bound
    * @since 0.1.0
    */
-  reachability(): Promise<boolean> {
-    return Promise.resolve(!this.#supervisor.faulted);
+  async reachability(): Promise<boolean | undefined> {
+    // Short-circuit, no round trip and NO cache: a fault window is a
+    // positively known, always-current outage, and probing through a dying
+    // connection would only burn it. Reading it ahead of the cache is what
+    // keeps a stopped broker's `down` immediate rather than TTL-delayed.
+    if (this.#supervisor.faulted) {
+      return false;
+    }
+    const probe = this.#probe;
+    if (probe === null || this.#connection === null) {
+      return false;
+    }
+    return await probe();
+  }
+
+  /**
+   * The round trip itself (M95b §3.6): open a throwaway channel and close it.
+   *
+   * `connection.createChannel()` is a real AMQP exchange that a paused broker
+   * cannot answer and a stopped one fails outright; it needs no queue, no
+   * exchange and no extra permission. The channel is its OWN, so a failure
+   * cannot touch `#channel` — the single channel every publish and every
+   * subscription shares, which a passive queue declare would have closed —
+   * and it is released in a `finally`, since a leaked channel per poll would
+   * be its own defect.
+   */
+  async #openThrowawayChannel(): Promise<boolean> {
+    const connection = this.#connection;
+    if (connection === null) {
+      return false;
+    }
+    try {
+      const channel = await connection.createChannel();
+      try {
+        return true;
+      } finally {
+        if (isCloseableChannel(channel)) {
+          await channel.close();
+        }
+      }
+    } catch {
+      // The round trip failed: a stopped broker fails it outright, and a
+      // hung one never settles and is resolved by the bound above.
+      return false;
+    }
   }
 
   /**
    * Boolean port member (M70c): `false` only when positively unreachable.
    *
-   * @returns `true` when reachable or unprobeable, `false` when the broker
-   *   is in a fault window
+   * A probe that could not answer inside the bound reports `true` — "not
+   * known down" — because the port contract is boolean and the honest
+   * tri-state is what {@linkcode RabbitMqBroker.reachability} carries. This
+   * is the `ServiceBusBroker.isHealthy()` shape exactly.
+   *
+   * @returns `true` when the broker answers the probe or could not be
+   *   probed, `false` when it is faulted, unconnected, or refuses it
    * @since 0.1.0
    */
-  isHealthy(): Promise<boolean> {
-    return Promise.resolve(!this.#supervisor.faulted);
+  async isHealthy(): Promise<boolean> {
+    const reachable = await this.reachability();
+    return reachable !== false;
   }
 
   /**

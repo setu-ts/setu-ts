@@ -57,6 +57,15 @@ import type { MongoTarget } from './mongo-mapping.ts';
 export class MongoAdapter implements IDatabaseAdapter {
   /** MongoDB snapshot isolation is not the portable serializable guarantee. */
   readonly transactionIsolationLevels: readonly TransactionIsolationLevel[] = [];
+  /**
+   * The reachability probe (M95b §3.5), present only when the resolved
+   * client's `db()` facade can answer a command. A minimal injected client
+   * whose database facade omits `command?` leaves this unassigned, so the
+   * service reports `hasReachabilityProbe: false` — the adapter is honest
+   * about having no probe rather than failing readiness for a backend it
+   * never asked.
+   */
+  isHealthy?: () => Promise<boolean>;
   #client: IMongoClient | null = null;
   /** The in-flight `connect()`, so concurrent callers share one attempt. */
   #connecting: Promise<void> | null = null;
@@ -142,6 +151,10 @@ export class MongoAdapter implements IDatabaseAdapter {
     this.#loader = loader;
     this.#client = client;
     this.#connected = true;
+    const probe = this.#buildReachabilityProbe();
+    if (probe !== undefined) {
+      this.isHealthy = probe;
+    }
   }
 
   /** Closes the connection and releases the client. @inheritdoc */
@@ -156,6 +169,46 @@ export class MongoAdapter implements IDatabaseAdapter {
   /** Reports whether the adapter is connected. @inheritdoc */
   isReady(): boolean {
     return this.#connected;
+  }
+
+  /**
+   * Builds the reachability probe over the resolved database facade
+   * (M95b §3.5): one `db.command({ ping: 1 })` round trip — the cheap
+   * liveness command the driver exposes, and the read X51-1's lifecycle
+   * read stood in for. Resolves `undefined` — no probe — when the facade
+   * carries no `command?` (a minimal injected double); the probe itself
+   * answers `false` for an adapter that lost its connection rather than
+   * throwing, so an outage reads as a fact.
+   */
+  #buildReachabilityProbe(): (() => Promise<boolean>) | undefined {
+    const client = this.#client;
+    if (client === null) {
+      return undefined;
+    }
+    let database: import('./mongo-client-types.ts').IMongoDatabase;
+    try {
+      database = client.db(this.#resolveDatabaseName());
+    } catch {
+      // A hostile injected facade whose db() throws must not fail connect()
+      // for the probe's sake: connect() connected fine before M95b, and the
+      // adapter reports no probe rather than refusing to start.
+      return undefined;
+    }
+    const command = database.command;
+    if (typeof command !== 'function') {
+      return undefined;
+    }
+    return async (): Promise<boolean> => {
+      if (!this.#connected || this.#client === null) {
+        return false;
+      }
+      try {
+        await command.call(database, { ping: 1 });
+        return true;
+      } catch {
+        return false;
+      }
+    };
   }
 
   /** Returns a data source for the named entity's collection. @inheritdoc */

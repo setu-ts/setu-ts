@@ -291,6 +291,27 @@ describe('real-backend CI wiring', () => {
     expect(workflow).toContain('AWS_SECRET_ACCESS_KEY: test');
   });
 
+  it('keeps the M95b Service Bus outage suite deliberately local-only (M95b §3.4)', async () => {
+    // Corrected in code review: the ORIGINAL reason recorded here — "a second
+    // consecutive run fails with RequestTimeoutError" — is R11, and it is a
+    // property of the E2E suite's RPC step, not of this outage suite, which
+    // restarts `he-sb` itself. Measured: two consecutive outage runs against a
+    // 21-minute-old container both pass with no restart between them. The two
+    // reasons that DO hold are the image size and the emulator's absent
+    // administration endpoint, which no CI service container would change.
+    // The Cosmos suite (M81) is local-only on image size too. What keeps a
+    // local-only suite honest is that its absence from CI is ASSERTED here
+    // rather than implicit — a later reader must not mistake it for an
+    // oversight — and that the doc keeps naming the guard variable and the
+    // run command the suite is guarded on.
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    expect(workflow).not.toContain('servicebus-emulator');
+    expect(workflow).not.toContain('SERVICEBUS_CONNECTION_STRING');
+    const doc = await Deno.readTextFile('docs/messaging-emulators.md');
+    expect(doc).toContain('service-bus-outage-real.test.ts');
+    expect(doc).toContain('SERVICEBUS_CONNECTION_STRING');
+  });
+
   it('pins the RabbitMQ service at major version 4 (M70l §3.1)', async () => {
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
     const rabbitLine = workflow

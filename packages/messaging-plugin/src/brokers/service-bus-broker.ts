@@ -210,6 +210,23 @@ export interface ServiceBusOptions {
    * @since 0.5.0
    */
   retryOptions?: ServiceBusRetryOptions;
+  /**
+   * How long a recorded data-plane outcome stays authoritative (M95b), in
+   * ms. Default `5000`, matching the management probe's 5 s TTL so the two
+   * signals age together: below the age the broker's evidence window
+   * answers `reachability()` directly, above it the management probe
+   * answers exactly as it did before this option existed.
+   *
+   * Must be a positive integer; a non-finite, fractional, zero or negative
+   * value is REFUSED at construction rather than accepted (M95b review).
+   * `NaN` — what `Number(env.X)` yields for an unset variable — would
+   * otherwise freeze the window so recorded evidence never ages out, and
+   * `0` would disable it entirely, reinstating the pre-M95b behaviour. The
+   * option has no disable arm by design.
+   *
+   * @throws {Error} If the value is not a positive integer
+   */
+  dataPlaneEvidenceMs?: number;
   /** Optional logger. */
   logger?: { error: (msg: string) => void };
 }
@@ -260,8 +277,13 @@ const NAMESPACE_ANSWERED_STATUSES: ReadonlySet<number> = new Set([401, 403]);
  * Reporting `down` for either shape drains a replica whose data plane is
  * publishing 200s — that is V5-2, and the 429 arm is the same defect reached
  * through a status code instead of a socket error. A namespace that is
- * genuinely gone still reports `down`: the data client stops being ready, and
- * the indicator checks `isReady()` before it ever consults this probe.
+ * genuinely gone is NOT caught here, and `isReady()` does not catch it
+ * either: that member is LIFECYCLE state — set when `connect()` succeeds,
+ * cleared only by `disconnect()` — with no liveness input, so a namespace
+ * dead for minutes still answers `isReady() === true` in 0 ms (the claimed
+ * gate does not exist; corrected M95b). What catches a dead data plane is
+ * the broker's data-plane evidence window: a recent publish failure resolves
+ * `reachability()` `false`, which the indicator maps to `down`.
  *
  * @param error - The caught probe error
  * @returns `true` reachable, `false` positively absent, `undefined` unknown
@@ -281,6 +303,72 @@ function classifyProbeFailure(error: unknown): boolean | undefined {
     return false;
   }
   return undefined;
+}
+
+/**
+ * Decides whether a failed publish is EVIDENCE about the data plane (M95b).
+ *
+ * Deliberately NOT {@linkcode classifyProbeFailure}: that one maps a
+ * 404/410 to "positively absent", which is right for a management probe and
+ * wrong here — a publish rejected because the topic was deleted is an
+ * application-level fact, not a network outage, and must never mark the
+ * broker down. This predicate is narrowed twice, and the narrowing is the
+ * design:
+ *
+ * - **By origin** — the only rejections passed here are the ones thrown by
+ *   `transport.send` inside `publishWithHeaders`; the not-connected guard
+ *   and `serializer.serialize` throw before the transport is reached and
+ *   say nothing about the network.
+ * - **By shape** — of those, only a rejection carrying no numeric
+ *   `statusCode` is evidence (the network-layer signature: ECONNRESET, a
+ *   DNS failure, a timeout). A rejected topic (404), a quota error (429)
+ *   and an auth failure all carry a status and leave the indicator
+ *   untouched.
+ *
+ * @param error - The caught send error
+ * @returns `true` when the failure is data-plane evidence
+ */
+/**
+ * Validates {@linkcode ServiceBusOptions.dataPlaneEvidenceMs} at construction
+ * (M95b review), refusing a value outside its domain rather than reading as
+ * configured while the window silently misbehaves.
+ *
+ * The two out-of-domain cases each reinstate a defect this broker exists to
+ * close, and both arrive from ordinary configuration. **`NaN`** — what
+ * `Number(env.X)` yields for an unset or misspelled variable — makes every
+ * `elapsed >= window` comparison `false`, so recorded evidence NEVER ages
+ * out and one publish at boot pins `reachability()` at its outcome
+ * indefinitely: the fail-open shape X51 was filed for. **`0` or negative**
+ * discards every outcome instantly, so `reachability()` always falls
+ * through to the management probe — the pre-M95b behaviour, i.e. a switch
+ * that asks for the defect back, which is why the option deliberately has
+ * no disable arm.
+ *
+ * @param value - The configured window, or `undefined` for the default
+ * @returns The validated window in ms
+ * @throws {Error} If the value is not a finite integer of at least 1 ms
+ */
+function resolveEvidenceMs(value: number | undefined): number {
+  if (value === undefined) {
+    return PROBE_TTL_MS;
+  }
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(
+      `ServiceBusBroker: dataPlaneEvidenceMs must be a positive integer of ` +
+        `milliseconds, received ${String(value)}. Omit the option for the ` +
+        `default ${PROBE_TTL_MS}ms; there is no value that disables the ` +
+        `data-plane evidence window.`,
+    );
+  }
+  return value;
+}
+
+function isDataPlaneNetworkFailure(error: unknown): boolean {
+  if (typeof error === 'object' && error !== null) {
+    const statusCode = (error as { statusCode?: unknown }).statusCode;
+    return typeof statusCode !== 'number';
+  }
+  return true;
 }
 
 /**
@@ -553,6 +641,20 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    * were publishing fine.
    */
   #probe: (() => Promise<boolean | undefined>) | null = null;
+  /**
+   * How long a recorded data-plane outcome stays authoritative (M95b).
+   * Defaults to {@linkcode PROBE_TTL_MS} so the evidence window and the
+   * management probe age together.
+   */
+  #evidenceMs: number;
+  /**
+   * The most recent data-plane outcome (M95b): `at` is a monotonic
+   * `runtime.hrtime()` reading and `reachable` is whether the last real
+   * `transport.send` completed. `null` — no recent evidence — is the state
+   * `reachability()` falls through to the management probe on. Private
+   * state, read only by this broker's own `reachability()`.
+   */
+  #evidence: { at: number; reachable: boolean } | null = null;
 
   constructor(
     runtime: IRuntimeServices,
@@ -568,6 +670,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     this.#replyTopic = options?.replyTopic ?? DEFAULT_REPLY_TOPIC;
     this.#logger = options?.logger;
     this.#retryOptions = options?.retryOptions;
+    this.#evidenceMs = resolveEvidenceMs(options?.dataPlaneEvidenceMs);
     this.#subscriptions = new Map();
     this.#rr = new RequestReplyCore({
       publish: (topic, message, headers) => this.publishWithHeaders(topic, message, headers ?? {}),
@@ -701,6 +804,9 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       // real I/O against the closed client. Post-close `reachability()`
       // answers `undefined` — not known down (M70c), never stale `true`.
       this.#probe = null;
+      // The evidence window shares the probe's fate (M95b): a surviving
+      // outcome would serve stale `true` for a client that no longer exists.
+      this.#evidence = null;
     }
     this.#ready = false;
   }
@@ -710,26 +816,67 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Tri-state backend reachability (M70c, bounded in M90b).
+   * Tri-state backend reachability (M70c, bounded in M90b; evidence-first
+   * in M95b).
    *
-   * The Azure SDK owns streaming-pull reconnection, so the broker issues no
-   * reconnect loop of its own; the probe delegates to the transport's
-   * `isHealthy?()` — the real adapter reads the namespace through the
-   * administration client — through the broker's own cached probe (5 s
-   * TTL, 2 s bound), so repeated health polls cost at most one round trip
-   * per TTL and a hung transport cannot hold a caller past the bound.
-   * `true`/`false` from the probe, `undefined` when the transport omits the
-   * member (a minimal fake) — the indicator then reports
-   * `reachable: 'unknown'`.
+   * The evidence window is consulted FIRST: a recent data-plane outcome —
+   * the success or network-layer failure of a real publish, recorded in
+   * {@linkcode ServiceBusBroker.publishWithHeaders} at zero extra round
+   * trips — answers directly, because the thing reported on should be the
+   * plane the application actually uses. With no recent evidence the
+   * management probe answers exactly as it did before M95b: the probe
+   * delegates to the transport's `isHealthy?()` — the real adapter reads
+   * the namespace through the administration client — through the broker's
+   * own cached probe (5 s TTL, 2 s bound), so repeated health polls cost
+   * at most one round trip per TTL and a hung transport cannot hold a
+   * caller past the bound. `true`/`false` from the evidence or the probe,
+   * `undefined` when neither has an answer (a minimal fake, an idle
+   * broker) — the indicator then reports `reachable: 'unknown'`.
    *
    * @returns `true`/`false`/`undefined` as described
    * @since 0.1.0
    */
   async reachability(): Promise<boolean | undefined> {
+    const evidence = this.#dataPlaneEvidence();
+    if (evidence !== undefined) {
+      return evidence;
+    }
     if (this.#probe === null) {
       return undefined;
     }
     return await this.#probe();
+  }
+
+  /**
+   * Reads the data-plane evidence window (M95b), answering `undefined` —
+   * no recent evidence — whenever the caller should fall through to the
+   * management probe instead. Evidence older than
+   * {@linkcode ServiceBusOptions.dataPlaneEvidenceMs} is discarded, so an
+   * idle broker's answer ages back to the probe's.
+   */
+  #dataPlaneEvidence(): boolean | undefined {
+    const recorded = this.#evidence;
+    if (recorded === null) {
+      return undefined;
+    }
+    // Strictly-within-the-window is authoritative — the same half-open
+    // interval the management probe's TTL uses, so the two signals age on
+    // one convention rather than disagreeing at the exact boundary.
+    if (this.#runtime.hrtime() - recorded.at >= this.#evidenceMs) {
+      this.#evidence = null;
+      return undefined;
+    }
+    return recorded.reachable;
+  }
+
+  /**
+   * Records a data-plane outcome (M95b): the success or network-layer
+   * failure of a real publish. Called only for outcomes of
+   * `transport.send` itself — never for a publish that failed before
+   * reaching the transport.
+   */
+  #recordDataPlaneOutcome(reachable: boolean): void {
+    this.#evidence = { at: this.#runtime.hrtime(), reachable };
   }
 
   /**
@@ -758,7 +905,18 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       throw new Error('ServiceBusBroker is not connected');
     }
     const serialized = this.#serializer.serialize(message);
-    await this.#transport.send(topic, serialized, headers);
+    try {
+      await this.#transport.send(topic, serialized, headers);
+    } catch (error) {
+      // M95b: narrowed by ORIGIN — the guard and the serializer above threw
+      // before the transport was reached and say nothing about the network;
+      // only a send rejection is offered to the evidence predicate.
+      if (isDataPlaneNetworkFailure(error)) {
+        this.#recordDataPlaneOutcome(false);
+      }
+      throw error;
+    }
+    this.#recordDataPlaneOutcome(true);
   }
 
   async subscribe<T>(

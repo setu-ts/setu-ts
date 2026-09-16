@@ -366,6 +366,32 @@ export interface ITransactionIsolationSupport {
  */
 export interface IDatabaseAdapter extends IOrmAdapter, Partial<ITransactionIsolationSupport> {
   /**
+   * Reports whether the backend answers right now (optional, M95b).
+   *
+   * `isReady()` — the lifecycle member this interface inherits — reports
+   * that `connect()` once succeeded; it says nothing about the backend now,
+   * and a probe built on it reports `up` for a database that has been dead
+   * for minutes (X51-1). This member is the liveness read the lifecycle
+   * read was mistaken for. `true` — the backend answered; `false` — it was
+   * contacted and refused or failed; a rejection reports as "could not
+   * determine". An adapter that cannot probe honestly OMITS the member: a
+   * probe that was never written is evidence of nothing, and the
+   * `DatabaseService` reports its absence rather than inventing an answer.
+   * Optional on the `fs?`/`workers?`/`dns?` precedent, so an out-of-repo
+   * adapter without it is unaffected.
+   *
+   * An implementation SHOULD answer `false` once it has been disconnected,
+   * rather than reporting on a connection it no longer holds. The health
+   * indicator gates this probe behind the lifecycle read as well, so a
+   * probe that forgets to is not a readiness defect — but this member is
+   * also read directly through `DatabaseService.reachability()`, where
+   * nothing else is watching.
+   *
+   * @returns `true` when the backend answered, `false` when it did not
+   */
+  isHealthy?(): Promise<boolean>;
+
+  /**
    * Open a non-transactional data source for the named entity.
    *
    * @param entity - Entity name (for example `'User'`)

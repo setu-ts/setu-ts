@@ -342,6 +342,25 @@ export class PrismaAdapter implements IDatabaseAdapter {
     };
   }
 
+  /**
+   * Liveness probe (M95b §3.5): one `SELECT 1` through the injected
+   * client's `$queryRawUnsafe` — the same funnel `rawQuery` uses, so the
+   * probe cannot diverge from the query path. `false` for an adapter that
+   * never connected; `false` when the round trip fails or is refused, so
+   * an outage reads as a fact.
+   */
+  async isHealthy(): Promise<boolean> {
+    if (!this.isReady()) {
+      return false;
+    }
+    try {
+      await this._client!.$queryRawUnsafe('SELECT 1');
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** @inheritdoc */
   rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {
     if (!this.isReady()) {

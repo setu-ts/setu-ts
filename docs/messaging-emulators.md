@@ -75,8 +75,26 @@ until docker logs he-sb 2>&1 | grep -q 'Application started'; do sleep 2; done
 SERVICEBUS_CONNECTION_STRING='Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' \
   deno test --allow-all packages/messaging-plugin/test/e2e/service-bus-emulator.test.ts
 
+SERVICEBUS_CONNECTION_STRING='Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' \
+  deno test --allow-all packages/messaging-plugin/test/integration/service-bus-outage-real.test.ts
+
 docker rm -f he-sb he-sqledge && docker network rm he-sbnet
 ```
+
+The **outage suite** (M95b §3.3) drives the broker through a real `docker
+stop`/`start` and asserts
+the 2×2 the `v0.6.0` health claim turned on: `up` while running, `down` while stopped, `up` again
+after restart — and that the two states get DIFFERENT answers. Its publishes are load-bearing, not
+setup: against this emulator the management probe resolves `unknown` in both states, so the
+data-plane evidence window is the only signal, and each health answer is preceded by the publish
+that populates it. Unlike the e2e suite, this one restarts `he-sb` itself and leaves it running, so
+**it is repeatable** — measured, two consecutive runs against a 21-minute-old container both pass
+with no restart between them. That is the difference from the e2e suite below, whose RPC step is
+what fails on a second run against a persistent emulator. This suite is deliberately **local-only**
+for the two reasons that do apply: the image is large, and the emulator has no administration
+endpoint, so the management probe can never succeed there (see the health-indicator note below) —
+and `test/apps-gate.test.ts` asserts that absence so it reads as a recorded decision rather than a
+gap.
 
 **What it proves that a fake cannot:** that `createReceiver(topicName, subscriptionName)` with
 `autoCompleteMessages: false` really hands settlement to the receiver, that `completeMessage` and
@@ -111,13 +129,21 @@ the same configuration answered `down` and `/ready` returned `503` while `publis
 namespace that positively answers unhealthy — a `404` for one that has been deleted, say — is still
 reported `down`, because that is an answer rather than a silence.
 
-**Against the emulator specifically, that means the indicator cannot tell a running broker from a
-stopped one.** Measured: with the container stopped it also reports `up`/`unknown` and `/ready`
-stays `200`, because there is no administration endpoint to answer either way — only the publish
-itself fails. This is a property of the emulator, not of a real namespace, where a `Manage`-capable
-credential succeeds and a send/listen-only one is refused with a `401` that counts as reachable. Do
-not use the emulator to exercise health transitions; use it for the data plane, which is what it
-implements. A publish against a stopped broker also holds the request for the SDK's full retry
+**Against the emulator specifically, the MANAGEMENT probe cannot tell a running broker from a
+stopped one.** Measured: with the container stopped it also reports `up`/`unknown`, because there is
+no administration endpoint to answer either way. This is a property of the emulator, not of a real
+namespace, where a `Manage`-capable credential succeeds and a send/listen-only one is refused with a
+`401` that counts as reachable.
+
+**Since M95b the indicator does discriminate here, and that is what the outage suite asserts.** The
+broker records the outcome of every real publish — the data plane — in an evidence window
+`reachability()` consults before the management probe, so a stopped emulator resolves `false` and
+`/ready` answers `503`. This paragraph previously ended "do not use the emulator to exercise health
+transitions"; that was true of the management probe alone and is now false of the indicator, so the
+guidance is: **drive health transitions through real publishes, never by polling `/health` alone.**
+A poll-only test learns nothing here, because with an empty evidence window every answer still falls
+through to the management probe — which is exactly why the outage suite's publishes are
+load-bearing. A publish against a stopped broker also holds the request for the SDK's full retry
 budget — shorten it with `retryOptions` (X28-6) if a test needs to fail fast.
 
 ## AWS SQS

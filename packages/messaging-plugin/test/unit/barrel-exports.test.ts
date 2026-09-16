@@ -99,7 +99,11 @@ describe('barrel exports', () => {
     // Assigning to _ prevents unused-variable warnings while proving
     // the types are part of the module's exported surface.
     const _pubSubOpts: PubSubOptions = {};
-    const _serviceBusOpts: ServiceBusOptions = {};
+    // M95b: `dataPlaneEvidenceMs` is pinned BY NAME on the barrel-exported
+    // options type — a type pinned by nothing can be dropped with the whole
+    // suite still green (the M70m lesson), and this member changes a
+    // published health contract.
+    const _serviceBusOpts: ServiceBusOptions = { dataPlaneEvidenceMs: 5_000 };
     // M90b: the retry budget type is nameable from the barrel — a production
     // `service-bus` arm needs it to configure `retryOptions`.
     const _serviceBusRetry: ServiceBusRetryOptions = { maxRetries: 0 };

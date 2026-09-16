@@ -20,7 +20,8 @@ import { drizzle } from 'npm:drizzle-orm@0.45.2/pg-proxy';
 import { pgTable, primaryKey, text } from 'npm:drizzle-orm@0.45.2/pg-core';
 import type { DrizzleAdapterOptions } from '../../src/interfaces/index.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
-import { createDrizzleDatabase } from '../../src/index.ts';
+import { createDrizzleDatabase, DatabaseService } from '../../src/index.ts';
+import { drizzle as sqliteDrizzle } from 'npm:drizzle-orm@0.45.2/sqlite-proxy';
 import { encodeCursor, keysetPredicate } from '@setu-ts/common';
 
 const tenants = pgTable('tenants', {
@@ -746,5 +747,83 @@ describe('DrizzleAdapter findPage — projection stripping', () => {
     for (const row of pageResult.rows) {
       expect(Object.keys(row).sort()).toEqual(['created_at']);
     }
+  });
+});
+
+describe('DrizzleAdapter reachability probe (M95b §3.5)', () => {
+  /** Builds an adapter over a pg-proxy instance whose callback the test owns. */
+  function makeProbeAdapter(respond: (sql: string) => Promise<{ rows: unknown[] }>) {
+    const seen: string[] = [];
+    const database = drizzle((sql) => {
+      seen.push(sql);
+      return respond(sql);
+    });
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(
+        database,
+        (instance, work) => instance.transaction(work),
+      ),
+      drizzleTables: { Tenant: tenants },
+    });
+    return { adapter, seen };
+  }
+
+  it('answers true through a real SELECT 1 round trip, on the same funnel as rawQuery', async () => {
+    // The probe the release notes advertise as shipped. It routes through
+    // the adapter's own `rawQuery`, so it cannot diverge from the query path
+    // — asserted on the SQL the real generator emits, not on a call count.
+    const { adapter, seen } = makeProbeAdapter(() => Promise.resolve({ rows: [] }));
+    await adapter.connect();
+
+    expect(typeof adapter.isHealthy).toBe('function');
+    expect(await adapter.isHealthy!()).toBe(true);
+    expect(seen).toContain('SELECT 1');
+  });
+
+  it('answers false when the round trip is refused, so an outage reads as a fact', async () => {
+    const { adapter } = makeProbeAdapter(() => Promise.reject(new Error('ECONNREFUSED')));
+    await adapter.connect();
+    expect(await adapter.isHealthy!()).toBe(false);
+  });
+
+  it('answers false once disconnected, rather than reporting on a connection it dropped', async () => {
+    const { adapter } = makeProbeAdapter(() => Promise.resolve({ rows: [] }));
+    await adapter.connect();
+    await adapter.disconnect();
+    // `rawQuery` refuses a disconnected adapter, and the probe reports that
+    // as `false` rather than letting the throw escape.
+    expect(await adapter.isHealthy!()).toBe(false);
+  });
+
+  it('OMITS the member for an execute-less instance, rather than shipping a probe that can only fail', async () => {
+    // A SQLite-Proxy/libsql-shaped instance exposes no `execute()`, and the
+    // adapter already refuses `rawQuery` for it. The member is left absent so
+    // `DatabaseService.hasReachabilityProbe` is `false` and the indicator
+    // takes the deliberate no-change row (`up`, `reachable` omitted) instead
+    // of `degraded`.
+    const database = sqliteDrizzle(() => Promise.resolve({ rows: [] }));
+    // The SQLite drivers expose no `execute`, so this instance does not
+    // satisfy `DrizzleInstance` — the cast is how the existing suites reach
+    // this shape too. The bridge is never invoked here; only `connect()` and
+    // the probe's absence are under test.
+    const configured = createDrizzleDatabase(
+      database as unknown as Parameters<typeof createDrizzleDatabase>[0],
+      ((instance: { transaction: (work: unknown) => unknown }, work: unknown) =>
+        instance.transaction(work)) as unknown as Parameters<typeof createDrizzleDatabase>[1],
+    );
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: configured,
+      drizzleTables: { Tenant: tenants },
+    });
+    await adapter.connect();
+
+    expect(adapter.isHealthy).toBeUndefined();
+    const service = new DatabaseService(
+      adapter,
+      (entity) => adapter.createDataSource(entity),
+      'drizzle',
+    );
+    expect(service.hasReachabilityProbe).toBe(false);
+    expect(await service.reachability()).toBeUndefined();
   });
 });

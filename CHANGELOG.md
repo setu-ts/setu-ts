@@ -34,6 +34,49 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **BREAKING (for out-of-repo adapter implementors) — `@setu-ts/common` +
+  `@setu-ts/database-plugin`: `IDatabaseAdapter` gains the optional `isHealthy?(): Promise<boolean>`
+  liveness member, and the `database` indicator stops reporting `up` for a backend it cannot vouch
+  for.** X51-1 (High): the indicator read the lifecycle `adapter.isReady()`, so a stopped MongoDB
+  reported `up`, `/ready` answered `200`, and a rolling deploy rolled forward over a pod answering
+  `500` to every request that touches data. The payload now carries `reachable` when the adapter
+  probes: `true`/`up`, `false`/`down`, and a probe that exists but does not answer inside the
+  2-second bound reports `'unknown'`/`degraded` — never `up`. An adapter with NO probe is the
+  deliberate no-change row: `reachable` omitted, `up`, `/ready` 200 — mapping a missing probe to
+  `degraded` would fail `/ready` for every healthy Cosmos/Bigtable/DynamoDB application on upgrade.
+  The lifecycle read still gates the probe, so an adapter whose own `isHealthy?()` does not
+  re-derive `isReady()` cannot report `up` for a connection it has already dropped; `MemoryAdapter`
+  reports its own lifecycle rather than an unconditional `true` for the same reason. Shipped probes:
+  MongoDB (`db.command({ ping: 1 })` via the new optional `IMongoDatabase.command?` facade member),
+  Prisma and Drizzle (`SELECT 1`; Drizzle omits it for instances without `execute()`), memory
+  (`true`). `DatabaseService` exposes `hasReachabilityProbe` and a bounded `reachability()` (the
+  `IMessageBroker.reachability()` twin); `isHealthy()` keeps its published lifecycle signature.
+  **Migration:** none for callers; a hand-written adapter that can probe should declare
+  `isHealthy?()`, one that cannot should omit it. Verified against a real MongoDB container through
+  a `docker stop`/`start` outage gate.
+- **`@setu-ts/messaging-plugin`: broker reachability reads the plane the application uses, and every
+  arm's probe is bounded.** The Service Bus indicator said `up` while every publish threw: the
+  management probe resolves `unknown` against an unreachable management plane in both states, and
+  `unknown` maps to `up`. The broker now records the outcome of real publishes — the DATA plane — in
+  an evidence window that `reachability()` consults first, narrowed twice (only `transport.send`
+  rejections count, and only status-less ones: a deleted topic or quota error is an application
+  fact, never an outage); `ServiceBusOptions.dataPlaneEvidenceMs` (default `5000`) bounds the
+  window, and is **refused at construction** if it is not a positive integer — `NaN` (what
+  `Number(env.X)` yields for an unset variable) would otherwise freeze the window so recorded
+  evidence never ages out, and `0` would disable it, reinstating the defect. The RabbitMQ probe is a
+  real round trip (a throwaway channel open/close) replacing the fault-flag read a HUNG broker never
+  trips, **cached 5 seconds and bounded 2 seconds inside the broker** so every caller shares one
+  round trip per TTL — `realtime-backplane-plugin`'s `'messaging'` transport calls
+  `broker.isHealthy()` directly and keeps no cache of its own, so an uncached probe there meant one
+  AMQP channel open per health poll and a paused broker left that indicator to hit `HealthPlugin`'s
+  deadline and report `down`. `RabbitMqBroker.reachability()` now resolves `boolean | undefined`
+  (the committed `IMessageBroker` tri-state) and its `isHealthy()` reports "not known down" for an
+  unanswerable probe, matching `ServiceBusBroker` exactly. The indicator bounds ALL seven arms'
+  probes (5-second TTL, 2-second bound): a probe that cannot answer now settles
+  `reachable: 'unknown'` instead of holding `/health` open forever. Residual posture, documented
+  rather than implied: an idle Service Bus deployment with an unreachable management plane stays
+  `reachable: 'unknown'` until its first publish. Verified against the real Service Bus emulator
+  (`docker stop`/`start` 2×2 gate) and real RabbitMQ 4 (`docker pause` hung arm).
 - **The Setu-TS website now identifies each page to social and search crawlers.** The shared layout
   publishes the page's canonical URL as `og:url` and SoftwareApplication JSON-LD describing the
   framework, its supported runtimes, and its free offering.
@@ -142,6 +185,17 @@ All notable changes to this project are documented here. The format follows
   One shared `fenceExtension(lang)` now decides, so the guide and package-README compilers cannot
   disagree. Verified to discriminate: breaking the props bag inside a JSX example fails the gate
   with `TS1241`, which is `@Render` rejecting a handler whose return does not match its component.
+- **`messaging-plugin` — the `v0.6.0` release notes claimed a safety net that does not exist; both
+  copies of the claim are corrected in place.** The `0.6.0` section above (and the probe's own
+  JSDoc) said a namespace that is genuinely gone "still reports `down` regardless: the data client
+  stops being ready, and the indicator checks `isReady()` before it consults the probe." Measured
+  against the emulator `docs/messaging-emulators.md` documents: `isReady()` is LIFECYCLE state — set
+  when `connect()` succeeds, cleared only by `disconnect()` — with no liveness input, so a broker
+  dead for minutes answers `isReady() === true` in 0 ms; nothing gated the probe, and a stopped
+  namespace reported `up` with `/ready` answering `200` while every publish threw. This milestone
+  ships what actually catches a dead data plane — the broker records recent data-plane outcomes and
+  `reachability()` consults that evidence before the management probe (M95b) — and the false
+  sentence is struck from the published section and the source.
 
 ## [0.6.0] — 2026-09-13
 
@@ -407,9 +461,13 @@ All notable changes to this project are documented here. The format follows
   at all, and a management-plane status that establishes nothing — a `429`, which Azure documents as
   temporary throttling or a conflicting management operation, or a `5xx`. Those last two previously
   answered `down`, which is the same defect as the network-failure case reached through a status
-  code instead of a socket error. A namespace that is genuinely gone still reports `down`
-  regardless: the data client stops being ready, and the indicator checks `isReady()` before it
-  consults the probe. `IServiceBusTransport.isHealthy?` widens to `Promise<boolean | undefined>`; an
+  code instead of a socket error. (This entry originally continued: "A namespace that is genuinely
+  gone still reports `down` regardless: the data client stops being ready, and the indicator checks
+  `isReady()` before it consults the probe." That sentence was measurably false and is corrected in
+  place: `isReady()` is LIFECYCLE state — set when `connect()` succeeds, cleared only by
+  `disconnect()` — with no liveness input, so it answers `true` in 0 ms for a broker dead for
+  minutes. A genuinely-gone namespace is caught by the data-plane evidence window (M95b), not by
+  `isReady()`.) `IServiceBusTransport.isHealthy?` widens to `Promise<boolean | undefined>`; an
   implementation resolving a plain `boolean` satisfies it unchanged.
 
 - **`audit-plugin`** — the `audit` health indicator reported `storage.isReady()` alone, which is a

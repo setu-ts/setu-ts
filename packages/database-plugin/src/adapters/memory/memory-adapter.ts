@@ -255,6 +255,24 @@ export class MemoryAdapter implements IDatabaseAdapter {
     return this._connected && !this._closed;
   }
 
+  /**
+   * Liveness probe (M95b §3.5): the process IS the backend, so the store is
+   * reachable exactly while this adapter is connected. Honest, not a special
+   * case — without it the indicator would omit `reachable` for the one
+   * backend it can actually vouch for.
+   *
+   * It reports {@linkcode MemoryAdapter.isReady} rather than an
+   * unconditional `true` (M95b review): "is the backend reachable" and "am I
+   * connected to it" are the same question for an in-process store, and a
+   * probe that answered `true` for a disconnected adapter would model, for
+   * every third-party implementor reading this as the reference, the one
+   * pattern that makes a liveness probe lie.
+   */
+  // deno-lint-ignore require-await -- reads synchronous lifecycle state
+  async isHealthy(): Promise<boolean> {
+    return this.isReady();
+  }
+
   /** @inheritdoc */
   beginTransaction(options?: TransactionOptions): Promise<IAdapterTransaction> {
     if (!this.isReady()) {
