@@ -259,6 +259,7 @@ export function UsersPlugin(): IPlugin {
     name: 'users',
     version: '1.0.0',
     dependencies: [CAPABILITIES.RUNTIME, CAPABILITIES.DATABASE],
+    provides: [USER_SERVICE],
     async register(ctx) {
       // Register services
       ctx.services.register(USER_SERVICE, new UserService());
@@ -765,6 +766,14 @@ describe('UsersController', () => {
   beforeEach(async () => {
     const module = await Test.createTestingModule({
       controllers: [UsersController],
+      providers: [{
+        provide: UserService,
+        useValue: {
+          findAll: () => [],
+          findById: (_id: string) => null,
+          create: (_dto: CreateUserDto) => ({}),
+        },
+      }],
     }).compile();
 
     controller = module.get<UsersController>(UsersController);
