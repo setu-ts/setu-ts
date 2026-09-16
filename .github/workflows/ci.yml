@@ -9,7 +9,28 @@ permissions:
   contents: read
 
 jobs:
+  # This is deliberately the only job a fork PR can run. It does not check out contributor code,
+  # start a service, or receive secrets. A failure prevents GitHub from treating the skipped,
+  # resource-intensive jobs below as successful required checks.
+  fork-contribution-policy:
+    name: Fork contribution policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require validation from a repository branch
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+        env:
+          BASE_REPOSITORY: ${{ github.repository }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "$HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]; then
+            echo "Fork pull requests are proposals only. After accepting a contribution, a maintainer must reproduce it in a repository branch, where the full validation suite runs."
+            exit 1
+          fi
+
+  # Fork PRs remain visible for maintainer triage but do not start repository validation jobs or
+  # service containers. An accepted contribution is validated from a trusted repository branch.
   deno:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Format / Lint / Check / Test (Deno)
     runs-on: ubuntu-latest
     env:
@@ -290,6 +311,7 @@ jobs:
         run: deno task test:coverage
 
   boundary-compatibility:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Boundary compatibility matrix
     runs-on: ubuntu-latest
     steps:
@@ -316,6 +338,7 @@ jobs:
   # naming the wrong namespace, and a Service selector matching no pod (which
   # `kubectl apply` accepts without complaint).
   deploy:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Docker / Kubernetes
     runs-on: ubuntu-latest
     steps:
@@ -361,6 +384,7 @@ jobs:
           KEEP_CLUSTER: '1'
 
   publish-dry-run:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: JSR publish dry-run
     runs-on: ubuntu-latest
     steps:
@@ -414,6 +438,7 @@ jobs:
   # publish that would fix it (the M34b drift-gate lesson). The consequence is
   # deliberate and worth stating — these jobs gate the last release, not HEAD.
   node-compat:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Node compatibility
     runs-on: ubuntu-latest
     defaults:
@@ -435,6 +460,7 @@ jobs:
         run: npm run test:node
 
   bun-compat:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Bun compatibility
     runs-on: ubuntu-latest
     defaults:
@@ -457,6 +483,7 @@ jobs:
   # proves that a fresh Deno consumer can resolve and import the JSR package
   # added to the compatibility suite, including its transitive `jsr:` graph.
   deno-view-plugin-resolution:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Deno view-plugin resolution
     runs-on: ubuntu-latest
     steps:
@@ -486,6 +513,7 @@ jobs:
           '
 
   audit:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     name: Dependency vulnerability scan
     runs-on: ubuntu-latest
     steps:
