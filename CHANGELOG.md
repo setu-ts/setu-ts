@@ -13,17 +13,16 @@ All notable changes to this project are documented here. The format follows
   did not escape — a pipe ends a table cell even inside backticks, and GFM then DROPS the cells past
   the header's width. `unescaped-pipe` catches a span still holding a raw pipe, i.e. at the moment
   it is written; `unterminated-span` catches a span left open, which is what the damage looks like
-  afterwards once the dropped cells have taken the closing backtick with them. Both real instances
+  afterwards, once the dropped cells have taken the closing backtick with them. Both real instances
   were found by a reviewer and a hand-written sweep rather than by any gate: `PUBLIC_API.md`'s
   `RenderDecorator` row had been rendering with its entire return union missing since M92, and
-  `packages/static-plugin/README.md` wrote a default value as `` `'/`'` ``. The checker walks spans
-  by matching the opening backtick run's length rather than counting backticks — counting is the
-  obvious implementation and is unsound, since
-  `has five — and considers a row only when its block
-  carries a delimiter row, without which a`deno
-  fmt`-wrapped prose line beginning
-  with`|`is a day-one false positive (`CHANGELOG.md:2491` is
-  exactly that).
+  `packages/static-plugin/README.md` wrote a default value with its backticks transposed. The
+  checker walks spans by matching the opening backtick run's length rather than counting backticks,
+  because counting is unsound — a double-backtick span wrapping a literal backtick holds an odd
+  number of them and would be misreported. A row counts only when its block carries a delimiter row,
+  without which the `SseMessage.data` entry further down this file is a day-one false positive:
+  `deno fmt` wrapped its inline union type mid-line, leaving a continuation line that begins with a
+  pipe and is not a table.
 
 - **Public contribution intake is now maintainer-triaged and protected from untrusted automation.**
   GitHub Discussions, focused issue forms, a contribution guide, code of conduct, security policy,

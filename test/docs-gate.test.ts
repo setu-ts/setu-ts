@@ -201,9 +201,11 @@ describe('documentation gate — malformed table rows', () => {
 
   it('ignores a wrapped prose line that merely begins with a pipe', () => {
     // `deno fmt` wraps a long paragraph mid-line, so an inline union type can
-    // leave a `|` at the start of a continuation line. `CHANGELOG.md:2491` is
-    // exactly this. Requiring a delimiter row is what keeps it out — without
-    // that requirement this is a day-one false positive on correct prose.
+    // leave a `|` at the start of a continuation line. `CHANGELOG.md`'s
+    // `SseMessage.data` entry is exactly this. Requiring a delimiter row is what
+    // keeps it out — without that requirement this is a day-one false positive
+    // on correct prose, which is why the case is pinned here rather than left to
+    // the corpus, where a later edit could remove the only live instance.
     expectReasons(
       [
         '- **`SseMessage.data` accepts any JSON-serializable value**:',

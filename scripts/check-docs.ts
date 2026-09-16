@@ -449,8 +449,11 @@ function classifyRow(text: string): MalformedRowReason | null {
  * A row counts only when its block actually contains a delimiter row, and that
  * is not pedantry: `deno fmt` wraps a long paragraph mid-line, so an inline
  * union such as `` `string | number | boolean | null` `` can leave a `|` at the
- * start of a continuation line. `CHANGELOG.md:2491` is exactly that, and is not
- * a table.
+ * start of a continuation line. `CHANGELOG.md`'s `SseMessage.data` entry is
+ * exactly that, and is not a table. (Cited by content rather than by line: this
+ * file grows at the top, so a line number into it rots on the next release —
+ * these citations were already stale once, by the CHANGELOG entry announcing
+ * this very check.)
  *
  * Backslash escapes are skipped, so `` \` `` and `\|` are inert, and spans are
  * matched by run length rather than counted — see {@linkcode classifyRow} for
