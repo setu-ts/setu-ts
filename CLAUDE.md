@@ -4910,11 +4910,35 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   round-trip count with 3-vs-2 AND leaves the hung test **never settling**, which is the defect
   itself) — complete (PR #319)
 
-- **Next milestone** — **M95c** (`packages/common` + `packages/database-plugin` +
-  `packages/kernel` + `packages/session-plugin` + `packages/static-plugin` — a contract its own
-  implementation does not honour: five documented contracts the code disagrees with, two of them at
-  the boundary seam. The Mongo facade drift X47-1 edits `mongo-client-types.ts`, which M95b's
-  `command?` addition also touched — M95c must rebase on this branch rather than merge blind.)
+- **Milestone 95c** (`packages/common` + `packages/database-plugin` + `packages/kernel` +
+  `packages/session-plugin` + `packages/static-plugin` — a contract its own implementation does not
+  honour: five documented contracts the code disagreed with, two at the boundary seam. **Mongo:**
+  the injection seam admits the real driver — `connect(): Promise<unknown>` plus two reconciliations
+  the compile-time fixture itself caught on its first run (`startTransaction`'s `void` return and
+  `TransactionOptions` parameter; the `Sort` union behind `sort?`) — the fixture being a
+  static-import, no-cast assignment of a real `MongoClient` reached by `deno task check`, and the
+  seam test's laundering cast removed with it. **Kernel:** `inject()` carries the body shapes a
+  request actually has — bytes verbatim with no content-type default, `URLSearchParams`
+  urlencoded-defaulted through its own `toString()`, JSON only for a plain object — and refuses
+  every other shape BY NAME (the runtime half of what the type union cannot enforce on a JavaScript
+  caller), where the old path turned a `Uint8Array` into `{"0":97,…}` and everything else into `{}`
+  while answering 200. **Session:** `csrfFormMiddleware` publishes its resolved config into
+  `ctx.state` under the exported `CSRF_CONFIG_STATE_KEY` BEFORE its short-circuits (the GET that
+  renders the form is an ignored method) and `csrfTokenField` reads it — explicit argument >
+  published config > `'_csrf'`, the no-middleware fallback byte-identical — so the README's own
+  recipe stops 403-ing every post under a custom `fieldName`. **Common:** the multipart parser
+  admits the unquoted, case-insensitive Content-Disposition parameter form (R9 semantics), drops a
+  part with no usable name, keeps `name=""`, and the `unknown` sentinel is removed outright; the
+  §3.4 normative table is asserted against LITERALS because R18 measured the runtimes disagreeing on
+  three of six rows. **Static:** the `cacheControl` callback parameter is renamed `requestPath` and
+  all three doc sites corrected to the deliberate full-path-including-prefix behaviour (C3 decided
+  for the docs side, §9.4), the README's dead `path === '/'` example replaced) — complete (PR
+  pending)
+- **Next milestone** — **M95d** (`docs/` + `packages/common` + `packages/view-plugin` + `scripts/` —
+  documentation that survives contact: the M90h precedent, four findings where the code is correct
+  and a reader following the documentation still ends up wrong. The only letter carrying gate work —
+  a URL-scheme payload for `check-example-behaviour.ts` and a `@since`-vs-shipping-version check.
+  Plan: `plans/milestone-95d-documentation-survives-contact.md`.)
 
 - **Then M95c and M95d** — the rest of the `v0.6.0` closeout, which now covers **two** runs against
   that version: the regression run (5 findings) and **Part 11, X46–X51** (8 more), the exercise

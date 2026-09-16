@@ -87,15 +87,19 @@ StaticPlugin({
 StaticPlugin({
   root: './public',
   urlPrefix: '/assets',
-  cacheControl: (path) =>
-    path === '/' || path.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000',
+  cacheControl: (requestPath) =>
+    requestPath.endsWith('.html') ? 'no-cache' : 'public, max-age=31536000',
 });
 ```
 
-**The callback's `path` argument is the leading-slash root-relative request path** —
-`/assets/app-A9acsx54.js` for a file under the prefix above, and the literal `'/'` when the request
-equals the prefix root. It is never the absolute filesystem path and never the `.br`/`.gz` sidecar
-path, so a hashed asset keeps its policy whichever encoding is negotiated.
+**The callback's `requestPath` argument is the full leading-slash request path, INCLUDING
+`urlPrefix`** — `/assets/app-A9acsx54.js` for a file under the prefix above, and
+`/assets/index.html` (the resolved index, never the literal `'/'`) for a directory request against
+it. Under a root mount the prefix is empty, so the whole request path is the story:
+`/app-A9acsx54.js` and `/index.html`. It is never the prefix-stripped server path, never the
+absolute filesystem path, and never the `.br`/`.gz` sidecar path, so a hashed asset keeps its policy
+whichever encoding is negotiated. The prefix inclusion is deliberate: a cache policy is about the
+URL the client caches under, so the served path is the input.
 
 ## SPA Fallback
 

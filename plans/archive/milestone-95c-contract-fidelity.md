@@ -198,6 +198,18 @@ between our multipart parser and the platform, of which the ROADMAP recorded one
 
 ### 3.8 The Mongo façade widens its return; the fixture is a TYPE assertion
 
+> **Correction at implementation time.** The fixture did its job on its first run: `connect()` was
+> only the FIRST divergence, and the real driver still failed `IMongoClient` on two more members.
+> `ClientSession.startTransaction` is `startTransaction(options?: TransactionOptions): void` — whose
+> option interface is not assignable to `Record<string, unknown>` and whose `void` return is not
+> assignable to `Promise<void>` — and the real `FindOptions.sort` is the `Sort` union, which admits
+> bare strings and arrays that the façade's `Record<string, unknown>` rejected. Both are reconciled
+> in the same widening spirit: `startTransaction(options?: unknown): unknown` (the adapter passes no
+> arguments and discards the result) and `sort?: unknown` on `find`/`findOne` (the adapter builds a
+> `Record`, which the real driver still accepts). Each carried its reason in JSDoc; each was
+> observed failing in the fixture before the fix and passing after, which is the negative control
+> this section required.
+
 `IMongoClient.connect()` becomes `Promise<unknown>`. That is the narrowest change that admits the
 real driver: the adapter never binds the resolved value (M4), so no call site moves, and widening a
 return is source-compatible for any existing structural implementation — a fake resolving `void`

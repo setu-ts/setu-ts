@@ -500,3 +500,59 @@ describe('getUploadedFile', () => {
     expect(new TextDecoder().decode(uploads?.[0].data ?? new Uint8Array(0))).toBe('DATA');
   });
 });
+
+describe('createUploadMiddleware — the M95c Content-Disposition name forms', () => {
+  it('R7: delivers an upload whose filename was sent UNQUOTED', async () => {
+    const boundary = '----m95cUnquotedFilename';
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; name="file"; filename=a.txt\r\n'),
+      ...encoder.encode('Content-Type: text/plain\r\n\r\n'),
+      ...encoder.encode('hello'),
+      ...encoder.encode(`\r\n--${boundary}--\r\n`),
+    ]);
+    const ctx = makeCtx();
+    ctx.request.headers.set('content-type', `multipart/form-data; boundary=${boundary}`);
+    ctx.request.bytes = () => Promise.resolve(body);
+    const mw = createUploadMiddleware();
+    let nextCalled = false;
+    await mw(ctx, (): Promise<void> => {
+      nextCalled = true;
+      return Promise.resolve();
+    });
+    expect(nextCalled).toBe(true);
+
+    // The accessor an application calls — the OLD parser delivered this part
+    // as a plain text field, so `getUploadedFile()` found nothing for an
+    // upload the client did send.
+    const file = getUploadedFile(ctx as unknown as IRequestContext, 'file');
+    expect(file).toBeDefined();
+    expect(file?.filename).toBe('a.txt');
+    expect(new TextDecoder().decode(file?.data ?? new Uint8Array(0))).toBe('hello');
+  });
+
+  it('R5: a nameless part carrying a filename is delivered under NO field', async () => {
+    const boundary = '----m95cNamelessFile';
+    const encoder = new TextEncoder();
+    const body = new Uint8Array([
+      ...encoder.encode(`--${boundary}\r\n`),
+      ...encoder.encode('Content-Disposition: form-data; filename=ghost.txt\r\n\r\n'),
+      ...encoder.encode('GHOSTDATA'),
+      ...encoder.encode(`\r\n--${boundary}--\r\n`),
+    ]);
+    const ctx = makeCtx();
+    ctx.request.headers.set('content-type', `multipart/form-data; boundary=${boundary}`);
+    ctx.request.bytes = () => Promise.resolve(body);
+    const mw = createUploadMiddleware();
+    await mw(ctx, (): Promise<void> => Promise.resolve());
+
+    // The old sentinel would have delivered this under `unknown`; dropped, no
+    // field exists and the state list is empty.
+    const uploads = ctx.state.get('storage-plugin:uploads') as
+      | import('../../src/interfaces/index.ts').UploadedFile[]
+      | undefined;
+    expect(uploads).toEqual([]);
+    expect(getUploadedFile(ctx as unknown as IRequestContext, 'unknown')).toBeUndefined();
+  });
+});

@@ -47,22 +47,30 @@ export const DEFAULT_MUTABLE = 'public, max-age=0, must-revalidate';
  */
 export type CacheControlOptions = {
   /**
-   * Custom cache control configuration. When a callback, it receives the
-   * leading-slash root-relative request path (e.g. `/assets/app-A9acsx54.js`).
+   * Custom cache control configuration. When a callback, it receives the FULL
+   * leading-slash request path INCLUDING the `urlPrefix`
+   * (e.g. `/assets/app-A9acsx54.js` for `urlPrefix: '/assets'`) — a cache
+   * policy is about the URL the client caches under, so the served path is the
+   * input, never the prefix-stripped server path and never the absolute
+   * filesystem path. A directory request delivers its resolved index path
+   * (`/index.html` under a root mount), so the callback NEVER receives the
+   * literal `'/'`. It is never the `.br`/`.gz` sidecar path either, so a
+   * hashed asset keeps its policy whichever encoding is negotiated.
    */
-  cacheControl?: string | ((relativePath: string) => string) | undefined;
+  cacheControl?: string | ((requestPath: string) => string) | undefined;
 };
 
 /**
  * Resolves the Cache-Control header value for a given path.
  *
- * @param relativePath - The root-relative path, beginning with '/'
+ * @param requestPath - The full leading-slash request path, including
+ *   `urlPrefix`, beginning with '/' — see {@linkcode CacheControlOptions}
  * @param options - Cache control options
  * @returns The Cache-Control header value
  * @since 0.1.0
  */
 export function resolveCacheControl(
-  relativePath: string,
+  requestPath: string,
   options: CacheControlOptions,
 ): string {
   const { cacheControl } = options;
@@ -72,11 +80,11 @@ export function resolveCacheControl(
   }
 
   if (typeof cacheControl === 'function') {
-    return cacheControl(relativePath);
+    return cacheControl(requestPath);
   }
 
   // Default: immutable for hashed assets, mutable otherwise
-  if (IMMUTABLE_PATTERN.test(relativePath)) {
+  if (IMMUTABLE_PATTERN.test(requestPath)) {
     return DEFAULT_IMMUTABLE;
   }
 

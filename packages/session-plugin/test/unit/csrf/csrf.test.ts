@@ -18,6 +18,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { deriveKeyRing } from '../../../src/codec/crypto.ts';
 import {
+  CSRF_CONFIG_STATE_KEY,
   CSRF_SESSION_KEY,
   csrfTokenField,
   getCsrfToken,
@@ -26,7 +27,7 @@ import {
 import { verifyCsrfToken } from '../../../src/csrf/verify.ts';
 import { csrfFormMiddleware } from '../../../src/middleware/csrf-form-middleware.ts';
 import { CsrfTokenMismatchError, SessionMiddlewareMissingError } from '../../../src/errors.ts';
-import { resolveSessionConfig } from '../../../src/options.ts';
+import { resolveCsrfConfig, resolveSessionConfig } from '../../../src/options.ts';
 import { SessionPlugin } from '../../../src/plugin/session-plugin.ts';
 import { SESSION_STATE_KEY, SessionService } from '../../../src/services/session-service.ts';
 import type { MakeContextOptions } from '../../fixtures/context.ts';
@@ -468,5 +469,33 @@ describe('csrfFormMiddleware', () => {
       expect(handlerRan).toBe(shouldPass);
       expect(functionPassed).toBe(shouldPass);
     }
+  });
+});
+
+describe('csrfTokenField — the published plugin config (M95c §3.1/§3.3)', () => {
+  it('renders the published fieldName bare, and an explicit argument still wins', async () => {
+    const { ctx } = await withSession();
+    // Published exactly as `csrfFormMiddleware` publishes it: the resolved
+    // config, under the state key, before the middleware's short-circuits.
+    ctx.state.set(CSRF_CONFIG_STATE_KEY, resolveCsrfConfig({ fieldName: 'xsrf' }));
+    const token = getCsrfToken(ctx);
+
+    // No argument → the plugin's configured name, not the shared default.
+    expect(csrfTokenField(ctx)).toBe(`<input type="hidden" name="xsrf" value="${token}">`);
+    // An explicit argument is an OVERRIDE, not the only source.
+    expect(csrfTokenField(ctx, { fieldName: 'authenticity_token' })).toBe(
+      `<input type="hidden" name="authenticity_token" value="${token}">`,
+    );
+  });
+
+  it('ignores a foreign value under the key and falls back to the shared default', async () => {
+    const { ctx } = await withSession();
+    // Not the middleware's shape: the guard narrows on `fieldName`, so an
+    // unrelated object under the key degrades to the default rather than
+    // rendering `undefined`.
+    ctx.state.set(CSRF_CONFIG_STATE_KEY, { nope: true });
+    const token = getCsrfToken(ctx);
+
+    expect(csrfTokenField(ctx)).toBe(`<input type="hidden" name="_csrf" value="${token}">`);
   });
 });

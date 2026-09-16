@@ -57,9 +57,18 @@ export interface IMongoSession {
   /**
    * Starts the transaction on this session.
    *
-   * @param options - Transaction options
+   * Both the parameter and the return are deliberately `unknown`: the real
+   * driver declares `startTransaction(options?: TransactionOptions): void`,
+   * whose option interface is not assignable to `Record<string, unknown>` and
+   * whose `void` return is not assignable to `Promise<void>`, so the typed
+   * forms made the real `ClientSession` fail this structural subset (X47-1).
+   * The adapter calls it with no arguments and discards the result
+   * (`mongo-adapter.ts`), and a fake returning `Promise<void>` still
+   * satisfies the widened member.
+   *
+   * @param options - Transaction options (the adapter passes none)
    */
-  startTransaction(options?: Record<string, unknown>): Promise<void>;
+  startTransaction(options?: unknown): unknown;
 
   /** Commits the active transaction. */
   commitTransaction(): Promise<void>;
@@ -129,7 +138,14 @@ export interface IMongoCollection {
     filter: Record<string, unknown>,
     options?: MongoOptions & {
       projection?: Record<string, 0 | 1>;
-      sort?: Record<string, unknown>;
+      /**
+       * Deliberately `unknown`: the real driver's `FindOptions.sort` is the
+       * `Sort` union, which admits bare strings and arrays, so a
+       * `Record<string, unknown>` here made the real collection fail this
+       * member (X47-1). The adapter builds a `Record` and the real driver
+       * accepts it; `unknown` keeps both assignable.
+       */
+      sort?: unknown;
     },
   ): Promise<Record<string, unknown> | null>;
 
@@ -143,7 +159,12 @@ export interface IMongoCollection {
   find(
     filter: Record<string, unknown>,
     options?: MongoOptions & {
-      sort?: Record<string, unknown>;
+      /**
+       * Deliberately `unknown` — see {@linkcode IMongoCollection.findOne}: the
+       * real `Sort` union admits strings and arrays, which a `Record` typing
+       * rejected.
+       */
+      sort?: unknown;
       skip?: number;
       limit?: number;
       projection?: Record<string, 0 | 1>;
@@ -216,8 +237,18 @@ export type MongoWriteOptions = MongoOptions;
 export interface IMongoClient {
   /**
    * Opens the connection.
+   *
+   * The resolved value is deliberately `unknown` rather than `void`: the real
+   * driver declares `connect(): Promise<this>` (`mongodb.d.ts`), and
+   * `Promise<MongoClient>` is not assignable to `Promise<void>`, so the typed
+   * `void` form made the documented injection arm a compile error for the one
+   * client it exists to accept (X47-1). The adapter discards the resolved
+   * value, so `unknown` is the widest return an implementation may specialise —
+   * a fake resolving `void` still satisfies it. The assignment is pinned by the
+   * compile-time fixture `test/types/mongo-seam.assert.ts`, which fails
+   * `deno task check` the moment this facade drifts from the driver again.
    */
-  connect(): Promise<void>;
+  connect(): Promise<unknown>;
 
   /**
    * Closes the connection.

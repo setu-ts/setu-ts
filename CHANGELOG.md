@@ -34,6 +34,52 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Multipart `Content-Disposition` parsing admits the unquoted parameter form and drops a part with
+  no usable name (behaviour changes, both with migration notes).** Two changes decided together
+  (M95c §3.4) because either alone is a regression. (a) The parser now accepts the unquoted token
+  form for `name` and `filename` — value to the next `;` or end of header, then trimmed, the
+  parameter NAME matched case-insensitively — where the previous quoted-only, case-sensitive regexes
+  silently LOST the name of a part sent as `name=x` (the platform delivers it) and demoted an upload
+  sent with an unquoted `filename=a.txt` to a plain text field, so `getUploadedFile()` found
+  nothing. (b) A part whose Content-Disposition carries no `name` parameter at all — including one
+  whose header cannot parse — is DROPPED, matching the platform, where the previous code promoted it
+  to a real field literally named `unknown` that collided with a legitimate field of that name; the
+  sentinel is removed outright, so a nameless part and a field named `unknown` are distinguishable
+  again. `name=""` (a quoted EMPTY value) is a defined name and is KEPT, as an empty-named field /
+  empty filename — the web standard's file-versus-text discriminator depends on it. **Migration:**
+  an application reading a form field named `unknown` was reading parts no correct client sends (the
+  platform discards them); read the part's real name now, or accept that malformed parts are
+  dropped. An unquoted `NAME=x` uppercase part is now delivered where Deno's own
+  `Response.formData()` drops it — the runtimes disagree on this row, and delivering is the side
+  that loses no data; the full normative table is pinned by
+  `packages/common/test/unit/form/multipart-platform-parity.test.ts`.
+- **`csrfTokenField(ctx)` now renders the plugin's configured `csrf.fieldName` by default**, not
+  always `'_csrf'`. The `csrfFormMiddleware` publishes its resolved configuration into `ctx.state`
+  under the new exported `CSRF_CONFIG_STATE_KEY` — BEFORE its `ignoreMethods` short-circuit, since
+  the GET that renders the form is itself an ignored method — and the helper reads it, so the
+  README's own recipe (render with the helper bare, post the form) no longer 403s on every post when
+  `fieldName` is customized. An explicit `csrfTokenField(ctx, { fieldName })` argument is an
+  override; with no published config and no argument — a request the middleware never saw, such as a
+  React Router action — the shared `'_csrf'` default is unchanged. Migration: none needed; if you
+  passed the configured name manually to work around the mismatch, the workaround is now optional
+  and may be deleted.
+- **BREAKING (for JavaScript callers and `unknown`-typed call sites) — `inject()` carries the body
+  shapes a request actually has and refuses every other by name.** `InjectRequest.body` widens from
+  an anything-goes `unknown` (documented "will be stringified if not a string", implemented as
+  `JSON.stringify` of whatever arrived) to
+  `string | Uint8Array | ArrayBuffer | Blob | URLSearchParams | Record<string, unknown>`: the
+  byte-ish shapes pass through verbatim with NO content-type default (only the caller knows whether
+  bytes are multipart, JSON, or an image), a `URLSearchParams` is serialised with its own
+  `toString()` and defaults `application/x-www-form-urlencoded`, and a plain object (JSON) and a
+  bare string keep the `application/json` default. Previously a `Uint8Array` arrived as
+  `{"0":97,…}`, an `ArrayBuffer`/`Blob`/`URLSearchParams` each arrived as the two bytes `{}`, and
+  the same release named `inject()` a producer of `IRequest.formData?()` — so an injected multipart
+  upload parsed as an empty form. **Migration:** TypeScript callers are compile-checked. A
+  JavaScript caller passing an array, `Date`, class instance or number must convert first: arrays
+  and plain data to a plain object, `Date` to a string or number, binary data to `Uint8Array`.
+  Per-shape bytes and content-type defaults are pinned by
+  `packages/kernel/test/unit/inject-body-shapes.test.ts`.
+
 - **BREAKING (for out-of-repo adapter implementors) — `@setu-ts/common` +
   `@setu-ts/database-plugin`: `IDatabaseAdapter` gains the optional `isHealthy?(): Promise<boolean>`
   liveness member, and the `database` indicator stops reporting `up` for a backend it cannot vouch
@@ -85,6 +131,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The Mongo injection seam admits the real `mongodb` driver.** X47-1: `PUBLIC_API.md` presented
+  `IMongoClient` as the seam a real `MongoClient` is supplied through and claimed the driver
+  implements its structural shapes — false, so the documented arm needed the cast this repository
+  forbids internally. The facade's `connect()` widens to `Promise<unknown>` (the driver returns
+  `Promise<this>`; the adapter binds nothing), and the compile-time fixture the claim now cites —
+  `packages/database-plugin/test/types/mongo-seam.assert.ts`, a static import of the real driver
+  assigned to `IMongoClient` with NO cast — caught two more divergences the single named fix missed:
+  `ClientSession.startTransaction(options?): void` (the session member is
+  `(options?: unknown) => unknown`) and the `Sort` union on `find`/`findOne` (`sort?: unknown`).
+  Source-compatible for existing structural implementations; the cast at `mongo-client-seam.test.ts`
+  that laundered the drift is gone with it.
 - **`ConsoleLogger` no longer writes `'[Redacted]'` into the application's own objects.** A nested
   redact path corrupted the caller's data: `#redactFields` shallow-clones the metadata record, so
   `logger.info('login', { auth: user })` under `redact: ['auth.token']` walked into `user` — still

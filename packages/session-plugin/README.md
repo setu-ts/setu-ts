@@ -184,8 +184,13 @@ app.router.get('/login', (ctx) => {
 ```
 
 `csrfTokenField` mints the session token on its first call and returns the complete trusted hidden
-input. It uses the default `'_csrf'` name; when your `SessionPlugin` configuration customizes
-`csrf.fieldName`, pass the same name as `csrfTokenField(ctx, { fieldName: 'authenticity_token' })`.
+input. The field name follows your `SessionPlugin` configuration: the form-CSRF middleware publishes
+its resolved config, and the helper reads it, so a form rendered by the helper names the field the
+verifier checks — a customized `csrf.fieldName` needs NO extra step. An explicit
+`csrfTokenField(ctx, { fieldName: 'authenticity_token' })` is an override, for a standalone
+`csrfFormMiddleware` on a different name or a custom renderer; with no published config and no
+argument (a request the middleware never saw, such as a React Router action), the shared `'_csrf'`
+default applies.
 
 Hono's `html` tag escapes interpolated strings. When using it or the view plugin's Hono-backed
 engines, mark this helper's generated markup as raw at the application rendering boundary:
@@ -341,6 +346,7 @@ arriving while every session reads as absent.
 | `SessionSecretMissingError`     | class     |
 | `SessionService`                | class     |
 | `SessionTooLargeError`          | class     |
+| `CSRF_CONFIG_STATE_KEY`         | const     |
 | `CSRF_SESSION_KEY`              | const     |
 | `CacheSessionStoreOptions`      | interface |
 | `CsrfFormOptions`               | interface |

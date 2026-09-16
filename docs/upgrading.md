@@ -12,6 +12,38 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Stop reading a multipart field named `unknown`
+
+A multipart part whose `Content-Disposition` carries no `name` parameter is now DROPPED, where it
+used to be delivered as a real field literally named `unknown` — colliding with any legitimate field
+of that name. `name=""` (a quoted EMPTY value) is still a field, with an empty name. If you read a
+form field named `unknown`, you were reading parts no correct client sends (the platform discards
+them); read the part's real name now. In exchange, a part your client sends with the unquoted form —
+`name=x` rather than `name="x"` — now arrives under its REAL name instead of `unknown`, and an
+upload sent with an unquoted `filename=a.txt` now reaches `getUploadedFile()` instead of arriving as
+a text field. The full table of accepted spellings is pinned by
+`packages/common/test/unit/form/multipart-platform-parity.test.ts`.
+
+### Drop the cast around an injected `MongoClient`
+
+`IMongoClient` (the `DatabasePlugin({ type: 'mongodb' })` injection seam) now admits the real
+`mongodb` driver structurally: `connect()` returns `Promise<unknown>` because the driver's
+`connect(): Promise<this>` is not assignable to `Promise<void>`. An application that wrote
+`new MongoClient(url) as unknown as IMongoClient` to satisfy the option can now assign directly —
+and the compile-time fixture `packages/database-plugin/test/types/mongo-seam.assert.ts` fails the
+build if the seam drifts from the driver again.
+
+### `inject()` refuses non-plain-object bodies (JavaScript callers)
+
+`app.inject()` used to JSON-stringify whatever body it was handed; it now carries the documented
+shapes verbatim (`Uint8Array`, `ArrayBuffer`, `Blob`, `URLSearchParams`, plain object, string) and
+REFUSES every other shape with a `TypeError` naming the received type. TypeScript callers are
+compile-checked; a JavaScript caller passing an array, `Date`, class instance or number must convert
+first — arrays and plain data to a plain object, `Date` to a string or number, binary data to
+`Uint8Array`. A byte body now also sets NO default content type, so an injected multipart test
+request must pass its own `multipart/form-data; boundary=…` header, exactly as a served request
+does.
+
 ### Check any view component you copied from the `0.6.0` docs
 
 `@setu-ts/view-plugin`'s README and `docs/migration-nestjs.md` showed the class-based example with a

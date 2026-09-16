@@ -107,9 +107,11 @@ export function createStaticHandler(options: StaticHandlerOptions): RouteHandler
     const normalizedPath = relativePath === '' ? '/' : relativePath;
 
     // The path handed to a user-supplied `cacheControl` callback: the FULL
-    // leading-slash request path INCLUDING the URL prefix, per the documented
-    // contract (`/assets/app.js`, never the prefix-stripped `/app.js`).
-    // Internal resolution below keeps using the stripped form.
+    // leading-slash request path INCLUDING the URL prefix — the documented
+    // contract (M95c C3: a cache policy is about the URL the client caches
+    // under, so `/assets/app.js`, never the prefix-stripped `/app.js`), a
+    // behaviour measured deliberate, not an oversight. Internal resolution
+    // below keeps using the stripped form.
     const callbackPath = (rootRelative: string): string =>
       normalizedPrefix === '/' ? rootRelative : `${normalizedPrefix}${rootRelative}`;
 
