@@ -4970,7 +4970,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the type fixture is genuinely reached by `deno check packages`. One finding was DECLINED rather
   than fixed: §6's test table named `test/unit/csrf-token-field.test.ts` and the cases landed in
   `test/unit/csrf/csrf.test.ts` — equivalent coverage, a better home beside the other CSRF tests,
-  and moving them would be churn against an archived plan) — complete (PR pending)
+  and moving them would be churn against an archived plan) — complete (PR #322)
 - **Next milestone** — **M95d** (`docs/` + `packages/common` + `packages/view-plugin` + `scripts/` —
   documentation that survives contact: the M90h precedent, four findings where the code is correct
   and a reader following the documentation still ends up wrong. The only letter carrying gate work —
