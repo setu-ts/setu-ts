@@ -48,6 +48,23 @@ describe('createRedactionService', () => {
     expect(service.redactValue('other', 'unchanged')).toBe('unchanged');
   });
 
+  it('matches double-star patterns at every depth, including the top level', () => {
+    const service = createRedactionService({ fields: { '**.token': 'secret' } });
+
+    expect(service.redactRecord({ token: 'top', nested: { token: 'deep' } })).toEqual({
+      token: '[Redacted]',
+      nested: { token: '[Redacted]' },
+    });
+  });
+
+  it('fails closed when a mask suffix is not a non-negative safe integer', () => {
+    for (const keep of [Number.NaN, Number.POSITIVE_INFINITY, -1]) {
+      expect(
+        createMaskRedactor({ keep })('12345678', { path: 'card', classification: 'pci' }),
+      ).toBe('[Redacted]');
+    }
+  });
+
   it('does not descend into non-plain objects or cycles', () => {
     const date = new Date(0);
     const cycle: Record<string, unknown> = { date };

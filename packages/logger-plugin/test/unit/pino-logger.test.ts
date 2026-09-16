@@ -2,6 +2,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
+import { createRedactionService } from '@setu-ts/common';
 
 import { normalizePinoFactory, PinoLogger } from '../../src/loggers/pino-logger.ts';
 import type { PinoFactory } from '../../src/loggers/pino-logger.ts';
@@ -68,6 +69,10 @@ class FakePino {
     const child = new FakePino(childOpts);
     this.children.push(child);
     return child;
+  }
+
+  get base(): Record<string, unknown> | undefined {
+    return this.#base;
   }
 }
 
@@ -168,6 +173,24 @@ describe('PinoLogger', () => {
     };
     await PinoLogger.create({ level: 'info', bindings: { service: 'api' }, pinoFactory: factory });
     expect(receivedBase).toEqual({ service: 'api' });
+  });
+
+  it('redacts policy-protected base and child bindings before Pino retains them', async () => {
+    const redaction = createRedactionService({ fields: { password: 'secret' } });
+    factory = (options) => {
+      fakePino = new FakePino(options);
+      return fakePino;
+    };
+    const logger = await PinoLogger.create({
+      level: 'info',
+      bindings: { password: 'base-secret' },
+      pinoFactory: factory,
+      redaction,
+    });
+
+    expect(fakePino.base?.password).toBe('[Redacted]');
+    logger.child({ password: 'child-secret' });
+    expect(fakePino.children[0]?.base?.password).toBe('[Redacted]');
   });
 
   it('does not pass base when no bindings are provided', async () => {

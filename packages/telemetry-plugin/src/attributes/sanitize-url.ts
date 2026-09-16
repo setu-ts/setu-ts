@@ -25,8 +25,10 @@ export function sanitizeUrl(
       parsed.search = '';
       return parsed.toString();
     }
-    for (const [name, value] of parsed.searchParams) {
-      parsed.searchParams.set(name, String(redaction.redactValue(`query.${name}`, value)));
+    const parameters = [...parsed.searchParams.entries()];
+    parsed.search = '';
+    for (const [name, value] of parameters) {
+      parsed.searchParams.append(name, String(redaction.redactValue(`query.${name}`, value)));
     }
     return parsed.toString();
   } catch {

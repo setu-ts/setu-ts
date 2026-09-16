@@ -23,6 +23,18 @@ describe('sanitizeUrl', () => {
     );
   });
 
+  it('preserves repeated query parameters while redacting each occurrence', () => {
+    const service = createRedactionService({ fields: { 'query.token': 'secret' } });
+
+    expect(sanitizeUrl(
+      'https://example.test/search?tag=first&tag=second&token=one&token=two',
+      'redact',
+      service,
+    )).toBe(
+      'https://example.test/search?tag=first&tag=second&token=%5BRedacted%5D&token=%5BRedacted%5D',
+    );
+  });
+
   it('fails closed and degrades malformed URLs without throwing', () => {
     expect(sanitizeUrl('https://example.test/search?email=a@b.test', 'redact', undefined)).toBe(
       'https://example.test/search',

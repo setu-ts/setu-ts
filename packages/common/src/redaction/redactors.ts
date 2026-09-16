@@ -32,7 +32,9 @@ export interface MaskOptions {
 export function createMaskRedactor(options: MaskOptions = {}): Redactor {
   const keep = options.keep ?? 4;
   return (value: unknown): unknown => {
-    if (typeof value !== 'string' || value.length <= keep) {
+    if (
+      !Number.isSafeInteger(keep) || keep < 0 || typeof value !== 'string' || value.length <= keep
+    ) {
       return eraseRedactor(value, { path: '', classification: '' });
     }
     return `${'*'.repeat(value.length - keep)}${value.slice(-keep)}`;

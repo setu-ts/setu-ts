@@ -97,6 +97,17 @@ describe('@setu-ts/common barrel — registry factory arm', () => {
   });
 });
 
+describe('@setu-ts/common barrel — M96 redaction', () => {
+  it('exports the redaction surface without exposing the internal matcher', () => {
+    expect(typeof common.createRedactionService).toBe('function');
+    expect(typeof common.createMaskRedactor).toBe('function');
+    expect(typeof common.eraseRedactor).toBe('function');
+    expect(common.DATA_CLASSIFICATIONS.SECRET).toBe('secret');
+    expect('createFieldMatcher' in common).toBe(false);
+    expect('REDACTION' in common.CAPABILITIES).toBe(false);
+  });
+});
+
 describe('@setu-ts/common barrel — M94b form body', () => {
   it('exports the seven form symbols from the barrel', () => {
     expect(typeof common.parseFormBody).toBe('function');

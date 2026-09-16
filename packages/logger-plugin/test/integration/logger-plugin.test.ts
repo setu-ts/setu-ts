@@ -154,6 +154,31 @@ describe('LoggerPlugin (integration)', () => {
     expect((logger as TraceEnrichedLogger).inner).toBeInstanceOf(ConsoleLogger);
   });
 
+  it('applies the default secret paths, while redact: [] restores plaintext output', async () => {
+    const lines: string[] = [];
+    // deno-lint-ignore no-console -- capture the ConsoleLogger's real egress.
+    const originalLog = console.log;
+    // deno-lint-ignore no-console -- capture the ConsoleLogger's real egress.
+    console.log = (...values: unknown[]): void => {
+      lines.push(String(values[0]));
+    };
+    try {
+      const defaultContext = createFakeContext(runtime);
+      await LoggerPlugin().register(defaultContext.ctx);
+      getLogger(defaultContext.registeredServices).info('default', { password: 'secret' });
+
+      const optOutContext = createFakeContext(runtime);
+      await LoggerPlugin({ redact: [] }).register(optOutContext.ctx);
+      getLogger(optOutContext.registeredServices).info('opt-out', { password: 'secret' });
+    } finally {
+      // deno-lint-ignore no-console -- restore the process-wide console after capture.
+      console.log = originalLog;
+    }
+
+    expect(JSON.parse(lines[0]!).password).toBe('[Redacted]');
+    expect(JSON.parse(lines[1]!).password).toBe('secret');
+  });
+
   it('passes level option to the logger', async () => {
     const plugin = LoggerPlugin({ transport: 'noop', level: 'error' });
     const { ctx, registeredServices } = createFakeContext(runtime);

@@ -188,7 +188,7 @@ export class PinoLogger implements ILogger {
   child(bindings: LogMetadata): ILogger {
     // Normalize before hand-off so an Error-valued binding survives Pino's
     // serialization instead of collapsing to {} (X2-5, M70f re-review finding 1).
-    const childPino = this.#pino.child(normalizeMetadata(bindings));
+    const childPino = this.#pino.child(normalizeBindings(bindings, this.#redaction));
     return new PinoLoggerAdapter(this.level, childPino, this.#redaction);
   }
 
@@ -217,7 +217,7 @@ export class PinoLogger implements ILogger {
       // Normalize the base bindings too, so an Error supplied as a base binding
       // is preserved in every emitted record rather than flattened to {} (X2-5,
       // M70f re-review finding 1).
-      pinoOptions.base = normalizeMetadata(options.bindings);
+      pinoOptions.base = normalizeBindings(options.bindings, options.redaction);
     }
     return factory(pinoOptions);
   }
@@ -283,7 +283,7 @@ class PinoLoggerAdapter implements ILogger {
     // serialization instead of collapsing to {} (X2-5, M70f re-review finding 1).
     return new PinoLoggerAdapter(
       this.level,
-      this.#pino.child(normalizeMetadata(bindings)),
+      this.#pino.child(normalizeBindings(bindings, this.#redaction)),
       this.#redaction,
     );
   }
@@ -304,5 +304,14 @@ function normalize(
 ): unknown {
   if (metadata === undefined) return undefined;
   const normalized = normalizeMetadata(metadata);
+  return redaction?.redactRecord(normalized) ?? normalized;
+}
+
+/** Normalizes and redacts bindings before Pino retains them outside log calls. */
+function normalizeBindings(
+  bindings: LogMetadata,
+  redaction: IRedactionService | undefined,
+): Record<string, unknown> {
+  const normalized = normalizeMetadata(bindings);
   return redaction?.redactRecord(normalized) ?? normalized;
 }
