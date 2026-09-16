@@ -365,31 +365,35 @@ kbd {
 /* ---- Landing ---- */
 
 .hero {
-  padding: 4rem 1.25rem 3rem;
+  padding: 2.5rem 1.25rem 3rem;
   text-align: center;
 }
 
-.hero-logo {
-  display: flex;
-  justify-content: center;
-}
-
-.hero-logo .brand {
-  display: flex;
-  justify-content: center;
+.hero-eyebrow {
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  margin: 0 0 0.75rem;
+  text-transform: uppercase;
 }
 
 .hero h1 {
-  font-size: clamp(1.6rem, 4vw, 2.6rem);
-  margin: 1.5rem auto 0.5rem;
-  max-width: 46rem;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1.12;
+  margin: 0 auto 0.75rem;
+  max-width: 42rem;
 }
 
 .hero .tagline {
   color: var(--muted);
   font-size: 1.15rem;
   max-width: 42rem;
-  margin: 0 auto 2rem;
+  margin: 0 auto;
+}
+
+.hero .install {
+  margin: 1.5rem auto 0;
 }
 
 .install {
@@ -624,22 +628,13 @@ kbd {
 
 @media (max-width: 48rem) {
   .hero {
-    padding: 2.5rem 1rem 2rem;
-  }
-
-  .hero-logo .brand {
-    width: min(100%, 18rem);
-  }
-
-  .hero-logo .brand img {
-    width: 100%;
-    height: auto;
+    padding: 1.5rem 1rem 2.25rem;
   }
 
   .hero h1 {
     max-width: 22rem;
-    margin: 1rem auto 0.75rem;
-    font-size: clamp(1.65rem, 7vw, 2rem);
+    margin: 0 auto 0.75rem;
+    font-size: clamp(1.9rem, 8vw, 2.35rem);
     line-height: 1.25;
   }
 
