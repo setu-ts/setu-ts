@@ -4908,7 +4908,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   own progress row and the plan's §3.5 commitment. Six negative controls were each observed failing
   and reverted, and the first is the instructive one: reverting the broker cache fails the
   round-trip count with 3-vs-2 AND leaves the hung test **never settling**, which is the defect
-  itself) — complete (PR pending)
+  itself) — complete (PR #319)
 
 - **Next milestone** — **M95c** (`packages/common` + `packages/database-plugin` +
   `packages/kernel` + `packages/session-plugin` + `packages/static-plugin` — a contract its own
