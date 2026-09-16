@@ -10,11 +10,18 @@
 import type { ILogger, IRuntimeServices, LogLevel, LogMetadata } from '@setu-ts/common';
 
 import { normalizeMetadata } from './normalize-metadata.ts';
+import { safeStringify } from './safe-stringify.ts';
 
 /**
  * Numeric severity ranking. Lower numbers are more severe (so a configured
  * level allows any entry whose rank is `<=` the configured rank).
  */
+/**
+ * Stands in for metadata that threw while being read. Emitted in place of the
+ * metadata so the entry still reaches the operator and says why it is thin.
+ */
+const UNSERIALIZABLE_METADATA = '[unserializable metadata]';
+
 const LEVEL_RANK: Readonly<Record<LogLevel, number>> = Object.freeze({
   fatal: 60,
   error: 50,
@@ -133,25 +140,60 @@ export class ConsoleLogger implements ILogger {
     if (LEVEL_RANK[level] < LEVEL_RANK[this.level]) {
       return;
     }
-    const merged: Record<string, unknown> = {
-      ...this.#bindings,
-      ...metadata,
-    };
-    // Normalize raw `Error` values BEFORE redaction (X2-5): a redact path such
-    // as `error.token` must see the normalized object, and an un-normalized
-    // `Error` would otherwise reach `JSON.stringify` and render as `{}`.
-    const normalized = normalizeMetadata(merged);
-    const redacted = this.#redactFields(normalized);
-    const entry = {
-      level,
-      time: this.#runtime.now(),
-      msg: message,
-      ...redacted,
-    };
+    // Everything that READS the caller's metadata is inside this guard, not
+    // just serialization. An own enumerable getter fires during the spread
+    // below — before `normalizeMetadata`, before redaction and before
+    // `safeStringify` can see the value at all — so guarding the serializer
+    // alone would still let the throw escape from the first line that touches
+    // the object. `normalizeMetadata` and `#redactFields` read properties too.
+    try {
+      const merged: Record<string, unknown> = {
+        ...this.#bindings,
+        ...metadata,
+      };
+      // Normalize raw `Error` values BEFORE redaction (X2-5): a redact path
+      // such as `error.token` must see the normalized object, and an
+      // un-normalized `Error` would otherwise reach `JSON.stringify` and
+      // render as `{}`.
+      const normalized = normalizeMetadata(merged);
+      const redacted = this.#redactFields(normalized);
+      if (this.#pretty) {
+        this.#prettyPrint(level, message, redacted);
+      } else {
+        const entry = {
+          level,
+          time: this.#runtime.now(),
+          msg: message,
+          ...redacted,
+        };
+        // The entry is emitted WITHOUT its metadata rather than lost, because
+        // the level, time and message are usually the half an operator is
+        // looking for and are always serializable.
+        console.log(safeStringify(entry) ?? this.#unserializableLine(level, message));
+      }
+    } catch {
+      this.#emitUnserializable(level, message);
+    }
+  }
+
+  /**
+   * Emits an entry whose metadata could not be read or serialized at all.
+   *
+   * Reached only when the caller's own code threw while its metadata was being
+   * read. Every value used here is a primitive this class produced, so it
+   * cannot fail for the reason the entry it replaces did — which is what makes
+   * "a log call emits exactly one line and never throws" true rather than
+   * merely intended.
+   *
+   * @param level - Severity of the entry
+   * @param message - Log message
+   */
+  #emitUnserializable(level: LogLevel, message: string): void {
     if (this.#pretty) {
-      this.#prettyPrint(level, message, redacted);
+      const ts = new Date(this.#runtime.now()).toISOString();
+      console.log(`${ts} [${level.toUpperCase()}] ${message} ${UNSERIALIZABLE_METADATA}`);
     } else {
-      console.log(JSON.stringify(entry));
+      console.log(this.#unserializableLine(level, message));
     }
   }
 
@@ -246,9 +288,30 @@ export class ConsoleLogger implements ILogger {
    * @param message - Log message
    * @param metadata - Structured context
    */
+  /**
+   * Builds the JSON line used when an entry's metadata could not be serialized.
+   *
+   * Every field here is a primitive this class produced, so this cannot fail
+   * for the reason the entry it replaces did.
+   *
+   * @param level - Severity of the entry
+   * @param message - Log message
+   * @returns A JSON line carrying the entry minus its metadata
+   */
+  #unserializableLine(level: LogLevel, message: string): string {
+    return JSON.stringify({
+      level,
+      time: this.#runtime.now(),
+      msg: message,
+      metadata: UNSERIALIZABLE_METADATA,
+    });
+  }
+
   #prettyPrint(level: LogLevel, message: string, metadata: Record<string, unknown>): void {
     const ts = new Date(this.#runtime.now()).toISOString();
-    const meta = Object.keys(metadata).length > 0 ? ` ${JSON.stringify(metadata)}` : '';
+    const meta = Object.keys(metadata).length > 0
+      ? ` ${safeStringify(metadata) ?? UNSERIALIZABLE_METADATA}`
+      : '';
     console.log(`${ts} [${level.toUpperCase()}] ${message}${meta}`);
   }
 }

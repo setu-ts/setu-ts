@@ -379,6 +379,182 @@ describe('ConsoleLogger', () => {
     });
   });
 
+  // A log call must emit one line and never throw. `LogMetadata` is
+  // `Readonly<Record<string, unknown>>` and carries no JSON constraint, so
+  // every value below is legal metadata by the contract — and each one used to
+  // take the caller down. That is worst in a catch block, where the TypeError
+  // replaces the error being reported.
+  describe('metadata JSON.stringify refuses', () => {
+    it('emits a circular structure instead of throwing', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info' });
+      const cyclic: Record<string, unknown> = { t: 1 };
+      cyclic.self = cyclic;
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { r: cyclic });
+      });
+
+      const entry = JSON.parse(output[0]!);
+      expect(entry.r.self).toBe('[Circular]');
+      expect(entry.r.t).toBe(1);
+      expect(entry.msg).toBe('m');
+    });
+
+    it('does not mistake a shared object for a cycle', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info' });
+      const shared = { a: 1 };
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { x: shared, y: shared });
+      });
+
+      const entry = JSON.parse(output[0]!);
+      expect(entry.x).toEqual({ a: 1 });
+      expect(entry.y).toEqual({ a: 1 });
+    });
+
+    it('emits a bigint instead of throwing', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info' });
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { v: 9007199254740993n });
+      });
+
+      expect(JSON.parse(output[0]!).v).toBe('9007199254740993');
+    });
+
+    it('keeps the entry when metadata throws while being read', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info' });
+      const hostile = {
+        toJSON(): never {
+          throw new Error('boom');
+        },
+      };
+
+      const { output } = captureConsole(() => {
+        logger.error('database write failed', { r: hostile });
+      });
+
+      // The message is the half an operator is looking for, so it survives.
+      const entry = JSON.parse(output[0]!);
+      expect(entry.msg).toBe('database write failed');
+      expect(entry.level).toBe('error');
+      expect(entry.metadata).toBe('[unserializable metadata]');
+    });
+
+    it('emits exactly one line per call on every refused input', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info' });
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      const hostile = {
+        get x(): never {
+          throw new Error('boom');
+        },
+      };
+
+      const { output } = captureConsole(() => {
+        logger.info('a', { r: cyclic });
+        logger.info('b', { v: 1n });
+        logger.info('c', { r: hostile });
+      });
+
+      expect(output.length).toBe(3);
+    });
+
+    // The getter cases above nest the hostile object one level down, so the
+    // throw happens inside JSON.stringify. A getter on the TOP-LEVEL metadata
+    // fires during the spread in #log instead — before normalizeMetadata,
+    // before redaction, and before the serializer sees the object at all.
+    it('survives a throwing getter on the top-level metadata object', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info' });
+      const hostile = {
+        get x(): never {
+          throw new Error('boom');
+        },
+      };
+
+      const { output } = captureConsole(() => {
+        logger.error('payment failed', hostile);
+      });
+
+      expect(output.length).toBe(1);
+      const entry = JSON.parse(output[0]!);
+      expect(entry.msg).toBe('payment failed');
+      expect(entry.level).toBe('error');
+      expect(entry.metadata).toBe('[unserializable metadata]');
+    });
+
+    it('survives a top-level throwing getter in pretty mode', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info', pretty: true });
+      const hostile = {
+        get x(): never {
+          throw new Error('boom');
+        },
+      };
+
+      const { output } = captureConsole(() => {
+        logger.info('m', hostile);
+      });
+
+      expect(output.length).toBe(1);
+      expect(output[0]).toContain('[unserializable metadata]');
+      expect(output[0]).toContain('m');
+    });
+
+    // A getter one level DOWN survives the spread — which copies `outer` by
+    // reference without reading through it — and fires inside #redactFields
+    // when the redact path walks into it. That is a third distinct reader,
+    // after the spread and the serializer. (A getter on the top-level object
+    // cannot reach it: the spread throws first.)
+    it('survives a throwing getter reached by a redact path', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, {
+        level: 'info',
+        redact: ['outer.a.b'],
+      });
+      const outer = {
+        get a(): never {
+          throw new Error('boom');
+        },
+      };
+
+      const { output } = captureConsole(() => {
+        logger.info('m', { outer });
+      });
+
+      expect(output.length).toBe(1);
+      expect(JSON.parse(output[0]!).metadata).toBe('[unserializable metadata]');
+    });
+
+    it('survives the same inputs in pretty mode', () => {
+      const { runtime } = createFakeRuntime();
+      const logger = new ConsoleLogger(runtime, { level: 'info', pretty: true });
+      const cyclic: Record<string, unknown> = { t: 1 };
+      cyclic.self = cyclic;
+      const hostile = {
+        toJSON(): never {
+          throw new Error('boom');
+        },
+      };
+
+      const { output } = captureConsole(() => {
+        logger.info('a', { r: cyclic });
+        logger.info('b', { r: hostile });
+      });
+
+      expect(output.length).toBe(2);
+      expect(output[0]).toContain('[Circular]');
+      expect(output[1]).toContain('[unserializable metadata]');
+    });
+  });
+
   describe('pretty mode', () => {
     it('pretty-prints entries with a human-readable prefix', () => {
       const { runtime } = createFakeRuntime({ clock: 1_700_000_000_000 });

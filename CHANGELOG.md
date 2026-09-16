@@ -67,6 +67,30 @@ All notable changes to this project are documented here. The format follows
   silent: pino resolves an array element with bracket notation (`'users[*].token'`) and would
   equally not match the dotted form, so descending would make one option behave differently per
   transport. Unifying the two syntaxes belongs to the redaction seam milestone, not to this fix.
+- **`ConsoleLogger` no longer throws out of a log call.** `LogMetadata` is
+  `Readonly<Record<string, unknown>>` and carries no JSON constraint, so every value
+  `JSON.stringify` refuses is legal metadata by the contract — `common`'s `JsonValue` documents that
+  limit for SSE precisely because it chose a narrow type, and the logger did not. Measured, **four**
+  inputs took the caller down on both the JSON and the pretty path: a circular structure, a
+  `bigint`, a throwing `toJSON`, and a throwing getter. Pino survives all four, so the default
+  logger was also the only one that could not. That is worst where logging is most needed — a
+  `catch` block — because the `TypeError` replaces the error being reported, and the handler that
+  would have recovered never runs. An internal `safeStringify` now neutralizes cycles
+  (`'[Circular]'`, the token pino emits, so the two transports describe one shape identically) and
+  renders a `bigint` as its decimal string; metadata that throws while being read cannot be handled
+  per value, since the throw happens inside `JSON.stringify`'s own property read, so the entry is
+  emitted **without** its metadata and carrying `'[unserializable metadata]'` rather than being lost
+  — the level, time and message are usually the half an operator wants and are always serializable.
+  A log call therefore emits exactly one line and never throws. **Cycle detection tracks the
+  ancestor chain, not every object already seen**, and that is the correctness of the fix rather
+  than a refinement: a `WeakSet` of seen objects reports the second appearance of a legitimately
+  shared object as circular, so `{ x: user, y: user }` would serialize as
+  `{"x":{…},"y":"[Circular]"}` and silently drop a field the caller supplied — pino renders both,
+  and swapping the algorithm fails exactly those guards. The `bigint` rendering is quoted where pino
+  emits unquoted digits: pino's form is exact in the emitted bytes but loses precision the moment a
+  consumer calls `JSON.parse`, and this is reachable in ordinary use, since drivers return `BigInt`
+  for int8 columns. No public API change — the helper is internal, matching `normalizeMetadata`
+  beside it, and `src/index.ts` is untouched.
 
 - **A scaffolded workspace's generated deployment now starts under its own security posture.** A
   `setu new --workspace` microservice, built with its own generated `docker/Dockerfile` and deployed
