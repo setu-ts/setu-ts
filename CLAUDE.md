@@ -5073,7 +5073,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   branch/function/line, and every line it adds to an existing one is covered; the three shared files
   it edits sit where `main` left them — `metadata-store.ts` 99.0, `openapi-generator.ts` 98.4 and
   `decorator-plugin.ts` 98.4/100/99.0, whose only uncovered lines are the pre-existing
-  `replayCustomDecorators` skip and the `autoDiscover` error loop) — complete (PR pending)
+  `replayCustomDecorators` skip and the `autoDiscover` error loop) — complete (PR #328)
 - **Next milestone** — **M95d** (`docs/` + `packages/common` + `packages/view-plugin` + `scripts/` —
   documentation that survives contact: the M90h precedent, four findings where the code is correct
   and a reader following the documentation still ends up wrong. The only letter carrying gate work —
