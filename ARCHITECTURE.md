@@ -1218,7 +1218,7 @@ graph TB
 | Aspect               | Detail                                                                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Optional decorator and metadata system                                                                                                |
-| **Responsibilities** | Store decorator metadata in plain objects; read metadata and register routes/services/middleware with kernel                          |
+| **Responsibilities** | Store decorator metadata in plain objects; read metadata and register routes, services, middleware, and explicit non-HTTP ingress classes through public capabilities |
 | **Dependencies**     | `common`, `kernel`                                                                                                                    |
 | **Public API**       | `DecoratorPlugin()`; `@Controller`, `@Get`, `@Post`, etc.; `@Injectable`, `@Inject`; `@Params(...)` with the `Body`/`Query`/`Param` sources; `createDecorator()` |
 | **Extension Points** | Custom decorators via `createDecorator()`; custom parameter sources via `Custom()`                                                                |

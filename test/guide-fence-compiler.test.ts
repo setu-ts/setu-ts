@@ -111,9 +111,9 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // through the stored scope, since `registerController` instantiates a
     // controller once at registration and constructor injection cannot reach a
     // per-request scope.
-    total: 30,
-    ts: 29,
-    compile: 29,
+    total: 31,
+    ts: 30,
+    compile: 30,
     external: 0,
     pseudocode: 0,
     skipped: 1,
@@ -173,9 +173,9 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // 268 once decorators.md's "Scoped Injection" section gained a second block
   // (+1, compiling) showing a decorated handler resolving through the stored
   // scope.
-  total: 268,
-  ts: 222,
-  compile: 189,
+  total: 269,
+  ts: 223,
+  compile: 190,
   external: 33,
   pseudocode: 0,
   skipped: 46,

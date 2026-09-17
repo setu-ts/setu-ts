@@ -74,19 +74,22 @@ export const MODULE_SEAM_LOCAL_IMPORT: LocalImport = {
  * @param wirings - The template's plugin wirings
  * @param extraControllers - Identifiers listed before the barrel spread
  * @param extraServices - Identifiers listed before the barrel spread
+ * @param extraIngress - Identifiers listed in the ingress class list
  * @returns The list with the decorator wiring's `args` replaced
  */
 export function withModuleSeam(
   wirings: readonly Wiring[],
   extraControllers: readonly string[] = [],
   extraServices: readonly string[] = [],
+  extraIngress: readonly string[] = [],
 ): readonly Wiring[] {
   const controllers = extraControllers.join(', ');
   const services = extraServices.join(', ');
+  const ingress = extraIngress.join(', ');
 
   return wirings.map((wiring) =>
     wiring.pkg === 'decorator-plugin'
-      ? { ...wiring, args: renderDecoratorArgs(controllers, services) }
+      ? { ...wiring, args: renderDecoratorArgs(controllers, services, ingress) }
       : wiring
   );
 }
@@ -105,13 +108,16 @@ export function withModuleSeam(
  *
  * @param controllers - Rendered contents of the `controllers` array
  * @param services - Rendered contents of the `services` array
+ * @param ingress - Rendered contents of the `ingress` array
  * @returns The argument source, without the enclosing parentheses
  */
-function renderDecoratorArgs(controllers: string, services: string): string {
+function renderDecoratorArgs(controllers: string, services: string, ingress: string): string {
   const inline =
-    `{ controllers: [${controllers}], services: [${services}], modules: [...${MODULES_EXPORT}] }`;
+    `{ controllers: [${controllers}], services: [${services}], ingress: [${ingress}], ` +
+    `modules: [...${MODULES_EXPORT}] }`;
   // 6 spaces of array indent + `DecoratorPlugin(` + `),` is 24 characters of overhead.
   if (inline.length <= 76) return inline;
   return `{\n        controllers: [${controllers}],\n        services: [${services}],\n` +
+    `        ingress: [${ingress}],\n` +
     `        modules: [...${MODULES_EXPORT}],\n      }`;
 }

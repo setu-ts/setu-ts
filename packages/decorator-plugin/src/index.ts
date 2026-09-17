@@ -25,6 +25,23 @@ export { Controller, Version } from './decorators/controller.ts';
 export { Delete, Get, Head, Options, Patch, Post, Put } from './decorators/http.ts';
 export type { HttpMethodDecorator } from './decorators/http.ts';
 
+// --- Non-HTTP ingress decorators ---
+export {
+  CommandHandler,
+  Cron,
+  Every,
+  Gateway,
+  OnClose,
+  OnEvent,
+  OnMessage,
+  OnOpen,
+  Processor,
+  QueryHandler,
+  Subscribe,
+  UseIngressBehaviors,
+  UsePipelineBehaviors,
+} from './decorators/ingress.ts';
+
 // --- Positional parameter binding ---
 export {
   Body,

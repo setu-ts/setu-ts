@@ -6,7 +6,9 @@
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { EVENT_HANDLERS_EXPORT, EVENTS_SEAM } from '../seams/events.ts';
+import { INGRESS_SEAM } from '../seams/ingress.ts';
 import { seamNames } from '../seams/seam-spec.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
 import {
   renderConstAssignment,
   renderDeclarationHeader,
@@ -25,6 +27,39 @@ export function generateEventHandler(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
+  if (generatorMode(options.plugins) === 'class-based') {
+    return [
+      {
+        path: `${INGRESS_SEAM.dir}/${names.kebab}${INGRESS_SEAM.suffix}`,
+        contents: `import type { IDomainEvent } from '@setu-ts/common';
+import { OnEvent } from '@setu-ts/decorator-plugin';
+
+/** Event type name the bus routes on. */
+${renderConstAssignment(`${names.screaming}_EVENT`, `'${names.kebab}'`)}
+
+/** Payload carried by the ${names.kebab} event. */
+export interface ${names.pascal}Payload {
+  readonly id: string;
+}
+
+/** Decorated event subscriber, registered through the ingress barrel. */
+export class ${names.pascal}Ingress {
+  @OnEvent(${names.screaming}_EVENT)
+  async handle(event: IDomainEvent<${names.pascal}Payload>): Promise<void> {
+    await Promise.resolve(event.data.id);
+  }
+}
+`,
+      },
+      {
+        path: INGRESS_SEAM.barrel,
+        contents: INGRESS_SEAM.renderBarrel({
+          ingress: seamNames(options.artifacts, 'ingress', names.kebab),
+        }),
+        managed: true,
+      },
+    ];
+  }
   const contents = `import type { IDomainEvent } from '@setu-ts/common';
 import type { IEventHandler } from '@setu-ts/events-plugin';
 

@@ -1,29 +1,62 @@
 /**
  * Job schematic — a job processor usable by the queue or scheduler plugin.
  *
- * Deliberately NOT wired: the emitted function is transport-agnostic by design, and
- * the CLI cannot pick a transport for it. Registering it as a queue processor starts a
- * worker loop polling for a job name nothing enqueues, while scheduling it needs a
- * cron expression or interval the artifact does not carry — so either guess produces
- * behaviour the developer did not ask for. `QueuePluginOptions` also publishes no
- * `processors` list a barrel could feed. The emitted JSDoc names both real calls.
+ * Functional projects keep the transport-agnostic function: the CLI cannot choose a
+ * queue consumer or schedule. Class-based projects instead emit a decorated queue
+ * processor and place it in the ingress seam consumed by `DecoratorPlugin`.
  *
  * @module
  */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
+import { INGRESS_SEAM } from '../seams/ingress.ts';
+import { seamNames } from '../seams/seam-spec.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
 
 /**
  * Generates a job module.
  *
  * @param names - Naming forms derived from the user's input
- * @param _options - Unused: jobs are runtime-agnostic
+ * @param options - Selects the functional or class-based registration shape
  * @returns One file at `src/jobs/<kebab>.job.ts`
  */
 export function generateJob(
   names: DerivedNames,
-  _options: SchematicOptions,
+  options: SchematicOptions,
 ): readonly GeneratedFile[] {
+  if (generatorMode(options.plugins) === 'class-based' && options.plugins.has('queue-plugin')) {
+    return [
+      {
+        path: `${INGRESS_SEAM.dir}/${names.kebab}${INGRESS_SEAM.suffix}`,
+        contents: `import type { IJob } from '@setu-ts/common';
+import { Processor } from '@setu-ts/decorator-plugin';
+
+/** Name the queue address this job consumes. */
+export const ${names.screaming}_JOB = '${names.kebab}';
+
+/** Payload accepted by the ${names.kebab} job. */
+export interface ${names.pascal}JobData {
+  readonly id: string;
+}
+
+/** Decorated queue processor, registered through the ingress barrel. */
+export class ${names.pascal}Ingress {
+  @Processor(${names.screaming}_JOB)
+  async process(job: IJob<${names.pascal}JobData>): Promise<void> {
+    await Promise.resolve(job.data.id);
+  }
+}
+`,
+      },
+      {
+        path: INGRESS_SEAM.barrel,
+        contents: INGRESS_SEAM.renderBarrel({
+          ingress: seamNames(options.artifacts, 'ingress', names.kebab),
+        }),
+        managed: true,
+      },
+    ];
+  }
   const contents = `/** Name the queue or scheduler addresses this job by. */
 export const ${names.screaming}_JOB = '${names.kebab}';
 

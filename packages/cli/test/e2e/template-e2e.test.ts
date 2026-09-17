@@ -92,12 +92,13 @@ const NON_COLLIDING_GROUPS: Readonly<Record<string, readonly string[]>> = {
  *
  * Counted separately from the generated files because they exist whether or not the group
  * under test writes into their directories: `src/modules/index.ts` plus one each for
- * controllers, services, middleware, plugins, health and metrics.
+ * controllers, services, ingress, middleware, plugins, health and metrics.
  *
- * SEVEN since M70h/E8, not eight: `route` and `controller` share
- * `src/controllers/index.ts`, so the separate `src/routes/index.ts` is gone.
+ * EIGHT since M97a: `route` and `controller` share `src/controllers/index.ts`,
+ * so the separate `src/routes/index.ts` is gone, while decorated non-HTTP
+ * ingress has its own registration barrel.
  */
-const SCAFFOLDED_BARRELS = 7;
+const SCAFFOLDED_BARRELS = 8;
 
 describe('template scaffolding — end to end', () => {
   let root: string;
@@ -419,6 +420,7 @@ describe('template scaffolding — end to end', () => {
       'DecoratorPlugin({\n' +
         '        controllers: [...APP_CONTROLLERS],\n' +
         '        services: [...APP_SERVICES],\n' +
+        '        ingress: [...INGRESS_HANDLERS],\n' +
         '        modules: [...MODULES],\n' +
         '      }),',
     );
@@ -431,6 +433,7 @@ describe('template scaffolding — end to end', () => {
     // explicit path — which is the signal a developer copies when adding theirs.
     expect(config).toContain("from './src/controllers/index.ts'");
     expect(config).toContain("from './src/services/index.ts'");
+    expect(config).toContain("from './src/ingress/index.ts'");
     expect(config).toContain("from './src/modules/index.ts'");
   });
 

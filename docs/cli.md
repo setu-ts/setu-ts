@@ -28,13 +28,13 @@ setu new my-app --dry-run                      # print the plan, write nothing
 
 ### Templates
 
-| Template       | Plugins it registers                                                                                                 |
-| -------------- | -------------------------------------------------------------------------------------------------------------------- |
-| _(none)_       | `RuntimePlugin` only                                                                                                 |
-| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenAPI + the `errorHandler()` middleware        |
-| `microservice` | The REST set + Messaging, Queue, Resilience, Telemetry, CQRS, Events, ServiceDiscovery                               |
-| `class-based`  | The REST set + `DecoratorPlugin` and `DiPlugin`, with a decorated controller and an injected service already written |
-| `full-stack`   | Composed through `@setu-ts/full-stack-starter`, plus a React Router 8 framework-mode app skeleton                    |
+| Template       | Plugins it registers                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| _(none)_       | `RuntimePlugin` only                                                                                                     |
+| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenAPI + the `errorHandler()` middleware            |
+| `microservice` | The REST set + Messaging, Queue, Resilience, Telemetry, CQRS, Events, ServiceDiscovery                                   |
+| `class-based`  | The REST set + `DecoratorPlugin` and `DiPlugin`, with decorated HTTP and non-HTTP ingress seams plus an injected service |
+| `full-stack`   | Composed through `@setu-ts/full-stack-starter`, plus a React Router 8 framework-mode app skeleton                        |
 
 `exceptions` ships middleware rather than a plugin, which is why `rest` registers eight plugins and
 adds `errorHandler()` to the pipeline separately. `class-based` was previously called `nest`; the
@@ -52,11 +52,11 @@ complete positions rather than a spectrum. The default is **functional**: no `De
 `DiPlugin`, `ctx`-first handlers, plain exported functions for services. `--template class-based` is
 the opt-in, and it always brings both plugins together.
 
-| You want    | Scaffold with                         | You get                                                                                                        |
-| ----------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Neither     | `setu new app`                        | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service`, `g module` and `g job` all work. |
-| Functional  | `setu new app --template rest`        | The REST plugin set. `g module` writes a plain service and a registered route with `GET` and `POST` handlers.  |
-| Class-based | `setu new app --template class-based` | `DecoratorPlugin` + `DiPlugin`, decorated controllers, `@Injectable` services, and class module barrels.       |
+| You want    | Scaffold with                         | You get                                                                                                                      |
+| ----------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Neither     | `setu new app`                        | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service`, `g module` and `g job` all work.               |
+| Functional  | `setu new app --template rest`        | The REST plugin set. `g module` writes a plain service and a registered route with `GET` and `POST` handlers.                |
+| Class-based | `setu new app --template class-based` | `DecoratorPlugin` + `DiPlugin`, decorated controllers and ingress classes, `@Injectable` services, and class module barrels. |
 
 The choice **persists**. `setu generate` reads the target project's manifest, so a project holding
 `@setu-ts/decorator-plugin` gets class output and one without it gets functional output — a later
@@ -165,29 +165,31 @@ Any casing of the name produces identical output: `setu g controller user-profil
 Eleven of the fourteen schematics land in a barrel the generated `setu.config.ts` already imports,
 so a generated artifact reaches its registration site with **no edit to a file you own**:
 
-| Schematic          | Requires           | Emits into         | Reaches                                                                              |
-| ------------------ | ------------------ | ------------------ | ------------------------------------------------------------------------------------ |
-| `module`           | `decorator-plugin` | `src/modules/`     | `DecoratorPlugin({ controllers, services })`                                         |
-| `controller`       | —                  | `src/controllers/` | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call |
-| `service`          | —                  | `src/services/`    | `DecoratorPlugin({ services })`, when installed                                      |
-| `route`            | —                  | `src/controllers/` | A `register…Routes(router)` call in `createApp()`                                    |
-| `middleware`       | —                  | `src/middleware/`  | The global middleware pipeline                                                       |
-| `plugin`           | —                  | `src/plugins/`     | The `plugins: [...]` array                                                           |
-| `health-indicator` | `health-plugin`    | `src/health/`      | `HealthPlugin({ indicators })` → `GET /health`                                       |
-| `metric`           | `metrics-plugin`   | `src/metrics/`     | `MetricsPlugin({ customMetrics })` → `/metrics`                                      |
-| `command-handler`  | `cqrs-plugin`      | `src/cqrs/`        | `CqrsPlugin({ commandHandlers })`                                                    |
-| `query-handler`    | `cqrs-plugin`      | `src/cqrs/`        | `CqrsPlugin({ queryHandlers })`                                                      |
-| `event-handler`    | `events-plugin`    | `src/events/`      | `EventsPlugin({ handlers })`                                                         |
-| `guard`            | `auth-plugin`      | `src/guards/`      | Nothing — attach it per route                                                        |
-| `job`              | —                  | `src/jobs/`        | Nothing — transport-agnostic by design                                               |
-| `migration`        | `database-plugin`  | `src/migrations/`  | Nothing — no framework code reads migrations                                         |
+| Schematic          | Requires           | Emits into                      | Reaches                                                                              |
+| ------------------ | ------------------ | ------------------------------- | ------------------------------------------------------------------------------------ |
+| `module`           | `decorator-plugin` | `src/modules/`                  | `DecoratorPlugin({ controllers, services })`                                         |
+| `controller`       | —                  | `src/controllers/`              | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call |
+| `service`          | —                  | `src/services/`                 | `DecoratorPlugin({ services })`, when installed                                      |
+| `route`            | —                  | `src/controllers/`              | A `register…Routes(router)` call in `createApp()`                                    |
+| `middleware`       | —                  | `src/middleware/`               | The global middleware pipeline                                                       |
+| `plugin`           | —                  | `src/plugins/`                  | The `plugins: [...]` array                                                           |
+| `health-indicator` | `health-plugin`    | `src/health/`                   | `HealthPlugin({ indicators })` → `GET /health`                                       |
+| `metric`           | `metrics-plugin`   | `src/metrics/`                  | `MetricsPlugin({ customMetrics })` → `/metrics`                                      |
+| `command-handler`  | `cqrs-plugin`      | `src/cqrs/` or `src/ingress/`   | `CqrsPlugin({ commandHandlers })`, or `DecoratorPlugin({ ingress })` in class mode   |
+| `query-handler`    | `cqrs-plugin`      | `src/cqrs/` or `src/ingress/`   | `CqrsPlugin({ queryHandlers })`, or `DecoratorPlugin({ ingress })` in class mode     |
+| `event-handler`    | `events-plugin`    | `src/events/` or `src/ingress/` | `EventsPlugin({ handlers })`, or `DecoratorPlugin({ ingress })` in class mode        |
+| `guard`            | `auth-plugin`      | `src/guards/`                   | Nothing — attach it per route                                                        |
+| `job`              | —                  | `src/jobs/` or `src/ingress/`   | Transport-agnostic function, or `DecoratorPlugin({ ingress })` in class mode         |
+| `migration`        | `database-plugin`  | `src/migrations/`               | Nothing — no framework code reads migrations                                         |
 
-The last three are unwired deliberately, not by omission. A `guard` answers `401` when
+`guard` and `migration` are unwired deliberately, not by omission. A `guard` answers `401` when
 `ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and `/` —
 turning a generated file into an outage; its positions are per route (`@UseGuards`, a route's
-`middleware` list). A `job` is transport-agnostic: registering it as a queue processor would start a
-worker loop polling for a name nothing enqueues, and scheduling it needs a cron expression the
-artifact does not carry. Nothing in the framework reads migration files at all.
+`middleware` list). In a functional project a `job` remains transport-agnostic: registering it as a
+queue processor would start a worker loop polling for a name nothing enqueues, and scheduling it
+needs a cron expression the artifact does not carry. In class mode with `QueuePlugin` installed it
+becomes a decorated queue processor in the ingress barrel. Nothing in the framework reads migration
+files at all.
 
 A schematic gated on a plugin refuses rather than emitting source whose own import cannot resolve,
 and names the decorator-free alternative when there is one:

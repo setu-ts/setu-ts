@@ -176,16 +176,23 @@ describe('enforceRoles option (§3.4, §3.5)', () => {
     expect(warns).toHaveLength(0);
   });
 
-  it('declares an optional dependency edge on the enforced capabilities and the view engine', () => {
+  it('declares optional dependency edges for every decorator capability', () => {
     // Real dependency edges (not priority luck): a REPLACEMENT provider
     // registered at a higher priority number still lands before this plugin,
     // so the register-time warning decision sees it. The view edge (M92)
     // orders the engine before the plugin that renders with it.
-    const plugin = DecoratorPlugin({});
+    const plugin = DecoratorPlugin({ ingress: [class Ingress {}] });
     expect(plugin.optionalDependencies).toEqual([
       CAPABILITIES.VALIDATION,
       CAPABILITIES.AUTHORIZATION,
       CAPABILITIES.VIEW,
+      CAPABILITIES.QUEUE,
+      CAPABILITIES.SCHEDULER,
+      CAPABILITIES.EVENTS,
+      CAPABILITIES.MESSAGING,
+      CAPABILITIES.WEBSOCKET,
+      CAPABILITIES.COMMAND_BUS,
+      CAPABILITIES.QUERY_BUS,
     ]);
   });
 });

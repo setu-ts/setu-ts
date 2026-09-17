@@ -1,14 +1,48 @@
 /** WebSocket route schematic. */
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
+import { INGRESS_SEAM } from '../seams/ingress.ts';
 import { PLUGINS_SEAM } from '../seams/plugins.ts';
 import { seamNames } from '../seams/seam-spec.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
 
 /** Generates a plugin that registers one WebSocket route. */
 export function generateWsRoute(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
+  if (generatorMode(options.plugins) === 'class-based') {
+    return [
+      {
+        path: `${INGRESS_SEAM.dir}/${names.kebab}${INGRESS_SEAM.suffix}`,
+        contents:
+          `import type { IWebSocketConnection, WebSocketConnectionContext } from '@setu-ts/common';
+import { Gateway, OnMessage, OnOpen } from '@setu-ts/decorator-plugin';
+
+/** Decorated WebSocket gateway, registered through the ingress barrel. */
+@Gateway('/ws/${names.kebab}')
+export class ${names.pascal}Ingress {
+  @OnOpen
+  open(connection: IWebSocketConnection, context: WebSocketConnectionContext): void {
+    connection.data.set('room', context.query['room'] ?? '${names.kebab}');
+  }
+
+  @OnMessage
+  message(_connection: IWebSocketConnection, _data: string | Uint8Array): void {
+    // Replace with the route's real frame handling.
+  }
+}
+`,
+      },
+      {
+        path: INGRESS_SEAM.barrel,
+        contents: INGRESS_SEAM.renderBarrel({
+          ingress: seamNames(options.artifacts, 'ingress', names.kebab),
+        }),
+        managed: true,
+      },
+    ];
+  }
   const contents = `import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IPluginContext, IWebSocketService } from '@setu-ts/common';
 
