@@ -110,11 +110,15 @@ export function assertValidHeader(name: string, value: string, where: string): v
   try {
     new Headers().set(name, value);
   } catch (cause) {
-    const detail = cause instanceof Error ? cause.message : String(cause);
+    // `String(cause)` rather than a narrowed `cause.message`: the runtime
+    // always throws a `TypeError` here, so an `instanceof` arm would be a
+    // branch no input can reach, and the type prefix it keeps
+    // (`TypeError: Invalid header name: …`) names the fault rather than
+    // burying it. The original is preserved as `cause` either way.
     throw new Error(
       `${where} is decorated with @ResponseHeader('${name}', '${value}'), which the runtime ` +
-        `refuses: ${detail}. An invalid pair throws while the response headers are written, so ` +
-        'every request to this route would answer 500.',
+        `refuses: ${String(cause)}. An invalid pair throws while the response headers are ` +
+        'written, so every request to this route would answer 500.',
       { cause },
     );
   }
