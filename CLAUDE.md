@@ -5004,6 +5004,41 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   compliance feature: no regulation is named in any shipped identifier, and a gate keeps it that
   way. Plan: `plans/milestone-96-redaction-seam.md`).
 
+- **Also open** — **M97** (97a `packages/decorator-plugin` + `packages/cli`; 97b
+  `packages/decorator-plugin` + `packages/common` + `packages/openapi-plugin`; 97c
+  `packages/config-plugin` — ergonomics: three places where a capability is complete, its
+  registration surface is public, and the developer still hand-writes the wiring. **Only 97b touches
+  `common`** — the other two lists were corrected once their plans resolved the seam (97a puts the
+  ingress map on the concrete `MetadataStore`, 97c ships a free function rather than a required
+  `IConfig` member). Three letters, separate package ownership, the M93a/M93b shape. **97a** gives
+  the six non-HTTP ingress categories — queue, scheduler, domain events, messaging, WebSocket, CQRS
+  — the class-based surface HTTP has had since M9 (`@Processor`, `@Cron`/`@Every`, `@OnEvent`,
+  `@Subscribe`, `@Gateway`, `@CommandHandler`/`@QueryHandler`, plus `@UseBehaviors`). Six
+  categories, **seven** provider tokens, because `CqrsPlugin` provides `COMMAND_BUS` and `QUERY_BUS`
+  separately and the pass resolves both buses directly — the follow-on M86 named at
+  `ROADMAP.md:8509` and deferred "until the arms and the pipeline exist", whose precondition PR #228
+  met. It is cheap for one checked reason: the behaviour-wrapped service is what each plugin
+  registers under its token (`queue-plugin.ts:245` registers the `BehaviorChainQueueService` whose
+  `override process()` wraps in `withIngressBehaviors`; same for the `PipelinedBroker` and the
+  scheduler), so an imperative registration on the RESOLVED capability inherits the whole M86/M90i
+  stack, and every method it needs is on a `common` contract — no plugin imports another, no
+  `IMetadataStore` widening, and no cycle (no ingress plugin depends on `METADATA_STORE`). **97b**
+  adds `@HttpCode`/`@ResponseHeader`/ `@Redirect`, since `decorator-plugin.ts:345` answers
+  `ctx.response.json(result)` for every plain return; `@Ctx()` already escapes it, so this is
+  ergonomics rather than a defect, and the second payoff is deriving the success status into OpenAPI
+  through the M57/M70m `Symbol.for` brand, which `RouteSchema.response` already has a slot for.
+  **97c** binds a named configuration section to a parsed type: `IConfig.get<T>` is unchecked over a
+  `Record<string, unknown>`, while `validateConfig` already coerces through a Zod-compatible schema
+  and then erases the type on its last line (`return parsed as Record<string, unknown>`). **Named
+  and not taken:** an automatic per-request DI scope (both comparison frameworks open one;
+  `createScope()` exists but nothing calls it per request — a kernel and container change, not
+  sugar), `ParseIntPipe`-style transforms (`z.coerce` through `@ValidateParams` already covers it),
+  `PartialType`/`PickType` (Zod ships them), `IHostedService`, and localization. **The competitor
+  rows are from knowledge and are NOT measured** — M94 built runnable ASP.NET 9 / NestJS 10 apps in
+  `.tmp/compare/` for this comparison and two doc-derived claims did not survive, so each plan
+  re-measures what it relies on. Plans: `plans/milestone-97a-ingress-decorators.md`,
+  `plans/milestone-97b-response-shaping.md`, `plans/milestone-97c-typed-config-sections.md`.)
+
 - **Milestone 95** (`packages/cli` + `packages/messaging-plugin` + `packages/common` +
   `packages/session-plugin` + `packages/static-plugin` + `docs/` — the `v0.6.0` smoke defect
   closeout) — **open**. The `v0.6.0` regression run re-executed all 15 rows the release claims to
