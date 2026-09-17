@@ -103,6 +103,34 @@ describe('@Redirect status validation', () => {
     }
   });
 
+  it('refuses a target the runtime will not carry as a Location header', () => {
+    // `@Redirect` writes a header exactly as `@ResponseHeader` does, so it needs
+    // the same check. Without it the route BOOTS and answers 500 on every
+    // request — measured, before this was added.
+    const url = `/ok${String.fromCharCode(10)}X-Injected: yes`;
+    const message = refusal({ redirect: { url, status: 302 } });
+
+    expect(message).toContain('Invalid header value');
+    expect(message).toContain('would answer 500');
+    expect(message).toContain(WHERE);
+  });
+
+  it('refuses a blank target, which the runtime accepts and no client follows', () => {
+    // `Headers.set` trims, so `'   '` becomes `''` — a redirect to nowhere, and
+    // a silent no-op of the whole decorator.
+    for (const url of ['', '   ', '\t']) {
+      const message = refusal({ redirect: { url, status: 302 } });
+
+      expect(message).toContain('whose target is empty');
+    }
+  });
+
+  it('accepts ordinary targets — a path, an absolute URL, a query string', () => {
+    for (const url of ['/orders', 'https://example.test/x', '/search?q=a%20b', '/x#frag']) {
+      expect(refusal({ redirect: { url, status: 302 } })).toBeNull();
+    }
+  });
+
   it('collapses a redirect into the status it sets and the Location it writes', () => {
     expect(validateResponseShaping({ redirect: { url: '/v2', status: 301 } }, WHERE)).toEqual({
       status: 301,
@@ -129,6 +157,26 @@ describe('@Redirect status validation', () => {
         ],
       }),
     ).rejects.toThrow('not a redirect status');
+  });
+
+  it('refuses an injectable target from a REAL application register()', async () => {
+    @Controller('/bad')
+    class InjectedRedirectController {
+      @Redirect(`/ok${String.fromCharCode(10)}X-Injected: yes`)
+      @Get('/')
+      handle(): number {
+        return 1;
+      }
+    }
+
+    await expect(
+      createTestApp({
+        plugins: [
+          RuntimePlugin(),
+          DecoratorPlugin({ controllers: [InjectedRedirectController as Constructor] }),
+        ],
+      }),
+    ).rejects.toThrow('Invalid header value');
   });
 });
 

@@ -26,12 +26,13 @@ the success body under the old key, and the fix is to regenerate the client and 
 Declaring `schema.response` (or `@ApiResponse`) still wins over the derivation, and
 `OpenApiPlugin({ deriveResponseStatus: false })` restores the assumed `200` for every branded route.
 
-Adopting the decorators also moves three checks from "never" to **startup**. `@HttpCode` takes an
-integer in `[200, 599]` and `@Redirect` one in `[300, 399]`; a header name and value must be ones
-the runtime accepts and the same header name may not be declared twice; and one handler may not
-carry both `@HttpCode` and `@Redirect`, because both set the status. Each refusal names the
-controller, the method and the value. There is nothing to migrate — no released code can trip these
-— but a `register()` that suddenly refuses is the decorator you just added, not a regression.
+Adopting the decorators also moves several checks from "never" to **startup**. `@HttpCode` takes an
+integer in `[200, 599]`; `@Redirect` takes one in `[300, 399]` plus a non-blank target the runtime
+will carry as a `Location` header; a header name and value must be ones the runtime accepts and the
+same header name may not be declared twice; and one handler may not carry both `@HttpCode` and
+`@Redirect`, because both set the status. Each refusal names the controller, the method and the
+value. There is nothing to migrate — no released code can trip these — but a `register()` that
+suddenly refuses is the decorator you just added, not a regression.
 
 ### Stop reading a multipart field named `unknown`
 

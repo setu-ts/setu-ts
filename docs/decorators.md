@@ -609,13 +609,14 @@ decide per request should call `ctx.response.redirect(url)` itself through `Ctx(
 the response.
 
 **Every argument is checked at startup, never per request.** `@HttpCode` takes an integer in
-`[200, 599]`; `@Redirect` takes one in `[300, 399]`; a header name and value must be ones the
-runtime accepts; the same header name may not be declared twice; and one handler may not carry both
-`@HttpCode` and `@Redirect`, because both set the status. Each refusal names the controller, the
-method and the offending value. The alternative is worse than a startup failure: an out-of-range
-status throws inside the HTTP adapter _after_ the middleware pipeline has finished, where no error
-handler can answer it, and an invalid header pair throws while the response headers are written, so
-every request to that route would answer `500`.
+`[200, 599]`; `@Redirect` takes one in `[300, 399]` and a non-blank target the runtime will carry as
+a `Location` header; a header name and value must be ones the runtime accepts; the same header name
+may not be declared twice; and one handler may not carry both `@HttpCode` and `@Redirect`, because
+both set the status. Each refusal names the controller, the method and the offending value. The
+alternative is worse than a startup failure: an out-of-range status throws inside the HTTP adapter
+_after_ the middleware pipeline has finished, where no error handler can answer it, and an invalid
+header pair throws while the response headers are written, so every request to that route would
+answer `500`.
 
 `@HttpCode(204)` (and `205`, and `304`) serves a bodiless response — the runtime drops a body
 written at a null-body status — which is exactly what a `DELETE` handler wants.

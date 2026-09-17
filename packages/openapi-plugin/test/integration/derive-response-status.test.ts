@@ -12,6 +12,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { withResponseMetadata } from '@setu-ts/common';
 import {
   ApiResponse,
   Controller,
@@ -178,6 +179,39 @@ describe('derived response status through a real application', () => {
     expect(on.paths['/plain']?.get?.responses).toEqual({
       '200': { description: 'Successful response' },
     });
+  });
+
+  it('derives from a handler branded OUTSIDE decorator-plugin', async () => {
+    // `RESPONSE_METADATA` is exported and `PUBLIC_API.md` says so: "the symbol
+    // is exported so a handler produced outside `@setu-ts/decorator-plugin` can
+    // be branded too". Nothing drove that claim, so this does — a programmatic
+    // route, no decorators anywhere.
+    const app = createApplication({
+      plugins: [RuntimePlugin(), OpenApiPlugin({ title: 'P', version: '1.0.0' })],
+    });
+    app.router.post('/things', {
+      handler: withResponseMetadata(
+        (ctx) => ctx.response.status(201).json({ id: 1 }),
+        { status: 201 },
+      ),
+    });
+    app.router.get('/things', { handler: (ctx) => ctx.response.json([]) });
+    await app.start();
+    try {
+      const res = await app.fetch(new Request('http://localhost/openapi.json'));
+      const spec = await res.json() as OpenApiDocument;
+
+      expect(spec.paths['/things']?.post?.responses).toEqual({
+        '201': { description: 'Resource created' },
+      });
+      // The control: an unbranded handler beside it keeps the assumed 200, so
+      // the assertion above cannot pass by the derivation being unconditional.
+      expect(spec.paths['/things']?.get?.responses).toEqual({
+        '200': { description: 'Successful response' },
+      });
+    } finally {
+      await app.stop();
+    }
   });
 
   it('the option reaches the generator through the PLUGIN, not only the generator', async () => {

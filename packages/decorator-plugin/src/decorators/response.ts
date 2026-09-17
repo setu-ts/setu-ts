@@ -152,15 +152,21 @@ export function ResponseHeader(name: string, value: string): SetuMethodDecorator
  * `ctx.response.redirect(url)` itself through `@Ctx()`, which terminates the
  * response and returns a `HandlerResult`.
  *
- * `status` must be an integer in `[300, 399]`, refused at `register()`
- * otherwise, and the same handler may not also carry `@HttpCode` — both set the
+ * `status` must be an integer in `[300, 399]`, and `url` must be non-blank and
+ * a value the runtime will carry as a `Location` header — both refused at
+ * `register()` otherwise, for the reason `@ResponseHeader` validates its own
+ * pair: an invalid header value throws while the response headers are written,
+ * so every request to the route would answer `500`. A blank target is refused
+ * separately, because the runtime ACCEPTS it and serves a redirect no client
+ * can follow. The same handler may not also carry `@HttpCode` — both set the
  * status.
  *
  * @param url - The `Location` header value
  * @param status - The redirect status; `302` by default, matching `IResponse.redirect`
  * @returns A standard method decorator
- * @throws {Error} At `register()`, when `status` is not a redirect status, or
- *   when the same handler also carries `@HttpCode`
+ * @throws {Error} At `register()`, when `status` is not a redirect status, when
+ *   `url` is blank or is not a value the runtime accepts as a header, or when
+ *   the same handler also carries `@HttpCode`
  * @example
  * ```typescript
  * @Controller('/docs')

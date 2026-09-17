@@ -95,6 +95,48 @@ export function assertRedirectStatus(status: number, url: string, where: string)
 }
 
 /**
+ * Refuses a `@Redirect` target the `Location` header could not carry, or one
+ * that would carry nothing.
+ *
+ * `@Redirect` writes a header exactly as `@ResponseHeader` does, so it needs
+ * the same check for the same reason: an invalid value throws `TypeError`
+ * inside the handler wrapper, answering `500` on every request to the route
+ * with the diagnostic reachable only in the log. A URL carrying a newline is
+ * the header-injection shape, and the runtime is right to refuse it — but a
+ * per-request `500` is the wrong place to learn that about a compile-time
+ * literal.
+ *
+ * An EMPTY or whitespace-only target is refused separately, because the runtime
+ * accepts it (`Headers.set` trims, so `'   '` becomes `''`) and serves a
+ * redirect no client can follow — a silent no-op of the whole decorator, which
+ * is the same shape {@linkcode assertRedirectStatus} refuses `@Redirect(url, 200)`
+ * for.
+ *
+ * @param url - The declared redirect target
+ * @param where - The route label the message names
+ * @throws {Error} When the target is blank, or the runtime refuses it
+ */
+export function assertRedirectUrl(url: string, where: string): void {
+  if (url.trim() === '') {
+    throw new Error(
+      `${where} is decorated with @Redirect('${url}'), whose target is empty. A redirect with a ` +
+        'blank Location header is one no client can follow, so the decorator would do nothing. ' +
+        'Name the target path or URL.',
+    );
+  }
+  try {
+    new Headers().set('location', url);
+  } catch (cause) {
+    throw new Error(
+      `${where} is decorated with @Redirect('${url}'), whose target the runtime refuses as a ` +
+        `Location header: ${String(cause)}. An invalid target throws while the response headers ` +
+        'are written, so every request to this route would answer 500.',
+      { cause },
+    );
+  }
+}
+
+/**
  * Refuses a header name or value the runtime itself will not accept.
  *
  * The check probes `Headers.set` rather than hand-rolling a token regex, so it
@@ -154,7 +196,10 @@ export function validateResponseShaping(
     );
   }
   if (httpCode !== undefined) assertServeableStatus(httpCode, where);
-  if (redirect !== undefined) assertRedirectStatus(redirect.status, redirect.url, where);
+  if (redirect !== undefined) {
+    assertRedirectStatus(redirect.status, redirect.url, where);
+    assertRedirectUrl(redirect.url, where);
+  }
 
   assertDistinctHeaderNames(headers, redirect, where);
   for (const header of headers) assertValidHeader(header.name, header.value, where);

@@ -5054,8 +5054,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   assertion stays green. Six negative controls in all were each observed failing and reverted, and
   the second records an honest nuance: swapping `Symbol.for` for `Symbol()` fails ONLY the
   cross-copy unit test, because both plugins share one `common` instance in-process — which is
-  precisely why that unit test exists. All changed `src` files at 100% branch/function/line) —
-  complete (PR pending)
+  precisely why that unit test exists.
+
+  **Code review then found the milestone's own principle applied to two of its three decorators and
+  not the third.** `@Redirect` writes a `Location` header exactly as `@ResponseHeader` does, and
+  validated only its STATUS — so a target carrying a newline booted clean and answered **`500` on
+  every request**, with the diagnostic reachable only in the log. That is verbatim the failure §3.3c
+  exists to prevent, on the header-injection shape, and the review dimension "a new guard is
+  reviewed against the code that runs before it" pointed it the other way round: the guard was right
+  and one of its two writers was not behind it. A blank target is refused separately, because the
+  runtime ACCEPTS it (`Headers.set` trims, so three spaces become the empty string) and serves a
+  redirect no client can follow — the silent-no-op shape `@Redirect(url, 200)` is already refused
+  for. The blank check must precede the `Headers` probe or it is unreachable, which is why it does.
+  Review also closed a test gap on a documented claim: `PUBLIC_API.md` says the symbol is exported
+  so a handler produced OUTSIDE `decorator-plugin` can be branded, and nothing drove that path — it
+  now has a programmatic-route case with an unbranded sibling as the control, so it cannot pass by
+  the derivation being unconditional. Every `src` file this milestone ADDS is at 100%
+  branch/function/line, and every line it adds to an existing one is covered; the three shared files
+  it edits sit where `main` left them — `metadata-store.ts` 99.0, `openapi-generator.ts` 98.4 and
+  `decorator-plugin.ts` 98.4/100/99.0, whose only uncovered lines are the pre-existing
+  `replayCustomDecorators` skip and the `autoDiscover` error loop) — complete (PR pending)
 - **Next milestone** — **M95d** (`docs/` + `packages/common` + `packages/view-plugin` + `scripts/` —
   documentation that survives contact: the M90h precedent, four findings where the code is correct
   and a reader following the documentation still ends up wrong. The only letter carrying gate work —

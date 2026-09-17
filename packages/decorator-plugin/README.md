@@ -178,11 +178,11 @@ builder BEFORE the handler runs, so `ctx.response.status(202).json(...)` answers
 **`@Redirect` does not skip the handler** — a decorator cannot decline to call the method, so the
 body still runs and a plain return is still serialised alongside `Location`. **Every argument is
 refused at `register()`, never per request**: `@HttpCode` takes an integer in `[200, 599]`,
-`@Redirect` one in `[300, 399]`, a header pair must be one the runtime accepts, a name may not be
-declared twice, and one handler may not carry both `@HttpCode` and `@Redirect`. Each refusal names
-the controller, the method and the value — the alternative is a `RangeError` thrown inside the HTTP
-adapter after the pipeline has finished, or a `TypeError` while headers are written, answering `500`
-on every request.
+`@Redirect` one in `[300, 399]` plus a non-blank target the runtime will carry as a `Location`
+header, a header pair must be one the runtime accepts, a name may not be declared twice, and one
+handler may not carry both `@HttpCode` and `@Redirect`. Each refusal names the controller, the
+method and the value — the alternative is a `RangeError` thrown inside the HTTP adapter after the
+pipeline has finished, or a `TypeError` while headers are written, answering `500` on every request.
 
 `@HttpCode(204)` serves a bodiless response, which is what a `DELETE` handler wants.
 
