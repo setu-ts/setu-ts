@@ -166,6 +166,29 @@ export function withDependency(
 }
 
 /**
+ * Finds the local name for one named provider import in the generated config shape.
+ *
+ * The config owns its import style, so this deliberately accepts only the
+ * one-line named import form the CLI writes. It still understands aliases: a
+ * hand-added `EventsPlugin as AppEvents` has to be invoked as `AppEvents`, not
+ * reintroduced under a second local binding.
+ */
+function providerBinding(source: string, bare: string, symbol: string): string | undefined {
+  const importStart = 'import {';
+  const importEnd = `} from '@setu-ts/${bare}';`;
+  for (const line of source.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith(importStart) || !trimmed.endsWith(importEnd)) continue;
+    const specifiers = trimmed.slice(importStart.length, -importEnd.length).split(',');
+    for (const specifier of specifiers) {
+      const parts = specifier.trim().split(/\s+as\s+/);
+      if (parts[0] === symbol) return parts[1] ?? symbol;
+    }
+  }
+  return undefined;
+}
+
+/**
  * Adds a zero-config ingress provider to the CLI-generated class-based config.
  *
  * The generated config is deliberately identified by its explicit ingress
@@ -188,27 +211,27 @@ export function withIngressProviderWiring(source: string, bare: string): string 
   const ingressOption = 'ingress: [...INGRESS_HANDLERS],';
   const pluginList = 'plugins: [';
   const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
-  const hasProviderImport = new RegExp(
-    `import\\s*\\{[^}]*\\b${provider.symbol}\\b[^}]*\\}\\s*from\\s*['"]@setu-ts/${bare}['"]`,
-  ).test(source);
+  const importedBinding = providerBinding(source, bare, provider.symbol);
+  const factory = importedBinding ?? provider.symbol;
   if (
     !source.includes(decoratorImport) ||
     !source.includes(ingressImport) ||
     !source.includes('DecoratorPlugin({') ||
     !source.includes(ingressOption) ||
     !source.includes(pluginList) ||
-    new RegExp(`\\b${provider.symbol}\\s*\\(`).test(source)
+    source.includes(`${factory}(`) ||
+    source.includes(`${factory} (`)
   ) {
     return undefined;
   }
 
-  const withImport = hasProviderImport
-    ? source
-    : source.replace(decoratorImport, `${decoratorImport}\n${providerImport}`);
+  const withImport = importedBinding === undefined
+    ? source.replace(decoratorImport, `${decoratorImport}\n${providerImport}`)
+    : source;
   const insertion = withImport.indexOf(pluginList) + pluginList.length;
   const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
   const indentation = withImport.slice(lineStart, insertion - pluginList.length);
-  return `${withImport.slice(0, insertion)}\n${indentation}  ${provider.symbol}(),${
+  return `${withImport.slice(0, insertion)}\n${indentation}  ${factory}(),${
     withImport.slice(insertion)
   }`;
 }

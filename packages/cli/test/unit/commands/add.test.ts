@@ -180,6 +180,21 @@ describe('withIngressProviderWiring', () => {
       .toHaveLength(1);
     expect(updated).toContain('      EventsPlugin(),');
   });
+
+  it('uses an aliased provider import for its generated construction', () => {
+    const source = CLASS_BASED_INGRESS_CONFIG.replace(
+      "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
+      "import { EventsPlugin as AppEvents } from '@setu-ts/events-plugin';\n" +
+        "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
+    );
+    const updated = withIngressProviderWiring(source, 'events-plugin') ?? '';
+
+    expect(updated).toContain(
+      "import { EventsPlugin as AppEvents } from '@setu-ts/events-plugin';",
+    );
+    expect(updated).not.toContain("import { EventsPlugin } from '@setu-ts/events-plugin';");
+    expect(updated).toContain('      AppEvents(),');
+  });
 });
 
 describe('runAddCommand', () => {

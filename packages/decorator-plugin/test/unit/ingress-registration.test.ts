@@ -14,6 +14,7 @@ import type {
 } from '@setu-ts/common';
 
 import {
+  CommandHandler,
   Cron,
   Every,
   Gateway,
@@ -416,6 +417,21 @@ describe('non-HTTP ingress registration', () => {
     await DecoratorPlugin({ ingress: [InvalidPipelineBehavior] }).register(second.ctx);
     const secondHook = second.lifecycleHooks.find((candidate) => candidate.phase === 'onInit');
     await expect(secondHook?.fn()).rejects.toThrow(/UseIngressBehaviors.*does not support/);
+  });
+
+  it('refuses multiple primary ingress decorators on one method', async () => {
+    class Jobs {
+      @Processor('email')
+      @CommandHandler('send-email')
+      process(): void {}
+    }
+
+    const { ctx, lifecycleHooks } = createFakeContext();
+    await DecoratorPlugin({ ingress: [Jobs] }).register(ctx);
+    const hook = lifecycleHooks.find((candidate) => candidate.phase === 'onInit');
+    await expect(hook?.fn()).rejects.toThrow(
+      /Jobs\.process has multiple primary ingress decorators \(command and queue\)/,
+    );
   });
 
   it('refuses @UseGuards on an ingress handler instead of silently ignoring it', async () => {

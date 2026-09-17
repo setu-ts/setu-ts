@@ -57,6 +57,34 @@ function primaryFor(
   );
 }
 
+function isPrimaryIngressEntry(
+  entry: IngressMetadata,
+): entry is Exclude<
+  IngressMetadata,
+  { readonly kind: 'gateway' | 'ingress-behaviors' | 'pipeline-behaviors' }
+> {
+  return 'handler' in entry && !entry.kind.endsWith('behaviors');
+}
+
+/** Refuses one method being registered into incompatible ingress lifecycles. */
+function refuseMultiplePrimaryIngresses(
+  target: Constructor,
+  entries: readonly IngressMetadata[],
+): void {
+  const primaries = new Map<string, IngressMetadata>();
+  for (const entry of entries) {
+    if (!isPrimaryIngressEntry(entry)) continue;
+    const existing = primaries.get(entry.handler);
+    if (existing !== undefined) {
+      throw new Error(
+        `${className(target)}.${entry.handler} has multiple primary ingress decorators ` +
+          `(${existing.kind} and ${entry.kind}). Declare one ingress kind per method.`,
+      );
+    }
+    primaries.set(entry.handler, entry);
+  }
+}
+
 function isIngressBehaviorEntry(
   entry: IngressMetadata,
 ): entry is Extract<IngressMetadata, { readonly kind: 'ingress-behaviors' }> {
@@ -170,9 +198,10 @@ export async function registerIngresses(
   for (const target of targets) {
     const entries = metadataStore.getIngress(target);
     if (entries.length === 0) continue;
-    const instance = instantiate(target);
 
+    refuseMultiplePrimaryIngresses(target, entries);
     refuseHttpGuards(target, entries);
+    const instance = instantiate(target);
     for (const entry of entries) {
       if (entry.kind === 'ingress-behaviors') ingressBehaviors(entries, target, entry.handler);
       if (entry.kind === 'pipeline-behaviors') pipelineBehaviors(entries, target, entry.handler);
