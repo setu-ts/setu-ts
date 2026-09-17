@@ -16,6 +16,7 @@ import {
   seamHeader,
   seamNames,
 } from './seam-spec.ts';
+import { deriveNames } from '../utils/names.ts';
 import type { DerivedNames } from '../utils/names.ts';
 
 /** Barrel export consumed by `DecoratorPlugin({ ingress })`. */
@@ -33,9 +34,7 @@ function modulePath(schematic: string, kebab: string): string {
 function renderIngressBarrel(artifacts: SeamArtifacts): string {
   const names = seamNames(artifacts, 'ingress');
   const imports = renderSeamImports(names, importSymbols, (kebab) => modulePath('ingress', kebab));
-  const classes = names.map((name) =>
-    `${name.split('-').map((part) => part[0].toUpperCase() + part.slice(1)).join('')}Ingress`
-  );
+  const classes = names.map((name) => importSymbols(deriveNames(name))[0]);
 
   return assembleSeamBarrel(
     seamHeader('setu generate job / ws-route / event-handler / command-handler / query-handler', [

@@ -46,12 +46,20 @@ function nextMessage(socket: WebSocket): Promise<string> {
 }
 
 function closed(socket: WebSocket): Promise<void> {
-  return new Promise((resolve) => {
-    if (socket.readyState === WebSocket.CLOSED) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('Timed out waiting for WebSocket close.')),
+      5_000,
+    );
+    const finish = (): void => {
+      clearTimeout(timer);
       resolve();
+    };
+    if (socket.readyState === WebSocket.CLOSED) {
+      finish();
       return;
     }
-    socket.onclose = () => resolve();
+    socket.onclose = finish;
   });
 }
 
@@ -85,7 +93,10 @@ try {
     throw new Error('The decorated gateway did not retain the connected socket.');
   }
 } finally {
-  client.close();
-  await closed(client);
-  await app.stop();
+  try {
+    client.close();
+    await closed(client);
+  } finally {
+    await app.stop();
+  }
 }

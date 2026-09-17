@@ -74,9 +74,17 @@ describe('decorated non-HTTP ingress through real plugins', () => {
       @CommandHandler('create-user')
       @UsePipelineBehaviors({
         handle: async (_request, next) => {
-          phases.push('before');
+          phases.push('outer-before');
           const result = await next();
-          phases.push('after');
+          phases.push('outer-after');
+          return result;
+        },
+      })
+      @UsePipelineBehaviors({
+        handle: async (_request, next) => {
+          phases.push('inner-before');
+          const result = await next();
+          phases.push('inner-after');
           return result;
         },
       })
@@ -104,7 +112,13 @@ describe('decorated non-HTTP ingress through real plugins', () => {
     await expect(queries.execute({ type: 'find-user', data: { id: 'user-2' } })).resolves.toEqual({
       id: 'user-2',
     });
-    expect(phases).toEqual(['before', 'command', 'after']);
+    expect(phases).toEqual([
+      'inner-before',
+      'outer-before',
+      'command',
+      'outer-after',
+      'inner-after',
+    ]);
     await app.stop();
   });
 

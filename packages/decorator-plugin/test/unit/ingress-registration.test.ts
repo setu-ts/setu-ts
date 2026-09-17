@@ -2,6 +2,7 @@ import { beforeEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
+  IContainer,
   IJob,
   IQueue,
   IScheduler,
@@ -24,6 +25,7 @@ import {
   UseIngressBehaviors,
   UsePipelineBehaviors,
 } from '../../src/decorators/ingress.ts';
+import { Injectable } from '../../src/decorators/injection.ts';
 import { UseGuards } from '../../src/decorators/pipeline.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
@@ -204,6 +206,100 @@ describe('non-HTTP ingress registration', () => {
     expect(handlerRan).toBe(false);
   });
 
+  it('composes every @UseIngressBehaviors application on one handler', async () => {
+    const phases: string[] = [];
+    class Jobs {
+      @Processor('email')
+      @UseIngressBehaviors({
+        handle: async (_work, next) => {
+          phases.push('outer-before');
+          const result = await next();
+          phases.push('outer-after');
+          return result;
+        },
+      })
+      @UseIngressBehaviors({
+        handle: async (_work, next) => {
+          phases.push('inner-before');
+          const result = await next();
+          phases.push('inner-after');
+          return result;
+        },
+      })
+      process(): void {
+        phases.push('handler');
+      }
+    }
+
+    const recorded: RecordedProcessor[] = [];
+    const { ctx, lifecycleHooks } = createFakeContext();
+    ctx.services.register(CAPABILITIES.QUEUE, queueDouble(recorded));
+    await DecoratorPlugin({ ingress: [Jobs] }).register(ctx);
+    const hook = lifecycleHooks.find((candidate) => candidate.phase === 'onInit');
+    await hook?.fn();
+    const processor = recorded[0].processor;
+    if (typeof processor !== 'function') throw new Error('Queue processor was not registered.');
+    await processor({ id: 'job-1', name: 'email', data: {}, attempts: 1 });
+
+    expect(phases).toEqual([
+      'inner-before',
+      'outer-before',
+      'handler',
+      'outer-after',
+      'inner-after',
+    ]);
+  });
+
+  it('resolves an ingress capability from the DI container', async () => {
+    const recorded: RecordedProcessor[] = [];
+    const queue = queueDouble(recorded);
+    const container: IContainer = {
+      register() {},
+      resolve<T>(token: string): T {
+        if (token === CAPABILITIES.QUEUE) return queue as unknown as T;
+        throw new Error(`Unexpected token: ${token}`);
+      },
+      has(token: string): boolean {
+        return token === CAPABILITIES.QUEUE;
+      },
+      createScope(): IContainer {
+        return container;
+      },
+    };
+    class Jobs {
+      @Processor('email')
+      process(): void {}
+    }
+
+    const { ctx, lifecycleHooks } = createFakeContext({ container });
+    await DecoratorPlugin({ ingress: [Jobs] }).register(ctx);
+    const hook = lifecycleHooks.find((candidate) => candidate.phase === 'onInit');
+    await hook?.fn();
+
+    expect(recorded).toHaveLength(1);
+  });
+
+  it('reuses an ingress target already registered as a service', async () => {
+    let constructed = 0;
+    @Injectable({ token: 'jobs' })
+    class Jobs {
+      constructor() {
+        constructed += 1;
+      }
+
+      @Processor('email')
+      process(): void {}
+    }
+
+    const { ctx, lifecycleHooks } = createFakeContext();
+    ctx.services.register(CAPABILITIES.QUEUE, queueDouble([]));
+    await DecoratorPlugin({ services: [Jobs], ingress: [Jobs] }).register(ctx);
+    const hook = lifecycleHooks.find((candidate) => candidate.phase === 'onInit');
+    await hook?.fn();
+
+    expect(constructed).toBe(1);
+  });
+
   it('registers cron and interval handlers and preserves their options', async () => {
     const calls: string[] = [];
     class Jobs {
@@ -334,5 +430,19 @@ describe('non-HTTP ingress registration', () => {
     await DecoratorPlugin({ ingress: [Jobs] }).register(ctx);
     const hook = lifecycleHooks.find((candidate) => candidate.phase === 'onInit');
     await expect(hook?.fn()).rejects.toThrow(/Jobs\.process.*UseGuards.*non-HTTP ingress/);
+  });
+
+  it('refuses class-level @UseGuards on an ingress class', async () => {
+    @UseGuards(async (_ctx, next) => await next())
+    class Jobs {
+      @Processor('email')
+      process(): void {}
+    }
+
+    const { ctx, lifecycleHooks } = createFakeContext();
+    ctx.services.register(CAPABILITIES.QUEUE, queueDouble([]));
+    await DecoratorPlugin({ ingress: [Jobs] }).register(ctx);
+    const hook = lifecycleHooks.find((candidate) => candidate.phase === 'onInit');
+    await expect(hook?.fn()).rejects.toThrow(/Jobs uses @UseGuards with non-HTTP ingress/);
   });
 });

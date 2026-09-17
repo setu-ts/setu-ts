@@ -79,7 +79,13 @@ happens during `onInit`, after the corresponding provider plugin has registered 
 declared handler with no provider fails startup with the class, method, and missing plugin named.
 
 ```typescript
-import type { CqrsCommand, IDomainEvent, IJob, IWebSocketConnection } from '@setu-ts/common';
+import type {
+  CqrsCommand,
+  CqrsQuery,
+  IDomainEvent,
+  IJob,
+  IWebSocketConnection,
+} from '@setu-ts/common';
 import {
   CommandHandler,
   Cron,
@@ -112,7 +118,7 @@ class BackgroundWork {
   command(_command: CqrsCommand): void {}
 
   @QueryHandler('find-user')
-  query(_query: CqrsCommand): void {}
+  query(_query: CqrsQuery): void {}
 }
 
 @Gateway('/ws/updates')

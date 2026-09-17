@@ -187,6 +187,10 @@ export function withIngressProviderWiring(source: string, bare: string): string 
   const ingressImport = "import { INGRESS_HANDLERS } from './src/ingress/index.ts';";
   const ingressOption = 'ingress: [...INGRESS_HANDLERS],';
   const pluginList = 'plugins: [';
+  const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
+  const hasProviderImport = new RegExp(
+    `import\\s*\\{[^}]*\\b${provider.symbol}\\b[^}]*\\}\\s*from\\s*['"]@setu-ts/${bare}['"]`,
+  ).test(source);
   if (
     !source.includes(decoratorImport) ||
     !source.includes(ingressImport) ||
@@ -198,8 +202,9 @@ export function withIngressProviderWiring(source: string, bare: string): string 
     return undefined;
   }
 
-  const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
-  const withImport = source.replace(decoratorImport, `${decoratorImport}\n${providerImport}`);
+  const withImport = hasProviderImport
+    ? source
+    : source.replace(decoratorImport, `${decoratorImport}\n${providerImport}`);
   const insertion = withImport.indexOf(pluginList) + pluginList.length;
   const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
   const indentation = withImport.slice(lineStart, insertion - pluginList.length);

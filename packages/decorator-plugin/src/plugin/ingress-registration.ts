@@ -36,13 +36,16 @@ function requireCapability<T extends object>(
   target: Constructor,
   handler: string,
 ): T {
-  if (!ctx.services.has(token)) {
-    throw new Error(
-      `${className(target)}.${handler} is decorated for non-HTTP ingress, but ${plugin} ` +
-        `is not registered to provide ${token}. Register ${plugin} (or another provider of ${token}).`,
-    );
+  if (ctx.services.has(token)) {
+    return ctx.services.get<T>(token);
   }
-  return ctx.services.get<T>(token);
+  if (ctx.container?.has(token) === true) {
+    return ctx.container.resolve<T>(token);
+  }
+  throw new Error(
+    `${className(target)}.${handler} is decorated for non-HTTP ingress, but ${plugin} ` +
+      `is not registered to provide ${token}. Register ${plugin} (or another provider of ${token}).`,
+  );
 }
 
 function primaryFor(
@@ -81,10 +84,11 @@ function ingressBehaviors(
   target: Constructor,
   handler: string,
 ): readonly import('@setu-ts/common').IIngressBehavior[] {
-  const behavior = entries.filter(isIngressBehaviorEntry).find((entry) =>
-    entry.handler === handler
-  );
-  if (behavior === undefined) return [];
+  const behaviors = entries
+    .filter(isIngressBehaviorEntry)
+    .filter((entry) => entry.handler === handler)
+    .flatMap((entry) => entry.behaviors);
+  if (behaviors.length === 0) return [];
   const primary = primaryFor(entries, handler);
   if (
     primary === undefined ||
@@ -103,7 +107,7 @@ function ingressBehaviors(
         'does not support IIngressBehavior. Use @UsePipelineBehaviors only on CQRS handlers.',
     );
   }
-  return behavior.behaviors;
+  return behaviors;
 }
 
 function pipelineBehaviors(
@@ -111,10 +115,11 @@ function pipelineBehaviors(
   target: Constructor,
   handler: string,
 ): readonly import('@setu-ts/common').IPipelineBehavior[] {
-  const behavior = entries.filter(isPipelineBehaviorEntry).find((entry) =>
-    entry.handler === handler
-  );
-  if (behavior === undefined) return [];
+  const behaviors = entries
+    .filter(isPipelineBehaviorEntry)
+    .filter((entry) => entry.handler === handler)
+    .flatMap((entry) => entry.behaviors);
+  if (behaviors.length === 0) return [];
   const primary = primaryFor(entries, handler);
   if (primary?.kind !== 'command' && primary?.kind !== 'query') {
     throw new Error(
@@ -124,7 +129,7 @@ function pipelineBehaviors(
         'Use @UseIngressBehaviors on supported non-CQRS ingress handlers.',
     );
   }
-  return behavior.behaviors;
+  return behaviors;
 }
 
 /** Refuses HTTP guards whose request context cannot exist on non-HTTP ingress. */
@@ -132,6 +137,12 @@ function refuseHttpGuards(
   target: Constructor,
   entries: readonly IngressMetadata[],
 ): void {
+  if ((metadataStore.getController(target)?.guards.length ?? 0) > 0) {
+    throw new Error(
+      `${className(target)} uses @UseGuards with non-HTTP ingress. ` +
+        'Use @UseIngressBehaviors or @UsePipelineBehaviors for the handler kind instead.',
+    );
+  }
   const methods = metadataStore.getMethods(target);
   for (const entry of entries) {
     if (!('handler' in entry)) continue;

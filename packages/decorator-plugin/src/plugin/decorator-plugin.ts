@@ -276,12 +276,15 @@ function registerInContainer(
  */
 function instantiate(target: Constructor, ctx: IPluginContext): unknown {
   const meta = metadataStore.getService(target);
+  const token = serviceToken(meta, target);
   const container = ctx.container;
   if (container !== undefined) {
-    const token = serviceToken(meta, target);
     if (container.has(token)) {
       return container.resolve<unknown>(token);
     }
+  }
+  if (ctx.services.has(token)) {
+    return ctx.services.get<object>(token);
   }
   const inject = meta?.inject;
   if (inject !== undefined && inject.length > 0) {

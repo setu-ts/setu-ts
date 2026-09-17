@@ -167,6 +167,19 @@ describe('withIngressProviderWiring', () => {
     expect(withIngressProviderWiring(once, 'events-plugin')).toBeUndefined();
     expect(withIngressProviderWiring(CLASS_BASED_INGRESS_CONFIG, 'auth-plugin')).toBeUndefined();
   });
+
+  it('reuses a provider import that exists before its plugin construction is added', () => {
+    const source = CLASS_BASED_INGRESS_CONFIG.replace(
+      "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
+      "import { EventsPlugin } from '@setu-ts/events-plugin';\n" +
+        "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
+    );
+    const updated = withIngressProviderWiring(source, 'events-plugin') ?? '';
+
+    expect(updated.match(/import \{ EventsPlugin \} from '@setu-ts\/events-plugin';/g))
+      .toHaveLength(1);
+    expect(updated).toContain('      EventsPlugin(),');
+  });
 });
 
 describe('runAddCommand', () => {
