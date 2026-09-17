@@ -59,6 +59,9 @@ export class OpenApiService implements IOpenApiService {
     if (this.#options.deriveRequestSchemas !== undefined) {
       base.deriveRequestSchemas = this.#options.deriveRequestSchemas;
     }
+    if (this.#options.deriveResponseStatus !== undefined) {
+      base.deriveResponseStatus = this.#options.deriveResponseStatus;
+    }
     return base as OpenApiGeneratorOptions;
   }
 

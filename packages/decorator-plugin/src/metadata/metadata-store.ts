@@ -200,6 +200,34 @@ export type IngressMetadata =
   };
 
 /**
+ * One response header declared by `@ResponseHeader(name, value)`.
+ *
+ * Header names are case-insensitive (RFC 9110 §5.1), so the plugin refuses a
+ * handler declaring the same name twice rather than letting the second
+ * silently overwrite the first.
+ *
+ * @since 0.7.0
+ */
+export interface ResponseHeaderMetadata {
+  /** The header name, exactly as the decorator was given it. */
+  readonly name: string;
+  /** The header value. */
+  readonly value: string;
+}
+
+/**
+ * The redirect declared by `@Redirect(url, status?)`.
+ *
+ * @since 0.7.0
+ */
+export interface RedirectMetadata {
+  /** The `Location` header value. */
+  readonly url: string;
+  /** The redirect status — an integer in `[300, 399]`; `302` by default. */
+  readonly status: number;
+}
+
+/**
  * Materialized route metadata — one entry per (controller, HTTP verb). Built
  * from a {@linkcode MethodMeta} accumulator's bindings. The
  * `DecoratorPlugin` composes each entry with its controller's class-level
@@ -239,6 +267,12 @@ export interface RouteMetadata {
    * HTML rendered from the handler's returned props bag instead of JSON.
    */
   readonly view?: Component<unknown>;
+  /** Success status declared by `@HttpCode(status)`. */
+  readonly httpCode?: number;
+  /** Redirect declared by `@Redirect(url, status?)`. */
+  readonly redirect?: RedirectMetadata;
+  /** Response headers declared by `@ResponseHeader(name, value)`. */
+  readonly responseHeaders?: readonly ResponseHeaderMetadata[];
 }
 
 /**
@@ -277,6 +311,17 @@ export interface MethodMeta {
   permissions?: string[];
   /** The view component attached by `@Render(Component)` (mutable twin). */
   view?: Component<unknown>;
+  /** Success status declared by `@HttpCode(status)` (mutable twin). */
+  httpCode?: number;
+  /** Redirect declared by `@Redirect(url, status?)` (mutable twin). */
+  redirect?: RedirectMetadata;
+  /**
+   * Response headers declared by `@ResponseHeader(name, value)` (mutable
+   * twin). Decorators apply bottom-up, so this accumulates in reverse source
+   * order — which is immaterial because a duplicate name is refused at
+   * `register()`, leaving no header able to overwrite another.
+   */
+  responseHeaders?: ResponseHeaderMetadata[];
 }
 
 /**
@@ -746,6 +791,9 @@ export class MetadataStore implements IMetadataStore {
       ...(meta.roles !== undefined ? { roles: [...meta.roles] } : {}),
       ...(meta.permissions !== undefined ? { permissions: [...meta.permissions] } : {}),
       ...(meta.view !== undefined ? { view: meta.view } : {}),
+      ...(meta.httpCode !== undefined ? { httpCode: meta.httpCode } : {}),
+      ...(meta.redirect !== undefined ? { redirect: meta.redirect } : {}),
+      ...(meta.responseHeaders !== undefined ? { responseHeaders: [...meta.responseHeaders] } : {}),
     };
   }
 }

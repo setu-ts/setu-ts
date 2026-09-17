@@ -156,6 +156,7 @@ package fits the plugin architecture.
 | `resolveResponseStatus`           | function  |
 | `respondWithAuthorizationFailure` | function  |
 | `respondWithError`                | function  |
+| `responseMetadataOf`              | function  |
 | `sealRequestIdentity`             | function  |
 | `securityMetadataOf`              | function  |
 | `serializeCookie`                 | function  |
@@ -169,6 +170,7 @@ package fits the plugin architecture.
 | `validatedStateKey`               | function  |
 | `validationMetadataOf`            | function  |
 | `withHttpStatusHint`              | function  |
+| `withResponseMetadata`            | function  |
 | `withSecurityMetadata`            | function  |
 | `withValidationMetadata`          | function  |
 | `MalformedRequestBodyError`       | class     |
@@ -181,6 +183,7 @@ package fits the plugin architecture.
 | `ERROR_RESPONDER_STATE_KEY`       | const     |
 | `HTTP_STATUS_HINT`                | const     |
 | `PLUGIN_PRIORITY`                 | const     |
+| `RESPONSE_METADATA`               | const     |
 | `SECURITY_METADATA`               | const     |
 | `TELEMETRY_CONTEXT_OPAQUE`        | const     |
 | `TRACEPARENT_HEADER`              | const     |
@@ -343,6 +346,7 @@ package fits the plugin architecture.
 | `RoomBroadcastOptions`            | interface |
 | `RouteDefinition`                 | interface |
 | `RouteInfo`                       | interface |
+| `RouteResponseMetadata`           | interface |
 | `RouteSchema`                     | interface |
 | `RouteSecurityMetadata`           | interface |
 | `RouteValidationMetadata`         | interface |

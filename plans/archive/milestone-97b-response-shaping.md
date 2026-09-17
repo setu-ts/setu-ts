@@ -1,7 +1,7 @@
 # Milestone 97b — Response Shaping for Decorated Handlers (`@setu-ts/decorator-plugin`)
 
-> **Status:** Planning. Branch: `feat/m97b-response-shaping`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Shipped. Branch: `feat/m97b-response-shaping`. Archived design record — the shipped
+> code, its tests, `PUBLIC_API.md` and `CHANGELOG.md` are the living contract (AI_GUIDELINES §16.5).
 
 ## 0. Objective & scope
 
@@ -149,6 +149,50 @@ handler must accept an unrelated parameter to say one thing about its response.
   asserting the response is a bodiless `204` rather than a throw — the citation above proven rather
   than asserted, which also fails if the mapper's guard is ever removed.
 
+### 3.3b Two decorators both setting the status, and a duplicate header name, are both refused
+
+**Recorded during implementation — the plan did not resolve either, and both are the §3.3a shape (a
+compile-time literal, known at registration, with no request in flight to rescue).**
+
+- **Decision:** a handler carrying BOTH `@HttpCode` and `@Redirect` is refused at `register()`,
+  naming the class, the method and both values. A handler declaring the same `@ResponseHeader` name
+  twice (case-insensitively — a header name is case-insensitive per RFC 9110 §5.1) is refused the
+  same way.
+- **Why:** both decorators write the status, so a handler carrying both has said two things. §3.1's
+  ordering would silently pick one (whichever is applied later), which is exactly the "silent no-op
+  of the whole decorator" §3.3a refuses for `@Redirect(url, 200)`. The duplicate header is the same
+  shape one layer down: `Headers.set` overwrites, so the second declaration would silently erase the
+  first, and a caller who wanted a multi-valued header wanted `appendHeader`, which `@Ctx()` already
+  reaches. Refusing costs one branch each and removes two ways to be silently wrong.
+- **Test home:** `packages/decorator-plugin/test/unit/response-status-validation.test.ts`.
+
+### 3.3c `@ResponseHeader`'s name and value are validated by the runtime's own rule, at `register()`
+
+- **Decision:** each `@ResponseHeader(name, value)` pair is validated at `register()` by attempting
+  `new Headers().set(name, value)` and refusing with the runtime's own message when it throws.
+- **Why:** measured on Deno 2.9.6, `Headers.set` throws `TypeError: Invalid header name: "x custom"`
+  and `TypeError: Invalid header value: …` for a value carrying a control character — and
+  `ResponseBuilder.header` calls `Headers.set` **inside the handler wrapper**, so an invalid pair
+  would throw on EVERY request to that route and answer `500`. That is §3.3a's failure mode applied
+  to headers, one layer earlier than the `RangeError` (the `Headers` object is built during the
+  request rather than during the adapter's mapping), and it is the same kind of compile-time
+  literal. The check probes the runtime rather than hand-rolling a token regex, so it cannot drift
+  from what the platform actually accepts, and the refusal quotes the platform's own message.
+  `Headers.set('X-Custom', '')` and `Headers.set('X-Custom', '  leading')` both SUCCEED (the latter
+  trimming), so neither is refused — measured, not assumed.
+- **Test home:** `packages/decorator-plugin/test/unit/response-status-validation.test.ts`.
+
+### 3.3d `@ResponseHeader` materialises the response `Headers`, and that is stated rather than hidden
+
+- **Decision:** `applyResponseShaping` writes headers with `IResponse.header(name, value)`.
+- **Why:** M88 made the common terminal shapes hand a snapshot-local header init straight to the
+  native `Response` constructor, and `ResponseBuilder.header` calls `#materializeHeaders()`, which
+  ends that fast path for the request. So a `@ResponseHeader` route pays one `Headers` allocation
+  per request that a bare `@HttpCode` route does not — `status()` is a bare assignment and touches
+  no header state. This is the correct trade (the route asked for a header), and it is recorded in
+  the decorator's JSDoc so the cost is visible at the declaration site rather than discovered in a
+  profile.
+
 ### 3.4 `RESPONSE_METADATA` is `Symbol.for`-keyed and lives in `common/src/http.ts`
 
 - **Decision:** `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata` and
@@ -230,15 +274,27 @@ handler must accept an unrelated parameter to say one thing about its response.
 
 ## 5. Implementation files
 
-| File                                                          | Purpose                                                                                                                                                                                    |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/common/src/http.ts`                                 | `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata`, `responseMetadataOf` (§3.4).                                                                                         |
-| `packages/common/src/index.ts`                                | Barrel additions.                                                                                                                                                                          |
-| `packages/decorator-plugin/src/decorators/response.ts`        | The three decorators.                                                                                                                                                                      |
-| `packages/decorator-plugin/src/decorators/response-status.ts` | The pure `assertServeableStatus` / `assertRedirectStatus` refusals (§3.3a), internal — NOT barrel-exported, so the dead-surface rule is satisfied without a consumer outside this package. |
-| `packages/decorator-plugin/src/plugin/decorator-plugin.ts`    | `createHandler` applies the metadata and brands the returned handler (§3.1, §3.5).                                                                                                         |
-| `packages/decorator-plugin/src/index.ts`                      | Barrel additions.                                                                                                                                                                          |
-| `packages/openapi-plugin/src/generators/openapi-generator.ts` | `deriveResponseStatus` option and `#deriveResponseStatus` (§3.6, §3.7).                                                                                                                    |
+| File                                                          | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/src/http.ts`                                 | `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata`, `responseMetadataOf` (§3.4).                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `packages/common/src/index.ts`                                | Barrel additions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `packages/decorator-plugin/src/decorators/response.ts`        | The three decorators.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `packages/decorator-plugin/src/decorators/response-status.ts` | The pure register-time refusals — `assertServeableStatus` / `assertRedirectStatus` (§3.3a), the both-decorators and duplicate-name refusals (§3.3b) and the `Headers`-probe validation (§3.3c). Internal — NOT barrel-exported, so the dead-surface rule is satisfied without a consumer outside this package. Widened from the plan's original status-only scope during implementation: one module owns every refusal this milestone adds, rather than two that could drift about their message shape. |
+| `packages/decorator-plugin/src/plugin/decorator-plugin.ts`    | `createHandler` applies the metadata and brands the returned handler (§3.1, §3.5).                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `packages/decorator-plugin/src/index.ts`                      | Barrel additions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `packages/openapi-plugin/src/generators/openapi-generator.ts` | `deriveResponseStatus` option and `#deriveResponseStatus` (§3.6, §3.7).                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+
+**Four files the table did not name were needed, recorded rather than left implicit.**
+`packages/decorator-plugin/src/metadata/metadata-store.ts` carries the new metadata
+(`httpCode`/`redirect`/`responseHeaders` on `MethodMeta` and `RouteMetadata`, plus
+`ResponseHeaderMetadata`/`RedirectMetadata`) — the decorators have nowhere else to write.
+`packages/openapi-plugin/src/plugin/openapi-plugin.ts` and `.../services/openapi-service.ts` thread
+`deriveResponseStatus`: `OpenApiPluginOptions extends OpenApiGeneratorOptions`, so the option
+type-checks on the plugin whether or not it reaches the generator, which is the M70i
+dropped-argument class and is why §6 gained a case that fails when the threading is removed. And
+`packages/decorator-plugin/src/decorators/view.ts` carries a JSDoc correction: `@Render`'s block
+said a status alongside a rendered body "goes through `@Ctx()`", which this milestone makes only
+half true.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -248,7 +304,7 @@ handler must accept an unrelated parameter to say one thing about its response.
 | `packages/common/test/unit/barrel-exports.test.ts` (extended)             | `common/src/index.ts`                                  | Compile-time assertions declared against the barrel, not the concrete module — M70m's review found that dropping a type export left every runtime assertion green.                                                                                                                                                                                                                                            |
 | `packages/decorator-plugin/test/unit/response-shaping.test.ts`            | `decorators/response.ts`, `plugin/decorator-plugin.ts` | `@HttpCode(201)` yields `201`; repeated `@ResponseHeader` yields both headers; `@Redirect` sets status + `Location` and the handler body still ran (§3.3); a returned `HandlerResult` wins (§3.2). Calls type-check against `SetuMethodDecorator`.                                                                                                                                                            |
 | `packages/decorator-plugin/test/unit/response-shaping-order.test.ts`      | `plugin/decorator-plugin.ts`                           | §3.1: the write lands BEFORE `method(...)` — a handler reading `ctx.response` observes the decorator's status, and its own `status(202)` then wins. Moving the write to after the method must fail this; a test asserting only the final status would pass regardless.                                                                                                                                        |
-| `packages/decorator-plugin/test/integration/render-with-status.test.ts`   | `plugin/decorator-plugin.ts`                           | `@Render` + `@HttpCode(201)` answers `201` with the rendered HTML body and `text/html` — driven through `app.fetch`, not `inject()`, because `inject()` exposes no response headers (the M51 `Allow` lesson).                                                                                                                                                                                                 |
+| `packages/decorator-plugin/test/integration/render-with-status.test.ts`   | `plugin/decorator-plugin.ts`                           | `@Render` + `@HttpCode(201)` answers `201` with the rendered HTML body and `text/html` — driven through `app.fetch`, not `inject()`, so every assertion reads what a served request reads (see §8's corrected note: `inject()` skips `mapSnapshotToWebResponse`).                                                                                                                                             |
 | `packages/decorator-plugin/test/unit/response-status-validation.test.ts`  | `decorators/response-status.ts`                        | §3.3a: `0`/`99`/`600`/`1000`/`2.5`/`NaN`/`4004` each refused with the value in the message; `200` and `599` accepted; `@Redirect` refuses `200`/`400` and accepts `301`/`302`/`307`/`308`; and a `@HttpCode(204)` route driven through a REAL kernel application answers a bodiless `204` rather than throwing — which pins the `NULL_BODY_STATUSES` citation and fails if that mapper guard is ever removed. |
 | `packages/decorator-plugin/test/unit/barrel-exports.test.ts` (extended)   | `decorator-plugin/src/index.ts`                        | The barrel gains exactly the three decorators.                                                                                                                                                                                                                                                                                                                                                                |
 | `packages/openapi-plugin/test/integration/derive-response-status.test.ts` | `openapi-generator.ts`                                 | Derived `201` replaces the default `200`; a DECLARED `response` map wins; `deriveResponseStatus: false` reproduces the previous document byte-for-byte; a `@Redirect` route emits its `3xx`; a `@ResponseHeader` route emits no `headers`. Drives the REAL `decorator-plugin` through a real kernel application so the two packages are proven to agree on the symbol (§3.5).                                 |
@@ -272,12 +328,19 @@ deno task release:verify 0.6.0
 
 ## 8. Risks & mitigations
 
-- **The derivation changes an existing document and nobody notices.** Every regenerated client's
-  success type moves from `200` to the derived status for any decorated route carrying `@HttpCode`,
-  which is a compile-time break for a call site reading the success body. Mitigation: CHANGELOG
-  entry under a breaking marker, `docs/upgrading.md` entry written at milestone time rather than
-  reconstructed at release cut (the M90h finding, and the release step that was skipped on its first
-  use), and §6's byte-identity assertion for the `false` arm.
+- **The derivation changes an existing document and nobody notices.** **Corrected during
+  implementation: it cannot, and the plan overstated this.** The brand is new surface, so no handler
+  in any released application carries it — an application that upgrades without touching its code
+  gets a byte-identical document even with `deriveResponseStatus` defaulting ON, which is why
+  defaulting it on is safe in a way `deriveSecurity` would not have been. What the risk actually
+  describes is a developer ADDING `@HttpCode(201)` and thereby moving their own generated client's
+  success type from `200` to `201` — their own opt-in, and the point of the milestone rather than a
+  silent break. So the CHANGELOG entry is `Added` with that consequence stated plainly, not a
+  breaking marker; the `docs/upgrading.md` entry is still written at milestone time (the M90h
+  finding, and the release step that was skipped on its first use) because it is where a reader
+  looks for "what changes if I adopt this"; and §6's byte-identity assertion for the `false` arm
+  stays, joined by one for an application carrying no response-shaping decorator at all, which is
+  the assertion that actually pins the claim above.
 - **`Symbol()` instead of `Symbol.for`.** Silent on every read when two copies of `common` share a
   process. Mitigation: §6's cross-copy case, with a vacuity guard so it cannot pass if Deno ever
   deduplicates the modules.
@@ -285,9 +348,18 @@ deno task release:verify 0.6.0
   and `schema?` (`common/src/http.ts:856-862`); reading `middleware` would find nothing for a
   decorated route with no guards. Mitigation: §3.5 fixes the member and §6's integration row reads
   through a real `RouteInfo`.
-- **`inject()` cannot see the assertion.** It exposes no response headers, so a `@ResponseHeader`
-  test written against it would pass regardless. Mitigation: §6 mandates `app.fetch` for every
-  header assertion.
+- **`inject()` cannot see the assertion.** **Corrected during implementation: the stated reason is
+  stale, and the real one is sharper.** `InjectResponse` has carried `readonly headers: Headers`
+  since at least M92 (`kernel/src/application/application.ts:112`, and `decorator-plugin`'s own
+  `render-e2e.test.ts` asserts `content-type` through it), so the M51 "exposes no response headers"
+  claim no longer holds and a `@ResponseHeader` assertion written against `inject()` would in fact
+  discriminate. What `inject()` genuinely does NOT do is go through `mapSnapshotToWebResponse` —
+  measured here, a `@HttpCode(204)` route returning a plain value reports `204 {"dropped":3}`
+  through `inject()` and `204 ""` through `app.fetch`. So the ONE case that must use `app.fetch` is
+  the bodiless-status citation, and it must for the opposite reason to the one the plan gave:
+  written against `inject()` it would pass while asserting the opposite of what a client sees.
+  Mitigation: §6 mandates `app.fetch` throughout — every assertion then reads what a served request
+  reads, and the `204` case cannot go vacuous.
 - **A second stacked JSDoc block.** M70m and M75 both shipped a docblock describing the wrong
   function because an insertion stacked a new block on an existing one, and M75's was caught only by
   the doc-lint ratchet. Mitigation: re-read each touched block after insertion, and `check:docs` is

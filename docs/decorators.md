@@ -522,9 +522,10 @@ export class UserController {
 ### The Authenticated Principal
 
 `CurrentUser()` binds `ctx.request.user` (populated by authentication middleware). To read the full
-request context, declare `Ctx()` — it resolves the live `IRequestContext`, so a handler can set a
-status code, add a header, or stream. For anything else, register a resolver and bind it with
-`Custom()` (see [Custom Decorators](#custom-decorators)).
+request context, declare `Ctx()` — it resolves the live `IRequestContext`, so a handler can compute
+a status code, add a header, or stream. (For a status or header that is FIXED for the route, prefer
+the declarative form in [Response Shaping](#response-shaping).) For anything else, register a
+resolver and bind it with `Custom()` (see [Custom Decorators](#custom-decorators)).
 
 ```typescript
 import { Controller, CurrentUser, Get, Params } from '@setu-ts/decorator-plugin';
@@ -539,6 +540,92 @@ export class MeController {
   }
 }
 ```
+
+## Response Shaping
+
+A decorated handler that returns a plain value is answered with `ctx.response.json(result)`: always
+`200`, always JSON, no headers. Three method decorators let a handler state something fixed about
+its response in its declaration, without accepting a request context it has no other use for.
+
+| Decorator                      | What it sets                                     |
+| ------------------------------ | ------------------------------------------------ |
+| `@HttpCode(status)`            | The success status for a plain return            |
+| `@ResponseHeader(name, value)` | One response header (repeatable, distinct names) |
+| `@Redirect(url, status?)`      | The status and `Location`; `302` by default      |
+
+```typescript
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Params,
+  Post,
+  Redirect,
+  ResponseHeader,
+} from '@setu-ts/decorator-plugin';
+
+@Controller('/orders')
+export class OrderController {
+  @Post()
+  @HttpCode(201)
+  @Params(Body())
+  create(order: { sku: string }) {
+    return { id: 'o-1', sku: order.sku };
+  }
+
+  @Get('/latest')
+  @ResponseHeader('Cache-Control', 'no-store')
+  @ResponseHeader('X-Report-Version', '3')
+  latest() {
+    return { sku: 'a-1' };
+  }
+
+  @Get('/v1')
+  @Redirect('/orders', 301)
+  legacy() {
+    return { moved: true };
+  }
+}
+```
+
+**Which to reach for.** Use these three when the value is fixed for the route. Use `Ctx()` when it
+is computed per request — a status that depends on whether a record already existed, a header
+carrying a per-request value, or a multi-valued header such as `Set-Cookie`, which needs
+`ctx.response.appendHeader(...)`. `Ctx()` is not deprecated by these and is not replaced by them.
+
+Three rules are worth knowing before you use them.
+
+**A returned `HandlerResult` wins.** The declared shaping is written to the response builder
+_before_ the handler method runs, so a handler that returns `ctx.response.status(202).json(...)`
+answers `202` even under `@HttpCode(201)` — the explicit runtime value is the more specific
+statement. The same ordering is why `@Render` composes: the rendered HTML is written onto a builder
+that already carries the status.
+
+**`@Redirect` does not skip the handler.** A decorator cannot decline to call the method, so the
+handler still runs and a plain return is still serialised alongside the `Location` header. That is
+the point of the declarative form: the handler's work is the side effect. A handler that wants to
+decide per request should call `ctx.response.redirect(url)` itself through `Ctx()`, which terminates
+the response.
+
+**Every argument is checked at startup, never per request.** `@HttpCode` takes an integer in
+`[200, 599]`; `@Redirect` takes one in `[300, 399]`; a header name and value must be ones the
+runtime accepts; the same header name may not be declared twice; and one handler may not carry both
+`@HttpCode` and `@Redirect`, because both set the status. Each refusal names the controller, the
+method and the offending value. The alternative is worse than a startup failure: an out-of-range
+status throws inside the HTTP adapter _after_ the middleware pipeline has finished, where no error
+handler can answer it, and an invalid header pair throws while the response headers are written, so
+every request to that route would answer `500`.
+
+`@HttpCode(204)` (and `205`, and `304`) serves a bodiless response — the runtime drops a body
+written at a null-body status — which is exactly what a `DELETE` handler wants.
+
+**The document learns the status too.** `@setu-ts/openapi-plugin` derives an operation's success
+status from what the handler declared, so a `@HttpCode(201)` route is documented under `201` and its
+generated client types the success body under the right key. That derivation is on by default and is
+described under `deriveResponseStatus` in [`PUBLIC_API.md`](../PUBLIC_API.md). `@ResponseHeader` is
+deliberately _not_ derived: an OpenAPI response-header entry needs a schema and a description the
+declaration does not carry.
 
 ## Validation
 

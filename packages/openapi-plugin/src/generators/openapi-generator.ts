@@ -4,7 +4,7 @@ import type {
   RouteValidationMetadata,
   SecurityRequirement,
 } from '@setu-ts/common';
-import { securityMetadataOf, validationMetadataOf } from '@setu-ts/common';
+import { responseMetadataOf, securityMetadataOf, validationMetadataOf } from '@setu-ts/common';
 
 import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
@@ -310,6 +310,37 @@ export interface OpenApiGeneratorOptions {
    * @defaultValue `true`
    */
   readonly deriveRequestSchemas?: boolean;
+  /**
+   * Documents each operation's success status from what its handler actually
+   * answers with, instead of assuming `200`.
+   *
+   * A handler brands itself with `RouteResponseMetadata` (every route a
+   * `@setu-ts/decorator-plugin` `@HttpCode` or `@Redirect` produces does); when
+   * a route carries the brand and declares no `schema.response` of its own, the
+   * default `200` response is replaced by the declared status. Without this, a
+   * `@HttpCode(201)` route is documented as `200` and every generated client
+   * types its success body under the wrong key.
+   *
+   * A `response` map DECLARED on the route's own schema always wins, tested
+   * `!== undefined` rather than by length: an empty map is a caller saying "no
+   * documented responses".
+   *
+   * Only the STATUS is derived. `@ResponseHeader` contributes nothing: an
+   * OpenAPI response-header entry needs a schema and a description the
+   * declaration does not carry, so deriving one would put an under-specified
+   * `headers` object into every document that used the decorator.
+   *
+   * Like {@linkcode OpenApiGeneratorOptions.deriveRequestSchemas} and unlike
+   * {@linkcode OpenApiGeneratorOptions.deriveSecurity}, this is ON by default,
+   * because nothing has to be configured for it: a security requirement names a
+   * scheme that cannot be inferred from a guard, while the status the handler
+   * declares IS the status the document wants. It is safe to default on because
+   * the brand is new surface — no handler written before it existed carries
+   * one, so an application that changes nothing gets a byte-identical document.
+   *
+   * @defaultValue `true`
+   */
+  readonly deriveResponseStatus?: boolean;
 }
 
 /**
@@ -475,6 +506,9 @@ export class OpenApiGenerator {
       ...(options.excludeOwners !== undefined ? { excludeOwners: options.excludeOwners } : {}),
       ...(options.deriveRequestSchemas !== undefined
         ? { deriveRequestSchemas: options.deriveRequestSchemas }
+        : {}),
+      ...(options.deriveResponseStatus !== undefined
+        ? { deriveResponseStatus: options.deriveResponseStatus }
         : {}),
     } as OpenApiGeneratorOptions & {
       title: string;
@@ -706,6 +740,17 @@ export class OpenApiGenerator {
     if (derived && responses['400'] === undefined) {
       responses['400'] = { description: 'Bad request' };
     }
+    // Re-key the default `200` when the handler declared a different success
+    // status. Done here rather than inside `#buildResponses`, which receives no
+    // route and so cannot read the brand — the same reason `#deriveSecurity` is
+    // reached from this call site.
+    const derivedStatus = this.#deriveResponseStatus(route, schema);
+    if (derivedStatus !== undefined) {
+      delete responses['200'];
+      responses[String(derivedStatus)] = {
+        description: this.#getStatusDescription(derivedStatus),
+      };
+    }
 
     return {
       operationId,
@@ -827,6 +872,28 @@ export class OpenApiGenerator {
 
     if (!sawBrand) return {};
     return { security: authenticated ? [{ [derive.scheme]: [] }] : [] };
+  }
+
+  /**
+   * Derives an operation's success status from the status its handler declared.
+   *
+   * Returns `undefined` — meaning "leave the default `200` alone" — when the
+   * option is off, when the route declares its own `response` map, when the
+   * handler carries no brand, and when the declared status IS `200`, where
+   * re-keying would produce an identical entry.
+   *
+   * @param route - The route being documented
+   * @param schema - The effective schema, whose declared `response` wins
+   * @returns The status to re-key the default response under, or `undefined`
+   */
+  #deriveResponseStatus(route: RouteInfo, schema: RouteSchema | undefined): number | undefined {
+    if (this.#options.deriveResponseStatus === false) return undefined;
+    // Precedence mirrors `#deriveSecurity`: a DECLARED value wins, tested
+    // `!== undefined` rather than by length, because an empty map is a caller
+    // saying "no documented responses" rather than "I did not say".
+    if (schema?.response !== undefined) return undefined;
+    const status = responseMetadataOf(route.definition.handler)?.status;
+    return status === undefined || status === 200 ? undefined : status;
   }
 
   /**
@@ -1062,6 +1129,14 @@ export class OpenApiGenerator {
       200: 'Successful response',
       201: 'Resource created',
       204: 'No content',
+      // The redirect statuses `@Redirect` can derive. Without them a derived
+      // `301` was documented as the bare fallback `'Response'`, which says
+      // nothing a reader could not see from the key.
+      301: 'Moved permanently',
+      302: 'Found',
+      303: 'See other',
+      307: 'Temporary redirect',
+      308: 'Permanent redirect',
       400: 'Bad request',
       401: 'Unauthorized',
       403: 'Forbidden',

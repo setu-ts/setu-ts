@@ -123,11 +123,73 @@ The engine is resolved from `CAPABILITIES.VIEW` once at `register()` — which i
 this plugin's `optionalDependencies` (a real ordering edge, not priority luck). A rendered route
 with no provider FAILS at `register()`, naming the controller, the handler and both remedies
 (register `ViewPlugin`, or any other `CAPABILITIES.VIEW` provider); the check is per route, so an
-application with no `@Render` route needs no view plugin. A status code or header alongside a
-rendered body goes through `@Params(Ctx())` — the return value IS the props bag, so it cannot also
-carry a status, and `@Render` deliberately grows no `status` argument. Rendering itself — engines,
-escaping, the `Suspense` refusal — lives in `@setu-ts/view-plugin`; this package imports no
-rendering runtime.
+application with no `@Render` route needs no view plugin. A FIXED status or header alongside a
+rendered body is declared with `@HttpCode` / `@ResponseHeader` (see below), and a computed one goes
+through `@Params(Ctx())`; the return value IS the props bag, so it cannot also carry a status, which
+is why `@Render` grows no `status` argument of its own. Rendering itself — engines, escaping, the
+`Suspense` refusal — lives in `@setu-ts/view-plugin`; this package imports no rendering runtime.
+
+## Response shaping
+
+A decorated handler returning a plain value is answered with `ctx.response.json(result)` — always
+`200`, always JSON, no headers. `@HttpCode(status)`, `@ResponseHeader(name, value)` (repeatable, for
+distinct names) and `@Redirect(url, status?)` let a route state something FIXED about its response
+in its declaration, instead of accepting a request context purely to say it.
+
+```typescript
+import {
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Redirect,
+  ResponseHeader,
+} from '@setu-ts/decorator-plugin';
+
+@Controller('/orders')
+class OrderController {
+  @HttpCode(201)
+  @Post('/')
+  create() {
+    return { id: 'o-1' };
+  }
+
+  @ResponseHeader('Cache-Control', 'no-store')
+  @Get('/latest')
+  latest() {
+    return { sku: 'a-1' };
+  }
+
+  @Redirect('/orders', 301)
+  @Get('/v1')
+  legacy() {
+    return { moved: true };
+  }
+}
+```
+
+`@Params(Ctx())` is neither replaced nor deprecated by these: it stays the way to compute a status
+or header PER REQUEST, and the only way to write a multi-valued header
+(`ctx.response.appendHeader`).
+
+Three rules. **A returned `HandlerResult` wins** — the declared shaping is written to the response
+builder BEFORE the handler runs, so `ctx.response.status(202).json(...)` answers `202` even under
+`@HttpCode(201)`, and the same ordering is why `@Render` composes with a declared status.
+**`@Redirect` does not skip the handler** — a decorator cannot decline to call the method, so the
+body still runs and a plain return is still serialised alongside `Location`. **Every argument is
+refused at `register()`, never per request**: `@HttpCode` takes an integer in `[200, 599]`,
+`@Redirect` one in `[300, 399]`, a header pair must be one the runtime accepts, a name may not be
+declared twice, and one handler may not carry both `@HttpCode` and `@Redirect`. Each refusal names
+the controller, the method and the value — the alternative is a `RangeError` thrown inside the HTTP
+adapter after the pipeline has finished, or a `TypeError` while headers are written, answering `500`
+on every request.
+
+`@HttpCode(204)` serves a bodiless response, which is what a `DELETE` handler wants.
+
+`@setu-ts/openapi-plugin` derives an operation's success status from `@HttpCode`/`@Redirect` (on by
+default, `deriveResponseStatus`), so a `201` route is documented under `201` rather than the assumed
+`200`. `@ResponseHeader` is deliberately not derived: an OpenAPI response-header entry needs a
+schema and a description the declaration does not carry.
 
 ## What it exports
 
@@ -143,6 +205,7 @@ rendering runtime.
 - **Validation** — `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
 - **Views** — `@Render(Component)` (renders through a `CAPABILITIES.VIEW` provider — see
   `@setu-ts/view-plugin`)
+- **Response shaping** — `@HttpCode`, `@ResponseHeader`, `@Redirect`
 - **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse`
 - **Extension** — `createDecorator`, `Custom`, `registerParameterResolver`
 - **Discovery** — `discoverControllers`
@@ -201,6 +264,7 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `Gateway`                    | function  |
 | `getParameterResolver`       | function  |
 | `Header`                     | function  |
+| `HttpCode`                   | function  |
 | `Inject`                     | function  |
 | `Injectable`                 | function  |
 | `Module`                     | function  |
@@ -214,10 +278,12 @@ enforcement; a restricted route keeps its derived OpenAPI security requirement.
 | `Public`                     | function  |
 | `Query`                      | function  |
 | `QueryHandler`               | function  |
+| `Redirect`                   | function  |
 | `registerParameterResolver`  | function  |
 | `Render`                     | function  |
 | `resolveParameter`           | function  |
 | `resolveParameters`          | function  |
+| `ResponseHeader`             | function  |
 | `Roles`                      | function  |
 | `Subscribe`                  | function  |
 | `UseFilters`                 | function  |

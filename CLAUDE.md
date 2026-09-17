@@ -4971,6 +4971,91 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   than fixed: §6's test table named `test/unit/csrf-token-field.test.ts` and the cases landed in
   `test/unit/csrf/csrf.test.ts` — equivalent coverage, a better home beside the other CSRF tests,
   and moving them would be churn against an archived plan) — complete (PR #322)
+- **Milestone 97b** (`packages/decorator-plugin` + `packages/common` + `packages/openapi-plugin` —
+  response shaping for decorated handlers. `createHandler` answered `ctx.response.json(result)` for
+  every plain return, so a decorated handler was always `200`, always JSON, always header-free
+  unless it took `@Params(Ctx())` purely to say one fixed thing. `@HttpCode(status)`,
+  `@ResponseHeader(name, value)` (repeatable for distinct names) and `@Redirect(url, status?)` are
+  the declarative form; `@Ctx()` is neither replaced nor deprecated, and stays the way to COMPUTE a
+  status or header per request and the only way to write a multi-valued header. **An ergonomics
+  milestone, not a defect repair, and the plan said so** — the `@Ctx()` escape genuinely works,
+  since `ResponseBuilder.status()` mutates and returns `this`.
+
+  **The write's position is the design, and both halves of it are load-bearing.** The shaping is
+  applied BEFORE `method(...)` is invoked. Writing before the `isHandlerResult` test is what makes
+  `@Render` compose — the render branch answers `ctx.response.html(...)` on a builder that already
+  carries the status, so a rendered `201` needs no special case. Writing before the METHOD is what
+  makes a returned `HandlerResult` win: the handler's own `ctx.response.status(202)` overwrites the
+  decorator's value. Moving the write after the method satisfies the first and silently INVERTS the
+  second, which is why the ordering has its own test file — a test asserting only the final status
+  passes either way. The negative control fails all three ordering cases plus the `HandlerResult`
+  one.
+
+  **Every argument is refused at `register()`, and two of the four refusals were decided during
+  implementation rather than by the plan.** The plan covered the status ranges (`[200, 599]` for
+  `@HttpCode`, not narrowed to `2xx`; `[300, 399]` for `@Redirect`, because a non-`3xx` with a
+  `Location` is a response no client follows). It did not resolve what happens when one handler
+  carries BOTH `@HttpCode` and `@Redirect` — both write the status, so the ordering would silently
+  pick whichever applied later — nor a duplicate `@ResponseHeader` name, where `Headers.set`
+  overwrites and the second declaration silently erases the first. Both are refused, names compared
+  case-insensitively per RFC 9110 §5.1, and `Location` declared alongside `@Redirect` is refused
+  too. The header pair is validated by **probing `new Headers().set(name, value)`** rather than a
+  hand-rolled token regex, so the check cannot drift from what the platform accepts and the refusal
+  quotes the platform's own message — measured, `Headers.set` throws `TypeError` for an invalid name
+  or a value carrying a control character, and `ResponseBuilder.header` calls it INSIDE the handler
+  wrapper, so an invalid pair would answer `500` on every request to that route.
+  `set('X-Custom', '')` and a value with leading whitespace both SUCCEED, so neither is refused.
+
+  **`204` needs no guard here, and the milestone owed the citation rather than a second check.**
+  `mapSnapshotToWebResponse` already drops a body written at one of `NULL_BODY_STATUSES`, so
+  `@HttpCode(204)` on a handler returning a plain value serves the conformant bodiless response —
+  which is what a `DELETE` handler wants. That case is driven through `app.fetch`, and **the plan's
+  stated reason for preferring `fetch` over `inject()` was stale while the real one is sharper**:
+  `InjectResponse` HAS carried `readonly headers: Headers` for some time (the M51 "exposes no
+  response headers" claim no longer holds, and this package's own `render-e2e.test.ts` asserts a
+  content type through it), but `inject()` does not go through that mapper — measured, the same
+  route reports `204 {"dropped":3}` through `inject()` and `204 ""` through `app.fetch`. Written
+  against `inject()` the bodiless assertion would have passed while asserting the opposite of what a
+  client sees.
+
+  **The second half is the one that justified touching `common`.** `RESPONSE_METADATA` /
+  `RouteResponseMetadata` / `withResponseMetadata` / `responseMetadataOf` are a `Symbol.for`-keyed
+  brand (the `SECURITY_METADATA` / `VALIDATION_METADATA` precedent, and for the stated reason: a
+  locally-created symbol misses on every read when two copies of `common` share a process), carried
+  on the ROUTE HANDLER rather than a middleware — a guard and a validator ARE middleware, while a
+  success status is a property of the handler and a decorated route may carry no middleware at all,
+  so a synthetic one purely to hold the brand would be a pipeline entry that does nothing. The guard
+  checks the RANGE as well as the type, because a status outside `[200, 599]` is one no runtime
+  could serve and reading it as documented would put an unreachable response into the document.
+  `openapi-plugin` gains `deriveResponseStatus`, **default ON** — the ROADMAP bullet said "opt-in
+  beside `deriveSecurity`" and was corrected: `deriveSecurity` is opt-in only because it needs a
+  caller-supplied scheme name, while a status needs nothing, so this follows `deriveRequestSchemas`.
+  **The plan's §8 breaking-change risk was also overstated and is corrected there**: the brand is
+  new surface, so no released handler carries one and an application that changes nothing gets a
+  byte-identical document — asserted by a test, not assumed. What changes a document is adopting the
+  decorator, which is the point; the CHANGELOG entry is `Added` with that consequence stated, and
+  `docs/upgrading.md` carries the regenerate-your-client note, written at milestone time rather than
+  reconstructed at release cut (the M90h finding).
+
+  Derivation happens at the operation builder, not inside `#buildResponses`, which receives no route
+  and so cannot read the brand — the same reason `#deriveSecurity` is reached from that call site.
+  Re-keying is order-safe because integer-like object keys iterate ascending regardless of insertion
+  order. `@ResponseHeader` is deliberately NOT derived (§3.7): an OpenAPI response-header entry
+  needs a schema and a description the declaration does not carry. One unplanned addition, because
+  the milestone's own new path would otherwise emit under-specified output: the status-description
+  table gained the five redirect statuses, which previously fell through to the bare fallback
+  `'Response'`.
+
+  **The option had to be threaded through THREE places** —
+  `OpenApiPluginOptions extends
+  OpenApiGeneratorOptions`, so it type-checks on the plugin whether
+  or not it reaches the generator, which is the M70i dropped-argument class; the negative control
+  that drops the threading fails exactly the `deriveResponseStatus: false` case while every other
+  assertion stays green. Six negative controls in all were each observed failing and reverted, and
+  the second records an honest nuance: swapping `Symbol.for` for `Symbol()` fails ONLY the
+  cross-copy unit test, because both plugins share one `common` instance in-process — which is
+  precisely why that unit test exists. All changed `src` files at 100% branch/function/line) —
+  complete (PR pending)
 - **Next milestone** — **M95d** (`docs/` + `packages/common` + `packages/view-plugin` + `scripts/` —
   documentation that survives contact: the M90h precedent, four findings where the code is correct
   and a reader following the documentation still ends up wrong. The only letter carrying gate work —

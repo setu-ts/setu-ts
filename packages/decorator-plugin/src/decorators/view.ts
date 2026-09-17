@@ -68,10 +68,13 @@ export type RenderDecorator<P> = (
  * than a startup refusal. The check is per route, so an application with no
  * rendered route needs no view plugin.
  *
- * A status code or header alongside a rendered body goes through `@Ctx()`:
- * the return value IS the props bag, so it cannot also carry a status, and
- * `@Render` deliberately grows no `status` argument — that would be a second
- * way to say what `@Ctx()` already says.
+ * A FIXED status or header alongside a rendered body is declared with
+ * `@HttpCode` / `@ResponseHeader`, which write to the response builder before
+ * the handler runs, so the rendered HTML lands on a builder already carrying
+ * them. A COMPUTED one goes through `@Ctx()`. Either way the return value IS
+ * the props bag, so it cannot also carry a status — which is why `@Render`
+ * grows no `status` argument of its own: that would be a third way to say what
+ * two existing ones already say.
  *
  * @typeParam P - The component's props bag
  * @param component - The view component to render the handler's props with
