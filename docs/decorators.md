@@ -338,6 +338,35 @@ app.middleware.add(async (ctx, next) => {
 });
 ```
 
+**Storing the scope is not enough for a decorated controller.** `registerController` instantiates a
+controller **once**, during route registration, and resolves its constructor arguments from the root
+container at that moment — before any request exists. Constructor injection therefore cannot reach a
+per-request scope, whatever `scope` the dependency declares. A handler that wants a request-local
+instance resolves it from the scope the middleware stored:
+
+```typescript
+import { Controller, Ctx, Get, Injectable, Params } from '@setu-ts/decorator-plugin';
+import type { IContainer, IRequestContext } from '@setu-ts/common';
+
+@Injectable({ scope: 'scoped', token: 'per-scope' })
+export class ScopedReportService {
+  readonly rows: string[] = [];
+}
+
+@Controller('/reports')
+export class ReportController {
+  // NOT `constructor(private readonly reports: ScopedReportService)` — that
+  // argument is resolved once, from the root container, at registration.
+  @Get()
+  @Params(Ctx())
+  today(ctx: IRequestContext) {
+    const scope = ctx.state.get('app:request-scope') as IContainer;
+    const reports = scope.resolve<ScopedReportService>('per-scope');
+    return { rows: reports.rows.length };
+  }
+}
+```
+
 [`apps/di-decorators`](https://github.com/setu-ts/setu-ts/tree/main/apps/di-decorators) serves a
 `/lifetimes` route that demonstrates the difference between the three lifetimes across two explicit
 scopes.
