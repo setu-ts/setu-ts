@@ -543,9 +543,11 @@ export class MeController {
 
 ## Response Shaping
 
-A decorated handler that returns a plain value is answered with `ctx.response.json(result)`: always
-`200`, always JSON, no headers. Three method decorators let a handler state something fixed about
-its response in its declaration, without accepting a request context it has no other use for.
+A decorated handler that returns a plain value is answered with `ctx.response.json(result)`. Left
+undecorated that is the DEFAULT — `200`, JSON, no headers — and the three method decorators below
+change it, each writing to the response builder before the handler runs. So a handler can state
+something fixed about its response in its declaration, without accepting a request context it has no
+other use for.
 
 | Decorator                      | What it sets                                     |
 | ------------------------------ | ------------------------------------------------ |

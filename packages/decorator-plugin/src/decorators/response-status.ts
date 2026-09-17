@@ -219,7 +219,7 @@ export function validateResponseShaping(
  *
  * `Headers.set` overwrites, so a duplicate would silently erase the first
  * declaration; a caller who wanted a multi-valued header wanted `appendHeader`,
- * which `@Ctx()` already reaches. A `@Redirect` on the same handler claims
+ * which `@Params(Ctx())` already reaches. A `@Redirect` on the same handler claims
  * `Location`, so it participates in the check — otherwise
  * `@ResponseHeader('Location', …)` beside it would be overwritten just as
  * silently.
@@ -245,8 +245,8 @@ function assertDistinctHeaderNames(
     if (seen.has(key)) {
       throw new Error(
         `${where} declares the response header '${header.name}' twice (header names are ` +
-          'case-insensitive). Declare each name once — for a multi-valued header, take @Ctx() ' +
-          'and call ctx.response.appendHeader(...).',
+          'case-insensitive). Declare each name once — for a multi-valued header, declare ' +
+          '@Params(Ctx()) and call ctx.response.appendHeader(...).',
       );
     }
     seen.add(key);

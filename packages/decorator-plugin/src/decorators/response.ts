@@ -1,11 +1,11 @@
 /**
  * Response-shaping decorators — `@HttpCode`, `@ResponseHeader` and `@Redirect`
  * let a handler state its success status and its response headers in its
- * declaration instead of accepting `@Ctx()` purely to say one fixed thing about
- * the response.
+ * declaration instead of accepting `@Params(Ctx())` purely to say one fixed
+ * thing about the response.
  *
- * `@Ctx()` is not replaced and is not deprecated: it stays the way to compute a
- * status or a header PER REQUEST, and it is the only way to write a
+ * `@Params(Ctx())` is not replaced and is not deprecated: it stays the way to
+ * compute a status or a header PER REQUEST, and it is the only way to write a
  * multi-valued header. These three are for the fixed, declarative case — which
  * is also the case a documentation generator can read, since
  * `@setu-ts/openapi-plugin` derives an operation's success status from the
@@ -88,7 +88,8 @@ export function HttpCode(status: number): SetuMethodDecorator {
  * Repeatable for DISTINCT names. The same name twice is refused at
  * `register()` — `Headers.set` overwrites, so the second declaration would
  * silently erase the first, and a multi-valued header (`Set-Cookie`, `Vary`)
- * wants `ctx.response.appendHeader(...)` through `@Ctx()` instead. Names are
+ * wants `ctx.response.appendHeader(...)` through `@Params(Ctx())` instead. Names
+ * are
  * compared case-insensitively, per RFC 9110 §5.1.
  *
  * The name and value are validated at `register()` by the runtime's own rule:
@@ -149,7 +150,8 @@ export function ResponseHeader(name: string, value: string): SetuMethodDecorator
  * the side effect, and the redirect is a property of the route.
  *
  * A handler that wants to decide per request should call
- * `ctx.response.redirect(url)` itself through `@Ctx()`, which terminates the
+ * `ctx.response.redirect(url)` itself through `@Params(Ctx())`, which terminates
+ * the
  * response and returns a `HandlerResult`.
  *
  * `status` must be an integer in `[300, 399]`, and `url` must be non-blank and

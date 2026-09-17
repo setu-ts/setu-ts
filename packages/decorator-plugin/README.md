@@ -131,10 +131,12 @@ is why `@Render` grows no `status` argument of its own. Rendering itself — eng
 
 ## Response shaping
 
-A decorated handler returning a plain value is answered with `ctx.response.json(result)` — always
-`200`, always JSON, no headers. `@HttpCode(status)`, `@ResponseHeader(name, value)` (repeatable, for
-distinct names) and `@Redirect(url, status?)` let a route state something FIXED about its response
-in its declaration, instead of accepting a request context purely to say it.
+A decorated handler returning a plain value is answered with `ctx.response.json(result)`. Left
+undecorated that is the DEFAULT — `200`, JSON, no headers — and the three decorators below change
+it, each writing to the response builder before the handler runs. `@HttpCode(status)`,
+`@ResponseHeader(name, value)` (repeatable, for distinct names) and `@Redirect(url, status?)` let a
+route state something FIXED about its response in its declaration, instead of accepting a request
+context purely to say it.
 
 ```typescript
 import {

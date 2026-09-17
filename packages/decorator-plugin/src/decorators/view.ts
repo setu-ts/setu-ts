@@ -71,7 +71,8 @@ export type RenderDecorator<P> = (
  * A FIXED status or header alongside a rendered body is declared with
  * `@HttpCode` / `@ResponseHeader`, which write to the response builder before
  * the handler runs, so the rendered HTML lands on a builder already carrying
- * them. A COMPUTED one goes through `@Ctx()`. Either way the return value IS
+ * them. A COMPUTED one goes through `@Params(Ctx())`. Either way the return value
+ * IS
  * the props bag, so it cannot also carry a status — which is why `@Render`
  * grows no `status` argument of its own: that would be a third way to say what
  * two existing ones already say.

@@ -4976,10 +4976,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   every plain return, so a decorated handler was always `200`, always JSON, always header-free
   unless it took `@Params(Ctx())` purely to say one fixed thing. `@HttpCode(status)`,
   `@ResponseHeader(name, value)` (repeatable for distinct names) and `@Redirect(url, status?)` are
-  the declarative form; `@Ctx()` is neither replaced nor deprecated, and stays the way to COMPUTE a
-  status or header per request and the only way to write a multi-valued header. **An ergonomics
-  milestone, not a defect repair, and the plan said so** — the `@Ctx()` escape genuinely works,
-  since `ResponseBuilder.status()` mutates and returns `this`.
+  the declarative form; `@Params(Ctx())` is neither replaced nor deprecated, and stays the way to
+  COMPUTE a status or header per request and the only way to write a multi-valued header. **An
+  ergonomics milestone, not a defect repair, and the plan said so** — the `@Params(Ctx())` escape
+  genuinely works, since `ResponseBuilder.status()` mutates and returns `this`.
 
   **The write's position is the design, and both halves of it are load-bearing.** The shaping is
   applied BEFORE `method(...)` is invoked. Writing before the `isHandlerResult` test is what makes
