@@ -175,6 +175,46 @@ describe('setu end-to-end on a real filesystem', () => {
     expect((await Deno.stat(`${project}/src/guards/admin.guard.ts`)).isFile).toBe(true);
   });
 
+  it('activates an added ingress provider before generating its class-based artifact', async () => {
+    expect(await run(['new', 'svc', '--template', 'class-based'])).toBe(0);
+    const project = `${root}/svc`;
+
+    expect(await run(['add', 'events', '--dir', project])).toBe(0);
+    expect(await run(['g', 'event-handler', 'user-created', '--dir', project])).toBe(0);
+
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    expect(config).toContain(`import { EventsPlugin } from '@setu-ts/events-plugin';`);
+    expect(config).toContain('      EventsPlugin(),');
+
+    // The local workspace mapping makes this exercise the new decorator
+    // registration pass rather than the last published version. Before the
+    // activation write, start() failed while resolving CAPABILITIES.EVENTS.
+    await useWorkspacePackages(project);
+    await Deno.writeTextFile(
+      `${project}/boot-ingress.ts`,
+      `import { createApp } from './setu.config.ts';
+
+const app = createApp();
+await app.start();
+await app.stop();
+`,
+    );
+    const booted = await new Deno.Command(Deno.execPath(), {
+      args: [
+        'run',
+        '-A',
+        '--node-modules-dir=none',
+        '--config',
+        `${project}/deno.json`,
+        `${project}/boot-ingress.ts`,
+      ],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    expect(booted.code, new TextDecoder().decode(booted.stderr)).toBe(0);
+  });
+
   // E8's own risk, found by review rather than by a gate. Merging `src/routes/`
   // into `src/controllers/` put two families in ONE directory under ONE barrel,
   // and in a FUNCTIONAL project both emit `register<Pascal>Routes` — so

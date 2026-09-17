@@ -200,6 +200,12 @@ Install it, then run this command again.
 Or run `setu generate route user-profile` — it registers handlers on the router API, so it needs no decorators.
 ```
 
+For a generated class-based project, `setu add cqrs`, `events`, `messaging`, `queue`, `scheduler`,
+or `websocket` also activates that provider's safe in-memory default in `setu.config.ts`. This keeps
+the ingress barrel runnable after the matching decorated artifact is generated. Other `setu add`
+packages remain manifest-only, and a config that does not retain this generated ingress shape is
+never rewritten.
+
 ### Managed barrels
 
 Each family's barrel is **managed**: the CLI owns it and rewrites it on every generate, which is the

@@ -86,6 +86,29 @@ const ADDABLE: ReadonlyMap<string, string> = new Map([
   ['worker-pool', 'worker-pool-plugin'],
 ]);
 
+/** One provider a decorated ingress class can resolve from the application. */
+interface IngressProviderWiring {
+  /** Factory exported by the provider package. */
+  readonly symbol: string;
+}
+
+/**
+ * Provider plugins that a class-based ingress config can activate safely.
+ *
+ * Every factory here has an in-memory, zero-configuration default. That makes
+ * adding it to the CLI-generated class-based config a coherent development
+ * composition; providers that need credentials or a user-owned choice remain
+ * manifest-only like every other `setu add` package.
+ */
+const INGRESS_PROVIDER_WIRINGS: ReadonlyMap<string, IngressProviderWiring> = new Map([
+  ['cqrs-plugin', { symbol: 'CqrsPlugin' }],
+  ['events-plugin', { symbol: 'EventsPlugin' }],
+  ['messaging-plugin', { symbol: 'MessagingPlugin' }],
+  ['queue-plugin', { symbol: 'QueuePlugin' }],
+  ['scheduler-plugin', { symbol: 'SchedulerPlugin' }],
+  ['websocket-plugin', { symbol: 'WebSocketPlugin' }],
+]);
+
 /**
  * Resolves what the user typed to a bare package name.
  *
@@ -143,7 +166,52 @@ export function withDependency(
 }
 
 /**
- * Adds a framework package to the project's manifest.
+ * Adds a zero-config ingress provider to the CLI-generated class-based config.
+ *
+ * The generated config is deliberately identified by its explicit ingress
+ * option, not merely by an import of `DecoratorPlugin`: a developer-owned
+ * decorator composition may have a different registration site and must not
+ * be rewritten by an installer. Likewise, a config that already constructs
+ * the provider is left byte-identical.
+ *
+ * @param source - Existing `setu.config.ts` contents
+ * @param bare - Bare package name being added
+ * @returns The updated config, or `undefined` when it is not an eligible
+ * generated config or needs no change
+ */
+export function withIngressProviderWiring(source: string, bare: string): string | undefined {
+  const provider = INGRESS_PROVIDER_WIRINGS.get(bare);
+  if (provider === undefined) return undefined;
+
+  const decoratorImport = "import { DecoratorPlugin } from '@setu-ts/decorator-plugin';";
+  const ingressImport = "import { INGRESS_HANDLERS } from './src/ingress/index.ts';";
+  const ingressOption = 'ingress: [...INGRESS_HANDLERS],';
+  const pluginList = 'plugins: [';
+  if (
+    !source.includes(decoratorImport) ||
+    !source.includes(ingressImport) ||
+    !source.includes('DecoratorPlugin({') ||
+    !source.includes(ingressOption) ||
+    !source.includes(pluginList) ||
+    new RegExp(`\\b${provider.symbol}\\s*\\(`).test(source)
+  ) {
+    return undefined;
+  }
+
+  const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
+  const withImport = source.replace(decoratorImport, `${decoratorImport}\n${providerImport}`);
+  const insertion = withImport.indexOf(pluginList) + pluginList.length;
+  const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
+  const indentation = withImport.slice(lineStart, insertion - pluginList.length);
+  return `${withImport.slice(0, insertion)}\n${indentation}  ${provider.symbol}(),${
+    withImport.slice(insertion)
+  }`;
+}
+
+/**
+ * Adds a framework package to the project's manifest. For the six ingress
+ * providers, it also activates the provider in an unmodified class-based
+ * scaffold, whose `DecoratorPlugin` already receives the ingress barrel.
  *
  * Reports the install command rather than spawning it. That is deliberate: on
  * the day of a release `deno install` hits the 24-hour minimum-dependency-age
@@ -235,6 +303,21 @@ export async function runAddCommand(
       continue;
     }
     edits.push({ path, contents: updated });
+  }
+
+  // The ingress barrel is already part of a class-based scaffold from project
+  // creation. Installing a provider only in the manifest would make a later
+  // decorated ingress class fail at startup because the capability was never
+  // registered. Activate only the known generated shape; an application-owned
+  // config can have arbitrary composition and is not ours to rewrite.
+  const configPath = joinPath(dir, 'setu.config.ts');
+  try {
+    const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
+    const wired = withIngressProviderWiring(config, bare);
+    if (wired !== undefined) edits.push({ path: configPath, contents: wired });
+  } catch {
+    // `setu add` remains useful for non-scaffolded projects. A missing config
+    // simply has no generated ingress composition to activate.
   }
 
   if (!found) {
