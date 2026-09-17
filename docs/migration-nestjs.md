@@ -816,6 +816,9 @@ describe('Users', () => {
 
 ### Request-Scoped Services
 
+**There is no automatic equivalent, and `scope: 'scoped'` is not one.** This is the lifecycle
+difference most likely to surprise a NestJS developer, so it is stated plainly rather than mapped.
+
 ### NestJS
 
 ```typescript
@@ -825,14 +828,52 @@ import { Injectable, Scope } from '@nestjs/common';
 export class RequestScopedService {}
 ```
 
+Nest instantiates this class once per request, automatically.
+
 ### Setu-TS
 
-```typescript
-import { Injectable } from '@setu-ts/decorator-plugin';
+`ServiceScope`'s `'scoped'` means one instance per `IContainer.createScope()` scope, and **the
+framework creates no scope per request** — so a `'scoped'` service is not re-created on every HTTP
+request and behaves as a singleton until the application calls `createScope()` itself. Writing
+`@Injectable({ scope: 'scoped' })` and expecting Nest's semantics gives you a shared instance with
+no error and no warning.
 
-@Injectable({ scope: 'scoped' })
-export class RequestScopedService {}
+An application that needs per-request instances creates and carries the scope itself:
+
+```typescript
+import { CAPABILITIES, type IContainer } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+
+interface ReportCollector {
+  readonly rows: readonly string[];
+}
+
+const app = createApplication();
+
+app.middleware.add(async (ctx, next) => {
+  const root = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+  ctx.state.set('app:request-scope', root.createScope());
+  await next();
+});
+
+app.router.get('/reports', (ctx) => {
+  // Resolve through the request's scope, never through the root container.
+  const scope = ctx.state.get('app:request-scope') as IContainer;
+  const reports = scope.resolve<ReportCollector>('per-scope');
+  return ctx.response.json({ rows: reports.rows.length });
+});
 ```
+
+Resolving through the stored scope is the whole mechanism, and it is not something constructor
+injection can do for you. A `@Controller` class is instantiated **once**, during route registration,
+with its constructor arguments resolved from the root container at that moment — so a decorated
+controller reaches a request scope only from inside a handler, through `Ctx()`. See
+[Scoped Injection](decorators.md#scoped-injection) for that form.
+[`apps/di-decorators`](https://github.com/setu-ts/setu-ts/tree/main/apps/di-decorators) serves a
+`/lifetimes` route that makes the three lifetimes visible across two explicit scopes.
+
+Note that the kernel _does_ give each request a child **service registry** (`ctx.services`), which
+is a different thing: it scopes capability registrations, not DI container lifetimes.
 
 ### Middleware Order
 

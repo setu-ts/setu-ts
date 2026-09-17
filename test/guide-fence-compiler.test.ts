@@ -98,14 +98,22 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     skipped: 3,
   },
   'docs/decorators.md': {
-    // 28 since M76. Two blocks left the guide: the `deno.json` "Enable
+    // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
     // Decorators" block, because TC39 standard decorators need no compiler
     // option; and a duplicated `@Inject` example, which the migration had
     // turned into a byte-identical copy of the one above it while the prose
     // still called one of them "the deprecated class-level form".
-    total: 28,
-    ts: 27,
-    compile: 27,
+    //
+    // 30 since the "Scoped Injection" correction: two blocks were added,
+    // because the guide had claimed `'scoped'` means "new instance per request
+    // scope" and nothing creates a scope per request. One shows the explicit
+    // `createScope()` route; the second shows a decorated handler resolving
+    // through the stored scope, since `registerController` instantiates a
+    // controller once at registration and constructor injection cannot reach a
+    // per-request scope.
+    total: 30,
+    ts: 29,
+    compile: 29,
     external: 0,
     pseudocode: 0,
     skipped: 1,
@@ -162,9 +170,12 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // compiling Setu-TS fence. 265 once mvc.md gained its Forms section (+2) and
   // the `raw()` script opt-out (+1) — all three compile. 266 once the Escaping
   // section gained the plain-string-is-not-escaped contrast (+1, compiling).
-  total: 266,
-  ts: 220,
-  compile: 187,
+  // 268 once decorators.md's "Scoped Injection" section gained a second block
+  // (+1, compiling) showing a decorated handler resolving through the stored
+  // scope.
+  total: 268,
+  ts: 222,
+  compile: 189,
   external: 33,
   pseudocode: 0,
   skipped: 46,
