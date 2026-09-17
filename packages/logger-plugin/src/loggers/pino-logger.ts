@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
+import type { ILogger, IRedactionService, LogLevel, LogMetadata } from '@setu-ts/common';
 
 import { normalizeMetadata } from './normalize-metadata.ts';
 
@@ -73,6 +73,8 @@ export interface PinoLoggerOptions {
   readonly level?: LogLevel;
   /** Dot-paths to redact from metadata, delegated to Pino's built-in redaction. */
   readonly redact?: readonly string[];
+  /** Optional service applied after metadata normalization and before Pino. */
+  readonly redaction?: IRedactionService;
   /** Bindings merged into every entry produced by this logger. */
   readonly bindings?: LogMetadata;
   /**
@@ -110,6 +112,7 @@ export interface PinoLoggerOptions {
 export class PinoLogger implements ILogger {
   readonly level: LogLevel;
   readonly #pino: PinoLoggerLike;
+  readonly #redaction: IRedactionService | undefined;
 
   /**
    * @internal Use {@linkcode PinoLogger.create} instead. Exists so
@@ -118,9 +121,10 @@ export class PinoLogger implements ILogger {
    * @param level - Minimum log level
    * @param pino - Pre-constructed Pino instance
    */
-  constructor(level: LogLevel, pino: PinoLoggerLike) {
+  constructor(level: LogLevel, pino: PinoLoggerLike, redaction?: IRedactionService) {
     this.level = level;
     this.#pino = pino;
+    this.#redaction = redaction;
   }
 
   /**
@@ -142,37 +146,37 @@ export class PinoLogger implements ILogger {
       factory = await PinoLogger.#loadPino();
     }
     const pino = PinoLogger.#buildPino(level, factory, options);
-    return new PinoLogger(level, pino);
+    return new PinoLogger(level, pino, options.redaction);
   }
 
   /** @inheritdoc */
   fatal(message: string, metadata?: LogMetadata): void {
-    this.#pino.fatal(normalize(metadata), message);
+    this.#pino.fatal(normalize(metadata, this.#redaction), message);
   }
 
   /** @inheritdoc */
   error(message: string, metadata?: LogMetadata): void {
-    this.#pino.error(normalize(metadata), message);
+    this.#pino.error(normalize(metadata, this.#redaction), message);
   }
 
   /** @inheritdoc */
   warn(message: string, metadata?: LogMetadata): void {
-    this.#pino.warn(normalize(metadata), message);
+    this.#pino.warn(normalize(metadata, this.#redaction), message);
   }
 
   /** @inheritdoc */
   info(message: string, metadata?: LogMetadata): void {
-    this.#pino.info(normalize(metadata), message);
+    this.#pino.info(normalize(metadata, this.#redaction), message);
   }
 
   /** @inheritdoc */
   debug(message: string, metadata?: LogMetadata): void {
-    this.#pino.debug(normalize(metadata), message);
+    this.#pino.debug(normalize(metadata, this.#redaction), message);
   }
 
   /** @inheritdoc */
   trace(message: string, metadata?: LogMetadata): void {
-    this.#pino.trace(normalize(metadata), message);
+    this.#pino.trace(normalize(metadata, this.#redaction), message);
   }
 
   /**
@@ -184,8 +188,8 @@ export class PinoLogger implements ILogger {
   child(bindings: LogMetadata): ILogger {
     // Normalize before hand-off so an Error-valued binding survives Pino's
     // serialization instead of collapsing to {} (X2-5, M70f re-review finding 1).
-    const childPino = this.#pino.child(normalizeMetadata(bindings));
-    return new PinoLoggerAdapter(this.level, childPino);
+    const childPino = this.#pino.child(normalizeBindings(bindings, this.#redaction));
+    return new PinoLoggerAdapter(this.level, childPino, this.#redaction);
   }
 
   /**
@@ -213,7 +217,7 @@ export class PinoLogger implements ILogger {
       // Normalize the base bindings too, so an Error supplied as a base binding
       // is preserved in every emitted record rather than flattened to {} (X2-5,
       // M70f re-review finding 1).
-      pinoOptions.base = normalizeMetadata(options.bindings);
+      pinoOptions.base = normalizeBindings(options.bindings, options.redaction);
     }
     return factory(pinoOptions);
   }
@@ -248,34 +252,40 @@ export class PinoLogger implements ILogger {
 class PinoLoggerAdapter implements ILogger {
   readonly level: LogLevel;
   readonly #pino: PinoLoggerLike;
+  readonly #redaction: IRedactionService | undefined;
 
-  constructor(level: LogLevel, pino: PinoLoggerLike) {
+  constructor(level: LogLevel, pino: PinoLoggerLike, redaction?: IRedactionService) {
     this.level = level;
     this.#pino = pino;
+    this.#redaction = redaction;
   }
 
   fatal(message: string, metadata?: LogMetadata): void {
-    this.#pino.fatal(normalize(metadata), message);
+    this.#pino.fatal(normalize(metadata, this.#redaction), message);
   }
   error(message: string, metadata?: LogMetadata): void {
-    this.#pino.error(normalize(metadata), message);
+    this.#pino.error(normalize(metadata, this.#redaction), message);
   }
   warn(message: string, metadata?: LogMetadata): void {
-    this.#pino.warn(normalize(metadata), message);
+    this.#pino.warn(normalize(metadata, this.#redaction), message);
   }
   info(message: string, metadata?: LogMetadata): void {
-    this.#pino.info(normalize(metadata), message);
+    this.#pino.info(normalize(metadata, this.#redaction), message);
   }
   debug(message: string, metadata?: LogMetadata): void {
-    this.#pino.debug(normalize(metadata), message);
+    this.#pino.debug(normalize(metadata, this.#redaction), message);
   }
   trace(message: string, metadata?: LogMetadata): void {
-    this.#pino.trace(normalize(metadata), message);
+    this.#pino.trace(normalize(metadata, this.#redaction), message);
   }
   child(bindings: LogMetadata): ILogger {
     // Normalize before hand-off so an Error-valued binding survives Pino's
     // serialization instead of collapsing to {} (X2-5, M70f re-review finding 1).
-    return new PinoLoggerAdapter(this.level, this.#pino.child(normalizeMetadata(bindings)));
+    return new PinoLoggerAdapter(
+      this.level,
+      this.#pino.child(normalizeBindings(bindings, this.#redaction)),
+      this.#redaction,
+    );
   }
 }
 
@@ -288,6 +298,20 @@ class PinoLoggerAdapter implements ILogger {
  * @param metadata - The caller's metadata
  * @returns The normalized object, or `undefined`
  */
-function normalize(metadata: LogMetadata | undefined): unknown {
-  return metadata !== undefined ? normalizeMetadata(metadata) : undefined;
+function normalize(
+  metadata: LogMetadata | undefined,
+  redaction: IRedactionService | undefined,
+): unknown {
+  if (metadata === undefined) return undefined;
+  const normalized = normalizeMetadata(metadata);
+  return redaction?.redactRecord(normalized) ?? normalized;
+}
+
+/** Normalizes and redacts bindings before Pino retains them outside log calls. */
+function normalizeBindings(
+  bindings: LogMetadata,
+  redaction: IRedactionService | undefined,
+): Record<string, unknown> {
+  const normalized = normalizeMetadata(bindings);
+  return redaction?.redactRecord(normalized) ?? normalized;
 }

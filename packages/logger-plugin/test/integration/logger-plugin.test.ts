@@ -10,8 +10,9 @@ import type {
   MiddlewareOptions,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { createRedactionService } from '@setu-ts/common';
 
-import { LoggerPlugin } from '../../src/plugin/logger-plugin.ts';
+import { composeLoggerRedaction, LoggerPlugin } from '../../src/plugin/logger-plugin.ts';
 import { NoopLogger } from '../../src/loggers/noop-logger.ts';
 import { ConsoleLogger } from '../../src/loggers/console-logger.ts';
 import { TraceEnrichedLogger } from '../../src/loggers/trace-enriched-logger.ts';
@@ -153,6 +154,31 @@ describe('LoggerPlugin (integration)', () => {
     expect((logger as TraceEnrichedLogger).inner).toBeInstanceOf(ConsoleLogger);
   });
 
+  it('applies the default secret paths, while redact: [] restores plaintext output', async () => {
+    const lines: string[] = [];
+    // deno-lint-ignore no-console -- capture the ConsoleLogger's real egress.
+    const originalLog = console.log;
+    // deno-lint-ignore no-console -- capture the ConsoleLogger's real egress.
+    console.log = (...values: unknown[]): void => {
+      lines.push(String(values[0]));
+    };
+    try {
+      const defaultContext = createFakeContext(runtime);
+      await LoggerPlugin().register(defaultContext.ctx);
+      getLogger(defaultContext.registeredServices).info('default', { password: 'secret' });
+
+      const optOutContext = createFakeContext(runtime);
+      await LoggerPlugin({ redact: [] }).register(optOutContext.ctx);
+      getLogger(optOutContext.registeredServices).info('opt-out', { password: 'secret' });
+    } finally {
+      // deno-lint-ignore no-console -- restore the process-wide console after capture.
+      console.log = originalLog;
+    }
+
+    expect(JSON.parse(lines[0]!).password).toBe('[Redacted]');
+    expect(JSON.parse(lines[1]!).password).toBe('secret');
+  });
+
   it('passes level option to the logger', async () => {
     const plugin = LoggerPlugin({ transport: 'noop', level: 'error' });
     const { ctx, registeredServices } = createFakeContext(runtime);
@@ -176,6 +202,46 @@ describe('LoggerPlugin (integration)', () => {
     expect((logger as TraceEnrichedLogger).inner).toBeInstanceOf(ConsoleLogger);
     // `level` passes through the decorator unchanged.
     expect(logger.level).toBe('debug');
+  });
+
+  it('accepts both policy and service redaction option arms', async () => {
+    const policyPlugin = LoggerPlugin({ redaction: { fields: { password: 'secret' } } });
+    const policyContext = createFakeContext(runtime);
+    await policyPlugin.register(policyContext.ctx);
+    expect(getLogger(policyContext.registeredServices)).toBeDefined();
+
+    const servicePlugin = LoggerPlugin({
+      redaction: createRedactionService({ fields: { password: 'secret' } }),
+    });
+    const serviceContext = createFakeContext(runtime);
+    await servicePlugin.register(serviceContext.ctx);
+    expect(getLogger(serviceContext.registeredServices)).toBeDefined();
+  });
+
+  it('applies legacy redaction after a policy for both service methods', () => {
+    const service = composeLoggerRedaction(
+      createRedactionService({ fields: { card: 'pci' }, defaultRedactor: () => 'masked' }),
+      ['password'],
+    );
+
+    expect(service.redactValue('card', '1234')).toBe('masked');
+    expect(service.redactValue('password', 'secret')).toBe('[Redacted]');
+    expect(service.redactRecord({ password: 'secret', card: '1234' })).toEqual({
+      password: '[Redacted]',
+      card: 'masked',
+    });
+  });
+
+  it('preserves an intentional nullish policy redaction result', () => {
+    const service = composeLoggerRedaction(
+      {
+        redactValue: () => undefined,
+        redactRecord: (record) => record,
+      },
+      [],
+    );
+
+    expect(service.redactValue('token', 'secret')).toBeUndefined();
   });
 
   it('registers a PinoLogger when transport is pino', async () => {

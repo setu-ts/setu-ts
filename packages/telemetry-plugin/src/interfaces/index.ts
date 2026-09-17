@@ -5,7 +5,12 @@
  * @since 0.2.0
  */
 
-import type { SpanContext, TelemetryContext } from '@setu-ts/common';
+import type {
+  IRedactionService,
+  RedactionPolicy,
+  SpanContext,
+  TelemetryContext,
+} from '@setu-ts/common';
 
 /**
  * The key used to store the active span on `ctx.state`.
@@ -151,6 +156,10 @@ export interface TelemetryPluginOptions {
    * @since 0.2.0
    */
   instrumentations?: InstrumentationsConfig;
+  /** Optional policy or service used to redact retained query parameter values. */
+  redaction?: RedactionPolicy | IRedactionService;
+  /** Query-string handling for `http.url`; defaults to `'omit'`. */
+  queryParameters?: 'omit' | 'redact';
 }
 
 /**

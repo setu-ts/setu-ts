@@ -37,6 +37,14 @@ That is the whole app-side change. The plugin uses OTLP/**HTTP**
 (`@opentelemetry/exporter-trace-otlp-http`), which is why the collector's OTLP receiver is
 configured for the HTTP protocol on `:4318`.
 
+### What reaches the collector
+
+The request-span `http.url` attribute contains the origin and path, with query strings and fragments
+removed by default. An application that needs retained query values can configure
+`queryParameters: 'redact'` and pass a shared `redaction` policy; classified values are transformed
+before the trace reaches the collector. Redact mode without a policy fails closed to omission and
+logs one registration warning.
+
 ## 2. Collector side — you need the _contrib_ distribution
 
 The `datadog` and `azuremonitor` exporters ship only in **`otelcol-contrib`** (image

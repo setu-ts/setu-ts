@@ -9,7 +9,8 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { AuditPlugin } from '../../src/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IAuditLogger } from '@setu-ts/common';
+import { createRedactionService } from '@setu-ts/common';
+import type { IAuditLogger, IRedactionService } from '@setu-ts/common';
 
 describe('AuditPlugin integration (real kernel)', () => {
   it('register -> resolve IAuditLogger -> log', async () => {
@@ -89,6 +90,50 @@ describe('AuditPlugin integration (real kernel)', () => {
     expect(rows[0].action).toBe('db.insert');
 
     await dbApp.stop();
+  });
+
+  it('redacts records through both policy and service option arms before persistence', async () => {
+    const policy = { fields: { password: 'secret' } };
+    const service: IRedactionService = createRedactionService(policy);
+
+    for (const redaction of [policy, service]) {
+      const rows: Record<string, unknown>[] = [];
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          AuditPlugin({
+            storage: 'database',
+            options: {
+              client: {
+                insert: (_table, row) => {
+                  rows.push(row);
+                  return Promise.resolve();
+                },
+                select: () => Promise.resolve(rows),
+              },
+            },
+            redaction,
+          }),
+        ],
+      });
+      await app.start();
+      try {
+        const logger = app.services.get<IAuditLogger>(CAPABILITIES.AUDIT);
+        await logger.log({
+          action: 'redact',
+          resource: 'user',
+          result: 'success',
+          before: { password: 'before' },
+          after: { password: 'after' },
+          metadata: { password: 'metadata' },
+        });
+        expect(JSON.parse(String(rows[0]?.before))).toEqual({ password: '[Redacted]' });
+        expect(JSON.parse(String(rows[0]?.after))).toEqual({ password: '[Redacted]' });
+        expect(JSON.parse(String(rows[0]?.metadata))).toEqual({ password: '[Redacted]' });
+      } finally {
+        await app.stop();
+      }
+    }
   });
 
   it('resolves IAuditLogger with file storage backend', async () => {

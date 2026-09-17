@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { ILogger } from '@setu-ts/common';
+import type { ILogger, IRedactionService, RedactionPolicy } from '@setu-ts/common';
 
 /**
  * A stored audit record extends {@linkcode AuditEntry} with an internally
@@ -146,4 +146,6 @@ export interface AuditPluginOptions {
   storage?: AuditStorageType;
   /** Backend-specific options. */
   options?: AuditStorageOptions;
+  /** Optional policy or service applied to entry bodies before storage. */
+  redaction?: RedactionPolicy | IRedactionService;
 }

@@ -90,6 +90,13 @@ Two outcomes count as active, and only one counts as failure:
 
 Pass an explicit `parentContext` where the relationship must hold regardless.
 
+## Request URL handling
+
+Request spans omit query strings and fragments from `http.url` by default. Set
+`queryParameters: 'redact'` together with `redaction` to retain query parameter names while applying
+the supplied policy to each value (`query.<name>`). If redact mode has no policy, the plugin warns
+at registration and continues to omit the query string.
+
 ## Multiple backends
 
 The plugin exports to **one** endpoint. To fan a single trace stream out to several vendors, point

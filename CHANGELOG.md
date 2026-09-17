@@ -23,6 +23,14 @@ All notable changes to this project are documented here. The format follows
   without which the `SseMessage.data` entry further down this file is a day-one false positive:
   `deno fmt` wrapped its inline union type mid-line, leaving a continuation line that begins with a
   pipe and is not a table.
+- **`common`, logger, telemetry, audit — one synchronous redaction seam for framework egress
+  (M96).** `@setu-ts/common` now exports `createRedactionService`, `IRedactionService`, policy and
+  redactor vocabulary, an erase redactor, and a suffix-mask factory. The logger, telemetry, and
+  audit plugins accept the same policy or service through `redaction`; policies are compiled once,
+  never mutate caller-owned records, and apply before records leave those components. Telemetry now
+  omits query strings and fragments from `http.url` by default; `queryParameters: 'redact'` retains
+  only policy-transformed query values, and fails closed to omission with a warning when no policy
+  is supplied. Audit redacts `before`, `after`, and `metadata` before deep-freezing stored entries.
 
 - **Public contribution intake is now maintainer-triaged and protected from untrusted automation.**
   GitHub Discussions, focused issue forms, a contribution guide, code of conduct, security policy,
@@ -49,6 +57,11 @@ All notable changes to this project are documented here. The format follows
   fence, and the case is pinned.
 
 ### Changed
+
+- **BREAKING — `logger-plugin` now redacts common secret-shaped fields by default.** Set
+  `LoggerPlugin({ redact: [] })` to restore the prior no-default-redaction behaviour. The legacy
+  `redact` list remains supported for both console and Pino transports and takes precedence over a
+  policy where both name a path.
 
 - **Multipart `Content-Disposition` parsing admits the unquoted parameter form and drops a part with
   no usable name (behaviour changes, both with migration notes).** Two changes decided together
