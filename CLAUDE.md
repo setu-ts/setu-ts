@@ -5004,16 +5004,17 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   compliance feature: no regulation is named in any shipped identifier, and a gate keeps it that
   way. Plan: `plans/milestone-96-redaction-seam.md`).
 
-- **In progress** — **M97** (97a `packages/decorator-plugin` + `packages/cli` — complete (PR
-  pending) on `feat/m97a-ingress-decorators`; 97b `packages/decorator-plugin` + `packages/common` +
-  `packages/openapi-plugin`; 97c `packages/config-plugin` — ergonomics: three places where a
-  capability is complete, its registration surface is public, and the developer still hand-writes
-  the wiring. **Only 97b touches `common`** — the other two lists were corrected once their plans
-  resolved the seam (97a puts the ingress map on the concrete `MetadataStore`, 97c ships a free
-  function rather than a required `IConfig` member). Three letters, separate package ownership, the
-  M93a/M93b shape. **97a** gives the six non-HTTP ingress categories — queue, scheduler, domain
-  events, messaging, WebSocket, CQRS — the class-based surface HTTP has had since M9 (`@Processor`,
-  `@Cron`/`@Every`, `@OnEvent`, `@Subscribe`, `@Gateway`, `@CommandHandler`/`@QueryHandler`, plus
+- **In progress** — **M97** (97a `packages/decorator-plugin` + `packages/cli` — complete
+  ([PR #327](https://github.com/setu-ts/setu-ts/pull/327)) on `feat/m97a-ingress-decorators`; 97b
+  `packages/decorator-plugin` + `packages/common` + `packages/openapi-plugin`; 97c
+  `packages/config-plugin` — ergonomics: three places where a capability is complete, its
+  registration surface is public, and the developer still hand-writes the wiring. **Only 97b touches
+  `common`** — the other two lists were corrected once their plans resolved the seam (97a puts the
+  ingress map on the concrete `MetadataStore`, 97c ships a free function rather than a required
+  `IConfig` member). Three letters, separate package ownership, the M93a/M93b shape. **97a** gives
+  the six non-HTTP ingress categories — queue, scheduler, domain events, messaging, WebSocket, CQRS
+  — the class-based surface HTTP has had since M9 (`@Processor`, `@Cron`/`@Every`, `@OnEvent`,
+  `@Subscribe`, `@Gateway`, `@CommandHandler`/`@QueryHandler`, plus
   `@UseIngressBehaviors`/`@UsePipelineBehaviors`). Six categories, **seven** provider tokens,
   because `CqrsPlugin` provides `COMMAND_BUS` and `QUERY_BUS` separately and the pass resolves both
   buses directly — the follow-on M86 named at `ROADMAP.md:8509` and deferred "until the arms and the
