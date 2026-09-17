@@ -3,6 +3,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { createMaskRedactor, createRedactionService } from '../../src/index.ts';
 import type { Redactor } from '../../src/index.ts';
+import { createFieldMatcher } from '../../src/redaction/field-matcher.ts';
 
 describe('createRedactionService', () => {
   it('redacts literal, wildcard, and array paths without mutating input', () => {
@@ -56,6 +57,15 @@ describe('createRedactionService', () => {
       token: '[Redacted]',
       nested: { token: '[Redacted]' },
     });
+  });
+
+  it('matches pathological globstar patterns without changing their result', () => {
+    const matcher = createFieldMatcher(
+      { '**.data.**.data.**.data.**.missing': 'secret' },
+      true,
+    );
+
+    expect(matcher(Array.from({ length: 32 }, () => 'data').join('.'))).toBeUndefined();
   });
 
   it('selects the most specific matching field pattern', () => {

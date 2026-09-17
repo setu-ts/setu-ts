@@ -62,15 +62,30 @@ function specificity(segments: readonly string[]): readonly number[] {
 function matches(
   pattern: readonly string[],
   path: readonly string[],
-  patternIndex = 0,
-  pathIndex = 0,
 ): boolean {
-  if (patternIndex === pattern.length) return pathIndex === path.length;
-  const segment = pattern[patternIndex]!;
-  if (segment === '**') {
-    return matches(pattern, path, patternIndex + 1, pathIndex) ||
-      (pathIndex < path.length && matches(pattern, path, patternIndex, pathIndex + 1));
+  const results = new Map<string, boolean>();
+
+  function visit(patternIndex: number, pathIndex: number): boolean {
+    const key = `${patternIndex}:${pathIndex}`;
+    const previousResult = results.get(key);
+    if (previousResult !== undefined) return previousResult;
+
+    const result = patternIndex === pattern.length
+      ? pathIndex === path.length
+      : matchSegment(patternIndex, pathIndex);
+    results.set(key, result);
+    return result;
   }
-  return pathIndex < path.length && (segment === '*' || segment === path[pathIndex]) &&
-    matches(pattern, path, patternIndex + 1, pathIndex + 1);
+
+  function matchSegment(patternIndex: number, pathIndex: number): boolean {
+    const segment = pattern[patternIndex]!;
+    if (segment === '**') {
+      return visit(patternIndex + 1, pathIndex) ||
+        (pathIndex < path.length && visit(patternIndex, pathIndex + 1));
+    }
+    return pathIndex < path.length && (segment === '*' || segment === path[pathIndex]) &&
+      visit(patternIndex + 1, pathIndex + 1);
+  }
+
+  return visit(0, 0);
 }
