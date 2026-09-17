@@ -5004,8 +5004,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   compliance feature: no regulation is named in any shipped identifier, and a gate keeps it that
   way. Plan: `plans/milestone-96-redaction-seam.md`).
 
-- **In progress** — **M97** (97a `packages/decorator-plugin` + `packages/cli` — complete on
-  `feat/m97a-ingress-decorators`; 97b `packages/decorator-plugin` + `packages/common` +
+- **In progress** — **M97** (97a `packages/decorator-plugin` + `packages/cli` — complete (PR
+  pending) on `feat/m97a-ingress-decorators`; 97b `packages/decorator-plugin` + `packages/common` +
   `packages/openapi-plugin`; 97c `packages/config-plugin` — ergonomics: three places where a
   capability is complete, its registration surface is public, and the developer still hand-writes
   the wiring. **Only 97b touches `common`** — the other two lists were corrected once their plans
@@ -5037,7 +5037,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   them), `IHostedService`, and localization. **The competitor rows are from knowledge and are NOT
   measured** — M94 built runnable ASP.NET 9 / NestJS 10 apps in `.tmp/compare/` for this comparison
   and two doc-derived claims did not survive, so each plan re-measures what it relies on. Plans:
-  `plans/milestone-97a-ingress-decorators.md`, `plans/milestone-97b-response-shaping.md`,
+  `plans/archive/milestone-97a-ingress-decorators.md`, `plans/milestone-97b-response-shaping.md`,
   `plans/milestone-97c-typed-config-sections.md`.)
 
 - **Milestone 95** (`packages/cli` + `packages/messaging-plugin` + `packages/common` +

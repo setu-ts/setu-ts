@@ -1,7 +1,8 @@
 # Milestone 97a — Decorators for Non-HTTP Ingress (`@setu-ts/decorator-plugin`, `@setu-ts/cli`)
 
-> **Status:** Complete pending merge. Branch: `feat/m97a-ingress-decorators`. `main` is protected —
-> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (PR pending). Archived on completion. Branch: `feat/m97a-ingress-decorators`.
+> `main` is protected — all work (implementation + fixes) stays on this one branch until it merges
+> via a single PR.
 
 ## 0. Objective & scope
 

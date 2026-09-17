@@ -10386,7 +10386,7 @@ below re-measures the rows it relies on before its section's prose is fixed.
 
 **Package(s):** `packages/decorator-plugin`, `packages/cli`
 
-**Plan:** `plans/milestone-97a-ingress-decorators.md`
+**Plan:** `plans/archive/milestone-97a-ingress-decorators.md`
 
 **Objective:** Give the six non-HTTP ingress categories — queue, scheduler, domain events,
 messaging, WebSocket and CQRS — the class-based registration surface HTTP has had since M9, so
