@@ -5011,8 +5011,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `common`** — the other two lists were corrected once their plans resolved the seam (97a puts the
   ingress map on the concrete `MetadataStore`, 97c ships a free function rather than a required
   `IConfig` member). Three letters, separate package ownership, the M93a/M93b shape. **97a** gives
-  the five non-HTTP ingress paths the class-based surface HTTP has had since M9 (`@Processor`,
-  `@Cron`, `@OnEvent`, `@Subscribe`, `@Gateway`, `@CommandHandler`) — the follow-on M86 named at
+  the six non-HTTP ingress categories — queue, scheduler, domain events, messaging, WebSocket, CQRS
+  — the class-based surface HTTP has had since M9 (`@Processor`, `@Cron`/`@Every`, `@OnEvent`,
+  `@Subscribe`, `@Gateway`, `@CommandHandler`/`@QueryHandler`, plus `@UseBehaviors`). Six
+  categories, **seven** provider tokens, because `CqrsPlugin` provides `COMMAND_BUS` and `QUERY_BUS`
+  separately and the pass resolves both buses directly — the follow-on M86 named at
   `ROADMAP.md:8509` and deferred "until the arms and the pipeline exist", whose precondition PR #228
   met. It is cheap for one checked reason: the behaviour-wrapped service is what each plugin
   registers under its token (`queue-plugin.ts:245` registers the `BehaviorChainQueueService` whose

@@ -10386,8 +10386,11 @@ below re-measures the rows it relies on before its section's prose is fixed.
 
 **Plan:** `plans/milestone-97a-ingress-decorators.md`
 
-**Objective:** Give the five non-HTTP ingress paths the class-based registration surface HTTP has
-had since M9, so `--template class-based` describes a whole application rather than its HTTP sixth.
+**Objective:** Give the six non-HTTP ingress categories — queue, scheduler, domain events,
+messaging, WebSocket and CQRS — the class-based registration surface HTTP has had since M9, so
+`--template class-based` describes a whole application rather than its HTTP seventh. Six categories,
+**seven** provider tokens: `CqrsPlugin` provides `COMMAND_BUS` and `QUERY_BUS` separately
+(`packages/cqrs-plugin/src/plugin/cqrs-plugin.ts:111`) and the pass resolves both buses directly.
 
 **This was scoped and deferred by M86, and its stated precondition is now met.** `ROADMAP.md:8509`
 records that "a `@Gateway`/`@Processor`/`@Cron`/`@Subscribe` surface is the natural follow-on and is
@@ -10398,10 +10401,12 @@ shipped green because a test asserted the decorator was _present_. M86 shipped t
 shared composer (PR #228). The seam exists; this is the sugar.
 
 **The gap is one-sided and mechanically checkable.** `grep -n "^export"` over
-`packages/{scheduler,events,queue,websocket,cqrs}-plugin/src/index.ts` returns no decorator from any
-of the five. A class-based project therefore gets `@Controller` and then writes an options array by
-hand for every queue processor, cron job, event handler, socket route, and command or query handler
-it owns.
+`packages/{scheduler,events,queue,websocket,cqrs,messaging}-plugin/src/index.ts` returns no
+decorator from any of the six — `messaging-plugin` is in that list because `@Subscribe` maps to
+`IMessageBroker.subscribe`, and an earlier draft cited only five paths while claiming a six-ingress
+gap. A class-based project therefore gets `@Controller` and then writes an options array by hand for
+every queue processor, cron job, event handler, broker subscription, socket route, and command or
+query handler it owns.
 
 **Four facts were established from source before the design was fixed, and the first is what makes
 this cheap.**
@@ -10425,8 +10430,8 @@ this cheap.**
   without six plugins each growing a metadata-reading path.
 - **The `optionalDependencies` edge this needs is the one the plugin already uses three times, and
   it forms no cycle.** `decorator-plugin.ts:871` already declares
-  `[VALIDATION, AUTHORIZATION, VIEW]` at `PLUGIN_PRIORITY.LOW` (900). Adding the six ingress tokens
-  orders every provider ahead of it.
+  `[VALIDATION, AUTHORIZATION, VIEW]` at `PLUGIN_PRIORITY.LOW` (900). Adding the seven ingress
+  provider tokens orders every declaring provider ahead of it.
   `grep -rn METADATA_STORE packages/{queue,scheduler,messaging,events,cqrs,websocket}-plugin/src`
   returns **nothing**, so no ingress plugin depends back on what this one provides — the
   `LoggerPlugin ↔ TelemetryPlugin` cycle M90i found (which threw at `start()` for every application
@@ -10448,20 +10453,29 @@ this cheap.**
   `@CommandHandler(type)`/`@QueryHandler(type)`. Each is a method decorator on a class the
   application lists in `DecoratorPluginOptions`, exactly as `@Controller` is.
 - **One registration pass, at one lifecycle phase, resolving each token with `ctx.services.has`.**
-  The plan picks `onInit` or `onBootstrap` explicitly and records why; both run after every ingress
-  plugin's chain is built, and the difference is only whether a late-registering application plugin
-  can still contribute. A decorated class whose ingress capability is absent fails at `register()`
+  The plan picks `onInit` and records why; it runs after every ingress plugin's chain is built, and
+  the alternative `onBootstrap` would place these registrations after an application plugin's own
+  `onInit`. A decorated class whose ingress capability is absent fails **from that same pass**,
   naming both the class and the missing plugin — the M92 `@Render` precedent, not the M70n
   `@ValidateBody` warn arm, because unlike a validation schema there is no defensible reading under
-  which an unregistered processor should silently never run.
+  which an unregistered processor should silently never run. The refusal is read at `onInit` rather
+  than at `register()` because `optionalDependencies` orders only plugins that DECLARE the
+  capability while the registry also accepts imperative registration and is not sealed until after
+  `runBootstrap()` (`application.ts:505-506`) — a `register()`-time check would refuse an
+  application for a capability it goes on to have.
 - **`@UseGuards` on an ingress handler compiles to an `IIngressBehavior`.** This is the deliverable
   M86 said it was deferring, and it is the one that has to be proven rather than asserted: a guard
   declared on ONE processor must be shown not to run for a second processor in the same application,
   driven through a real kernel app.
-- **The `class-based` template and `setu generate` reach the new surface.** `g processor`, `g cron`,
-  `g event-handler`, `g gateway`, `g command-handler` emit the decorated form in a class-based
-  project and today's functional artifact otherwise — the M65 `generatorMode(plugins)` mechanism,
-  which reads the generated manifest and needs no new `SchematicOptions` field.
+- **The `class-based` template and `setu generate` reach the new surface.** `g job`,
+  `g event-handler`, `g ws-route`, `g command-handler` and `g query-handler` emit the decorated form
+  in a class-based project and today's functional artifact otherwise — the M65
+  `generatorMode(plugins)` mechanism, which reads the generated manifest and needs no new
+  `SchematicOptions` field. These are **arms on the five existing schematics, not new ones**:
+  `g job` already emits "a job processor usable by the queue or scheduler plugin" and so covers
+  `@Processor`, `@Cron` and `@Every`, and `g ws-route` shipped in M84. `@Subscribe` gets no
+  generator, because there is no messaging schematic to give an arm to and creating one is out of
+  scope — stated rather than promised.
 
 **Verification bar.** Every one of the six ingresses demonstrates a decorated handler receiving real
 work through a real kernel application, and one behaviour short-circuiting before it. Booting is
