@@ -279,6 +279,7 @@ describe('class-based template', () => {
       '{\n' +
         '        controllers: [...APP_CONTROLLERS],\n' +
         '        services: [...APP_SERVICES],\n' +
+        '        ingress: [...INGRESS_HANDLERS],\n' +
         '        modules: [...MODULES],\n' +
         '      }',
     );
@@ -337,6 +338,7 @@ describe('class-based template', () => {
     const imported = (CLASS_BASED_TEMPLATE.localImports ?? []).flatMap((l) => l.symbols);
     expect(imported).toContain('APP_CONTROLLERS');
     expect(imported).toContain('APP_SERVICES');
+    expect(imported).toContain('INGRESS_HANDLERS');
     expect(imported).toContain('MODULES');
   });
 
@@ -349,6 +351,7 @@ describe('class-based template', () => {
     expect(froms).not.toContain('./src/greeting-controller.ts');
     expect(froms).toContain('./src/services/index.ts');
     expect(froms).toContain('./src/controllers/index.ts');
+    expect(froms).toContain('./src/ingress/index.ts');
   });
 
   it('seeds the showcase into the SCAFFOLDED barrels, before anything is generated', () => {
@@ -381,6 +384,7 @@ describe('class-based template', () => {
       'src/plugins/index.ts',
       'src/health/index.ts',
       'src/metrics/index.ts',
+      'src/ingress/index.ts',
     ]);
   });
 

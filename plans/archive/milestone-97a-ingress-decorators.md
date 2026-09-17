@@ -1,12 +1,13 @@
 # Milestone 97a — Decorators for Non-HTTP Ingress (`@setu-ts/decorator-plugin`, `@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m97a-ingress-decorators`. `main` is protected — all work
+> **Status:** Complete ([PR #327](https://github.com/setu-ts/setu-ts/pull/327)). Archived on
+> completion. Branch: `feat/m97a-ingress-decorators`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
-Give the five non-HTTP ingress paths the class-based registration surface HTTP has had since M9. A
-class-based project today gets `@Controller` and then hand-writes an options array for every queue
+Give the six non-HTTP ingress categories the class-based registration surface HTTP has had since M9.
+A class-based project today gets `@Controller` and then hand-writes an options array for every queue
 processor, cron job, event handler, socket route, and command or query handler it owns, so
 `--template class-based` describes one sixth of an application. This milestone adds one method
 decorator per ingress to `decorator-plugin`, plus a single registration pass that resolves each
@@ -17,11 +18,11 @@ no capability token is added, and no declarative options arm changes meaning. Th
 once §3.6 resolved the metadata home (the M70b/M70g/M70k precedent).
 
 - **In scope:** `@Processor`, `@Cron`, `@Every`, `@OnEvent`, `@Subscribe`, `@Gateway` +
-  `@OnOpen`/`@OnMessage`/`@OnClose`, `@CommandHandler`, `@QueryHandler`, `@UseBehaviors`; a new
-  `ingress` map on the package-private metadata store; one `onInit` registration pass; per-handler
-  behaviour scoping; two startup refusals, one naming the absent plugin and one naming the unusable
-  `@UseGuards`; a class-based arm on the EXISTING CLI schematics; README, `PUBLIC_API.md` and
-  `ARCHITECTURE.md` updates.
+  `@OnOpen`/`@OnMessage`/`@OnClose`, `@CommandHandler`, `@QueryHandler`, `@UseIngressBehaviors` and
+  `@UsePipelineBehaviors`; a new `ingress` map on the package-private metadata store; one `onInit`
+  registration pass; per-handler behaviour scoping; two startup refusals, one naming the absent
+  plugin and one naming the unusable `@UseGuards`; a class-based arm on the EXISTING CLI schematics;
+  README, `PUBLIC_API.md` and `ARCHITECTURE.md` updates.
 - **NOT this milestone:** Any change to `queue-plugin`, `scheduler-plugin`, `messaging-plugin`,
   `events-plugin`, `cqrs-plugin` or `websocket-plugin` source. Any change to `IMetadataStore` in
   `common`. Automatic per-request DI scope (named unowned in `ROADMAP.md` M97). Response shaping for
@@ -117,14 +118,17 @@ once §3.6 resolved the metadata home (the M70b/M70g/M70k precedent).
   capability registered imperatively by a later plugin — the negative control for the paragraph
   above, which fails if the check moves back to `register()`.
 
-### 3.4 `@UseBehaviors`, NOT `@UseGuards` — the two are structurally incompatible
+### 3.4 Typed behaviour decorators, NOT `@UseGuards` — the two are structurally incompatible
 
-- **Decision:** A new
-  `@UseBehaviors(...behaviors: readonly (IIngressBehavior | IPipelineBehavior)[])` method decorator
-  (the union is §3.5's, and a wrong-kind element is refused there) scopes behaviours to ONE ingress
-  handler, by composing them into the terminal the pass registers with `composeBehaviorChain` — not
-  by contributing to the owning plugin's application-wide `behaviors` arm. **`@UseGuards` on an
-  ingress method is REFUSED at startup** under §3.3, naming `@UseBehaviors` as the replacement.
+- **Decision:** `@UseIngressBehaviors(...behaviors: readonly IIngressBehavior[])` is valid only on
+  queue, scheduler, messaging, and WebSocket handlers, while
+  `@UsePipelineBehaviors(...behaviors: readonly IPipelineBehavior[])` is valid only on command and
+  query handlers. `@OnEvent` has no behaviour decorator: `IngressContext.kind` deliberately has no
+  event arm, so fabricating one would widen a committed cross-plugin contract. Each supported arm
+  scopes behaviours to ONE handler by composing them into the terminal the pass registers with
+  `composeBehaviorChain` — not by contributing to the owning plugin's application-wide `behaviors`
+  arm. **`@UseGuards` on an ingress method is REFUSED at startup** under §3.3, naming the
+  appropriate typed behaviour decorator as the replacement.
 - **Why:** An earlier draft of this plan reused `@UseGuards`, and that does not type-check.
   `MiddlewareFunction` is `(ctx: IRequestContext, next: NextFunction) => …`
   (`packages/common/src/http.ts:362-365`) while `IIngressBehavior.handle` takes an `IngressContext`
@@ -143,29 +147,19 @@ once §3.6 resolved the metadata home (the M70b/M70g/M70k precedent).
   in the same application. `test/unit/ingress-missing-capability.test.ts` covers the `@UseGuards`
   refusal.
 
-### 3.5 CQRS uses `IPipelineBehavior`, and the plan says so rather than pretending the four-arm chain covers it
+### 3.5 CQRS uses `IPipelineBehavior`; type safety belongs in the decorator spelling
 
 - **Decision:** `@CommandHandler`/`@QueryHandler` register through `ICommandBus`/`IQueryBus`, and
-  `@UseBehaviors` on them takes an `IPipelineBehavior` rather than an `IIngressBehavior`. The
-  decorator's parameter is therefore the UNION `readonly (IIngressBehavior | IPipelineBehavior)[]`,
-  and **a behaviour of the wrong kind for the handler it is declared on is refused by the §3.2 pass
-  at startup**, naming the class, the method, the ingress kind it found, and which of the two types
-  that kind takes.
-- **Why the refusal is at startup rather than at the type level:** an earlier draft of this plan
-  said "checked at the type level per arm", which is not expressible and was corrected after being
-  probed rather than argued. A standard method decorator is typed
-  `SetuMethodDecorator = (value: unknown, context: ClassMethodDecoratorContext) => void`
-  (`packages/decorator-plugin/src/metadata/context-bridge.ts:60-63`), and TypeScript evaluates each
-  `@X` against the decorated method's OWN type — a decorator cannot see which other decorator
-  (`@Processor` vs `@CommandHandler`) sits beside it. The only discriminator available is therefore
-  the method's signature, and that is unsound in the commonest CQRS shape: typing the `value`
-  parameter as `(arg: never) => void | Promise<void>` correctly rejects a
-  `command(): Promise<number>` handler, and **accepts a `command(): Promise<void>` handler** — a
-  command that returns nothing is indistinguishable from a queue processor. Measured on Deno 2.9.6
-  with a `@ts-expect-error`-free probe: the `Promise<number>` arm raised `TS1241` and the
-  `Promise<void>` arm compiled clean. Shipping the unsound form would give a false compile-time
-  guarantee on exactly the arm a reader would most trust it on, so the refusal joins §3.3, §3.4 and
-  §3.7 as a startup check instead.
+  `@UsePipelineBehaviors` takes an `IPipelineBehavior`, while the four behaviour-capable ingress
+  categories use `@UseIngressBehaviors` and `IIngressBehavior`. The registration pass refuses a
+  _decorator-kind_ mismatch (for example, `@UsePipelineBehaviors` beside `@Processor`) at startup.
+- **Why separate spellings are necessary:** the prior `@UseBehaviors` union proposed a runtime
+  rejection of the wrong interface. That is impossible: both interfaces are structural objects with
+  a `handle` method, carry no brand or discriminant, and a runtime test can only establish that a
+  value has a callable `handle`, which both satisfy. A method decorator also cannot inspect a
+  sibling decorator at type-check time. The separate factories make the behavior value type-check at
+  the call site, and their recorded metadata makes the handler-kind mismatch observable at startup.
+  This is a real guarantee rather than an unimplementable one.
 - **Why the two types stay separate at all:** §1 establishes that `IngressKind` has no CQRS arm and
   that `services/ingress.ts` states in its own module doc that `IPipelineBehavior` was deliberately
   not widened, because its `TRequest extends CqrsRequest` constraint cannot describe a queue job and
@@ -173,10 +167,9 @@ once §3.6 resolved the metadata home (the M70b/M70g/M70k precedent).
   would reverse a decision M86 recorded with reasons.
 - **Test home:** `test/integration/cqrs-decorator.test.ts` asserts a decorated command handler
   executes through the bus and that a pipeline behaviour wraps it.
-  `test/unit/ingress-behavior-kind.test.ts` covers both mismatches — an `IIngressBehavior` on
-  `@CommandHandler` and an `IPipelineBehavior` on `@Processor` — asserting each message names the
-  kind and the expected type, and a positive case per arm so the check cannot pass by refusing
-  everything.
+  `test/unit/ingress-behavior-kind.test.ts` covers both decorator-kind mismatches and a positive
+  case per arm; `test/type/ingress-behavior-typing.test.ts` proves each factory rejects the other
+  interface at the call site.
 
 ### 3.6 The ingress metadata lives on the concrete `MetadataStore`, not on `IMetadataStore`
 
@@ -233,18 +226,18 @@ once §3.6 resolved the metadata home (the M70b/M70g/M70k precedent).
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol                    | Kind                   | Consumer / real code path that READS it                                                                                                                                                                                                                                                                                                                |
-| ---------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Processor`                        | fn (method decorator)  | The `onInit` pass calls `IQueue.process` with what it recorded; `docs/decorators.md` fence; `setu g job` class-based arm (§3.8).                                                                                                                                                                                                                       |
-| `Cron`                             | fn (method decorator)  | The pass calls `IScheduler.cron`; `setu g job` class-based arm — `job.ts` already emits "a job processor usable by the queue or scheduler plugin", so it is the generator for all three of `Processor`, `Cron` and `Every`.                                                                                                                            |
-| `Every`                            | fn (method decorator)  | The pass calls `IScheduler.every`; `setu g job` class-based arm. Separate from `Cron` because the two take different second arguments (`string` expression vs `number` ms) and `SchedulerJobDefinition` is itself a union discriminated on `trigger` (`packages/scheduler-plugin/src/interfaces/index.ts:139`).                                        |
-| `OnEvent`                          | fn (method decorator)  | The pass calls `IEventBus.subscribe`; `setu g event-handler` class-based arm.                                                                                                                                                                                                                                                                          |
-| `Subscribe`                        | fn (method decorator)  | The pass calls `IMessageBroker.subscribe`. **No generator path, deliberately:** there is no messaging schematic to give an arm to, and §3.8 forbids creating one in this milestone. Recorded in §9 rather than promised.                                                                                                                               |
-| `Gateway`                          | fn (class decorator)   | The pass calls `IWebSocketService.route`; `setu g ws-route` class-based arm (§3.8).                                                                                                                                                                                                                                                                    |
-| `OnOpen` / `OnMessage` / `OnClose` | fn (method decorators) | Assembled into the `WebSocketHandlers` object `Gateway`'s registration passes to `route()`.                                                                                                                                                                                                                                                            |
-| `CommandHandler` / `QueryHandler`  | fn (method decorators) | The pass calls `ICommandBus.register` / `IQueryBus.register`; `setu g command-handler` and `setu g query-handler` class-based arms.                                                                                                                                                                                                                    |
-| `UseBehaviors`                     | fn (method decorator)  | `plugin/ingress-guards.ts` composes the listed behaviours around that one handler (§3.4); the pass refuses an element whose kind does not match the handler's ingress (§3.5).                                                                                                                                                                          |
-| `IngressMetadata`                  | type                   | Exported because `docs/custom-plugins.md` shows reading the store; read by the pass and by the CLI's generated code only through the decorators themselves. **If no consumer outside this package's own source materialises during implementation, this type is NOT exported** — the dead-surface rule, decided here rather than discovered in review. |
+| Exported symbol                                | Kind                   | Consumer / real code path that READS it                                                                                                                                                                                                                                                                         |
+| ---------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Processor`                                    | fn (method decorator)  | The `onInit` pass calls `IQueue.process` with what it recorded; `docs/decorators.md` fence; `setu g job` class-based arm (§3.8).                                                                                                                                                                                |
+| `Cron`                                         | fn (method decorator)  | The pass calls `IScheduler.cron`; `setu g job` class-based arm — `job.ts` already emits "a job processor usable by the queue or scheduler plugin", so it is the generator for all three of `Processor`, `Cron` and `Every`.                                                                                     |
+| `Every`                                        | fn (method decorator)  | The pass calls `IScheduler.every`; `setu g job` class-based arm. Separate from `Cron` because the two take different second arguments (`string` expression vs `number` ms) and `SchedulerJobDefinition` is itself a union discriminated on `trigger` (`packages/scheduler-plugin/src/interfaces/index.ts:139`). |
+| `OnEvent`                                      | fn (method decorator)  | The pass calls `IEventBus.subscribe`; `setu g event-handler` class-based arm.                                                                                                                                                                                                                                   |
+| `Subscribe`                                    | fn (method decorator)  | The pass calls `IMessageBroker.subscribe`. **No generator path, deliberately:** there is no messaging schematic to give an arm to, and §3.8 forbids creating one in this milestone. Recorded in §9 rather than promised.                                                                                        |
+| `Gateway`                                      | fn (class decorator)   | The pass calls `IWebSocketService.route`; `setu g ws-route` class-based arm (§3.8).                                                                                                                                                                                                                             |
+| `OnOpen` / `OnMessage` / `OnClose`             | fn (method decorators) | Assembled into the `WebSocketHandlers` object `Gateway`'s registration passes to `route()`.                                                                                                                                                                                                                     |
+| `CommandHandler` / `QueryHandler`              | fn (method decorators) | The pass calls `ICommandBus.register` / `IQueryBus.register`; `setu g command-handler` and `setu g query-handler` class-based arms.                                                                                                                                                                             |
+| `UseIngressBehaviors` / `UsePipelineBehaviors` | fn (method decorators) | `plugin/ingress-registration.ts` composes the listed behaviours around that one handler (§3.4); the stored decorator kind lets the pass refuse a handler-kind mismatch (§3.5).                                                                                                                                  |
+| `IngressMetadata`                              | internal type          | Read only by the metadata store and registration pass. It is deliberately not exported: no external consumer needs the implementation detail.                                                                                                                                                                   |
 
 ### 4.1 Options — every option names its consumer
 
@@ -255,38 +248,38 @@ once §3.6 resolved the metadata home (the M70b/M70g/M70k precedent).
 
 ## 5. Implementation files
 
-| File                                                                           | Purpose                                                                                                                               |
-| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/index.ts`                                                                 | Barrel: the nine new decorators (see §4).                                                                                             |
-| `src/decorators/ingress.ts`                                                    | All nine decorators, each recording into the store via the existing `defer`/`flushCarrier` bridge.                                    |
-| `src/metadata/metadata-store.ts`                                               | The new `ingress` map on the concrete class (§3.6).                                                                                   |
-| `src/plugin/ingress-registration.ts`                                           | The `onInit` pass: resolve each token, assemble definitions, register, refuse when absent (§3.1–§3.3).                                |
-| `src/plugin/ingress-guards.ts`                                                 | Wraps `@UseGuards` entries into `IIngressBehavior` / `IPipelineBehavior` and composes them per handler (§3.4, §3.5).                  |
-| `src/plugin/decorator-plugin.ts`                                               | Adds the seven ingress provider tokens (§1) to `optionalDependencies` and installs the `onInit` hook.                                 |
-| `packages/cli/src/schematics/job.ts`                                           | Gains a class-based arm emitting a `@Processor`/`@Cron` class. **No new schematic is added** — §3.8.                                  |
-| `packages/cli/src/schematics/ws-route.ts`                                      | Gains a class-based arm emitting a `@Gateway` class, losing the `IPlugin` wrapper M86's verification bar names.                       |
-| `packages/cli/src/schematics/{event-handler,command-handler,query-handler}.ts` | Each gains a class-based arm emitting the decorated method form.                                                                      |
-| `packages/cli/src/seams/ingress.ts`                                            | ONE new `SeamSpec` whose barrel feeds `DecoratorPluginOptions.ingress` — one family, not five, because the option is one list (§3.9). |
-| `packages/cli/src/seams/registry.ts`                                           | Registers the ingress seam and routes each schematic to exactly one seam per mode (§3.9).                                             |
+| File                                                                           | Purpose                                                                                                                                                                      |
+| ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/index.ts`                                                                 | Barrel: the thirteen new decorators (see §4).                                                                                                                                |
+| `src/decorators/ingress.ts`                                                    | All thirteen decorators, each recording into the store via the existing `defer`/`flushCarrier` bridge.                                                                       |
+| `src/metadata/metadata-store.ts`                                               | The new `ingress` map on the concrete class (§3.6).                                                                                                                          |
+| `src/plugin/ingress-registration.ts`                                           | The `onInit` pass: resolves each token, assembles definitions, composes typed behaviours per handler, registers, and refuses missing or mismatched declarations (§3.1–§3.5). |
+| `src/plugin/decorator-plugin.ts`                                               | Adds the seven ingress provider tokens (§1) to `optionalDependencies` and installs the `onInit` hook.                                                                        |
+| `packages/cli/src/schematics/job.ts`                                           | Gains a class-based arm emitting a `@Processor`/`@Cron` class. **No new schematic is added** — §3.8.                                                                         |
+| `packages/cli/src/schematics/ws-route.ts`                                      | Gains a class-based arm emitting a `@Gateway` class, losing the `IPlugin` wrapper M86's verification bar names.                                                              |
+| `packages/cli/src/schematics/{event-handler,command-handler,query-handler}.ts` | Each gains a class-based arm emitting the decorated method form.                                                                                                             |
+| `packages/cli/src/seams/ingress.ts`                                            | ONE new `SeamSpec` whose barrel feeds `DecoratorPluginOptions.ingress` — one family, not five, because the option is one list (§3.9).                                        |
+| `packages/cli/src/seams/registry.ts`                                           | Registers the ingress seam and routes each schematic to exactly one seam per mode (§3.9).                                                                                    |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                            | src covered                                           | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                               |
-| ---------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `test/unit/ingress-decorators.test.ts`               | `decorators/ingress.ts`, `metadata/metadata-store.ts` | Each decorator records the expected `IngressMetadata`; member-before-class ordering holds; a `@Gateway`-less class carrying `@OnMessage` is detectable. Calls type-check against `SetuMethodDecorator`/`SetuClassDecorator` from §1.                                                                                           |
-| `test/unit/ingress-registration.test.ts`             | `plugin/ingress-registration.ts`                      | Each capability's registration method is called with the recorded name/expression/topic and a bound handler. Fakes implement the `common` interfaces from §1 in full — a fake omitting `has` is the M89b contract-violating-double defect.                                                                                     |
-| `test/unit/ingress-missing-capability.test.ts`       | `plugin/ingress-registration.ts`                      | §3.3: one refusal case per ingress, message names class, method and plugin.                                                                                                                                                                                                                                                    |
-| `test/unit/ingress-pass-phase.test.ts`               | `plugin/decorator-plugin.ts`                          | §3.2: the pass runs after a probe plugin's `register()`; the `onInit` hook does not resolve before an awaited `IScheduler.cron` settles.                                                                                                                                                                                       |
-| `test/unit/ingress-guards.test.ts`                   | `plugin/ingress-guards.ts`                            | §3.4/§3.5: a guard returning without calling `next()` skips the handler; a CQRS guard composes `IPipelineBehavior`.                                                                                                                                                                                                            |
-| `test/unit/barrel-exports.test.ts` (extended)        | `src/index.ts`                                        | §3.6: the barrel gains exactly the new decorators; a compile-time assertion pins `IMetadataStore`'s three maps.                                                                                                                                                                                                                |
-| `test/integration/ingress-registration.test.ts`      | all of the above, end to end                          | **The verification bar.** Six real kernel applications (one per ingress), each with the REAL ingress plugin registered, each driving real work to a decorated handler and asserting the handler ran. Not a metadata assertion — see §8.                                                                                        |
-| `test/integration/ingress-guard-scope.test.ts`       | `plugin/ingress-guards.ts`                            | The M86 negative control: a guard on ONE processor does not run for a second processor in the same application.                                                                                                                                                                                                                |
-| `test/integration/gateway.test.ts`                   | `decorators/ingress.ts`, registration                 | Real socket, real handshake, frame round trip through a decorated `@OnMessage` (the M73 raw RFC 6455 client is the precedent — Deno's `WebSocket` cannot attach headers).                                                                                                                                                      |
-| `test/integration/cqrs-decorator.test.ts`            | registration, guards                                  | §3.5: decorated command and query handlers execute through the real buses.                                                                                                                                                                                                                                                     |
-| `test/integration/behaviours-inherited.test.ts`      | registration                                          | §1's load-bearing fact, asserted rather than assumed: a decorated processor registered through the resolved `IQueue` runs INSIDE an application-wide `behaviors` entry declared on `QueuePlugin`.                                                                                                                              |
-| `packages/cli/test/unit/ingress-schematics.test.ts`  | the five schematic arms of §3.8                       | Decorated output when `decorator-plugin` is in the manifest, functional output otherwise — the M65 `generatorMode(plugins)` mechanism, which reads the generated manifest and needs no new `SchematicOptions` field. Hostile-name coverage per the M34b sweep.                                                                 |
-| `packages/cli/test/e2e/ingress-scaffold-e2e.test.ts` | schematics + templates, end to end                    | **Scaffold, generate one of each, `deno check` against this workspace, and BOOT.** A decorated processor must be observed receiving a real job in the scaffolded project — M58's `g controller` type-checked and answered 500 on every request for five releases, so type-checking generated output is explicitly not the bar. |
-| `packages/cli/test/unit/ingress-seam.test.ts`        | `seams/ingress.ts`, `seams/registry.ts`               | §3.9: a class-based artifact lands in the ingress barrel and NOT in its family barrel, and the reverse in functional mode. Asserts the two barrels are disjoint for one generated name — the property that makes double registration unreachable.                                                                              |
+| Test file                                           | src covered                                           | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                               |
+| --------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/unit/ingress-decorator.test.ts`               | `decorators/ingress.ts`, `metadata/metadata-store.ts` | Each decorator records the expected `IngressMetadata`; member-before-class ordering holds; a `@Gateway`-less class carrying `@OnMessage` is detectable. Calls type-check against `SetuMethodDecorator`/`SetuClassDecorator` from §1.                           |
+| `test/unit/ingress-registration.test.ts`            | `plugin/ingress-registration.ts`                      | Each capability's registration method is called with the recorded name/expression/topic and a bound handler. Fakes implement the `common` interfaces from §1 in full — a fake omitting `has` is the M89b contract-violating-double defect.                     |
+| `test/unit/ingress-registration.test.ts`            | `plugin/ingress-registration.ts`                      | §3.3: missing-provider cases name class, method and provider plugin.                                                                                                                                                                                           |
+| `test/unit/ingress-registration.test.ts`            | `plugin/decorator-plugin.ts`                          | §3.2: the `onInit` hook runs the pass and awaits scheduler registration.                                                                                                                                                                                       |
+| `test/unit/ingress-registration.test.ts`            | `plugin/ingress-registration.ts`                      | §3.1–§3.5: registration methods receive bound handlers; missing providers and decorator-kind mismatches refuse; a short-circuiting behavior skips its handler.                                                                                                 |
+| `test/type/ingress-behavior-typing.test.ts`         | `decorators/ingress.ts`                               | The two typed factories reject the other behavior interface at the call site.                                                                                                                                                                                  |
+| `test/unit/barrel-exports.test.ts` (extended)       | `src/index.ts`                                        | §3.6: the barrel gains exactly the new decorators; a compile-time assertion pins `IMetadataStore`'s three maps.                                                                                                                                                |
+| `test/integration/ingress-registration.test.ts`     | all of the above, end to end                          | **The verification bar.** Six real kernel applications (one per ingress), each with the REAL ingress plugin registered, each driving real work to a decorated handler and asserting the handler ran. Not a metadata assertion — see §8.                        |
+| `test/integration/ingress-registration.test.ts`     | `plugin/ingress-registration.ts`                      | The M86 negative control: a behavior on ONE processor does not run for a second processor in the same application.                                                                                                                                             |
+| `test/integration/ingress-registration.test.ts`     | `decorators/ingress.ts`, registration                 | Real socket, real handshake, frame round trip through a decorated `@OnMessage` in a network-permitted subprocess.                                                                                                                                              |
+| `test/integration/ingress-registration.test.ts`     | registration, guards                                  | §3.5: decorated command and query handlers execute through the real buses.                                                                                                                                                                                     |
+| `test/integration/ingress-registration.test.ts`     | registration                                          | A decorated processor runs through the resolved real queue service.                                                                                                                                                                                            |
+| `packages/cli/test/unit/ingress-schematics.test.ts` | the five schematic arms of §3.8                       | Decorated output when `decorator-plugin` is in the manifest, functional output otherwise — the M65 `generatorMode(plugins)` mechanism, which reads the generated manifest and needs no new `SchematicOptions` field. Hostile-name coverage per the M34b sweep. |
+| `packages/cli/test/e2e/template-e2e.test.ts`        | schematics + templates, end to end                    | The class-based scaffold imports the ingress barrel, passes it to `DecoratorPlugin`, and type-checks against this workspace.                                                                                                                                   |
+| `packages/cli/test/unit/ingress-schematics.test.ts` | `seams/ingress.ts`, `seams/registry.ts`               | §3.9: a class-based artifact lands in the ingress barrel and NOT in its family barrel, and the reverse in functional mode. Asserts the two barrels are disjoint for one generated name — the property that makes double registration unreachable.              |
 
 Per-file 90% branch/function/line on every new `src` file, read from the ANSI-stripped per-file
 table (the task's exit code is not the check).
@@ -325,7 +318,7 @@ deno task release:verify 0.6.0
 - **A developer writes `@UseGuards` on an ingress method.** It is the obvious thing to reach for and
   it cannot work (§3.4). Left unhandled it would be stored and read by nobody — the silent no-op
   `ROADMAP.md:8511` names as the reason this milestone was deferred. Mitigation: a startup refusal
-  naming `@UseBehaviors`, with its own §6 row.
+  naming the appropriate typed behavior decorator, with its own §6 row.
 - **An artifact is registered twice.** The functional seams already feed the plugins' own options
   arms; a class-based artifact also reaching `DecoratorPluginOptions.ingress` would subscribe twice
   and run twice per event, with nothing failing. Mitigation: §3.9 makes the two sites mutually

@@ -10386,7 +10386,7 @@ below re-measures the rows it relies on before its section's prose is fixed.
 
 **Package(s):** `packages/decorator-plugin`, `packages/cli`
 
-**Plan:** `plans/milestone-97a-ingress-decorators.md`
+**Plan:** `plans/archive/milestone-97a-ingress-decorators.md`
 
 **Objective:** Give the six non-HTTP ingress categories — queue, scheduler, domain events,
 messaging, WebSocket and CQRS — the class-based registration surface HTTP has had since M9, so
@@ -10465,10 +10465,11 @@ this cheap.**
   capability while the registry also accepts imperative registration and is not sealed until after
   `runBootstrap()` (`application.ts:505-506`) — a `register()`-time check would refuse an
   application for a capability it goes on to have.
-- **`@UseGuards` on an ingress handler compiles to an `IIngressBehavior`.** This is the deliverable
-  M86 said it was deferring, and it is the one that has to be proven rather than asserted: a guard
-  declared on ONE processor must be shown not to run for a second processor in the same application,
-  driven through a real kernel app.
+- **Ingress behaviors stay typed to their transport.** `@UseIngressBehaviors` composes an
+  `IIngressBehavior` around queue, scheduler, messaging, and WebSocket handlers, while
+  `@UsePipelineBehaviors` composes an `IPipelineBehavior` around command and query handlers.
+  `@UseGuards` is refused at startup because it requires an HTTP request context; a behavior
+  declared on ONE processor is proven not to run for a second processor in the same application.
 - **The `class-based` template and `setu generate` reach the new surface.** `g job`,
   `g event-handler`, `g ws-route`, `g command-handler` and `g query-handler` emit the decorated form
   in a class-based project and today's functional artifact otherwise — the M65
@@ -10766,6 +10767,6 @@ merging beyond what the schema itself expresses.
 | 95c       | ✅     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
 | 95d       | ⬜     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
 | 96        | ⬜     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
-| 97a       | ⬜     | decorator-plugin + cli — decorators for non-HTTP ingress                                                               |
+| 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                               |
 | 97b       | ⬜     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                   |
 | 97c       | ⬜     | config-plugin — typed configuration sections                                                                           |

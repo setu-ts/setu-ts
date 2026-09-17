@@ -154,6 +154,7 @@ export const CLASS_BASED_PLUGINS: readonly Wiring[] = withPluginOptionSeams(
     // showcase no longer needs a second registration path of its own.
     decoratorSeamExtras(CLASS_BASED_SEAMS).controllers,
     decoratorSeamExtras(CLASS_BASED_SEAMS).services,
+    decoratorSeamExtras(CLASS_BASED_SEAMS).ingress,
   ),
   CLASS_BASED_SEAMS,
 ).concat([DI_WIRING]);

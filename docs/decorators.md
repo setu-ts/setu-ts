@@ -71,6 +71,70 @@ removed. An older project may hold `DecoratorPlugin` alone, and it keeps working
 container-less path described above. See the
 [CLI Guide](./cli.md#decorators-and-di-are-one-choice-and-functional-is-the-default).
 
+## Non-HTTP ingress
+
+The same explicit class list can register queue processors, scheduled jobs, domain-event and broker
+subscriptions, WebSocket gateways, and CQRS handlers. Put those classes in `ingress`; registration
+happens during `onInit`, after the corresponding provider plugin has registered its capability. A
+declared handler with no provider fails startup with the class, method, and missing plugin named.
+
+```typescript
+import type {
+  CqrsCommand,
+  CqrsQuery,
+  IDomainEvent,
+  IJob,
+  IWebSocketConnection,
+} from '@setu-ts/common';
+import {
+  CommandHandler,
+  Cron,
+  Every,
+  Gateway,
+  OnEvent,
+  OnMessage,
+  Processor,
+  QueryHandler,
+  Subscribe,
+} from '@setu-ts/decorator-plugin';
+
+class BackgroundWork {
+  @Processor('email')
+  process(_job: IJob): void {}
+
+  @Cron('0 2 * * *')
+  nightly(): void {}
+
+  @Every(60_000)
+  poll(): void {}
+
+  @OnEvent('user.created')
+  created(_event: IDomainEvent): void {}
+
+  @Subscribe('user.created')
+  replicated(_message: unknown): void {}
+
+  @CommandHandler('create-user')
+  command(_command: CqrsCommand): void {}
+
+  @QueryHandler('find-user')
+  query(_query: CqrsQuery): void {}
+}
+
+@Gateway('/ws/updates')
+class UpdatesGateway {
+  @OnMessage
+  message(_connection: IWebSocketConnection, _data: string | Uint8Array): void {}
+}
+```
+
+Register the provider plugins that a class uses (`QueuePlugin`, `SchedulerPlugin`, `EventsPlugin`,
+`MessagingPlugin`, `WebSocketPlugin`, or `CqrsPlugin`) alongside the decorator plugin:
+`DecoratorPlugin({ ingress: [BackgroundWork, UpdatesGateway] })`. `@UseIngressBehaviors(...)` wraps
+queue, scheduler, messaging, and WebSocket handlers; `@UsePipelineBehaviors(...)` wraps only command
+and query handlers. The decorators are deliberately separate because the two public behavior
+contracts take different contexts. Domain events receive no ingress-behavior wrapper.
+
 ## Controllers
 
 ### Basic Controller

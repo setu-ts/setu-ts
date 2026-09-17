@@ -13,6 +13,7 @@ import {
   resolveAddablePackage,
   runAddCommand,
   withDependency,
+  withIngressProviderWiring,
 } from '../../../src/commands/add.ts';
 import { VERSION } from '../../../src/constants.ts';
 import { parseArgs } from '../../../src/args.ts';
@@ -48,6 +49,21 @@ const DENO_MANIFEST = JSON.stringify(
   null,
   2,
 );
+
+const CLASS_BASED_INGRESS_CONFIG = `import { createApplication } from '@setu-ts/kernel';
+import { DecoratorPlugin } from '@setu-ts/decorator-plugin';
+import { INGRESS_HANDLERS } from './src/ingress/index.ts';
+
+export function createApp() {
+  return createApplication({
+    plugins: [
+      DecoratorPlugin({
+        ingress: [...INGRESS_HANDLERS],
+      }),
+    ],
+  });
+}
+`;
 
 describe('resolveAddablePackage', () => {
   it('accepts a short name', () => {
@@ -121,6 +137,66 @@ describe('withDependency', () => {
   });
 });
 
+describe('withIngressProviderWiring', () => {
+  for (
+    const [bare, symbol] of [
+      ['cqrs-plugin', 'CqrsPlugin'],
+      ['events-plugin', 'EventsPlugin'],
+      ['messaging-plugin', 'MessagingPlugin'],
+      ['queue-plugin', 'QueuePlugin'],
+      ['scheduler-plugin', 'SchedulerPlugin'],
+      ['websocket-plugin', 'WebSocketPlugin'],
+    ] as const
+  ) {
+    it(`activates ${bare} in the generated class-based ingress config`, () => {
+      const updated = withIngressProviderWiring(CLASS_BASED_INGRESS_CONFIG, bare);
+
+      expect(updated).toContain(`import { ${symbol} } from '@setu-ts/${bare}';`);
+      expect(updated).toContain(`      ${symbol}(),`);
+    });
+  }
+
+  it('does not rewrite a custom decorator config or a provider it already constructs', () => {
+    const custom = CLASS_BASED_INGRESS_CONFIG.replace(
+      'ingress: [...INGRESS_HANDLERS],',
+      'controllers: [],',
+    );
+    expect(withIngressProviderWiring(custom, 'events-plugin')).toBeUndefined();
+
+    const once = withIngressProviderWiring(CLASS_BASED_INGRESS_CONFIG, 'events-plugin') ?? '';
+    expect(withIngressProviderWiring(once, 'events-plugin')).toBeUndefined();
+    expect(withIngressProviderWiring(CLASS_BASED_INGRESS_CONFIG, 'auth-plugin')).toBeUndefined();
+  });
+
+  it('reuses a provider import that exists before its plugin construction is added', () => {
+    const source = CLASS_BASED_INGRESS_CONFIG.replace(
+      "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
+      "import { EventsPlugin } from '@setu-ts/events-plugin';\n" +
+        "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
+    );
+    const updated = withIngressProviderWiring(source, 'events-plugin') ?? '';
+
+    expect(updated.match(/import \{ EventsPlugin \} from '@setu-ts\/events-plugin';/g))
+      .toHaveLength(1);
+    expect(updated).toContain('      EventsPlugin(),');
+  });
+
+  it('uses an aliased provider import for its generated construction', () => {
+    const source = CLASS_BASED_INGRESS_CONFIG.replace(
+      "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
+      "import { EventsPlugin as AppEvents } from '@setu-ts/events-plugin';\n" +
+        "import { INGRESS_HANDLERS } from './src/ingress/index.ts';",
+    );
+    const updated = withIngressProviderWiring(source, 'events-plugin') ?? '';
+
+    expect(updated).toContain(
+      "import { EventsPlugin as AppEvents } from '@setu-ts/events-plugin';",
+    );
+    expect(updated).not.toContain("import { EventsPlugin } from '@setu-ts/events-plugin';");
+    expect(updated).toContain('      AppEvents(),');
+  });
+});
+
 describe('runAddCommand', () => {
   it('pins the package at the CLI own version', async () => {
     // The rule `setu new` already follows, so a project's framework packages
@@ -155,6 +231,31 @@ describe('runAddCommand', () => {
     expect(JSON.parse(h.read('/app/deno.json')).imports['@setu-ts/auth-plugin']).toBeDefined();
     expect(JSON.parse(h.read('/app/package.json')).dependencies['@setu-ts/auth-plugin'])
       .toBe(`npm:@jsr/setu-ts__auth-plugin@^${VERSION}`);
+  });
+
+  it('activates an ingress provider in the generated class-based config', async () => {
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+    });
+
+    expect(await h.run(['events'])).toBe(0);
+
+    const config = h.read('/app/setu.config.ts');
+    expect(config).toContain(`import { EventsPlugin } from '@setu-ts/events-plugin';`);
+    expect(config).toContain('      EventsPlugin(),');
+    expect(h.out.join('\n')).toContain('updated /app/setu.config.ts');
+  });
+
+  it('keeps an ingress config untouched under --dry-run', async () => {
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/setu.config.ts': CLASS_BASED_INGRESS_CONFIG,
+    });
+
+    expect(await h.run(['events', '--dry-run'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(CLASS_BASED_INGRESS_CONFIG);
+    expect(h.out.join('\n')).toContain('would update /app/setu.config.ts');
   });
 
   it('is idempotent', async () => {

@@ -12,7 +12,17 @@
  *
  * @module
  */
-import type { Component, Constructor, IMetadataStore, MiddlewareFunction } from '@setu-ts/common';
+import type {
+  Component,
+  Constructor,
+  IIngressBehavior,
+  IMetadataStore,
+  IPipelineBehavior,
+  MiddlewareFunction,
+  ProcessOptions,
+  ScheduleOptions,
+  SubscribeOptions,
+} from '@setu-ts/common';
 
 import { takePending } from './pending.ts';
 import type { HttpMethod } from '@setu-ts/common';
@@ -144,6 +154,50 @@ export interface ModuleMetadata {
   /** Imported module classes, expanded before this module's own entries. */
   readonly imports: readonly Constructor[];
 }
+
+/** Metadata captured by a non-HTTP ingress decorator. */
+export type IngressMetadata =
+  | {
+    readonly kind: 'queue';
+    readonly handler: string;
+    readonly name: string;
+    readonly options?: ProcessOptions;
+  }
+  | {
+    readonly kind: 'scheduler-cron';
+    readonly handler: string;
+    readonly expression: string;
+    readonly options?: ScheduleOptions;
+  }
+  | {
+    readonly kind: 'scheduler-every';
+    readonly handler: string;
+    readonly intervalMs: number;
+    readonly options?: ScheduleOptions;
+  }
+  | { readonly kind: 'event'; readonly handler: string; readonly type: string }
+  | {
+    readonly kind: 'messaging';
+    readonly handler: string;
+    readonly topic: string;
+    readonly options?: SubscribeOptions;
+  }
+  | { readonly kind: 'gateway'; readonly path: string }
+  | { readonly kind: 'websocket-open'; readonly handler: string }
+  | { readonly kind: 'websocket-message'; readonly handler: string }
+  | { readonly kind: 'websocket-close'; readonly handler: string }
+  | { readonly kind: 'command'; readonly handler: string; readonly type: string }
+  | { readonly kind: 'query'; readonly handler: string; readonly type: string }
+  | {
+    readonly kind: 'ingress-behaviors';
+    readonly handler: string;
+    readonly behaviors: readonly IIngressBehavior[];
+  }
+  | {
+    readonly kind: 'pipeline-behaviors';
+    readonly handler: string;
+    readonly behaviors: readonly IPipelineBehavior[];
+  };
 
 /**
  * Materialized route metadata — one entry per (controller, HTTP verb). Built
@@ -281,6 +335,7 @@ export class MetadataStore implements IMetadataStore {
   private readonly _custom: CustomDecoratorRecord[] = [];
   private readonly _ctorOptional = new Map<Constructor, Set<number>>();
   private readonly _modules = new Map<Constructor, ModuleMetadata>();
+  private readonly _ingress = new Map<Constructor, IngressMetadata[]>();
 
   /** Controllers keyed by class. */
   get controllers(): Map<Constructor, Readonly<Record<string, unknown>>> {
@@ -512,6 +567,27 @@ export class MetadataStore implements IMetadataStore {
   }
 
   /**
+   * Records one non-HTTP ingress declaration for a class.
+   *
+   * @internal
+   */
+  addIngress(target: Constructor, metadata: IngressMetadata): void {
+    const entries = this._ingress.get(target) ?? [];
+    entries.push(metadata);
+    this._ingress.set(target, entries);
+  }
+
+  /**
+   * Returns the non-HTTP ingress declarations recorded for a class.
+   *
+   * @internal
+   */
+  getIngress(target: Constructor): readonly IngressMetadata[] {
+    this.#drain(target);
+    return this._ingress.get(target) ?? [];
+  }
+
+  /**
    * Returns the (mutable) method accumulator for a controller method,
    * creating it if absent.
    *
@@ -647,6 +723,7 @@ export class MetadataStore implements IMetadataStore {
     this._custom.length = 0;
     this._ctorOptional.clear();
     this._modules.clear();
+    this._ingress.clear();
   }
 
   /**

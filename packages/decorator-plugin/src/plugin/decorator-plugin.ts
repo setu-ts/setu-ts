@@ -32,6 +32,7 @@ import type {
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { createPermissionsMiddleware, createRolesMiddleware } from './authorization-middleware.ts';
+import { registerIngresses } from './ingress-registration.ts';
 
 import { metadataStore } from '../metadata/metadata-store.ts';
 import type {
@@ -62,6 +63,8 @@ export interface DecoratorPluginOptions {
   readonly controllers?: readonly Constructor[];
   /** Explicit list of service classes to register. */
   readonly services?: readonly Constructor[];
+  /** Explicit list of classes carrying non-HTTP ingress decorators. */
+  readonly ingress?: readonly Constructor[];
   /**
    * Module classes to expand before registration. Imported modules are visited
    * depth-first; each module's providers are collected before its controllers.
@@ -273,12 +276,15 @@ function registerInContainer(
  */
 function instantiate(target: Constructor, ctx: IPluginContext): unknown {
   const meta = metadataStore.getService(target);
+  const token = serviceToken(meta, target);
   const container = ctx.container;
   if (container !== undefined) {
-    const token = serviceToken(meta, target);
     if (container.has(token)) {
       return container.resolve<unknown>(token);
     }
+  }
+  if (ctx.services.has(token)) {
+    return ctx.services.get<object>(token);
   }
   const inject = meta?.inject;
   if (inject !== undefined && inject.length > 0) {
@@ -861,6 +867,7 @@ function replayCustomDecorators(ctx: IPluginContext): void {
  */
 export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
   const opts = options ?? {};
+  const ingress = dedup(opts.ingress ?? []);
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
@@ -868,7 +875,20 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
     // Real dependency edges (not priority luck): a REPLACEMENT provider
     // registered at a higher priority number still lands before this plugin,
     // so the register-time resolution of all three capabilities sees it.
-    optionalDependencies: [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION, CAPABILITIES.VIEW],
+    optionalDependencies: ingress.length === 0
+      ? [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION, CAPABILITIES.VIEW]
+      : [
+        CAPABILITIES.VALIDATION,
+        CAPABILITIES.AUTHORIZATION,
+        CAPABILITIES.VIEW,
+        CAPABILITIES.QUEUE,
+        CAPABILITIES.SCHEDULER,
+        CAPABILITIES.EVENTS,
+        CAPABILITIES.MESSAGING,
+        CAPABILITIES.WEBSOCKET,
+        CAPABILITIES.COMMAND_BUS,
+        CAPABILITIES.QUERY_BUS,
+      ],
     priority: PLUGIN_PRIORITY.LOW,
 
     async register(ctx: IPluginContext): Promise<void> {
@@ -947,6 +967,15 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
         );
       }
       replayCustomDecorators(ctx);
+
+      if (ingress.length > 0) {
+        ctx.lifecycle.onInit(async () => {
+          await registerIngresses(ctx, ingress, (target) => {
+            registerInContainer(ctx, target, metadataStore.getService(target));
+            return instantiate(target, ctx);
+          });
+        });
+      }
     },
   };
 }

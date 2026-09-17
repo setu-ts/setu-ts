@@ -6,7 +6,9 @@
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { COMMAND_HANDLER_SEAM, COMMAND_HANDLERS_EXPORT } from '../seams/cqrs.ts';
+import { INGRESS_SEAM } from '../seams/ingress.ts';
 import { seamNames } from '../seams/seam-spec.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
 import {
   renderConstAssignment,
   renderDeclarationHeader,
@@ -25,6 +27,44 @@ export function generateCommandHandler(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
+  if (generatorMode(options.plugins) === 'class-based') {
+    return [
+      {
+        path: `${INGRESS_SEAM.dir}/${names.kebab}${INGRESS_SEAM.suffix}`,
+        contents: `import type { CqrsCommand } from '@setu-ts/common';
+import { CommandHandler } from '@setu-ts/decorator-plugin';
+
+/** Type name the command bus routes on. */
+${renderConstAssignment(`${names.screaming}_COMMAND`, `'${names.pascal}'`)}
+
+/** Payload of the ${names.pascal} command. */
+export interface ${names.pascal}Payload {
+  readonly id: string;
+}
+
+/** The ${names.pascal} command. */
+export interface ${names.pascal}Command extends CqrsCommand<${names.pascal}Payload> {
+  readonly type: typeof ${names.screaming}_COMMAND;
+}
+
+/** Decorated command handler, registered through the ingress barrel. */
+export class ${names.pascal}Ingress {
+  @CommandHandler(${names.screaming}_COMMAND)
+  handle(command: ${names.pascal}Command): Promise<{ readonly id: string }> {
+    return Promise.resolve({ id: command.data.id });
+  }
+}
+`,
+      },
+      {
+        path: INGRESS_SEAM.barrel,
+        contents: INGRESS_SEAM.renderBarrel({
+          ingress: seamNames(options.artifacts, 'ingress', names.kebab),
+        }),
+        managed: true,
+      },
+    ];
+  }
   const contents = `import type { CqrsCommand, ICommandHandler } from '@setu-ts/common';
 
 /** Type name the command bus routes on. */

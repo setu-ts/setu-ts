@@ -21,16 +21,17 @@ import {
   seamNames,
 } from '../../../src/seams/seam-spec.ts';
 
-/** The three artifacts with no registration site, and why each has none. */
-const UNWIRED = ['guard', 'job', 'migration'] as const;
+/** The two artifacts with no registration site, and why each has none. */
+const UNWIRED = ['guard', 'migration'] as const;
 
 describe('seam registry', () => {
-  it('declares a seam for exactly the ten wired families', () => {
+  it('declares the ten family seams plus the class-based ingress aggregate', () => {
     expect(listSeamSpecs().map((spec) => spec.schematic).sort()).toEqual([
       'command-handler',
       'controller',
       'event-handler',
       'health-indicator',
+      'ingress',
       'metric',
       'middleware',
       'plugin',
@@ -43,7 +44,7 @@ describe('seam registry', () => {
   // Not an omission — the milestone's finding. A guard's positions are all per target
   // and a global one would 401 /health; a job is transport-ambiguous by design; and no
   // plugin in this repository calls `ctx.cli.register`, so no migration runner exists.
-  it('declares no seam for guard, job or migration', () => {
+  it('declares no seam for guard or migration', () => {
     for (const schematic of UNWIRED) {
       expect(seamSpecFor(schematic)).toBeUndefined();
     }
@@ -60,8 +61,8 @@ describe('seam registry', () => {
     }
   });
 
-  it('keeps guard and job emitting a single unmanaged file', () => {
-    for (const schematic of ['guard', 'job'] as const) {
+  it('keeps guard emitting a single unmanaged file', () => {
+    for (const schematic of ['guard'] as const) {
       const files = getSchematic(schematic)!.factory(deriveNames('order-item'), {
         runtime: 'deno',
         plugins: new Set(['decorator-plugin']),
@@ -72,9 +73,10 @@ describe('seam registry', () => {
     }
   });
 
-  it('names a registered schematic for every seam', () => {
+  it('names a registered schematic for every family seam', () => {
     const registered = new Set(listSchematics().map(({ name }) => name));
     for (const spec of listSeamSpecs()) {
+      if (spec.schematic === 'ingress') continue;
       expect(registered.has(spec.schematic)).toBe(true);
     }
   });
@@ -83,9 +85,13 @@ describe('seam registry', () => {
   // a mismatch means the barrel silently never lists anything.
   it('declares a dir and suffix matching the path its schematic writes', () => {
     for (const spec of listSeamSpecs()) {
+      if (spec.schematic === 'ingress') continue;
+      const plugins = spec.schematic === 'controller' || spec.schematic === 'service'
+        ? ['decorator-plugin']
+        : [];
       const files = getSchematic(spec.schematic)!.factory(deriveNames('order-item'), {
         runtime: 'deno',
-        plugins: new Set(['decorator-plugin']),
+        plugins: new Set(plugins),
         now: () => 0,
       });
       const artifact = files.find((f) => f.managed !== true)!;
