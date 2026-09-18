@@ -61,7 +61,7 @@
     "release:docs": "deno run --allow-read --allow-run --allow-write --allow-env scripts/generate-api-docs.ts",
     "check:plan": "deno run --allow-read scripts/plan-lint.ts",
     "check:versions": "deno run --allow-read --allow-run=git scripts/version-sweep.ts",
-    "check:deploy": "deno run --allow-read --allow-write --allow-run --allow-env scripts/check-deploy.ts",
+    "check:deploy": "deno run --allow-read --allow-write --allow-run --allow-env --allow-net=jsr.io scripts/check-deploy.ts",
     "deploy:render": "deno run --allow-read --allow-write --allow-run --allow-env scripts/check-deploy.ts --render --write",
     "test": "deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease --allow-run=deno,git,docker --allow-write packages test",
     "test:coverage": "rm -rf coverage && deno test -P --allow-read --allow-import --allow-env --allow-sys=hostname,osRelease --allow-run=deno,git,docker --allow-write packages test --coverage=coverage --coverage-raw-data-only && deno run --allow-run=deno scripts/coverage.ts && deno run --allow-run=deno scripts/script-coverage.ts coverage",
