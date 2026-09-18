@@ -10655,7 +10655,9 @@ that boundary. Implement the letters in order, with separate feature branches an
 neither is permission to sweep unrelated packages. Each gets one canonical plan from
 `plans/TEMPLATE.md` and passes `deno task check:plan` before implementation. The plan must name the
 real consumer of every new export, resolve the exact contracts from source, and include the threat
-model and negative tests below. No implementation plan or public API is added by this roadmap entry.
+model and negative tests below. The canonical plans are `plans/milestone-98a-kernel-diagnostics.md`
+and `plans/milestone-98b-local-diagnostics-connector.md`; these specify proposed APIs, not shipped
+ones.
 
 ### Existing seams and gaps
 
@@ -10682,8 +10684,8 @@ model and negative tests below. No implementation plan or public API is added by
 ### Milestone 98a: Kernel Metadata and Execution Observation
 
 **Package(s):** `packages/kernel`; `packages/common` only for the contracts consumed across the
-kernel/plugin boundary. Any new capability token belongs in `CAPABILITIES` and must satisfy its
-existing grammar; its name and interface binding are fixed in the implementation plan.
+kernel/plugin boundary. The plan selects an optional application reader with snapshot and cursor
+reads; no new capability token is needed.
 
 **Deliverables:**
 
@@ -10713,12 +10715,12 @@ existing grammar; its name and interface binding are fixed in the implementation
       generic serializer for custom plugin state.
 - [ ] Disabled observation installs no diagnostic hooks, buffers, timers or listener. Enabled
       observation has bounded buffering, overflow/drop counters, and lifecycle cleanup. A slow,
-      asynchronous consumer must not backpressure requests: collection uses a bounded handoff and
-      does not await consumer callbacks. Observer rejections/throws cannot replace results, swallow
-      application errors or recursively flood logs. This cannot isolate deliberately blocking
-      synchronous code running in the same process; document that trust limit. Measure enabled and
-      disabled overhead against the same application; set the acceptance budget in the plan before
-      implementation.
+      asynchronous consumer must not backpressure requests: collection uses a bounded ring with
+      pull-only public reads and no consumer callbacks. Collection failures cannot replace results,
+      swallow application errors or recursively flood logs. This cannot isolate deliberately
+      blocking synchronous code running in the same process; document that trust limit. Measure
+      enabled and disabled overhead against the same application; set the acceptance budget in the
+      plan before implementation.
 
 ### Milestone 98b: Authenticated Local Diagnostics Connector
 
@@ -10731,9 +10733,10 @@ existing grammar; its name and interface binding are fixed in the implementation
 - [ ] Explicit plugin registration and explicit local-connection activation. Importing the package,
       registering unrelated plugins, or setting a development environment variable must not expose
       an endpoint. No automatic mounting on the application's public HTTP listener and no wildcard
-      bind. The plan selects and exercises one supported local transport, authenticates both ends
-      during pairing, and documents unsupported runtimes; inability to enforce local isolation
-      refuses activation rather than falling back to a public endpoint.
+      bind. The plan selects Deno with a separate injected HTTP adapter, IPv4 loopback polling and a
+      native client. Authenticate both ends during pairing and document unsupported runtimes;
+      inability to enforce local isolation refuses activation rather than falling back to a public
+      endpoint.
 - [ ] Fresh per-session pairing credentials, expiration/revocation, and application-instance-bound
       authorization for snapshot and observation reads. Credentials never appear in URLs, captured
       records or diagnostic logs. Localhost, CORS, an Origin/Host check, or a Pro license is not
@@ -10741,7 +10744,7 @@ existing grammar; its name and interface binding are fixed in the implementation
       additional checks, define the policy for native clients without Origin, and test cross-origin
       requests and DNS-rebinding attempts. No data is released before authentication completes.
 - [ ] A versioned, validated read-only protocol with explicit supported operations, size/rate/client
-      limits and bounded streaming. Unknown versions and operations fail closed. There is no
+      limits and bounded polling responses. Unknown versions and operations fail closed. There is no
       arbitrary method invocation, expression evaluation, file read, credential reveal, service
       resolution or mutation command. Scope every session to its paired application instance;
       connection to one process does not authorize another process or tenant-data access.
