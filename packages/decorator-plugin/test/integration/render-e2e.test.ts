@@ -6,7 +6,8 @@
  * where an `optionalDependencies` edge added in the opposite direction made
  * every application registering both plugins throw `Circular plugin
  * dependency detected` at `start()`. The body is HTML under
- * `text/html; charset=utf-8`, never JSON; a route sets `201` through `@Ctx()`.
+ * `text/html; charset=utf-8`, never JSON; a route sets `201` through
+ * `@Params(Ctx())`.
  *
  * @module
  */
@@ -131,7 +132,7 @@ describe('a rendered route end to end, in both registration orders', () => {
     await app.stop();
   });
 
-  it('a route sets 201 through @Ctx() and keeps its rendered body', async () => {
+  it('a route sets 201 through @Params(Ctx()) and keeps its rendered body', async () => {
     const app = await createTestApp({
       plugins: [RuntimePlugin(), ViewPlugin(), DecoratorPlugin({ controllers: [PagesController] })],
     });

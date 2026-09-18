@@ -33,8 +33,9 @@ deno add jsr:@setu-ts/decorator-plugin jsr:@setu-ts/di-plugin
 
 Nothing to enable. Setu-TS uses **TC39 standard decorators**, which Deno, Bun and every current
 bundler parse with no `compilerOptions` entry at all — so a project's `deno.json` needs no decorator
-setting, and adding one is actively unhelpful, because declaring any compiler option replaces Deno's
-default set.
+setting, and adding one asserts a setting nothing in the project reads. Declaring a compiler option
+does not disturb Deno's other defaults (measured on Deno 2.9.6), so the rest of an existing
+`compilerOptions` block can stay exactly as it is.
 
 The one exception is Node, where V8 has not shipped decorators: run the project through a transform
 (`setu new --runtime node` emits `tsx`, which handles them) rather than through `node`'s built-in

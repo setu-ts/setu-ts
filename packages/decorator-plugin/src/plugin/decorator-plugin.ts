@@ -832,9 +832,9 @@ function warnUnresolvableParameters(
         handler: route.handler,
         parameterIndex: param.index,
         customType: param.customType ?? '(none)',
-        hint:
-          'Register a resolver with registerParameterResolver(), or — for @Ctx() — check that ' +
-          'the application and DecoratorPlugin resolve to the same @setu-ts/decorator-plugin version.',
+        hint: 'Register a resolver with registerParameterResolver(), or — for ' +
+          '@Params(Ctx()) — check that the application and DecoratorPlugin resolve to the ' +
+          'same @setu-ts/decorator-plugin version.',
       },
     );
   }

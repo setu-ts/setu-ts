@@ -78,8 +78,13 @@ describe('generated start-task permissions', () => {
 describe('generated Deno compiler options', () => {
   it('gives the decorator-hosting templates NO compiler option at all', () => {
     // The decorator surface is TC39 standard decorators, which Deno parses
-    // unconfigured. Declaring any option here would also replace Deno's whole
-    // default set (M63 D3), so a template needing none declares none.
+    // unconfigured, so a template needing no option declares none rather than
+    // an empty object: an option nothing reads is noise.
+    //
+    // An earlier revision added that declaring any option here would replace
+    // Deno's whole default set (M63 D3). That is false (measured in M90h:
+    // declaring one option leaves every other default in force), and this
+    // assertion never depended on it.
     for (const name of ['class-based'] as const) {
       expect(compilerOptionsOf(getTemplate(name)!)).toBeUndefined();
     }

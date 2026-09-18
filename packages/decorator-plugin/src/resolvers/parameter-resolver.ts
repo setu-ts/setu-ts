@@ -223,9 +223,9 @@ export function findUnresolvableParameters(
 }
 
 /**
- * Resolves a custom parameter. The built-in `@Ctx()` marker and `current-user`
- * resolve directly; other types look up a resolver registered via
- * {@linkcode registerParameterResolver}.
+ * Resolves a custom parameter. The built-in `@Params(Ctx())` marker and
+ * `current-user` resolve directly; other types look up a resolver registered
+ * via {@linkcode registerParameterResolver}.
  */
 async function resolveCustom(ctx: IRequestContext, param: ParameterMetadata): Promise<unknown> {
   const resolution = classifyCustom(param);

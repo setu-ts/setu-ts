@@ -10777,7 +10777,7 @@ merging beyond what the schema itself expresses.
 | 95b       | ✅     | common + database-plugin + messaging-plugin — reachability that fails open (**High**)                                  |
 | 95c       | ✅     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
 | 95d       | ⬜     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
-| 96        | ⬜     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
+| 96        | ✅     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                               |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                   |
 | 97c       | ⬜     | config-plugin — typed configuration sections                                                                           |

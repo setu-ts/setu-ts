@@ -21,8 +21,9 @@ import type {
 export const PARAMETER_KIND_KEY = 'setu-ts.parameter.kind';
 
 /**
- * Marker identifying the built-in `@Ctx()` decorator, distinguishing it from an
- * application-defined custom parameter that also uses the name `context`.
+ * Marker identifying the built-in `@Params(Ctx())` source, distinguishing it
+ * from an application-defined custom parameter that also uses the name
+ * `context`.
  *
  * Registered in the process-global symbol registry via `Symbol.for` rather than
  * created with `Symbol()`, so the marker compares equal across two copies of
@@ -36,7 +37,8 @@ export const PARAMETER_KIND_KEY = 'setu-ts.parameter.kind';
 export const CONTEXT_PARAMETER_MARKER: symbol = Symbol.for('@setu-ts/decorator-plugin:context');
 
 /**
- * Metadata attached by `@Ctx()`, carrying {@linkcode CONTEXT_PARAMETER_MARKER}.
+ * Metadata attached by `@Params(Ctx())`, carrying
+ * {@linkcode CONTEXT_PARAMETER_MARKER}.
  *
  * This is intentionally not re-exported from the package barrel. Recognition is
  * by marker VALUE, never by this object's identity.
@@ -46,8 +48,9 @@ export const CONTEXT_PARAMETER_METADATA: Readonly<Record<string, unknown>> = Obj
 });
 
 /**
- * Reports whether parameter metadata was attached by the built-in `@Ctx()`,
- * including by a different copy of this package in the same process.
+ * Reports whether parameter metadata was attached by the built-in
+ * `@Params(Ctx())`, including by a different copy of this package in the same
+ * process.
  *
  * @param metadata - Captured parameter metadata, if any
  * @returns `true` when the metadata carries the context marker

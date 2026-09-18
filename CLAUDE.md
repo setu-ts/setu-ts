@@ -2083,15 +2083,21 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   place and said so**: its plan's risk list records the trap as "probed here and it did not
   reproduce on Deno 2.9.5 for the JSX default, so the mechanism recorded in M63 needs
   re-establishing rather than trusting". Nobody re-established it, and the claim went on to
-  propagate into **nine** sites — two CLAUDE.md entries, a ROADMAP scope bullet, two published
-  CHANGELOG sections, three `packages/cli` source comments and a CLI test — because each new use
-  cited the entry rather than the measurement. A flagged-but-unverified claim spreads exactly like a
-  verified one; the flag has to be actioned or removed. Compiler options are now per template
-  (`denoCompilerOptions`), and `full-stack` gains the `check:app` task that reaches route modules
-  `deno check main.ts` never sees. **D6:** a fresh workspace failed `deno fmt --check` on 62 of 74
-  files the CLI itself wrote — no `fmt` config was emitted, and with one added the `.tsx` emitters
-  still disagreed, so generated imports are now sorted and wrapped the way `deno fmt` does and
-  emitted JSX is single-quoted. The deliverable that keeps them fixed is
+  propagate into **eleven** sites — two CLAUDE.md entries, a ROADMAP scope bullet, two published
+  CHANGELOG sections, three `packages/cli` source comments, a CLI test, `docs/decorators.md` and the
+  `PUBLIC_API.md` decorator note — because each new use cited the entry rather than the measurement.
+  A flagged-but-unverified claim spreads exactly like a verified one; the flag has to be actioned or
+  removed. **The M90h sweep then missed three of the eleven**, fixed later on a `fix/…` branch (PR
+  pending): the two doc sites, which its six-site list never named, and a SECOND occurrence in the
+  CLI test — whose sibling comment three assertions away had been corrected, so the file looked
+  done. The re-probe is recorded there: on Deno 2.9.6 a manifest declaring only
+  `experimentalDecorators` still reports `TS7006` for an implicit `any`, so `strict` survives, while
+  the control declaring `strict: false` beside it type-checks cleanly. Compiler options are now per
+  template (`denoCompilerOptions`), and `full-stack` gains the `check:app` task that reaches route
+  modules `deno check main.ts` never sees. **D6:** a fresh workspace failed `deno fmt --check` on 62
+  of 74 files the CLI itself wrote — no `fmt` config was emitted, and with one added the `.tsx`
+  emitters still disagreed, so generated imports are now sorted and wrapped the way `deno fmt` does
+  and emitted JSX is single-quoted. The deliverable that keeps them fixed is
   `test/e2e/scaffold-runs-e2e.test.ts`, which formats, lints, installs, type-checks and BOOTS every
   template, then requests what it advertises — booting deliberately without `-A`, since a forgotten
   permission is unobservable under a blanket grant. Four negative controls were each observed
@@ -4971,6 +4977,27 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   than fixed: §6's test table named `test/unit/csrf-token-field.test.ts` and the cases landed in
   `test/unit/csrf/csrf.test.ts` — equivalent coverage, a better home beside the other CSRF tests,
   and moving them would be churn against an archived plan) — complete (PR #322)
+- **Milestone 96** (`packages/common` + `packages/logger-plugin` + `packages/telemetry-plugin` +
+  `packages/audit-plugin` — one redaction seam for every egress path. Three components export
+  application data somewhere an operator did not write, and each answered differently: the logger
+  had an opt-in dot-path list whose two implementations disagreed and whose nested walk MUTATED the
+  caller's object, telemetry shipped the full request URL — query string included — to Datadog, New
+  Relic and Azure Monitor, and the audit trail had no filter at all. `common` gains
+  `createRedactionService`, `IRedactionService`, the policy and redactor vocabulary, an erase
+  redactor and a suffix-mask factory; all three plugins accept the same policy or service through a
+  `redaction` option on their existing options — **no new package and no capability token**, because
+  the package a first draft carried would have held no implementation (it must live in `common`
+  under §2.2) and nothing needed to resolve it by name; a token is additive later if a consumer ever
+  must. Policies are compiled once, never mutate a caller-owned record, and apply before a record
+  leaves the component. Telemetry now omits query strings and fragments from `http.url` by default,
+  and `queryParameters: 'redact'` retains only policy-transformed query values, failing CLOSED to
+  omission with a warning when no policy is supplied; audit redacts `before`, `after` and `metadata`
+  before deep-freezing a stored entry. **One breaking change:** `logger-plugin` now redacts common
+  secret-shaped fields by default, so `LoggerPlugin({ redact: [] })` restores the prior
+  no-default-redaction behaviour; the legacy `redact` list stays supported on both the console and
+  Pino transports and takes precedence over a policy where both name a path. A mechanism, not a
+  compliance feature: no regulation is named in any shipped identifier, and a gate keeps it that
+  way) — complete (PR #324)
 - **Milestone 97b** (`packages/decorator-plugin` + `packages/common` + `packages/openapi-plugin` —
   response shaping for decorated handlers. `createHandler` answered `ctx.response.json(result)` for
   every plain return, so a decorated handler was always `200`, always JSON, always header-free
@@ -5094,54 +5121,42 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the
   Deno/Node/Bun/Workers portability matrix validated end to end).
 
-- **Also open** — **M96** (`common` + `logger-plugin` + `telemetry-plugin` + `audit-plugin` — one
-  redaction seam for every egress path. Three components export application data somewhere an
-  operator did not write, and each answers differently: the logger has an opt-in dot-path list whose
-  two implementations disagree and whose nested walk mutates the caller's object, telemetry ships
-  the full request URL — query string included — to Datadog, New Relic and Azure Monitor, and the
-  audit trail has no filter at all. Adds an `IRedactionService` port and one pure implementation in
-  `common`, reaching all three exporters through a `redaction` option on their existing plugin
-  options — **no new package and no capability token**, because the package a first draft carried
-  would have held no implementation (it must live in `common` under §2.2) and nothing needed to
-  resolve it by name; a token is additive later if a consumer ever must. A mechanism, not a
-  compliance feature: no regulation is named in any shipped identifier, and a gate keeps it that
-  way. Plan: `plans/milestone-96-redaction-seam.md`).
-
 - **In progress** — **M97** (97a `packages/decorator-plugin` + `packages/cli` — complete
   ([PR #327](https://github.com/setu-ts/setu-ts/pull/327)) on `feat/m97a-ingress-decorators`; 97b
-  `packages/decorator-plugin` + `packages/common` + `packages/openapi-plugin`; 97c
-  `packages/config-plugin` — ergonomics: three places where a capability is complete, its
-  registration surface is public, and the developer still hand-writes the wiring. **Only 97b touches
-  `common`** — the other two lists were corrected once their plans resolved the seam (97a puts the
-  ingress map on the concrete `MetadataStore`, 97c ships a free function rather than a required
-  `IConfig` member). Three letters, separate package ownership, the M93a/M93b shape. **97a** gives
-  the six non-HTTP ingress categories — queue, scheduler, domain events, messaging, WebSocket, CQRS
-  — the class-based surface HTTP has had since M9 (`@Processor`, `@Cron`/`@Every`, `@OnEvent`,
-  `@Subscribe`, `@Gateway`, `@CommandHandler`/`@QueryHandler`, plus
-  `@UseIngressBehaviors`/`@UsePipelineBehaviors`). Six categories, **seven** provider tokens,
-  because `CqrsPlugin` provides `COMMAND_BUS` and `QUERY_BUS` separately and the pass resolves both
-  buses directly — the follow-on M86 named at `ROADMAP.md:8509` and deferred "until the arms and the
-  pipeline exist", whose precondition PR #228 met. It is cheap for one checked reason: the
-  behaviour-wrapped service is what each plugin registers under its token (`queue-plugin.ts:245`
-  registers the `BehaviorChainQueueService` whose `override process()` wraps in
-  `withIngressBehaviors`; same for the `PipelinedBroker` and the scheduler), so an imperative
-  registration on the RESOLVED capability inherits the whole M86/M90i stack, and every method it
-  needs is on a `common` contract — no plugin imports another, no `IMetadataStore` widening, and no
-  cycle (no ingress plugin depends on `METADATA_STORE`). **97b** adds `@HttpCode`/`@ResponseHeader`/
-  `@Redirect`, since `decorator-plugin.ts:345` answers `ctx.response.json(result)` for every plain
-  return; `@Ctx()` already escapes it, so this is ergonomics rather than a defect, and the second
-  payoff is deriving the success status into OpenAPI through the M57/M70m `Symbol.for` brand, which
-  `RouteSchema.response` already has a slot for. **97c** binds a named configuration section to a
-  parsed type: `IConfig.get<T>` is unchecked over a `Record<string, unknown>`, while
-  `validateConfig` already coerces through a Zod-compatible schema and then erases the type on its
-  last line (`return parsed as Record<string, unknown>`). **Named and not taken:** an automatic
-  per-request DI scope (both comparison frameworks open one; `createScope()` exists but nothing
-  calls it per request — a kernel and container change, not sugar), `ParseIntPipe`-style transforms
-  (`z.coerce` through `@ValidateParams` already covers it), `PartialType`/`PickType` (Zod ships
-  them), `IHostedService`, and localization. **The competitor rows are from knowledge and are NOT
-  measured** — M94 built runnable ASP.NET 9 / NestJS 10 apps in `.tmp/compare/` for this comparison
-  and two doc-derived claims did not survive, so each plan re-measures what it relies on. Plans:
-  `plans/archive/milestone-97a-ingress-decorators.md`, `plans/milestone-97b-response-shaping.md`,
+  `packages/decorator-plugin` + `packages/common` + `packages/openapi-plugin` — complete
+  ([PR #328](https://github.com/setu-ts/setu-ts/pull/328)); 97c `packages/config-plugin` —
+  ergonomics: three places where a capability is complete, its registration surface is public, and
+  the developer still hand-writes the wiring. **Only 97b touches `common`** — the other two lists
+  were corrected once their plans resolved the seam (97a puts the ingress map on the concrete
+  `MetadataStore`, 97c ships a free function rather than a required `IConfig` member). Three
+  letters, separate package ownership, the M93a/M93b shape. **97a** gives the six non-HTTP ingress
+  categories — queue, scheduler, domain events, messaging, WebSocket, CQRS — the class-based surface
+  HTTP has had since M9 (`@Processor`, `@Cron`/`@Every`, `@OnEvent`, `@Subscribe`, `@Gateway`,
+  `@CommandHandler`/`@QueryHandler`, plus `@UseIngressBehaviors`/`@UsePipelineBehaviors`). Six
+  categories, **seven** provider tokens, because `CqrsPlugin` provides `COMMAND_BUS` and `QUERY_BUS`
+  separately and the pass resolves both buses directly — the follow-on M86 named at
+  `ROADMAP.md:8509` and deferred "until the arms and the pipeline exist", whose precondition PR #228
+  met. It is cheap for one checked reason: the behaviour-wrapped service is what each plugin
+  registers under its token (`queue-plugin.ts:245` registers the `BehaviorChainQueueService` whose
+  `override process()` wraps in `withIngressBehaviors`; same for the `PipelinedBroker` and the
+  scheduler), so an imperative registration on the RESOLVED capability inherits the whole M86/M90i
+  stack, and every method it needs is on a `common` contract — no plugin imports another, no
+  `IMetadataStore` widening, and no cycle (no ingress plugin depends on `METADATA_STORE`). **97b**
+  adds `@HttpCode`/`@ResponseHeader`/`@Redirect`, since `decorator-plugin.ts:345` answers
+  `ctx.response.json(result)` for every plain return; `@Params(Ctx())` already escapes it, so
+  ergonomics rather than a defect, and the second payoff is deriving the success status into OpenAPI
+  through the M57/M70m `Symbol.for` brand, which `RouteSchema.response` already has a slot for.
+  **97c** binds a named configuration section to a parsed type: `IConfig.get<T>` is unchecked over a
+  `Record<string, unknown>`, while `validateConfig` already coerces through a Zod-compatible schema
+  and then erases the type on its last line (`return parsed as Record<string, unknown>`). **Named
+  and not taken:** an automatic per-request DI scope (both comparison frameworks open one;
+  `createScope()` exists but nothing calls it per request — a kernel and container change, not
+  sugar), `ParseIntPipe`-style transforms (`z.coerce` through `@ValidateParams` already covers it),
+  `PartialType`/`PickType` (Zod ships them), `IHostedService`, and localization. **The competitor
+  rows are from knowledge and are NOT measured** — M94 built runnable ASP.NET 9 / NestJS 10 apps in
+  `.tmp/compare/` for this comparison and two doc-derived claims did not survive, so each plan
+  re-measures what it relies on. Plans: `plans/archive/milestone-97a-ingress-decorators.md`,
+  `plans/archive/milestone-97b-response-shaping.md`,
   `plans/milestone-97c-typed-config-sections.md`.)
 
 - **Milestone 95** (`packages/cli` + `packages/messaging-plugin` + `packages/common` +
