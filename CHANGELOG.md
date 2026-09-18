@@ -287,10 +287,15 @@ All notable changes to this project are documented here. The format follows
   and the gate's own tests cannot disagree.
 
   The sweep would have opened a false PASS on its own — a component reading past every mode has each
-  payload resolve to `undefined`, renders nothing, and scores as escaped — so the unbounded proxy
-  survives as a REACH probe whose output is never judged for escaping, and the two disagreeing is
-  reported as UNCHECKED. Reach also improved: a nested `props.note.link` in an `href` is now caught,
-  where before it was not delivered at all.
+  payload resolve to `undefined`, renders nothing, and scores as escaped — so a REACH probe decides
+  whether the component touches its props at all, and the two disagreeing is reported as UNCHECKED.
+  That probe is a SEPARATE object which deliberately does not carry the sentinel: every level
+  stringifies to the payload, which is what lets it answer a read at any depth, and is only safe
+  because its output is never judged for escaping. Sharing one object between the two roles made the
+  guard inert for exactly the components it exists to catch, which a negative control found.
+
+  Reach also improved: a nested `props.note.link` in an `href` is now caught, where before it was
+  not delivered at all.
 
 - **The weekly `Dependency drift` workflow reported a `test` failure that was never drift, and gated
   a graph it had not resolved.** Three defects, one shape — the job's report did not describe what

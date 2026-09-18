@@ -37,8 +37,16 @@ export const HOSTILE = '<script>alert(1)</script>';
 export const URL_PAYLOAD = 'javascript:alert(1)';
 
 /**
- * The URL-valued attributes a `javascript:` scheme is a finding in. `xlink:href`
- * is covered because the scan matches an attribute name by suffix.
+ * The URL-valued attributes a `javascript:` scheme is a finding in.
+ *
+ * An attribute name is matched by SUFFIX, which is deliberate and has been
+ * probed rather than assumed. It buys `xlink:href` and — more usefully —
+ * `formaction`, which is a real navigation hazard. It costs false positives on
+ * inert names that happen to end the same way (`data-action`, `data-href`,
+ * `myhref`), and a tag written inside an HTML comment is scanned like any
+ * other. Every one of those errs toward reporting, never toward silence, which
+ * is the direction a security gate should fail in. `srcset` is NOT matched,
+ * because the name must be followed by `=`.
  */
 export const URL_ATTRIBUTES: readonly string[] = ['href', 'src', 'action'];
 
@@ -52,7 +60,13 @@ export const URL_ATTRIBUTES: readonly string[] = ['href', 'src', 'action'];
  */
 export const DELIVERY_DEPTHS: readonly number[] = [1, 2, 3];
 
-/** The escaped form of a payload, for deciding whether it was delivered. */
+/**
+ * The escaped form of a payload, for deciding whether it was delivered.
+ *
+ * This must agree with what hono actually emits: if it does not, `delivered`
+ * reads false for a component that WAS delivered to, and the reach guard then
+ * reports a false UNCHECKED. `escaping-matches-hono` pins the agreement.
+ */
 export function escapeHtml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
@@ -612,7 +626,8 @@ export function buildProbe(components: readonly DocComponent[]): string {
 ${c.dependencies.join('\n')}
 ${c.source}
 try {
-  const seen = { raw: false, delivered: false, scheme: false, rendered: false };
+  const seen = { raw: false, delivered: false, rendered: false };
+  const urlRenders = [];
   for (const deliver of DELIVERIES) {
     let out;
     try {
@@ -622,8 +637,7 @@ try {
     if (out.includes(HOSTILE)) seen.raw = true;
     if (out.includes(HOSTILE) || out.includes(ESCAPED_HOSTILE)) seen.delivered = true;
     try {
-      const outUrl = await renderComponent(${c.name} as never, deliver(URL_PAYLOAD));
-      if (schemeInUrlAttribute(outUrl)) seen.scheme = true;
+      urlRenders.push(await renderComponent(${c.name} as never, deliver(URL_PAYLOAD)));
     } catch { /* this shape does not fit; another mode covers it */ }
   }
   if (!seen.rendered) throw new Error('no delivery mode rendered this component');
@@ -637,7 +651,7 @@ try {
     index: ${index},
     ok: true,
     escaped: !seen.raw,
-    scheme: seen.scheme,
+    urlRenders,
     delivered: seen.delivered,
     reached: reach.includes(HOSTILE) || reach.includes(ESCAPED_HOSTILE),
   }));
@@ -649,11 +663,6 @@ try {
 
   return `/** @jsxImportSource @hono/hono/jsx */
 import { renderComponent } from '../../packages/view-plugin/src/render/normalize.ts';
-// The scanner is imported, never copied: one implementation decides what counts
-// as a URL attribute, so the probe and the gate's own tests cannot disagree.
-// The gate script guards its entry point with import.meta.main, so importing
-// it here runs no gate.
-import { hasSchemeInUrlAttribute as schemeInUrlAttribute } from '../../scripts/check-example-behaviour.ts';
 import { html } from '@hono/hono/html';
 
 const HOSTILE = ${JSON.stringify(HOSTILE)};
@@ -678,15 +687,6 @@ const DEPTHS = ${JSON.stringify(DELIVERY_DEPTHS)};
 // so the mode simply contributes nothing rather than reporting a safe
 // component UNESCAPED because an OBJECT went into the attribute.
 const SENTINEL = '__setu_probe_nonleaf__';
-
-const leafString = (payload) =>
-  new Proxy({}, {
-    get(_t, key) {
-      if (key === Symbol.toPrimitive) return () => SENTINEL;
-      if (key === 'toString' || key === 'valueOf') return () => SENTINEL;
-      return payload;
-    },
-  });
 
 const nested = (payload, depth) => {
   if (depth <= 0) return payload;
@@ -714,12 +714,32 @@ const arrayOfStrings = (payload) => {
   return node;
 };
 
-const DELIVERIES = [leafString, (p) => nested(p, 2), (p) => nested(p, 3), arrayOfStrings];
+const DELIVERIES = [...DEPTHS.map((d) => (p) => nested(p, d)), arrayOfStrings];
 
-// The unbounded proxy is the REACH probe only — it answers a read at any depth,
-// so it says whether the component touches its props at all. Its output is
-// never judged for escaping, for the reason given above.
-const props = arrayOfStrings(HOSTILE);
+// The REACH probe is its own object, and it deliberately does NOT carry the
+// sentinel: every level stringifies to the payload, which is what lets it
+// answer a read at ANY depth and shape. That is only safe because its output is
+// never judged for escaping — it decides one thing, whether the component
+// touches its props at all.
+//
+// Sharing arrayOfStrings here was a defect: with the sentinel in place the
+// reach render yielded the sentinel for a depth-1 read, so reached was false
+// for exactly the components the guard exists to catch, and the guard was inert.
+const reachProxy = (payload) => {
+  const node = new Proxy([payload], {
+    get(t, key) {
+      if (key === Symbol.toPrimitive) return () => payload;
+      if (key === 'toString' || key === 'valueOf') return () => payload;
+      if (key in t) {
+        const value = Reflect.get(t, key);
+        return typeof value === 'function' ? value.bind(t) : value;
+      }
+      return node;
+    },
+  });
+  return node;
+};
+const props = reachProxy(HOSTILE);
 
 // \`raw()\` is the documented opt-out, so its argument must NOT carry the
 // payload — otherwise the opt-out reports itself as a defect. Stubbed to a
@@ -782,14 +802,21 @@ export function parseProbe(stdout: string, expected: number): readonly ProbeResu
     if (typeof record['ok'] !== 'boolean') return null;
     if (record['ok'] === true) {
       if (typeof record['escaped'] !== 'boolean') return null;
-      if (typeof record['scheme'] !== 'boolean') return null;
+      const urlRenders = record['urlRenders'];
+      if (!Array.isArray(urlRenders)) return null;
+      if (!urlRenders.every((render) => typeof render === 'string')) return null;
       if (typeof record['delivered'] !== 'boolean') return null;
       if (typeof record['reached'] !== 'boolean') return null;
       results.push({
         index: position,
         ok: true,
         escaped: record['escaped'],
-        scheme: record['scheme'],
+        // Decided HERE rather than inside the probe. The probe is a subprocess,
+        // and importing the scanner into it removed this file from coverage
+        // entirely — the script-coverage completeness check caught that. The
+        // probe therefore reports what it rendered and the scanner stays in one
+        // place, in the process the gates measure.
+        scheme: (urlRenders as readonly string[]).some(hasSchemeInUrlAttribute),
         delivered: record['delivered'],
         reached: record['reached'],
       });

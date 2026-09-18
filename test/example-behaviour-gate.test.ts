@@ -75,6 +75,27 @@ describe('hasSchemeInUrlAttribute — the scheme must be in an ATTRIBUTE (#333)'
       expect(hasSchemeInUrlAttribute(html)).toBe(false);
     });
   }
+
+  // The suffix match's consequences, as DATA rather than as a sentence in the
+  // JSDoc that can drift from it. Every row errs toward reporting.
+  it('matches an attribute name by suffix, with the costs that buys', () => {
+    // Worth having: formaction really does navigate.
+    expect(hasSchemeInUrlAttribute('<button formaction="javascript:alert(1)">x</button>'))
+      .toBe(true);
+    // The cost: inert names ending the same way, and a tag inside a comment.
+    for (
+      const inert of [
+        '<a data-action="javascript:alert(1)">x</a>',
+        '<a data-href="javascript:alert(1)">x</a>',
+        '<a myhref="javascript:alert(1)">x</a>',
+        '<!-- <a href="javascript:alert(1)"> -->',
+      ]
+    ) {
+      expect(hasSchemeInUrlAttribute(inert)).toBe(true);
+    }
+    // But the name must be followed by `=`, so `srcset` is not `src`.
+    expect(hasSchemeInUrlAttribute('<img srcset="javascript:alert(1)">')).toBe(false);
+  });
 });
 
 describe('renderedComponentNames', () => {
@@ -303,10 +324,11 @@ describe('buildProbe', () => {
     expect(probe).toContain('renderComponent(A as never, deliver(HOSTILE))');
     expect(probe).toContain('renderComponent(A as never, deliver(URL_PAYLOAD))');
     expect(probe).toContain('for (const deliver of DELIVERIES)');
-    // The scheme verdict comes from the shared HTML-aware scanner, imported
-    // rather than copied, so the probe and this file's own unit cases agree.
-    expect(probe).toContain('schemeInUrlAttribute(outUrl)');
-    expect(probe).toContain("from '../../scripts/check-example-behaviour.ts'");
+    // The probe REPORTS what it rendered; the scheme verdict is decided in the
+    // parent, because importing the scanner into the subprocess removed this
+    // file from coverage entirely.
+    expect(probe).toContain('urlRenders.push(');
+    expect(probe).not.toContain("from '../../scripts/check-example-behaviour.ts'");
     // The unbounded proxy survives as a REACH probe only, never judged for
     // escaping.
     expect(probe).toContain('const reach = await renderComponent(A as never, props)');
@@ -330,7 +352,7 @@ describe('parseProbe', () => {
     expect(parseProbe('{"index":0,"ok":true}', 1)).toBeNull();
     expect(parseProbe('{"index":0,"ok":false}', 1)).toBeNull();
     expect(parseProbe('{"index":0,"ok":"yes","escaped":true}', 1)).toBeNull();
-    expect(parseProbe('{"index":0,"ok":true,"escaped":"no"}', 1)).toBeNull();
+    expect(parseProbe('{"index":0,"ok":true,"escaped":"no","urlRenders":[]}', 1)).toBeNull();
     expect(parseProbe('{"index":0,"ok":false,"error":7}', 1)).toBeNull();
     // The URL verdict is part of the record: an `ok` line without it is a
     // component the URL payload never reached, which must fail the batch.
@@ -338,17 +360,55 @@ describe('parseProbe', () => {
   });
 
   it('refuses results that arrive out of order or duplicated', () => {
-    const a = '{"index":0,"ok":true,"escaped":true,"scheme":false,"delivered":true,"reached":true}';
-    const b = '{"index":1,"ok":true,"escaped":true,"scheme":false,"delivered":true,"reached":true}';
+    const a =
+      '{"index":0,"ok":true,"escaped":true,"urlRenders":[],"delivered":true,"reached":true}';
+    const b =
+      '{"index":1,"ok":true,"escaped":true,"urlRenders":[],"delivered":true,"reached":true}';
     expect(parseProbe(`${b}\n${a}`, 2)).toBeNull();
     expect(parseProbe(`${a}\n${a}`, 2)).toBeNull();
     expect(parseProbe(`${a}\n${b}`, 2)).toHaveLength(2);
   });
 
+  it('derives the scheme verdict from the reported renders (#333)', () => {
+    // The probe reports what it rendered; the scanner runs HERE. Importing it
+    // into the subprocess instead removed this file from coverage entirely,
+    // which the script-coverage completeness check caught.
+    const hit = parseProbe(
+      JSON.stringify({
+        index: 0,
+        ok: true,
+        escaped: true,
+        urlRenders: ['<a href="javascript:alert(1)">x</a>'],
+        delivered: true,
+        reached: true,
+      }),
+      1,
+    );
+    expect(hit?.[0]).toMatchObject({ scheme: true });
+
+    const miss = parseProbe(
+      JSON.stringify({
+        index: 0,
+        ok: true,
+        escaped: true,
+        urlRenders: ['<code>href=javascript:alert(1)</code>'],
+        delivered: true,
+        reached: true,
+      }),
+      1,
+    );
+    expect(miss?.[0]).toMatchObject({ scheme: false });
+  });
+
+  it('refuses a batch whose renders are not strings', () => {
+    expect(parseProbe('{"index":0,"ok":true,"escaped":true,"urlRenders":[7]}', 1)).toBeNull();
+    expect(parseProbe('{"index":0,"ok":true,"escaped":true,"urlRenders":"x"}', 1)).toBeNull();
+  });
+
   it('accepts a complete batch', () => {
     expect(
       parseProbe(
-        '{"index":0,"ok":true,"escaped":true,"scheme":false,"delivered":true,"reached":true}',
+        '{"index":0,"ok":true,"escaped":true,"urlRenders":[],"delivered":true,"reached":true}',
         1,
       ),
     )
@@ -706,6 +766,17 @@ describe('run — end to end, through the real renderer', () => {
       `// ${UNCHECKED_EXEMPT_MARKERS[0]}:   \n${raw}`,
     );
     expect(await run([blank])).toHaveLength(1);
+  });
+
+  it('reports nothing for a safe component whose payload IS delivered (#333)', async () => {
+    // This is what pins `escapeHtml` against hono's real escaping, and it does
+    // it through the consequence rather than by reimplementing the escaper. The
+    // probe decides a payload was DELIVERED by finding it raw or in that
+    // escaped form; if the two disagreed, `delivered` would read false here,
+    // the reach guard would fire, and this component would be reported
+    // UNCHECKED although it is both safe and reached.
+    const safe = 'const Attr = (p: { t: string }) => <span title={p.t}>x</span>;\n@Render(Attr)';
+    expect(await run([await write('safe-attr.md', safe)])).toEqual([]);
   });
 
   it('FAILS a component that renders a prop into href', async () => {
