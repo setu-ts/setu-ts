@@ -16,7 +16,7 @@ import type { StructuralSchema } from '../validators/config-validator.ts';
  * prefix-stripped entries from `keys`.
  *
  * @typeParam T - The validated output produced by the section schema
- * @since 0.6.0
+ * @since 0.7.0
  */
 export interface ConfigSection<T> {
   /** Prefix prepended to every declared key when reading the configuration. */
@@ -60,7 +60,7 @@ const sectionCache = new WeakMap<
  *   schema: { parse: (input) => input },
  * });
  * ```
- * @since 0.6.0
+ * @since 0.7.0
  */
 export function defineConfigSection<T>(definition: ConfigSection<T>): ConfigSection<T> {
   return Object.freeze({
@@ -81,7 +81,7 @@ export function defineConfigSection<T>(definition: ConfigSection<T>): ConfigSect
  * @param definition - The section declaration passed to the plugin at startup
  * @returns The validated section value
  * @throws {Error} If this configuration did not validate the definition
- * @since 0.6.0
+ * @since 0.7.0
  */
 export function getConfigSection<T>(config: IConfig, definition: ConfigSection<T>): T {
   const entry = sectionCache.get(config)?.get(definition);

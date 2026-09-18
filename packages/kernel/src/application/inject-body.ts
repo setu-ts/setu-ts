@@ -21,7 +21,7 @@ import type { InjectRequest } from './application.ts';
  * The body shapes {@linkcode InjectRequest} carries — derived from the
  * published interface, which owns the literal union.
  *
- * @since 0.6.1
+ * @since 0.7.0
  */
 export type InjectBody = NonNullable<InjectRequest['body']>;
 
@@ -52,7 +52,7 @@ export interface CoercedInjectBody {
  * @param body - The caller-supplied body, if any
  * @returns The coerced bytes and the content-type default for the shape
  * @throws {TypeError} When the body is outside the {@linkcode InjectBody} union
- * @since 0.6.1
+ * @since 0.7.0
  */
 export async function coerceInjectBody(
   body: InjectBody | undefined,

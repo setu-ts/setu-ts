@@ -99,7 +99,7 @@ export function getCsrfToken(ctx: IRequestContext): string {
  *
  * Keyed per the M71 state-key convention (`<owner-package>:<kebab-key>`).
  *
- * @since 0.6.1
+ * @since 0.7.0
  */
 export const CSRF_CONFIG_STATE_KEY = 'session-plugin:csrf-config';
 
@@ -113,7 +113,7 @@ export const CSRF_CONFIG_STATE_KEY = 'session-plugin:csrf-config';
  * anonymous. The object is frozen, so a stray write throws under ESM's strict
  * mode instead of silently detaching from what the verifier checks.
  *
- * @since 0.6.1
+ * @since 0.7.0
  */
 export interface PublishedCsrfConfig {
   /** The form field the verifier will read on an unsafe method. */
