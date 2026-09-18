@@ -10199,8 +10199,10 @@ every exporter honour it — and that is the whole scope here.
 
 ### The gap is mechanical, and four of its five parts are defects
 
-`grep -rnwE "PII|PHI|PCI|HIPAA|GDPR|DSS" packages/*/src docs/*.md *.md` returns **nothing**, which
-is correct and stays that way. The gap is not vocabulary; it is that the three exporters disagree.
+`grep -rnwE "HIPAA|GDPR|DSS" packages/*/src docs/*.md` returns **nothing**, which is correct and
+stays that way. Planning records are intentionally outside this scan. Standard field classifications
+such as PII, PHI and PCI are mechanism vocabulary, not a claim that this framework implements a
+regulation. The gap is that the three exporters disagree.
 
 1. **Telemetry exports the full URL, query string included.**
    `telemetry-plugin/src/middleware/telemetry-middleware.ts:59` sets `http.url` to `request.url` —
@@ -10354,6 +10356,287 @@ that to per-parameter redaction, so a query string can be kept where the policy 
 
 ---
 
+## Milestone 97: Ergonomics — Sugar Over Seams That Already Exist
+
+**Package(s):** 97a `packages/decorator-plugin`, `packages/cli`; 97b `packages/decorator-plugin`,
+`packages/common`, `packages/openapi-plugin`; 97c `packages/config-plugin`.
+
+**Only 97b touches `common`,** and the other two lists were corrected from an earlier draft once
+their plans resolved the seam (the M70b/M70g/M70k precedent): 97a puts the ingress map on the
+concrete `MetadataStore` rather than widening `IMetadataStore` (the M36b `ctorInject` precedent),
+and 97c ships a free function rather than a required `IConfig` member. 97a gains `packages/cli`
+because its schematics are a deliverable rather than a follow-on.
+
+**Objective:** Close three places where a capability is complete, its registration surface is
+public, and the developer still hand-writes the wiring. None of the three needs a new capability
+token, a new package, or a behaviour change to anything already registered.
+
+The three have separate package ownership and no shared mechanism, so they are separate milestones
+under one number — the M93a/M93b shape, for the same reason: bundling them would put two unrelated
+correctness boundaries in one PR.
+
+### The test each one passes is the one M93 set
+
+M93's two halves are sugar over a seam that already exists, with no new coupling:
+`createDomainEvents()` is one factory with no token, no registration and no plugin context, and
+`defineIntegrationEvent` produces the existing `SubscriptionDefinition` shape so it plugs into
+`MessagingPlugin({ subscriptions })` with no `IMessageBroker` change. Each item below was admitted
+only after its seam was read and confirmed complete; where the seam is NOT complete — an automatic
+per-request DI scope, which both comparison frameworks have and this one does not — it is named at
+the end as unowned rather than smuggled in, because it is a kernel and container change, not sugar.
+
+**The competitor rows below are from knowledge and have NOT been measured.** M94 built runnable
+ASP.NET Core 9 and NestJS 10 applications in `.tmp/compare/` for exactly this comparison and
+recorded that **two doc-derived claims did not survive** — most notably that ASP.NET negotiates
+error responses on `Accept`, which it does not. `.tmp/compare/aspnet` is still on disk. Each plan
+below re-measures the rows it relies on before its section's prose is fixed.
+
+### Milestone 97a: Decorators for Non-HTTP Ingress
+
+**Package(s):** `packages/decorator-plugin`, `packages/cli`
+
+**Plan:** `plans/archive/milestone-97a-ingress-decorators.md`
+
+**Objective:** Give the six non-HTTP ingress categories — queue, scheduler, domain events,
+messaging, WebSocket and CQRS — the class-based registration surface HTTP has had since M9, so
+`--template class-based` describes a whole application rather than its HTTP seventh. Six categories,
+**seven** provider tokens: `CqrsPlugin` provides `COMMAND_BUS` and `QUERY_BUS` separately
+(`packages/cqrs-plugin/src/plugin/cqrs-plugin.ts:111`) and the pass resolves both buses directly.
+
+**This was scoped and deferred by M86, and its stated precondition is now met.** `ROADMAP.md:8509`
+records that "a `@Gateway`/`@Processor`/`@Cron`/`@Subscribe` surface is the natural follow-on and is
+deliberately deferred until the arms and the pipeline exist", with the reasoning that shipping
+`@UseGuards` on a gateway before `route()` accepts middleware "gives the guard nothing to attach to,
+so it would silently do nothing" — M70n's `@ValidateBody` and M58's `g controller`, both of which
+shipped green because a test asserted the decorator was _present_. M86 shipped the arms and the
+shared composer (PR #228). The seam exists; this is the sugar.
+
+**The gap is one-sided and mechanically checkable.** `grep -n "^export"` over
+`packages/{scheduler,events,queue,websocket,cqrs,messaging}-plugin/src/index.ts` returns no
+decorator from any of the six — `messaging-plugin` is in that list because `@Subscribe` maps to
+`IMessageBroker.subscribe`, and an earlier draft cited only five paths while claiming a six-ingress
+gap. A class-based project therefore gets `@Controller` and then writes an options array by hand for
+every queue processor, cron job, event handler, broker subscription, socket route, and command or
+query handler it owns.
+
+**Four facts were established from source before the design was fixed, and the first is what makes
+this cheap.**
+
+- **The behaviour-wrapped service is what is registered under the token, so an imperative
+  registration on the RESOLVED capability inherits the whole M86/M90i stack.**
+  `queue-plugin/src/plugin/queue-plugin.ts:245` registers `registrar`, which is the
+  `BehaviorChainQueueService` built at `:349` whose `override process()` (`:378`) wraps the
+  processor in `withIngressBehaviors(...)` and the `chainReady` gate — and, when a telemetry
+  capability is present, `registrar` is the `TracedQueue` decorator (`:238`). The same holds for
+  messaging (`messaging-plugin.ts:392-403` registers the `PipelinedBroker`) and scheduler
+  (`scheduler-plugin.ts:159-172` registers `BehaviorChainSchedulerService`). A decorated processor
+  registered through `queue.process(...)` is therefore behaviour-wrapped, gated and traced with no
+  new code on either side. This is the whole reason the milestone is small.
+- **No plugin imports another plugin, and none needs to.** Every registration method is on a
+  contract declared in `common`: `IQueue.process`, `IScheduler.cron`/`every`/`delay`,
+  `IMessageBroker.subscribe`, `IEventBus.subscribe` (`services/events.ts:82`),
+  `ICommandBus.register`/`IQueryBus.register` (`services/cqrs.ts:114,146`), and
+  `IWebSocketService.route`. `decorator-plugin` resolves each token optionally and registers what
+  the metadata store holds. AI_GUIDELINES §2.2 is satisfied without widening `IMetadataStore` and
+  without six plugins each growing a metadata-reading path.
+- **The `optionalDependencies` edge this needs is the one the plugin already uses three times, and
+  it forms no cycle.** `decorator-plugin.ts:871` already declares
+  `[VALIDATION, AUTHORIZATION, VIEW]` at `PLUGIN_PRIORITY.LOW` (900). Adding the seven ingress
+  provider tokens orders every declaring provider ahead of it.
+  `grep -rn METADATA_STORE packages/{queue,scheduler,messaging,events,cqrs,websocket}-plugin/src`
+  returns **nothing**, so no ingress plugin depends back on what this one provides — the
+  `LoggerPlugin ↔ TelemetryPlugin` cycle M90i found (which threw at `start()` for every application
+  registering both) cannot occur here. The plan states this as a checked fact, not an assumption,
+  and pins it with a boot test.
+- **The definition shapes are already public and already what the arms take.**
+  `QueueProcessorDefinition` (`queue-plugin/src/interfaces/index.ts:308`) is
+  `{ name, processor, options? }`, `SchedulerJobDefinition` (`scheduler-plugin/.../index.ts:139`) is
+  a union discriminated on `trigger`, and `SubscriptionDefinition`
+  (`messaging-plugin/.../index.ts:329`) is `{ topic, handler, options? }`. A decorator produces
+  these, so the declarative arm and the decorated form cannot diverge about what a registration is.
+
+**Deliverables.**
+
+- **One decorator per ingress, in `decorator-plugin`.** `@Processor(name, options?)`,
+  `@Cron(expression, options?)` / `@Every(ms, options?)`, `@OnEvent(type)`,
+  `@Subscribe(topic,
+  options?)`, `@Gateway(path)` + `@OnMessage`/`@OnOpen`/`@OnClose`, and
+  `@CommandHandler(type)`/`@QueryHandler(type)`. Each is a method decorator on a class the
+  application lists in `DecoratorPluginOptions`, exactly as `@Controller` is.
+- **One registration pass, at one lifecycle phase, resolving each token with `ctx.services.has`.**
+  The plan picks `onInit` and records why; it runs after every ingress plugin's chain is built, and
+  the alternative `onBootstrap` would place these registrations after an application plugin's own
+  `onInit`. A decorated class whose ingress capability is absent fails **from that same pass**,
+  naming both the class and the missing plugin — the M92 `@Render` precedent, not the M70n
+  `@ValidateBody` warn arm, because unlike a validation schema there is no defensible reading under
+  which an unregistered processor should silently never run. The refusal is read at `onInit` rather
+  than at `register()` because `optionalDependencies` orders only plugins that DECLARE the
+  capability while the registry also accepts imperative registration and is not sealed until after
+  `runBootstrap()` (`application.ts:505-506`) — a `register()`-time check would refuse an
+  application for a capability it goes on to have.
+- **Ingress behaviors stay typed to their transport.** `@UseIngressBehaviors` composes an
+  `IIngressBehavior` around queue, scheduler, messaging, and WebSocket handlers, while
+  `@UsePipelineBehaviors` composes an `IPipelineBehavior` around command and query handlers.
+  `@UseGuards` is refused at startup because it requires an HTTP request context; a behavior
+  declared on ONE processor is proven not to run for a second processor in the same application.
+- **The `class-based` template and `setu generate` reach the new surface.** `g job`,
+  `g event-handler`, `g ws-route`, `g command-handler` and `g query-handler` emit the decorated form
+  in a class-based project and today's functional artifact otherwise — the M65
+  `generatorMode(plugins)` mechanism, which reads the generated manifest and needs no new
+  `SchematicOptions` field. These are **arms on the five existing schematics, not new ones**:
+  `g job` already emits "a job processor usable by the queue or scheduler plugin" and so covers
+  `@Processor`, `@Cron` and `@Every`, and `g ws-route` shipped in M84. `@Subscribe` gets no
+  generator, because there is no messaging schematic to give an arm to and creating one is out of
+  scope — stated rather than promised.
+
+**Verification bar.** Every one of the six ingresses demonstrates a decorated handler receiving real
+work through a real kernel application, and one behaviour short-circuiting before it. Booting is
+mandatory, not optional: M58's `g controller` emitted a decorated controller that answered 500 on
+every request **for five releases** because every test asserted decorator presence rather than
+behaviour, and M70n's `@ValidateBody` validated nothing for as long. A test that asserts a decorator
+was recorded in the metadata store does not discharge this bar.
+
+**Not a deliverable.** No change to any of the six plugins' `src`. No `IMetadataStore` widening. No
+capability token. No change to any declarative arm — every existing options-array call site keeps
+working unchanged, and a plan-time byte-identity assertion pins that an application registering no
+decorated ingress class composes exactly as it does today. No auto-discovery by filesystem scan; the
+class list is explicit, as `controllers` is.
+
+### Milestone 97b: Response Shaping for Decorated Handlers
+
+**Package(s):** `packages/decorator-plugin`, `packages/common`, `packages/openapi-plugin`
+
+**Plan:** `plans/archive/milestone-97b-response-shaping.md`
+
+**Objective:** Let a decorated handler state its success status and its response headers in its
+declaration, rather than taking `@Ctx()` and mutating the response builder to say `201`.
+
+**The cliff is one line, and it has been widened twice already.**
+`decorator-plugin/src/plugin/decorator-plugin.ts:345` answers `ctx.response.json(result)` for any
+handler return that is not already a `HandlerResult` — so a plain return is always `200`, always
+JSON, always without headers. M58's review dropped a generated `201` for exactly this reason ("a
+decorated handler cannot set a status code"), and M64 shipped `@Ctx()` as the escape. **The escape
+works and the plan must not overstate the gap**: `ResponseBuilder.status()` mutates and returns
+`this` (`kernel/src/context/response.ts:36-39`), so `@Ctx()` plus `ctx.response.status(201)` plus
+returning the value does produce a `201`, and it composes with `@Render` because the render branch
+fires on a non-`HandlerResult` return. This is an ergonomics milestone, not a defect repair, and the
+section says so.
+
+**The second payoff is the one that justifies the `common` change.** A declared success status is
+derivable into the OpenAPI document by the mechanism M57 and M70m already built twice: a
+`Symbol.for`-keyed brand in `common`, read by `openapi-plugin` off the route, with neither plugin
+importing the other (`SECURITY_METADATA` at `common/src/http.ts:519`, `VALIDATION_METADATA` at
+`:741`). `RouteSchema.response` is already `Readonly<Record<number, unknown>>`
+(`common/src/http.ts:445`), so the document has a status-keyed slot to receive it — today a
+decorated `201` is invisible to the generated client, which types every success as `200`.
+
+**Deliverables.**
+
+- **`@HttpCode(status)`, `@ResponseHeader(name, value)`, `@Redirect(url, status?)`** in
+  `decorator-plugin`, applied in `createHandler` before the JSON/render branch.
+- **`RESPONSE_METADATA` + `withResponseMetadata`/`responseMetadataOf` in `common`**, `Symbol.for`
+  keyed for the reason M57 records: a locally-created symbol misses on every read when two copies of
+  `common` share a process, silently.
+- **`deriveResponseStatus` in `openapi-plugin`**, consistent with M70m's precedence: a **declared**
+  `RouteSchema.response` wins over a derived one, and with the option off the document is
+  byte-identical. **Shipped ON by default, not opt-in as this bullet first said** — it follows
+  `deriveRequestSchemas` rather than `deriveSecurity`, because `deriveSecurity` is opt-in only for
+  needing a caller-supplied scheme name and a status needs nothing configured. It is safe to default
+  on because the brand is new surface: no handler written before `@HttpCode` existed carries one, so
+  an application that changes nothing gets a byte-identical document — asserted by a test rather
+  than assumed.
+- **A returned `HandlerResult` still wins.** A handler that returns
+  `ctx.response.status(202).json(...)` keeps that status even under `@HttpCode(201)`, because the
+  explicit runtime value is the more specific statement. Pinned by a test, so the precedence is a
+  decision rather than an accident of ordering.
+
+**Not a deliverable.** No `@Res()`-style raw response injection — `@Ctx()` already is that, and a
+second spelling would be the dead-surface rule. No content negotiation.
+
+**Out of scope, recorded rather than forgotten.** `setu g controller` and `g module` are NOT changed
+to emit `@HttpCode(201)` on their create handlers, though it is expressible now and M58's review
+recorded dropping exactly that `201` because it was not. Changing generated output is a behaviour
+change to already-published generated output and wants its own CHANGELOG migration note, as M58's
+did; it is a separable decision, and it belongs to whichever milestone next touches the schematics.
+
+### Milestone 97c: Typed Configuration Sections
+
+**Package(s):** `packages/config-plugin`
+
+**Plan:** `plans/archive/milestone-97c-typed-config-sections.md`
+
+**Objective:** Make a configuration read return a value whose type was checked, rather than a value
+whose type the caller asserted.
+
+**`IConfig` is flat and the type parameter is unchecked.** `common/src/services/config.ts:28` is
+`get<T>(key: string): T | undefined` over a `Record<string, unknown>`, so
+`config.get<number>('PORT')` compiles, returns whatever is in the store, and is typed `number`
+regardless. There is no way to name a group of related settings, and no way for a consumer to
+receive one.
+
+**The validation seam is already built, and the parsed type is thrown away one line from where it
+exists.** `ConfigPluginOptions.validationSchema` (`config-plugin/src/options.ts:56`) takes a
+`StructuralSchema<unknown>` — Zod-compatible, `parse(input: unknown): T` — and
+`validators/config-validator.ts:41-76` runs it at startup, so a schema declaring `z.coerce.number()`
+means the **stored value really is a number**. The last line of that function is
+`return parsed as Record<string, unknown>`: the coerced values survive and their type does not. That
+erasure is the whole gap. This is the one of the three where the ergonomic is also a safety
+improvement, and it is the ASP.NET `IOptions<T>` row.
+
+**Deliverables.**
+
+- **A typed section accessor.** `defineConfigSection({ prefix, keys, schema })` produces a
+  definition and the free function `getConfigSection(config, definition)` resolves one to its parsed
+  type. **A required `IConfig.getSection` member was considered and declined** — it is breaking for
+  an implementor (the M74 precedent) and buys nothing, because the parsed value is cached at startup
+  and the accessor reads through the public `get`; keeping the section concept out of `common` also
+  keeps `common` free of the validator dependency that put `StructuralSchema` in `config-plugin` in
+  the first place. `ConfigPluginOptions.validationSchema` keeps its current meaning and runs FIRST;
+  sections parse their declared prefix-plus-key subsets out of its output. `keys` is required
+  because `IConfig` has named reads but cannot enumerate an arbitrary injected snapshot.
+- **Sections validate at startup, not at first read.** A missing or unparseable section fails
+  `register()` naming the section, which is the property that makes the typed read honest — a
+  read-time parse would mean a configuration error surfaces on the first request that happens to
+  touch it.
+- **A section's error message discloses no value.** `validateConfig` already refuses to propagate
+  the schema's own message for this reason (`config-validator.ts:49-53`); the section path must hold
+  the same line, and a test must pin that a bad enum value does not reach the thrown message.
+
+**Not a deliverable.** No change to `get`/`getOrThrow`/`has`. No reloading or change notification —
+ASP.NET's `IOptionsMonitor` is a different capability with a file-watching or polling dependency,
+and the framework's configuration is loaded once at startup by design. No per-section default
+merging beyond what the schema itself expresses.
+
+### Named and NOT taken
+
+- **An automatic per-request DI scope.** Both comparison frameworks open one: Nest's `Scope.REQUEST`
+  and ASP.NET's `AddScoped`, where it is the default lifetime for an EF `DbContext`. `di-plugin` has
+  the lifetime (`container.ts:142` implements `createScope()`), but
+  `grep -rn createScope packages/kernel/src packages/decorator-plugin/src packages/di-plugin/src/plugin`
+  returns **nothing**, so nothing opens a scope per request and a `'scoped'` service is a singleton
+  unless the application calls `createScope()` itself — which `apps/di-decorators/src/app.ts:26`
+  does, deliberately and manually. This is a kernel and container change with a real cost (a
+  container per request), not sugar over an existing seam, so it fails this milestone's own test and
+  wants its own. `docs/migration-nestjs.md:833` presents `@Injectable({ scope: 'scoped' })` as the
+  `Scope.REQUEST` equivalent, and `docs/decorators.md:315` states "new instance per request scope"
+  outright. Both are defects — M70d corrected the `ServiceScope` JSDoc and swept neither guide — and
+  both are repaired in [#325](https://github.com/setu-ts/setu-ts/pull/325) rather than waiting for
+  the capability.
+- **`ParseIntPipe`-style parameter transformation and `{id:int}` route constraints.** Narrower than
+  it looks: `resolveParameter` prefers a validated value for `@Body`/`@Query`/`@Param`
+  (`decorator-plugin/src/resolvers/parameter-resolver.ts:150`), so `z.coerce.number()` through
+  `@ValidateParams` already yields a typed parameter. What is missing is only the zero-config form,
+  and a second spelling of a solved problem is the dead-surface rule.
+- **`PartialType`/`PickType`/`OmitType`.** Zod ships `.partial()`, `.pick()` and `.omit()`.
+  Reimplementing them is §11.1.
+- **`IHostedService`.** ASP.NET's one primitive with no Setu name. `onBootstrap`/`onShutdown` plus a
+  plugin covers it, and the part applications get wrong — cancelling the loop on shutdown — is an
+  `AbortSignal` threading question that belongs with the runtime lifecycle, not here.
+- **Localization.** `IStringLocalizer` has no counterpart here and the framework has no i18n of any
+  kind. That is a real gap and a milestone in its own right, not an ergonomic.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                |
@@ -10504,4 +10787,7 @@ that to per-parameter redaction, so a query string can be kept where the policy 
 | 95b       | ✅     | common + database-plugin + messaging-plugin — reachability that fails open (**High**)                                  |
 | 95c       | ✅     | common + database-plugin + kernel + session-plugin + static-plugin — a contract its own implementation does not honour |
 | 95d       | ✅     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
-| 96        | ⬜     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
+| 96        | ✅     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
+| 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                               |
+| 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                   |
+| 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                     |

@@ -78,7 +78,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/audit-plugin/README.md': 3,
   'packages/common/README.md': 2,
   // M92: +1 for the @Render example.
-  'packages/decorator-plugin/README.md': 4,
+  'packages/decorator-plugin/README.md': 5,
   // M92: the new package's README is born gated — usage, functional renderView,
   // the @Render decorator and the raw() opt-out.
   'packages/view-plugin/README.md': 6,
@@ -98,14 +98,14 @@ const READMES: Readonly<Record<string, number>> = {
   // producing false failures of its own; the nine still outstanding are named
   // in the ungated-coverage assertion below so the gap cannot be forgotten.
   'packages/cache-plugin/README.md': 2,
-  'packages/config-plugin/README.md': 4,
+  'packages/config-plugin/README.md': 5,
   'packages/di-plugin/README.md': 2,
   'packages/exceptions/README.md': 3,
   'packages/feature-flags-plugin/README.md': 2,
   'packages/health-plugin/README.md': 2,
   'packages/http-security-plugin/README.md': 2,
   'packages/kernel/README.md': 2,
-  'packages/logger-plugin/README.md': 2,
+  'packages/logger-plugin/README.md': 3,
   'packages/mail-plugin/README.md': 2,
   'packages/metrics-plugin/README.md': 2,
   'packages/runtime/README.md': 3,

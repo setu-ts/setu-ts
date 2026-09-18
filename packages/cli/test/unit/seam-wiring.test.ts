@@ -127,7 +127,12 @@ describe('seam selection', () => {
     const extras = decoratorSeamExtras(listSeamSpecs());
     expect(extras.controllers).toEqual(['...APP_CONTROLLERS']);
     expect(extras.services).toEqual(['...APP_SERVICES']);
-    expect(decoratorSeamExtras(seamsFor(new Set()))).toEqual({ controllers: [], services: [] });
+    expect(extras.ingress).toEqual(['...INGRESS_HANDLERS']);
+    expect(decoratorSeamExtras(seamsFor(new Set()))).toEqual({
+      controllers: [],
+      services: [],
+      ingress: [],
+    });
   });
 
   it('replaces the args of each plugin whose options carry a seam', () => {

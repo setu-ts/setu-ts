@@ -12,7 +12,17 @@
  *
  * @module
  */
-import type { Component, Constructor, IMetadataStore, MiddlewareFunction } from '@setu-ts/common';
+import type {
+  Component,
+  Constructor,
+  IIngressBehavior,
+  IMetadataStore,
+  IPipelineBehavior,
+  MiddlewareFunction,
+  ProcessOptions,
+  ScheduleOptions,
+  SubscribeOptions,
+} from '@setu-ts/common';
 
 import { takePending } from './pending.ts';
 import type { HttpMethod } from '@setu-ts/common';
@@ -145,6 +155,78 @@ export interface ModuleMetadata {
   readonly imports: readonly Constructor[];
 }
 
+/** Metadata captured by a non-HTTP ingress decorator. */
+export type IngressMetadata =
+  | {
+    readonly kind: 'queue';
+    readonly handler: string;
+    readonly name: string;
+    readonly options?: ProcessOptions;
+  }
+  | {
+    readonly kind: 'scheduler-cron';
+    readonly handler: string;
+    readonly expression: string;
+    readonly options?: ScheduleOptions;
+  }
+  | {
+    readonly kind: 'scheduler-every';
+    readonly handler: string;
+    readonly intervalMs: number;
+    readonly options?: ScheduleOptions;
+  }
+  | { readonly kind: 'event'; readonly handler: string; readonly type: string }
+  | {
+    readonly kind: 'messaging';
+    readonly handler: string;
+    readonly topic: string;
+    readonly options?: SubscribeOptions;
+  }
+  | { readonly kind: 'gateway'; readonly path: string }
+  | { readonly kind: 'websocket-open'; readonly handler: string }
+  | { readonly kind: 'websocket-message'; readonly handler: string }
+  | { readonly kind: 'websocket-close'; readonly handler: string }
+  | { readonly kind: 'command'; readonly handler: string; readonly type: string }
+  | { readonly kind: 'query'; readonly handler: string; readonly type: string }
+  | {
+    readonly kind: 'ingress-behaviors';
+    readonly handler: string;
+    readonly behaviors: readonly IIngressBehavior[];
+  }
+  | {
+    readonly kind: 'pipeline-behaviors';
+    readonly handler: string;
+    readonly behaviors: readonly IPipelineBehavior[];
+  };
+
+/**
+ * One response header declared by `@ResponseHeader(name, value)`.
+ *
+ * Header names are case-insensitive (RFC 9110 §5.1), so the plugin refuses a
+ * handler declaring the same name twice rather than letting the second
+ * silently overwrite the first.
+ *
+ * @since 0.7.0
+ */
+export interface ResponseHeaderMetadata {
+  /** The header name, exactly as the decorator was given it. */
+  readonly name: string;
+  /** The header value. */
+  readonly value: string;
+}
+
+/**
+ * The redirect declared by `@Redirect(url, status?)`.
+ *
+ * @since 0.7.0
+ */
+export interface RedirectMetadata {
+  /** The `Location` header value. */
+  readonly url: string;
+  /** The redirect status — an integer in `[300, 399]`; `302` by default. */
+  readonly status: number;
+}
+
 /**
  * Materialized route metadata — one entry per (controller, HTTP verb). Built
  * from a {@linkcode MethodMeta} accumulator's bindings. The
@@ -185,6 +267,12 @@ export interface RouteMetadata {
    * HTML rendered from the handler's returned props bag instead of JSON.
    */
   readonly view?: Component<unknown>;
+  /** Success status declared by `@HttpCode(status)`. */
+  readonly httpCode?: number;
+  /** Redirect declared by `@Redirect(url, status?)`. */
+  readonly redirect?: RedirectMetadata;
+  /** Response headers declared by `@ResponseHeader(name, value)`. */
+  readonly responseHeaders?: readonly ResponseHeaderMetadata[];
 }
 
 /**
@@ -223,6 +311,17 @@ export interface MethodMeta {
   permissions?: string[];
   /** The view component attached by `@Render(Component)` (mutable twin). */
   view?: Component<unknown>;
+  /** Success status declared by `@HttpCode(status)` (mutable twin). */
+  httpCode?: number;
+  /** Redirect declared by `@Redirect(url, status?)` (mutable twin). */
+  redirect?: RedirectMetadata;
+  /**
+   * Response headers declared by `@ResponseHeader(name, value)` (mutable
+   * twin). Decorators apply bottom-up, so this accumulates in reverse source
+   * order — which is immaterial because a duplicate name is refused at
+   * `register()`, leaving no header able to overwrite another.
+   */
+  responseHeaders?: ResponseHeaderMetadata[];
 }
 
 /**
@@ -281,6 +380,7 @@ export class MetadataStore implements IMetadataStore {
   private readonly _custom: CustomDecoratorRecord[] = [];
   private readonly _ctorOptional = new Map<Constructor, Set<number>>();
   private readonly _modules = new Map<Constructor, ModuleMetadata>();
+  private readonly _ingress = new Map<Constructor, IngressMetadata[]>();
 
   /** Controllers keyed by class. */
   get controllers(): Map<Constructor, Readonly<Record<string, unknown>>> {
@@ -512,6 +612,27 @@ export class MetadataStore implements IMetadataStore {
   }
 
   /**
+   * Records one non-HTTP ingress declaration for a class.
+   *
+   * @internal
+   */
+  addIngress(target: Constructor, metadata: IngressMetadata): void {
+    const entries = this._ingress.get(target) ?? [];
+    entries.push(metadata);
+    this._ingress.set(target, entries);
+  }
+
+  /**
+   * Returns the non-HTTP ingress declarations recorded for a class.
+   *
+   * @internal
+   */
+  getIngress(target: Constructor): readonly IngressMetadata[] {
+    this.#drain(target);
+    return this._ingress.get(target) ?? [];
+  }
+
+  /**
    * Returns the (mutable) method accumulator for a controller method,
    * creating it if absent.
    *
@@ -647,6 +768,7 @@ export class MetadataStore implements IMetadataStore {
     this._custom.length = 0;
     this._ctorOptional.clear();
     this._modules.clear();
+    this._ingress.clear();
   }
 
   /**
@@ -669,6 +791,9 @@ export class MetadataStore implements IMetadataStore {
       ...(meta.roles !== undefined ? { roles: [...meta.roles] } : {}),
       ...(meta.permissions !== undefined ? { permissions: [...meta.permissions] } : {}),
       ...(meta.view !== undefined ? { view: meta.view } : {}),
+      ...(meta.httpCode !== undefined ? { httpCode: meta.httpCode } : {}),
+      ...(meta.redirect !== undefined ? { redirect: meta.redirect } : {}),
+      ...(meta.responseHeaders !== undefined ? { responseHeaders: [...meta.responseHeaders] } : {}),
     };
   }
 }

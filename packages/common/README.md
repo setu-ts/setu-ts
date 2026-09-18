@@ -116,11 +116,14 @@ package fits the plugin architecture.
 | `contextToTraceparent`            | function  |
 | `createCachedProbe`               | function  |
 | `createCapabilityToken`           | function  |
+| `createMaskRedactor`              | function  |
 | `createPathMatcher`               | function  |
+| `createRedactionService`          | function  |
 | `decodeCursor`                    | function  |
 | `decodeFrameData`                 | function  |
 | `encodeCursor`                    | function  |
 | `encodeFrameData`                 | function  |
+| `eraseRedactor`                   | function  |
 | `err`                             | function  |
 | `errorResponderOf`                | function  |
 | `extractContextFromHeaders`       | function  |
@@ -153,6 +156,7 @@ package fits the plugin architecture.
 | `resolveResponseStatus`           | function  |
 | `respondWithAuthorizationFailure` | function  |
 | `respondWithError`                | function  |
+| `responseMetadataOf`              | function  |
 | `sealRequestIdentity`             | function  |
 | `securityMetadataOf`              | function  |
 | `serializeCookie`                 | function  |
@@ -166,16 +170,20 @@ package fits the plugin architecture.
 | `validatedStateKey`               | function  |
 | `validationMetadataOf`            | function  |
 | `withHttpStatusHint`              | function  |
+| `withResponseMetadata`            | function  |
 | `withSecurityMetadata`            | function  |
 | `withValidationMetadata`          | function  |
 | `MalformedRequestBodyError`       | class     |
 | `UnsupportedFormEncodingError`    | class     |
 | `CAPABILITIES`                    | const     |
 | `CLIENT_IP_STATE_KEY`             | const     |
+| `DATA_CLASSIFICATIONS`            | const     |
+| `DEFAULT_SECRET_FIELD_PATTERNS`   | const     |
 | `ERROR_RESPONDER_BRAND`           | const     |
 | `ERROR_RESPONDER_STATE_KEY`       | const     |
 | `HTTP_STATUS_HINT`                | const     |
 | `PLUGIN_PRIORITY`                 | const     |
+| `RESPONSE_METADATA`               | const     |
 | `SECURITY_METADATA`               | const     |
 | `TELEMETRY_CONTEXT_OPAQUE`        | const     |
 | `TRACEPARENT_HEADER`              | const     |
@@ -273,6 +281,7 @@ package fits the plugin architecture.
 | `IQueryHandler`                   | interface |
 | `IQueue`                          | interface |
 | `IRealtimeBackplane`              | interface |
+| `IRedactionService`               | interface |
 | `IRequest`                        | interface |
 | `IRequestContext`                 | interface |
 | `IResilienceService`              | interface |
@@ -309,6 +318,7 @@ package fits the plugin architecture.
 | `IWorkerPool`                     | interface |
 | `JwtSignOptions`                  | interface |
 | `MailMessage`                     | interface |
+| `MaskOptions`                     | interface |
 | `MessageMetadata`                 | interface |
 | `MetricConfig`                    | interface |
 | `MetricOptions`                   | interface |
@@ -326,6 +336,8 @@ package fits the plugin architecture.
 | `RbacConfig`                      | interface |
 | `RealtimeFrame`                   | interface |
 | `RecurringOptions`                | interface |
+| `RedactionContext`                | interface |
+| `RedactionPolicy`                 | interface |
 | `RegisterOptions`                 | interface |
 | `RequestOptions`                  | interface |
 | `RetryOptions`                    | interface |
@@ -334,6 +346,7 @@ package fits the plugin architecture.
 | `RoomBroadcastOptions`            | interface |
 | `RouteDefinition`                 | interface |
 | `RouteInfo`                       | interface |
+| `RouteResponseMetadata`           | interface |
 | `RouteSchema`                     | interface |
 | `RouteSecurityMetadata`           | interface |
 | `RouteValidationMetadata`         | interface |
@@ -379,6 +392,7 @@ package fits the plugin architecture.
 | `Component`                       | type      |
 | `Constructor`                     | type      |
 | `CursorValue`                     | type      |
+| `DataClassification`              | type      |
 | `DecoratorHandler`                | type      |
 | `EntityKey`                       | type      |
 | `EventHandler`                    | type      |
@@ -411,6 +425,7 @@ package fits the plugin architecture.
 | `Provider`                        | type      |
 | `RealtimeFrameHandler`            | type      |
 | `RealtimeFrameKind`               | type      |
+| `Redactor`                        | type      |
 | `RegistryFactory`                 | type      |
 | `RequestHandler`                  | type      |
 | `ResilientCall`                   | type      |

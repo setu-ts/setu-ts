@@ -1218,7 +1218,7 @@ graph TB
 | Aspect               | Detail                                                                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Optional decorator and metadata system                                                                                                |
-| **Responsibilities** | Store decorator metadata in plain objects; read metadata and register routes/services/middleware with kernel                          |
+| **Responsibilities** | Store decorator metadata in plain objects; read metadata and register routes, services, middleware, and explicit non-HTTP ingress classes through public capabilities |
 | **Dependencies**     | `common`, `kernel`                                                                                                                    |
 | **Public API**       | `DecoratorPlugin()`; `@Controller`, `@Get`, `@Post`, etc.; `@Injectable`, `@Inject`; `@Params(...)` with the `Body`/`Query`/`Param` sources; `createDecorator()` |
 | **Extension Points** | Custom decorators via `createDecorator()`; custom parameter sources via `Custom()`                                                                |
@@ -1229,7 +1229,7 @@ graph TB
 | Aspect               | Detail                                                                                                      |
 | -------------------- | ----------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | Structured logging                                                                                          |
-| **Responsibilities** | Provide `ILogger` implementations (Pino, Console, Noop); request logging middleware; slow request detection |
+| **Responsibilities** | Provide `ILogger` implementations (Pino, Console, Noop); request logging middleware; slow request detection; redaction of log metadata |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                               |
 | **Public API**       | `LoggerPlugin()`; `ILogger`                                                                                 |
 | **Extension Points** | Custom logger implementation (override `logger` token); custom log formatters                               |
@@ -1418,7 +1418,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | Aspect               | Detail                                                                                                                                                                                                                                                                                                                                                                                            |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Purpose**          | OpenTelemetry distributed tracing                                                                                                                                                                                                                                                                                                                                                                 |
-| **Responsibilities** | Tracer provider; span management; context propagation; request-span middleware                                                                                                                                                                                                                                                                                                                    |
+| **Responsibilities** | Tracer provider; span management; context propagation; request-span middleware; safe request URL attributes                                                                                                                                                                                                                                                                                      |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                                                                                                                                                                                                                                     |
 | **Public API**       | `TelemetryPlugin()`; `telemetryMiddleware`; `TELEMETRY_SPAN_KEY`; `NoopTelemetryService`; `InstrumentationsConfig`/`InstrumentationConfig`/`InstrumentationKind`/`SpanProcessorKind`                                                                                                                                                                                                              |
 | **Extension Points** | Custom exporters; injectable `tracerProviderFactory`; injectable per-instrumentation instances (`InstrumentationConfig.instrumentation`)                                                                                                                                                                                                                                                          |
@@ -1440,7 +1440,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | Aspect               | Detail                                                                   |
 | -------------------- | ------------------------------------------------------------------------ |
 | **Purpose**          | Audit trail logging                                                      |
-| **Responsibilities** | Log audit events; store in database, file, or log; audit trail retrieval |
+| **Responsibilities** | Log audit events; redact entry bodies; store in database, file, or log; audit trail retrieval |
 | **Dependencies**     | `common`, `kernel` (consumes `logger` capability via token)              |
 | **Public API**       | `AuditPlugin()`; `IAuditLogger`                                          |
 | **Extension Points** | Custom audit storage                                                     |
@@ -2439,14 +2439,15 @@ The `SecretsPlugin` provides secret management:
 
 ### Plugin Responsibilities
 
-| Plugin                 | Security Responsibility                                 |
-| ---------------------- | ------------------------------------------------------- |
-| `http-security-plugin` | CORS, security headers, CSRF, request size, IP security |
-| `auth-plugin`          | Authentication, authorization, RBAC, route guards       |
-| `secrets-plugin`       | Secret management and rotation                          |
-| `audit-plugin`         | Audit trail for security events                         |
-| `validation-plugin`    | Input validation and sanitization                       |
-| `logger-plugin`        | Redaction of sensitive fields in logs                   |
+| Plugin                 | Security Responsibility                                  |
+| ---------------------- | -------------------------------------------------------- |
+| `http-security-plugin` | CORS, security headers, CSRF, request size, IP security  |
+| `auth-plugin`          | Authentication, authorization, RBAC, route guards        |
+| `secrets-plugin`       | Secret management and rotation                           |
+| `audit-plugin`         | Audit trail for security events; policy redaction        |
+| `validation-plugin`    | Input validation and sanitization                        |
+| `logger-plugin`        | Redaction of structured log metadata                     |
+| `telemetry-plugin`     | Query-safe span URL attributes; optional value redaction |
 
 ### Secure Defaults
 

@@ -46,6 +46,7 @@ import {
 } from './http.ts';
 import { COMMAND_HANDLER_SEAM, QUERY_HANDLER_SEAM } from './cqrs.ts';
 import { EVENTS_SEAM } from './events.ts';
+import { INGRESS_SEAM } from './ingress.ts';
 import { FUNCTIONAL_HEALTH_SEAM, HEALTH_SEAM } from './health.ts';
 import { METRICS_SEAM } from './metrics.ts';
 import { MIDDLEWARE_SEAM } from './middleware.ts';
@@ -72,6 +73,7 @@ const SEAM_REGISTRY: ReadonlyMap<string, SeamSpec> = new Map<string, SeamSpec>([
   [COMMAND_HANDLER_SEAM.schematic, COMMAND_HANDLER_SEAM],
   [QUERY_HANDLER_SEAM.schematic, QUERY_HANDLER_SEAM],
   [EVENTS_SEAM.schematic, EVENTS_SEAM],
+  [INGRESS_SEAM.schematic, INGRESS_SEAM],
 ]);
 
 /**
@@ -114,7 +116,9 @@ function withHostShapes(
     // scaffold time, not only when an artifact is admitted (A2).
     [FUNCTIONAL_HEALTH_SEAM.schematic, FUNCTIONAL_HEALTH_SEAM],
   ]);
-  return specs.map((spec) => functional.get(spec.schematic) ?? spec);
+  return specs.filter((spec) => spec !== INGRESS_SEAM).map((spec) =>
+    functional.get(spec.schematic) ?? spec
+  );
 }
 
 /**

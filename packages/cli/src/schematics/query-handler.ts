@@ -6,7 +6,9 @@
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { QUERY_HANDLER_SEAM, QUERY_HANDLERS_EXPORT } from '../seams/cqrs.ts';
+import { INGRESS_SEAM } from '../seams/ingress.ts';
 import { seamNames } from '../seams/seam-spec.ts';
+import { generatorMode } from '../utils/generator-mode.ts';
 import {
   renderConstAssignment,
   renderDeclarationHeader,
@@ -25,6 +27,44 @@ export function generateQueryHandler(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
+  if (generatorMode(options.plugins) === 'class-based') {
+    return [
+      {
+        path: `${INGRESS_SEAM.dir}/${names.kebab}${INGRESS_SEAM.suffix}`,
+        contents: `import type { CqrsQuery } from '@setu-ts/common';
+import { QueryHandler } from '@setu-ts/decorator-plugin';
+
+/** Type name the query bus routes on. */
+${renderConstAssignment(`${names.screaming}_QUERY`, `'${names.pascal}'`)}
+
+/** Criteria the ${names.pascal} query accepts. */
+export interface ${names.pascal}Criteria {
+  readonly id: string;
+}
+
+/** The ${names.pascal} query. */
+export interface ${names.pascal}Query extends CqrsQuery<${names.pascal}Criteria> {
+  readonly type: typeof ${names.screaming}_QUERY;
+}
+
+/** Decorated query handler, registered through the ingress barrel. */
+export class ${names.pascal}Ingress {
+  @QueryHandler(${names.screaming}_QUERY)
+  handle(query: ${names.pascal}Query): Promise<{ readonly id: string }> {
+    return Promise.resolve({ id: query.data.id });
+  }
+}
+`,
+      },
+      {
+        path: INGRESS_SEAM.barrel,
+        contents: INGRESS_SEAM.renderBarrel({
+          ingress: seamNames(options.artifacts, 'ingress', names.kebab),
+        }),
+        managed: true,
+      },
+    ];
+  }
   const contents = `import type { CqrsQuery, IQueryHandler } from '@setu-ts/common';
 
 /** Type name the query bus routes on. */

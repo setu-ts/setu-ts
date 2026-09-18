@@ -31,16 +31,17 @@ logger.info('server ready', { port: 3000 });
 
 ## Options
 
-| Option                 | Type                     | Default     | Description                                                                                             |
-| ---------------------- | ------------------------ | ----------- | ------------------------------------------------------------------------------------------------------- |
-| `level`                | `LogLevel`               | `'info'`    | Minimum level to emit.                                                                                  |
-| `transport`            | `LoggerTransport`        | `'console'` | Implementation: `'console'`, `'pino'`, or `'noop'`.                                                     |
-| `pretty`               | `boolean`                | `false`     | Pretty-print entries (console transport only).                                                          |
-| `redact`               | `readonly string[]`      | `[]`        | Dot-paths to strip from metadata.                                                                       |
-| `requestLogging`       | `boolean`                | `false`     | Register request/response logging middleware.                                                           |
-| `slowRequestThreshold` | `number`                 | `5000`      | Requests slower than this (ms) log at `warn`.                                                           |
-| `excludePaths`         | `readonly PathPattern[]` | `[]`        | Paths excluded from request logging. A string is an EXACT match; a `RegExp` is tested against the path. |
-| `pinoFactory`          | `PinoFactory`            | —           | Inject a pre-loaded Pino factory, skipping the import.                                                  |
+| Option                 | Type                                   | Default               | Description                                                                                             |
+| ---------------------- | -------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `level`                | `LogLevel`                             | `'info'`              | Minimum level to emit.                                                                                  |
+| `transport`            | `LoggerTransport`                      | `'console'`           | Implementation: `'console'`, `'pino'`, or `'noop'`.                                                     |
+| `pretty`               | `boolean`                              | `false`               | Pretty-print entries (console transport only).                                                          |
+| `redact`               | `readonly string[]`                    | Secret-field patterns | Dot-paths to redact from metadata; pass `[]` to opt out of the secure defaults.                         |
+| `redaction`            | `RedactionPolicy \| IRedactionService` | —                     | Shared policy or service applied before log egress.                                                     |
+| `requestLogging`       | `boolean`                              | `false`               | Register request/response logging middleware.                                                           |
+| `slowRequestThreshold` | `number`                               | `5000`                | Requests slower than this (ms) log at `warn`.                                                           |
+| `excludePaths`         | `readonly PathPattern[]`               | `[]`                  | Paths excluded from request logging. A string is an EXACT match; a `RegExp` is tested against the path. |
+| `pinoFactory`          | `PinoFactory`                          | —                     | Inject a pre-loaded Pino factory, skipping the import.                                                  |
 
 ## Pino
 
@@ -81,6 +82,21 @@ never turn logging into the fault.
 > The value registered under `CAPABILITIES.LOGGER` is an internal decorator wrapping the configured
 > transport, so `instanceof ConsoleLogger` on the resolved capability does not hold. `ILogger` is
 > the contract.
+
+## Redaction
+
+Loggers apply `redaction` after normalizing metadata and before the legacy `redact` list. Supply a
+shared `RedactionPolicy` (or an `IRedactionService`) to use the same policy in other egress plugins:
+
+```typescript
+LoggerPlugin({
+  redaction: { fields: { 'user.email': 'private' } },
+});
+```
+
+The legacy `redact` option remains supported and wins when it overlaps a policy. With no explicit
+`redact` list, common secret-shaped fields are redacted by default; set `redact: []` to restore the
+previous no-default-redaction behaviour.
 
 ## Exports
 

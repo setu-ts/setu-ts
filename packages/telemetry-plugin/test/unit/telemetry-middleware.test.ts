@@ -8,7 +8,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { telemetryMiddleware } from '../../src/middleware/telemetry-middleware.ts';
 import type { ISpan, ITelemetryService, NextFunction } from '@setu-ts/common';
-import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
+import { createRedactionService, TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
 import { TELEMETRY_SPAN_KEY } from '../../src/interfaces/index.ts';
 import { createFakeTracerHost } from '../fixtures/fake-tracer-host.ts';
 import { TelemetryService } from '../../src/services/telemetry-service.ts';
@@ -212,6 +212,25 @@ describe('telemetryMiddleware', () => {
     await middleware(ctx as never, async () => {});
 
     expect(recordedSpans[0]!.attributes['http.url']).toBe('http://localhost/items/1');
+  });
+
+  it('retains repeated query values while redacting each protected value', async () => {
+    const { service, recordedSpans } = createFakeService();
+    const tracerHost = createFakeTracerHost();
+    const middleware = telemetryMiddleware(
+      service,
+      tracerHost,
+      'redact',
+      createRedactionService({ fields: { 'query.token': 'secret' } }),
+    );
+    const ctx = createMockContext('GET', '/search');
+    ctx.request.url = 'http://localhost/search?tag=first&tag=second&token=one&token=two';
+
+    await middleware(ctx as never, async () => {});
+
+    expect(recordedSpans[0]!.attributes['http.url']).toBe(
+      'http://localhost/search?tag=first&tag=second&token=%5BRedacted%5D&token=%5BRedacted%5D',
+    );
   });
 
   it('should set http.route attribute', async () => {

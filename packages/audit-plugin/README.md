@@ -125,6 +125,12 @@ which leaves one gap it is honest about: a directory that is readable but not wr
 Every stored record is deep-frozen — including nested `before`/`after`/`metadata` — so it cannot be
 mutated after it is written, and records reconstructed on read (database/file) are frozen too.
 
+## Redaction
+
+Pass `redaction` as a `RedactionPolicy` or `IRedactionService` to filter `before`, `after`, and
+`metadata` before an entry is frozen and stored. Omitting the option preserves the existing audit
+record shape and values.
+
 ## License
 
 MIT

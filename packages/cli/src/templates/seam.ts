@@ -20,6 +20,7 @@ import { APP_CONTROLLERS_EXPORT, REGISTER_ROUTES_EXPORT } from '../seams/http.ts
 import { APP_SERVICES_EXPORT } from '../seams/services.ts';
 import { COMMAND_HANDLERS_EXPORT, QUERY_HANDLERS_EXPORT } from '../seams/cqrs.ts';
 import { EVENT_HANDLERS_EXPORT } from '../seams/events.ts';
+import { INGRESS_HANDLERS_EXPORT } from '../seams/ingress.ts';
 import { GENERATED_MIDDLEWARE_EXPORT } from '../seams/middleware.ts';
 import { GENERATED_PLUGINS_EXPORT } from '../seams/plugins.ts';
 import { HEALTH_INDICATORS_EXPORT } from '../seams/health.ts';
@@ -207,11 +208,15 @@ export function withPluginOptionSeams(
  * replacing them.
  *
  * @param seams - The host's consumable seams
- * @returns Controller and service identifier lists, either possibly empty
+ * @returns Controller, service, and ingress identifier lists, either possibly empty
  */
 export function decoratorSeamExtras(
   seams: readonly SeamSpec[],
-): { readonly controllers: readonly string[]; readonly services: readonly string[] } {
+): {
+  readonly controllers: readonly string[];
+  readonly services: readonly string[];
+  readonly ingress: readonly string[];
+} {
   const schematics = new Set(seams.map((spec) => spec.schematic));
   return {
     // Gated on the EXPORT, not the schematic name: both modes generate
@@ -221,5 +226,6 @@ export function decoratorSeamExtras(
       ? [`...${APP_CONTROLLERS_EXPORT}`]
       : [],
     services: schematics.has('service') ? [`...${APP_SERVICES_EXPORT}`] : [],
+    ingress: schematics.has('ingress') ? [`...${INGRESS_HANDLERS_EXPORT}`] : [],
   };
 }

@@ -261,7 +261,7 @@ describe('setu generate, with seams', () => {
   // not silently unwired.
   describe('an artifact predating the factory arm (M70d)', () => {
     const PRE_M70D = {
-      ...WIRED,
+      '/app/deno.json': manifest('cqrs-plugin'),
       '/app/src/cqrs/legacy.command-handler.ts': 'export const LEGACY_COMMAND = "Legacy";\n' +
         'export class LegacyCommandHandler { handle() { return Promise.resolve({ id: "x" }); } }',
     };

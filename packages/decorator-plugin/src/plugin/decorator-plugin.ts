@@ -20,6 +20,7 @@ import type {
   IAuthorizationService,
   IPlugin,
   IPluginContext,
+  IResponse,
   IValidationService,
   IViewEngine,
   MiddlewareFunction,
@@ -29,9 +30,12 @@ import type {
   RouteSchema,
   ValidationTarget,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY, withResponseMetadata } from '@setu-ts/common';
 
 import { createPermissionsMiddleware, createRolesMiddleware } from './authorization-middleware.ts';
+import { registerIngresses } from './ingress-registration.ts';
+import { validateResponseShaping } from '../decorators/response-status.ts';
+import type { ResponseShaping } from '../decorators/response-status.ts';
 
 import { metadataStore } from '../metadata/metadata-store.ts';
 import type {
@@ -62,6 +66,8 @@ export interface DecoratorPluginOptions {
   readonly controllers?: readonly Constructor[];
   /** Explicit list of service classes to register. */
   readonly services?: readonly Constructor[];
+  /** Explicit list of classes carrying non-HTTP ingress decorators. */
+  readonly ingress?: readonly Constructor[];
   /**
    * Module classes to expand before registration. Imported modules are visited
    * depth-first; each module's providers are collected before its controllers.
@@ -273,12 +279,15 @@ function registerInContainer(
  */
 function instantiate(target: Constructor, ctx: IPluginContext): unknown {
   const meta = metadataStore.getService(target);
+  const token = serviceToken(meta, target);
   const container = ctx.container;
   if (container !== undefined) {
-    const token = serviceToken(meta, target);
     if (container.has(token)) {
       return container.resolve<unknown>(token);
     }
+  }
+  if (ctx.services.has(token)) {
+    return ctx.services.get<object>(token);
   }
   const inject = meta?.inject;
   if (inject !== undefined && inject.length > 0) {
@@ -320,23 +329,66 @@ function registerService(ctx: IPluginContext, target: Constructor): void {
 }
 
 /**
- * Builds the route handler wrapper: resolves decorator parameters, calls the
- * controller method, and serializes the return value (unless the method
- * already returned a `HandlerResult`).
+ * Writes what `@HttpCode`, `@ResponseHeader` and `@Redirect` declared onto the
+ * response builder.
+ *
+ * Every value here was validated at `register()`, so the runtime's own header
+ * check cannot reject one — which matters because this runs per request, inside
+ * the handler wrapper, where a `TypeError` from `Headers.set` would answer
+ * `500` on every request to the route.
+ *
+ * The writes are not undone if the handler then THROWS: the error response
+ * keeps the declared headers (and a `@Redirect` route's `Location`, which no
+ * client follows at a `5xx`) while `errorHandler` replaces the status. That is
+ * deliberate rather than overlooked — `IResponse` offers no way to remove a
+ * header, and buffering the writes until the handler returned would put them
+ * after the method, which §3.1 establishes would silently invert the
+ * `HandlerResult`-wins precedence.
+ */
+function applyResponseShaping(response: IResponse, shaping: ResponseShaping): void {
+  if (shaping.status !== undefined) {
+    response.status(shaping.status);
+  }
+  if (shaping.location !== undefined) {
+    response.header('location', shaping.location);
+  }
+  for (const header of shaping.headers) {
+    response.header(header.name, header.value);
+  }
+}
+
+/**
+ * Builds the route handler wrapper: resolves decorator parameters, applies the
+ * declared response shaping, calls the controller method, and serializes the
+ * return value (unless the method already returned a `HandlerResult`).
+ *
+ * The shaping is written BEFORE the method is invoked, and both halves of that
+ * position are load-bearing. Writing before the `isHandlerResult` test is what
+ * makes `@Render` work with a status: the render branch answers
+ * `ctx.response.html(...)` on a builder that already carries it, so a rendered
+ * `201` needs no special case. Writing before the METHOD is what makes a
+ * returned `HandlerResult` win: the handler's own `ctx.response.status(202)`
+ * overwrites the decorator's value, which is the more specific statement.
+ * Moving the write after the method would satisfy the first and silently invert
+ * the second.
  */
 function createHandler(
   instance: unknown,
   handlerName: string,
   params: readonly ParameterMetadata[],
   render?: RenderRoute,
+  shaping?: ResponseShaping,
 ): RouteHandler {
   const fn = (instance as Record<string, unknown>)[handlerName];
   if (typeof fn !== 'function') {
     throw new Error(`Handler '${handlerName}' is not a method on the controller instance.`);
   }
   const method = fn.bind(instance) as (...args: unknown[]) => unknown | Promise<unknown>;
-  return async (ctx) => {
+  const handler: RouteHandler = async (ctx) => {
     const args = await resolveParameters(ctx, params);
+    if (shaping !== undefined) {
+      applyResponseShaping(ctx.response, shaping);
+    }
     const result = await method(...args);
     if (isHandlerResult(result)) {
       return result;
@@ -348,6 +400,14 @@ function createHandler(
     // handler's returned props bag, and the answer is HTML — never JSON.
     return ctx.response.html(await render.engine.render(render.view, result));
   };
+  // Brand the HANDLER, not a middleware: a documentation generator reads the
+  // declared success status off `RouteInfo.definition.handler`, and a decorated
+  // route may carry no middleware at all — a synthetic one purely to hold the
+  // brand would add a pipeline entry that does nothing. Headers are not
+  // branded (see `@ResponseHeader`'s JSDoc for why they are not derivable).
+  return shaping?.status === undefined
+    ? handler
+    : withResponseMetadata(handler, { status: shaping.status });
 }
 
 /**
@@ -377,6 +437,22 @@ interface RenderRoute {
 }
 
 /**
+ * Names a route the way every register-time refusal in this package names it:
+ * verb, resolved path, and the class and method that declared it.
+ *
+ * One helper rather than a template literal per refusal, so the wording cannot
+ * drift between the `@Render` refusal and the response-shaping ones.
+ *
+ * @param target - The controller class
+ * @param route - The route metadata
+ * @param fullPath - The resolved router path
+ * @returns A label of the form `Route GET /orders (OrderController.create)`
+ */
+function routeLabel(target: Constructor, route: RouteMetadata, fullPath: string): string {
+  return `Route ${route.method} ${fullPath} (${className(target)}.${route.handler})`;
+}
+
+/**
  * Refuses a rendered route whose application registered no
  * `CAPABILITIES.VIEW` provider, naming the controller, the handler, and both
  * remedies.
@@ -399,7 +475,7 @@ function requireViewEngine(
 ): IViewEngine {
   if (engine === undefined) {
     throw new Error(
-      `Route ${route.method} ${fullPath} (${className(target)}.${route.handler}) is decorated ` +
+      `${routeLabel(target, route, fullPath)} is decorated ` +
         'with @Render, but no CAPABILITIES.VIEW provider is registered. Register ViewPlugin ' +
         'from @setu-ts/view-plugin (or any other provider of CAPABILITIES.VIEW) so the route ' +
         'can answer HTML instead of JSON.',
@@ -756,9 +832,10 @@ function warnUnresolvableParameters(
         handler: route.handler,
         parameterIndex: param.index,
         customType: param.customType ?? '(none)',
-        hint:
-          'Register a resolver with registerParameterResolver(), or — for @Ctx() — check that ' +
-          'the application and DecoratorPlugin resolve to the same @setu-ts/decorator-plugin version.',
+        hint: 'Register a resolver with registerParameterResolver() for this custom type. ' +
+          'The built-in @Params(Ctx()) is unaffected by package duplication or version skew: ' +
+          'its marker is process-global, and a duplicated copy fails earlier, at controller ' +
+          'registration.',
       },
     );
   }
@@ -790,7 +867,8 @@ function registerController(
     const render = route.view !== undefined
       ? { view: route.view, engine: requireViewEngine(viewEngine, target, route, fullPath) }
       : undefined;
-    const handler = createHandler(instance, route.handler, route.params, render);
+    const shaping = validateResponseShaping(route, routeLabel(target, route, fullPath));
+    const handler = createHandler(instance, route.handler, route.params, render, shaping);
     const middleware = composeGuards(ctrlMeta, route);
     if (enforceRoles) {
       appendAuthorizationMiddleware(ctx, target, ctrlMeta, route, middleware, authorization);
@@ -861,6 +939,7 @@ function replayCustomDecorators(ctx: IPluginContext): void {
  */
 export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
   const opts = options ?? {};
+  const ingress = dedup(opts.ingress ?? []);
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
@@ -868,7 +947,20 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
     // Real dependency edges (not priority luck): a REPLACEMENT provider
     // registered at a higher priority number still lands before this plugin,
     // so the register-time resolution of all three capabilities sees it.
-    optionalDependencies: [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION, CAPABILITIES.VIEW],
+    optionalDependencies: ingress.length === 0
+      ? [CAPABILITIES.VALIDATION, CAPABILITIES.AUTHORIZATION, CAPABILITIES.VIEW]
+      : [
+        CAPABILITIES.VALIDATION,
+        CAPABILITIES.AUTHORIZATION,
+        CAPABILITIES.VIEW,
+        CAPABILITIES.QUEUE,
+        CAPABILITIES.SCHEDULER,
+        CAPABILITIES.EVENTS,
+        CAPABILITIES.MESSAGING,
+        CAPABILITIES.WEBSOCKET,
+        CAPABILITIES.COMMAND_BUS,
+        CAPABILITIES.QUERY_BUS,
+      ],
     priority: PLUGIN_PRIORITY.LOW,
 
     async register(ctx: IPluginContext): Promise<void> {
@@ -947,6 +1039,15 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
         );
       }
       replayCustomDecorators(ctx);
+
+      if (ingress.length > 0) {
+        ctx.lifecycle.onInit(async () => {
+          await registerIngresses(ctx, ingress, (target) => {
+            registerInContainer(ctx, target, metadataStore.getService(target));
+            return instantiate(target, ctx);
+          });
+        });
+      }
     },
   };
 }

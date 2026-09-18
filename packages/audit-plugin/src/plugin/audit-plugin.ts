@@ -4,10 +4,18 @@
  *
  * @module
  */
-import type { HealthCheckResult, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import type {
+  HealthCheckResult,
+  IPlugin,
+  IPluginContext,
+  IRedactionService,
+  IRuntimeServices,
+  RedactionPolicy,
+} from '@setu-ts/common';
 import {
   CAPABILITIES,
   createCachedProbe,
+  createRedactionService,
   PLUGIN_PRIORITY,
   resolveProbeTiming,
 } from '@setu-ts/common';
@@ -123,6 +131,7 @@ export function createStorage(
 export function AuditPlugin(options?: AuditPluginOptions): IPlugin {
   const storageType = options?.storage ?? DEFAULT_STORAGE;
   const backendOptions: AuditStorageOptions = options?.options ?? {};
+  const redaction = resolveRedaction(options?.redaction);
 
   return {
     name: PLUGIN_NAME,
@@ -134,7 +143,7 @@ export function AuditPlugin(options?: AuditPluginOptions): IPlugin {
     register(ctx: IPluginContext): void {
       const storage = createStorage(storageType, backendOptions, ctx);
       const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-      const service = new AuditService(storage, runtime);
+      const service = new AuditService(storage, runtime, redaction);
 
       ctx.services.register<typeof service>(CAPABILITIES.AUDIT, service);
 
@@ -151,6 +160,16 @@ export function AuditPlugin(options?: AuditPluginOptions): IPlugin {
       ctx.lifecycle.onClose(() => storage.close());
     },
   };
+}
+
+function resolveRedaction(
+  redaction: RedactionPolicy | IRedactionService | undefined,
+): IRedactionService | undefined {
+  return redaction === undefined
+    ? undefined
+    : 'redactRecord' in redaction
+    ? redaction
+    : createRedactionService(redaction);
 }
 
 /**

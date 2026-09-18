@@ -8,6 +8,74 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`config-plugin` — typed configuration sections (M97c).**
+  `defineConfigSection({ prefix, keys, schema })` declares related flat keys, and
+  `getConfigSection(config, section)` returns the exact schema output validated and cached at
+  startup. Sections run after whole-snapshot `validationSchema` coercion and are validated for both
+  ordinary loading and an injected `instance`. The explicit prefix-stripped `keys` list keeps
+  `IConfig` unchanged while allowing an arbitrary injected implementation to be validated through
+  its existing named-read contract. A section validation error identifies only its declared prefix;
+  it never carries the schema diagnostic or a configuration value.
+
+- **`decorator-plugin`, `common`, `openapi-plugin` — response shaping for decorated handlers
+  (M97b).** `@HttpCode(status)`, `@ResponseHeader(name, value)` (repeatable, distinct names) and
+  `@Redirect(url, status?)` let a decorated handler state its success status and its response
+  headers in its declaration instead of accepting `@Params(Ctx())` purely to say one fixed thing.
+  `@Params(Ctx())` is neither replaced nor deprecated: it remains the way to compute a status or
+  header per request, and the only way to write a multi-valued header. The declared shaping is
+  written to the response builder BEFORE the handler runs, so a returned `HandlerResult`
+  (`ctx.response.status(202).json(...)`) still wins and `@Render` composes with a declared status
+  unchanged. `@Redirect` does NOT short-circuit — a decorator cannot decline to call the method, so
+  the handler still runs and a plain return is still serialised alongside `Location`.
+
+  Every argument is refused at `register()` rather than per request, naming the controller, the
+  method and the value: a status outside `[200, 599]` (or `[300, 399]` for `@Redirect`), a header
+  pair the runtime rejects, the same header name twice, `Location` alongside `@Redirect`, and one
+  handler carrying both `@HttpCode` and `@Redirect`. The alternative in each case is a failure
+  nothing can answer — a `RangeError` thrown inside the HTTP adapter after the middleware pipeline
+  has finished, or a `TypeError` while response headers are written, answering `500` on every
+  request to that route.
+
+  `@setu-ts/common` gains `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata` and
+  `responseMetadataOf` — a `Symbol.for`-keyed brand on the ROUTE HANDLER, the `SECURITY_METADATA` /
+  `VALIDATION_METADATA` precedent, carried on the handler rather than a middleware because a success
+  status is a property of the handler and a decorated route may carry no middleware at all.
+  `@setu-ts/openapi-plugin` gains `deriveResponseStatus` (default `true`), which reads that brand
+  and documents the operation under the declared status instead of the assumed `200`; a declared
+  `schema.response` still wins. Defaulting it on is safe because the brand is new surface: an
+  application that changes nothing gets a byte-identical document, asserted rather than assumed.
+  `@ResponseHeader` is deliberately NOT derived — an OpenAPI response-header entry needs a schema
+  and a description the declaration does not carry. Adopting `@HttpCode` moves a regenerated
+  client's success type for that operation from `200` to the declared status; see
+  [`docs/upgrading.md`](docs/upgrading.md).
+
+  Also: the OpenAPI status-description table gains the five redirect statuses (`301`, `302`, `303`,
+  `307`, `308`), which previously fell through to the bare fallback `'Response'`.
+
+- **`deno task check:docs` now refuses a markdown table row whose code spans will not render as
+  written.** Two rules, the same defect at two stages of its life, both caused by a `|` the author
+  did not escape — a pipe ends a table cell even inside backticks, and GFM then DROPS the cells past
+  the header's width. `unescaped-pipe` catches a span still holding a raw pipe, i.e. at the moment
+  it is written; `unterminated-span` catches a span left open, which is what the damage looks like
+  afterwards, once the dropped cells have taken the closing backtick with them. Both real instances
+  were found by a reviewer and a hand-written sweep rather than by any gate: `PUBLIC_API.md`'s
+  `RenderDecorator` row had been rendering with its entire return union missing since M92, and
+  `packages/static-plugin/README.md` wrote a default value with its backticks transposed. The
+  checker walks spans by matching the opening backtick run's length rather than counting backticks,
+  because counting is unsound — a double-backtick span wrapping a literal backtick holds an odd
+  number of them and would be misreported. A row counts only when its block carries a delimiter row,
+  without which the `SseMessage.data` entry further down this file is a day-one false positive:
+  `deno fmt` wrapped its inline union type mid-line, leaving a continuation line that begins with a
+  pipe and is not a table.
+- **`common`, logger, telemetry, audit — one synchronous redaction seam for framework egress
+  (M96).** `@setu-ts/common` now exports `createRedactionService`, `IRedactionService`, policy and
+  redactor vocabulary, an erase redactor, and a suffix-mask factory. The logger, telemetry, and
+  audit plugins accept the same policy or service through `redaction`; policies are compiled once,
+  never mutate caller-owned records, and apply before records leave those components. Telemetry now
+  omits query strings and fragments from `http.url` by default; `queryParameters: 'redact'` retains
+  only policy-transformed query values, and fails closed to omission with a warning when no policy
+  is supplied. Audit redacts `before`, `after`, and `metadata` before deep-freezing stored entries.
+
 - **Public contribution intake is now maintainer-triaged and protected from untrusted automation.**
   GitHub Discussions, focused issue forms, a contribution guide, code of conduct, security policy,
   and pull-request template direct beta feedback, questions, compatibility reports, and proposed
@@ -53,6 +121,24 @@ All notable changes to this project are documented here. The format follows
   `verified N` printed — exit 77 would fail `check:docs`' `&&` chain.
 
 ### Changed
+
+- **`deno.lock` re-resolved to the current satisfying versions of every declared range.** No
+  manifest range changes, so this moves only what the lockfile pins: `@hono/hono` `4.13.0` →
+  `4.13.8`, the seven AWS SDK v3 clients `3.1103.0`/`3.1121.0` → `3.1134.0`, `zod` `4.5.4` →
+  `4.6.5`, `react-router` `8.3.0` → `8.4.0`, `@bufbuild/protobuf` `2.13.0` → `2.15.0`,
+  `@connectrpc/connect` `2.1.2` → `2.2.0`, the three OpenTelemetry packages `2.9.0`/`2.10.0` →
+  `2.11.0`, `@launchdarkly/node-server-sdk` `9.13.0` → `9.13.6`, `@google-cloud/pubsub` `6.0.0` →
+  `6.1.0`, `@google-cloud/storage` `7.21.0` → `7.22.0`, `@azure/identity` `4.13.1` → `4.13.3`,
+  `@azure/cosmos` `4.10.0` → `4.10.1`, and `ws` `8.21.2` → `8.21.3`. Five stale entries naming
+  ranges no manifest or source declares any more are dropped with them. The declared
+  dependency-compatibility ranges are unaffected — zod stays inside `>=4.4.0 <5`, and the Drizzle
+  (`0.45.2`) and Prisma v7 baselines do not move. `deno task audit:ci` reports the same 0 low, 4
+  moderate, 0 high, 0 critical baseline before and after, so no advisory drove this.
+
+- **BREAKING — `logger-plugin` now redacts common secret-shaped fields by default.** Set
+  `LoggerPlugin({ redact: [] })` to restore the prior no-default-redaction behaviour. The legacy
+  `redact` list remains supported for both console and Pino transports and takes precedence over a
+  policy where both name a path.
 
 - **Multipart `Content-Disposition` parsing admits the unquoted parameter form and drops a part with
   no usable name (behaviour changes, both with migration notes).** Two changes decided together
@@ -157,6 +243,61 @@ All notable changes to this project are documented here. The format follows
   historical release record remains in this changelog for users maintaining legacy installations.
 
 ### Fixed
+
+- **The weekly `Dependency drift` workflow reported a `test` failure that was never drift, and gated
+  a graph it had not resolved.** Three defects, one shape — the job's report did not describe what
+  the job had done. Found while acting on the drift issue it filed on 2026-09-14.
+
+  It started **none of the twelve backends** ci.yml's `deno` job starts, while running that job's
+  full suite. GitHub sets `CI=true` in every workflow, so `test/apps-gate.test.ts`'s REDIS_URL
+  reachability assertion — the M53 pin that stops a dropped container becoming a silent skip —
+  failed on every scheduled run. That single assertion was the ENTIRE `test: failure` reported on
+  2026-09-07 and again on 2026-09-14; nothing about the fresh dependency graph was wrong. The
+  invisible half cost more: six guarded suites (70 steps) skipped there, and those are exactly the
+  suites a drifted `ioredis`, `amqplib`, `kafkajs`, `mongodb` or AWS SDK would break, so the one job
+  whose purpose is noticing that a new dependency broke something could not see it. The job now
+  declares the same `env`, `services` and backend startup steps, derived from ci.yml by the parity
+  test in `test/unit/release-notes.test.ts` so a backend added to the PR job is required here too.
+  The assertion was right and the workflow was wrong: it is unchanged.
+
+  Its source listing matched **`.ts` only**, while `packages/` carries three `.tsx` files — one of
+  which reaches `@hono/hono/jsx` through its manifest's `jsxImportSource`. So the lock the `check`
+  and `test` gates were handed was resolved from a smaller graph than those gates then walk.
+  `test/dependency-drift-gate.test.ts` now derives the listing from the tracked tree rather than
+  pinning it as a literal, because the literal was the defect.
+
+  And resolving from sources alone produced a lockfile **`deno ci` refuses to install** — measured:
+  it demanded `@std/async`, `@std/data-structures` and `@std/fs`, which no `.ts` file imports by
+  name — so the "fresh resolution" every gate ran against was one that could never be committed. The
+  same gap mis-attributed drift: `@prisma/client` is declared in
+  `packages/database-plugin/deno.json` and imported by no source, so dropping it took
+  `drizzle-orm`'s optional peer from `7.10.0` down to `7.8.0`, reported for weeks as two rows of
+  upstream drift that no upstream release had caused. The job now resolves the workspace manifests
+  before the source graph, and reports a manifest failure separately — the per-file retry below it
+  exists to absorb a transient batch failure, and an unresolvable manifest range would have sailed
+  through it with every individual file caching fine.
+
+- **Documentation — the last three sites asserting the false Deno compiler-option mechanism.**
+  `docs/decorators.md`, the `PUBLIC_API.md` decorator note, and a `packages/cli` test comment still
+  stated that declaring any `compilerOptions` key in a `deno.json` replaces Deno's default set. M90h
+  corrected six sites and these three survived the sweep. The mechanism is false, re-measured here
+  on Deno 2.9.6 rather than taken from the earlier record: a manifest declaring only
+  `experimentalDecorators` still reports `TS7006` for an implicit `any`, so `strict` remains in
+  force, while the control declaring `strict: false` beside it type-checks cleanly — which is what
+  proves the probe discriminates rather than always failing. All three now state what is true: the
+  decorator surface needs no compiler option, and declaring one leaves Deno's other defaults alone,
+  so an existing `compilerOptions` block needs no edit. The stated reason matters on its own,
+  because a reader who believed the old one would avoid declaring an option their project needs.
+
+- **`@setu-ts/decorator-plugin`: the unresolvable-parameter warning no longer tells a developer to
+  write source that does not compile.** Since M76 retired parameter decorators, `Ctx()` returns a
+  `ParamSource` and `@Ctx()` in method position fails with
+  `TS1241 Unable to resolve signature of method decorator`; the valid form is `@Params(Ctx())`. The
+  hint logged for a decorated parameter that no resolver can satisfy named the invalid spelling, and
+  so did four JSDoc blocks across `decorators/security.ts`, `resolvers/parameter-resolver.ts` and
+  three test-prose sites. All eight are corrected. The two `not.toContain('@Ctx() ctx')` assertions
+  in the CLI schematic tests are deliberately left as they are: that string is the legacy parameter
+  form they exist to guard against reappearing.
 
 - **`@setu-ts/static-plugin`: the `cacheControl` callback's documented input matches what it
   receives, and the published option says so.** The callback has always been handed the FULL

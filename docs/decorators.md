@@ -33,8 +33,9 @@ deno add jsr:@setu-ts/decorator-plugin jsr:@setu-ts/di-plugin
 
 Nothing to enable. Setu-TS uses **TC39 standard decorators**, which Deno, Bun and every current
 bundler parse with no `compilerOptions` entry at all — so a project's `deno.json` needs no decorator
-setting, and adding one is actively unhelpful, because declaring any compiler option replaces Deno's
-default set.
+setting, and adding one asserts a setting nothing in the project reads. Declaring a compiler option
+does not disturb Deno's other defaults (measured on Deno 2.9.6), so the rest of an existing
+`compilerOptions` block can stay exactly as it is.
 
 The one exception is Node, where V8 has not shipped decorators: run the project through a transform
 (`setu new --runtime node` emits `tsx`, which handles them) rather than through `node`'s built-in
@@ -70,6 +71,70 @@ writes: the default templates install neither plugin, and the independent `--di`
 removed. An older project may hold `DecoratorPlugin` alone, and it keeps working — that is the
 container-less path described above. See the
 [CLI Guide](./cli.md#decorators-and-di-are-one-choice-and-functional-is-the-default).
+
+## Non-HTTP ingress
+
+The same explicit class list can register queue processors, scheduled jobs, domain-event and broker
+subscriptions, WebSocket gateways, and CQRS handlers. Put those classes in `ingress`; registration
+happens during `onInit`, after the corresponding provider plugin has registered its capability. A
+declared handler with no provider fails startup with the class, method, and missing plugin named.
+
+```typescript
+import type {
+  CqrsCommand,
+  CqrsQuery,
+  IDomainEvent,
+  IJob,
+  IWebSocketConnection,
+} from '@setu-ts/common';
+import {
+  CommandHandler,
+  Cron,
+  Every,
+  Gateway,
+  OnEvent,
+  OnMessage,
+  Processor,
+  QueryHandler,
+  Subscribe,
+} from '@setu-ts/decorator-plugin';
+
+class BackgroundWork {
+  @Processor('email')
+  process(_job: IJob): void {}
+
+  @Cron('0 2 * * *')
+  nightly(): void {}
+
+  @Every(60_000)
+  poll(): void {}
+
+  @OnEvent('user.created')
+  created(_event: IDomainEvent): void {}
+
+  @Subscribe('user.created')
+  replicated(_message: unknown): void {}
+
+  @CommandHandler('create-user')
+  command(_command: CqrsCommand): void {}
+
+  @QueryHandler('find-user')
+  query(_query: CqrsQuery): void {}
+}
+
+@Gateway('/ws/updates')
+class UpdatesGateway {
+  @OnMessage
+  message(_connection: IWebSocketConnection, _data: string | Uint8Array): void {}
+}
+```
+
+Register the provider plugins that a class uses (`QueuePlugin`, `SchedulerPlugin`, `EventsPlugin`,
+`MessagingPlugin`, `WebSocketPlugin`, or `CqrsPlugin`) alongside the decorator plugin:
+`DecoratorPlugin({ ingress: [BackgroundWork, UpdatesGateway] })`. `@UseIngressBehaviors(...)` wraps
+queue, scheduler, messaging, and WebSocket handlers; `@UsePipelineBehaviors(...)` wraps only command
+and query handlers. The decorators are deliberately separate because the two public behavior
+contracts take different contexts. Domain events receive no ingress-behavior wrapper.
 
 ## Controllers
 
@@ -306,14 +371,70 @@ export class MyService {
 import { Injectable } from '@setu-ts/decorator-plugin';
 
 @Injectable({ scope: 'scoped' })
-export class RequestScopedService {}
+export class PerScopeService {}
 ```
 
 **Scopes:**
 
-- `'singleton'` (default): Single instance per container
-- `'scoped'`: New instance per request scope
-- `'transient'`: New instance every injection
+- `'singleton'` (default): one instance for the application lifetime
+- `'scoped'`: one instance per `IContainer.createScope()` scope
+- `'transient'`: a new instance per resolution
+
+**A scope is not a request.** A scope is a child container the application creates and disposes
+itself, and **the framework creates no scope per request** — so a `'scoped'` service is not
+re-created on every HTTP request, and behaves as a singleton until something calls `createScope()`.
+This is what `ServiceScope` in `@setu-ts/common` and the
+[DI plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/di-plugin/README.md) both
+state, and it is the one place the lifecycle differs from the framework you may be arriving from.
+
+To get per-request instances, create the scope yourself in middleware and resolve through it:
+
+```typescript
+import { CAPABILITIES, type IContainer } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+
+const app = createApplication();
+
+app.middleware.add(async (ctx, next) => {
+  const root = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+  const scope = root.createScope();
+  ctx.state.set('app:request-scope', scope);
+  await next();
+});
+```
+
+**Storing the scope is not enough for a decorated controller.** `registerController` instantiates a
+controller **once**, during route registration, and resolves its constructor arguments from the root
+container at that moment — before any request exists. Constructor injection therefore cannot reach a
+per-request scope, whatever `scope` the dependency declares. A handler that wants a request-local
+instance resolves it from the scope the middleware stored:
+
+```typescript
+import { Controller, Ctx, Get, Injectable, Params } from '@setu-ts/decorator-plugin';
+import type { IContainer, IRequestContext } from '@setu-ts/common';
+
+@Injectable({ scope: 'scoped', token: 'per-scope' })
+export class ScopedReportService {
+  readonly rows: string[] = [];
+}
+
+@Controller('/reports')
+export class ReportController {
+  // NOT `constructor(private readonly reports: ScopedReportService)` — that
+  // argument is resolved once, from the root container, at registration.
+  @Get()
+  @Params(Ctx())
+  today(ctx: IRequestContext) {
+    const scope = ctx.state.get('app:request-scope') as IContainer;
+    const reports = scope.resolve<ScopedReportService>('per-scope');
+    return { rows: reports.rows.length };
+  }
+}
+```
+
+[`apps/di-decorators`](https://github.com/setu-ts/setu-ts/tree/main/apps/di-decorators) serves a
+`/lifetimes` route that demonstrates the difference between the three lifetimes across two explicit
+scopes.
 
 ## Request Data Access
 
@@ -402,9 +523,10 @@ export class UserController {
 ### The Authenticated Principal
 
 `CurrentUser()` binds `ctx.request.user` (populated by authentication middleware). To read the full
-request context, declare `Ctx()` — it resolves the live `IRequestContext`, so a handler can set a
-status code, add a header, or stream. For anything else, register a resolver and bind it with
-`Custom()` (see [Custom Decorators](#custom-decorators)).
+request context, declare `Ctx()` — it resolves the live `IRequestContext`, so a handler can compute
+a status code, add a header, or stream. (For a status or header that is FIXED for the route, prefer
+the declarative form in [Response Shaping](#response-shaping).) For anything else, register a
+resolver and bind it with `Custom()` (see [Custom Decorators](#custom-decorators)).
 
 ```typescript
 import { Controller, CurrentUser, Get, Params } from '@setu-ts/decorator-plugin';
@@ -419,6 +541,95 @@ export class MeController {
   }
 }
 ```
+
+## Response Shaping
+
+A decorated handler that returns a plain value is answered with `ctx.response.json(result)`. Left
+undecorated that is the DEFAULT — `200`, JSON, no headers — and the three method decorators below
+change it, each writing to the response builder before the handler runs. So a handler can state
+something fixed about its response in its declaration, without accepting a request context it has no
+other use for.
+
+| Decorator                      | What it sets                                     |
+| ------------------------------ | ------------------------------------------------ |
+| `@HttpCode(status)`            | The success status for a plain return            |
+| `@ResponseHeader(name, value)` | One response header (repeatable, distinct names) |
+| `@Redirect(url, status?)`      | The status and `Location`; `302` by default      |
+
+```typescript
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Params,
+  Post,
+  Redirect,
+  ResponseHeader,
+} from '@setu-ts/decorator-plugin';
+
+@Controller('/orders')
+export class OrderController {
+  @Post()
+  @HttpCode(201)
+  @Params(Body())
+  create(order: { sku: string }) {
+    return { id: 'o-1', sku: order.sku };
+  }
+
+  @Get('/latest')
+  @ResponseHeader('Cache-Control', 'no-store')
+  @ResponseHeader('X-Report-Version', '3')
+  latest() {
+    return { sku: 'a-1' };
+  }
+
+  @Get('/v1')
+  @Redirect('/orders', 301)
+  legacy() {
+    return { moved: true };
+  }
+}
+```
+
+**Which to reach for.** Use these three when the value is fixed for the route. Use `Ctx()` when it
+is computed per request — a status that depends on whether a record already existed, a header
+carrying a per-request value, or a multi-valued header such as `Set-Cookie`, which needs
+`ctx.response.appendHeader(...)`. `Ctx()` is not deprecated by these and is not replaced by them.
+
+Three rules are worth knowing before you use them.
+
+**A returned `HandlerResult` wins.** The declared shaping is written to the response builder
+_before_ the handler method runs, so a handler that returns `ctx.response.status(202).json(...)`
+answers `202` even under `@HttpCode(201)` — the explicit runtime value is the more specific
+statement. The same ordering is why `@Render` composes: the rendered HTML is written onto a builder
+that already carries the status.
+
+**`@Redirect` does not skip the handler.** A decorator cannot decline to call the method, so the
+handler still runs and a plain return is still serialised alongside the `Location` header. That is
+the point of the declarative form: the handler's work is the side effect. A handler that wants to
+decide per request should call `ctx.response.redirect(url)` itself through `Ctx()`, which terminates
+the response.
+
+**Every argument is checked at startup, never per request.** `@HttpCode` takes an integer in
+`[200, 599]`; `@Redirect` takes one in `[300, 399]` and a non-blank target the runtime will carry as
+a `Location` header; a header name and value must be ones the runtime accepts; the same header name
+may not be declared twice; and one handler may not carry both `@HttpCode` and `@Redirect`, because
+both set the status. Each refusal names the controller, the method and the offending value. The
+alternative is worse than a startup failure: an out-of-range status throws inside the HTTP adapter
+_after_ the middleware pipeline has finished, where no error handler can answer it, and an invalid
+header pair throws while the response headers are written, so every request to that route would
+answer `500`.
+
+`@HttpCode(204)` (and `205`, and `304`) serves a bodiless response — the runtime drops a body
+written at a null-body status — which is exactly what a `DELETE` handler wants.
+
+**The document learns the status too.** `@setu-ts/openapi-plugin` derives an operation's success
+status from what the handler declared, so a `@HttpCode(201)` route is documented under `201` and its
+generated client types the success body under the right key. That derivation is on by default and is
+described under `deriveResponseStatus` in [`PUBLIC_API.md`](../PUBLIC_API.md). `@ResponseHeader` is
+deliberately _not_ derived: an OpenAPI response-header entry needs a schema and a description the
+declaration does not carry.
 
 ## Validation
 

@@ -160,14 +160,25 @@ app.register(LoggerPlugin());
 ### Config Plugin
 
 ```typescript
-import { ConfigPlugin } from '@setu-ts/config-plugin';
+import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
+import { z } from 'npm:zod@^3.24.0';
+
+const database = defineConfigSection({
+  prefix: 'DATABASE_',
+  keys: ['URL'],
+  schema: z.object({ URL: z.string().url() }),
+});
 
 app.register(ConfigPlugin({
   // Optional: load .env files. Requires a runtime with filesystem support
   // (absent on edge platforms). Defaults to reading only `runtime.env`.
   envFilePath: '.env',
+  sections: [database],
 }));
 ```
+
+Use `getConfigSection(config, database)` to read the validated typed section after resolving
+`CAPABILITIES.CONFIG`; sections are checked at application startup.
 
 ### Database Plugin
 

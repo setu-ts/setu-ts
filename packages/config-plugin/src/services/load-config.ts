@@ -14,6 +14,7 @@
 import type { IConfig, IRuntimeServices } from '@setu-ts/common';
 
 import type { ConfigPluginOptions } from '../options.ts';
+import { validateConfigSections } from '../sections/validate-sections.ts';
 import { ConfigService } from './config-service.ts';
 import type { EnvLoaderOptions } from './env-loader.ts';
 import { loadEnv } from './env-loader.ts';
@@ -59,6 +60,7 @@ export async function loadConfig(
   // configuration and the application's are the same object by construction.
   const instance = options?.instance;
   if (instance !== undefined) {
+    validateConfigSections(instance, options?.sections ?? []);
     return instance;
   }
 
@@ -78,5 +80,7 @@ export async function loadConfig(
     ? validateConfig(raw, validationSchema)
     : raw;
 
-  return new ConfigService(data);
+  const config = new ConfigService(data);
+  validateConfigSections(config, options?.sections ?? []);
+  return config;
 }

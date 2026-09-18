@@ -7,6 +7,7 @@ import { expect } from '@std/expect';
 import { AuditService } from '../../src/services/audit-service.ts';
 import type { AuditQuery, IAuditStorage, StoredAuditEntry } from '../../src/interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
+import { createRedactionService } from '@setu-ts/common';
 
 describe('AuditService', () => {
   const fakeRuntime: IRuntimeServices = {
@@ -124,5 +125,49 @@ describe('AuditService', () => {
     await svc.log({ action: 'b', resource: 'r', result: 'success' });
 
     expect(appends[0].id).not.toBe(appends[1].id);
+  });
+
+  it('redacts before, after, and metadata before freezing the record', async () => {
+    const { storage, appends } = makeFakeStorage();
+    const service = new AuditService(
+      storage,
+      fakeRuntime,
+      createRedactionService({ fields: { password: 'secret', 'profile.email': 'pii' } }),
+    );
+
+    await service.log({
+      action: 'user.update',
+      resource: 'user',
+      result: 'success',
+      before: { password: 'old' },
+      after: { profile: { email: 'user@example.test' } },
+      metadata: { password: 'metadata-secret' },
+    });
+
+    expect(appends[0]?.before).toEqual({ password: '[Redacted]' });
+    expect(appends[0]?.after).toEqual({ profile: { email: '[Redacted]' } });
+    expect(appends[0]?.metadata).toEqual({ password: '[Redacted]' });
+    expect(Object.isFrozen(appends[0])).toBe(true);
+  });
+
+  it('keeps all optional bodies unchanged when no redaction service is supplied', async () => {
+    const { storage, appends } = makeFakeStorage();
+    const service = new AuditService(storage, fakeRuntime);
+    const before = { password: 'before' };
+    const after = { password: 'after' };
+    const metadata = { password: 'metadata' };
+
+    await service.log({
+      action: 'user.update',
+      resource: 'user',
+      result: 'success',
+      before,
+      after,
+      metadata,
+    });
+
+    expect(appends[0]?.before).toEqual(before);
+    expect(appends[0]?.after).toEqual(after);
+    expect(appends[0]?.metadata).toEqual(metadata);
   });
 });

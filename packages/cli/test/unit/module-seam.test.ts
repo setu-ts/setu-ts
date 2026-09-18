@@ -47,7 +47,7 @@ describe('module generation styles', () => {
     const [wiring] = withModuleSeam([{ pkg: 'decorator-plugin', symbol: 'DecoratorPlugin' }]);
 
     expect(wiring.args).toBe(
-      '{ controllers: [], services: [], modules: [...MODULES] }',
+      '{ controllers: [], services: [], ingress: [], modules: [...MODULES] }',
     );
   });
 });

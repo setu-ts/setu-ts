@@ -4,7 +4,7 @@
  *
  * @module
  */
-import type { AuditEntry, IAuditLogger } from '@setu-ts/common';
+import type { AuditEntry, IAuditLogger, IRedactionService } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
 import type { IAuditStorage, StoredAuditEntry } from '../interfaces/index.ts';
 import { freezeAuditRecord } from '../storage/audit-record.ts';
@@ -20,6 +20,7 @@ export class AuditService implements IAuditLogger {
   constructor(
     private readonly storage: IAuditStorage,
     private readonly runtime: IRuntimeServices,
+    private readonly redaction?: IRedactionService,
   ) {}
 
   /**
@@ -29,18 +30,26 @@ export class AuditService implements IAuditLogger {
    * @throws Propagates any storage rejection (never swallowed)
    */
   async log(entry: AuditEntry): Promise<void> {
-    const record: StoredAuditEntry = {
+    const record: {
+      -readonly [Key in keyof StoredAuditEntry]: StoredAuditEntry[Key];
+    } = {
       action: entry.action,
       resource: entry.resource,
-      resourceId: entry.resourceId,
-      userId: entry.userId,
       result: entry.result,
-      before: entry.before,
-      after: entry.after,
-      metadata: entry.metadata,
       id: this.runtime.uuid(),
       timestamp: this.runtime.now(),
     };
+    if (entry.resourceId !== undefined) record.resourceId = entry.resourceId;
+    if (entry.userId !== undefined) record.userId = entry.userId;
+    if (entry.before !== undefined) {
+      record.before = this.redaction?.redactRecord(entry.before) ?? entry.before;
+    }
+    if (entry.after !== undefined) {
+      record.after = this.redaction?.redactRecord(entry.after) ?? entry.after;
+    }
+    if (entry.metadata !== undefined) {
+      record.metadata = this.redaction?.redactRecord(entry.metadata) ?? entry.metadata;
+    }
     await this.storage.append(freezeAuditRecord(record));
   }
 }

@@ -106,6 +106,7 @@ export type {
   ResponseSnapshotInit,
   RouteDefinition,
   RouteHandler,
+  RouteResponseMetadata,
   RouteSchema,
   RouteSecurityMetadata,
   RouteValidationMetadata,
@@ -116,6 +117,8 @@ export {
   isPromiseLike,
   isWebSocketUpgradeRequest,
   parseJsonBody,
+  RESPONSE_METADATA,
+  responseMetadataOf,
   SECURITY_METADATA,
   securityMetadataOf,
   setUpgradeIntent,
@@ -123,6 +126,7 @@ export {
   upgradeIntentOf,
   VALIDATION_METADATA,
   validationMetadataOf,
+  withResponseMetadata,
   withSecurityMetadata,
   withValidationMetadata,
 } from './http.ts';
@@ -221,6 +225,13 @@ export type {
   RbacConfig,
   RoleDefinition,
 } from './services/auth.ts';
+export { DATA_CLASSIFICATIONS, DEFAULT_SECRET_FIELD_PATTERNS } from './redaction/classification.ts';
+export type { DataClassification } from './redaction/classification.ts';
+export { createMaskRedactor, eraseRedactor } from './redaction/redactors.ts';
+export type { MaskOptions, RedactionContext, Redactor } from './redaction/redactors.ts';
+export type { RedactionPolicy } from './redaction/policy.ts';
+export { createRedactionService } from './redaction/redaction-service.ts';
+export type { IRedactionService } from './redaction/redaction-service.ts';
 export type {
   EntityKey,
   FilterComparison,

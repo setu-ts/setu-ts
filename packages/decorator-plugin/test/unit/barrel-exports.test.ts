@@ -47,6 +47,19 @@ const EXPECTED_VALUES = [
   'Patch',
   'Post',
   'Put',
+  'CommandHandler',
+  'Cron',
+  'Every',
+  'Gateway',
+  'OnClose',
+  'OnEvent',
+  'OnMessage',
+  'OnOpen',
+  'Processor',
+  'QueryHandler',
+  'Subscribe',
+  'UseIngressBehaviors',
+  'UsePipelineBehaviors',
   'Body',
   'Cookie',
   'CurrentUser',
@@ -60,9 +73,12 @@ const EXPECTED_VALUES = [
   'Injectable',
   'Module',
   'Optional',
+  'HttpCode',
   'Permissions',
   'Public',
+  'Redirect',
   'Render',
+  'ResponseHeader',
   'Roles',
   'UseFilters',
   'UseGuards',
@@ -101,6 +117,24 @@ describe('published barrel surface', () => {
     // createParameterDecorator has no standard-decorator form; Custom() replaces
     // it. Pinned so it cannot return by accident.
     expect('createParameterDecorator' in barrel).toBe(false);
+  });
+
+  it('exports the response-shaping surface (M97b)', () => {
+    // The headline addition: without these a decorated handler can only say
+    // 201 by accepting a request context it has no other use for.
+    for (const name of ['HttpCode', 'ResponseHeader', 'Redirect'] as const) {
+      expect(typeof barrel[name]).toBe('function');
+    }
+  });
+
+  it('keeps the response-shaping refusals internal', () => {
+    // `response-status.ts` is the mechanism, not the surface: its refusals are
+    // reached through registration and never named by a consumer.
+    for (
+      const name of ['validateResponseShaping', 'assertServeableStatus', 'assertRedirectStatus']
+    ) {
+      expect(name in barrel).toBe(false);
+    }
   });
 
   it('keeps the mechanism internal', () => {
