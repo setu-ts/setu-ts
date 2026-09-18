@@ -462,11 +462,25 @@ side is a release-blocking error rather than a missing asset discovered after pu
 ### Dependency drift
 
 The scheduled **Dependency drift** workflow runs weekly. It resolves all workspace ranges with
-`--reload` into a temporary lockfile, compares that lockfile's direct resolutions with the committed
-one, then runs format, lint, type-check, and test gates against the fresh lock. It never modifies
-`deno.lock` and cannot block a pull request or release. A changed resolution or failed gate creates
-or updates one `dependency-drift` GitHub issue whose table names each package, specifier, and
-committed→fresh version.
+`--reload` into a temporary lockfile — the workspace manifests first, then the tracked source graph,
+because a source-only resolution produces a lockfile `deno ci` refuses to install and mis-attributes
+the peer versions that fall out with it — compares that lockfile's direct resolutions with the
+committed one, then runs format, lint, type-check, and test gates against the fresh lock. It never
+modifies `deno.lock` and cannot block a pull request or release. A changed resolution or failed gate
+creates or updates one `dependency-drift` GitHub issue whose table names each package, specifier,
+and committed→fresh version.
+
+The job declares the same backend containers as ci.yml's `deno` job, and must: it re-runs that job's
+suite, so a backend it does not start is a guarded suite that skips there while passing on every PR
+— and `REDIS_URL`'s reachability assertion fires in every workflow, so a job without the container
+reports a `test` failure that has nothing to do with drift. `test/unit/release-notes.test.ts`
+derives that requirement from ci.yml for every workflow that runs the suite.
+
+**Acting on the report.** Drift is diagnostic, not a queue to drain: a table with no advisory behind
+it and green gates needs no action. When a bump is warranted, re-resolve the same way the job does
+rather than by hand — `rm deno.lock && deno install --frozen=false`, then `deno cache` over the
+tracked sources, then `deno ci` to confirm the result installs frozen. Resolving only one of those
+two halves produces a lockfile that passes `deno check` and fails `deno ci`.
 
 The `&&` is load-bearing rather than stylistic. The workflow step runs under `set -euo pipefail`; a
 block pasted into an interactive shell does not, so without it a failed extraction still leaves a

@@ -17,12 +17,231 @@ jobs:
     # Drift is diagnostic: it must never block ordinary pull requests or a
     # release, but it must remain visibly red when a fresh graph is unhealthy.
     continue-on-error: true
+    # The same backend environment as the `deno` job in ci.yml, because the
+    # gates below re-run that job's suite and it is not the same suite without
+    # them. Two things went wrong while this job started none of them. The
+    # visible one: GitHub sets CI=true in EVERY workflow, so
+    # `test/apps-gate.test.ts` asserts REDIS_URL is reachable here exactly as
+    # it does on a pull request — that assertion was the entire `test` failure
+    # this job reported on 2026-09-07 and 2026-09-14, and it is not dependency
+    # drift. The invisible one matters more: every guarded real-backend suite
+    # skipped here (6 suites, 70 steps), and those are precisely the suites a
+    # drifted ioredis, amqplib, kafkajs, mongodb or AWS SDK would break — so
+    # the job under-reported the very thing it exists to find. Kept in step
+    # with ci.yml by the derived parity test in
+    # `test/unit/release-notes.test.ts`, which reads what this job must declare
+    # out of ci.yml rather than from a hand-written list.
+    env:
+      REDIS_URL: redis://localhost:6379
+      SQS_ENDPOINT_URL: http://localhost:9324
+      SQS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      # M70c §3.7 real-outage suites: a real broker/backend, really stopped.
+      # Guarded on these env vars and NOT in ALLOW_SKIP, so a dropped service
+      # or a missing var fails the job instead of quietly skipping.
+      RABBITMQ_URL: amqp://localhost:5672
+      S3_ENDPOINT_URL: http://localhost:9000
+      S3_BUCKET: m70c-verify
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      SMTP_URL: smtp://localhost:1025
+      MONGODB_URI: mongodb://127.0.0.1:27017
+      # M80 §6.2: the real-emulator DynamoDB suite (database-plugin) guards on
+      # this exact endpoint, which is also the host:port the package manifest's
+      # net grant scopes.
+      DYNAMODB_ENDPOINT: http://127.0.0.1:8000
+      # M82 §3.13: the real-emulator Bigtable suite (database-plugin) guards on
+      # this exact endpoint, which is also the host:port the package manifest's
+      # net grant scopes. `127.0.0.1` rather than `localhost` deliberately: the
+      # SDK speaks gRPC, and a `host:port` grant does not authorize a DNS
+      # lookup, so an IP literal is what keeps the grant endpoint-scoped (the
+      # M70g Pub/Sub lesson).
+      BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086
+      # M90d §3.5: the real-backend NATS and Kafka suites (messaging-plugin)
+      # guard on these exact endpoints, which are also the host:port pairs the
+      # package manifest's net grant scopes. Started by the steps below.
+      NATS_URL: nats://127.0.0.1:4222
+      KAFKA_BROKERS: 127.0.0.1:9092
+    services:
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 }).ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      elasticmq:
+        image: softwaremill/elasticmq-native:1.7.1
+        ports:
+          - 9324:9324
+        # The image ships neither curl nor a 2xx-answering root path — ElasticMQ
+        # returns 400 to a bare GET / — so an HTTP probe can never pass. `nc` is
+        # present and a port check is what readiness actually means here.
+        options: >-
+          --health-cmd "nc -z localhost 9324 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # M70c §3.7: the RabbitMQ outage suites (messaging broker + queue) need a
+      # real broker to stop and restart. Higher retries than the other services:
+      # the Erlang VM needs a few seconds before `rabbitmq-diagnostics ping`
+      # answers, and the outage test stops/restarts the container, so the
+      # service must be healthy before the first test runs.
+      rabbitmq:
+        # Major version 4 is load-bearing (M70l X10-1): 3.13 accepts the queue
+        # declaration the broker used to emit, so the defect is invisible there.
+        image: rabbitmq:4-management-alpine
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+      # M70c §3.7: the S3 outage suite (storage-plugin) needs a real
+      # S3-compatible gateway. The bucket is created by the test itself
+      # (ensureBucket), so the service starts with an empty data dir.
+      # M70c §3.7: the SMTP outage suite (mail-plugin) needs a real SMTP
+      # server. Only the SMTP port is published; readiness uses Mailpit's own
+      # `readyz` subcommand because the image ships neither curl nor a
+      # `/health` route (verified: `/health` 404s, `/readyz` answers 200).
+      mailpit:
+        image: axllent/mailpit:v1.20.4
+        ports:
+          - 1025:1025
+        options: >-
+          --health-cmd "/mailpit readyz"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      # M80 §6.2: the real-emulator DynamoDB suite (database-plugin) needs the
+      # emulator. A bare GET / answers 400, so a naive `curl -f /` could never
+      # pass — but curl IS in the image, and a POST ListTables answers 200 once
+      # the emulator is ready (M80 §1A E3, measured). Like ElasticMQ above,
+      # the probe has to match what readiness actually means here.
+      # DynamoDB Local answers a bare `GET /` with 400, so a naive `curl -f /`
+      # healthcheck can never pass (the ElasticMQ situation above). A POST
+      # ListTables does answer 200 — but ONLY with an `Authorization` header:
+      # without one the server replies 400 and `curl -f` exits 22, which is how
+      # this check first shipped and left the container permanently unhealthy.
+      # The credential is inert (DynamoDB Local never validates it); it is the
+      # header's PRESENCE that makes the request well-formed.
+      dynamodb:
+        # Pinned to a version rather than `latest`: every other service in
+        # this workflow pins at least a major (mongo:8, redis:7, rabbitmq:4),
+        # and a floating tag can change the emulator's behaviour between runs.
+        # A sha256 digest is deliberately not used — no other service here is
+        # digest-pinned, and the asymmetry would be the surprising part.
+        image: amazon/dynamodb-local:3.3.1
+        ports:
+          - 8000:8000
+        options: >-
+          --health-cmd "curl -sf -X POST -H 'X-Amz-Target: DynamoDB_20120810.ListTables' -H 'Content-Type: application/x-amz-json-1.0' -H 'Authorization: AWS4-HMAC-SHA256 Credential=ci/20260101/us-east-1/dynamodb/aws4_request' -d '{}' http://localhost:8000/"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
       - uses: denoland/setup-deno@v2
         with:
           deno-version: 2.9.6
+
+      # The four backends that cannot be `services:` containers, because each
+      # needs a command or an argument and `options` reaches `docker create`
+      # BEFORE the image while the command comes after it. ci.yml carries the
+      # reasoning per backend; these are byte-identical to its steps, which the
+      # parity test compares, except for the `continue-on-error: true` each
+      # carries here. That one line is load-bearing for THIS job: its whole
+      # output is a report, and without it a single failed image pull skips
+      # every backend step after it -- and the resolve step below, which
+      # carries no `if:`, so the report would then blank the drift table
+      # entirely and claim resolution had failed. `if: always()` has the same
+      # defect for the same reason; only `continue-on-error` keeps the job
+      # walking to its report.
+      #
+      # The cost, stated because it is real: a failed backend does NOT fail
+      # this job. It surfaces as its own red step annotation in the run, and as
+      # whichever guarded suites then fail in the `test` row. A reader who sees
+      # `test: failure` has to open the run to tell a broken container from
+      # broken dependencies -- worth a `backends` report row if it ever
+      # actually bites.
+      - name: Start the Cloud Bigtable emulator
+        continue-on-error: true
+        run: |
+          docker run -d --name bigtable-emulator -p 127.0.0.1:8086:8086 \
+            gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators \
+            gcloud beta emulators bigtable start --host-port=0.0.0.0:8086
+          for _ in $(seq 1 60); do
+            if docker exec bigtable-emulator bash -c 'echo > /dev/tcp/127.0.0.1/8086' 2>/dev/null; then
+              echo 'bigtable emulator ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'bigtable emulator did not become ready'
+          docker logs bigtable-emulator
+          exit 1
+
+      - name: Start the NATS server (JetStream)
+        continue-on-error: true
+        run: |
+          docker run -d --name m90d-nats -p 127.0.0.1:4222:4222 nats:2-alpine -js
+          for _ in $(seq 1 60); do
+            if docker exec m90d-nats nc -z 127.0.0.1 4222 2>/dev/null; then
+              echo 'nats ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'nats server did not become ready'
+          docker logs m90d-nats
+          exit 1
+
+      - name: Start Kafka (KRaft single-node)
+        continue-on-error: true
+        run: |
+          docker run -d --name m90d-kafka -p 127.0.0.1:9092:9092 apache/kafka:4.0.0
+          for _ in $(seq 1 90); do
+            if docker exec m90d-kafka /opt/kafka/bin/kafka-broker-api-versions.sh \
+              --bootstrap-server localhost:9092 > /dev/null 2>&1; then
+              echo 'kafka ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'kafka did not become ready'
+          docker logs m90d-kafka
+          exit 1
+
+      - name: Start MinIO (S3 storage outage suite)
+        continue-on-error: true
+        run: |
+          docker run -d --name m70c-minio -p 127.0.0.1:9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+          for _ in $(seq 1 60); do
+            if curl -fs http://localhost:9000/minio/health/ready >/dev/null; then
+              echo 'minio ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'minio did not become ready'
+          docker logs m70c-minio
+          exit 1
 
       - name: Resolve every source and test range fresh
         id: resolve
@@ -32,8 +251,43 @@ jobs:
           # ubuntu-24.04 runner image, so the original listing exited 127 and
           # every scheduled run filed a drift issue that had checked nothing
           # (issue #216). Against a fresh checkout the two listings are
-          # byte-identical -- both are the tracked, non-ignored `.ts` set.
-          git ls-files -- 'packages/*.ts' 'test/*.ts' 'scripts/*.ts' > "$sources"
+          # byte-identical -- both are the tracked, non-ignored source set.
+          #
+          # `.tsx` as well as `.ts`: `packages/` carries three of them, one of
+          # which (`view-plugin/test/fixtures/users.tsx`) imports
+          # `@hono/hono/jsx` through the manifest's `jsxImportSource`. Listing
+          # only `.ts` resolved a graph the `check` and `test` gates below then
+          # walked anyway, so the lock those gates were handed was not the lock
+          # that had been resolved -- which surfaces either as a `--frozen`
+          # failure read as drift, or as a silently under-resolved report.
+          # `test/dependency-drift-gate.test.ts` derives this listing from the
+          # tracked tree, so a new source extension cannot slip past it.
+          git ls-files -- 'packages/*.ts' 'packages/*.tsx' 'test/*.ts' \
+            'test/*.tsx' 'scripts/*.ts' 'scripts/*.tsx' > "$sources"
+
+          # The workspace manifests FIRST, then the source graph. Resolving
+          # only the sources produced a lock `deno ci` refuses to install --
+          # measured: it demanded `@std/async`, `@std/data-structures` and
+          # `@std/fs`, none of which any `.ts` file imports by name, so the
+          # "fresh resolution" the gates were handed was one that could never
+          # be committed. It also mis-attributed drift. `@prisma/client` is
+          # declared in `packages/database-plugin/deno.json` and imported by no
+          # source, so a source-only resolve dropped it and `drizzle-orm`'s
+          # optional peer fell 7.10.0 -> 7.8.0 -- reported for weeks as two
+          # rows of upstream drift that no upstream release had caused.
+          # `--lockfile-only`: this job needs the resolutions, not node_modules.
+          #
+          # Reported separately from the source resolution below rather than
+          # chained into it: the per-file retry that follows exists to absorb a
+          # transient batch failure, and a manifest range that genuinely cannot
+          # resolve would sail through it -- every individual file would cache
+          # fine and the step would report a transient blip.
+          if ! deno install --reload --frozen=false --lockfile-only \
+            --lock="$RUNNER_TEMP/dependency-drift.lock"; then
+            echo "::error title=Dependency range resolution failed for the workspace manifests::deno install --lockfile-only"
+            exit 1
+          fi
+
           if xargs deno cache --reload --frozen=false \
             --lock="$RUNNER_TEMP/dependency-drift.lock" < "$sources"; then
             exit 0

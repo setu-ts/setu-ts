@@ -102,6 +102,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`deno.lock` re-resolved to the current satisfying versions of every declared range.** No
+  manifest range changes, so this moves only what the lockfile pins: `@hono/hono` `4.13.0` →
+  `4.13.8`, the seven AWS SDK v3 clients `3.1103.0`/`3.1121.0` → `3.1134.0`, `zod` `4.5.4` →
+  `4.6.5`, `react-router` `8.3.0` → `8.4.0`, `@bufbuild/protobuf` `2.13.0` → `2.15.0`,
+  `@connectrpc/connect` `2.1.2` → `2.2.0`, the three OpenTelemetry packages `2.9.0`/`2.10.0` →
+  `2.11.0`, `@launchdarkly/node-server-sdk` `9.13.0` → `9.13.6`, `@google-cloud/pubsub` `6.0.0` →
+  `6.1.0`, `@google-cloud/storage` `7.21.0` → `7.22.0`, `@azure/identity` `4.13.1` → `4.13.3`,
+  `@azure/cosmos` `4.10.0` → `4.10.1`, and `ws` `8.21.2` → `8.21.3`. Five stale entries naming
+  ranges no manifest or source declares any more are dropped with them. The declared
+  dependency-compatibility ranges are unaffected — zod stays inside `>=4.4.0 <5`, and the Drizzle
+  (`0.45.2`) and Prisma v7 baselines do not move. `deno task audit:ci` reports the same 0 low, 4
+  moderate, 0 high, 0 critical baseline before and after, so no advisory drove this.
+
 - **BREAKING — `logger-plugin` now redacts common secret-shaped fields by default.** Set
   `LoggerPlugin({ redact: [] })` to restore the prior no-default-redaction behaviour. The legacy
   `redact` list remains supported for both console and Pino transports and takes precedence over a
@@ -210,6 +223,39 @@ All notable changes to this project are documented here. The format follows
   historical release record remains in this changelog for users maintaining legacy installations.
 
 ### Fixed
+
+- **The weekly `Dependency drift` workflow reported a `test` failure that was never drift, and gated
+  a graph it had not resolved.** Three defects, one shape — the job's report did not describe what
+  the job had done. Found while acting on the drift issue it filed on 2026-09-14.
+
+  It started **none of the twelve backends** ci.yml's `deno` job starts, while running that job's
+  full suite. GitHub sets `CI=true` in every workflow, so `test/apps-gate.test.ts`'s REDIS_URL
+  reachability assertion — the M53 pin that stops a dropped container becoming a silent skip —
+  failed on every scheduled run. That single assertion was the ENTIRE `test: failure` reported on
+  2026-09-07 and again on 2026-09-14; nothing about the fresh dependency graph was wrong. The
+  invisible half cost more: six guarded suites (70 steps) skipped there, and those are exactly the
+  suites a drifted `ioredis`, `amqplib`, `kafkajs`, `mongodb` or AWS SDK would break, so the one job
+  whose purpose is noticing that a new dependency broke something could not see it. The job now
+  declares the same `env`, `services` and backend startup steps, derived from ci.yml by the parity
+  test in `test/unit/release-notes.test.ts` so a backend added to the PR job is required here too.
+  The assertion was right and the workflow was wrong: it is unchanged.
+
+  Its source listing matched **`.ts` only**, while `packages/` carries three `.tsx` files — one of
+  which reaches `@hono/hono/jsx` through its manifest's `jsxImportSource`. So the lock the `check`
+  and `test` gates were handed was resolved from a smaller graph than those gates then walk.
+  `test/dependency-drift-gate.test.ts` now derives the listing from the tracked tree rather than
+  pinning it as a literal, because the literal was the defect.
+
+  And resolving from sources alone produced a lockfile **`deno ci` refuses to install** — measured:
+  it demanded `@std/async`, `@std/data-structures` and `@std/fs`, which no `.ts` file imports by
+  name — so the "fresh resolution" every gate ran against was one that could never be committed. The
+  same gap mis-attributed drift: `@prisma/client` is declared in
+  `packages/database-plugin/deno.json` and imported by no source, so dropping it took
+  `drizzle-orm`'s optional peer from `7.10.0` down to `7.8.0`, reported for weeks as two rows of
+  upstream drift that no upstream release had caused. The job now resolves the workspace manifests
+  before the source graph, and reports a manifest failure separately — the per-file retry below it
+  exists to absorb a transient batch failure, and an unresolvable manifest range would have sailed
+  through it with every individual file caching fine.
 
 - **Documentation — the last three sites asserting the false Deno compiler-option mechanism.**
   `docs/decorators.md`, the `PUBLIC_API.md` decorator note, and a `packages/cli` test comment still
