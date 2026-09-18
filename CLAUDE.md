@@ -5484,6 +5484,18 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   opened this way. Do not push or open a PR unprompted, though: finish the milestone, report the
   evidence, and wait for the human to ask. Publishing a branch is outward-facing and their call to
   time.
+- **A new PR carries the `maintainer-review` label** — `gh pr create --label maintainer-review`, or
+  `gh pr edit <pr> --add-label maintainer-review` for one already open. Automatic CodeRabbit review
+  is off by default in `.coderabbit.yaml`, which re-enables it for that label alone, so an
+  unlabelled PR is never reviewed. **The failure is silent**: the same file sets
+  `review_status: false`, so there is no "review skipped" notice and an unlabelled PR looks exactly
+  like one whose review has not arrived — PR #328 sat unreviewed until a maintainer typed
+  `@coderabbitai review` by hand. Check the label landed rather than trusting the flag. The label
+  buys the FIRST review only — `auto_incremental_review: false` sits beside it, so a re-review after
+  pushing fixes still needs `@coderabbitai review`. The maintainer's gate on EXTERNAL contributions
+  is untouched, and does not depend on this rule being obeyed: applying a label needs the Triage
+  role or above on this repository, so from a fork `--label` fails with a 403 and nothing is applied
+  — that is the gate working, not something to retry around. AI_GUIDELINES §16.7 is canonical.
 - **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
   the code-quality bot anchor findings to lines; answer in the thread
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with

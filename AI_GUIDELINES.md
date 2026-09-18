@@ -1008,6 +1008,52 @@ Reviewers must verify:
 
 ---
 
+### 16.7 A New Pull Request Carries the `maintainer-review` Label
+
+**Applies to every AI agent working this repository — Claude Code, ChatGPT/Codex, Roo Code, and any
+future one.** Automatic CodeRabbit review is **disabled by default**. `.coderabbit.yaml` turns
+`auto_review` off entirely and re-enables it for one label:
+
+```yaml
+reviews:
+  review_status: false
+  auto_review:
+    enabled: false
+    auto_incremental_review: false
+    labels:
+      - maintainer-review
+```
+
+A pull request without that label is never reviewed automatically. Apply it as you open the PR:
+
+```bash
+gh pr create --label maintainer-review --title '…' --body '…'
+gh pr edit <pr> --add-label maintainer-review   # one that is already open
+```
+
+**The omission is silent, which is what makes this a rule rather than a preference.** The same file
+sets `review_status: false`, so CodeRabbit posts no "review skipped" notice: an unlabelled PR is
+indistinguishable from one whose review has not landed yet, and waiting produces nothing. PR #328
+was opened unlabelled and sat unreviewed until a maintainer typed `@coderabbitai review` by hand —
+the label is what removes that step. Verify the label is present after opening the PR rather than
+assuming the flag took effect.
+
+`auto_incremental_review: false` sits beside it, so the label buys the **first** review and not a
+re-review: commits pushed to an already-reviewed PR are not picked up on their own, and asking for
+another pass after addressing findings still means `@coderabbitai review`. That is read from the
+setting rather than measured here — treat it as the expected behaviour to confirm, not a result.
+
+**The external-contribution gate is unchanged, and it does not rest on this rule being obeyed.** The
+label exists so that fork pull requests do not consume automatic reviews: a maintainer adds it only
+after accepting a contribution. An outside contributor — or an agent acting for one, reading this
+file from their own clone — cannot bypass that by following §16.7. Applying a label requires the
+**Triage** role or above on _this_ repository, which a fork contributor does not have, so `--label`
+/ `--add-label` fails with HTTP 403 and the label is simply not applied. Expect that failure on a
+fork PR: it is the gate working, not a misconfiguration to retry around. This rule governs a PR
+opened on a branch in this repository.
+
+---
+
 ## 17. Violation Handling
 
 ### 17.1 Violations Are Blocking
