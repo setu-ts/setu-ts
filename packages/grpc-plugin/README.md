@@ -162,7 +162,7 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   worse than refusing it cleanly: clients see an explicit, well-formed `UNIMPLEMENTED` instead of an
   opaque transport error after a successful handshake. Measured with real `grpcurl` v1.9.3: a unary
   native call reports `target server does not expose service …` and exits 1. A **bidi** native call
-  reports the same refusal, and since `0.6.0` it does so without hanging: the refusal is decided
+  reports the same refusal, and since `0.7.0` it does so without hanging: the refusal is decided
   from the request HEADERS and answered before the body is read. **Use Connect or gRPC-Web
   instead**; both work completely for unary, server-streaming and client-streaming over both
   HTTP/1.1 and HTTP/2; bidi additionally requires HTTP/2, per the bidi bullet above. Every non-JS

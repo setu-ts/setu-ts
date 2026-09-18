@@ -1629,6 +1629,33 @@ describe('documentation gate — install-snippet versions', () => {
     expect(fenceExtension('typescript')).toBe('ts');
   });
 
+  it('reads the post-alpha 0.7.x line, and still reads 0.6.x as stale beside it', () => {
+    // Stale WITHIN 0.7 — the only case that discriminates. `^0.7.0` clean at
+    // 0.7.0 passes just as well when the gate reads no 0.7 at all, which is the
+    // silent-green failure this constant exists to prevent.
+    const withinLine = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.7.0\n'),
+      '0.7.1',
+    );
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.7.0');
+    expect(withinLine[0]?.message).toContain('0.7.1');
+
+    expect(
+      checkInstallVersions(doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.7.0\n'), '0.7.0'),
+    ).toEqual([]);
+
+    // The OUTGOING line names the references this release still has to move,
+    // so it must keep reading 0.6 after the widening.
+    const outgoing = checkInstallVersions(
+      doc('README.md', 'deno add jsr:@setu-ts/kernel@^0.6.0\n'),
+      '0.7.0',
+    );
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.6.0');
+    expect(outgoing[0]?.message).toContain('0.7.0');
+  });
+
   it('reads the post-alpha 0.6.x line, and still reads 0.5.x as stale beside it', () => {
     // Stale WITHIN 0.6 — the only case that discriminates. `^0.6.0` clean at
     // 0.6.0 passes just as well when the gate reads no 0.6 at all.
@@ -1893,6 +1920,23 @@ describe('documentation gate — bare version claims', () => {
 
   // The bare-claim checker reads its own copy of the alternation, so the 0.6
   // line is unproven here until asserted here.
+  it('reads the post-alpha 0.7.x line in a bare claim', () => {
+    const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.7.0`\n'), '0.7.1');
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.7.0');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.7.0`\n'), '0.7.0')).toEqual([]);
+
+    const outgoing = checkVersionClaims(doc('README.md', 'ships `v0.6.0`\n'), '0.7.0');
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.6.0');
+
+    // Every string CONTAINS `0.7.N`, so these are what the new arm could
+    // plausibly have started claiming; the boundary lookarounds reject them.
+    const sevenNoise = 'bound to 127.0.7.1 and 10.0.7.2, requires foo 10.7.1, mask 192.0.7.9\n';
+    expect(checkVersionClaims(doc('README.md', sevenNoise), '0.7.0')).toEqual([]);
+  });
+
   it('reads the post-alpha 0.6.x line in a bare claim', () => {
     const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.6.0`\n'), '0.6.1');
     expect(withinLine).toHaveLength(1);

@@ -13,7 +13,7 @@ import type {
   BackoffStrategy,
   CircuitBreakerPolicy,
   RetryPolicy,
-} from 'jsr:@setu-ts/common@^0.6.0';
+} from 'jsr:@setu-ts/common@^0.7.0';
 
 export type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy };
 

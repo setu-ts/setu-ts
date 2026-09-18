@@ -10,7 +10,7 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
-## Unreleased
+## 0.7.0
 
 ### Regenerate your client if you adopt `@HttpCode` or `@Redirect`
 
@@ -65,6 +65,8 @@ first — arrays and plain data to a plain object, `Date` to a string or number,
 `Uint8Array`. A byte body now also sets NO default content type, so an injected multipart test
 request must pass its own `multipart/form-data; boundary=…` header, exactly as a served request
 does.
+
+<!-- version:history -->
 
 ### Check any view component you copied from the `0.6.0` docs
 
