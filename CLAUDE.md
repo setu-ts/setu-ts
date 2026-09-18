@@ -5001,7 +5001,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Its first full run verified 736 tags and surfaced six MORE wrong ones, each corrected against the
   registry. All six negative controls observed failing and reverted, including the file-level
   reduction that passes a symbol-absent tag and the exit-77 convention that would block the whole
-  `check:docs` chain) — complete (PR pending)
+  `check:docs` chain) — complete (PR #332)
 - **Milestone 96** (`packages/common` + `packages/logger-plugin` + `packages/telemetry-plugin` +
   `packages/audit-plugin` — one redaction seam for every egress path. Three components export
   application data somewhere an operator did not write, and each answered differently: the logger
