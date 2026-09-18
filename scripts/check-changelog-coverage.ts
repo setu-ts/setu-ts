@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-console -- a gate must print actionable findings.
 /**
  * @module
  *
