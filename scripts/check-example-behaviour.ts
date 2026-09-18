@@ -884,7 +884,14 @@ export function compare(
           `or carry an // ${UNCHECKED_EXEMPT_MARKERS[0]}: <reason> comment above the component.`,
       });
     }
-    if (component.expectUnsafe && result.escaped) {
+    // `delivered` is required, and it is not belt-and-braces. Since the mode
+    // sweep, `escaped` is `!raw` — so a component NO mode delivered to scores
+    // as escaped simply because nothing appeared in its output. Without this
+    // guard a counter-example the probe never reached is told it "ESCAPES its
+    // input" and invited to drop a warning that is still true, which is the
+    // worst advice this gate can give. When nothing was delivered the UNCHECKED
+    // finding above is the honest report, and it has already fired.
+    if (component.expectUnsafe && result.delivered && result.escaped) {
       findings.push({
         file: component.file,
         line: component.line,

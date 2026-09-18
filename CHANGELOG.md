@@ -297,6 +297,13 @@ All notable changes to this project are documented here. The format follows
   Reach also improved: a nested `props.note.link` in an `href` is now caught, where before it was
   not delivered at all.
 
+  One consequence of the sweep needed guarding, found in review: `escaped` is now `!raw`, so a
+  component NO mode delivered to scores as escaped because nothing appeared in its output at all. A
+  counter-example — a component its own comment labels UNSAFE, checked in the other direction — was
+  therefore told it "ESCAPES its input" and invited to drop a warning that is still true, which is
+  the worst advice this gate can give. That verdict now requires delivery; when nothing was
+  delivered the UNCHECKED finding is the honest report, and it has already fired.
+
 - **The weekly `Dependency drift` workflow reported a `test` failure that was never drift, and gated
   a graph it had not resolved.** Three defects, one shape — the job's report did not describe what
   the job had done. Found while acting on the drift issue it filed on 2026-09-14.

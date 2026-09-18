@@ -480,6 +480,26 @@ describe('compare', () => {
     expect(finding?.message).toContain('no longer unsafe');
   });
 
+  it('does not tell an UNREACHED counter-example to drop its warning (#334 review)', () => {
+    // Since the mode sweep, `escaped` is `!raw`, so a component no mode
+    // delivered to scores as escaped because nothing appeared at all. A
+    // counter-example in that state used to be told it "ESCAPES its input" and
+    // invited to drop a warning that is still true.
+    const counter = { ...base, expectUnsafe: true };
+    const findings = compare([counter], [{
+      index: 0,
+      ok: true,
+      escaped: true,
+      scheme: false,
+      delivered: false,
+      reached: true,
+    }]);
+    // The honest report is UNCHECKED, and only that.
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain('UNCHECKED');
+    expect(findings[0]?.message).not.toContain('drop the entry');
+  });
+
   it('passes a labelled counter-example that is still unsafe', () => {
     const labelled = { ...base, expectUnsafe: true };
     expect(
