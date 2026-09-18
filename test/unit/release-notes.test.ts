@@ -155,13 +155,50 @@ function stepBlock(job: string, name: string): string {
   let end = start + 1;
   while (end < lines.length) {
     const line = lines[end]!;
-    const isSibling = line.trimStart().startsWith('- ') &&
-      line.length - line.trimStart().length === indent;
-    if (isSibling) break;
+    const text = line.trimStart();
+    const atStepIndent = line.length - text.length === indent;
+    // A comment at the step's own indentation introduces the NEXT step, so the
+    // scan has to stop there too. Breaking only on a sibling `- ` swept that
+    // step's prose into this block — the opposite of what the paragraph above
+    // promises — and the comparison below passed anyway because ci.yml and
+    // release.yml happened to carry byte-identical prose. drift.yml does not,
+    // and should not have to.
+    if (atStepIndent && (text.startsWith('- ') || text.startsWith('#'))) break;
     end += 1;
   }
   return lines.slice(start, end).join('\n').trimEnd();
 }
+
+/**
+ * Every workflow that re-runs the full suite, and the job in it that does.
+ *
+ * ci.yml's `deno` job is the reference rather than a member: the backends are
+ * derived FROM it, so listing it here would compare it with itself.
+ *
+ * `expectedStep` builds the step this consumer must declare out of ci.yml's,
+ * so a permitted difference is asserted rather than tolerated — dropping
+ * drift.yml's extra line fails here just as adding one to release.yml would.
+ */
+const SUITE_CONSUMERS: readonly {
+  readonly workflow: string;
+  readonly job: string;
+  readonly expectedStep: (step: string) => string;
+}[] = [
+  {
+    workflow: '.github/workflows/release.yml',
+    job: 'release',
+    expectedStep: (step) => step,
+  },
+  {
+    workflow: '.github/workflows/drift.yml',
+    job: 'fresh-resolution',
+    // drift.yml's whole output is a report, so each backend step there carries
+    // `continue-on-error: true`: without it one failed image pull skips every
+    // backend step after it and files an issue blaming a wall of unrelated
+    // test failures on dependency drift.
+    expectedStep: (step) => step.replace('\n', '\n        continue-on-error: true\n'),
+  },
+];
 
 describe('release workflow wiring', () => {
   it('builds its notes with this script rather than inlined shell', async () => {
@@ -233,21 +270,22 @@ describe('release workflow wiring', () => {
     );
   });
 
-  it('starts every backend the PR job starts, so a tag run is no weaker a gate', async () => {
-    // The tag run re-runs the whole suite as the last gate before an immutable
-    // publish, so a backend it does not start is a guarded suite that skips
-    // there while passing on every PR. That is invisible: only `REDIS_URL` has
-    // a CI-reachability assertion, so the rest degrade to a silent skip and the
+  it('starts every backend the PR job starts, in every workflow that runs the suite', async () => {
+    // A backend a workflow does not start is a guarded suite that skips there
+    // while passing on every PR. That is invisible: only `REDIS_URL` has a
+    // CI-reachability assertion, so the rest degrade to a silent skip and the
     // job stays green. v0.2.0 shipped with DynamoDB Local and the Bigtable
-    // emulator missing here for exactly that reason.
+    // emulator missing from the tag run for exactly that reason, and the
+    // weekly drift job started none of the twelve — so six suites (70 steps)
+    // skipped in the one job whose entire purpose is noticing that a new
+    // dependency broke something, while the one assertion that IS visible
+    // turned its report red for a reason that was never drift.
     //
     // Derived from ci.yml rather than listed by hand, because a hand-written
-    // list is what drifted: a backend added to the PR job is now automatically
-    // required here too.
+    // list is what drifted: a backend added to the PR job is automatically
+    // required in every consumer below.
     const ci = await Deno.readTextFile('.github/workflows/ci.yml');
-    const release = await Deno.readTextFile('.github/workflows/release.yml');
     const prJob = jobBlock(ci, 'deno');
-    const tagJob = jobBlock(release, 'release');
 
     // Matched as ACTIVE lines rather than substrings: commenting a declaration
     // out leaves the `key: value` text intact, so a `toContain` passes while
@@ -255,26 +293,40 @@ describe('release workflow wiring', () => {
     // for the release-verify step.
     const images = [...prJob.matchAll(/^ +image: (\S+)$/gm)].map((match) => match[1]);
     expect(images.length).toBeGreaterThan(5);
-    for (const image of images) {
-      expect(tagJob).toMatch(activeLine(`image: ${image}`));
-    }
 
     // Endpoints too: a started container the suite cannot address is no gate.
     const endpoints = [...prJob.matchAll(/^ +([A-Z0-9_]+(?:_URL|_URI|_ENDPOINT)): (\S+)$/gm)];
     expect(endpoints.length).toBeGreaterThan(5);
-    for (const [, name, value] of endpoints) {
-      expect(tagJob).toMatch(activeLine(`${name}: ${value}`));
-    }
 
-    // The Bigtable emulator cannot be a service container — its image's default
-    // command is a shell, and `options` reaches `docker create` BEFORE the image
-    // while the command comes after — so it is a step that no image or endpoint
-    // pin above reaches. Compared byte-for-byte against ci.yml's own step rather
-    // than pinned as a literal, so changing the image, the published port, the
-    // emulator command or the readiness probe on the PR side requires the same
-    // change here; a hand-written literal is what let these two drift already.
-    const emulator = 'Start the Cloud Bigtable emulator';
-    expect(stepBlock(tagJob, emulator)).toBe(stepBlock(prJob, emulator));
+    // The four backends that cannot be service containers — each needs a
+    // command or an argument, and `options` reaches `docker create` BEFORE the
+    // image while the command comes after it — so no image or endpoint pin
+    // above reaches them. Compared byte-for-byte against ci.yml's own steps
+    // rather than pinned as literals, so changing an image, a published port,
+    // a command or a readiness probe on the PR side requires the same change
+    // in every consumer; a hand-written literal is what let these drift
+    // already. Only Bigtable was compared before, which left the other three
+    // free to diverge.
+    const stepBackends = [
+      'Start the Cloud Bigtable emulator',
+      'Start the NATS server (JetStream)',
+      'Start Kafka (KRaft single-node)',
+      'Start MinIO (S3 storage outage suite)',
+    ];
+
+    for (const { workflow, job, expectedStep } of SUITE_CONSUMERS) {
+      const text = await Deno.readTextFile(workflow);
+      const consumer = jobBlock(text, job);
+      for (const image of images) {
+        expect(consumer).toMatch(activeLine(`image: ${image}`));
+      }
+      for (const [, name, value] of endpoints) {
+        expect(consumer).toMatch(activeLine(`${name}: ${value}`));
+      }
+      for (const backend of stepBackends) {
+        expect(stepBlock(consumer, backend)).toBe(expectedStep(stepBlock(prJob, backend)));
+      }
+    }
   });
 
   it('flags a 0.x release as a prerelease, not only a -suffix version', async () => {

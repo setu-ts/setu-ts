@@ -535,6 +535,17 @@ describe('real-backend CI wiring', () => {
     // the test step, which the static checks above cannot observe. Every
     // workflow running this suite must therefore provide the container — see
     // the release-job assertion above.
+    //
+    // `CI` and not a backend-specific opt-in, deliberately: the guard has to
+    // be one a new workflow cannot forget. The weekly drift job ran this suite
+    // for months with no backends at all, so this assertion failed on every
+    // scheduled run and reported `test: failure` in the dependency-drift issue
+    // — twice, on 2026-09-07 and 2026-09-14 — for a reason that was never
+    // drift. The fix was to give that job the backends, not to narrow this
+    // guard: the assertion was right and the workflow was wrong, and the wider
+    // loss was the six guarded suites silently skipping there. Which workflows
+    // must satisfy it is derived from ci.yml in
+    // `test/unit/release-notes.test.ts`, so the list cannot go stale.
     if (Deno.env.get('CI') === undefined) return;
     expect(Deno.env.get('REDIS_URL')).toBeDefined();
   });
