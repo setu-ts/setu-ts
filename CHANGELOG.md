@@ -135,8 +135,11 @@ All notable changes to this project are documented here. The format follows
   requests — raised a `file-absent` finding and exited 1, failing the whole `check:docs` chain on a
   transient fault, the opposite of the outage contract. And the behaviour gate matched its
   `UNCHECKED-EXEMPT` marker with a bare substring test, so the marker alone exempted a component, as
-  did a comment merely mentioning it; the documented `MARKER: <reason>` form is now required, which
-  matters because that exemption is the only way past an unchecked verdict.
+  did a comment merely mentioning it. The marker must now OPEN its comment line and carry a reason:
+  requiring the documented `MARKER: <reason>` form was the first fix and was NOT enough, since
+  `// Never write UNCHECKED-EXEMPT: without review` carries both the colon and a reason and is still
+  a mention — a second review pass caught that on the fix itself. It matters because the exemption
+  is the only way past an unchecked verdict.
 
 ### Changed
 
