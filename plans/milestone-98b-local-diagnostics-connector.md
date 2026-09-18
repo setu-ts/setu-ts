@@ -76,13 +76,20 @@ interface ILocalDiagnosticsListenerFactory {
   plus `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`. `RuntimePlugin` always provides this factory. Its
   sole method is `listen({ port, handler }): Promise<ILocalDiagnosticsListener>`: it permits one
   active listener, binds only `127.0.0.1`, accepts no hostname/adapter/body-limit option and returns
-  only `close()`. The Deno factory creates and owns its private adapter inside `packages/runtime`;
-  Node, Bun, Workers and unknown platforms reject with one fixed unsupported-transport error before
-  any bind. The factory validates port 1024..65535, uses `maxBodyBytes: 0`, and never exposes its
-  adapter or handle. It reuses RuntimePlugin's existing injected Deno HTTP-adapter factory for
-  deterministic tests, but creates its own adapter instance. RuntimePlugin registers a close hook
-  that closes an active local listener on every shutdown/failure path; connector revocation and that
-  hook share the same idempotent close operation.
+  only `close()`. The Deno factory creates and owns a private `DenoLocalDiagnosticsListener` inside
+  `packages/runtime`; it uses the internal Deno serve-host seam and
+  `mapWebRequestToFrameworkRequest`, without exposing an adapter or server handle. Node, Bun,
+  Workers and unknown platforms reject with one fixed unsupported-transport error before any bind.
+  The factory validates port 1024..65535 and uses a zero-body policy. Before mapping to `IRequest`,
+  its native `Request` handler rejects any `Transfer-Encoding`, a `Content-Length` other than absent
+  or exactly `0`, and comma-containing singleton `Host`, `X-Setu-Session`, `X-Setu-Sequence`,
+  `X-Setu-Instance` or `X-Setu-Mac` values. Those grammars contain no comma, so the check rejects a
+  duplicate line that the Fetch `Headers` interface coalesced. Deno does not expose raw header-line
+  multiplicity after HTTP parsing; this plan therefore makes no raw-wire preservation claim and
+  proves the parser/normalization boundary with real-socket duplicate-header tests. The connector
+  handler repeats semantic header validation after mapping as defence in depth. RuntimePlugin
+  registers a close hook that closes an active local listener on every shutdown/failure path;
+  connector revocation and that hook share the same idempotent close operation.
 - Export `DiagnosticsPlugin(options): IDiagnosticsPlugin`, where
   `IDiagnosticsPlugin extends IPlugin` with `revoke(): Promise<void>`. The plugin name is
   `diagnostics-plugin`, with `dependencies: [CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER]` and no
@@ -175,9 +182,11 @@ GET
   the client's session to M98a's non-null instance UUID. Later requests must supply that exact ID,
   including subsequent status requests. Session ID/key are per launch; obtaining a UUID alone grants
   nothing. The server must not accept an empty instance ID after the initial status exchange.
-- Serialize each response body once to UTF-8 JSON, then sign the following fields. Send the
-  signature as `X-Setu-Mac`; the native client checks it over the exact bounded response bytes
-  before parsing, displaying or persisting anything:
+- Serialize each response body once to UTF-8 JSON, then sign the following fields. `<sequence>` is
+  exactly the accepted `X-Setu-Sequence` value from the request that produced this response; there
+  is no response counter. Send the signature as `X-Setu-Mac`; the native client checks it over the
+  exact bounded response bytes and the sequence it allocated for that request before parsing,
+  displaying or persisting anything:
 
 ```text
 setu-diagnostics-v1
@@ -199,8 +208,11 @@ response
   unverifiable response as a connection failure, never an application result.
 - All responses use `Cache-Control: no-store`, `Content-Type: application/json` and
   `X-Content-Type-Options: nosniff`. The source's DTO version and instance must match the session.
-  Validate and re-project responses against the exact M98a field allowlist before serialization; do
-  not spread an arbitrary provider result into output. Never pass a raw error to the logger.
+  The snapshot response body is M98a's compact final snapshot JSON, not an envelope; measure its
+  exact UTF-8 bytes again before signing/sending and refuse an over-limit internal result with the
+  fixed `unavailable` error. Validate and re-project responses against the exact M98a field
+  allowlist before serialization; do not spread an arbitrary provider result into output. Never pass
+  a raw error to the logger.
 - **Test home:** `protocol.test.ts`, `authentication.test.ts`, `client.test.ts`, `security.test.ts`.
   Include independent fixed HMAC vectors and raw HTTP adversarial cases; a server and client sharing
   the same canonicalization bug must not be the only evidence.
@@ -215,10 +227,18 @@ response
 - A single runtime timer triggers `revoke()` at expiry; clear it on every startup/close/failure
   path. A failure closing the listener does not restore authorization. Report only a fixed local
   error. Repeated revoke calls await the same cleanup promise.
-- Fixed server limits: maximum 8 simultaneous connector handlers, global token bucket of 20
-  requests/second with burst 40 using `hrtime`, maximum 8 KiB total parsed header bytes, 128 events
-  per read and 256 KiB response body. Reject work over the handler/rate bounds before crypto or
-  snapshot copying. Header budgets are application-level limits after HTTP parsing; native adapter
+- Fixed server limits: maximum 8 simultaneous connector handlers, maximum 8 KiB total parsed header
+  bytes, 128 events per read and 256 KiB response body. Raw-validation refusals use a dedicated
+  anonymous bucket of 5 requests/second with burst 10 and never debit the session budget. After
+  successful MAC/session verification, only the paired session's bucket of 20 requests/second with
+  burst 40 using `hrtime` applies. A matching session ID may enter a separate bounded authentication
+  lane, but cannot debit the authenticated bucket until `subtle.verify` succeeds; it has a distinct
+  concurrency cap and no snapshot/read access. Reserve one connector-processing slot for a
+  successfully authenticated request, while anonymous/authentication lanes together use at most
+  seven. Thus a flood of malformed, wrong-session or wrong-MAC requests cannot consume the paired
+  client's request budget or all processing slots. Reject before crypto where a structural/native
+  check fails, before snapshot copying where authentication/rate admission fails, and never log a
+  supplied header. Header budgets are application-level limits after HTTP parsing; native adapter
   parsing remains a runtime responsibility, not a protection this plugin can claim to implement.
 - Reads are immediate bounded polling, not long polling, SSE or WebSockets. No per-client event
   queue, application subscription, raw log sink, database, file or background export is created. The
@@ -318,21 +338,21 @@ Connector paths are relative to `packages/diagnostics-plugin/`; common/runtime p
 Package tests below live under `packages/diagnostics-plugin/test/` and use `describe`/`it` with
 `expect`. The source coverage bar applies independently to every file, including error paths.
 
-| Test file                                         | src covered                                            | Key assertions (and the signature each call type-checks against)                                                                                                                     |
-| ------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| runtime `unit/local-diagnostics-listener.test.ts` | common runtime/tokens, runtime listener/runtime-plugin | One active listener, exact loopback bind, no adapter/handle escape, body refusal, unsupported-platform refusal, close idempotence and token/provider ordering.                       |
-| `unit/plugin.test.ts`                             | plugin/interfaces/index                                | `DiagnosticsPlugin(options)` types, explicit activation, option bounds, declared listener dependency and `revoke(): Promise<void>`.                                                  |
-| `unit/connector-handler.test.ts`                  | connector-handler                                      | Protocol handler receives only normalized requests and cannot create/listen/close an adapter.                                                                                        |
-| `unit/session.test.ts`                            | session                                                | Invalid key/ID, monotonic expiry, key disposal, atomic sequence race, overflow, terminal revoke and instance binding.                                                                |
-| `unit/authentication.test.ts`                     | authentication                                         | Fixed independent HMAC/SHA-256 vectors, exact canonical bytes, request/response domain separation, bad MAC and mutation of every signed field.                                       |
-| `unit/protocol.test.ts`                           | protocol                                               | Canonical targets, allowed DTO shape, unsupported version, malformed/custom source result and fixed errors.                                                                          |
-| `unit/limits.test.ts`                             | limits                                                 | Burst/refill, concurrency cap, UTF-8 header counting, body bounds, oversized output and no crypto/read on refusal.                                                                   |
-| `unit/client.test.ts`                             | client                                                 | Public snapshot/read/close, status verification, sequence serialization, modified response, oversized chunked body, redirect, timeout, abort and terminal failed pairing.            |
-| `integration/activation.test.ts`                  | plugin/connector-handler/interfaces                    | Real parent application: absent plugin opens no socket; missing diagnostics and non-Deno runtime refuse before listening.                                                            |
-| `integration/security.test.ts`                    | session/authentication/protocol/limits                 | Missing/wrong/replayed/stale/cross-instance credentials, all Origin values, wrong Host/forwarded authority, unknown methods and canary absence; allowed metadata remains observable. |
-| `integration/lifecycle.test.ts`                   | plugin/connector-handler/session/client                | Revoke and expiration during auth/read/bind, failed parent startup, failed close, no reopening, parent keeps serving.                                                                |
-| `e2e/local-connector.test.ts`                     | all source modules                                     | Real Deno adapter/socket, signed native client, snapshot, request observations, raw hostile HTTP, port conflict, revocation and socket cleanup.                                      |
-| `test/inspect-local-diagnostics.test.ts` (root)   | demo and public exports                                | Subprocess demo shows useful verified DTOs and a still-working application; no key/session environment dump.                                                                         |
+| Test file                                         | src covered                                            | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                              |
+| ------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| runtime `unit/local-diagnostics-listener.test.ts` | common runtime/tokens, runtime listener/runtime-plugin | One active listener, exact loopback bind, native pre-mapping header/framing refusal, no adapter/handle escape, body refusal, unsupported-platform refusal, close idempotence and token/provider ordering.                                                     |
+| `unit/plugin.test.ts`                             | plugin/interfaces/index                                | `DiagnosticsPlugin(options)` types, explicit activation, option bounds, declared listener dependency and `revoke(): Promise<void>`.                                                                                                                           |
+| `unit/connector-handler.test.ts`                  | connector-handler                                      | Protocol handler receives only normalized requests and cannot create/listen/close an adapter.                                                                                                                                                                 |
+| `unit/session.test.ts`                            | session                                                | Invalid key/ID, monotonic expiry, key disposal, atomic sequence race, overflow, terminal revoke and instance binding.                                                                                                                                         |
+| `unit/authentication.test.ts`                     | authentication                                         | Fixed independent HMAC/SHA-256 vectors, exact canonical bytes, request/response domain separation, bad MAC and mutation of every signed field.                                                                                                                |
+| `unit/protocol.test.ts`                           | protocol                                               | Canonical targets, allowed DTO shape, unsupported version, malformed/custom source result and fixed errors.                                                                                                                                                   |
+| `unit/limits.test.ts`                             | limits                                                 | Separate anonymous/authentication/session buckets and reserved authenticated slot, burst/refill, concurrent hostile loopback traffic cannot debit/starve a valid session, UTF-8 header counting, body bounds, oversized output and no crypto/read on refusal. |
+| `unit/client.test.ts`                             | client                                                 | Public snapshot/read/close, status verification, sequence serialization, modified response, oversized chunked body, redirect, timeout, abort and terminal failed pairing.                                                                                     |
+| `integration/activation.test.ts`                  | plugin/connector-handler/interfaces                    | Real parent application: absent plugin opens no socket; missing diagnostics and non-Deno runtime refuse before listening.                                                                                                                                     |
+| `integration/security.test.ts`                    | session/authentication/protocol/limits                 | Missing/wrong/replayed/stale/cross-instance credentials, all Origin values, wrong Host/forwarded authority, unknown methods and canary absence; allowed metadata remains observable.                                                                          |
+| `integration/lifecycle.test.ts`                   | plugin/connector-handler/session/client                | Revoke and expiration during auth/read/bind, failed parent startup, failed close, no reopening, parent keeps serving.                                                                                                                                         |
+| `e2e/local-connector.test.ts`                     | all source modules                                     | Real Deno socket, signed native client, snapshot, request observations, duplicate/coalesced singleton headers and framing refusal before mapping, raw hostile HTTP, port conflict, revocation and socket cleanup.                                             |
+| `test/inspect-local-diagnostics.test.ts` (root)   | demo and public exports                                | Subprocess demo shows useful verified DTOs and a still-working application; no key/session environment dump.                                                                                                                                                  |
 
 The package's `deno.json` uses the runtime package's existing `test.permissions` convention, with
 `net: ["127.0.0.1"]` for real loopback socket exercises. Keep other permissions absent unless the

@@ -194,23 +194,34 @@ integration consumer test; compile a consumer against every proposed signature.
 ### 3.6 Bounds, readers and performance
 
 - **Decision:** Fixed v1 limits: 1,024 event slots, 1,024 encoded bytes per event, 256 KiB per
-  snapshot, 1,024 nodes and 4,096 edges. Drop oversized events whole; evict oldest events when the
-  ring fills. Stop adding topology entries at its limits, set `truncated`, and omit edges whose
-  endpoints are absent. Bound strings and counts before serialization/allocation, not afterwards.
-  Maintain counters with saturation at `Number.MAX_SAFE_INTEGER`; stop collection with a coarse
-  failure state before sequence IDs can wrap. These are internal constants, not unused options.
+  snapshot, 1,024 nodes and 4,096 edges. The snapshot limit is the exact UTF-8 byte length of the
+  compact `JSON.stringify()` representation returned by `snapshot()`; it is also the exact M98b
+  `/v1/snapshot` response body, with no envelope or pretty-printing. Build and measure the final DTO
+  before returning it; when topology would exceed the budget, omit later entries/edges and set
+  `truncated` until it fits. M98b independently re-measures the bytes immediately before signing and
+  sending, so no accepted snapshot can exceed its 256 KiB server/client limit. Drop oversized events
+  whole; evict oldest events when the ring fills. Stop adding topology entries at its limits, set
+  `truncated`, and omit edges whose endpoints are absent. Bound strings and counts before
+  serialization/allocation, not afterward. Maintain counters with saturation at
+  `Number.MAX_SAFE_INTEGER`; stop collection with a coarse failure state before sequence IDs can
+  wrap. These are internal constants, not unused options.
 - No public push subscription, timers, consumer queues or background promises. Request work never
   awaits a reader. A reader can be slow, stop polling or throw after reading without affecting the
   application. Deliberately blocking synchronous code in the same JS process remains out of scope.
-- Snapshot DTOs are built/cached at registration changes; requests append fixed-shape events. Reads
-  return frozen safe data, not handles into mutable collector storage. Teardown clears all caches
-  and weak context bookkeeping. Every mutation/execution call site enters one private
-  `safeObserve(kind, () => void)` boundary in the collector. It catches every observation failure
-  and stores neither the exception nor its message. An event-capture failure saturatingly increments
-  `droppedEvents`, disables further event capture and returns synchronously; a topology-capture
-  failure drops that entry and sets `truncated`. Option validation remains the only
-  construction-time diagnostic failure that can reject application creation. An inspection failure
-  must not change a response, lifecycle result or startup/shutdown error.
+- Snapshot DTOs are rebuilt lazily and cached after every topology or scalar snapshot mutation.
+  Registration changes invalidate the cached topology; each state/failure-code transition,
+  `truncated` transition, and `droppedEvents` increment also marks the complete snapshot dirty.
+  `snapshot()` rebuilds the final DTO from collector-owned data, re-applies the final UTF-8 budget,
+  deeply freezes it, then caches it. Requests append fixed-shape events without invalidating the
+  snapshot unless an event is dropped. Reads return frozen safe data, not handles into mutable
+  collector storage. Teardown clears all caches and weak context bookkeeping. Every
+  mutation/execution call site enters one private `safeObserve(kind, () => void)` boundary in the
+  collector. It catches every observation failure and stores neither the exception nor its message.
+  An event-capture failure saturatingly increments `droppedEvents`, disables further event capture
+  and returns synchronously; a topology-capture failure drops that entry and sets `truncated`.
+  Option validation remains the only construction-time diagnostic failure that can reject
+  application creation. An inspection failure must not change a response, lifecycle result or
+  startup/shutdown error.
 - Performance acceptance: same machine/runtime, five paired 10-second runs after warm-up for an
   empty synchronous route and an async route with five middleware stages. Disabled median throughput
   must be at least 98% of baseline; enabled at least 90%, with p95 latency at most 110% of baseline.
@@ -290,8 +301,8 @@ Kernel test filenames below are under `packages/kernel/test/`; common's are unde
 | ------------------------------------------------------------ | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | common `unit/diagnostics-contract.test.ts`                   | common diagnostics/plugin/index      | Structural old application remains valid; public imports and consumer return types compile.                                                                                                                                                                          |
 | kernel `unit/diagnostics-projection.test.ts`                 | projection                           | Exact labels, accessor omission, bounded strings, unknown fields absent, fixed errors.                                                                                                                                                                               |
-| kernel `unit/diagnostics-buffer.test.ts`                     | buffer                               | `read(after, limit)` cursor validation, truncation, overflow, non-destructive readers and saturated counters.                                                                                                                                                        |
-| kernel `unit/diagnostics-contract.test.ts`                   | collector                            | `snapshot()` state/DTO freezing, runtime-not-ready null fields, closed reads and buffer disposal.                                                                                                                                                                    |
+| kernel `unit/diagnostics-buffer.test.ts`                     | buffer                               | `read(after, limit)` cursor validation, truncation, overflow, non-destructive readers, saturated counters and the final UTF-8 snapshot-body cap.                                                                                                                     |
+| kernel `unit/diagnostics-contract.test.ts`                   | collector                            | `snapshot()` state/DTO freezing, cache rebuild after state/failure/truncation/drop mutations, runtime-not-ready null fields, closed reads and buffer disposal.                                                                                                       |
 | kernel `integration/diagnostics-activation.test.ts`          | application/index, common exports    | Explicit options, absent property/allocations, no listener, public consumer signature.                                                                                                                                                                               |
 | kernel `integration/diagnostics-registration.test.ts`        | registry/router/pipeline/application | No lazy resolution, owners/declared edges, ordered priorities, removal/multi-provider and both match paths.                                                                                                                                                          |
 | kernel `integration/diagnostics-lifecycle.test.ts`           | lifecycle/application/collector      | Early resolution failure, runtime initialization, per-hook ordering, startup/close failures and unconditional diagnostic cleanup.                                                                                                                                    |
