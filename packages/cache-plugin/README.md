@@ -64,24 +64,23 @@ programmatic read-through calls.
 
 ## Exports
 
-| Export                   | Kind      |
-| ------------------------ | --------- |
-| `cacheMiddleware`        | function  |
-| `CachePlugin`            | function  |
-| `CacheService`           | class     |
-| `MemoryStore`            | class     |
-| `NoopStore`              | class     |
-| `RedisStore`             | class     |
-| `CachedResponsePayload`  | interface |
+| Export | Kind |
+| --- | --- |
+| `cacheMiddleware` | function |
+| `CachePlugin` | function |
+| `CacheService` | class |
+| `MemoryStore` | class |
+| `NoopStore` | class |
+| `RedisStore` | class |
+| `CachedResponsePayload` | interface |
 | `CacheMiddlewareOptions` | interface |
-| `CachePluginOptions`     | interface |
-| `CacheStoreOptions`      | interface |
-| `ICacheStore`            | interface |
-| `IRedisClient`           | interface |
-| `CacheStoreType`         | type      |
+| `CachePluginOptions` | interface |
+| `CacheStoreOptions` | interface |
+| `ICacheStore` | interface |
+| `IRedisClient` | interface |
+| `CacheStoreType` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

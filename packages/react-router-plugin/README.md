@@ -111,35 +111,34 @@ stateless.
 
 ## Exports
 
-| Export                     | Kind      |
-| -------------------------- | --------- |
-| `assembleHandler`          | function  |
-| `assertSsrRuntime`         | function  |
-| `bridgeRequestToRR`        | function  |
-| `contextKeyFor`            | function  |
-| `createLoadContextFactory` | function  |
-| `createPublicFileHandler`  | function  |
-| `createStaticAssetHandler` | function  |
-| `loadRequestHandler`       | function  |
-| `ReactRouterPlugin`        | function  |
-| `SsrService`               | class     |
-| `CAPABILITIES`             | const     |
-| `servicesContext`          | const     |
-| `userContext`              | const     |
-| `HandlerResult`            | interface |
-| `IFileSystem`              | interface |
-| `IRequestContext`          | interface |
-| `ISsrService`              | interface |
+| Export | Kind |
+| --- | --- |
+| `assembleHandler` | function |
+| `assertSsrRuntime` | function |
+| `bridgeRequestToRR` | function |
+| `contextKeyFor` | function |
+| `createLoadContextFactory` | function |
+| `createPublicFileHandler` | function |
+| `createStaticAssetHandler` | function |
+| `loadRequestHandler` | function |
+| `ReactRouterPlugin` | function |
+| `SsrService` | class |
+| `CAPABILITIES` | const |
+| `servicesContext` | const |
+| `userContext` | const |
+| `HandlerResult` | interface |
+| `IFileSystem` | interface |
+| `IRequestContext` | interface |
+| `ISsrService` | interface |
 | `ReactRouterPluginOptions` | interface |
-| `RouterContextKey`         | interface |
-| `RouterLoadContext`        | interface |
-| `SsrRuntime`               | interface |
-| `PopulateLoadContext`      | type      |
-| `RouteHandler`             | type      |
-| `SsrRequestHandler`        | type      |
+| `RouterContextKey` | interface |
+| `RouterLoadContext` | interface |
+| `SsrRuntime` | interface |
+| `PopulateLoadContext` | type |
+| `RouteHandler` | type |
+| `SsrRequestHandler` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

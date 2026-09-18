@@ -156,6 +156,11 @@ jobs:
           # write-capable credential in reach. The release step gets its token
           # explicitly through GH_TOKEN instead.
           persist-credentials: false
+          # The changelog-coverage gate compares each published barrel against
+          # the last RELEASE TAG, and a shallow checkout fetches no tags — it
+          # would fail closed on a tag run, which is the one run that must not
+          # be blocked by its own gate for a reason unrelated to the release.
+          fetch-depth: 0
 
       - uses: denoland/setup-deno@v2
         with:

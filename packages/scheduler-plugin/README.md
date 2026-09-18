@@ -108,25 +108,24 @@ the handler receives its original job directly and no chain is allocated.
 
 ## Exports
 
-| Export                      | Kind      |
-| --------------------------- | --------- |
-| `SchedulerPlugin`           | function  |
-| `SchedulerUnavailableError` | class     |
-| `DistributedLockOptions`    | interface |
-| `IDistributedLock`          | interface |
-| `IRedisLockClient`          | interface |
-| `IScheduler`                | interface |
-| `RetryOptions`              | interface |
-| `ScheduledJob`              | interface |
-| `ScheduleOptions`           | interface |
-| `SchedulerPluginOptions`    | interface |
-| `SchedulerBackoff`          | type      |
-| `SchedulerJobDefinition`    | type      |
-| `SchedulerJobEntry`         | type      |
-| `SchedulerJobHandler`       | type      |
+| Export | Kind |
+| --- | --- |
+| `SchedulerPlugin` | function |
+| `SchedulerUnavailableError` | class |
+| `DistributedLockOptions` | interface |
+| `IDistributedLock` | interface |
+| `IRedisLockClient` | interface |
+| `IScheduler` | interface |
+| `RetryOptions` | interface |
+| `ScheduledJob` | interface |
+| `ScheduleOptions` | interface |
+| `SchedulerPluginOptions` | interface |
+| `SchedulerBackoff` | type |
+| `SchedulerJobDefinition` | type |
+| `SchedulerJobEntry` | type |
+| `SchedulerJobHandler` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

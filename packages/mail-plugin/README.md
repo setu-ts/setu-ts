@@ -72,47 +72,46 @@ the provider has no liveness check (e.g. the log provider always reports `true`)
 
 ## Exports
 
-| Export                    | Kind      |
-| ------------------------- | --------- |
-| `adaptNodemailerModule`   | function  |
-| `adaptSesModule`          | function  |
-| `createProvider`          | function  |
-| `escapeHtml`              | function  |
-| `loadNodemailerModule`    | function  |
-| `loadSesModule`           | function  |
-| `MailPlugin`              | function  |
-| `toNodemailerMessage`     | function  |
-| `toSendGridBody`          | function  |
-| `toSesInput`              | function  |
-| `validateSesClient`       | function  |
-| `validateSmtpTransport`   | function  |
-| `LogProvider`             | class     |
-| `MailService`             | class     |
-| `SendGridProvider`        | class     |
-| `SesProvider`             | class     |
-| `SmtpProvider`            | class     |
-| `TemplateEngine`          | class     |
-| `IMailer`                 | interface |
-| `ISesClient`              | interface |
-| `ISmtpTransport`          | interface |
-| `LogProviderOptions`      | interface |
-| `MailMessage`             | interface |
-| `MailPluginOptions`       | interface |
-| `MailProviderOptions`     | interface |
-| `MailServiceOptions`      | interface |
-| `MailTemplate`            | interface |
-| `NodemailerModule`        | interface |
-| `RenderedTemplate`        | interface |
+| Export | Kind |
+| --- | --- |
+| `adaptNodemailerModule` | function |
+| `adaptSesModule` | function |
+| `createProvider` | function |
+| `escapeHtml` | function |
+| `loadNodemailerModule` | function |
+| `loadSesModule` | function |
+| `MailPlugin` | function |
+| `toNodemailerMessage` | function |
+| `toSendGridBody` | function |
+| `toSesInput` | function |
+| `validateSesClient` | function |
+| `validateSmtpTransport` | function |
+| `LogProvider` | class |
+| `MailService` | class |
+| `SendGridProvider` | class |
+| `SesProvider` | class |
+| `SmtpProvider` | class |
+| `TemplateEngine` | class |
+| `IMailer` | interface |
+| `ISesClient` | interface |
+| `ISmtpTransport` | interface |
+| `LogProviderOptions` | interface |
+| `MailMessage` | interface |
+| `MailPluginOptions` | interface |
+| `MailProviderOptions` | interface |
+| `MailServiceOptions` | interface |
+| `MailTemplate` | interface |
+| `NodemailerModule` | interface |
+| `RenderedTemplate` | interface |
 | `SendGridProviderOptions` | interface |
-| `SesProviderOptions`      | interface |
-| `SesSdkModule`            | interface |
-| `SmtpProviderOptions`     | interface |
-| `IMailHttp`               | type      |
-| `MailProviderType`        | type      |
-| `OutgoingMail`            | type      |
+| `SesProviderOptions` | interface |
+| `SesSdkModule` | interface |
+| `SmtpProviderOptions` | interface |
+| `IMailHttp` | type |
+| `MailProviderType` | type |
+| `OutgoingMail` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

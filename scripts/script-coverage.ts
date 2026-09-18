@@ -73,6 +73,11 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // tag scanner, symbol resolver and comparison carry the bar. Its failure
   // mode is also a SILENT PASS — a wrong tag ships on the public docs page.
   'scripts/check-since-tags.ts',
+  // The changelog-coverage gate: every export added to a published barrel
+  // since the last release, against the Unreleased section. Its failure mode
+  // is a SILENT PASS — an export ships unannounced and the gate says it did
+  // not — so the comparison itself carries the bar, with its I/O injected.
+  'scripts/check-changelog-coverage.ts',
 ];
 
 interface FileCoverage {

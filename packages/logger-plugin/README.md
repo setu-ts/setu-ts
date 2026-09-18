@@ -100,23 +100,22 @@ previous no-default-redaction behaviour.
 
 ## Exports
 
-| Export                          | Kind      |
-| ------------------------------- | --------- |
-| `createRequestLoggerMiddleware` | function  |
-| `LoggerPlugin`                  | function  |
-| `ConsoleLogger`                 | class     |
-| `NoopLogger`                    | class     |
-| `PinoLogger`                    | class     |
-| `ConsoleLoggerOptions`          | interface |
-| `LoggerPluginOptions`           | interface |
-| `NoopLoggerOptions`             | interface |
-| `PinoLoggerOptions`             | interface |
-| `RequestLoggerOptions`          | interface |
-| `LoggerTransport`               | type      |
-| `PinoFactory`                   | type      |
+| Export | Kind |
+| --- | --- |
+| `createRequestLoggerMiddleware` | function |
+| `LoggerPlugin` | function |
+| `ConsoleLogger` | class |
+| `NoopLogger` | class |
+| `PinoLogger` | class |
+| `ConsoleLoggerOptions` | interface |
+| `LoggerPluginOptions` | interface |
+| `NoopLoggerOptions` | interface |
+| `PinoLoggerOptions` | interface |
+| `RequestLoggerOptions` | interface |
+| `LoggerTransport` | type |
+| `PinoFactory` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

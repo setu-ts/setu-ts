@@ -398,52 +398,51 @@ MIT
 
 ## Exports
 
-| Export                              | Kind      |
-| ----------------------------------- | --------- |
-| `authMiddleware`                    | function  |
-| `AuthPlugin`                        | function  |
-| `defaultRateLimitKey`               | function  |
-| `publicRoute`                       | function  |
-| `rateLimitMiddleware`               | function  |
-| `requireAllPermissions`             | function  |
-| `requireAnyRole`                    | function  |
-| `requireAuth`                       | function  |
-| `requirePermission`                 | function  |
-| `requireRole`                       | function  |
-| `MalformedPasswordHashError`        | class     |
-| `MemoryAccessTokenRevocationStore`  | class     |
-| `MemoryRateLimitStore`              | class     |
-| `MemoryRefreshTokenStore`           | class     |
-| `PasswordHasher`                    | class     |
-| `RedisRateLimitStore`               | class     |
-| `RefreshTokenService`               | class     |
-| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
-| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
-| `ApiKeyOptions`                     | interface |
-| `AuthPluginOptions`                 | interface |
-| `IAccessTokenRevocationStore`       | interface |
-| `IAuthorizationService`             | interface |
-| `IAuthService`                      | interface |
-| `IAuthStrategy`                     | interface |
-| `IJwtService`                       | interface |
-| `IPrincipal`                        | interface |
-| `JwtOptions`                        | interface |
-| `JwtSignOptions`                    | interface |
-| `LocalOptions`                      | interface |
-| `RateLimitOptions`                  | interface |
-| `RateLimitResult`                   | interface |
-| `RateLimitStore`                    | interface |
-| `RbacConfig`                        | interface |
-| `RefreshTokenOptions`               | interface |
-| `RefreshTokenRecord`                | interface |
-| `RefreshTokenStore`                 | interface |
-| `RoleDefinition`                    | interface |
-| `SessionAuthOptions`                | interface |
-| `TokenPair`                         | interface |
-| `IRefreshTokenRotation`             | type      |
+| Export | Kind |
+| --- | --- |
+| `authMiddleware` | function |
+| `AuthPlugin` | function |
+| `defaultRateLimitKey` | function |
+| `publicRoute` | function |
+| `rateLimitMiddleware` | function |
+| `requireAllPermissions` | function |
+| `requireAnyRole` | function |
+| `requireAuth` | function |
+| `requirePermission` | function |
+| `requireRole` | function |
+| `MalformedPasswordHashError` | class |
+| `MemoryAccessTokenRevocationStore` | class |
+| `MemoryRateLimitStore` | class |
+| `MemoryRefreshTokenStore` | class |
+| `PasswordHasher` | class |
+| `RedisRateLimitStore` | class |
+| `RefreshTokenService` | class |
+| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const |
+| `DEFAULT_RATE_LIMIT_KEY_PREFIX` | const |
+| `ApiKeyOptions` | interface |
+| `AuthPluginOptions` | interface |
+| `IAccessTokenRevocationStore` | interface |
+| `IAuthorizationService` | interface |
+| `IAuthService` | interface |
+| `IAuthStrategy` | interface |
+| `IJwtService` | interface |
+| `IPrincipal` | interface |
+| `JwtOptions` | interface |
+| `JwtSignOptions` | interface |
+| `LocalOptions` | interface |
+| `RateLimitOptions` | interface |
+| `RateLimitResult` | interface |
+| `RateLimitStore` | interface |
+| `RbacConfig` | interface |
+| `RefreshTokenOptions` | interface |
+| `RefreshTokenRecord` | interface |
+| `RefreshTokenStore` | interface |
+| `RoleDefinition` | interface |
+| `SessionAuthOptions` | interface |
+| `TokenPair` | interface |
+| `IRefreshTokenRotation` | type |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
-drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
 
 ## Full API
 

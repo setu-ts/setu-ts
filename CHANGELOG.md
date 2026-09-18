@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`deno task check:docs` now refuses an export added to a published barrel that no `Unreleased`
+  changelog entry names.** Four releases in a row shipped, or nearly shipped, public surface that no
+  entry announced — `alpha.10` lost PR #195, `v0.4.0` lost `ResponseSnapshotInit`, `v0.5.0` lost
+  `respondWithAuthorizationFailure`, and `v0.7.0` lost thirteen ingress decorators on
+  `@setu-ts/decorator-plugin`. Every one was caught by a human reading the merged PR list at cut
+  time, which `docs/releasing.md` carries as a manual step; this is that step, run on every pull
+  request instead of once per release.
+
+  It compares the README `## Exports` tables between the last release tag and the working tree,
+  which is what makes it cheap: those tables are derived from the barrel by `deno task docs:exports`
+  and already gated for drift, so the committed table is the barrel's contents in a form two git
+  revisions can be diffed in — no TypeScript parser, no `deno doc` run per package, no network. It
+  reuses `parseExportsTable`, so this gate and the drift check cannot disagree about what an export
+  is.
+
+  It deliberately does NOT require an entry to name its PR, which was the blocker recorded when the
+  gate was first proposed: entries are prose and carry no stable identifier. Naming the SYMBOL is
+  cheaper for the author and a better check. The mention must sit in a code span — a first cut
+  matched anywhere in the section and was satisfied by the section's own `### Added` HEADING, which
+  is a false PASS, and every Keep-a-Changelog heading is a plausible identifier. An unresolvable
+  base tag fails closed with the remedy in the message, because a shallow checkout fetches no tags
+  and would otherwise compare nothing silently; both workflows now check out full history.
+
+  Validated against the three releases that actually lost an export, before it was written:
+  replaying each reports exactly the symbols their manual checks found, and replaying the current
+  tree reports none. What it does not catch is a release-worthy change that adds no export — PR #195
+  was dependency ranges, a workflow and a release artifact — so reading the merged PR list stays in
+  the runbook.
+
 ## [0.7.0] — 2026-09-18
 
 ### Added
