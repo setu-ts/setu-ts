@@ -170,6 +170,33 @@ function stepBlock(job: string, name: string): string {
 }
 
 /**
+ * Extracts one mapping block from a job, by its key.
+ *
+ * Returns the block's body without its own key line, so a caller matches the
+ * entries rather than the heading. Throws when the key is absent, so a
+ * comparison against a renamed section fails loudly instead of comparing an
+ * empty string.
+ *
+ * @param job - A job block from `jobBlock`
+ * @param key - The mapping key, e.g. `env`
+ * @returns That mapping's lines
+ */
+function jobSection(job: string, key: string): string {
+  const lines = job.split('\n');
+  const start = lines.findIndex((line) => line.trim() === `${key}:`);
+  if (start === -1) throw new Error(`No '${key}:' in the job.`);
+  const indent = lines[start]!.length - lines[start]!.trimStart().length;
+  let end = start + 1;
+  while (end < lines.length) {
+    const line = lines[end]!;
+    const text = line.trimStart();
+    if (text !== '' && line.length - text.length <= indent) break;
+    end += 1;
+  }
+  return lines.slice(start + 1, end).join('\n');
+}
+
+/**
  * Every workflow that re-runs the full suite, and the job in it that does.
  *
  * ci.yml's `deno` job is the reference rather than a member: the backends are
@@ -294,9 +321,15 @@ describe('release workflow wiring', () => {
     const images = [...prJob.matchAll(/^ +image: (\S+)$/gm)].map((match) => match[1]);
     expect(images.length).toBeGreaterThan(5);
 
-    // Endpoints too: a started container the suite cannot address is no gate.
-    const endpoints = [...prJob.matchAll(/^ +([A-Z0-9_]+(?:_URL|_URI|_ENDPOINT)): (\S+)$/gm)];
-    expect(endpoints.length).toBeGreaterThan(5);
+    // The whole job-level `env` block, entry by entry: a started container the
+    // suite cannot address is no gate. Matched as a block rather than by a
+    // `*_URL`/`*_URI`/`*_ENDPOINT` name pattern, which checked 9 of the 16
+    // entries and left `KAFKA_BROKERS`, `S3_BUCKET`, `SQS_REGION` and the four
+    // credential keys free to be dropped from a consumer while this passed —
+    // and the Kafka, S3 and SQS suites guard on exactly those, so each would
+    // have degraded to the silent skip this test exists to prevent.
+    const environment = [...jobSection(prJob, 'env').matchAll(/^ +([A-Z0-9_]+): (\S+)$/gm)];
+    expect(environment.length).toBeGreaterThan(10);
 
     // The four backends that cannot be service containers — each needs a
     // command or an argument, and `options` reaches `docker create` BEFORE the
@@ -320,8 +353,9 @@ describe('release workflow wiring', () => {
       for (const image of images) {
         expect(consumer).toMatch(activeLine(`image: ${image}`));
       }
-      for (const [, name, value] of endpoints) {
-        expect(consumer).toMatch(activeLine(`${name}: ${value}`));
+      const consumerEnvironment = jobSection(consumer, 'env');
+      for (const [, name, value] of environment) {
+        expect(consumerEnvironment).toMatch(activeLine(`${name}: ${value}`));
       }
       for (const backend of stepBackends) {
         expect(stepBlock(consumer, backend)).toBe(expectedStep(stepBlock(prJob, backend)));
