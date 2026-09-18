@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-console -- this CI script reports progress, drift and skips.
 import { fromFileUrl } from 'jsr:@std/path@^1.1.6';
+import { walk } from 'jsr:@std/fs@^1.0.19';
 
 /**
  * @module
@@ -515,6 +516,84 @@ export function nativeFilePath(fileUrl: URL): string {
  * run with the WORKSPACE as their cwd. */
 const CLI_ENTRY = nativeFilePath(new URL('../packages/cli/src/main.ts', import.meta.url));
 
+/**
+ * The version a generated scaffold can actually resolve from the registry.
+ *
+ * `setu new` stamps generated projects with the CLI's OWN version, and the
+ * image build below resolves that version from jsr.io for real — which is the
+ * point of this check, and is also why it cannot pass on a release branch: the
+ * version being released is not published yet, so `deno cache` inside the image
+ * fails with `Could not find version of '@setu-ts/common'`. That is not a defect
+ * in the scaffold; a version that does not exist is untestable by construction.
+ *
+ * So the check asks the registry. When the pinned version is published it is
+ * used unchanged, which is the faithful case and the one that holds on `main`.
+ * When it is not, the newest PUBLISHED version is substituted and the
+ * substitution is printed: the generated Dockerfile, its permissions and its
+ * security posture are still proved against real jsr.io resolution, which is
+ * what this gate exists for.
+ *
+ * A registry that cannot be reached returns `null`, leaving the pinned version
+ * in place: failing loudly on an unresolvable specifier is better than silently
+ * building something other than what was asked for.
+ *
+ * @param pinned - The version the scaffold was stamped with
+ * @returns The version to build against, or `null` when the registry is unreachable
+ */
+export async function resolvableScaffoldVersion(
+  pinned: string,
+  fetchImpl: (url: string) => Promise<Response> = (url) => fetch(url),
+): Promise<string | null> {
+  let meta: { readonly latest?: string; readonly versions?: Record<string, unknown> };
+  try {
+    const response = await fetchImpl('https://jsr.io/@setu-ts/kernel/meta.json');
+    if (!response.ok) return null;
+    meta = JSON.parse(await response.text()) as typeof meta;
+  } catch {
+    return null;
+  }
+  if (Object.hasOwn(meta.versions ?? {}, pinned)) return pinned;
+  return meta.latest ?? null;
+}
+
+/**
+ * The `@setu-ts` version a scaffolded workspace was stamped with.
+ *
+ * Read from the emitted files rather than from this repository's manifests, so
+ * it is whatever `setu new` actually wrote.
+ *
+ * @param root - The scaffolded workspace root
+ * @returns The pinned version, or `null` when no specifier carries one
+ */
+export async function scaffoldPinnedVersion(root: string): Promise<string | null> {
+  for await (const entry of walk(root, { exts: ['.json'], includeDirs: false })) {
+    const match = /jsr:@setu-ts\/[a-z0-9-]+@\^?([0-9][^"']*)/.exec(
+      await Deno.readTextFile(entry.path),
+    );
+    if (match?.[1] !== undefined) return match[1];
+  }
+  return null;
+}
+
+/**
+ * Rewrites every `@setu-ts` specifier in a scaffold from one version to another.
+ *
+ * @param root - The scaffolded workspace root
+ * @param from - The version the scaffold carries
+ * @param to - The version to build against
+ */
+export async function repinScaffold(root: string, from: string, to: string): Promise<void> {
+  const pattern = new RegExp(
+    `(@setu-ts/[a-z0-9-]+@\\^?)${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+    'g',
+  );
+  for await (const entry of walk(root, { exts: ['.json', '.ts', '.tsx'], includeDirs: false })) {
+    const source = await Deno.readTextFile(entry.path);
+    const rewritten = source.replace(pattern, `$1${to}`);
+    if (rewritten !== source) await Deno.writeTextFile(entry.path, rewritten);
+  }
+}
+
 /** Resources owned by one generated-deployment gate invocation. */
 export interface GeneratedResources {
   /** Unique Docker image tag for this invocation. */
@@ -597,6 +676,21 @@ async function checkGenerated(): Promise<CheckOutcome> {
       if (!created.success) console.error(created.stderr);
       if (!member.success) console.error(member.stderr);
       return 'failed';
+    }
+
+    // A release branch pins the version being released, which is not on the registry until the
+    // tag run publishes it — so the build below could never resolve it. Substitute the newest
+    // published version in that case, and say so: the scaffold, its Dockerfile and its security
+    // posture are still proved against real jsr.io resolution, which is what this gate is for.
+    const pinned = await scaffoldPinnedVersion(root);
+    if (pinned !== null) {
+      const resolvable = await resolvableScaffoldVersion(pinned);
+      if (resolvable !== null && resolvable !== pinned) {
+        console.log(
+          `  ${pinned} is not published yet — building against ${resolvable}, the newest that is`,
+        );
+        await repinScaffold(root, pinned, resolvable);
+      }
     }
 
     // The GENERATED Dockerfile, not this repository's own — the defect lives in what `setu`
