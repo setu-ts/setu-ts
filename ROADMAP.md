@@ -10650,14 +10650,14 @@ inspection boundary is established. Framework diagnostics remain available indep
 devtool subscription; licensing never grants permission to inspect an application.
 
 **Ownership and sequence:** M98a owns the kernel observation boundary, with only its necessary
-shared contracts in `packages/common`. M98b owns a new `packages/diagnostics-plugin` and consumes
-that boundary. Implement the letters in order, with separate feature branches and verification;
-neither is permission to sweep unrelated packages. Each gets one canonical plan from
-`plans/TEMPLATE.md` and passes `deno task check:plan` before implementation. The plan must name the
-real consumer of every new export, resolve the exact contracts from source, and include the threat
-model and negative tests below. The canonical plans are `plans/milestone-98a-kernel-diagnostics.md`
-and `plans/milestone-98b-local-diagnostics-connector.md`; these specify proposed APIs, not shipped
-ones.
+shared contracts in `packages/common`. M98b owns the runtime-local listener port, its common
+contract/token, and the new `packages/diagnostics-plugin` that consumes both M98a and that port.
+Implement the letters in order, with separate feature branches and verification; neither is
+permission to sweep unrelated packages. Each gets one canonical plan from `plans/TEMPLATE.md` and
+passes `deno task check:plan` before implementation. The plan must name the real consumer of every
+new export, resolve the exact contracts from source, and include the threat model and negative tests
+below. The canonical plans are `plans/milestone-98a-kernel-diagnostics.md` and
+`plans/milestone-98b-local-diagnostics-connector.md`; these specify proposed APIs, not shipped ones.
 
 ### Existing seams and gaps
 
@@ -10724,19 +10724,19 @@ reads; no new capability token is needed.
 
 ### Milestone 98b: Authenticated Local Diagnostics Connector
 
-**Package:** `packages/diagnostics-plugin` (new). Depends on M98a. Runtime-specific operations use
-`IRuntimeServices`; any missing transport primitive must be separately scoped and delivered in
-`packages/runtime`, not implemented through runtime imports in this plugin.
+**Packages:** `packages/runtime`, `packages/common` for the listener contract/token, and new
+`packages/diagnostics-plugin`. Depends on M98a. Runtime owns the loopback listener; the connector
+plugin only supplies its authenticated request handler and never creates a server or imports a
+runtime adapter.
 
 **Deliverables:**
 
 - [ ] Explicit plugin registration and explicit local-connection activation. Importing the package,
       registering unrelated plugins, or setting a development environment variable must not expose
       an endpoint. No automatic mounting on the application's public HTTP listener and no wildcard
-      bind. The plan selects Deno with a separate injected HTTP adapter, IPv4 loopback polling and a
-      native client. Authenticate both ends during pairing and document unsupported runtimes;
-      inability to enforce local isolation refuses activation rather than falling back to a public
-      endpoint.
+      bind. The plan selects a Deno runtime-owned IPv4 loopback listener, polling and a native
+      client. Authenticate both ends during pairing and document unsupported runtimes; inability to
+      enforce local isolation refuses activation rather than falling back to a public endpoint.
 - [ ] Fresh per-session pairing credentials, expiration/revocation, and application-instance-bound
       authorization for snapshot and observation reads. Credentials never appear in URLs, captured
       records or diagnostic logs. Localhost, CORS, an Origin/Host check, or a Pro license is not
@@ -10971,4 +10971,4 @@ need separate transport, retention and access-control designs before implementat
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                |
 | 98        | ⬜     | secure read-only devtool diagnostics (umbrella; planned)                                                                          |
 | 98a       | ⬜     | kernel + common — metadata and execution observation                                                                              |
-| 98b       | ⬜     | diagnostics-plugin — authenticated local connector                                                                                |
+| 98b       | ⬜     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector                                               |

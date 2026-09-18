@@ -1,4 +1,4 @@
-# Milestone 98b — Local Diagnostics Connector (`@setu-ts/diagnostics-plugin`)
+# Milestone 98b — Runtime-Owned Local Diagnostics Connector
 
 > **Status:** Planning; depends on M98a, whose APIs below are proposed, not shipped. Authored on
 > `docs/m98-secure-devtool-diagnostics`. Implementation branch:
@@ -7,81 +7,106 @@
 ## 0. Objective & scope
 
 Connect a native devtool client to M98a's minimized diagnostic snapshots and events over a separate,
-authenticated IPv4 loopback HTTP listener. The first implementation supports Deno and bounded
-polling. It has no browser-facing UI, application-data reads or application-control commands.
-Authentication remains independent of any devtool subscription.
+runtime-owned authenticated IPv4 loopback HTTP listener. The first implementation supports Deno and
+bounded polling. It has no browser-facing UI, application-data reads or application-control
+commands. Authentication remains independent of any devtool subscription.
 
-- **In scope:** new optional plugin, native client helper, session authentication/revocation,
-  resource limits, protocol fixtures and a real loopback consumer exercise.
+- **In scope:** a runtime-owned local-listener port, new optional connector plugin, native client
+  helper, session authentication/revocation, resource limits, protocol fixtures and a real loopback
+  consumer exercise.
 - **NOT this milestone:** M98a owns capture/projection. Node/Bun connector support, Workers,
   browser/WebSocket transports, remote connections, persistence, payload capture and mutation
-  operations remain the explicitly deferred M98 follow-ons in ROADMAP.md. No new runtime transport
-  primitive is needed for the selected Deno implementation.
+  operations remain the explicitly deferred M98 follow-ons in ROADMAP.md. The runtime listener port
+  is limited to this local, Deno-only transport; it is not a generic second HTTP server API.
 
 ## 1. Contracts verified from SOURCE (not names)
 
 Current-source references describe base `c9cd53d7`. Rebase after M98a and verify its actual merged
 signatures before implementation; do not silently treat this plan's proposed contract as shipped.
 
-| Reference                | Source (file:line)                                                    | Verified surface / fact                                                                                                                                                                |
-| ------------------------ | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `IPlugin`, context       | `packages/common/src/plugin.ts:477`, `:538`                           | Plugins register services/hooks through context; context exposes the owning application.                                                                                               |
-| Runtime primitives       | `packages/common/src/runtime.ts:303`                                  | `platform()`, `hrtime()`, random bytes, timers and `subtle` supply the required platform/expiry/crypto operations.                                                                     |
-| `IHttpAdapter`           | `packages/common/src/runtime.ts:459`                                  | `setHandler`, `fetch`, `listen(port, hostname)`, `close(handle)`; the server handle is opaque. No API to discover a chosen ephemeral port or clone an adapter.                         |
-| Adapter ownership        | `packages/runtime/src/plugin/runtime-plugin.ts:189`                   | RuntimePlugin constructs and registers one HTTP adapter for the application. Reusing it would overwrite the application's handler/listener.                                            |
-| Deno adapter             | `packages/runtime/src/adapters/deno/deno-http-adapter.ts:255`, `:281` | Public constructor accepts adapter options; `listen` forwards the hostname. The default host uses `0.0.0.0` if no hostname is supplied, so the connector must always pass `127.0.0.1`. |
-| Body limit               | `packages/runtime/src/adapters/shared/adapter-options.ts:17`          | `maxBodyBytes` caps reads; zero refuses any body when read. The connector additionally never reads a request body.                                                                     |
-| Application construction | `packages/kernel/src/application/application.ts:59`, `:322`           | A separate kernel application can receive application-owned provider plugins; it compiles its own middleware/router and delegates listening to its own adapter.                        |
-| Lifecycle teardown       | `packages/kernel/src/application/application.ts:295`, `:546`          | Startup failures run close hooks; normal stop runs stopping/shutdown/close phases. Revocation must also work independently of parent shutdown.                                         |
-| HMAC support precedent   | `packages/auth-plugin/src/services/jwt-service.ts:183`                | Existing JWT verification calls runtime Web Crypto. This plugin uses the same standard primitive directly, without importing auth-plugin internals.                                    |
-| Proposed M98a reader     | `plans/milestone-98a-kernel-diagnostics.md`, §3.2                     | `IApplication.diagnostics`, `IDiagnosticsSource.snapshot/read` and bounded DTOs are dependencies to be delivered by M98a, not present on the base commit.                              |
-| Publication list         | `scripts/release-packages.ts:20`                                      | New workspace members must be in the publish order; this plugin belongs after common/kernel.                                                                                           |
+| Reference              | Source (file:line)                                                    | Verified surface / fact                                                                                                                                   |
+| ---------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IPlugin`, context     | `packages/common/src/plugin.ts:477`, `:538`                           | Plugins register services/hooks through context; context exposes the owning application.                                                                  |
+| Capability tokens      | `packages/common/src/tokens.ts:39`                                    | Standard tokens live in `CAPABILITIES`; the new lower-kebab-case listener token must be added there and declared by its provider/consumer.                |
+| Runtime primitives     | `packages/common/src/runtime.ts:303`                                  | `platform()`, `hrtime()`, random bytes, timers and `subtle` supply the required platform/expiry/crypto operations.                                        |
+| `IHttpAdapter`         | `packages/common/src/runtime.ts:459`                                  | The application adapter has one mutable handler and `listen()` binds its socket. It cannot safely be reused or cloned for a second listener.              |
+| Adapter ownership      | `packages/runtime/src/plugin/runtime-plugin.ts:171`, `:186`, `:202`   | RuntimePlugin owns registration of runtime services and the application HTTP adapter; another plugin must not create a server.                            |
+| Deno adapter           | `packages/runtime/src/adapters/deno/deno-http-adapter.ts:255`, `:281` | Runtime code can construct this adapter; its `listen(port, hostname)` accepts an explicit numeric IPv4 hostname.                                          |
+| Runtime server rule    | `AI_GUIDELINES.md:239`                                                | Plugins cannot directly create HTTP servers; runtime owns the server abstraction.                                                                         |
+| Lifecycle teardown     | `packages/kernel/src/application/application.ts:295`, `:546`          | Startup failures run close hooks; normal stop runs stopping/shutdown/close phases. Revocation must also work independently of parent shutdown.            |
+| HMAC support precedent | `packages/auth-plugin/src/services/jwt-service.ts:183`                | Existing JWT verification calls runtime Web Crypto. This plugin uses the same standard primitive directly, without importing auth-plugin internals.       |
+| Proposed M98a reader   | `plans/milestone-98a-kernel-diagnostics.md`, §3.2                     | `IApplication.diagnostics`, `IDiagnosticsSource.snapshot/read` and bounded DTOs are dependencies to be delivered by M98a, not present on the base commit. |
+| Publication list       | `scripts/release-packages.ts:20`                                      | New workspace members must be in the publish order; this plugin belongs after common/kernel/runtime.                                                      |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                             | Resolution (picked side)                                                                                                          | Doc deliverable (same PR)                                             |
-| -- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| C1 | ROADMAP leaves the local transport and supported runtimes to the plan.               | Select Deno, native client, IPv4 loopback HTTP polling. Reject every other runtime rather than exposing a fallback endpoint.      | Update M98b scope, PUBLIC_API.md, ARCHITECTURE.md and the new README. |
-| C2 | Existing HTTP adapters are stateful and the application already owns one.            | Require a fresh injected `IHttpAdapter`; use it in a separate child kernel application. Never repurpose the parent's adapter.     | Document the required composition example and option contract.        |
-| C3 | ROADMAP refers to bounded streaming and pairing credentials without a wire protocol. | Use bounded polling, launch-time out-of-band pairing, authenticated request/response bytes and strict sequence replay protection. | Add a versioned protocol document and native-client security model.   |
+| #  | Conflict                                                                             | Resolution (picked side)                                                                                                                                           | Doc deliverable (same PR)                                             |
+| -- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| C1 | ROADMAP leaves the local transport and supported runtimes to the plan.               | Select Deno, native client, IPv4 loopback HTTP polling. Reject every other runtime rather than exposing a fallback endpoint.                                       | Update M98b scope, PUBLIC_API.md, ARCHITECTURE.md and the new README. |
+| C2 | Existing HTTP adapters are stateful and the application already owns one.            | Add one dedicated, runtime-owned local-diagnostics listener port. The connector supplies its handler but never receives an adapter or creates a child application. | Document the listener's narrow contract and composition example.      |
+| C3 | ROADMAP refers to bounded streaming and pairing credentials without a wire protocol. | Use bounded polling, launch-time out-of-band pairing, authenticated request/response bytes and strict sequence replay protection.                                  | Add a versioned protocol document and native-client security model.   |
 
-No new socket implementation is placed outside runtime. The selected transport uses existing public
-interfaces and needs no dependency on RuntimePlugin or another capability plugin.
+The listener implementation is added to `packages/runtime`; the connector depends on its new, narrow
+capability and never imports a runtime adapter or calls `listen()`.
 
 ## 3. Design decisions
 
 ### 3.1 Public composition and listener lifecycle
 
-- **Decision:** Export `DiagnosticsPlugin(options): IDiagnosticsPlugin`, where
+The proposed runtime-owned port is the following exact common surface; `handler` accepts the
+normalized framework request and returns the framework response, so the connector has no raw socket,
+web `Request`, adapter or server-handle access.
+
+```typescript
+interface LocalDiagnosticsListenerOptions {
+  readonly port: number;
+  readonly handler: (request: IRequest) => IResponse | Promise<IResponse>;
+}
+
+interface ILocalDiagnosticsListener {
+  close(): Promise<void>;
+}
+
+interface ILocalDiagnosticsListenerFactory {
+  listen(options: LocalDiagnosticsListenerOptions): Promise<ILocalDiagnosticsListener>;
+}
+```
+
+- **Decision:** Add `ILocalDiagnosticsListenerFactory` and `ILocalDiagnosticsListener` to common
+  plus `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`. `RuntimePlugin` always provides this factory. Its
+  sole method is `listen({ port, handler }): Promise<ILocalDiagnosticsListener>`: it permits one
+  active listener, binds only `127.0.0.1`, accepts no hostname/adapter/body-limit option and returns
+  only `close()`. The Deno factory creates and owns its private adapter inside `packages/runtime`;
+  Node, Bun, Workers and unknown platforms reject with one fixed unsupported-transport error before
+  any bind. The factory validates port 1024..65535, uses `maxBodyBytes: 0`, and never exposes its
+  adapter or handle. It reuses RuntimePlugin's existing injected Deno HTTP-adapter factory for
+  deterministic tests, but creates its own adapter instance. RuntimePlugin registers a close hook
+  that closes an active local listener on every shutdown/failure path; connector revocation and that
+  hook share the same idempotent close operation.
+- Export `DiagnosticsPlugin(options): IDiagnosticsPlugin`, where
   `IDiagnosticsPlugin extends IPlugin` with `revoke(): Promise<void>`. The plugin name is
-  `diagnostics-plugin`, with `dependencies: [CAPABILITIES.RUNTIME]` and no provided capability
-  token. `ctx.app.diagnostics` is required; refuse startup with a fixed error if M98a was not
-  enabled.
-- Require explicit options `{ enabled: true, adapter, port, sessionId, sessionKey }`. Omitted plugin
-  means no work; no environment variable auto-enables it. The options are validated before listener
+  `diagnostics-plugin`, with `dependencies: [CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER]` and no
+  provided capability token. `ctx.app.diagnostics` is required; refuse startup with a fixed error if
+  M98a was not enabled.
+- Require explicit options `{ enabled: true, port, sessionId, sessionKey }`. Omitted plugin means no
+  work; no environment variable auto-enables it. The options are validated before listener
   construction. An omitted/false `enabled`, unsupported runtime, invalid port, invalid session or
   missing diagnostics refuses activation. This is an explicit development composition, not
   production auto-discovery.
-- `adapter` must be a fresh application-created `IHttpAdapter`. Reject identity equality with the
-  parent's `CAPABILITIES.HTTP_ADAPTER` before calling `setHandler` or `listen`. The trusted caller
-  owns the stronger obligation that it is not already used by another application. Default example:
-  `new DenoHttpAdapter(undefined, { maxBodyBytes: 0 })`, instantiated by application code.
-- Create a child application through `createApplication`, without enabling its diagnostics. One
-  internal provider plugin supplies the parent's `IRuntimeServices` and the fresh adapter under
-  their existing tokens. This bridge imports only common/kernel. The child registers the connector
-  middleware/routes and starts at the required explicit port and hostname `127.0.0.1`.
-- `port` is an integer from 1024 through 65535; zero is refused because `ServerHandle` does not
-  expose the selected port. Port conflict fails closed; do not scan/fallback to another address.
-  `ctx.runtime.platform()` must be `deno`; injected test runtimes follow the same check. Node, Bun,
-  Workers and unknown platform strings are refused in v1, with no socket attempt.
-- Install parent cleanup hooks before starting the child in `onBootstrap`. `revoke()` immediately
-  disables authorization, discards key references and closes the child; it is idempotent and does
-  not stop the parent application or M98a's in-process reader. Register it for `onStopping` and
-  `onClose`, covering failed parent startup too. A generation/closed check after every asynchronous
-  startup step ensures revocation during bind closes any late-created listener. No detached task may
-  reopen it. A revoked/expired plugin instance cannot be reactivated; pairing again requires a fresh
-  development application launch in this version.
-- **Test home:** `plugin.test.ts`, `listener.test.ts`, `activation.test.ts`, `lifecycle.test.ts`.
+- The connector resolves `ILocalDiagnosticsListenerFactory` through the declared capability, gives
+  it the private protocol handler and explicit port in `onBootstrap`, and retains only the returned
+  listener. It does not import `@setu-ts/runtime`, construct `DenoHttpAdapter`, call `IHttpAdapter`,
+  create a child application or receive a server handle. Port conflict fails closed; do not scan or
+  fall back to another address.
+- Install parent cleanup hooks before opening the runtime listener in `onBootstrap`. `revoke()`
+  immediately disables authorization, discards key references and closes the listener; it is
+  idempotent and does not stop the parent application or M98a's in-process reader. Register it for
+  `onStopping` and `onClose`, covering failed parent startup too. A generation/closed check after
+  every asynchronous startup step ensures revocation during bind closes any late-created listener.
+  No detached task may reopen it. A revoked/expired plugin instance cannot be reactivated; pairing
+  again requires a fresh development application launch in this version.
+- **Test home:** runtime `local-diagnostics-listener.test.ts`; connector `plugin.test.ts`,
+  `activation.test.ts`, `lifecycle.test.ts`.
 
 ### 3.2 Pairing and attacker model
 
@@ -220,11 +245,12 @@ response
   optional dependency are needed. Sequential calls reserve unique sequence numbers; `close()` aborts
   pending fetches, drops key references and rejects subsequent calls with a fixed error.
 - Add `scripts/inspect-local-diagnostics.ts`, a standalone demonstration that creates a new random
-  session, a small explicitly instrumented application, a fresh Deno adapter and the native client.
-  Inject a request, display only authenticated/minimized DTOs, revoke the connector, verify further
-  reads fail, and prove the application still answers normally. No credential appears in output. The
-  demo passes credentials in memory; the README separately documents the launcher's environment
-  handoff and its trust limits. The extension repository is not claimed tested by this script.
+  session, a small explicitly instrumented application and the native client. RuntimePlugin owns the
+  local listener used by the connector. Inject a request, display only authenticated/minimized DTOs,
+  revoke the connector, verify further reads fail, and prove the application still answers normally.
+  No credential appears in output. The demo passes credentials in memory; the README separately
+  documents the launcher's environment handoff and its trust limits. The extension repository is not
+  claimed tested by this script.
 - Add package manifest/README, workspace membership, publish-list entry, JSR metadata, documented
   exports and API/navigation/catalog entries using existing release tooling. Pin the workspace
   version at implementation time. No new npm dependency, no plugin-to-plugin import, no optional
@@ -233,25 +259,30 @@ response
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol            | Kind                          | Consumer / real code path that READS it                                          |
-| -------------------------- | ----------------------------- | -------------------------------------------------------------------------------- |
-| `DiagnosticsPlugin`        | factory                       | Development application composition and the executable local demo.               |
-| `IDiagnosticsPlugin`       | interface extending `IPlugin` | Demo/application invokes `revoke()` without stopping the application.            |
-| `DiagnosticsPluginOptions` | interface                     | Factory validation, listener, session/key and expiry logic.                      |
-| `createDiagnosticsClient`  | factory                       | Native devtool integration and executable demo; real protocol consumer.          |
-| `IDiagnosticsClient`       | interface                     | Demo reads snapshots/events and closes the client.                               |
-| `DiagnosticsClientOptions` | interface                     | Native helper consumes endpoint, session, crypto, fetch and timing dependencies. |
+| Exported symbol                           | Kind                          | Consumer / real code path that READS it                                                           |
+| ----------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------- |
+| `LocalDiagnosticsListenerOptions`         | common options interface      | Runtime factory validates port and retains the connector handler.                                 |
+| `ILocalDiagnosticsListener`               | common interface              | Connector revokes the runtime-owned listener without receiving its adapter/handle.                |
+| `ILocalDiagnosticsListenerFactory`        | common interface              | RuntimePlugin implementation creates the Deno-only listener; connector resolves it by capability. |
+| `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER` | common token                  | RuntimePlugin provides it; DiagnosticsPlugin declares and resolves it.                            |
+| `DiagnosticsPlugin`                       | factory                       | Development application composition and the executable local demo.                                |
+| `IDiagnosticsPlugin`                      | interface extending `IPlugin` | Demo/application invokes `revoke()` without stopping the application.                             |
+| `DiagnosticsPluginOptions`                | interface                     | Factory validation, listener, session/key and expiry logic.                                       |
+| `createDiagnosticsClient`                 | factory                       | Native devtool integration and executable demo; real protocol consumer.                           |
+| `IDiagnosticsClient`                      | interface                     | Demo reads snapshots/events and closes the client.                                                |
+| `DiagnosticsClientOptions`                | interface                     | Native helper consumes endpoint, session, crypto, fetch and timing dependencies.                  |
 
 Reuse M98a DTOs by type import from common, not duplicate type declarations or barrel re-exports.
-Crypto/protocol/session/limit internals are not exported. No global singleton or new token is added.
+Crypto/protocol/session/limit internals are not exported. The listener is the sole new token; it has
+one runtime provider and one connector consumer.
 
 ### 4.1 Options — every option names its consumer
 
 | Option                                                      | Consumer                           | Behavior (per implementation)                                                       |
 | ----------------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------- |
 | Plugin `enabled: true`                                      | factory/activation                 | Required explicit opt-in; no environment fallback.                                  |
-| Plugin `adapter: IHttpAdapter`                              | child kernel listener              | Required fresh instance, parent-instance reuse rejected before mutation.            |
 | Plugin `port: number`                                       | validation/listen/authority checks | 1024..65535; bind exactly IPv4 loopback; no auto-selection.                         |
+| Runtime listener `handler`                                  | runtime listener                   | Receives normalized requests only; runtime owns all adapter/handle operations.      |
 | Plugin/client `sessionId: string`, `sessionKey: Uint8Array` | session authentication             | Exactly 16-byte lowercase-hex ID and 32-byte random key from a fresh native launch. |
 | Plugin `ttlMs?: number`                                     | expiry timer/auth checks           | Default 900,000; positive safe integer up to 3,600,000.                             |
 | Client `endpoint: string`                                   | fetch and signed authority         | Only exact numeric loopback endpoint accepted; redirects refused.                   |
@@ -261,19 +292,21 @@ Crypto/protocol/session/limit internals are not exported. No global singleton or
 
 ## 5. Implementation files
 
-Paths within the new package are relative to `packages/diagnostics-plugin/`.
+Connector paths are relative to `packages/diagnostics-plugin/`; common/runtime paths are explicit.
 
 | File                                                                                                                | Purpose                                                                                 |
 | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `src/index.ts`                                                                                                      | Documented public exports with `@module` first.                                         |
 | `src/interfaces/index.ts`                                                                                           | Six public factory/interface contracts and options.                                     |
 | `src/plugin/diagnostics-plugin.ts`                                                                                  | Activation, parent lifecycle hooks and revocable IPlugin implementation.                |
-| `src/transport/listener.ts`                                                                                         | Isolated child kernel, provider bridge, bind and shutdown.                              |
+| `src/transport/connector-handler.ts`                                                                                | Runtime-factory callback: protocol dispatch only, no adapter/server ownership.          |
 | `src/security/session.ts`                                                                                           | Key import, sequence/instance binding, monotonic expiry and revocation state.           |
 | `src/security/authentication.ts`                                                                                    | Canonical authenticated bytes, standard HMAC sign/verify and response digest.           |
 | `src/protocol/protocol.ts`                                                                                          | Exact operations, DTO validation/projection, bounded fixed error responses.             |
 | `src/transport/limits.ts`                                                                                           | Handler/header/rate/response bounds.                                                    |
 | `src/client/client.ts`                                                                                              | Native helper, serialized reads, status binding, bounded verification and close.        |
+| `packages/common/src/runtime.ts`, `packages/common/src/tokens.ts`, `packages/common/src/index.ts`                   | Narrow local-listener contracts, token and documented exports.                          |
+| `packages/runtime/src/diagnostics/local-diagnostics-listener.ts`, `packages/runtime/src/plugin/runtime-plugin.ts`   | Deno-only owned listener, unsupported-platform refusal and capability registration.     |
 | `deno.json`, `README.md`                                                                                            | Workspace package, test permissions, composition, lifecycle/privacy/support limits.     |
 | `scripts/inspect-local-diagnostics.ts`                                                                              | Real publisher/client/revocation exercise, no credential logging.                       |
 | root `deno.json`, `scripts/release-packages.ts`, `scripts/jsr-metadata.ts`                                          | Workspace and publication/metadata registration.                                        |
@@ -285,20 +318,21 @@ Paths within the new package are relative to `packages/diagnostics-plugin/`.
 Package tests below live under `packages/diagnostics-plugin/test/` and use `describe`/`it` with
 `expect`. The source coverage bar applies independently to every file, including error paths.
 
-| Test file                                       | src covered                            | Key assertions (and the signature each call type-checks against)                                                                                                                     |
-| ----------------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `unit/plugin.test.ts`                           | plugin/interfaces/index                | `DiagnosticsPlugin(options)` types, explicit activation, option bounds, same-adapter rejection and `revoke(): Promise<void>`.                                                        |
-| `unit/listener.test.ts`                         | listener                               | Child provider isolation, exact bind parameters, no parent handler replacement, late bind after revoke closes.                                                                       |
-| `unit/session.test.ts`                          | session                                | Invalid key/ID, monotonic expiry, key disposal, atomic sequence race, overflow, terminal revoke and instance binding.                                                                |
-| `unit/authentication.test.ts`                   | authentication                         | Fixed independent HMAC/SHA-256 vectors, exact canonical bytes, request/response domain separation, bad MAC and mutation of every signed field.                                       |
-| `unit/protocol.test.ts`                         | protocol                               | Canonical targets, allowed DTO shape, unsupported version, malformed/custom source result and fixed errors.                                                                          |
-| `unit/limits.test.ts`                           | limits                                 | Burst/refill, concurrency cap, UTF-8 header counting, body bounds, oversized output and no crypto/read on refusal.                                                                   |
-| `unit/client.test.ts`                           | client                                 | Public snapshot/read/close, status verification, sequence serialization, modified response, oversized chunked body, redirect, timeout, abort and terminal failed pairing.            |
-| `integration/activation.test.ts`                | plugin/listener/interfaces             | Real parent application: absent plugin creates no route/socket; missing diagnostics and non-Deno runtime refuse before listening.                                                    |
-| `integration/security.test.ts`                  | session/authentication/protocol/limits | Missing/wrong/replayed/stale/cross-instance credentials, all Origin values, wrong Host/forwarded authority, unknown methods and canary absence; allowed metadata remains observable. |
-| `integration/lifecycle.test.ts`                 | plugin/listener/session/client         | Revoke and expiration during auth/read/bind, failed parent startup, failed close, no reopening, parent keeps serving.                                                                |
-| `e2e/local-connector.test.ts`                   | all source modules                     | Real Deno adapter/socket, signed native client, snapshot, request observations, raw hostile HTTP, port conflict, revocation and socket cleanup.                                      |
-| `test/inspect-local-diagnostics.test.ts` (root) | demo and public exports                | Subprocess demo shows useful verified DTOs and a still-working application; no key/session environment dump.                                                                         |
+| Test file                                         | src covered                                            | Key assertions (and the signature each call type-checks against)                                                                                                                     |
+| ------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| runtime `unit/local-diagnostics-listener.test.ts` | common runtime/tokens, runtime listener/runtime-plugin | One active listener, exact loopback bind, no adapter/handle escape, body refusal, unsupported-platform refusal, close idempotence and token/provider ordering.                       |
+| `unit/plugin.test.ts`                             | plugin/interfaces/index                                | `DiagnosticsPlugin(options)` types, explicit activation, option bounds, declared listener dependency and `revoke(): Promise<void>`.                                                  |
+| `unit/connector-handler.test.ts`                  | connector-handler                                      | Protocol handler receives only normalized requests and cannot create/listen/close an adapter.                                                                                        |
+| `unit/session.test.ts`                            | session                                                | Invalid key/ID, monotonic expiry, key disposal, atomic sequence race, overflow, terminal revoke and instance binding.                                                                |
+| `unit/authentication.test.ts`                     | authentication                                         | Fixed independent HMAC/SHA-256 vectors, exact canonical bytes, request/response domain separation, bad MAC and mutation of every signed field.                                       |
+| `unit/protocol.test.ts`                           | protocol                                               | Canonical targets, allowed DTO shape, unsupported version, malformed/custom source result and fixed errors.                                                                          |
+| `unit/limits.test.ts`                             | limits                                                 | Burst/refill, concurrency cap, UTF-8 header counting, body bounds, oversized output and no crypto/read on refusal.                                                                   |
+| `unit/client.test.ts`                             | client                                                 | Public snapshot/read/close, status verification, sequence serialization, modified response, oversized chunked body, redirect, timeout, abort and terminal failed pairing.            |
+| `integration/activation.test.ts`                  | plugin/connector-handler/interfaces                    | Real parent application: absent plugin opens no socket; missing diagnostics and non-Deno runtime refuse before listening.                                                            |
+| `integration/security.test.ts`                    | session/authentication/protocol/limits                 | Missing/wrong/replayed/stale/cross-instance credentials, all Origin values, wrong Host/forwarded authority, unknown methods and canary absence; allowed metadata remains observable. |
+| `integration/lifecycle.test.ts`                   | plugin/connector-handler/session/client                | Revoke and expiration during auth/read/bind, failed parent startup, failed close, no reopening, parent keeps serving.                                                                |
+| `e2e/local-connector.test.ts`                     | all source modules                                     | Real Deno adapter/socket, signed native client, snapshot, request observations, raw hostile HTTP, port conflict, revocation and socket cleanup.                                      |
+| `test/inspect-local-diagnostics.test.ts` (root)   | demo and public exports                                | Subprocess demo shows useful verified DTOs and a still-working application; no key/session environment dump.                                                                         |
 
 The package's `deno.json` uses the runtime package's existing `test.permissions` convention, with
 `net: ["127.0.0.1"]` for real loopback socket exercises. Keep other permissions absent unless the
@@ -337,8 +371,9 @@ change makes no claim that these future checks or the external extension's tests
 
 ## 8. Risks & mitigations
 
-- A second listener accidentally takes over the application adapter: required fresh injection,
-  parent-identity refusal before mutation, isolated child kernel and real two-listener test.
+- A second listener takes over the application adapter: the runtime factory owns a separate private
+  adapter, exposes no adapter/handle to the connector, binds only loopback and has a real
+  two-listener test proving the parent handler remains intact.
 - Loopback mistaken for authentication/encryption: per-launch authenticated bytes, native-only
   policy, no remote support and explicit local-privilege/confidentiality limits.
 - Native launcher leaks environment credentials: exact bootstrap documentation, fresh pair per
