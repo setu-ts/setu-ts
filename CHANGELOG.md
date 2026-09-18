@@ -265,6 +265,45 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The example-behaviour gate judges escaping on the value type production renders, and looks for a
+  `javascript:` scheme in an ATTRIBUTE rather than anywhere in the output
+  ([#333](https://github.com/setu-ts/setu-ts/issues/333)).** Two fail-safe false positives, both
+  properties of how the probe delivered its payload rather than of any documented component.
+
+  hono escapes an attribute value only when it is `typeof === 'string'`, and the probe delivered a
+  `Proxy` — so a SAFE component rendering a prop into `title=` came back unescaped and was reported
+  as a defect, while a real string is escaped correctly. The probe now sweeps several delivery
+  modes, each putting a real string where the component finally reads, and a mode that does not fit
+  a component simply contributes nothing instead of failing it. What makes the sweep sound is that a
+  non-leaf level stringifies to a SENTINEL, never to the payload: a mode that puts an OBJECT where
+  the component reads therefore cannot look like an unescaped payload. Disabling that one line
+  reports two of the corpus's own safe components as UNESCAPED.
+
+  Separately, the scheme check ran one regex over the whole render, so body text reading
+  `href=javascript:alert(1)` matched although no attribute existed — a false positive on a document
+  merely DESCRIBING the hazard, which `docs/mvc.md` does. It now walks tag regions quote-aware and
+  inspects only `href`, `src` and `action` values, matching an attribute name by suffix so
+  `xlink:href` is covered. The probe imports that scanner rather than carrying a second copy, so it
+  and the gate's own tests cannot disagree.
+
+  The sweep would have opened a false PASS on its own — a component reading past every mode has each
+  payload resolve to `undefined`, renders nothing, and scores as escaped — so a REACH probe decides
+  whether the component touches its props at all, and the two disagreeing is reported as UNCHECKED.
+  That probe is a SEPARATE object which deliberately does not carry the sentinel: every level
+  stringifies to the payload, which is what lets it answer a read at any depth, and is only safe
+  because its output is never judged for escaping. Sharing one object between the two roles made the
+  guard inert for exactly the components it exists to catch, which a negative control found.
+
+  Reach also improved: a nested `props.note.link` in an `href` is now caught, where before it was
+  not delivered at all.
+
+  One consequence of the sweep needed guarding, found in review: `escaped` is now `!raw`, so a
+  component NO mode delivered to scores as escaped because nothing appeared in its output at all. A
+  counter-example — a component its own comment labels UNSAFE, checked in the other direction — was
+  therefore told it "ESCAPES its input" and invited to drop a warning that is still true, which is
+  the worst advice this gate can give. That verdict now requires delivery; when nothing was
+  delivered the UNCHECKED finding is the honest report, and it has already fired.
+
 - **The weekly `Dependency drift` workflow reported a `test` failure that was never drift, and gated
   a graph it had not resolved.** Three defects, one shape — the job's report did not describe what
   the job had done. Found while acting on the drift issue it filed on 2026-09-14.
