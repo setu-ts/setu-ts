@@ -180,6 +180,17 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 
   Every line it prints must name the version being released.
 
+- **A version bump must not rewrite both ends of a RANGE.** README's Versioning section explains the
+  caret with a worked range — `^0.6.0` means `>=0.6.0 <0.7.0` — where the second number is the UPPER
+  bound and is one minor AHEAD of the release. A line-oriented sweep rewrites both, producing
+  `>=0.7.0 <0.7.0`, an empty range that can install nothing. Cutting `v0.7.0` did exactly this and a
+  reviewer caught it; `check:docs` cannot, because both numbers name shipped lines and are
+  individually correct. After bumping, grep for a range whose bounds are equal:
+
+  ```fish
+  grep -rn '>=<version> <<version>' --include='*.md' .
+  ```
+
 - **Re-render `k8s/manifests/` after bumping `k8s/chart/Chart.yaml`.** The chart is the single
   authored source and the rendered manifests are committed beside it (M39), so bumping `appVersion`
   without re-rendering leaves eight manifests carrying the previous `app.kubernetes.io/version`

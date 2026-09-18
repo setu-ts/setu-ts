@@ -81,6 +81,8 @@ SERVICEBUS_CONNECTION_STRING='Endpoint=sb://localhost:5673;SharedAccessKeyName=R
 docker rm -f he-sb he-sqledge && docker network rm he-sbnet
 ```
 
+<!-- version:history -->
+
 The **outage suite** (M95b §3.3) drives the broker through a real `docker
 stop`/`start` and asserts
 the 2×2 the `v0.6.0` health claim turned on: `up` while running, `down` while stopped, `up` again

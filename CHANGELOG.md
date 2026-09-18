@@ -4,9 +4,35 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] — 2026-09-18
 
 ### Added
+
+- **`decorator-plugin`, `cli` — decorators for the six non-HTTP ingress categories (M97a).** Queue,
+  scheduler, domain events, messaging, WebSocket and CQRS get the class-based registration surface
+  HTTP has had since M9: `@Processor`, `@Cron`/`@Every`, `@OnEvent`, `@Subscribe`, `@Gateway` (with
+  `@OnOpen`/`@OnMessage`/`@OnClose`) and `@CommandHandler`/`@QueryHandler`, plus
+  `@UseIngressBehaviors` and `@UsePipelineBehaviors` for the per-target chains. Six categories,
+  **seven** provider tokens, because `CqrsPlugin` provides `COMMAND_BUS` and `QUERY_BUS` separately
+  and the registration pass resolves both buses directly.
+
+  A decorated target registers imperatively against the capability RESOLVED from its token, which is
+  why this is an ergonomic surface rather than a second pipeline: the behaviour-wrapped service is
+  what each plugin already registers under its token, so a decorated processor, job or subscription
+  inherits the M86 ingress-behaviour and M90i tracing stack unchanged. **No `common` change, no new
+  capability token, and no plugin imports another** — the ingress map lives on the concrete
+  `MetadataStore`, and no ingress plugin depends on `METADATA_STORE`, so no cycle is introduced.
+
+  Four things are refused at `register()` rather than at the first message, each naming the class,
+  the method and the alternative: a decorated target whose backing plugin is not registered (naming
+  both the plugin and the token), two primary ingress decorators on one method,
+  `@UsePipelineBehaviors` anywhere but a command or query handler, and `@UseGuards` on a non-HTTP
+  ingress target — guards are an HTTP-pipeline concept and do not carry over, so the refusal points
+  at `@UseIngressBehaviors`/`@UsePipelineBehaviors` instead.
+
+  `setu generate` emits the decorated form from the existing `command-handler`, `query-handler`,
+  `event-handler`, `job` and `ws-route` schematics when the project has `decorator-plugin`, and
+  `setu add` knows the backing plugins by short name.
 
 - **`config-plugin` — typed configuration sections (M97c).**
   `defineConfigSection({ prefix, keys, schema })` declares related flat keys, and
@@ -5741,6 +5767,7 @@ Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milest
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
 [unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.6.0...HEAD
+[0.7.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.7.0
 [0.6.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.6.0
 [0.5.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.5.0
 [0.4.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.4.0

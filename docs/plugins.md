@@ -1216,7 +1216,7 @@ named by reference.
 **Installation:**
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.6.0/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.7.0/main
 ```
 
 **Links:**

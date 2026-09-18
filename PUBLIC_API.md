@@ -6049,7 +6049,7 @@ app.router.post('/users', async (ctx) => {
 
 ### Notes
 
-- `IMailer.isHealthy?()` (OPTIONAL, added in `0.6.0`) reports the transport's REACHABILITY, distinct
+- `IMailer.isHealthy?()` (OPTIONAL, added in `0.7.0`) reports the transport's REACHABILITY, distinct
   from whether the mailer was constructed: `true` reachable, `false` contacted and unreachable,
   `undefined` when the question cannot be asked — never read `undefined` as healthy. `MailService`
   implements it by delegating to the configured provider's own probe, so a provider with none yields
@@ -7314,7 +7314,7 @@ Install it with an explicit binary name, because Deno's default inference would 
 package (`cli`):
 
 ```bash
-deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.6.0/main
+deno install -g -A --min-dep-age 0 -n setu jsr:@setu-ts/cli@^0.7.0/main
 ```
 
 `--min-dep-age 0` because Deno refuses a dependency published within the last 24 hours, and the CLI
@@ -10679,7 +10679,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-deno add jsr:@setu-ts/sdk@^0.6.0
+deno add jsr:@setu-ts/sdk@^0.7.0
 ```
 
 ### createClient()
@@ -11110,7 +11110,7 @@ grpc.addService(AnotherDefinition, anotherImpl);
   no fetch-based server runtime exposes them to a `Response` — including Deno's `Deno.serve`,
   Node.js, and Bun. Every native request is therefore answered with a **Trailers-Only
   `UNIMPLEMENTED`** (`HTTP 200`, `content-type: application/grpc`, `grpc-status: 12`) instead of
-  half-serving the protocol. This is a deliberate design decision, not a platform bug. Since `0.6.0`
+  half-serving the protocol. This is a deliberate design decision, not a platform bug. Since `0.7.0`
   the refusal is decided from the request HEADERS through the optional `IGrpcService.refuses?`,
   which the kernel consults BEFORE it reads the body — without that, a client-streaming or
   bidirectional call held its request stream open, the read never resolved, and the caller received

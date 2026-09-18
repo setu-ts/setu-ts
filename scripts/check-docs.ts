@@ -1764,7 +1764,14 @@ const VERSION_HISTORY_DOCS: readonly string[] = [
  * invisible while `check:docs` stays green — the failure mode is a silent pass,
  * not a red run. `docs/releasing.md` carries this as a release step.
  */
-export const POST_ALPHA_MINOR_LINES: readonly string[] = ['0.2', '0.3', '0.4', '0.5', '0.6'];
+export const POST_ALPHA_MINOR_LINES: readonly string[] = [
+  '0.2',
+  '0.3',
+  '0.4',
+  '0.5',
+  '0.6',
+  '0.7',
+];
 
 /**
  * The post-alpha arm of {@link SHIPPED_VERSION_LINES}, built from complete
