@@ -10497,7 +10497,7 @@ class list is explicit, as `controllers` is.
 
 **Package(s):** `packages/decorator-plugin`, `packages/common`, `packages/openapi-plugin`
 
-**Plan:** `plans/milestone-97b-response-shaping.md`
+**Plan:** `plans/archive/milestone-97b-response-shaping.md`
 
 **Objective:** Let a decorated handler state its success status and its response headers in its
 declaration, rather than taking `@Ctx()` and mutating the response builder to say `201`.
@@ -10528,9 +10528,14 @@ decorated `201` is invisible to the generated client, which types every success 
 - **`RESPONSE_METADATA` + `withResponseMetadata`/`responseMetadataOf` in `common`**, `Symbol.for`
   keyed for the reason M57 records: a locally-created symbol misses on every read when two copies of
   `common` share a process, silently.
-- **`deriveResponseStatus` in `openapi-plugin`**, opt-in beside `deriveSecurity` and consistent with
-  M70m's precedence: a **declared** `RouteSchema.response` wins over a derived one, and with the
-  option off the document is byte-identical.
+- **`deriveResponseStatus` in `openapi-plugin`**, consistent with M70m's precedence: a **declared**
+  `RouteSchema.response` wins over a derived one, and with the option off the document is
+  byte-identical. **Shipped ON by default, not opt-in as this bullet first said** — it follows
+  `deriveRequestSchemas` rather than `deriveSecurity`, because `deriveSecurity` is opt-in only for
+  needing a caller-supplied scheme name and a status needs nothing configured. It is safe to default
+  on because the brand is new surface: no handler written before `@HttpCode` existed carries one, so
+  an application that changes nothing gets a byte-identical document — asserted by a test rather
+  than assumed.
 - **A returned `HandlerResult` still wins.** A handler that returns
   `ctx.response.status(202).json(...)` keeps that status even under `@HttpCode(201)`, because the
   explicit runtime value is the more specific statement. Pinned by a test, so the precedence is a
@@ -10538,6 +10543,12 @@ decorated `201` is invisible to the generated client, which types every success 
 
 **Not a deliverable.** No `@Res()`-style raw response injection — `@Ctx()` already is that, and a
 second spelling would be the dead-surface rule. No content negotiation.
+
+**Out of scope, recorded rather than forgotten.** `setu g controller` and `g module` are NOT changed
+to emit `@HttpCode(201)` on their create handlers, though it is expressible now and M58's review
+recorded dropping exactly that `201` because it was not. Changing generated output is a behaviour
+change to already-published generated output and wants its own CHANGELOG migration note, as M58's
+did; it is a separable decision, and it belongs to whichever milestone next touches the schematics.
 
 ### Milestone 97c: Typed Configuration Sections
 
@@ -10768,5 +10779,5 @@ merging beyond what the schema itself expresses.
 | 95d       | ⬜     | docs + common + view-plugin + scripts — documentation that survives contact                                            |
 | 96        | ⬜     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                               |
-| 97b       | ⬜     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                   |
+| 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                   |
 | 97c       | ⬜     | config-plugin — typed configuration sections                                                                           |

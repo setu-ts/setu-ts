@@ -19,6 +19,7 @@ import type {
 import type {
   JsonValue,
   RegistryFactory,
+  RouteResponseMetadata,
   RouteValidationMetadata,
   SessionView,
 } from '../../src/index.ts';
@@ -70,6 +71,20 @@ describe('@setu-ts/common barrel — registry factory arm', () => {
     const metadata: RouteValidationMetadata = { target: 'body', schema: { kind: 'zod' } };
 
     expect(metadata.target).toBe('body');
+  });
+
+  it('exports the response-status brand (M97b)', () => {
+    expect(typeof common.RESPONSE_METADATA).toBe('symbol');
+    expect(typeof common.withResponseMetadata).toBe('function');
+    expect(typeof common.responseMetadataOf).toBe('function');
+  });
+
+  it('exports the RouteResponseMetadata type (declared against the barrel)', () => {
+    // Compile-time, and declared against the BARREL: dropping the re-export
+    // stops this file compiling, which no runtime assertion could see.
+    const metadata: RouteResponseMetadata = { status: 201 };
+
+    expect(metadata.status).toBe(201);
   });
 
   it('exports the JsonValue type (declared against the barrel) (M74/X3-8)', () => {

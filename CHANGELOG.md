@@ -8,6 +8,41 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`decorator-plugin`, `common`, `openapi-plugin` — response shaping for decorated handlers
+  (M97b).** `@HttpCode(status)`, `@ResponseHeader(name, value)` (repeatable, distinct names) and
+  `@Redirect(url, status?)` let a decorated handler state its success status and its response
+  headers in its declaration instead of accepting `@Params(Ctx())` purely to say one fixed thing.
+  `@Params(Ctx())` is neither replaced nor deprecated: it remains the way to compute a status or
+  header per request, and the only way to write a multi-valued header. The declared shaping is
+  written to the response builder BEFORE the handler runs, so a returned `HandlerResult`
+  (`ctx.response.status(202).json(...)`) still wins and `@Render` composes with a declared status
+  unchanged. `@Redirect` does NOT short-circuit — a decorator cannot decline to call the method, so
+  the handler still runs and a plain return is still serialised alongside `Location`.
+
+  Every argument is refused at `register()` rather than per request, naming the controller, the
+  method and the value: a status outside `[200, 599]` (or `[300, 399]` for `@Redirect`), a header
+  pair the runtime rejects, the same header name twice, `Location` alongside `@Redirect`, and one
+  handler carrying both `@HttpCode` and `@Redirect`. The alternative in each case is a failure
+  nothing can answer — a `RangeError` thrown inside the HTTP adapter after the middleware pipeline
+  has finished, or a `TypeError` while response headers are written, answering `500` on every
+  request to that route.
+
+  `@setu-ts/common` gains `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata` and
+  `responseMetadataOf` — a `Symbol.for`-keyed brand on the ROUTE HANDLER, the `SECURITY_METADATA` /
+  `VALIDATION_METADATA` precedent, carried on the handler rather than a middleware because a success
+  status is a property of the handler and a decorated route may carry no middleware at all.
+  `@setu-ts/openapi-plugin` gains `deriveResponseStatus` (default `true`), which reads that brand
+  and documents the operation under the declared status instead of the assumed `200`; a declared
+  `schema.response` still wins. Defaulting it on is safe because the brand is new surface: an
+  application that changes nothing gets a byte-identical document, asserted rather than assumed.
+  `@ResponseHeader` is deliberately NOT derived — an OpenAPI response-header entry needs a schema
+  and a description the declaration does not carry. Adopting `@HttpCode` moves a regenerated
+  client's success type for that operation from `200` to the declared status; see
+  [`docs/upgrading.md`](docs/upgrading.md).
+
+  Also: the OpenAPI status-description table gains the five redirect statuses (`301`, `302`, `303`,
+  `307`, `308`), which previously fell through to the bare fallback `'Response'`.
+
 - **`deno task check:docs` now refuses a markdown table row whose code spans will not render as
   written.** Two rules, the same defect at two stages of its life, both caused by a `|` the author
   did not escape — a pipe ends a table cell even inside backticks, and GFM then DROPS the cells past

@@ -848,6 +848,130 @@ function isRouteValidationMetadata(value: unknown): value is RouteValidationMeta
 }
 
 /**
+ * Key under which a {@linkcode RouteHandler} carries its
+ * {@linkcode RouteResponseMetadata}.
+ *
+ * Created with `Symbol.for`, not `Symbol()`, so two copies of this package in
+ * one process resolve the same key — the {@linkcode SECURITY_METADATA}
+ * precedent, and for the same reason: a locally-created symbol would simply
+ * miss on every read, silently.
+ *
+ * The HANDLER is the carrier rather than a middleware function, unlike
+ * {@linkcode SECURITY_METADATA} and {@linkcode VALIDATION_METADATA}. Those two
+ * brand middleware because a guard and a validator ARE middleware; a success
+ * status is a property of the handler, and a route may carry no middleware at
+ * all — branding a synthetic middleware purely to carry it would add a pipeline
+ * entry that does nothing.
+ *
+ * Prefer {@linkcode withResponseMetadata} and {@linkcode responseMetadataOf}
+ * over touching this directly; the symbol is exported so a handler produced
+ * outside `@setu-ts/decorator-plugin` can be branded too.
+ *
+ * @since 0.7.0
+ */
+export const RESPONSE_METADATA: unique symbol = Symbol.for('setu.response.metadata');
+
+/**
+ * The success status a {@linkcode RouteHandler} answers with when it returns a
+ * plain value, branded onto the handler so a documentation generator can
+ * describe the route without importing the plugin that produced it.
+ *
+ * This is a **description**, not a mechanism: the handler still sets the status
+ * on `ctx.response`, and removing the metadata changes no runtime behaviour.
+ *
+ * It carries the STATUS only. A response header is deliberately not
+ * represented: an OpenAPI response-header entry needs a schema and a
+ * description that a `@ResponseHeader('X-Total', '42')` declaration does not
+ * carry, so deriving one would put an under-specified `headers` object into
+ * every document that used the decorator.
+ *
+ * @since 0.7.0
+ */
+export interface RouteResponseMetadata {
+  /**
+   * The HTTP status the handler answers with on success — an integer in
+   * `[200, 599]`, the range the web `Response` constructor accepts.
+   */
+  readonly status: number;
+}
+
+/**
+ * Brands a route handler with the success status it answers with, so a
+ * documentation generator can read it without importing the plugin that
+ * produced it.
+ *
+ * The function is branded in place and returned, so identity is preserved and
+ * the brand costs no wrapper frame per request. The property is symbol-keyed
+ * and non-enumerable, so it is invisible to `Object.keys`, `JSON.stringify`
+ * and spread, and the handler behaves exactly as it did.
+ *
+ * @param handler - The handler to brand
+ * @param metadata - The success status it answers with
+ * @returns The same `handler` reference, branded
+ *
+ * @example
+ * ```typescript
+ * const handler = withResponseMetadata(
+ *   (ctx) => ctx.response.status(201).json({ created: true }),
+ *   { status: 201 },
+ * );
+ * ```
+ *
+ * @since 0.7.0
+ */
+export function withResponseMetadata<T extends RouteHandler>(
+  handler: T,
+  metadata: RouteResponseMetadata,
+): T {
+  Object.defineProperty(handler, RESPONSE_METADATA, {
+    value: metadata,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+  return handler;
+}
+
+/**
+ * Reads the success status a route handler was branded with.
+ *
+ * @param handler - The handler to inspect
+ * @returns The metadata, or `undefined` when the handler carries none
+ *
+ * @example
+ * ```typescript
+ * const status = responseMetadataOf(route.definition.handler)?.status ?? 200;
+ * ```
+ *
+ * @since 0.7.0
+ */
+export function responseMetadataOf(
+  handler: RouteHandler,
+): RouteResponseMetadata | undefined {
+  const carrier = handler as RouteHandler & {
+    readonly [RESPONSE_METADATA]?: unknown;
+  };
+  const value = carrier[RESPONSE_METADATA];
+  return isRouteResponseMetadata(value) ? value : undefined;
+}
+
+/**
+ * Narrows an unknown branded value. A foreign value under the same global
+ * symbol is treated as absent rather than trusted.
+ *
+ * The range is checked, not merely the type: a status outside `[200, 599]` is
+ * one the web `Response` constructor refuses with `RangeError`, so a brand
+ * carrying one could never be honoured by any runtime and reading it as a
+ * documented status would put an unreachable response into the document.
+ */
+function isRouteResponseMetadata(value: unknown): value is RouteResponseMetadata {
+  if (typeof value !== 'object' || value === null) return false;
+  const status = (value as { status?: unknown }).status;
+  return typeof status === 'number' && Number.isInteger(status) &&
+    status >= 200 && status <= 599;
+}
+
+/**
  * Full route definition, used when a route needs middleware or schemas in
  * addition to its handler.
  *
