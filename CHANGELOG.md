@@ -202,6 +202,28 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Documentation — the last three sites asserting the false Deno compiler-option mechanism.**
+  `docs/decorators.md`, the `PUBLIC_API.md` decorator note, and a `packages/cli` test comment still
+  stated that declaring any `compilerOptions` key in a `deno.json` replaces Deno's default set. M90h
+  corrected six sites and these three survived the sweep. The mechanism is false, re-measured here
+  on Deno 2.9.6 rather than taken from the earlier record: a manifest declaring only
+  `experimentalDecorators` still reports `TS7006` for an implicit `any`, so `strict` remains in
+  force, while the control declaring `strict: false` beside it type-checks cleanly — which is what
+  proves the probe discriminates rather than always failing. All three now state what is true: the
+  decorator surface needs no compiler option, and declaring one leaves Deno's other defaults alone,
+  so an existing `compilerOptions` block needs no edit. The stated reason matters on its own,
+  because a reader who believed the old one would avoid declaring an option their project needs.
+
+- **`@setu-ts/decorator-plugin`: the unresolvable-parameter warning no longer tells a developer to
+  write source that does not compile.** Since M76 retired parameter decorators, `Ctx()` returns a
+  `ParamSource` and `@Ctx()` in method position fails with
+  `TS1241 Unable to resolve signature of method decorator`; the valid form is `@Params(Ctx())`. The
+  hint logged for a decorated parameter that no resolver can satisfy named the invalid spelling, and
+  so did four JSDoc blocks across `decorators/security.ts`, `resolvers/parameter-resolver.ts` and
+  three test-prose sites. All eight are corrected. The two `not.toContain('@Ctx() ctx')` assertions
+  in the CLI schematic tests are deliberately left as they are: that string is the legacy parameter
+  form they exist to guard against reappearing.
+
 - **`@setu-ts/static-plugin`: the `cacheControl` callback's documented input matches what it
   receives, and the published option says so.** The callback has always been handed the FULL
   leading-slash request path INCLUDING `urlPrefix` (`/assets/app-A9acsx54.js`), deliberately — a

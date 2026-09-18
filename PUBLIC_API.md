@@ -10166,8 +10166,9 @@ carry full JSDoc.
 
 > **TC39 standard decorators — no compiler option required.** The surface needs no
 > `experimentalDecorators`, no `emitDecoratorMetadata`, and no `compilerOptions` entry of any kind:
-> Deno and Bun parse standard decorators unconfigured, and declaring an option would replace Deno's
-> default set. Node needs a transform (`tsx`) because V8 has not shipped decorators.
+> Deno and Bun parse standard decorators unconfigured. Declaring an option leaves Deno's other
+> defaults in force (measured on Deno 2.9.6), so an existing `compilerOptions` block needs no edit
+> either. Node needs a transform (`tsx`) because V8 has not shipped decorators.
 >
 > The standard proposal has **no parameter position**, so handler arguments are declared at the
 > method level with `@Params(...)` and constructor dependencies at the class level with

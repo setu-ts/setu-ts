@@ -56,7 +56,8 @@ describe('generateModule', () => {
       expect(source).toContain('export function registerUserProfileRoutes(router: IRouterApi)');
       expect(source).toContain("router.group('/user-profile'");
       // The write answers a real 201, which a decorated handler can only do
-      // through `@Ctx()` — here the context is simply the handler's argument.
+      // through `@Params(Ctx())` — here the context is simply the handler's
+      // argument.
       expect(source).toContain('status(201)');
     });
 
