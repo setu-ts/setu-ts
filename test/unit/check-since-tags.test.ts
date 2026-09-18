@@ -291,6 +291,75 @@ describe('run', () => {
     expect(skip?.reason).toContain('ahead of the registry');
   });
 
+  it('FAILS a version that was never published, rather than reading it as ahead', async () => {
+    // The discriminating case. `ahead.ts` above claims 9.0.0, which is
+    // genuinely newer than everything the registry holds, so it passes whether
+    // the rule is "absent from the list" or "newer than all of them" — it
+    // cannot tell the two apart. 0.5.1 can: the registry holds 0.5.0 and
+    // 0.6.0, so 0.5.1 is absent AND older than a published version, which
+    // means it was skipped over and can never appear. Read as "ahead" it is
+    // skipped forever; four such tags (`@since 0.6.1`, on a line that went
+    // 0.6.0 -> 0.7.0) were live on `main` and this gate reported none of them.
+    const file = 'packages/mock/src/never.ts';
+    const source = `/** Never published.\n * @since 0.5.1\n */\nexport const Never = true;\n`;
+    const base = options();
+    const result = await run({
+      ...base,
+      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      listSourceFiles: () => Promise.resolve([file]),
+    });
+    expect(result.skipped.find((s) => s.file === file)).toBeUndefined();
+    const finding = result.findings.find((f) => f.file === file);
+    expect(finding?.kind).toBe('version-absent');
+    expect(finding?.message).toContain('never published');
+  });
+
+  it('skips a version whose release LINE shipped only as a prerelease', async () => {
+    // `@since 0.1.0` is the repo-wide spelling for "since the first release",
+    // and that line shipped only as `0.1.0-alpha.*` — the exact string is
+    // absent from the registry while the release it names plainly exists.
+    // Reporting it would have produced 783 findings across the corpus, which
+    // is how the first cut of the rule above was caught: the unit test passed
+    // and its control discriminated, and the rule was still wrong at scale.
+    const file = 'packages/mock/src/first.ts';
+    const source = `/** First release.\n * @since 0.1.0\n */\nexport const First = true;\n`;
+    const base = options();
+    const result = await run({
+      ...base,
+      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      listSourceFiles: () => Promise.resolve([file]),
+      fetchImpl: fakeFetch({
+        'https://jsr.io/@setu-ts/mock/meta.json': {
+          status: 200,
+          body: JSON.stringify({ versions: { '0.1.0-alpha.3': {}, '0.2.0': {} } }),
+        },
+      }),
+    });
+    expect(result.findings).toHaveLength(0);
+    expect(result.skipped.find((s) => s.file === file)?.reason).toContain('not on the registry');
+  });
+
+  it('does not let a non-semver registry version claim a release line', async () => {
+    // The registry's version list is remote input. A value carrying no release
+    // triple must not compare equal to 0.0.0 and make an unrelated tag look
+    // like it shares that line, so it is dropped before the comparison.
+    const file = 'packages/mock/src/never.ts';
+    const source = `/** Never published.\n * @since 0.5.1\n */\nexport const Never = true;\n`;
+    const base = options();
+    const result = await run({
+      ...base,
+      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      listSourceFiles: () => Promise.resolve([file]),
+      fetchImpl: fakeFetch({
+        'https://jsr.io/@setu-ts/mock/meta.json': {
+          status: 200,
+          body: JSON.stringify({ versions: { 'not-a-version': {}, '0.6.0': {} } }),
+        },
+      }),
+    });
+    expect(result.findings.find((f) => f.file === file)?.kind).toBe('version-absent');
+  });
+
   it('skips a tag whose symbol it cannot resolve', async () => {
     const result = await run(options());
     const skip = result.skipped.find((s) => s.file.endsWith('member.ts'));

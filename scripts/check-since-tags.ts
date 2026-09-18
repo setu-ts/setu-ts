@@ -22,9 +22,14 @@
  * missing-module case is the degenerate one.
  *
  * The registry is queried once per fetched artifact and cached for the run,
- * never once per tag. A version the registry has not seen — a tag ahead of
- * the registry, the normal state on a release branch — is SKIPPED rather
- * than failed, so the gate cannot block a release PR.
+ * never once per tag. A version the registry has not published is SKIPPED
+ * rather than failed in exactly two cases — it is newer than everything
+ * published (the normal state on a release branch, which must never be
+ * blocked), or some published version shares its release line (`@since
+ * 0.1.0`, a line that shipped only as `0.1.0-alpha.*`). Any OTHER unpublished
+ * version is reported: it names a release that was skipped over and can never
+ * appear, which absence alone cannot distinguish. See
+ * {@linkcode mayBeSkipped}.
  *
  * A network failure is NOT an exit 77 here. `check:docs` is an `&&` chain of
  * `deno run` invocations, so any non-zero status fails the task — 77
@@ -73,7 +78,8 @@ export interface SinceSkip {
 /** Why a tag failed. */
 export type SinceFindingKind =
   | 'file-absent'
-  | 'symbol-absent';
+  | 'symbol-absent'
+  | 'version-absent';
 
 /** A tag whose claim the registry disproves. */
 export interface SinceFinding {
@@ -268,6 +274,63 @@ export function symbolPresent(fetched: string, symbol: string): boolean {
   return new RegExp(`(?<![\\w$])${escaped}(?![\\w$])`).test(fetched);
 }
 
+/** Matches the release triple at the head of a semver string. */
+const RELEASE_TRIPLE = /^(\d+)\.(\d+)\.(\d+)/;
+
+/**
+ * The `[major, minor, patch]` of a version string; any prerelease identifier
+ * and build metadata are ignored, because this only has to order release
+ * LINES, never two prereleases of one line.
+ *
+ * A string that carries no triple at all returns `null` rather than a
+ * zero-filled tuple. The registry's version list is remote input, so a value
+ * that is not semver must not silently compare equal to `0.0.0` and make an
+ * unrelated tag look like it shares that line.
+ *
+ * @param version - A version string, from a tag or from the registry
+ * @returns Its release triple, or `null` when there is none
+ */
+function releaseTriple(version: string): readonly [number, number, number] | null {
+  const match = RELEASE_TRIPLE.exec(version);
+  if (match === null) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/**
+ * Whether a tag naming an unpublished version may be skipped rather than
+ * reported. Two cases qualify, and they are different questions:
+ *
+ * 1. The version is NEWER than every version the registry holds — the normal
+ *    state on a release branch, which must never be blocked.
+ * 2. Some published version shares its release line. `@since 0.1.0` is the
+ *    repo-wide spelling for "since the first release", and that line shipped
+ *    only as `0.1.0-alpha.*`, so the exact string is absent while the release
+ *    it names plainly exists.
+ *
+ * Absence from the published list is NOT by itself either question, and
+ * conflating them left a permanent blind spot: a version that was never
+ * released and never will be (`0.6.1`, on a line that went `0.6.0` -> `0.7.0`)
+ * is absent forever, so it was skipped forever while the message claimed it
+ * was "ahead of the registry". Four such tags were live on `main` and this
+ * gate could not have reported any of them.
+ *
+ * @param version - The version the tag claims
+ * @param published - Every version the registry holds for that package
+ * @returns True when the tag must not be reported
+ */
+function mayBeSkipped(version: string, published: readonly string[]): boolean {
+  const triple = releaseTriple(version);
+  if (triple === null) return true;
+  const [major, minor, patch] = triple;
+  const lines = published.map(releaseTriple).filter((t) => t !== null);
+  if (lines.some(([m, n, p]) => m === major && n === minor && p === patch)) return true;
+  return lines.every(([m, n, p]) => {
+    if (major !== m) return major > m;
+    if (minor !== n) return minor > n;
+    return patch > p;
+  });
+}
+
 /**
  * The registry URL for one file at one version.
  *
@@ -451,11 +514,23 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
           continue;
         }
         if (!meta.versions.includes(tag.version)) {
-          pushSkip(
-            tag,
-            `${tag.version} is not on the registry yet — a tag ahead of the registry is ` +
-              `skipped, not failed, so a release branch cannot be blocked`,
-          );
+          if (mayBeSkipped(tag.version, meta.versions)) {
+            pushSkip(
+              tag,
+              `${tag.version} is not on the registry yet — a tag ahead of the registry is ` +
+                `skipped, not failed, so a release branch cannot be blocked`,
+            );
+            continue;
+          }
+          findings.push({
+            file: tag.file,
+            line: tag.line,
+            version: tag.version,
+            kind: 'version-absent',
+            message: `${packageName} has no ${tag.version} — the tag names a version that ` +
+              `was never published, and is older than one that was, so it can never appear. ` +
+              `Name the release that ships the symbol.`,
+          });
           continue;
         }
         let content: string | null;

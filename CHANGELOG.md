@@ -122,6 +122,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+Reported in code review before merge: the gate originally SKIPPED any version absent from the
+registry, under a message asserting it was "ahead of the registry" — two different claims. A version
+that was never released and never will be (`@since 0.6.1`, on a line that went `0.6.0` → `0.7.0`) is
+absent forever, so it was skipped forever; four such tags were live on `main` and the gate could not
+have reported one of them. It now skips only a version that is newer than everything published, or
+one whose release LINE did ship (`@since 0.1.0`, a line released only as `0.1.0-alpha.*`), and
+reports the rest. The test covering that branch used `@since 9.0.0`, which is genuinely ahead and
+therefore passes under either rule — it could not tell them apart, which is why the hole shipped.
+
 - **`deno.lock` re-resolved to the current satisfying versions of every declared range.** No
   manifest range changes, so this moves only what the lockfile pins: `@hono/hono` `4.13.0` →
   `4.13.8`, the seven AWS SDK v3 clients `3.1103.0`/`3.1121.0` → `3.1134.0`, `zod` `4.5.4` →
@@ -444,6 +453,12 @@ All notable changes to this project are documented here. The format follows
   `resolveProbeTiming` (common, `0.4.0` → `0.5.0`), `UnsupportedMigrationError` (database-plugin,
   `0.4.0` → `0.5.0`), `csrfTokenField` (session-plugin, `0.5.0` → `0.6.0`), and `contentEncodingFor`
   (static-plugin, `0.4.0` → `0.5.0`). The corrected run verifies 736 tags.
+
+  Four more were found by running the finished gate against merged `main`, and are corrected here:
+  three `@since 0.6.0` tags on `config-plugin`'s typed-config-section module, a file `0.6.0` does
+  not contain, and four naming `0.6.1` across `kernel` and `session-plugin` — a version that was
+  never released. All move to `0.7.0`. That is PR #286's named systematic cause repeating, which is
+  the argument the gate was built on.
 - **The documentation now states what the code does at the three places a reader following it ended
   up wrong (M95d, X46-1 / X49-1 / X49-2).** `docs/mvc.md` §Escaping states the boundary — escaping
   protects HTML structure, not URL schemes, a difference BETWEEN rendering runtimes (React

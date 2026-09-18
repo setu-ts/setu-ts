@@ -124,9 +124,11 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // M92: the new guide is born gated — five fences, all TypeScript, all
     // compiling (two as fragments through the committed `app` prelude).
     // +3 for the Forms section (the urlencoded read, the redirect-or-re-render
-    // decorated handler) and the `raw()` script opt-out. Every fence here is
-    // written to disk as `.ts`, so a JSX fence would be a parse error — the
-    // escaping example uses the `html` tag and states the JSX spelling in prose.
+    // decorated handler) and the `raw()` script opt-out. A `tsx`-fenced example
+    // is written to disk as `.tsx` by `fenceExtension`, so JSX compiles here;
+    // the escaping example still uses the `html` tag and states the JSX
+    // spelling in prose, which is a choice about that example rather than a
+    // limit of the harness.
     // +1 in review: the Escaping section gained a fence contrasting an UNSAFE
     // plain template literal with the `html` tag, because two reviewers
     // independently found that a plain `(props) => string` component escapes
