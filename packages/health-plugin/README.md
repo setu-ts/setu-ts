@@ -50,22 +50,23 @@ among them.
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `createHttpIndicator` | function |
-| `HealthPlugin` | function |
-| `HealthService` | class |
-| `HealthCheckResult` | interface |
-| `HealthPluginOptions` | interface |
-| `HealthReport` | interface |
+| Export                 | Kind      |
+| ---------------------- | --------- |
+| `createHttpIndicator`  | function  |
+| `HealthPlugin`         | function  |
+| `HealthService`        | class     |
+| `HealthCheckResult`    | interface |
+| `HealthPluginOptions`  | interface |
+| `HealthReport`         | interface |
 | `HttpIndicatorOptions` | interface |
-| `IHealthIndicator` | interface |
-| `IHealthService` | interface |
-| `HealthIndicatorEntry` | type |
-| `HealthIndicatorFn` | type |
-| `HealthStatus` | type |
+| `IHealthIndicator`     | interface |
+| `IHealthService`       | interface |
+| `HealthIndicatorEntry` | type      |
+| `HealthIndicatorFn`    | type      |
+| `HealthStatus`         | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

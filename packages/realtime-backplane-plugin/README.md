@@ -144,34 +144,34 @@ serving — never `down`. A transport that cannot probe reports `up` with `reach
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `adaptRedisModule` | function |
-| `createBackplane` | function |
-| `decodeFrameData` | function |
-| `encodeFrameData` | function |
-| `isRealtimeFrame` | function |
-| `loadRedisModule` | function |
-| `RealtimeBackplanePlugin` | function |
-| `MemoryBackplane` | class |
-| `MessagingBackplane` | class |
-| `RedisBackplane` | class |
-| `RedisModuleError` | class |
-| `CAPABILITIES` | const |
-| `DEFAULT_TOPIC` | const |
-| `BackplaneCommonOptions` | interface |
-| `CustomBackplaneOptions` | interface |
-| `EncodedPayload` | interface |
-| `IRealtimeBackplane` | interface |
-| `IRedisBackplaneClient` | interface |
-| `IRedisModule` | interface |
-| `MemoryBackplaneOptions` | interface |
-| `MessagingBackplaneOptions` | interface |
-| `RealtimeFrame` | interface |
-| `RedisBackplaneOptions` | interface |
-| `RealtimeBackplanePluginOptions` | type |
-| `RealtimeFrameHandler` | type |
-| `RealtimeFrameKind` | type |
+| Export                           | Kind      |
+| -------------------------------- | --------- |
+| `adaptRedisModule`               | function  |
+| `createBackplane`                | function  |
+| `decodeFrameData`                | function  |
+| `encodeFrameData`                | function  |
+| `isRealtimeFrame`                | function  |
+| `loadRedisModule`                | function  |
+| `RealtimeBackplanePlugin`        | function  |
+| `MemoryBackplane`                | class     |
+| `MessagingBackplane`             | class     |
+| `RedisBackplane`                 | class     |
+| `RedisModuleError`               | class     |
+| `CAPABILITIES`                   | const     |
+| `DEFAULT_TOPIC`                  | const     |
+| `BackplaneCommonOptions`         | interface |
+| `CustomBackplaneOptions`         | interface |
+| `EncodedPayload`                 | interface |
+| `IRealtimeBackplane`             | interface |
+| `IRedisBackplaneClient`          | interface |
+| `IRedisModule`                   | interface |
+| `MemoryBackplaneOptions`         | interface |
+| `MessagingBackplaneOptions`      | interface |
+| `RealtimeFrame`                  | interface |
+| `RedisBackplaneOptions`          | interface |
+| `RealtimeBackplanePluginOptions` | type      |
+| `RealtimeFrameHandler`           | type      |
+| `RealtimeFrameKind`              | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
-
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.

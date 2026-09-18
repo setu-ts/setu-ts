@@ -107,41 +107,42 @@ carries no such caveat — it awaits the SDK and is the accurate entry point whe
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `adaptLaunchDarklyModule` | function |
-| `createFlagGuard` | function |
-| `createProvider` | function |
-| `FeatureFlagsPlugin` | function |
-| `loadLaunchDarklyModule` | function |
-| `toLaunchDarklyContext` | function |
-| `ConfigProvider` | class |
-| `DatabaseProvider` | class |
-| `FeatureFlagService` | class |
-| `LaunchDarklyModuleError` | class |
-| `LaunchDarklyProvider` | class |
-| `MemoryProvider` | class |
-| `ConfigProviderOptions` | interface |
-| `CustomProviderOptions` | interface |
-| `DatabaseProviderOptions` | interface |
-| `FlagContext` | interface |
-| `FlagDefinition` | interface |
-| `FlagGuardOptions` | interface |
-| `FlagProvider` | interface |
-| `FlagProviderStatus` | interface |
-| `IFeatureFlags` | interface |
-| `IFlagStore` | interface |
-| `ILaunchDarklyClient` | interface |
-| `ILaunchDarklyFlagsState` | interface |
-| `ILaunchDarklyModule` | interface |
-| `LaunchDarklyContext` | interface |
-| `LaunchDarklyProviderConfig` | interface |
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `adaptLaunchDarklyModule`     | function  |
+| `createFlagGuard`             | function  |
+| `createProvider`              | function  |
+| `FeatureFlagsPlugin`          | function  |
+| `loadLaunchDarklyModule`      | function  |
+| `toLaunchDarklyContext`       | function  |
+| `ConfigProvider`              | class     |
+| `DatabaseProvider`            | class     |
+| `FeatureFlagService`          | class     |
+| `LaunchDarklyModuleError`     | class     |
+| `LaunchDarklyProvider`        | class     |
+| `MemoryProvider`              | class     |
+| `ConfigProviderOptions`       | interface |
+| `CustomProviderOptions`       | interface |
+| `DatabaseProviderOptions`     | interface |
+| `FlagContext`                 | interface |
+| `FlagDefinition`              | interface |
+| `FlagGuardOptions`            | interface |
+| `FlagProvider`                | interface |
+| `FlagProviderStatus`          | interface |
+| `IFeatureFlags`               | interface |
+| `IFlagStore`                  | interface |
+| `ILaunchDarklyClient`         | interface |
+| `ILaunchDarklyFlagsState`     | interface |
+| `ILaunchDarklyModule`         | interface |
+| `LaunchDarklyContext`         | interface |
+| `LaunchDarklyProviderConfig`  | interface |
 | `LaunchDarklyProviderOptions` | interface |
-| `MemoryProviderOptions` | interface |
-| `FeatureFlagsPluginOptions` | type |
-| `FlagProviderType` | type |
+| `MemoryProviderOptions`       | interface |
+| `FeatureFlagsPluginOptions`   | type      |
+| `FlagProviderType`            | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 

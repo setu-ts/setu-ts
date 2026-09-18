@@ -194,16 +194,17 @@ is stateless and touches no backend, and a probe must not fabricate reachability
 
 ## Exports
 
-| Export | Kind |
-| --- | --- |
-| `raw` | function |
-| `renderView` | function |
-| `ViewPlugin` | function |
-| `UnresolvedSuspenseError` | class |
-| `ViewRenderError` | class |
-| `ViewPluginOptions` | type |
+| Export                    | Kind     |
+| ------------------------- | -------- |
+| `raw`                     | function |
+| `renderView`              | function |
+| `ViewPlugin`              | function |
+| `UnresolvedSuspenseError` | class    |
+| `ViewRenderError`         | class    |
+| `ViewPluginOptions`       | type     |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it drifts.
+Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+drifts.
 
 ## Full API
 
