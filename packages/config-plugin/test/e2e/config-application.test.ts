@@ -10,6 +10,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IConfig, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
 
 import { createApplication } from '@setu-ts/kernel';
+import { defineConfigSection, getConfigSection } from '../../src/index.ts';
 import { ConfigPlugin } from '../../src/plugin/config-plugin.ts';
 import { createFakeFileSystem, createRuntime } from '../fixtures/fake-runtime.ts';
 
@@ -98,6 +99,38 @@ describe('ConfigPlugin E2E — with real application', () => {
     expect(config?.get<number>('PORT')).toBe(3000);
     expect(config?.get<boolean>('DEBUG')).toBe(false);
     expect(config?.get<string>('NAME')).toBe('zod-test');
+    await app.stop();
+  });
+
+  it('resolves a typed section from the real application service registry', async () => {
+    const { z } = await import('npm:zod@^3.24.0');
+    const database = defineConfigSection({
+      prefix: 'DATABASE_',
+      keys: ['URL', 'POOL_SIZE'],
+      schema: z.object({
+        URL: z.string().url(),
+        POOL_SIZE: z.coerce.number().int().positive(),
+      }),
+    });
+    const app = createApplication({
+      plugins: [
+        createTestRuntimePlugin({
+          env: {
+            DATABASE_URL: 'postgres://localhost/app',
+            DATABASE_POOL_SIZE: '8',
+          },
+        }),
+        ConfigPlugin({ sections: [database] }),
+      ],
+    });
+
+    await app.start();
+    const config = app.services.get<IConfig>(CAPABILITIES.CONFIG);
+
+    expect(getConfigSection(config, database)).toEqual({
+      URL: 'postgres://localhost/app',
+      POOL_SIZE: 8,
+    });
     await app.stop();
   });
 

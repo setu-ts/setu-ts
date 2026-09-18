@@ -36,11 +36,12 @@ const port = config.get('PORT', { default: '3000' });
 
 ## Options
 
-| Option             | Type                          | Default     | Description                                           |
-| ------------------ | ----------------------------- | ----------- | ----------------------------------------------------- |
-| `envFilePath`      | `string \| readonly string[]` | `undefined` | Path(s) to `.env` files. No file loading when absent. |
-| `validationSchema` | `StructuralSchema<T>`         | `undefined` | Zod-compatible schema for startup validation.         |
-| `expandVariables`  | `boolean`                     | `true`      | Expand `${NAME}` references in values.                |
+| Option             | Type                                | Default     | Description                                                    |
+| ------------------ | ----------------------------------- | ----------- | -------------------------------------------------------------- |
+| `envFilePath`      | `string \| readonly string[]`       | `undefined` | Path(s) to `.env` files. No file loading when absent.          |
+| `validationSchema` | `StructuralSchema<T>`               | `undefined` | Zod-compatible whole-snapshot schema for startup validation.   |
+| `sections`         | `readonly ConfigSection<unknown>[]` | `undefined` | Typed, declared-key sections to validate and cache at startup. |
+| `expandVariables`  | `boolean`                           | `true`      | Expand `${NAME}` references in values.                         |
 
 ## Configuration Precedence
 
@@ -102,6 +103,40 @@ app.register(
 - The schema's parsed output must be a non-null, non-array object.
 - Validation errors do not disclose secret values.
 
+## Typed Configuration Sections
+
+Use a section when related settings should be returned with the type that its schema validated.
+Sections are validated and cached during startup; `getConfigSection` never parses or asserts a value
+at read time.
+
+```typescript
+import { CAPABILITIES, type IConfig } from '@setu-ts/common';
+import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
+import { z } from 'npm:zod@^3.24.0';
+
+const database = defineConfigSection({
+  prefix: 'DATABASE_',
+  keys: ['URL', 'POOL_SIZE'],
+  schema: z.object({
+    URL: z.string().url(),
+    POOL_SIZE: z.coerce.number().int().positive(),
+  }),
+});
+
+app.register(ConfigPlugin({ sections: [database] }));
+
+const config = app.services.get<IConfig>(CAPABILITIES.CONFIG);
+const settings = getConfigSection(config, database);
+// settings.POOL_SIZE is a number, validated before the application started.
+```
+
+`keys` contains prefix-stripped names: `prefix: 'DATABASE_'` plus `keys: ['URL']` reads the flat
+`DATABASE_URL` key and supplies `{ URL }` to the schema. The list is explicit because `IConfig`
+supports named reads but deliberately has no key-enumeration method; this also lets sections
+validate an arbitrary `instance` snapshot. A missing key is omitted, so the schema decides whether
+it is optional. A section schema is not interchangeable with `validationSchema`: the latter receives
+the whole flat snapshot, while the former receives only its declared, prefix-stripped keys.
+
 ## Hot Reload
 
 **Deferred.** The current runtime contract has no file-watching abstraction. Configuration is an
@@ -123,16 +158,28 @@ Creates the configuration plugin. Consumes `CAPABILITIES.RUNTIME`, provides `CAP
 ### `ConfigPluginOptions`
 
 ```typescript
+import type { IConfig } from '@setu-ts/common';
+import type { ConfigSection, StructuralSchema } from '@setu-ts/config-plugin';
+
 interface ConfigPluginOptions {
   readonly envFilePath?: string | readonly string[];
+  readonly envFileOptional?: boolean;
   readonly validationSchema?: StructuralSchema<unknown>;
+  readonly sections?: readonly ConfigSection<unknown>[];
   readonly expandVariables?: boolean;
+  readonly instance?: IConfig;
 }
 ```
 
 ### `StructuralSchema<T>`
 
 Minimal schema interface compatible with Zod's `parse(unknown)` API.
+
+### `ConfigSection<T>`
+
+The typed section declaration returned by `defineConfigSection`. It carries `prefix`,
+prefix-stripped `keys`, and a `StructuralSchema<T>`. Pass it in `ConfigPluginOptions.sections`, then
+retrieve its validated output with `getConfigSection(config, section)`.
 
 ### `IConfig` (from `@setu-ts/common`)
 
@@ -161,7 +208,10 @@ When `validationSchema` is not provided, all values remain as strings from the e
 | --------------------- | --------- |
 | `ConfigPlugin`        | function  |
 | `loadConfig`          | function  |
+| `defineConfigSection` | function  |
+| `getConfigSection`    | function  |
 | `ConfigPluginOptions` | interface |
+| `ConfigSection`       | interface |
 | `StructuralSchema`    | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
