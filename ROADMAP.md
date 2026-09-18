@@ -10554,7 +10554,7 @@ did; it is a separable decision, and it belongs to whichever milestone next touc
 
 **Package(s):** `packages/config-plugin`
 
-**Plan:** `plans/milestone-97c-typed-config-sections.md`
+**Plan:** `plans/archive/milestone-97c-typed-config-sections.md`
 
 **Objective:** Make a configuration read return a value whose type was checked, rather than a value
 whose type the caller asserted.
@@ -10576,14 +10576,15 @@ improvement, and it is the ASP.NET `IOptions<T>` row.
 
 **Deliverables.**
 
-- **A typed section accessor.** `defineConfigSection({ prefix, schema })` produces a definition and
-  the free function `getConfigSection(config, definition)` resolves one to its parsed type. **A
-  required `IConfig.getSection` member was considered and declined** — it is breaking for an
-  implementor (the M74 precedent) and buys nothing, because the parsed value is cached at startup
+- **A typed section accessor.** `defineConfigSection({ prefix, keys, schema })` produces a
+  definition and the free function `getConfigSection(config, definition)` resolves one to its parsed
+  type. **A required `IConfig.getSection` member was considered and declined** — it is breaking for
+  an implementor (the M74 precedent) and buys nothing, because the parsed value is cached at startup
   and the accessor reads through the public `get`; keeping the section concept out of `common` also
   keeps `common` free of the validator dependency that put `StructuralSchema` in `config-plugin` in
   the first place. `ConfigPluginOptions.validationSchema` keeps its current meaning and runs FIRST;
-  sections parse their prefix subsets out of its output.
+  sections parse their declared prefix-plus-key subsets out of its output. `keys` is required
+  because `IConfig` has named reads but cannot enumerate an arbitrary injected snapshot.
 - **Sections validate at startup, not at first read.** A missing or unparseable section fails
   `register()` naming the section, which is the property that makes the typed read honest — a
   read-time parse would mean a configuration error surfaces on the first request that happens to
@@ -10780,4 +10781,4 @@ merging beyond what the schema itself expresses.
 | 96        | ✅     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                               |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                   |
-| 97c       | ⬜     | config-plugin — typed configuration sections                                                                           |
+| 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                     |

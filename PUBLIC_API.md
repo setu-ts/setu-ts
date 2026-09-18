@@ -631,6 +631,7 @@ interface ConfigPluginOptions {
   readonly envFilePath?: string | readonly string[];
   readonly envFileOptional?: boolean;
   readonly validationSchema?: StructuralSchema<unknown>;
+  readonly sections?: readonly ConfigSection<unknown>[];
   readonly expandVariables?: boolean;
   readonly instance?: IConfig;
 }
@@ -646,13 +647,17 @@ interface ConfigPluginOptions {
 - **`validationSchema`** — A Zod-compatible schema for startup validation. The schema's `parse()` is
   called once after merging and expansion; the parsed output is stored as the configuration
   snapshot, preserving Zod coercions and defaults.
+- **`sections`** — Typed sections validated after `validationSchema` has parsed the whole snapshot.
+  Each section reads only its declared prefix-plus-key entries, parses them once at startup, and
+  caches the output for `getConfigSection`. Sections validate even when `instance` is supplied.
 - **`expandVariables`** — When `true` (default), expand `${NAME}` references in values using the
   final merged configuration.
 - **`instance`** — An already-loaded snapshot to register verbatim. Present → **nothing is read**
-  from the environment or from disk and the three options above are ignored; absent → configuration
-  loads normally. This exists so an application can resolve configuration before its plugins are
-  constructed and then hand the plugin that same object, rather than letting it load a second
-  snapshot a moment later that the composition never saw.
+  from the environment or from disk and `envFilePath`, `envFileOptional`, `validationSchema`, and
+  `expandVariables` are ignored; declared `sections` still validate it through named reads. Absent →
+  configuration loads normally. This exists so an application can resolve configuration before its
+  plugins are constructed and then hand the plugin that same object, rather than letting it load a
+  second snapshot a moment later that the composition never saw.
 
 ### loadConfig()
 
@@ -686,6 +691,41 @@ interface StructuralSchema<T> {
 
 Minimal schema interface compatible with Zod's `parse(unknown)` API. Consumers supply a Zod schema
 without `config-plugin` depending on Zod.
+
+### Typed Configuration Sections
+
+```typescript
+import { CAPABILITIES, type IConfig } from '@setu-ts/common';
+import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
+import { z } from 'npm:zod@^3.24.0';
+
+const database = defineConfigSection({
+  prefix: 'DATABASE_',
+  keys: ['URL', 'POOL_SIZE'],
+  schema: z.object({
+    URL: z.string().url(),
+    POOL_SIZE: z.coerce.number().int().positive(),
+  }),
+});
+
+app.register(ConfigPlugin({ sections: [database] }));
+
+const config = app.services.get<IConfig>(CAPABILITIES.CONFIG);
+const settings = getConfigSection(config, database);
+// settings.POOL_SIZE is a validated number.
+```
+
+`ConfigSection<T>` is the typed declaration returned by `defineConfigSection`. `prefix` is prepended
+to every prefix-stripped entry in `keys`, so the example reads `DATABASE_URL` and
+`DATABASE_POOL_SIZE` while the schema receives `{ URL, POOL_SIZE }`. The explicit key list is
+required because `IConfig` intentionally supports named reads but no key enumeration; this also
+makes an arbitrary `ConfigPluginOptions.instance` validatable. Missing keys are omitted and the
+schema decides whether they are optional. A section schema is not reusable as `validationSchema`:
+the latter receives the entire flat snapshot and always runs first.
+
+`getConfigSection(config, section)` returns the exact schema output cached during startup. It throws
+when that configuration snapshot did not validate the given definition; it never parses a value at
+read time.
 
 ### Configuration Precedence
 

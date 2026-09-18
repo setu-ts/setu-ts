@@ -10,6 +10,7 @@
 
 import type { IConfig } from '@setu-ts/common';
 
+import type { ConfigSection } from './sections/config-section.ts';
 import type { StructuralSchema } from './validators/config-validator.ts';
 
 /**
@@ -56,6 +57,18 @@ export interface ConfigPluginOptions {
   readonly validationSchema?: StructuralSchema<unknown>;
 
   /**
+   * Typed sections to validate at startup after `validationSchema` has parsed
+   * the whole snapshot. Each section reads only its declared prefix-plus-key
+   * entries, then caches its schema output for `getConfigSection`.
+   *
+   * Sections are also validated when `instance` is supplied. This keeps a
+   * preloaded snapshot and the application using it on the same safe path.
+   *
+   * @since 0.6.0
+   */
+  readonly sections?: readonly ConfigSection<unknown>[];
+
+  /**
    * When `true` (default), expand `${NAME}` references in values.
    * Set to `false` to disable variable expansion.
    *
@@ -66,8 +79,10 @@ export interface ConfigPluginOptions {
   /**
    * An already-loaded configuration snapshot to use verbatim.
    *
-   * Present → nothing is read from the environment or from disk, the three
-   * options above are ignored, and this exact object becomes the application's
+   * Present → nothing is read from the environment or from disk;
+   * `envFilePath`, `envFileOptional`, `validationSchema`, and
+   * `expandVariables` are ignored. Declared `sections` still validate through
+   * named reads on this exact object before it becomes the application's
    * `CAPABILITIES.CONFIG` service. Absent → configuration is loaded normally.
    *
    * This exists so configuration can be resolved BEFORE plugins are

@@ -148,7 +148,8 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
   },
   'docs/migration-nestjs.md': {
     // M92: +2 for the Views section — one external NestJS fence, one
-    // compiling Setu-TS fence.
+    // compiling Setu-TS fence. M97c updates the configuration fence with
+    // typed sections without changing the number of fenced examples.
     total: 37,
     ts: 37,
     compile: 20,
@@ -176,7 +177,8 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // (+1, compiling) showing a decorated handler resolving through the stored
   // scope.
   // 270 since M97b: docs/decorators.md's Response Shaping section (+1,
-  // compiling).
+  // compiling). M97c updates an existing migration fence rather than adding
+  // one, so counts remain unchanged.
   total: 270,
   ts: 224,
   compile: 191,

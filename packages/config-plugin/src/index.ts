@@ -19,5 +19,9 @@ export type { ConfigPluginOptions } from './options.ts';
 // resolving configuration before any plugin is constructed.
 export { loadConfig } from './services/load-config.ts';
 
+// Typed configuration sections, validated and cached during startup.
+export { defineConfigSection, getConfigSection } from './sections/config-section.ts';
+export type { ConfigSection } from './sections/config-section.ts';
+
 // Structural schema for validation (compatible with Zod)
 export type { StructuralSchema } from './validators/config-validator.ts';

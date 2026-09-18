@@ -488,7 +488,14 @@ export class AppService {
 
 ```typescript
 import { CAPABILITIES, type IConfig } from '@setu-ts/common';
-import { ConfigPlugin } from '@setu-ts/config-plugin';
+import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
+import { z } from 'npm:zod@^3.24.0';
+
+const database = defineConfigSection({
+  prefix: 'DATABASE_',
+  keys: ['URL'],
+  schema: z.object({ URL: z.string().url() }),
+});
 
 app.register(ConfigPlugin({
   // Optional: load .env files before reading `runtime.env` (requires a
@@ -496,11 +503,13 @@ app.register(ConfigPlugin({
   // (e.g. Zod) via `validationSchema` — `ConfigPluginOptions` has no `validate`
   // field.
   envFilePath: '.env',
+  sections: [database],
 }));
 
 // Usage
 const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
 const port = config.get('PORT');
+const databaseSettings = getConfigSection(config, database);
 ```
 
 ## Database (TypeORM → Prisma/Drizzle)

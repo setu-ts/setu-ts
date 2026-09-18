@@ -1,6 +1,7 @@
 # Milestone 97c — Typed Configuration Sections (`@setu-ts/config-plugin`)
 
-> **Status:** Planning. Branch: `feat/m97c-typed-config-sections`. `main` is protected — all work
+> **Status:** Complete ([PR #330](https://github.com/setu-ts/setu-ts/pull/330)). Archived on
+> completion. Branch: `feat/m97c-typed-config-sections`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
@@ -44,11 +45,11 @@ safety improvement, and it is the ASP.NET `IOptions<T>` row.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                                                                                  | Resolution (picked side)                                                                                                                                                            | Doc deliverable (same PR)                                                                                                        |
-| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| C1 | `docs/migration-nestjs.md:462-505` maps Nest's `ConfigModule` onto `ConfigPlugin` with a flat `config.get('KEY')`. Nest's actual idiom is `registerAs('database', () => ({ … }))` plus a namespaced `ConfigService` read, which is the section shape this milestone adds. | The mapping is corrected to show the section form as the closer equivalent, with the flat read kept for single values.                                                              | Update the Configuration section of `docs/migration-nestjs.md`, with fence counts bumped in `test/guide-fence-compiler.test.ts`. |
-| C2 | `PUBLIC_API.md`'s config section documents `IConfig`'s four members and `validationSchema` as whole-store validation. A section accessor changes what "validated" means for a reader.                                                                                     | `validationSchema` keeps its exact current meaning — whole-store validation — and sections compose with it rather than replacing it; the doc states both and says which runs first. | `PUBLIC_API.md` config rows for the new symbols and a sentence on ordering.                                                      |
-| C3 | No committed doc claims typed sections exist, so there is no third conflict. Checked: `README.md`, `ARCHITECTURE.md` §config, `packages/config-plugin/README.md`, `docs/getting-started.md`.                                                                              | Nothing to resolve.                                                                                                                                                                 | None.                                                                                                                            |
+| #  | Conflict                                                                                                                                                                                                                                                                  | Resolution (picked side)                                                                                                                                                            | Doc deliverable (same PR)                                                                                                                             |
+| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 | `docs/migration-nestjs.md:462-505` maps Nest's `ConfigModule` onto `ConfigPlugin` with a flat `config.get('KEY')`. Nest's actual idiom is `registerAs('database', () => ({ … }))` plus a namespaced `ConfigService` read, which is the section shape this milestone adds. | The mapping is corrected to show the section form as the closer equivalent, with the flat read kept for single values.                                                              | Update the existing Configuration fence in `docs/migration-nestjs.md`; its fence count is unchanged and the expected-count comment records that fact. |
+| C2 | `PUBLIC_API.md`'s config section documents `IConfig`'s four members and `validationSchema` as whole-store validation. A section accessor changes what "validated" means for a reader.                                                                                     | `validationSchema` keeps its exact current meaning — whole-store validation — and sections compose with it rather than replacing it; the doc states both and says which runs first. | `PUBLIC_API.md` config rows for the new symbols and a sentence on ordering.                                                                           |
+| C3 | No committed doc claims typed sections exist, so there is no third conflict. Checked: `README.md`, `ARCHITECTURE.md` §config, `packages/config-plugin/README.md`, `docs/getting-started.md`.                                                                              | Nothing to resolve.                                                                                                                                                                 | None.                                                                                                                                                 |
 
 ## 3. Design decisions
 
@@ -77,22 +78,23 @@ safety improvement, and it is the ASP.NET `IOptions<T>` row.
 - **Test home:** `test/unit/config-section.test.ts` plus a compile-time assertion that `IConfig`
   still declares exactly its four members.
 
-### 3.2 `defineConfigSection` produces a definition carrying the key prefix and the schema
+### 3.2 `defineConfigSection` produces a definition carrying the prefix, keys, and schema
 
-- **Decision:** `defineConfigSection<T>({ prefix, schema })` returns an opaque `ConfigSection<T>`
-  carrying both. `prefix` selects the flat keys belonging to the section (`DATABASE_` selects
-  `DATABASE_URL`, `DATABASE_POOL_SIZE`), and `schema` parses the selected subset **with the prefix
-  STRIPPED** — the schema declares `{ URL: …, POOL_SIZE: … }`, not `{ DATABASE_URL: … }`.
-- **Why:** The store is flat string keys from the environment (§1), so a section is a prefix over
-  that flat space rather than a nested object — there is no nesting in the source data to address.
-  Naming the prefix rather than a list of keys is what makes the schema the single statement of the
-  section's shape. **Stripping** is the half an earlier draft left unstated, and it is not cosmetic:
-  it decides what every user's schema literally looks like, and repeating the prefix inside the
-  schema would state it twice with nothing checking the two agree. The cost is that a section's
-  schema is not reusable as a whole-store `validationSchema`, which the README states rather than
-  leaving to discovery.
-- **Test home:** `test/unit/config-section.test.ts` — prefix selection, and a key outside the prefix
-  not reaching the schema.
+- **Decision:** `defineConfigSection<T>({ prefix, keys, schema })` returns an opaque
+  `ConfigSection<T>` carrying all three. `keys` names the prefix-stripped keys that belong to the
+  section (`prefix: 'DATABASE_', keys: ['URL', 'POOL_SIZE']` selects `DATABASE_URL` and
+  `DATABASE_POOL_SIZE`), and `schema` parses that selected subset — the schema declares
+  `{ URL: …, POOL_SIZE: … }`, not `{ DATABASE_URL: … }`.
+- **Why:** `IConfig` has named reads but no enumeration method. A prefix alone can select keys from
+  the record available while loading a normal snapshot, but cannot select from an arbitrary injected
+  `IConfig`, which §3.4 must validate too. Explicit stripped keys preserve the free-function,
+  no-`common` design and make both paths honest. **Stripping** decides what every user's schema
+  literally looks like; repeating the prefix inside the schema would state it twice with nothing
+  checking the two agree. The cost is that a section's schema is not reusable as a whole-store
+  `validationSchema`, and that its key list accompanies the schema; the README states both rather
+  than leaving this distinction to discovery.
+- **Test home:** `test/unit/config-section.test.ts` — the selected keys are read with the prefix
+  stripped, and an undeclared key never reaches the schema.
 
 ### 3.3 Sections validate at startup, not at first read
 
@@ -131,7 +133,7 @@ safety improvement, and it is the ASP.NET `IOptions<T>` row.
 ### 3.6 `validationSchema` runs first, then sections
 
 - **Decision:** Whole-store `validationSchema` (when supplied) parses first and its output becomes
-  the store; sections then parse their prefix subsets out of that store.
+  the store; sections then read their declared prefix-plus-key entries out of that store.
 - **Why:** The ordering has to be one way or the other and only this one composes: a section reading
   a coerced value requires the whole-store coercion to have already happened. The reverse would make
   a section see raw strings while `get` saw coerced values, which is two answers for one key.
@@ -148,27 +150,27 @@ safety improvement, and it is the ASP.NET `IOptions<T>` row.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                                             | Consumer                                                     | Behavior (per implementation)                                                                                                                                                                               |
-| ------------------------------------------------------------------ | ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ConfigPluginOptions.sections?: readonly ConfigSection<unknown>[]` | `loadConfig` (both paths, §3.4) and `ConfigPlugin.register`. | Each entry is parsed at startup and cached. Absent means no sections, and the plugin behaves byte-identically to today — asserted, not assumed (§6).                                                        |
-| `defineConfigSection({ prefix })`                                  | `loadConfig`'s selection step.                               | Selects the flat keys beginning with `prefix`. A prefix matching nothing yields an empty object, which the schema then accepts or refuses — the schema is the authority on whether the section is optional. |
-| `defineConfigSection({ schema })`                                  | `loadConfig`'s parse step.                                   | A `StructuralSchema<T>`, the same Zod-compatible shape `validationSchema` already takes (§1).                                                                                                               |
+| Option                                                             | Consumer                                                     | Behavior (per implementation)                                                                                                                        |
+| ------------------------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ConfigPluginOptions.sections?: readonly ConfigSection<unknown>[]` | `loadConfig` (both paths, §3.4) and `ConfigPlugin.register`. | Each entry is parsed at startup and cached. Absent means no sections, and the plugin behaves byte-identically to today — asserted, not assumed (§6). |
+| `defineConfigSection({ prefix, keys })`                            | `loadConfig`'s selection step.                               | Reads `prefix + key` for every stripped key. Missing keys are omitted, so the schema remains the authority on whether they are optional.             |
+| `defineConfigSection({ schema })`                                  | `loadConfig`'s parse step.                                   | A `StructuralSchema<T>`, the same Zod-compatible shape `validationSchema` already takes (§1).                                                        |
 
 ## 5. Implementation files
 
-| File                                | Purpose                                                                                             |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `src/index.ts`                      | Barrel: the three symbols in §4.                                                                    |
-| `src/sections/config-section.ts`    | `defineConfigSection`, `ConfigSection<T>`, the prefix selector, and `getConfigSection` (§3.1–§3.2). |
-| `src/sections/validate-sections.ts` | Startup parse + cache + the disclosure-safe throw (§3.3, §3.5).                                     |
-| `src/services/load-config.ts`       | Calls the section validation on both paths (§3.4) and orders it after `validationSchema` (§3.6).    |
-| `src/options.ts`                    | The `sections` option.                                                                              |
+| File                                | Purpose                                                                                                |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/index.ts`                      | Barrel: the three symbols in §4.                                                                       |
+| `src/sections/config-section.ts`    | `defineConfigSection`, `ConfigSection<T>`, declared-key selection, and `getConfigSection` (§3.1–§3.2). |
+| `src/sections/validate-sections.ts` | Startup parse + cache + the disclosure-safe throw (§3.3, §3.5).                                        |
+| `src/services/load-config.ts`       | Calls the section validation on both paths (§3.4) and orders it after `validationSchema` (§3.6).       |
+| `src/options.ts`                    | The `sections` option.                                                                                 |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
 | Test file                                     | src covered                                                | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                          |
 | --------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/unit/config-section.test.ts`            | `sections/config-section.ts`                               | Prefix selection includes only matching keys; `getConfigSection` returns the parsed value typed as the schema's output; a key outside the prefix never reaches the schema. Calls type-check against `StructuralSchema<T>` from §1 — a test passing a bare object literal as a schema is a plan defect.    |
+| `test/unit/config-section.test.ts`            | `sections/config-section.ts`                               | Declared keys are read with the prefix stripped; `getConfigSection` returns the parsed value typed as the schema's output; an undeclared key never reaches the schema. Calls type-check against `StructuralSchema<T>` from §1 — a test passing a bare object literal as a schema is a plan defect.        |
 | `test/unit/config-section-cache.test.ts`      | `sections/config-section.ts`                               | §3.1a: the `WeakMap` is keyed by the `IConfig` instance, so two applications in one process do not share a section value; reading a section for an `IConfig` the plugin never validated throws naming the prefix.                                                                                         |
 | `test/unit/config-section-startup.test.ts`    | `sections/validate-sections.ts`, `services/load-config.ts` | §3.3: `register()` throws for an unparseable section. §3.4: both `loadConfig` paths validate, including `options.instance`. §3.5: the message names the prefix, contains no configuration value, and carries no `cause`. Parsed exactly once across repeated accessor calls.                              |
 | `test/unit/config-section-ordering.test.ts`   | `services/load-config.ts`                                  | §3.6: a section schema expecting a number succeeds over a store whose `validationSchema` coerced it, and the reverse ordering is shown to fail — so the decision is proven rather than asserted.                                                                                                          |

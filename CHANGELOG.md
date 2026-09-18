@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`config-plugin` — typed configuration sections (M97c).**
+  `defineConfigSection({ prefix, keys, schema })` declares related flat keys, and
+  `getConfigSection(config, section)` returns the exact schema output validated and cached at
+  startup. Sections run after whole-snapshot `validationSchema` coercion and are validated for both
+  ordinary loading and an injected `instance`. The explicit prefix-stripped `keys` list keeps
+  `IConfig` unchanged while allowing an arbitrary injected implementation to be validated through
+  its existing named-read contract. A section validation error identifies only its declared prefix;
+  it never carries the schema diagnostic or a configuration value.
+
 - **`decorator-plugin`, `common`, `openapi-plugin` — response shaping for decorated handlers
   (M97b).** `@HttpCode(status)`, `@ResponseHeader(name, value)` (repeatable, distinct names) and
   `@Redirect(url, status?)` let a decorated handler state its success status and its response

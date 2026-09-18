@@ -98,7 +98,7 @@ const READMES: Readonly<Record<string, number>> = {
   // producing false failures of its own; the nine still outstanding are named
   // in the ungated-coverage assertion below so the gap cannot be forgotten.
   'packages/cache-plugin/README.md': 2,
-  'packages/config-plugin/README.md': 4,
+  'packages/config-plugin/README.md': 5,
   'packages/di-plugin/README.md': 2,
   'packages/exceptions/README.md': 2,
   'packages/feature-flags-plugin/README.md': 2,
