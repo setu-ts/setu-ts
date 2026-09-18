@@ -517,6 +517,15 @@ export function nativeFilePath(fileUrl: URL): string {
 const CLI_ENTRY = nativeFilePath(new URL('../packages/cli/src/main.ts', import.meta.url));
 
 /**
+ * How long the registry lookup may take before it counts as unreachable.
+ *
+ * Generous, because the answer decides what the image is built against and a
+ * slow registry is not a wrong one — but finite, because the alternative is
+ * waiting for the CI job's own timeout.
+ */
+const REGISTRY_TIMEOUT_MS = 10_000;
+
+/**
  * The version a generated scaffold can actually resolve from the registry.
  *
  * `setu new` stamps generated projects with the CLI's OWN version, and the
@@ -537,16 +546,26 @@ const CLI_ENTRY = nativeFilePath(new URL('../packages/cli/src/main.ts', import.m
  * in place: failing loudly on an unresolvable specifier is better than silently
  * building something other than what was asked for.
  *
+ * The request is BOUNDED, which a refused connection does not need but a hung
+ * one does: a socket the registry accepts and never answers leaves the fetch
+ * pending, so the `catch` never runs and this gate waits until the CI job's own
+ * timeout kills it. `AbortSignal.timeout` turns that into the same `null` as
+ * every other failure to reach the registry.
+ *
  * @param pinned - The version the scaffold was stamped with
+ * @param fetchImpl - Injected for tests; defaults to the global
  * @returns The version to build against, or `null` when the registry is unreachable
  */
 export async function resolvableScaffoldVersion(
   pinned: string,
-  fetchImpl: (url: string) => Promise<Response> = (url) => fetch(url),
+  fetchImpl: (url: string, init?: RequestInit) => Promise<Response> = (url, init) =>
+    fetch(url, init),
 ): Promise<string | null> {
   let meta: { readonly latest?: string; readonly versions?: Record<string, unknown> };
   try {
-    const response = await fetchImpl('https://jsr.io/@setu-ts/kernel/meta.json');
+    const response = await fetchImpl('https://jsr.io/@setu-ts/kernel/meta.json', {
+      signal: AbortSignal.timeout(REGISTRY_TIMEOUT_MS),
+    });
     if (!response.ok) return null;
     meta = JSON.parse(await response.text()) as typeof meta;
   } catch {
