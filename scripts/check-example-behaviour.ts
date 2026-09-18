@@ -70,11 +70,19 @@ export const UNCHECKED_EXEMPT_MARKERS: readonly string[] = ['UNCHECKED-EXEMPT'];
  * merely MENTIONS it — `// never write UNCHECKED-EXEMPT here` exempted the
  * component it sat above. That direction is the dangerous one, because it
  * SUPPRESSES an unchecked-path finding: the gate then reports a clean render
- * for markup it could not have delivered a payload into. Both collection paths
- * read this one pattern, so they cannot disagree about what an exemption is.
+ * for markup it could not have delivered a payload into.
+ *
+ * Requiring the colon and a reason is NOT enough on its own, which a second
+ * review pass caught: `// Never write UNCHECKED-EXEMPT: without review` carries
+ * both and is still a mention. The marker must therefore open its comment line
+ * — `attachedComment` yields trimmed lines each beginning `//`, `*` or `/*`, so
+ * the anchor is that prefix and nothing between it and the marker. Both
+ * collection paths read this one pattern, so they cannot disagree about what an
+ * exemption is.
  */
 const UNCHECKED_EXEMPT_PATTERN = new RegExp(
-  `(?:${UNCHECKED_EXEMPT_MARKERS.join('|')})\\s*:\\s*\\S`,
+  `^(?://+|/\\*+|\\*+)\\s*(?:${UNCHECKED_EXEMPT_MARKERS.join('|')})\\s*:\\s*\\S`,
+  'm',
 );
 
 /**

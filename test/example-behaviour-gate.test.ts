@@ -558,6 +558,20 @@ describe('run — end to end, through the real renderer', () => {
       `// never write ${UNCHECKED_EXEMPT_MARKERS[0]} here\n${raw}`,
     );
     expect(await run([mention])).toHaveLength(1);
+    // Carrying the colon AND a reason is still a mention, which requiring the
+    // documented form alone does not catch — the marker has to OPEN its comment
+    // line. Caught by a second review pass on the first version of this fix.
+    const withColon = await write(
+      'raw-mention-colon.md',
+      `// Never write ${UNCHECKED_EXEMPT_MARKERS[0]}: without review\n${raw}`,
+    );
+    expect(await run([withColon])).toHaveLength(1);
+    // And a JSDoc line legitimately opens with `*`, so that form must still exempt.
+    const jsdoc = await write(
+      'raw-jsdoc-exempt.md',
+      `/**\n * ${UNCHECKED_EXEMPT_MARKERS[0]}: documents the opt-out itself.\n */\n${raw}`,
+    );
+    expect(await run([jsdoc])).toEqual([]);
     const blank = await write(
       'raw-blank-reason.md',
       `// ${UNCHECKED_EXEMPT_MARKERS[0]}:   \n${raw}`,
