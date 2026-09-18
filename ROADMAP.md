@@ -10781,4 +10781,4 @@ merging beyond what the schema itself expresses.
 | 96        | ✅     | common + logger/telemetry/audit — one redaction seam for every egress path                                             |
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                               |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                   |
-| 97c       | ✅     | config-plugin — typed configuration sections                                                                           |
+| 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                     |

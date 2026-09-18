@@ -1,6 +1,7 @@
 # Milestone 97c — Typed Configuration Sections (`@setu-ts/config-plugin`)
 
-> **Status:** Planning. Branch: `feat/m97c-typed-config-sections`. `main` is protected — all work
+> **Status:** Complete ([PR #330](https://github.com/setu-ts/setu-ts/pull/330)). Archived on
+> completion. Branch: `feat/m97c-typed-config-sections`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
