@@ -31,6 +31,12 @@ All notable changes to this project are documented here. The format follows
   base tag fails closed with the remedy in the message, because a shallow checkout fetches no tags
   and would otherwise compare nothing silently; both workflows now check out full history.
 
+  Two review findings, both the gate's own failure mode pointed at itself: `git ls-files` had its
+  exit status discarded, so a missing binary or a cwd outside the repository returned an empty list
+  that read downstream as "no packages to check" — demonstrated by running it from `/tmp`, where it
+  answered `0 READMEs` and passed. It throws now, and a run that compared NOTHING is reported as a
+  failure rather than a pass, in the shape `script-coverage` already uses for its target set.
+
   Validated against the three releases that actually lost an export, before it was written:
   replaying each reports exactly the symbols their manual checks found, and replaying the current
   tree reports none. What it does not catch is a release-worthy change that adds no export — PR #195

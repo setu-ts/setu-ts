@@ -216,8 +216,15 @@ export async function publishedReadmes(): Promise<readonly string[]> {
   const listed = await new Deno.Command('git', {
     args: ['ls-files', 'packages/*/README.md', 'packages/*/*/README.md'],
     stdout: 'piped',
-    stderr: 'null',
+    stderr: 'piped',
   }).output();
+  // Discarding the status here would turn every git failure — a missing
+  // binary, a checkout that is not a repository, a cwd outside the root —
+  // into an empty list, which reads downstream as "no packages to check" and
+  // passes. That is this gate's own failure mode.
+  if (!listed.success) {
+    throw new Error(`git ls-files failed: ${new TextDecoder().decode(listed.stderr).trim()}`);
+  }
   return new TextDecoder().decode(listed.stdout).split('\n').filter((line) => line !== '').sort();
 }
 
@@ -280,6 +287,17 @@ export async function main(deps: MainDeps): Promise<number> {
           `changelog's Unreleased section — a consumer gets it with no announcement.`,
       );
     }
+    return 1;
+  }
+  // Completeness, in the shape `script-coverage` already uses for its target
+  // set: a run that compared NOTHING has checked nothing, and reporting that
+  // as a pass is exactly what this gate exists to stop. Every README skipped
+  // above is named, so the reason is already on the log.
+  if (result.compared === 0) {
+    deps.error(
+      `changelog coverage FAILED: no package README was compared against ${tag}, so nothing ` +
+        `was checked. A run that compares nothing is not a pass.`,
+    );
     return 1;
   }
   deps.log(

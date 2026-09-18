@@ -228,26 +228,42 @@ describe('main — reporting and exit codes', () => {
     expect(err.join('\n')).toContain('no released version');
   });
 
-  it('reports a skip without failing', async () => {
-    const { deps: d, out } = deps({
+  it('FAILS when every README was skipped, because nothing was compared', async () => {
+    // The gate's own failure mode. An empty `git ls-files`, a checkout with no
+    // packages, or every table missing all reach here, and reporting a pass
+    // for a run that checked nothing is what this gate exists to stop.
+    const { deps: d, out, err } = deps({
       readWorkingTree: () => Promise.resolve('# Pkg\n\nNo table.\n'),
     });
-    expect(await main(d)).toBe(0);
+    expect(await main(d)).toBe(1);
     expect(out.join('\n')).toContain('skipped packages/pkg/README.md');
+    expect(err.join('\n')).toContain('nothing was checked');
+  });
+
+  it('FAILS when the README list itself is empty', async () => {
+    const { deps: d, err } = deps({ listReadmes: () => Promise.resolve([]) });
+    expect(await main(d)).toBe(1);
+    expect(err.join('\n')).toContain('no package README was compared');
   });
 });
 
 describe('the git seams, against this repository', () => {
-  it('resolves a real tag and rejects one that does not exist', async () => {
-    expect(await revisionExists('v0.7.0')).toBe(true);
-    expect(await revisionExists('v99.0.0')).toBe(false);
+  // Deliberately `HEAD` rather than a release tag. A shallow checkout — which
+  // is what `actions/checkout` produces by default, and what a reviewer's
+  // sandbox has — fetches no tags, so a tag-dependent unit test fails for a
+  // reason that has nothing to do with the seam it claims to cover. That a
+  // real tag resolves is proved by the gate's own run under `check:docs`,
+  // where the workflow checks out full history.
+  it('resolves a revision that exists and rejects one that does not', async () => {
+    expect(await revisionExists('HEAD')).toBe(true);
+    expect(await revisionExists('v99.0.0-does-not-exist')).toBe(false);
   });
 
   it('reads a path at a revision, and reports an absent path as null', async () => {
-    const changelog = await readAtRevision('v0.7.0', 'CHANGELOG.md');
+    const changelog = await readAtRevision('HEAD', 'CHANGELOG.md');
     expect(changelog).not.toBeNull();
-    expect(changelog).toContain('## [0.7.0]');
-    expect(await readAtRevision('v0.7.0', 'no/such/file.md')).toBeNull();
+    expect(changelog).toContain('## [Unreleased]');
+    expect(await readAtRevision('HEAD', 'no/such/file.md')).toBeNull();
   });
 
   it('lists every published package README, and only those', async () => {
@@ -270,8 +286,8 @@ describe('productionDeps', () => {
     expect(await deps.readChangelog()).toContain('## [Unreleased]');
     expect(await deps.readWorkingTree('packages/kernel/README.md')).toContain('## Exports');
     expect(await deps.readWorkingTree('no/such/file.md')).toBeNull();
-    expect(await deps.revisionExists('v0.7.0')).toBe(true);
-    expect(await deps.readAtRevision('v0.7.0', 'CHANGELOG.md')).toContain('## [0.7.0]');
+    expect(await deps.revisionExists('HEAD')).toBe(true);
+    expect(await deps.readAtRevision('HEAD', 'CHANGELOG.md')).toContain('## [Unreleased]');
     expect((await deps.listReadmes()).length).toBeGreaterThan(40);
   });
 
