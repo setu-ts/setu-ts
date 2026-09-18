@@ -246,7 +246,7 @@ Setu-TS is pre-1.0, and the version number says exactly what that means:
 | **Minor** — `0.5` → `0.6`    | Breaking changes. Every one is listed in [CHANGELOG.md](CHANGELOG.md) with migration text. |
 | **Patch** — the third number | Fixes and additions only. Safe to take without reading anything.                           |
 
-Under semver a `^0.7.0` range means `>=0.7.0 <0.7.0`, so a caret pin absorbs patches and stops at
+Under semver a `^0.7.0` range means `>=0.7.0 <0.8.0`, so a caret pin absorbs patches and stops at
 the next breaking release. That is the intended way to depend on this project today.
 
 <!-- version:history -->
