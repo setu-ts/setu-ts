@@ -46,7 +46,8 @@ const sectionCache = new WeakMap<
  * Every entry in `keys` is read as `prefix + key`; the schema receives those
  * values under their prefix-stripped names. For example, `prefix:
  * 'DATABASE_'` and `keys: ['URL']` read `DATABASE_URL` and pass `{ URL }` to
- * the schema.
+ * the schema. The returned declaration is an immutable snapshot, so later
+ * mutations to the caller-owned definition cannot change a cached section.
  *
  * @typeParam T - The validated output produced by `schema`
  * @param definition - The flat-key prefix, declared keys, and schema
@@ -62,7 +63,10 @@ const sectionCache = new WeakMap<
  * @since 0.6.0
  */
 export function defineConfigSection<T>(definition: ConfigSection<T>): ConfigSection<T> {
-  return definition;
+  return Object.freeze({
+    ...definition,
+    keys: Object.freeze([...definition.keys]),
+  });
 }
 
 /**

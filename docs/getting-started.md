@@ -160,7 +160,7 @@ app.register(LoggerPlugin());
 ### Config Plugin
 
 ```typescript
-import { ConfigPlugin, defineConfigSection } from '@setu-ts/config-plugin';
+import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
 import { z } from 'npm:zod@^3.24.0';
 
 const database = defineConfigSection({

@@ -43,4 +43,27 @@ describe('typed configuration sections | cache', () => {
       'Configuration section "DATABASE_" was not validated at startup.',
     );
   });
+
+  it('snapshots a definition so caller mutations cannot change its cached section', async () => {
+    const { z } = await import('npm:zod@^3.24.0');
+    const definition = {
+      prefix: 'DATABASE_',
+      keys: ['URL'],
+      schema: z.object({ URL: z.string() }),
+    };
+    const database = defineConfigSection(definition);
+    const config = await loadConfig(
+      createRuntime({ env: { DATABASE_URL: 'postgres://localhost/app' } }),
+      { sections: [database] },
+    );
+
+    definition.prefix = 'OTHER_';
+    definition.keys[0] = 'HOST';
+
+    expect(database.prefix).toBe('DATABASE_');
+    expect(database.keys).toEqual(['URL']);
+    expect(Object.isFrozen(database)).toBe(true);
+    expect(Object.isFrozen(database.keys)).toBe(true);
+    expect(getConfigSection(config, database)).toEqual({ URL: 'postgres://localhost/app' });
+  });
 });
