@@ -34,7 +34,7 @@ import { withHttpStatusHint } from './status-hint.ts';
  *   }
  * }
  * ```
- * @since 0.5.0
+ * @since 0.6.0
  */
 export class UnsupportedFormEncodingError extends Error {
   /** Discriminant for consumers that cannot use `instanceof` across realms. */

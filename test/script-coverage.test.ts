@@ -67,10 +67,13 @@ function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
 }
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly seven canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(7);
+  it('has exactly eight canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(8);
     expect(SCRIPT_TARGETS).toContain('scripts/check-docs.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/check-prose-assertions.ts');
+    // The @since gate (M95d): its registry fetch is the injected I/O seam;
+    // the scanner, resolver and comparison carry the bar.
+    expect(SCRIPT_TARGETS).toContain('scripts/check-since-tags.ts');
     // The executable behaviour gate's pure core — fence selection, definition
     // extraction, probe assembly and the safe/unsafe comparison. Its
     // subprocess runner is the I/O seam.

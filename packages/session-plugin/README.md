@@ -201,6 +201,9 @@ import type { IRequestContext } from '@setu-ts/common';
 import { csrfTokenField } from '@setu-ts/session-plugin';
 import { raw } from '@setu-ts/view-plugin';
 
+// UNCHECKED-EXEMPT: LoginForm takes IRequestContext, so the gate never renders
+// it, and raw() wraps csrfTokenField(ctx) — trusted markup that escapes the
+// configured field name itself.
 const LoginForm = (ctx: IRequestContext) =>
   html`
     <form method="post">${raw(csrfTokenField(ctx))}<button>Sign in</button></form>

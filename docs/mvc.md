@@ -285,12 +285,45 @@ const Safe = (props: { readonly name: string }) => html`<p>Hello, ${props.name}<
 Write views with JSX or the `html` tag. Reach for a plain string only when the value is already
 escaped by the engine that produced it.
 
+### Escaping protects HTML structure, not URL schemes
+
+The one class escaping does not cover is the one that carries none of the characters the escape pass
+rewrites. A `javascript:` URL needs neither `<` nor `&` nor a quote, so it survives both arms — and
+the browser executes it when the link is clicked:
+
+```typescript
+// The stored value, attacker-controlled — a note's user-editable link field:
+const link = 'javascript:alert(1)';
+
+// Rendered the documented way, in either arm — <a href={link}>open</a> — the
+// attribute carries the scheme verbatim, because there is nothing to escape:
+//
+//   <a href="javascript:alert(1)">open</a>    clicking the link executes it.
+```
+
+Escaping neutralises `<script>alert(1)</script>` in the same position because that payload is made
+OF metacharacters; the scheme payload is not. The remedy therefore lives in the application, not the
+view: **validate the scheme of a user-supplied URL before it reaches the view** — an allowlist as
+small as `http:` and `https:` where the value enters the application — and treat every rendered URL
+attribute (`href`, `src`, `action`) as untrusted until then.
+
+This is a difference BETWEEN rendering runtimes, not a property of JSX. React's server renderer
+rewrites the same attribute to
+`href="javascript:throw new Error('React has blocked a javascript: URL as a security precaution.')"`
+— it neutralises the value; hono's runtime, which both arms here render through, passes it through.
+A reader arriving with a correct-for-React mental model is wrong here, and nothing in this framework
+will correct it for them.
+
 **This is checked, not just asserted.** `deno task check:docs` runs
 [`scripts/check-example-behaviour.ts`](../scripts/check-example-behaviour.ts), which renders every
 component this repository documents — including the two above — through the framework's own renderer
-with `<script>alert(1)</script>` as its input, and fails when the payload comes back unescaped. A
-component a comment labels `UNSAFE` or `DO NOT USE` is checked in the other direction, so the
-warning above fails the gate if it ever stops being true.
+twice: once with `<script>alert(1)</script>` substituted into its props, which escaping must
+neutralise, and once with `javascript:alert(1)`, which must not survive into a rendered `href`,
+`src` or `action`. A component whose own source routes a value through `raw()` — or spreads
+`{...props}` into an element — is reported `unchecked` and fails the gate unless its own comment
+carries an `UNCHECKED-EXEMPT` label naming the reason: the gate does not claim a pass for markup it
+could not have delivered a payload into. A component a comment labels `UNSAFE` or `DO NOT USE` is
+checked in the other direction, so the warning above fails the gate if it ever stops being true.
 
 ### An inline `<script>` must use `raw()`
 
@@ -306,6 +339,8 @@ import { raw } from '@setu-ts/view-plugin';
 const CLIENT = `const es = new EventSource('/events');
 es.onmessage = (e) => { if (e.data < '9') console.log(e.data); };`;
 
+// UNCHECKED-EXEMPT: raw() wraps the module-level CLIENT constant, not a prop —
+// nothing user-controlled reaches raw(), so the probe's stub hides nothing.
 export const Page = () =>
   html`
     <div id="log"></div>
@@ -315,6 +350,73 @@ export const Page = () =>
 
 The JSX arm has the identical trap in its own spelling — `<script>{CLIENT}</script>` escapes the
 same way and needs the same `raw(CLIENT)`.
+
+Take the CSP this section implies deliberately, and separately from the URL hazard above. An inline
+`<script>` needs `script-src 'unsafe-inline'` — and `'unsafe-inline'` is exactly the CSP that does
+NOT block a `javascript:` URL. An application that followed both pieces of advice casually would
+hold the door open for the one payload a CSP with `'unsafe-inline'` cannot stop. Prefer an external
+script (or a nonce- or hash-based `script-src`) when the client script can move, and keep
+`script-src 'self'` — no `'unsafe-inline'` — as the defence in depth: it blocks a `javascript:`
+navigation even when a value slips past validation.
+
+## Error pages
+
+`respond` covers what `errorHandler` catches; every responder terminal is outside it. That is the
+whole rule, and `@setu-ts/exceptions`' own contract pins it — what the rule leaves uncovered in a
+browser-facing application is the part worth spelling out. A mistyped URL (`404`), a logged-out user
+(`401`), an authorization service that is not configured (`501`), a stale form (`403`) and a
+throttled client (`429`) are all emitted by responder terminals, so each answers with the JSON of
+whatever formatter `errorHandler` was configured with — Problem Details under `format: 'rfc9457'`,
+as below, and the `{ error, detail }` default otherwise — no matter what `respond` renders for the
+errors your own handlers throw.
+
+The worked example — the page IS the error report, and the callback owns its status:
+
+```tsx
+import { errorHandler, statusTitle } from '@setu-ts/exceptions';
+import type { HandlerResult, IRequestContext } from '@setu-ts/common';
+import { renderView } from '@setu-ts/view-plugin';
+
+interface ErrorPageProps {
+  readonly status: number;
+  readonly title: string;
+}
+
+const ErrorPage = (props: ErrorPageProps) => (
+  <main>
+    <h1>{props.status}</h1>
+    <p>{props.title}</p>
+  </main>
+);
+
+function wantsHtml(ctx: IRequestContext): boolean {
+  // Deliberately simple — the point here is that the callback owns the status,
+  // not content negotiation. This does NOT honour `q` values, so a client
+  // sending `text/html;q=0` (a refusal) still gets HTML; parse the media
+  // ranges if your callers send them.
+  return (ctx.request.headers.get('accept') ?? '').includes('text/html');
+}
+
+app.middleware.add(
+  errorHandler({
+    format: 'rfc9457',
+    async respond(error, ctx): Promise<HandlerResult | undefined> {
+      if (!wantsHtml(ctx)) return undefined; // API clients keep Problem Details
+      // The callback owns the result's status, and renderView takes none —
+      // without this line every branded error answers 200.
+      ctx.response.status(error.statusCode);
+      return await renderView(ctx, ErrorPage, {
+        status: error.statusCode,
+        title: statusTitle(error.statusCode),
+      });
+    },
+  }),
+  { priority: 0, name: 'error-handler' },
+);
+```
+
+The hook's full contract — masking, logging, and the `undefined` fallback — is documented in
+[`@setu-ts/exceptions`](../packages/exceptions/README.md).
 
 ## Health
 

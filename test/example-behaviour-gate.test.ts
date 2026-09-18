@@ -14,8 +14,11 @@ import { expect } from '@std/expect';
 
 import {
   attachedComment,
+  type BlindSpot,
+  blindSpotFindings,
   buildProbe,
   collectComponents,
+  collectUnrenderedBlindSpots,
   compare,
   type DocComponent,
   extractDefinition,
@@ -26,6 +29,8 @@ import {
   scanDocuments,
   skipComment,
   topLevelConsts,
+  UNCHECKED_EXEMPT_MARKERS,
+  URL_PAYLOAD,
 } from '../scripts/check-example-behaviour.ts';
 
 const JSX =
@@ -231,6 +236,8 @@ describe('buildProbe', () => {
     source: `const A = ${PLAIN};`,
     expectUnsafe: false,
     usesRaw: false,
+    spreads: false,
+    exempt: false,
     dependencies: [],
     ...over,
   });
@@ -249,6 +256,15 @@ describe('buildProbe', () => {
 
   it('carries the hostile payload', () => {
     expect(buildProbe([component()])).toContain(JSON.stringify(HOSTILE));
+  });
+
+  it('carries the URL payload and renders every component twice', () => {
+    const probe = buildProbe([component()]);
+    expect(probe).toContain(JSON.stringify(URL_PAYLOAD));
+    // Both payloads go into EVERY prop; the verdict is decided on the output.
+    expect(probe).toContain('renderComponent(A as never, props)');
+    expect(probe).toContain('renderComponent(A as never, urlProps)');
+    expect(probe).toContain('scheme: URL_SCHEME.test(outUrl)');
   });
 });
 
@@ -271,19 +287,22 @@ describe('parseProbe', () => {
     expect(parseProbe('{"index":0,"ok":"yes","escaped":true}', 1)).toBeNull();
     expect(parseProbe('{"index":0,"ok":true,"escaped":"no"}', 1)).toBeNull();
     expect(parseProbe('{"index":0,"ok":false,"error":7}', 1)).toBeNull();
+    // The URL verdict is part of the record: an `ok` line without it is a
+    // component the URL payload never reached, which must fail the batch.
+    expect(parseProbe('{"index":0,"ok":true,"escaped":true}', 1)).toBeNull();
   });
 
   it('refuses results that arrive out of order or duplicated', () => {
-    const a = '{"index":0,"ok":true,"escaped":true}';
-    const b = '{"index":1,"ok":true,"escaped":true}';
+    const a = '{"index":0,"ok":true,"escaped":true,"scheme":false}';
+    const b = '{"index":1,"ok":true,"escaped":true,"scheme":false}';
     expect(parseProbe(`${b}\n${a}`, 2)).toBeNull();
     expect(parseProbe(`${a}\n${a}`, 2)).toBeNull();
     expect(parseProbe(`${a}\n${b}`, 2)).toHaveLength(2);
   });
 
   it('accepts a complete batch', () => {
-    expect(parseProbe('{"index":0,"ok":true,"escaped":true}', 1))
-      .toEqual([{ index: 0, ok: true, escaped: true }]);
+    expect(parseProbe('{"index":0,"ok":true,"escaped":true,"scheme":false}', 1))
+      .toEqual([{ index: 0, ok: true, escaped: true, scheme: false }]);
   });
 
   it('treats empty output as a batch of none', () => {
@@ -300,28 +319,41 @@ describe('compare', () => {
     source: 'const A = …;',
     expectUnsafe: false,
     usesRaw: false,
+    spreads: false,
+    exempt: false,
     dependencies: [],
   };
 
   it('passes a safe component', () => {
-    expect(compare([base], [{ index: 0, ok: true, escaped: true }])).toEqual([]);
+    expect(compare([base], [{ index: 0, ok: true, escaped: true, scheme: false }])).toEqual([]);
   });
 
   it('fails an unlabelled component that does not escape', () => {
-    const [finding] = compare([base], [{ index: 0, ok: true, escaped: false }]);
+    const [finding] = compare([base], [{
+      index: 0,
+      ok: true,
+      escaped: false,
+      scheme: false,
+    }]);
     expect(finding?.message).toContain('UNESCAPED');
     expect(finding?.line).toBe(7);
   });
 
   it('fails a labelled counter-example that HAS started escaping', () => {
     const labelled = { ...base, expectUnsafe: true };
-    const [finding] = compare([labelled], [{ index: 0, ok: true, escaped: true }]);
+    const [finding] = compare([labelled], [{
+      index: 0,
+      ok: true,
+      escaped: true,
+      scheme: false,
+    }]);
     expect(finding?.message).toContain('no longer unsafe');
   });
 
   it('passes a labelled counter-example that is still unsafe', () => {
     const labelled = { ...base, expectUnsafe: true };
-    expect(compare([labelled], [{ index: 0, ok: true, escaped: false }])).toEqual([]);
+    expect(compare([labelled], [{ index: 0, ok: true, escaped: false, scheme: false }]))
+      .toEqual([]);
   });
 
   it('reports a render failure rather than reading it as a pass', () => {
@@ -331,6 +363,74 @@ describe('compare', () => {
 
   it('reports a missing result rather than reading it as a pass', () => {
     expect(compare([base], [])[0]?.message).toContain('no result');
+  });
+
+  it('fails a component that carries the scheme into a URL attribute', () => {
+    const [finding] = compare([base], [{
+      index: 0,
+      ok: true,
+      escaped: true,
+      scheme: true,
+    }]);
+    expect(finding?.message).toContain(JSON.stringify(URL_PAYLOAD));
+    expect(finding?.message).toContain('href, src or action');
+  });
+
+  it('does not ask a labelled counter-example to demonstrate the URL hazard', () => {
+    // The label owns the ESCAPE direction; the URL verdict is not reversed
+    // for it, so a warning about template literals is not failed for
+    // lacking a javascript: link.
+    const labelled = { ...base, expectUnsafe: true };
+    expect(compare([labelled], [{ index: 0, ok: true, escaped: false, scheme: true }]))
+      .toEqual([]);
+  });
+
+  it('reports UNCHECKED for a component whose source routes through raw()', () => {
+    const rawUser = { ...base, usesRaw: true };
+    const findings = compare([rawUser], [{
+      index: 0,
+      ok: true,
+      escaped: true,
+      scheme: false,
+    }]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain('UNCHECKED');
+    expect(findings[0]?.message).toContain('`raw()`');
+    expect(findings[0]?.message).toContain(UNCHECKED_EXEMPT_MARKERS[0]);
+  });
+
+  it('reports UNCHECKED for an element spread', () => {
+    const spreader = { ...base, spreads: true };
+    const [finding] = compare([spreader], [{
+      index: 0,
+      ok: true,
+      escaped: true,
+      scheme: false,
+    }]);
+    expect(finding?.message).toContain('element spread');
+  });
+
+  it('passes an exempted raw() component, which is the only way past UNCHECKED', () => {
+    const exempted = { ...base, usesRaw: true, exempt: true };
+    expect(compare([exempted], [{
+      index: 0,
+      ok: true,
+      escaped: true,
+      scheme: false,
+    }])).toEqual([]);
+  });
+
+  it('can emit the UNCHECKED and UNESCAPED verdicts together', () => {
+    const rawAndUnsafe = { ...base, usesRaw: true };
+    const findings = compare([rawAndUnsafe], [{
+      index: 0,
+      ok: true,
+      escaped: false,
+      scheme: false,
+    }]);
+    expect(findings).toHaveLength(2);
+    expect(findings[0]?.message).toContain('UNCHECKED');
+    expect(findings[1]?.message).toContain('UNESCAPED');
   });
 });
 
@@ -359,6 +459,33 @@ describe('the gate covers the repository it is meant to cover', () => {
     // one the original defect lived in.
     expect(collected.filter((c) => c.file === 'packages/view-plugin/README.md').length)
       .toBeGreaterThan(1);
+  });
+
+  it('leaves no component in the corpus unchecked', async () => {
+    // The probe stubs raw() and cannot deliver a payload through an element
+    // spread, so a component using either is UNCHECKED — failing the gate
+    // unless its own comment carries the exemption. Every such component in
+    // the corpus must be exempt, and the three known sites are pinned by
+    // name, so dropping a label is a failing test rather than a silent gap.
+    const documents = await scanDocuments(['docs', 'packages', '.']);
+    const collected: DocComponent[] = [];
+    const spots: BlindSpot[] = [];
+    for (const file of documents) {
+      const markdown = await Deno.readTextFile(file);
+      collected.push(...collectComponents(file, markdown));
+      spots.push(...collectUnrenderedBlindSpots(file, markdown));
+    }
+    const rawComponents = collected
+      .filter((c) => c.usesRaw || c.spreads)
+      .map((c) => `${c.file} ${c.name}${c.exempt ? '' : ' UNEXEMPTED'}`)
+      .sort();
+    expect(rawComponents).toEqual([
+      'docs/mvc.md Page',
+      'packages/view-plugin/README.md Snippet',
+    ]);
+    expect(spots.map((s) => `${s.file} ${s.name}${s.exempt ? '' : ' UNEXEMPTED'}`))
+      .toEqual(['packages/session-plugin/README.md LoginForm']);
+    expect(blindSpotFindings(spots)).toEqual([]);
   });
 });
 
@@ -394,12 +521,103 @@ describe('run — end to end, through the real renderer', () => {
     expect(await run([path])).toEqual([]);
   });
 
-  it('skips a component that opts out through raw()', async () => {
+  it('FAILS an unlabelled raw() component as UNCHECKED, and passes it labelled', async () => {
+    // The old behaviour — a silent pass — is the defect finding 9 describes:
+    // the raw() stub hides the prop's data path, so a clean render means
+    // nothing. The blind spot must be loud, and the exemption label the only
+    // way past it.
+    const raw =
+      'const Snippet = (p: { m: string }) => html`<div>${raw(p.m)}</div>`;\n@Render(Snippet)';
+    const failing = await write('raw-unlabelled.md', raw);
+    const findings = await run([failing]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain('UNCHECKED');
+    expect(findings[0]?.message).toContain(UNCHECKED_EXEMPT_MARKERS[0]);
+    const exemptPath = await write(
+      'raw-labelled.md',
+      `// ${UNCHECKED_EXEMPT_MARKERS[0]}: documents the opt-out itself.\n${raw}`,
+    );
+    expect(await run([exemptPath])).toEqual([]);
+  });
+
+  it('refuses a bare marker and an incidental mention as exemptions', async () => {
+    // The exemption is the ONLY way past an unchecked verdict, so what counts
+    // as one is a security decision. `includes(marker)` accepted the marker
+    // with no reason, and accepted prose that merely names it — a comment
+    // reading "never write UNCHECKED-EXEMPT here" exempted the component below
+    // it. That suppresses the finding, which is the dangerous direction.
+    const raw =
+      'const Snippet = (p: { m: string }) => html`<div>${raw(p.m)}</div>`;\n@Render(Snippet)';
+    const bare = await write(
+      'raw-bare-marker.md',
+      `// ${UNCHECKED_EXEMPT_MARKERS[0]}\n${raw}`,
+    );
+    expect(await run([bare])).toHaveLength(1);
+    const mention = await write(
+      'raw-mention.md',
+      `// never write ${UNCHECKED_EXEMPT_MARKERS[0]} here\n${raw}`,
+    );
+    expect(await run([mention])).toHaveLength(1);
+    // Carrying the colon AND a reason is still a mention, which requiring the
+    // documented form alone does not catch — the marker has to OPEN its comment
+    // line. Caught by a second review pass on the first version of this fix.
+    const withColon = await write(
+      'raw-mention-colon.md',
+      `// Never write ${UNCHECKED_EXEMPT_MARKERS[0]}: without review\n${raw}`,
+    );
+    expect(await run([withColon])).toHaveLength(1);
+    // And a JSDoc line legitimately opens with `*`, so that form must still exempt.
+    const jsdoc = await write(
+      'raw-jsdoc-exempt.md',
+      `/**\n * ${UNCHECKED_EXEMPT_MARKERS[0]}: documents the opt-out itself.\n */\n${raw}`,
+    );
+    expect(await run([jsdoc])).toEqual([]);
+    const blank = await write(
+      'raw-blank-reason.md',
+      `// ${UNCHECKED_EXEMPT_MARKERS[0]}:   \n${raw}`,
+    );
+    expect(await run([blank])).toHaveLength(1);
+  });
+
+  it('FAILS a component that renders a prop into href', async () => {
+    // The X46-1 shape, through the real renderer: escaping cannot stop a
+    // metacharacter-free scheme, so the rendered href keeps it verbatim.
     const path = await write(
-      'raw.md',
-      'const Snippet = (p: { m: string }) => html`<div>${raw(p.m)}</div>`;\n@Render(Snippet)',
+      'href.md',
+      'const Link = (p: { url: string }) => <a href={p.url}>open</a>;\n@Render(Link)',
+    );
+    const findings = await run([path]);
+    // The HOSTILE verdict fires too — hono's JSX leaves `<` unescaped in
+    // attribute position — so the scheme verdict is asserted by name rather
+    // than by count.
+    const scheme = findings.find((f) => f.message.includes('href, src or action'));
+    expect(scheme?.message).toContain(JSON.stringify(URL_PAYLOAD));
+    expect(scheme?.file).toBe(path);
+  });
+
+  it('passes the URL payload landing in a text child', async () => {
+    // A scheme outside a URL attribute is inert in a browser — the verdict
+    // is decided on the output's ATTRIBUTE positions, not on substring luck.
+    const path = await write(
+      'text-child.md',
+      'const Text = (p: { url: string }) => <p>{p.url}</p>;\n@Render(Text)',
     );
     expect(await run([path])).toEqual([]);
+  });
+
+  it('reports a ctx-taking helper that routes a value through raw()', async () => {
+    // Such a helper is never rendered by the probe — exclusion by signature
+    // is right for rendering and wrong for coverage — so the blind-spot
+    // sweep reports it instead of letting it pass unseen.
+    const path = await write(
+      'helper.md',
+      `const Widget = (p: { x: string }) => <p>{p.x}</p>;\nrenderView(ctx, Widget, {});\n` +
+        'const Helper = (ctx: IRequestContext) => html`<div>${raw(ctx.token)}</div>`;',
+    );
+    const findings = await run([path]);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain('Helper');
+    expect(findings[0]?.message).toContain('UNCHECKED');
   });
 
   it('propagates an I/O failure rather than omitting a directory', async () => {

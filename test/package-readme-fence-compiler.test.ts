@@ -100,7 +100,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/cache-plugin/README.md': 2,
   'packages/config-plugin/README.md': 5,
   'packages/di-plugin/README.md': 2,
-  'packages/exceptions/README.md': 2,
+  'packages/exceptions/README.md': 3,
   'packages/feature-flags-plugin/README.md': 2,
   'packages/health-plugin/README.md': 2,
   'packages/http-security-plugin/README.md': 2,

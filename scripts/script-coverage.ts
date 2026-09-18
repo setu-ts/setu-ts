@@ -67,6 +67,12 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // decidable core. Its failure mode is a SILENT PASS, so the bar matters more
   // here than the line count suggests.
   'scripts/version-sweep.ts',
+  // The @since gate (M95d): every tag versus the version that shipped the
+  // symbol, fetched from the registry at symbol level. Its registry fetch is
+  // the injected I/O seam (`fetchImpl` / `listSourceFiles` / `readFile`); the
+  // tag scanner, symbol resolver and comparison carry the bar. Its failure
+  // mode is also a SILENT PASS — a wrong tag ships on the public docs page.
+  'scripts/check-since-tags.ts',
 ];
 
 interface FileCoverage {

@@ -124,16 +124,22 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // M92: the new guide is born gated — five fences, all TypeScript, all
     // compiling (two as fragments through the committed `app` prelude).
     // +3 for the Forms section (the urlencoded read, the redirect-or-re-render
-    // decorated handler) and the `raw()` script opt-out. Every fence here is
-    // written to disk as `.ts`, so a JSX fence would be a parse error — the
-    // escaping example uses the `html` tag and states the JSX spelling in prose.
+    // decorated handler) and the `raw()` script opt-out. A `tsx`-fenced example
+    // is written to disk as `.tsx` by `fenceExtension`, so JSX compiles here;
+    // the escaping example still uses the `html` tag and states the JSX
+    // spelling in prose, which is a choice about that example rather than a
+    // limit of the harness.
     // +1 in review: the Escaping section gained a fence contrasting an UNSAFE
     // plain template literal with the `html` tag, because two reviewers
     // independently found that a plain `(props) => string` component escapes
     // nothing while the guide claimed escaping was on by default.
-    total: 9,
-    ts: 9,
-    compile: 9,
+    // +2 in M95d: the Escaping subsection's URL-scheme demonstration (stored
+    // value as a comment, so the behaviour gate is not fed a live hostile
+    // component) and the Error pages worked example, which compiles as a
+    // fragment through the committed `app` prelude.
+    total: 11,
+    ts: 11,
+    compile: 11,
     external: 0,
     pseudocode: 0,
     skipped: 0,
@@ -179,9 +185,11 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // 270 since M97b: docs/decorators.md's Response Shaping section (+1,
   // compiling). M97c updates an existing migration fence rather than adding
   // one, so counts remain unchanged.
-  total: 270,
-  ts: 224,
-  compile: 191,
+  // 272 in M95d: docs/mvc.md's URL-scheme demonstration and its Error pages
+  // worked example (+2, both compiling).
+  total: 272,
+  ts: 226,
+  compile: 193,
   external: 33,
   pseudocode: 0,
   skipped: 46,
