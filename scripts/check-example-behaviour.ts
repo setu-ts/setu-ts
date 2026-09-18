@@ -37,14 +37,103 @@ export const HOSTILE = '<script>alert(1)</script>';
 export const URL_PAYLOAD = 'javascript:alert(1)';
 
 /**
- * The output-side assertion for {@linkcode URL_PAYLOAD}. The payload goes into
- * EVERY prop — the gate cannot know which one a component routes into a URL —
- * so the defect is decided on the OUTPUT: the scheme is a finding only when
- * the rendered markup carries it in a URL attribute. In a text child, or in a
- * non-navigational attribute (`value`, `title`), a scheme is inert in a
- * browser and is not a finding. `xlink:href` matches on the suffix.
+ * The URL-valued attributes a `javascript:` scheme is a finding in. `xlink:href`
+ * is covered because the scan matches an attribute name by suffix.
  */
-export const URL_SCHEME_PATTERN = /(?:href|src|action)\s*=\s*(["']?)\s*javascript:/i;
+export const URL_ATTRIBUTES: readonly string[] = ['href', 'src', 'action'];
+
+/**
+ * The prop depths the probe delivers a REAL STRING at.
+ *
+ * A primitive has no properties, so one render cannot serve both
+ * `props.name` and `props.note.link`. Each depth puts the string one level
+ * further down and the sweep takes the union, which is what lets the escape
+ * verdict be judged on the value type production actually renders.
+ */
+export const DELIVERY_DEPTHS: readonly number[] = [1, 2, 3];
+
+/** The escaped form of a payload, for deciding whether it was delivered. */
+export function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Whether a rendered document carries a `javascript:` scheme in a URL-valued
+ * ATTRIBUTE, as opposed to anywhere in its text.
+ *
+ * The first version of this ran one regex over the whole render, so body text
+ * reading `href=javascript:alert(1)` matched although no attribute existed —
+ * a false positive on a document that is merely DESCRIBING the hazard, which
+ * `docs/mvc.md` does. The scan therefore walks tag regions first and inspects
+ * only what is inside one.
+ *
+ * Input is hono's own output rather than arbitrary HTML, so a scanner is
+ * sufficient and a parser would be a dependency this gate does not want.
+ *
+ * @param html - The rendered output
+ * @returns True when a URL attribute's VALUE opens with the scheme
+ */
+export function hasSchemeInUrlAttribute(html: string): boolean {
+  const attribute = new RegExp(
+    `(?:^|[\\s/])[\\w:-]*(?:${URL_ATTRIBUTES.join('|')})\\s*=\\s*` +
+      `(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    'gi',
+  );
+  for (const region of tagRegions(html)) {
+    attribute.lastIndex = 0;
+    for (const match of region.matchAll(attribute)) {
+      const value = match[1] ?? match[2] ?? match[3] ?? '';
+      if (/^\s*javascript:/i.test(decodeEntities(value))) return true;
+    }
+  }
+  return false;
+}
+
+/** Decodes the few entities hono emits, so an escaped scheme is still read. */
+function decodeEntities(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+/**
+ * The text inside each `<tag …>` opening, quote-aware so a `>` inside an
+ * attribute value does not end the region early.
+ *
+ * @param html - The rendered output
+ * @returns One slice per tag opening
+ */
+function* tagRegions(html: string): Generator<string> {
+  for (let i = 0; i < html.length; i++) {
+    if (html[i] !== '<') continue;
+    const next = html[i + 1] ?? '';
+    if (!/[a-zA-Z]/.test(next)) continue;
+    let quote = '';
+    let j = i + 1;
+    for (; j < html.length; j++) {
+      const ch = html[j]!;
+      if (quote !== '') {
+        if (ch === quote) quote = '';
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      if (ch === '>') break;
+    }
+    yield html.slice(i + 1, j);
+    i = j;
+  }
+}
 
 /**
  * The comment label exempting a component from probe coverage.
@@ -523,13 +612,34 @@ export function buildProbe(components: readonly DocComponent[]): string {
 ${c.dependencies.join('\n')}
 ${c.source}
 try {
-  const out = await renderComponent(${c.name} as never, props);
-  const outUrl = await renderComponent(${c.name} as never, urlProps);
+  const seen = { raw: false, delivered: false, scheme: false, rendered: false };
+  for (const deliver of DELIVERIES) {
+    let out;
+    try {
+      out = await renderComponent(${c.name} as never, deliver(HOSTILE));
+    } catch { continue; }
+    seen.rendered = true;
+    if (out.includes(HOSTILE)) seen.raw = true;
+    if (out.includes(HOSTILE) || out.includes(ESCAPED_HOSTILE)) seen.delivered = true;
+    try {
+      const outUrl = await renderComponent(${c.name} as never, deliver(URL_PAYLOAD));
+      if (schemeInUrlAttribute(outUrl)) seen.scheme = true;
+    } catch { /* this shape does not fit; another mode covers it */ }
+  }
+  if (!seen.rendered) throw new Error('no delivery mode rendered this component');
+  // Reach probe only: the unbounded proxy answers a read at ANY depth, so it
+  // says whether the component touches its props at all. Its output is NOT
+  // judged for escaping — hono escapes a value only when it is a real string,
+  // so a proxy in an attribute renders unescaped and would report every safe
+  // attribute component UNESCAPED.
+  const reach = await renderComponent(${c.name} as never, props);
   console.log(JSON.stringify({
     index: ${index},
     ok: true,
-    escaped: !out.includes(HOSTILE),
-    scheme: URL_SCHEME.test(outUrl),
+    escaped: !seen.raw,
+    scheme: seen.scheme,
+    delivered: seen.delivered,
+    reached: reach.includes(HOSTILE) || reach.includes(ESCAPED_HOSTILE),
   }));
 } catch (error) {
   console.log(JSON.stringify({ index: ${index}, ok: false, error: String(error) }));
@@ -539,37 +649,77 @@ try {
 
   return `/** @jsxImportSource @hono/hono/jsx */
 import { renderComponent } from '../../packages/view-plugin/src/render/normalize.ts';
+// The scanner is imported, never copied: one implementation decides what counts
+// as a URL attribute, so the probe and the gate's own tests cannot disagree.
+// The gate script guards its entry point with import.meta.main, so importing
+// it here runs no gate.
+import { hasSchemeInUrlAttribute as schemeInUrlAttribute } from '../../scripts/check-example-behaviour.ts';
 import { html } from '@hono/hono/html';
 
 const HOSTILE = ${JSON.stringify(HOSTILE)};
+const ESCAPED_HOSTILE = ${JSON.stringify(escapeHtml(HOSTILE))};
 const URL_PAYLOAD = ${JSON.stringify(URL_PAYLOAD)};
-const URL_SCHEME = /(?:href|src|action)\\s*=\\s*(["']?)\\s*javascript:/i;
+const DEPTHS = ${JSON.stringify(DELIVERY_DEPTHS)};
 
-// A sentinel that answers EVERY read with itself, so a nested access reaches
-// the payload as readily as a direct one. The first cut returned a plain
-// [HOSTILE] array, which made \`props.values.title\` resolve to \`undefined\` —
-// and \`docs/mvc.md\`'s TaskForm, a plain template literal interpolating
-// SUBMITTED FORM DATA, scored as escaped.
+// Payload delivery in several MODES, because no single one is faithful for
+// every shape. hono escapes an attribute value only when it is
+// typeof === 'string', so a Proxy in that position renders UNESCAPED and a
+// SAFE component is reported as a defect — delivering a primitive is the only
+// way to judge escaping the way production does. But a primitive has no
+// .map and no properties, so one mode cannot also serve props.users.map(...)
+// or props.note.link. The modes are swept and their verdicts unioned.
 //
-// Array-backed so \`props.users.map(fn)\` still works, and it stringifies to the
-// payload so a direct interpolation carries it. It is never nullish, so
-// \`props.errors.title ?? ''\` does not fall through to the empty string.
-const makeProps = (payload: string): never => {
-  const props: never = new Proxy([payload], {
-    get(target, key) {
-      if (key === Symbol.toPrimitive) return () => payload;
-      if (key === 'toString' || key === 'valueOf') return () => payload;
-      if (key in target) {
-        const value = Reflect.get(target, key) as unknown;
-        return typeof value === 'function' ? value.bind(target) : value;
-      }
-      return props;
+// A mode that THROWS is not a failure: it means that shape does not fit this
+// component, and another mode covers it. Only a component that throws in
+// EVERY mode is a render error.
+// A non-leaf level stringifies to a SENTINEL, never to the payload. That is
+// what makes the sweep sound: if a component reads at a depth this mode does
+// not put a string at, the sentinel reaches the output instead of the payload,
+// so the mode simply contributes nothing rather than reporting a safe
+// component UNESCAPED because an OBJECT went into the attribute.
+const SENTINEL = '__setu_probe_nonleaf__';
+
+const leafString = (payload) =>
+  new Proxy({}, {
+    get(_t, key) {
+      if (key === Symbol.toPrimitive) return () => SENTINEL;
+      if (key === 'toString' || key === 'valueOf') return () => SENTINEL;
+      return payload;
     },
-  }) as never;
-  return props;
+  });
+
+const nested = (payload, depth) => {
+  if (depth <= 0) return payload;
+  return new Proxy({}, {
+    get(_t, key) {
+      if (key === Symbol.toPrimitive) return () => SENTINEL;
+      if (key === 'toString' || key === 'valueOf') return () => SENTINEL;
+      return nested(payload, depth - 1);
+    },
+  });
 };
-const props = makeProps(HOSTILE);
-const urlProps = makeProps(URL_PAYLOAD);
+
+const arrayOfStrings = (payload) => {
+  const node = new Proxy([payload], {
+    get(t, key) {
+      if (key === Symbol.toPrimitive) return () => SENTINEL;
+      if (key === 'toString' || key === 'valueOf') return () => SENTINEL;
+      if (key in t) {
+        const value = Reflect.get(t, key);
+        return typeof value === 'function' ? value.bind(t) : value;
+      }
+      return node;
+    },
+  });
+  return node;
+};
+
+const DELIVERIES = [leafString, (p) => nested(p, 2), (p) => nested(p, 3), arrayOfStrings];
+
+// The unbounded proxy is the REACH probe only — it answers a read at any depth,
+// so it says whether the component touches its props at all. Its output is
+// never judged for escaping, for the reason given above.
+const props = arrayOfStrings(HOSTILE);
 
 // \`raw()\` is the documented opt-out, so its argument must NOT carry the
 // payload — otherwise the opt-out reports itself as a defect. Stubbed to a
@@ -590,6 +740,10 @@ export type ProbeResult =
     readonly ok: true;
     readonly escaped: boolean;
     readonly scheme: boolean;
+    /** A payload reached the output under at least one string-delivery mode. */
+    readonly delivered: boolean;
+    /** The unbounded reach proxy got a payload into the output. */
+    readonly reached: boolean;
   }
   | { readonly index: number; readonly ok: false; readonly error: string };
 
@@ -629,11 +783,15 @@ export function parseProbe(stdout: string, expected: number): readonly ProbeResu
     if (record['ok'] === true) {
       if (typeof record['escaped'] !== 'boolean') return null;
       if (typeof record['scheme'] !== 'boolean') return null;
+      if (typeof record['delivered'] !== 'boolean') return null;
+      if (typeof record['reached'] !== 'boolean') return null;
       results.push({
         index: position,
         ok: true,
         escaped: record['escaped'],
         scheme: record['scheme'],
+        delivered: record['delivered'],
+        reached: record['reached'],
       });
       continue;
     }
@@ -681,6 +839,14 @@ export function compare(
     const unchecked: string[] = [];
     if (component.usesRaw) unchecked.push('`raw()`');
     if (component.spreads) unchecked.push('an element spread (`{...`)');
+    // The delivery modes put a real STRING at a bounded set of prop shapes.
+    // A component that reads past all of them would have every payload resolve
+    // to `undefined`, render nothing, and score as ESCAPED — a false pass. The
+    // unbounded reach proxy answers a read at any depth, so the two disagreeing
+    // is exactly that case, and it is reported rather than passed.
+    if (!result.delivered && result.reached) {
+      unchecked.push('a prop shape no delivery mode reaches');
+    }
     if (unchecked.length > 0 && !component.exempt) {
       findings.push({
         file: component.file,

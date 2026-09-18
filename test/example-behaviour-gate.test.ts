@@ -22,6 +22,7 @@ import {
   compare,
   type DocComponent,
   extractDefinition,
+  hasSchemeInUrlAttribute,
   HOSTILE,
   parseProbe,
   renderedComponentNames,
@@ -41,6 +42,40 @@ const PLAIN = '(props: { readonly name: string }) => `<p>${props.name}</p>`';
 function doc(body: string): string {
   return `# Views\n\n\`\`\`tsx\nimport { renderView } from '@setu-ts/view-plugin';\n${body}\n\`\`\`\n`;
 }
+
+describe('hasSchemeInUrlAttribute — the scheme must be in an ATTRIBUTE (#333)', () => {
+  // The first version ran one regex over the whole render, so body text reading
+  // `href=javascript:alert(1)` matched although no attribute existed — a false
+  // positive on a document that is merely DESCRIBING the hazard, which
+  // `docs/mvc.md` does.
+  const found: readonly string[] = [
+    '<a href="javascript:alert(1)">x</a>',
+    "<a href='javascript:alert(1)'>x</a>",
+    '<a href=javascript:alert(1)>x</a>',
+    '<img src="javascript:alert(1)"/>',
+    '<form action="javascript:alert(1)"></form>',
+    '<svg><use xlink:href="javascript:alert(1)"/></svg>',
+    '<a href="  javascript:alert(1)">x</a>',
+    '<a data-note="x>y" href="javascript:alert(1)">x</a>',
+  ];
+  for (const html of found) {
+    it(`reports ${html}`, () => {
+      expect(hasSchemeInUrlAttribute(html)).toBe(true);
+    });
+  }
+
+  const ignored: readonly string[] = [
+    '<code>href=javascript:alert(1)</code>',
+    '<p>see href=javascript:alert(1) for the hazard</p>',
+    '<a href="/safe">javascript:alert(1)</a>',
+    '<a title="javascript:alert(1)" href="/safe">x</a>',
+  ];
+  for (const html of ignored) {
+    it(`ignores ${html}`, () => {
+      expect(hasSchemeInUrlAttribute(html)).toBe(false);
+    });
+  }
+});
 
 describe('renderedComponentNames', () => {
   it('reads a component from @Render and from renderView', () => {
@@ -258,13 +293,23 @@ describe('buildProbe', () => {
     expect(buildProbe([component()])).toContain(JSON.stringify(HOSTILE));
   });
 
-  it('carries the URL payload and renders every component twice', () => {
+  it('carries both payloads and sweeps the delivery modes (#333)', () => {
     const probe = buildProbe([component()]);
     expect(probe).toContain(JSON.stringify(URL_PAYLOAD));
-    // Both payloads go into EVERY prop; the verdict is decided on the output.
-    expect(probe).toContain('renderComponent(A as never, props)');
-    expect(probe).toContain('renderComponent(A as never, urlProps)');
-    expect(probe).toContain('scheme: URL_SCHEME.test(outUrl)');
+    expect(probe).toContain(JSON.stringify(HOSTILE));
+    // Every mode delivers a real STRING where the component reads, because hono
+    // escapes an attribute value only when it is one; a Proxy there renders
+    // unescaped and reported a SAFE component as a defect.
+    expect(probe).toContain('renderComponent(A as never, deliver(HOSTILE))');
+    expect(probe).toContain('renderComponent(A as never, deliver(URL_PAYLOAD))');
+    expect(probe).toContain('for (const deliver of DELIVERIES)');
+    // The scheme verdict comes from the shared HTML-aware scanner, imported
+    // rather than copied, so the probe and this file's own unit cases agree.
+    expect(probe).toContain('schemeInUrlAttribute(outUrl)');
+    expect(probe).toContain("from '../../scripts/check-example-behaviour.ts'");
+    // The unbounded proxy survives as a REACH probe only, never judged for
+    // escaping.
+    expect(probe).toContain('const reach = await renderComponent(A as never, props)');
   });
 });
 
@@ -293,16 +338,28 @@ describe('parseProbe', () => {
   });
 
   it('refuses results that arrive out of order or duplicated', () => {
-    const a = '{"index":0,"ok":true,"escaped":true,"scheme":false}';
-    const b = '{"index":1,"ok":true,"escaped":true,"scheme":false}';
+    const a = '{"index":0,"ok":true,"escaped":true,"scheme":false,"delivered":true,"reached":true}';
+    const b = '{"index":1,"ok":true,"escaped":true,"scheme":false,"delivered":true,"reached":true}';
     expect(parseProbe(`${b}\n${a}`, 2)).toBeNull();
     expect(parseProbe(`${a}\n${a}`, 2)).toBeNull();
     expect(parseProbe(`${a}\n${b}`, 2)).toHaveLength(2);
   });
 
   it('accepts a complete batch', () => {
-    expect(parseProbe('{"index":0,"ok":true,"escaped":true,"scheme":false}', 1))
-      .toEqual([{ index: 0, ok: true, escaped: true, scheme: false }]);
+    expect(
+      parseProbe(
+        '{"index":0,"ok":true,"escaped":true,"scheme":false,"delivered":true,"reached":true}',
+        1,
+      ),
+    )
+      .toEqual([{
+        index: 0,
+        ok: true,
+        escaped: true,
+        scheme: false,
+        delivered: true,
+        reached: true,
+      }]);
   });
 
   it('treats empty output as a batch of none', () => {
@@ -325,7 +382,16 @@ describe('compare', () => {
   };
 
   it('passes a safe component', () => {
-    expect(compare([base], [{ index: 0, ok: true, escaped: true, scheme: false }])).toEqual([]);
+    expect(
+      compare([base], [{
+        index: 0,
+        ok: true,
+        escaped: true,
+        scheme: false,
+        delivered: true,
+        reached: true,
+      }]),
+    ).toEqual([]);
   });
 
   it('fails an unlabelled component that does not escape', () => {
@@ -334,6 +400,8 @@ describe('compare', () => {
       ok: true,
       escaped: false,
       scheme: false,
+      delivered: true,
+      reached: true,
     }]);
     expect(finding?.message).toContain('UNESCAPED');
     expect(finding?.line).toBe(7);
@@ -346,13 +414,24 @@ describe('compare', () => {
       ok: true,
       escaped: true,
       scheme: false,
+      delivered: true,
+      reached: true,
     }]);
     expect(finding?.message).toContain('no longer unsafe');
   });
 
   it('passes a labelled counter-example that is still unsafe', () => {
     const labelled = { ...base, expectUnsafe: true };
-    expect(compare([labelled], [{ index: 0, ok: true, escaped: false, scheme: false }]))
+    expect(
+      compare([labelled], [{
+        index: 0,
+        ok: true,
+        escaped: false,
+        scheme: false,
+        delivered: true,
+        reached: true,
+      }]),
+    )
       .toEqual([]);
   });
 
@@ -371,6 +450,8 @@ describe('compare', () => {
       ok: true,
       escaped: true,
       scheme: true,
+      delivered: true,
+      reached: true,
     }]);
     expect(finding?.message).toContain(JSON.stringify(URL_PAYLOAD));
     expect(finding?.message).toContain('href, src or action');
@@ -381,7 +462,16 @@ describe('compare', () => {
     // for it, so a warning about template literals is not failed for
     // lacking a javascript: link.
     const labelled = { ...base, expectUnsafe: true };
-    expect(compare([labelled], [{ index: 0, ok: true, escaped: false, scheme: true }]))
+    expect(
+      compare([labelled], [{
+        index: 0,
+        ok: true,
+        escaped: false,
+        scheme: true,
+        delivered: true,
+        reached: true,
+      }]),
+    )
       .toEqual([]);
   });
 
@@ -392,11 +482,44 @@ describe('compare', () => {
       ok: true,
       escaped: true,
       scheme: false,
+      delivered: true,
+      reached: true,
     }]);
     expect(findings).toHaveLength(1);
     expect(findings[0]?.message).toContain('UNCHECKED');
     expect(findings[0]?.message).toContain('`raw()`');
     expect(findings[0]?.message).toContain(UNCHECKED_EXEMPT_MARKERS[0]);
+  });
+
+  it('reports UNCHECKED when no delivery mode reached the component (#333)', () => {
+    // The mode sweep delivers a real STRING at a bounded set of prop shapes, so
+    // escaping is judged on the value type production renders. A component
+    // reading past all of them would have every payload resolve to `undefined`,
+    // render nothing, and score ESCAPED — a false PASS. The unbounded reach
+    // proxy answers a read at any depth, so the two disagreeing IS that case.
+    const [finding] = compare([base], [{
+      index: 0,
+      ok: true,
+      escaped: true,
+      scheme: false,
+      delivered: false,
+      reached: true,
+    }]);
+    expect(finding?.message).toContain('UNCHECKED');
+    expect(finding?.message).toContain('no delivery mode reaches');
+  });
+
+  it('does not report a component that simply never touches its props', () => {
+    // Neither probe delivered, so there is nothing to judge and nothing to warn
+    // about — a static component is not a blind spot.
+    expect(compare([base], [{
+      index: 0,
+      ok: true,
+      escaped: true,
+      scheme: false,
+      delivered: false,
+      reached: false,
+    }])).toEqual([]);
   });
 
   it('reports UNCHECKED for an element spread', () => {
@@ -406,6 +529,8 @@ describe('compare', () => {
       ok: true,
       escaped: true,
       scheme: false,
+      delivered: true,
+      reached: true,
     }]);
     expect(finding?.message).toContain('element spread');
   });
@@ -417,6 +542,8 @@ describe('compare', () => {
       ok: true,
       escaped: true,
       scheme: false,
+      delivered: true,
+      reached: true,
     }])).toEqual([]);
   });
 
@@ -427,6 +554,8 @@ describe('compare', () => {
       ok: true,
       escaped: false,
       scheme: false,
+      delivered: true,
+      reached: true,
     }]);
     expect(findings).toHaveLength(2);
     expect(findings[0]?.message).toContain('UNCHECKED');

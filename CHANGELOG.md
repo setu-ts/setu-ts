@@ -265,6 +265,33 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **The example-behaviour gate judges escaping on the value type production renders, and looks for a
+  `javascript:` scheme in an ATTRIBUTE rather than anywhere in the output
+  ([#333](https://github.com/setu-ts/setu-ts/issues/333)).** Two fail-safe false positives, both
+  properties of how the probe delivered its payload rather than of any documented component.
+
+  hono escapes an attribute value only when it is `typeof === 'string'`, and the probe delivered a
+  `Proxy` — so a SAFE component rendering a prop into `title=` came back unescaped and was reported
+  as a defect, while a real string is escaped correctly. The probe now sweeps several delivery
+  modes, each putting a real string where the component finally reads, and a mode that does not fit
+  a component simply contributes nothing instead of failing it. What makes the sweep sound is that a
+  non-leaf level stringifies to a SENTINEL, never to the payload: a mode that puts an OBJECT where
+  the component reads therefore cannot look like an unescaped payload. Disabling that one line
+  reports two of the corpus's own safe components as UNESCAPED.
+
+  Separately, the scheme check ran one regex over the whole render, so body text reading
+  `href=javascript:alert(1)` matched although no attribute existed — a false positive on a document
+  merely DESCRIBING the hazard, which `docs/mvc.md` does. It now walks tag regions quote-aware and
+  inspects only `href`, `src` and `action` values, matching an attribute name by suffix so
+  `xlink:href` is covered. The probe imports that scanner rather than carrying a second copy, so it
+  and the gate's own tests cannot disagree.
+
+  The sweep would have opened a false PASS on its own — a component reading past every mode has each
+  payload resolve to `undefined`, renders nothing, and scores as escaped — so the unbounded proxy
+  survives as a REACH probe whose output is never judged for escaping, and the two disagreeing is
+  reported as UNCHECKED. Reach also improved: a nested `props.note.link` in an `href` is now caught,
+  where before it was not delivered at all.
+
 - **The weekly `Dependency drift` workflow reported a `test` failure that was never drift, and gated
   a graph it had not resolved.** Three defects, one shape — the job's report did not describe what
   the job had done. Found while acting on the drift issue it filed on 2026-09-14.
