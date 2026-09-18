@@ -360,6 +360,29 @@ describe('run', () => {
     expect(result.findings.find((f) => f.file === file)?.kind).toBe('version-absent');
   });
 
+  it('treats a 429 or a 5xx as unreachable, never as an absent file', async () => {
+    // The outage contract says an unreachable registry SKIPS and exits 0.
+    // Reading a rate-limit or a gateway error as absence instead raises a
+    // `file-absent` FINDING and exits 1, failing the whole `check:docs` chain
+    // on a transient fault — and this gate issues roughly 200 requests a run,
+    // so 429 is a realistic answer rather than a hypothetical one.
+    for (const status of [429, 503]) {
+      const result = await run(options({
+        'https://jsr.io/@setu-ts/mock/0.6.0/src/gadget.ts': { status, body: '' },
+      }));
+      expect(result.findings.filter((f) => f.file.endsWith('gadget.ts'))).toEqual([]);
+      expect(result.skipped.some((k) => k.file.endsWith('gadget.ts'))).toBe(true);
+    }
+  });
+
+  it('treats a non-404 meta response as unreachable, not as an unpublished package', async () => {
+    const result = await run(options({
+      'https://jsr.io/@setu-ts/mock/meta.json': { status: 503, body: '' },
+    }));
+    expect(result.findings).toEqual([]);
+    expect(result.skipped.some((k) => k.reason.includes('could not be reached'))).toBe(true);
+  });
+
   it('skips a tag whose symbol it cannot resolve', async () => {
     const result = await run(options());
     const skip = result.skipped.find((s) => s.file.endsWith('member.ts'));

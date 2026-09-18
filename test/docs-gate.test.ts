@@ -372,9 +372,16 @@ describe('documentation gate — CI wiring', () => {
     const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
       tasks: Record<string, string>;
     };
-    const checkDocs = manifest.tasks['check:docs'];
-    expect(checkDocs).toContain('scripts/check-example-behaviour.ts');
-    expect(checkDocs).toContain('scripts/check-since-tags.ts');
+    const checkDocs = manifest.tasks['check:docs'] ?? '';
+    // Assert the ACTUAL invocations in the `&&` chain, not that the path is
+    // mentioned somewhere: `echo scripts/check-since-tags.ts` satisfies a
+    // substring check while CI runs no gate at all.
+    const invoked = checkDocs.split('&&')
+      .map((step) => step.trim())
+      .filter((step) => step.startsWith('deno run'))
+      .map((step) => step.split(/\s+/).at(-1));
+    expect(invoked).toContain('scripts/check-example-behaviour.ts');
+    expect(invoked).toContain('scripts/check-since-tags.ts');
     // And the @since gate stays runnable in isolation, which is how its
     // skip-on-network behaviour is negative-controlled.
     expect(manifest.tasks['check:since-tags']).toContain('scripts/check-since-tags.ts');

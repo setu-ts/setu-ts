@@ -540,6 +540,31 @@ describe('run — end to end, through the real renderer', () => {
     expect(await run([exemptPath])).toEqual([]);
   });
 
+  it('refuses a bare marker and an incidental mention as exemptions', async () => {
+    // The exemption is the ONLY way past an unchecked verdict, so what counts
+    // as one is a security decision. `includes(marker)` accepted the marker
+    // with no reason, and accepted prose that merely names it — a comment
+    // reading "never write UNCHECKED-EXEMPT here" exempted the component below
+    // it. That suppresses the finding, which is the dangerous direction.
+    const raw =
+      'const Snippet = (p: { m: string }) => html`<div>${raw(p.m)}</div>`;\n@Render(Snippet)';
+    const bare = await write(
+      'raw-bare-marker.md',
+      `// ${UNCHECKED_EXEMPT_MARKERS[0]}\n${raw}`,
+    );
+    expect(await run([bare])).toHaveLength(1);
+    const mention = await write(
+      'raw-mention.md',
+      `// never write ${UNCHECKED_EXEMPT_MARKERS[0]} here\n${raw}`,
+    );
+    expect(await run([mention])).toHaveLength(1);
+    const blank = await write(
+      'raw-blank-reason.md',
+      `// ${UNCHECKED_EXEMPT_MARKERS[0]}:   \n${raw}`,
+    );
+    expect(await run([blank])).toHaveLength(1);
+  });
+
   it('FAILS a component that renders a prop into href', async () => {
     // The X46-1 shape, through the real renderer: escaping cannot stop a
     // metacharacter-free scheme, so the rendered href keeps it verbatim.

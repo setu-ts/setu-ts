@@ -63,6 +63,31 @@ export const URL_SCHEME_PATTERN = /(?:href|src|action)\s*=\s*(["']?)\s*javascrip
 export const UNCHECKED_EXEMPT_MARKERS: readonly string[] = ['UNCHECKED-EXEMPT'];
 
 /**
+ * The exemption as it must actually be written: the marker, a colon, and a
+ * non-empty reason.
+ *
+ * A bare `includes(marker)` accepted the marker alone, and accepted prose that
+ * merely MENTIONS it — `// never write UNCHECKED-EXEMPT here` exempted the
+ * component it sat above. That direction is the dangerous one, because it
+ * SUPPRESSES an unchecked-path finding: the gate then reports a clean render
+ * for markup it could not have delivered a payload into. Both collection paths
+ * read this one pattern, so they cannot disagree about what an exemption is.
+ */
+const UNCHECKED_EXEMPT_PATTERN = new RegExp(
+  `(?:${UNCHECKED_EXEMPT_MARKERS.join('|')})\\s*:\\s*\\S`,
+);
+
+/**
+ * Whether an attached comment carries a well-formed exemption.
+ *
+ * @param comment - The comment block attached above a definition
+ * @returns True when the documented `MARKER: <reason>` form is present
+ */
+function isExempt(comment: string): boolean {
+  return UNCHECKED_EXEMPT_PATTERN.test(comment);
+}
+
+/**
  * Documents scanned for renderable components.
  *
  * Every Markdown file the repository publishes, so a component documented in a
@@ -393,7 +418,7 @@ export function collectComponents(file: string, markdown: string): readonly DocC
         expectUnsafe: COUNTER_EXAMPLE_MARKERS.some((marker) => before.includes(marker)),
         usesRaw: /\braw\s*\(/.test(source),
         spreads: /\{\.\.\./.test(source),
-        exempt: UNCHECKED_EXEMPT_MARKERS.some((marker) => before.includes(marker)),
+        exempt: isExempt(before),
         dependencies: localDependencies(fence.code, source),
       });
     }
@@ -439,7 +464,7 @@ export function collectUnrenderedBlindSpots(
         file,
         line: fence.line,
         name,
-        exempt: UNCHECKED_EXEMPT_MARKERS.some((marker) => before.includes(marker)),
+        exempt: isExempt(before),
       });
     }
   }

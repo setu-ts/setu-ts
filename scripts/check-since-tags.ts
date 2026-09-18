@@ -435,7 +435,14 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
     const pending = (async () => {
       try {
         const response = await fetchImpl(`${registryBase}/${packageName}/meta.json`);
-        if (!response.ok) return { kind: 'unpublished' as const };
+        if (!response.ok) {
+          // Only 404 means the package is absent. A 429 or a 5xx is the
+          // registry declining to answer, and reading that as "unpublished"
+          // skips validation under a reason that is not true. This gate makes
+          // ~200 requests per run, so rate limiting is a realistic outcome.
+          if (response.status === 404) return { kind: 'unpublished' as const };
+          throw new Error(`HTTP ${response.status}`);
+        }
         const parsed = JSON.parse(await response.text()) as {
           versions?: Record<string, unknown>;
         };
@@ -456,7 +463,13 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
     const pending = (async () => {
       try {
         const response = await fetchImpl(url);
-        return response.ok ? await response.text() : null;
+        if (response.ok) return await response.text();
+        // As above: only 404 is absence. Reading a 429 or a 5xx as an absent
+        // file would raise a `file-absent` FINDING and exit 1, failing the
+        // whole `check:docs` chain on a transient registry fault — the exact
+        // outcome the outage contract in this module's JSDoc forbids.
+        if (response.status === 404) return null;
+        throw new Error(`HTTP ${response.status}`);
       } catch {
         return await Promise.reject(new Error(`fetch failed for ${url}`));
       }

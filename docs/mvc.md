@@ -365,8 +365,10 @@ navigation even when a value slips past validation.
 whole rule, and `@setu-ts/exceptions`' own contract pins it — what the rule leaves uncovered in a
 browser-facing application is the part worth spelling out. A mistyped URL (`404`), a logged-out user
 (`401`), an authorization service that is not configured (`501`), a stale form (`403`) and a
-throttled client (`429`) are all emitted by responder terminals, so each answers as Problem Details
-JSON no matter what `respond` renders for the errors your own handlers throw.
+throttled client (`429`) are all emitted by responder terminals, so each answers with the JSON of
+whatever formatter `errorHandler` was configured with — Problem Details under `format: 'rfc9457'`,
+as below, and the `{ error, detail }` default otherwise — no matter what `respond` renders for the
+errors your own handlers throw.
 
 The worked example — the page IS the error report, and the callback owns its status:
 
@@ -388,6 +390,10 @@ const ErrorPage = (props: ErrorPageProps) => (
 );
 
 function wantsHtml(ctx: IRequestContext): boolean {
+  // Deliberately simple — the point here is that the callback owns the status,
+  // not content negotiation. This does NOT honour `q` values, so a client
+  // sending `text/html;q=0` (a refusal) still gets HTML; parse the media
+  // ranges if your callers send them.
   return (ctx.request.headers.get('accept') ?? '').includes('text/html');
 }
 

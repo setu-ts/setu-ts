@@ -72,6 +72,10 @@ const ErrorPage = (props: ErrorPageProps) => (
 );
 
 function wantsHtml(ctx: IRequestContext): boolean {
+  // Deliberately simple — the point here is that the callback owns the status,
+  // not content negotiation. This does NOT honour `q` values, so a client
+  // sending `text/html;q=0` (a refusal) still gets HTML; parse the media
+  // ranges if your callers send them.
   return (ctx.request.headers.get('accept') ?? '').includes('text/html');
 }
 
