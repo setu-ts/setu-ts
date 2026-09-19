@@ -75,14 +75,29 @@ describe('application gate configuration', () => {
         'boundary-compatibility',
         'deploy',
         'publish-dry-run',
-        'node-compat',
-        'bun-compat',
         'deno-view-plugin-resolution',
         'audit',
       ]
     ) {
       expect(workflow).toContain(`  ${job}:\n    ${repositoryBranchOnly}`);
     }
+
+    // The compatibility jobs moved to their own workflow because they install
+    // the PUBLISHED packages and so cannot be affected by a pull request. The
+    // guard has to move WITH them: that workflow still has a `pull_request`
+    // trigger (path-filtered to `compat/`), so a fork PR touching the suite
+    // would otherwise run it.
+    const compat = await Deno.readTextFile('.github/workflows/compat.yml');
+    for (const job of ['node-compat', 'bun-compat']) {
+      expect(compat).toContain(`  ${job}:\n    ${repositoryBranchOnly}`);
+    }
+    // And they must not silently become per-PR jobs again: the triggers are
+    // what make them cheap.
+    expect(compat).toContain('schedule:');
+    expect(compat).toContain('workflow_dispatch:');
+    expect(compat).toContain("- 'compat/**'");
+    expect(workflow).not.toContain('  node-compat:');
+    expect(workflow).not.toContain('  bun-compat:');
   });
 
   it('keeps a documented smoke skip distinct from a passing smoke check', () => {

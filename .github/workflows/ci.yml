@@ -442,47 +442,11 @@ jobs:
   # the publish, so pinning to it would deadlock the release PR against the
   # publish that would fix it (the M34b drift-gate lesson). The consequence is
   # deliberate and worth stating — these jobs gate the last release, not HEAD.
-  node-compat:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    name: Node compatibility
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: compat
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24.18.0
-
-      # No lockfile is committed (see .gitignore): resolving `latest` on every
-      # run is the point.
-      - name: Install published packages
-        run: npm install
-
-      - name: Compat suite
-        run: npm run test:node
-
-  bun-compat:
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-    name: Bun compatibility
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: compat
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.14
-
-      - name: Install published packages
-        run: bun install
-
-      - name: Compat suite
-        run: bun run test:bun
+  # `node-compat` and `bun-compat` live in `.github/workflows/compat.yml`. They
+  # install the PUBLISHED packages from JSR's npm mirror, so nothing a pull
+  # request changes can affect them until it has been released — running them
+  # here cost two installs and two suites per push while proving nothing about
+  # the diff. They now run weekly, on demand, and on a change to `compat/`.
 
   # Node and Bun consume JSR's npm-compatible artifacts. This job separately
   # proves that a fresh Deno consumer can resolve and import the JSR package
