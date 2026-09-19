@@ -10939,9 +10939,18 @@ behind **six** commands — `new`, `generate`, `generate app`, `generate library
 workspace. Those are the cases where the remedy that works for `setu new` — delete it and start over
 — is not available at all.
 
-**Fix:** make `writeFiles` transactional. It already tracks a `created` set for directories, so
-tracking written files and unlinking them on failure is small, fixes all six call sites at once, and
-directly restores retryability. `Ctrl-C` mid-run hits the same path, so the trigger is ordinary.
+**Fix:** make `writeFiles` transactional. It already tracks a `created` set for directories, so the
+bookkeeping is small, it fixes all six call sites at once, and it directly restores retryability.
+`Ctrl-C` mid-run hits the same path, so the trigger is ordinary.
+
+**Unlinking every written path is NOT the fix, and this row's own `managed` paragraph is why** —
+raised in code review on the plan PR and corrected there. `findExisting` skips a `managed` path, so
+one that already exists is overwritten rather than refused, and that set is 31 sites across 19
+files: `setu generate app` into an existing workspace rewrites the Dockerfile, `compose.yaml`, the
+Kubernetes manifests and every member's discovery module. Unlinking on failure would delete them.
+The writer must therefore capture a path's prior bytes immediately before overwriting it and RESTORE
+them on failure, unlinking only paths it genuinely created. Reading at the write rather than
+trusting the preflight also closes the window between `findExisting` and the first write.
 
 **A sweep for the same shape found one more gap the `writeFiles` fix would NOT close.** `adopt` is
 three phases — move the project's files, write the workspace files, rewrite the entry — and only the
@@ -11007,8 +11016,18 @@ reproduction with a passing `$ref` control is committed.
 **Not a regression:** the `0.6.0` SDK throws identically. Why no run caught it: the X11 exercise
 generates from a **committed fixture** that predates the component renaming and still says
 `Schema1`. Part 12's X53 now generates from a running application and carries the trigger by design,
-so it fails until this is fixed. **Fix:** give the two producers disjoint name spaces — suffix a
-hoisted response body, or have the hoister reuse a structurally identical existing component.
+so it fails until this is fixed. **Fix:** the component name is published surface of the document,
+so the hoisted alias is the side that yields — it asks for its current name first and takes a
+suffixed one only when that is claimed.
+
+**Two refinements from code review on the plan PR.** Suffixing UNCONDITIONALLY is wrong: the alias
+is emitted as `export type PlaceOrderResponse201`, so consumers can hold it, and the repository's
+own committed fixture pins three of those names — renaming every alias to fix the one document that
+collides breaks clients that generate fine today. And `Body` is a suffix, not a namespace: a
+document may legally declare `GetOrdersResponse200Body`, so the fallback must be ALLOCATED through
+the registry with a deterministic retry, or the abort merely moves. The same collision exists at all
+four hoist sites (request body, parameter, success response, error body), so the allocation belongs
+in `hoistMultiline`, which the source already names as the single owner of the hoisting rule.
 
 **V7-1 — `inject()` drops `Blob.type`, so a multipart Blob `500`s where the same bytes serve
 `200`.** The byte-ish shapes pass through with no content-type default on the stated ground that
@@ -11075,6 +11094,15 @@ LocalStack, …"_.
 
 **Fix:** add `endpoint?: string` to the AWS and GCP providers, matching the shape the other two
 already have.
+
+**What the two SDKs are handed is not the same, raised in code review on the plan PR.** AWS takes
+`endpoint` in the config object `buildAwsConfig` already builds. The Google client takes
+`apiEndpoint` — `google-gax`'s `ClientOptions` has no `endpoint` member at all — and its
+`ClientStubOptions` carries an index signature, so passing `endpoint` type-checks, constructs, and
+is ignored at runtime, which is this letter's own defect class reintroduced by its fix. GCP also has
+no channel today: the facade constructor takes no argument and `adaptGcpModule` accepts only a
+`projectId`, so both signatures widen. The test must assert the KEY per provider, not just that a
+value arrived.
 
 **Why they are one letter.** Both are small, both are about the developer's expressed intent being
 quietly unmet, and both were invisible to every gate because the gates exercise one family or one
