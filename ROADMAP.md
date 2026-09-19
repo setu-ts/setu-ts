@@ -10637,6 +10637,184 @@ merging beyond what the schema itself expresses.
 
 ---
 
+## Milestone 98: Secure Read-Only Devtool Diagnostics
+
+**Status:** Planned; implementation has not started. This milestone records the framework work
+needed by the separately maintained devtool. It is not a claim that the proposed interfaces or
+connector have passed a security review.
+
+**Objective:** Let a developer inspect application composition and execution through supported,
+optional interfaces, without exposing live services, application data, credentials, or mutation
+controls. Deliver an authenticated local connection for the extension after the in-process
+inspection boundary is established. Framework diagnostics remain available independently of a paid
+devtool subscription; licensing never grants permission to inspect an application.
+
+**Ownership and sequence:** M98a owns the kernel observation boundary, with only its necessary
+shared contracts in `packages/common`. M98b owns the runtime-local listener port, its common
+contract/token, and the new `packages/diagnostics-plugin` that consumes both M98a and that port.
+Implement the letters in order, with separate feature branches and verification; neither is
+permission to sweep unrelated packages. Each gets one canonical plan from `plans/TEMPLATE.md` and
+passes `deno task check:plan` before implementation. The plan must name the real consumer of every
+new export, resolve the exact contracts from source, and include the threat model and negative tests
+below. The canonical plans are `plans/milestone-98a-kernel-diagnostics.md` and
+`plans/milestone-98b-local-diagnostics-connector.md`; these specify proposed APIs, not shipped ones.
+
+### Existing seams and gaps
+
+- `packages/common/src/plugin.ts` exposes `IRouterApi.listRoutes()` and lifecycle hooks.
+  `RouteInfo.definition` contains handlers, middleware and schemas: it is an in-process contract,
+  not a wire-safe snapshot. The diagnostic projection must select its own fields.
+- `IServiceRegistry` in `packages/common/src/registry.ts` supports token lookup, not enumeration of
+  registration metadata. `IMiddlewareApi` supports `add()` only; the compiled middleware names in
+  `packages/kernel/src/pipeline/middleware-pipeline.ts` are an internal diagnostic seam, not a
+  public execution observer. A general plugin/service/pipeline inspector therefore needs new
+  supported reads rather than casts into kernel private fields.
+- M90i already propagates queue trace context, and messaging has producer/consumer tracing. Preserve
+  those relationships and reuse existing OpenTelemetry identifiers where available; absence of a
+  trace is reported as absence, never a fabricated causal relationship. The built-in lazy-loaded
+  auto-instrumentations target Node, so they cannot be the prerequisite for portable kernel
+  observation.
+- M96 supplies field-classification and redaction utilities in `packages/common/src/redaction/`. An
+  unclassified field is returned unchanged. The logger's default patterns cover names such as
+  `password` and `Authorization`, but not arbitrary connection strings, `Set-Cookie`, or secrets
+  embedded in free text. Reusing this utility alone does not make a diagnostic record safe.
+  Telemetry URL sanitization and configuration-validation error suppression are existing,
+  path-specific protections, not a blanket guarantee over custom attributes or exceptions.
+
+### Milestone 98a: Kernel Metadata and Execution Observation
+
+**Package(s):** `packages/kernel`; `packages/common` only for the contracts consumed across the
+kernel/plugin boundary. The plan selects an optional application reader with snapshot and cursor
+reads; no new capability token is needed.
+
+**Deliverables:**
+
+- [ ] An explicitly enabled, read-only application snapshot containing selected plugin names and
+      versions, declared capability relationships, registration state, route templates and owners,
+      and middleware names/order. Distinguish declared dependencies from observed behavior; do not
+      label a declared edge as a runtime call. Describe startup failures through bounded codes and
+      approved identifiers, not raw exception messages or stacks.
+- [ ] Optional lifecycle and request/middleware observations containing local operation IDs,
+      approved correlation identifiers, stage identity, monotonic duration and outcome. Cover the
+      global and route chains, short-circuits, throws and startup/shutdown; document inclusive
+      versus exclusive timing. WebSocket upgrades and gRPC dispatch traverse the HTTP pipeline, but
+      an HTTP-stage observation must not claim to trace subsequent socket frames or RPC internals.
+- [ ] Immutable diagnostic projections with bounded identifiers and record sizes. Reading a snapshot
+      must not resolve lazy factories, invoke service methods, traverse arbitrary object graphs, or
+      execute application getters/serialization hooks. No live request context, function, schema
+      object, DI instance, plugin options, configuration value, or environment map escapes.
+- [ ] Capture minimization before any diagnostic buffer or callback receives data. Dynamic request
+      paths, query strings, headers, bodies, cookies, tokens, claims, session contents, database
+      values and raw log/error text are excluded from this first version. Selected registration
+      labels are still potentially sensitive: bound and validate them, provide suppression, and
+      expose no arbitrary metadata bag. Reuse classification/redaction for allowed fields where
+      needed; a projection or redaction failure drops the affected record with a value-free signal.
+- [ ] A documented, versioned contract with a working in-repository consumer example using public
+      interfaces, available without decorators or DI. Existing custom plugins continue working
+      without adopting diagnostics. Unknown information is explicitly unavailable. This is not a
+      generic serializer for custom plugin state.
+- [ ] Disabled observation installs no diagnostic hooks, buffers, timers or listener. Enabled
+      observation has bounded buffering, overflow/drop counters, and lifecycle cleanup. A slow,
+      asynchronous consumer must not backpressure requests: collection uses a bounded ring with
+      pull-only public reads and no consumer callbacks. Collection failures cannot replace results,
+      swallow application errors or recursively flood logs. This cannot isolate deliberately
+      blocking synchronous code running in the same process; document that trust limit. Measure
+      enabled and disabled overhead against the same application; set the acceptance budget in the
+      plan before implementation.
+
+### Milestone 98b: Authenticated Local Diagnostics Connector
+
+**Packages:** `packages/runtime`, `packages/common` for the listener contract/token, and new
+`packages/diagnostics-plugin`. Depends on M98a. Runtime owns the loopback listener; the connector
+plugin only supplies its authenticated request handler and never creates a server or imports a
+runtime adapter.
+
+**Deliverables:**
+
+- [ ] Explicit plugin registration and explicit local-connection activation. Importing the package,
+      registering unrelated plugins, or setting a development environment variable must not expose
+      an endpoint. No automatic mounting on the application's public HTTP listener and no wildcard
+      bind. The plan selects a Deno runtime-owned IPv4 loopback listener, polling and a native
+      client. Authenticate both ends during pairing and document unsupported runtimes; inability to
+      enforce local isolation refuses activation rather than falling back to a public endpoint.
+- [ ] Fresh per-session pairing credentials, expiration/revocation, and application-instance-bound
+      authorization for snapshot and observation reads. Credentials never appear in URLs, captured
+      records or diagnostic logs. Localhost, CORS, an Origin/Host check, or a Pro license is not
+      authentication. For an HTTP/WebSocket transport, validate Host and browser Origin as
+      additional checks, define the policy for native clients without Origin, and test cross-origin
+      requests and DNS-rebinding attempts. No data is released before authentication completes.
+- [ ] A versioned, validated read-only protocol with explicit supported operations, size/rate/client
+      limits and bounded polling responses. Unknown versions and operations fail closed. There is no
+      arbitrary method invocation, expression evaluation, file read, credential reveal, service
+      resolution or mutation command. Scope every session to its paired application instance;
+      connection to one process does not authorize another process or tenant-data access.
+- [ ] An actual connector consumer exercise: pair, read the selected snapshot, observe a request,
+      disconnect, revoke and refuse reuse. Include protocol fixtures usable by the separate devtool
+      repository. All display strings remain untrusted text; the extension must escape them and must
+      not execute HTML or commands from diagnostic records. Source-file reading is outside this
+      protocol. The framework milestone does not claim verification of an unreviewed UI.
+- [ ] No persistent recordings, cloud upload, or billing/analytics transmission of application
+      diagnostics in this milestone. In-memory buffers are bounded and cleared on teardown. Any
+      later persistence/export consumer must preserve the minimized record boundary, add retention
+      and access controls, and receive its own review before shipping.
+
+### Threat Model and Acceptance Evidence
+
+Before either letter starts, its plan identifies assets, trust boundaries and attacker actions:
+secrets in otherwise ordinary application fields; malicious HTTP inputs and diagnostic strings;
+unpaired local clients and hostile browser origins; accidental production exposure; cross-instance
+mixups; and stalled or oversized capture. Trusted application code and installed in-process plugins
+already execute with application privileges: this API is not a sandbox against a compromised process
+or developer account. The connector boundary must nevertheless reject untrusted clients.
+
+Completion requires behavioral evidence, not just an assertion that the connector is local or the
+records are redacted:
+
+- [ ] Plant synthetic canaries in passwords, mixed-case auth headers, `Set-Cookie`, database URLs,
+      query/path values, nested payloads, configuration, custom attributes and exception text.
+      Assert their absence from diagnostic callbacks, buffers, protocol frames and connector
+      error/log output, including failure paths. Also assert useful allowed metadata remains visible
+      so suppressing every record cannot make the test pass vacuously.
+- [ ] Exercise missing/wrong/expired/revoked pairing credentials and cross-instance requests. On the
+      chosen network transport, prove hostile origins/hosts and rebinding attempts receive no data.
+      Refuse unsupported protocol versions and every attempted write/control operation.
+- [ ] Prove disabled diagnostics open no socket or route and retain no capture buffer. Exercise the
+      activation refusals on unsupported runtimes/bind addresses. Verify shutdown disposes
+      observers, credentials, streams and buffers, including failed startup and disconnected
+      clients.
+- [ ] Drive the same real application with observation absent, enabled, throwing and backpressured;
+      assert identical responses and side effects. Test stage ordering, route middleware, throws and
+      short-circuits; verify skipped downstream work never appears as executed. Verify snapshot
+      reads do not instantiate lazy services or invoke malicious getters.
+- [ ] Test bounded memory and record/client/rate limits with oversized and sustained input; confirm
+      overflow reporting contains no captured values. Record the agreed performance comparison.
+- [ ] Run the normal verification gates, read the ANSI-stripped per-file coverage table (every
+      changed `src` file at least 90% branch/function/line), and run both publish gates on committed
+      trees. Update `PUBLIC_API.md`, `ARCHITECTURE.md`, package documentation, release manifests for
+      the new package, and the progress/status records in the owning implementation PRs.
+
+### Explicit Follow-ons, Not M98 Deliverables
+
+The extension UI, Free/Pro packaging, subscriptions and any customer portal remain in the separate
+devtool product. Both tiers get the same security boundaries. This milestone adds no licensing check
+to the framework.
+
+Payload/log recording, configuration values/provenance, policy-decision explanations, source
+navigation metadata, custom-plugin inspection contributions and broader non-HTTP operation
+correlation require separately scoped follow-ons. Each must define exactly which fields it emits,
+who can read them, and how it behaves when information is unavailable; no promise of automatic
+visibility into every adapter or arbitrary application code.
+
+Database/cache/storage browsing, queue enumeration and retry, scheduler controls, tenant switching,
+request replay, fixture capture, fault injection and generated scenarios are also deferred. They
+require capability-specific inspection/control contracts, resource/tenant authorization and a fresh
+threat review. Begin replay and failure experiments in isolated test applications using
+`@setu-ts/testing` and controlled dependencies; neither resending a request nor possessing a trace
+is deterministic replay. Remote/production connections and persistent/shared investigation bundles
+need separate transport, retention and access-control designs before implementation.
+
+---
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                           |
@@ -10791,3 +10969,6 @@ merging beyond what the schema itself expresses.
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                          |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                              |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; planned)                                                                          |
+| 98a       | ⬜     | kernel + common — metadata and execution observation                                                                              |
+| 98b       | ⬜     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector                                               |
