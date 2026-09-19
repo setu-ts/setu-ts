@@ -105,7 +105,14 @@ try {
 } finally {
   streaming.abort();
   for (const replica of [replicaA, replicaB]) {
-    replica.kill('SIGTERM');
+    // Guarded per replica, not around the loop: `kill()` on an already-exited
+    // child throws, which from here would both replace the real failure AND skip
+    // the second replica, leaving it running.
+    try {
+      replica.kill('SIGTERM');
+    } catch {
+      // Already gone; both statuses are awaited below.
+    }
   }
   await Promise.all([replicaA.status, replicaB.status]);
 }

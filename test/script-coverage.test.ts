@@ -67,9 +67,14 @@ function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
 }
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly nine canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(9);
+  it('has exactly ten canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(10);
     expect(SCRIPT_TARGETS).toContain('scripts/check-docs.ts');
+    // The suite partition's classifier. Its runner is deliberately NOT a target
+    // — the decidable logic was extracted out of it, and its failure mode is a
+    // silent pass.
+    expect(SCRIPT_TARGETS).toContain('scripts/test-partition-rules.ts');
+    expect(SCRIPT_TARGETS).not.toContain('scripts/test-partition.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/check-prose-assertions.ts');
     // The @since gate (M95d): its registry fetch is the injected I/O seam;
     // the scanner, resolver and comparison carry the bar.

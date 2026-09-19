@@ -408,6 +408,40 @@ Every package must include:
 - Snapshots must be reviewed in PRs.
 - Do not use snapshots for testing logic.
 
+### 6.9 Suite Partitioning — What Runs Alone
+
+`deno task test` runs in two phases: suites that touch something shared run alone, then everything
+else runs with `--parallel`. [`scripts/test-partition.ts`](scripts/test-partition.ts) is the runner;
+the classification lives in [`scripts/test-partition-rules.ts`](scripts/test-partition-rules.ts) and
+is DERIVED on every run — there is no list to maintain, and a new suite is classified the moment it
+is written.
+
+A suite is isolated when any of these is true:
+
+- it lives under `test/e2e/` or its name ends `-e2e.test.ts`;
+- its source names a backend environment variable (`REDIS_URL`, `RABBITMQ_URL`, `S3_ENDPOINT_URL`,
+  `MONGODB_URI`, …), which is how every guarded real-backend suite is gated;
+- it spawns a subprocess (`Deno.Command`), which covers everything driving `docker` or `deno`;
+- it binds a real socket (`unusedPort`, `Deno.listen`, `Deno.serve`, `.listen(`, `.start({ port`).
+
+Two consequences to keep in mind when writing a test:
+
+- **Over-isolation is free, under-isolation is not.** The signals are matched as plain substrings,
+  so a mention in a comment isolates the file. That is deliberate: the cost is a little sequential
+  time, whereas a suite that shares a resource with three others running concurrently produces an
+  intermittent failure in whichever suite is least patient — and an intermittent pipeline teaches
+  everyone to re-run red builds.
+- **If a suite reaches a shared resource by a spelling none of those signals match, it will run in
+  parallel.** Name the resource in the source (the env var is the natural way) or add the signal to
+  `isolationReason`. `test/unit/test-partition.test.ts` asserts that no parallel-phase file carries
+  any known signal — against its OWN marker list, deliberately, because a gate that reads the same
+  constant it verifies cannot fail — but it cannot invent a signal nobody has written down.
+
+This replaced a first attempt (PR #339, reverted) that hardcoded the isolated set into `deno.json`
+four times over and keyed it on "is it e2e, or does it restart a container". That left 67 files in
+the parallel phase, including the real-MinIO streaming suite that then failed on CI — so the rule is
+"does it touch something shared", not "does it restart something".
+
 ---
 
 ## 7. Documentation Rules

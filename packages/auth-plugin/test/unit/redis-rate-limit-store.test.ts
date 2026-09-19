@@ -189,17 +189,42 @@ describe('RedisRateLimitStore', () => {
       }
 
       const runtime = createFakeRuntime();
-      // Port 6390: no Redis expected there — the command fails, but the lazy
-      // import + construction path (loadIoredis → new Redis(url)) executes.
-      const store = new RedisRateLimitStore({ runtime, url: 'redis://127.0.0.1:6390' });
-      try {
-        await store.increment('guarded-key', 1000);
-      } catch {
-        // Connection refused is the expected outcome without a local Redis.
-      } finally {
-        // Always release the real client's socket/timers.
-        await store.disconnect().catch(() => {});
-      }
+      // An out-of-range port, so ioredis' own constructor refuses the URL.
+      //
+      // This used to point at `redis://127.0.0.1:6390` — a closed port — and
+      // await the command, which reached the same two lines and then spent a
+      // real 10 s doing it: ioredis treats a refused connection as retriable,
+      // holds the command in its offline queue, and gives up only at its
+      // default `connectTimeout` of 10 000 ms. That was the slowest step in this
+      // package by an order of magnitude, and it asserted nothing at all.
+      //
+      // Bounding it through options is not available: ioredis DOES copy URL
+      // query parameters onto its options, but as strings, so
+      // `?connectTimeout=120` reaches `stream.setTimeout` and crashes the
+      // process with `The "msecs" argument must be of type number` (measured).
+      // `RedisRateLimitStore` exposes no options passthrough either.
+      //
+      // So the doomed operation is made to fail in ioredis' constructor rather
+      // than on the wire. `resolveClient` still runs `await loadIoredis()` and
+      // `new RedisCtor(url)` — the lazy path this test exists to cover — and the
+      // rejection now carries ioredis' own message, which is what lets the two
+      // assertions below distinguish "the real module was loaded and its
+      // constructor was reached" from "the injected-client branch was taken".
+      // No socket is opened, so no timer or handle outlives the test either.
+      const store = new RedisRateLimitStore({ runtime, url: 'redis://127.0.0.1:99999' });
+      const failure = await store.increment('guarded-key', 1000).then(
+        () => null,
+        (error: unknown) => error as Error,
+      );
+
+      // ioredis' own diagnostic: the real module was imported and `new
+      // Redis(url)` ran. A fake or an unreached import cannot produce this.
+      expect(failure?.message).toContain('Invalid URL');
+      // And NOT the store's own structural rejection, which is what a wrongly
+      // taken injected-client branch would have produced.
+      expect(failure?.message).not.toContain('structural shape');
+
+      await store.disconnect().catch(() => {});
     });
   });
 });

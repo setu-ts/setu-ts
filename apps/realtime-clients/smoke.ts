@@ -82,7 +82,10 @@ try {
     stderr: 'inherit',
   }).spawn();
   try {
-    await waitForServer(`http://127.0.0.1:${workerdPort}`, 'workerd client host');
+    await waitForServer(
+      `http://127.0.0.1:${workerdPort}`,
+      'workerd client host',
+    );
     const response = await fetch(
       `http://127.0.0.1:${workerdPort}/?baseUrl=${encodeURIComponent(baseUrl)}`,
     );
@@ -90,7 +93,14 @@ try {
       throw new Error(`workerd client driver returned ${response.status}.`);
     }
   } finally {
-    worker.kill('SIGTERM');
+    // The same guard this file's outer `finally` already carries for `server`:
+    // `kill()` on an already-terminated child throws, and a throw here would
+    // replace the real failure.
+    try {
+      worker.kill('SIGTERM');
+    } catch {
+      // Already gone; its status still needs awaiting.
+    }
     await worker.status;
   }
 } finally {
