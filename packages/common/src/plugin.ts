@@ -13,6 +13,7 @@ import type { IServiceRegistry } from './registry.ts';
 import type { HttpMethod } from './types.ts';
 import type { IRequestContext, MiddlewareFunction, RouteDefinition, RouteHandler } from './http.ts';
 import type { IRuntimeServices } from './runtime.ts';
+import type { IDiagnosticsSource } from './services/diagnostics.ts';
 import type { Constructor, IContainer } from './container.ts';
 import type { ILogger } from './services/logger.ts';
 import type { IConfig } from './services/config.ts';
@@ -466,6 +467,27 @@ export interface IApplication {
    * @returns A web-standard `Response`
    */
   fetch(request: Request): Promise<Response>;
+  /**
+   * Read-only kernel diagnostics reader, present ONLY when the application was
+   * created with diagnostics explicitly enabled; the property is absent (and
+   * this member reads as `undefined`) otherwise. Absence creates no collector,
+   * metadata mirror, ring buffer, or timer anywhere in the kernel.
+   *
+   * This member is the consumer's whole access path: it is a pull-only reader
+   * (`snapshot()` / `read()`), never a registry token, never a writer, and
+   * never a service to resolve. Reading it can neither execute application
+   * code nor mutate application state, and the data it returns is a bounded,
+   * frozen projection — see `IDiagnosticsSource` for the exact contract.
+   *
+   * Optional by contract so a third-party `IApplication` implementation
+   * written before diagnostics existed remains valid without adopting it.
+   * (`| undefined` is explicit for `exactOptionalPropertyTypes`: an
+   * implementation may satisfy this with a getter that answers `undefined`,
+   * which is exactly what the disabled kernel does.)
+   *
+   * @since 0.8.0
+   */
+  readonly diagnostics?: IDiagnosticsSource | undefined;
 }
 
 /**

@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Kernel diagnostics (M98a): an optional, read-only view of application composition and kernel
+  execution.** `createApplication({ diagnostics: {} })` enables collection and exposes
+  `IApplication.diagnostics` — a pull-only `IDiagnosticsSource` with `snapshot()` and
+  `read(after, limit?)`. New public surface on `@setu-ts/common`: `IDiagnosticsSource`,
+  `DiagnosticsSnapshot`, `DiagnosticsNode`, `DiagnosticsEdge`, `DiagnosticsEvent`,
+  `DiagnosticsBatch`, and their vocabulary types `DiagnosticsNodeKind`, `DiagnosticsEdgeKind`,
+  `DiagnosticsSnapshotState`, `DiagnosticsFailureCode`, `DiagnosticsEventKind`,
+  `DiagnosticsEventOutcome`, and `DiagnosticsEventStage`. New public surface on `@setu-ts/kernel`:
+  `KernelDiagnosticsOptions`, `KernelDiagnosticsLabelOptions`, and the
+  `ApplicationOptions.diagnostics` option. An omitted option allocates nothing: no collector,
+  mirror, ring, or timer, and the property is absent. Labels are OFF by default and gated by exact
+  allowlists; route patterns, plugin names, and versions leave the process only when explicitly
+  approved. Snapshots are bounded (1,024 nodes / 4,096 edges / 256 KiB of compact JSON) and event
+  batches are bounded (1,024 events, 1,024 bytes per event) with drop and loss counters. Startup
+  failure and final shutdown clear retained metadata while preserving the original error.
 - **`deno task check:docs` now refuses an export added to a published barrel that no `Unreleased`
   changelog entry names.** Four releases in a row shipped, or nearly shipped, public surface that no
   entry announced — `alpha.10` lost PR #195, `v0.4.0` lost `ResponseSnapshotInit`, `v0.5.0` lost

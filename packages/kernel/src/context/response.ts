@@ -135,6 +135,16 @@ export class ResponseBuilder implements IResponse {
     return this.#ended;
   }
 
+  /**
+   * The response status as currently set, defaulted to 200 — the value a
+   * completed request's diagnostics record reports. Read-only by design:
+   * status is set through {@linkcode ResponseBuilder.status}.
+   * @since 0.8.0
+   */
+  get statusCode(): number {
+    return this.#status;
+  }
+
   /** Returns the native Headers object, creating it only for mutable access. */
   #materializeHeaders(): Headers {
     if (this.#headers === undefined) {

@@ -25,6 +25,7 @@ import type {
   IApplication,
   IConfig,
   IContainer,
+  IDiagnosticsSource,
   IErrorResponder,
   IHttpAdapter,
   ILogger,
@@ -36,8 +37,10 @@ import type {
   IRequestContext,
   IRouterApi,
   IRuntimeServices,
+  ITelemetryService,
   IWebSocketService,
   MetricConfig,
+  RouteDefinition,
   StartOptions,
   WebSocketUpgradeDecision,
 } from '@setu-ts/common';
@@ -45,20 +48,41 @@ import type { IGrpcService } from '@setu-ts/common';
 
 import { MiddlewarePipeline } from '../pipeline/middleware-pipeline.ts';
 import { executeChain } from '../pipeline/execute-chain.ts';
+import type { ChainObserver } from '../pipeline/execute-chain.ts';
 import { findUnsatisfiedConsumers, resolvePluginOrder } from '../registry/plugin-resolver.ts';
 import { ServiceRegistry } from '../registry/service-registry.ts';
 import { Router } from '../router/router.ts';
+import type { RouteEntry } from '../router/router.ts';
 import { isPathDecodable } from '../router/route-matcher.ts';
 import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
 import { coerceInjectBody } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
+import { DiagnosticsCollector } from '../diagnostics/collector.ts';
+import { compileLabelAllowlists } from '../diagnostics/projection.ts';
+import type {
+  KernelDiagnosticsLabelOptions,
+  KernelDiagnosticsOptions,
+} from '../diagnostics/projection.ts';
+import type { DiagnosticsEventOutcome } from '@setu-ts/common';
+
+export type { KernelDiagnosticsLabelOptions, KernelDiagnosticsOptions };
 
 /** Options for {@linkcode createApplication}. */
 export interface ApplicationOptions {
   /** Plugins to pre-register before {@linkcode IApplication.start}. */
   plugins?: IPlugin[];
+  /**
+   * Explicit kernel diagnostics activation. An omitted option leaves
+   * {@linkcode IApplication.diagnostics} absent and creates no collector,
+   * metadata mirror, ring buffer, or timer anywhere in the kernel; supplying
+   * an object (even `{}`) enables collection. Malformed label allowlists
+   * reject construction — the one diagnostics failure that may.
+   *
+   * @since 0.8.0
+   */
+  diagnostics?: KernelDiagnosticsOptions;
 }
 
 /**
@@ -224,6 +248,40 @@ class Application implements IKernelApplication {
   /** Cached in-flight/completed shutdown, so stop() runs its side effects once. */
   #stopPromise: Promise<void> | null = null;
   /**
+   * The kernel diagnostics collector — `undefined` unless the application was
+   * created with `diagnostics` explicitly enabled. Every read of this field
+   * gates instrumentation, so the disabled path performs no additional work.
+   */
+  readonly #collector: DiagnosticsCollector | undefined;
+
+  constructor(diagnostics?: KernelDiagnosticsOptions) {
+    if (diagnostics === undefined) {
+      return;
+    }
+    // Construction is the ONLY place option validation may reject: malformed
+    // label allowlists throw here, value-free, before any collection exists.
+    const collector = new DiagnosticsCollector(compileLabelAllowlists(diagnostics));
+    this.#collector = collector;
+    collector.safeObserve('topology', () => {
+      this.#lifecycle.setLifecycleObserver({
+        clock: () => collector.monotonicMs(),
+        onHook: (observation) => {
+          collector.observeLifecycleHook(observation);
+        },
+      });
+    });
+  }
+
+  /**
+   * The read-only diagnostics reader when diagnostics are enabled; `undefined`
+   * — never a stub — when they are not. This member is the consumer's whole
+   * access path: pull-only reads, never a registry token, never a writer.
+   * @since 0.8.0
+   */
+  get diagnostics(): IDiagnosticsSource | undefined {
+    return this.#collector;
+  }
+  /**
    * The application's resolved error responder, read from the compiled
    * pipeline's `errorHandler` brand at startup (M70f re-review, findings 1 & 2).
    *
@@ -300,6 +358,8 @@ class Application implements IKernelApplication {
     this.#started = true;
     try {
       await this.#runStartup(options);
+      // Startup fully completed (including listen): the application serves.
+      this.#collector?.markRunning();
     } catch (error) {
       // Plugins may have connected resources and registered their `onClose`
       // hook before a later registration, environment validation, or `onInit`
@@ -314,13 +374,29 @@ class Application implements IKernelApplication {
         // later hooks cannot be reached once `runClose()` rejects.
       }
       this.#started = false;
+      // Terminal failure state: retained node/edge/event buffers are cleared
+      // inside, while the original error below is preserved untouched.
+      this.#collector?.markStartupFailed();
       throw error;
     }
   }
 
   async #runStartup(options?: StartOptions): Promise<void> {
+    this.#collector?.markStarting();
     // 1. Resolve plugin order — throws without runtime provider
-    const ordered = resolvePluginOrder(this.#plugins);
+    const resolveOperation = this.#collector?.beginOperation();
+    let ordered;
+    try {
+      ordered = resolvePluginOrder(this.#plugins);
+    } catch (error) {
+      if (resolveOperation !== undefined) {
+        this.#collector?.observeLifecycleEvent(resolveOperation, 'resolve', null, 'error');
+      }
+      throw error;
+    }
+    if (resolveOperation !== undefined) {
+      this.#collector?.observeLifecycleEvent(resolveOperation, 'resolve', null, 'ok');
+    }
 
     // The optional getters (config/logger/metadata/container) and the
     // mandatory runtime are resolved lazily via a Proxy. Runtime is fetched
@@ -333,6 +409,34 @@ class Application implements IKernelApplication {
     registry.setObserver((kind, token) => {
       this.#reportRegistryMutation(kind, token, this.#registeringPlugin);
     });
+    // Diagnostics sinks, installed beside (never instead of) the logging
+    // observer. The collector's own safeObserve boundary guards each capture.
+    const collector = this.#collector;
+    if (collector !== undefined) {
+      registry.setDiagnosticsSink((event) => {
+        collector.safeObserve('topology', () => {
+          collector.capabilityRegistrationObserved(event, this.#registeringPlugin);
+          // The runtime capability's OWN registration is the diagnostics
+          // epoch: origin and instance UUID start there — the earliest moment
+          // they can honestly exist — so every later observation carries
+          // timings while earlier ones stay null.
+          if (event.token === CAPABILITIES.RUNTIME && event.kind !== 'unregister') {
+            const runtime = this.#registry.peekResolved<IRuntimeServices>(CAPABILITIES.RUNTIME);
+            if (runtime !== undefined) {
+              collector.initializeRuntime(
+                runtime,
+                () => this.#registry.peekResolved<ITelemetryService>(CAPABILITIES.TELEMETRY),
+              );
+            }
+          }
+        });
+      });
+      this.#router.setDiagnosticsSink((event) => {
+        collector.safeObserve('topology', () => {
+          collector.routeRegistered(event);
+        });
+      });
+    }
     // Name of the plugin whose `register()` is currently running — read by
     // `environment.validate` to attribute each env-var declaration. `undefined`
     // outside the registration loop (e.g. a `validate` call from a lifecycle
@@ -466,8 +570,40 @@ class Application implements IKernelApplication {
         // caller remove the plugin that caused it.
         this.#registrationStarted = true;
         this.#registeringPlugin = plugin.name;
-        await plugin.register(ctx);
-        await this.#lifecycle.runRegister();
+        // Capture the plugin at its registration boundary: node plus DECLARED
+        // edges, before `register()` runs and while the owner attribution is
+        // unambiguous. Labels are projected through the allowlists here.
+        const pluginNodeId = collector?.pluginRegistered({
+          name: plugin.name,
+          version: plugin.version,
+          provides: plugin.provides ?? [],
+          requires: plugin.dependencies ?? [],
+          optionalDependencies: plugin.optionalDependencies ?? [],
+          consumes: plugin.consumes ?? [],
+        });
+        const registerOperation = collector?.beginOperation();
+        try {
+          await plugin.register(ctx);
+          await this.#lifecycle.runRegister();
+        } catch (error) {
+          if (registerOperation !== undefined) {
+            collector?.observeLifecycleEvent(
+              registerOperation,
+              'register',
+              pluginNodeId ?? null,
+              'error',
+            );
+          }
+          throw error;
+        }
+        if (registerOperation !== undefined) {
+          collector?.observeLifecycleEvent(
+            registerOperation,
+            'register',
+            pluginNodeId ?? null,
+            'ok',
+          );
+        }
       }
     } finally {
       this.#registeringPlugin = undefined;
@@ -475,6 +611,14 @@ class Application implements IKernelApplication {
 
     // 4. Validate collected env specs against runtime.env
     const runtime = this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    // Fallback initialization for a runtime registered as a LAZY factory,
+    // whose registration cannot be observed as a resolved instance at its
+    // mutation. `initializeRuntime` is idempotent, so an application whose
+    // runtime registered normally was already initialized in the sink above.
+    collector?.initializeRuntime(
+      runtime,
+      () => this.#registry.peekResolved<ITelemetryService>(CAPABILITIES.TELEMETRY),
+    );
     this.#validateEnvironment(runtime);
 
     // 5. Run init hooks
@@ -488,6 +632,9 @@ class Application implements IKernelApplication {
 
     // 6. Compile the middleware pipeline
     const chain = this.#pipeline.compile();
+    // Capture the compiled global pipeline once, in execution order — the
+    // stable priority sort — so middleware nodes and stage records agree.
+    collector?.middlewareCompiled(this.#pipeline.compiledDescriptors());
 
     // 6b. Resolve the application's error responder from the pipeline (M70f
     //     re-review, findings 1 & 2). `errorHandler` brands its middleware
@@ -520,7 +667,18 @@ class Application implements IKernelApplication {
         );
       }
       const adapter = this.#registry.get<IHttpAdapter>(CAPABILITIES.HTTP_ADAPTER);
-      this.#serverHandle = await adapter.listen(options.port, options.hostname);
+      const listenOperation = collector?.beginOperation();
+      try {
+        this.#serverHandle = await adapter.listen(options.port, options.hostname);
+      } catch (error) {
+        if (listenOperation !== undefined) {
+          collector?.observeLifecycleEvent(listenOperation, 'listen', null, 'error');
+        }
+        throw error;
+      }
+      if (listenOperation !== undefined) {
+        collector?.observeLifecycleEvent(listenOperation, 'listen', null, 'ok');
+      }
     }
   }
 
@@ -543,6 +701,23 @@ class Application implements IKernelApplication {
   }
 
   async #doStop(): Promise<void> {
+    // Diagnostics state flips to `stopping` as the shutdown begins; the
+    // terminal `closed` transition and the retained-buffer clear run in the
+    // `finally` below, whatever the shutdown outcome — including a rejecting
+    // shutdown or close hook.
+    this.#collector?.markStopping();
+    let shutdownFailed = false;
+    try {
+      await this.#runShutdownSequence();
+    } catch (error) {
+      shutdownFailed = true;
+      throw error;
+    } finally {
+      this.#collector?.markClosed(shutdownFailed);
+    }
+  }
+
+  async #runShutdownSequence(): Promise<void> {
     // Runs FIRST, while the application is still serving normally, so a hook
     // can tell the outside world to stop routing here before that becomes
     // true — deregistering from a service registry, for instance.
@@ -815,16 +990,22 @@ class Application implements IKernelApplication {
       ctx.state.set(ERROR_RESPONDER_STATE_KEY, this.#errorResponder);
     }
 
+    // The request operation is keyed in the collector's private WeakMap —
+    // never in application state, never a caller-supplied id.
+    this.#collector?.beginRequestOperation(ctx);
+
     this.#inFlight++;
     try {
       const pending = this.#runRequest(ctx, handle, path, request);
       if (pending === undefined) {
         this.#inFlight--;
+        this.#completeRequest(ctx, 'ok');
         return ctx.response as ResponseBuilder;
       }
       return pending.then(
         () => {
           this.#inFlight--;
+          this.#completeRequest(ctx, 'ok');
           return ctx.response as ResponseBuilder;
         },
         (error: unknown) => this.#failRequest(error, ctx),
@@ -832,6 +1013,22 @@ class Application implements IKernelApplication {
     } catch (error) {
       return this.#failRequest(error, ctx);
     }
+  }
+
+  /**
+   * Emits the request operation's completion record. Reading the status AFTER
+   * the response is final keeps the record honest about what was served; the
+   * operation is unkeyed inside the collector, so a double completion cannot
+   * occur.
+   *
+   * @param ctx - The live request context
+   * @param outcome - How the request completed
+   */
+  #completeRequest(ctx: IRequestContext, outcome: DiagnosticsEventOutcome): void {
+    this.#collector?.endRequestOperation(ctx, {
+      outcome,
+      statusCode: (ctx.response as ResponseBuilder).statusCode,
+    });
   }
 
   /**
@@ -891,18 +1088,100 @@ class Application implements IKernelApplication {
     requestHooks: readonly ((ctx: IRequestContext) => void | Promise<void>)[],
     responseHooks: readonly ((ctx: IRequestContext) => void | Promise<void>)[],
   ): Promise<void> {
+    const parentOperationId = this.#collector?.requestOperationIdOf(ctx);
     for (const hook of requestHooks) {
-      await hook(ctx);
+      await this.#observeRequestStage('request-hook', parentOperationId, () => hook(ctx));
     }
 
-    // Execute pipeline with route dispatch as terminal.
-    await this.#pipeline.execute(ctx, async () => {
-      await this.#dispatch(ctx, handle, path, request);
-    });
+    // Execute pipeline with route dispatch as terminal, observing each global
+    // stage's completion when diagnostics are enabled.
+    await this.#pipeline.execute(
+      ctx,
+      async () => {
+        await this.#dispatch(ctx, handle, path, request);
+      },
+      this.#chainObserver('global', parentOperationId, undefined),
+    );
 
     for (const hook of responseHooks) {
-      await hook(ctx);
+      await this.#observeRequestStage('response-hook', parentOperationId, () => hook(ctx));
     }
+  }
+
+  /**
+   * Runs one request-scoped hook (`onRequest`/`onResponse`/`onError`),
+   * observing its completion when diagnostics are enabled. Absent collector —
+   * or no request operation, which cannot happen on a reached path — this is
+   * a bare `await`, so the disabled path is unchanged.
+   *
+   * @param stage - Which hook boundary this is
+   * @param parentOperationId - The request operation, when known
+   * @param run - The hook invocation
+   */
+  async #observeRequestStage(
+    stage: 'request-hook' | 'response-hook' | 'error-hook',
+    parentOperationId: string | undefined,
+    run: () => void | Promise<void>,
+  ): Promise<void> {
+    const collector = this.#collector;
+    if (collector === undefined || parentOperationId === undefined) {
+      await run();
+      return;
+    }
+    const startedAtMs = collector.monotonicMs();
+    try {
+      await run();
+    } catch (error) {
+      collector.observeRequestStage({
+        parentOperationId,
+        stage,
+        outcome: 'error',
+        startedAtMs,
+        durationMs: collector.elapsedSince(startedAtMs),
+      });
+      throw error;
+    }
+    collector.observeRequestStage({
+      parentOperationId,
+      stage,
+      outcome: 'ok',
+      startedAtMs,
+      durationMs: collector.elapsedSince(startedAtMs),
+    });
+  }
+
+  /**
+   * Builds the chain observer for one chain execution (global or route).
+   * `undefined` when diagnostics are disabled, which keeps the executor's
+   * instrumented path byte-identical to the original one.
+   *
+   * @param scope - Which chain the observer instruments
+   * @param parentOperationId - The request operation the stages belong to
+   * @param routeEntryIndex - The matched route's entry index (route chains)
+   */
+  #chainObserver(
+    scope: 'global' | 'route',
+    parentOperationId: string | undefined,
+    routeEntryIndex: number | undefined,
+  ): ChainObserver | undefined {
+    const collector = this.#collector;
+    if (collector === undefined) {
+      return undefined;
+    }
+    return {
+      clock: () => collector.monotonicMs(),
+      onStage: (stage) => {
+        collector.observeMiddlewareStage({
+          parentOperationId: parentOperationId ?? '<unkeyed>',
+          scope,
+          position: stage.position,
+          routeEntryIndex,
+          outcome: stage.outcome,
+          startedAtMs: stage.startedAtMs,
+          durationMs: stage.durationMs,
+        });
+      },
+    };
   }
 
   /**
@@ -965,13 +1244,68 @@ class Application implements IKernelApplication {
     path: string,
     request: IRequest,
   ): Promise<void> {
-    if (this.#registry.has(CAPABILITIES.WEBSOCKET) && await this.#tryUpgrade(ctx)) {
+    if (
+      this.#registry.has(CAPABILITIES.WEBSOCKET) &&
+      await this.#observeProtocol(ctx, 'websocket-upgrade', () => this.#tryUpgrade(ctx))
+    ) {
       return;
     }
-    if (this.#registry.has(CAPABILITIES.GRPC) && await this.#tryGrpc(ctx)) {
+    if (
+      this.#registry.has(CAPABILITIES.GRPC) &&
+      await this.#observeProtocol(ctx, 'grpc-dispatch', () => this.#tryGrpc(ctx))
+    ) {
       return;
     }
     await this.#dispatchRoute(ctx, handle, path, request);
+  }
+
+  /**
+   * Observes one protocol-dispatch boundary (WebSocket upgrade or gRPC
+   * dispatch). A boundary that claims the request records its completion —
+   * never a claim about subsequent socket frames or RPC internals — and a
+   * thrown boundary records `error` and propagates unchanged.
+   *
+   * @param ctx - The live request context
+   * @param stage - Which protocol boundary is being attempted
+   * @param run - The boundary attempt, answering `true` when it claimed the request
+   * @returns The attempt's answer, unchanged
+   */
+  async #observeProtocol(
+    ctx: IRequestContext,
+    stage: 'websocket-upgrade' | 'grpc-dispatch',
+    run: () => Promise<boolean>,
+  ): Promise<boolean> {
+    const collector = this.#collector;
+    if (collector === undefined) {
+      return await run();
+    }
+    const parentOperationId = collector.requestOperationIdOf(ctx) ?? '<unkeyed>';
+    const startedAtMs = collector.monotonicMs();
+    try {
+      const answered = await run();
+      if (answered) {
+        collector.observeHandlerStage({
+          parentOperationId,
+          stage,
+          nodeId: null,
+          outcome: 'ok',
+          startedAtMs,
+          durationMs: collector.elapsedSince(startedAtMs),
+          statusCode: (ctx.response as ResponseBuilder).statusCode,
+        });
+      }
+      return answered;
+    } catch (error) {
+      collector.observeHandlerStage({
+        parentOperationId,
+        stage,
+        nodeId: null,
+        outcome: 'error',
+        startedAtMs,
+        durationMs: collector.elapsedSince(startedAtMs),
+      });
+      throw error;
+    }
   }
 
   /**
@@ -1002,21 +1336,26 @@ class Application implements IKernelApplication {
     }
 
     // Install matched params via the internal setter (no readonly cast)
-    const { definition, params } = routeResult;
+    const { definition, params, entry } = routeResult;
     handle.setParams(params);
 
     // Route middleware uses the same next()-chaining semantics as the global
     // pipeline: a stage that responds without calling next() short-circuits,
     // and the handler does not run. Defense-in-depth in executeChain also
-    // stops stages after the response is ended.
+    // stops stages after the response is ended. Positions follow the route's
+    // own middleware array; the terminal observes the handler itself.
     const routeMiddleware = definition.middleware;
     if (routeMiddleware !== undefined && routeMiddleware.length > 0) {
       return executeChain(
         routeMiddleware,
         ctx,
         async () => {
-          await definition.handler(ctx);
+          await this.#observeHandler(ctx, entry, async () => {
+            await definition.handler(ctx);
+          });
         },
+        undefined,
+        this.#chainObserver('route', this.#collector?.requestOperationIdOf(ctx), entry.index),
       );
     }
 
@@ -1029,14 +1368,139 @@ class Application implements IKernelApplication {
     if ((ctx.response as ResponseBuilder).ended) {
       return undefined;
     }
-    const result = definition.handler(ctx);
-    // Duck-typed, not `instanceof Promise`: a cross-realm or userland promise
-    // satisfies `RouteHandler`'s declared return type structurally but fails
-    // `instanceof`, and treating one as "already finished" would send the
-    // response while the handler was still running (M87 review).
-    // `Promise.resolve` returns a native promise unchanged, so the ordinary
-    // async path allocates nothing extra.
-    return isPromiseLike(result) ? Promise.resolve(result) : undefined;
+    return this.#invokeHandlerObserved(ctx, entry, definition);
+  }
+
+  /**
+   * Invokes a route's handler on the empty-chain bypass, observing its
+   * completion when diagnostics are enabled WITHOUT changing the bypass's
+   * synchronous contract: a sync handler still returns `undefined` from this
+   * method and an async one still returns its promise.
+   *
+   * @param ctx - The live request context
+   * @param entry - The matched route entry, naming the handler's node
+   * @param definition - The route definition holding the handler
+   * @returns `undefined` when complete synchronously, else the handler's promise
+   */
+  #invokeHandlerObserved(
+    ctx: IRequestContext,
+    entry: RouteEntry,
+    definition: RouteDefinition,
+  ): undefined | Promise<unknown> {
+    const collector = this.#collector;
+    if (collector === undefined) {
+      const result = definition.handler(ctx);
+      // Duck-typed, not `instanceof Promise`: a cross-realm or userland promise
+      // satisfies `RouteHandler`'s declared return type structurally but fails
+      // `instanceof`, and treating one as "already finished" would send the
+      // response while the handler was still running (M87 review).
+      // `Promise.resolve` returns a native promise unchanged, so the ordinary
+      // async path allocates nothing extra.
+      return isPromiseLike(result) ? Promise.resolve(result) : undefined;
+    }
+    const parentOperationId = collector.requestOperationIdOf(ctx) ?? '<unkeyed>';
+    const nodeId = collector.routeNodeIdOf(entry.index) ?? null;
+    const startedAtMs = collector.monotonicMs();
+    let result: ReturnType<typeof definition.handler>;
+    try {
+      result = definition.handler(ctx);
+    } catch (error) {
+      collector.observeHandlerStage({
+        parentOperationId,
+        stage: 'handler',
+        nodeId,
+        outcome: 'error',
+        startedAtMs,
+        durationMs: collector.elapsedSince(startedAtMs),
+      });
+      throw error;
+    }
+    if (isPromiseLike(result)) {
+      const pending = Promise.resolve(result);
+      // Observation only: the ORIGINAL promise is returned to the caller and
+      // its rejection propagates unchanged — this detached chain never
+      // swallows or re-routes it.
+      void pending.then(
+        () => {
+          collector.observeHandlerStage({
+            parentOperationId,
+            stage: 'handler',
+            nodeId,
+            outcome: 'ok',
+            startedAtMs,
+            durationMs: collector.elapsedSince(startedAtMs),
+            statusCode: (ctx.response as ResponseBuilder).statusCode,
+          });
+        },
+        () => {
+          collector.observeHandlerStage({
+            parentOperationId,
+            stage: 'handler',
+            nodeId,
+            outcome: 'error',
+            startedAtMs,
+            durationMs: collector.elapsedSince(startedAtMs),
+          });
+        },
+      );
+      return pending;
+    }
+    collector.observeHandlerStage({
+      parentOperationId,
+      stage: 'handler',
+      nodeId,
+      outcome: 'ok',
+      startedAtMs,
+      durationMs: collector.elapsedSince(startedAtMs),
+      statusCode: (ctx.response as ResponseBuilder).statusCode,
+    });
+    return undefined;
+  }
+
+  /**
+   * Runs the route chain's terminal handler, observing its completion when
+   * diagnostics are enabled. The terminal is already async, so observation
+   * adds no new microtask boundary to the disabled path.
+   *
+   * @param ctx - The live request context
+   * @param entry - The matched route entry, naming the handler's node
+   * @param run - The handler invocation
+   */
+  async #observeHandler(
+    ctx: IRequestContext,
+    entry: RouteEntry,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    const collector = this.#collector;
+    if (collector === undefined) {
+      await run();
+      return;
+    }
+    const parentOperationId = collector.requestOperationIdOf(ctx) ?? '<unkeyed>';
+    const nodeId = collector.routeNodeIdOf(entry.index) ?? null;
+    const startedAtMs = collector.monotonicMs();
+    try {
+      await run();
+      collector.observeHandlerStage({
+        parentOperationId,
+        stage: 'handler',
+        nodeId,
+        outcome: 'ok',
+        startedAtMs,
+        durationMs: collector.elapsedSince(startedAtMs),
+        statusCode: (ctx.response as ResponseBuilder).statusCode,
+      });
+    } catch (error) {
+      collector.observeHandlerStage({
+        parentOperationId,
+        stage: 'handler',
+        nodeId,
+        outcome: 'error',
+        startedAtMs,
+        durationMs: collector.elapsedSince(startedAtMs),
+      });
+      throw error;
+    }
   }
 
   /**
@@ -1065,10 +1529,11 @@ class Application implements IKernelApplication {
     if (hooks.length === 0) {
       return this.#finishFailure(err, ctx);
     }
+    const parentOperationId = this.#collector?.requestOperationIdOf(ctx);
     return (async () => {
       for (const hook of hooks) {
         try {
-          await hook(err, ctx);
+          await this.#observeRequestStage('error-hook', parentOperationId, () => hook(err, ctx));
         } catch (hookError) {
           this.#reportSuppressedHookError(hookError);
         }
@@ -1097,6 +1562,9 @@ class Application implements IKernelApplication {
     this.#inFlight--;
     this.#reportUnhandledError(err, ctx);
     respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
+    // Recorded AFTER the response is final, so the status in the record is
+    // the status that was actually served.
+    this.#completeRequest(ctx, 'error');
     return ctx.response as ResponseBuilder;
   }
 
@@ -1666,7 +2134,7 @@ class Application implements IKernelApplication {
  * @since 0.1.0
  */
 export function createApplication(options?: ApplicationOptions): IKernelApplication {
-  const app = new Application();
+  const app = new Application(options?.diagnostics);
   if (options?.plugins) {
     for (const plugin of options.plugins) {
       app.register(plugin);

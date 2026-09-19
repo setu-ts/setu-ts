@@ -87,13 +87,15 @@ package fits the plugin architecture.
 
 ## Exports
 
-| Export               | Kind      |
-| -------------------- | --------- |
-| `createApplication`  | function  |
-| `ApplicationOptions` | interface |
-| `IKernelApplication` | interface |
-| `InjectRequest`      | interface |
-| `InjectResponse`     | interface |
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `createApplication`             | function  |
+| `ApplicationOptions`            | interface |
+| `IKernelApplication`            | interface |
+| `InjectRequest`                 | interface |
+| `InjectResponse`                | interface |
+| `KernelDiagnosticsLabelOptions` | interface |
+| `KernelDiagnosticsOptions`      | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

@@ -202,6 +202,11 @@ package fits the plugin architecture.
 | `CqrsQuery`                       | interface |
 | `CqrsRequest`                     | interface |
 | `CursorPayload`                   | interface |
+| `DiagnosticsBatch`                | interface |
+| `DiagnosticsEdge`                 | interface |
+| `DiagnosticsEvent`                | interface |
+| `DiagnosticsNode`                 | interface |
+| `DiagnosticsSnapshot`             | interface |
 | `EncodedPayload`                  | interface |
 | `EnvVarSpec`                      | interface |
 | `Err`                             | interface |
@@ -240,6 +245,7 @@ package fits the plugin architecture.
 | `IDatabaseAdapter`                | interface |
 | `IDataSource`                     | interface |
 | `IDecoratorApi`                   | interface |
+| `IDiagnosticsSource`              | interface |
 | `IDnsResolver`                    | interface |
 | `IDomainEvent`                    | interface |
 | `IEnvironmentApi`                 | interface |
@@ -394,6 +400,13 @@ package fits the plugin architecture.
 | `CursorValue`                     | type      |
 | `DataClassification`              | type      |
 | `DecoratorHandler`                | type      |
+| `DiagnosticsEdgeKind`             | type      |
+| `DiagnosticsEventKind`            | type      |
+| `DiagnosticsEventOutcome`         | type      |
+| `DiagnosticsEventStage`           | type      |
+| `DiagnosticsFailureCode`          | type      |
+| `DiagnosticsNodeKind`             | type      |
+| `DiagnosticsSnapshotState`        | type      |
 | `EntityKey`                       | type      |
 | `EventHandler`                    | type      |
 | `FilterComparison`                | type      |

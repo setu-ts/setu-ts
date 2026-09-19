@@ -48,6 +48,30 @@ export interface RouteEntry {
   owner?: string;
 }
 
+/**
+ * A route registration reported to the diagnostics collector at its owning
+ * mutation boundary, carrying only bounded registration primitives.
+ *
+ * @since 0.8.0
+ */
+export interface RouteRegistrationEvent {
+  readonly kind: 'register';
+  /** The entry's insertion index — the identity dispatch uses to name the route. */
+  readonly entryIndex: number;
+  /**
+   * The method as registered — typed as the raw string deliberately, because
+   * projecting onto the supported verb vocabulary is the COLLECTOR's decision
+   * (unsupported input is omitted there, never widened).
+   */
+  readonly method: string;
+  /** The COMPLETE registered pattern, including any group prefix. */
+  readonly pattern: string;
+  /** The plugin that registered the route, when one was registering. */
+  readonly owner: string | undefined;
+  /** How many middleware stages the route's definition declares. */
+  readonly middlewareCount: number;
+}
+
 // Hono imports — use LinearRouter (not the default SmartRouter) because the
 // kernel's tie-break (§3.6) needs Hono to return EVERY overlapping candidate
 // for a path so it can re-rank them by static-segment count + registration
@@ -125,9 +149,21 @@ export class Router implements IRouterApi {
   /** Maps `${method} ${path}` → the kernel's RouteEntry. */
   readonly #entryMap = new Map<string, RouteEntry>();
   readonly #owner: () => string | undefined;
+  #diagnosticsSink: ((event: RouteRegistrationEvent) => void) | undefined;
 
   constructor(owner: () => string | undefined = () => undefined) {
     this.#owner = owner;
+  }
+
+  /**
+   * Installs the diagnostics sink that receives route registration events at
+   * the owning mutation boundary. Pass `undefined` to detach (teardown).
+   *
+   * @param sink - The collector-facing sink, or `undefined`
+   * @since 0.8.0
+   */
+  setDiagnosticsSink(sink: ((event: RouteRegistrationEvent) => void) | undefined): void {
+    this.#diagnosticsSink = sink;
   }
 
   #registerMethod(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
@@ -157,6 +193,16 @@ export class Router implements IRouterApi {
     };
     this.#routes.push(entry);
     this.#entryMap.set(key, entry);
+    // Reported at the owning mutation boundary, after the entry exists — a
+    // duplicate-key refusal above never reaches this line.
+    this.#diagnosticsSink?.({
+      kind: 'register',
+      entryIndex: entry.index,
+      method,
+      pattern: path,
+      owner,
+      middlewareCount: definition.middleware?.length ?? 0,
+    });
 
     // Register on Hono with a stub handler. The stub does NOT execute the
     // framework handler — it exists only so Hono's matcher records the
@@ -249,7 +295,12 @@ export class Router implements IRouterApi {
   match(
     method: HttpMethod,
     path: string,
-  ): { definition: RouteDefinition; params: Record<string, string> } | null {
+  ): {
+    definition: RouteDefinition;
+    params: Record<string, string>;
+    /** The selected entry — dispatch names the actual route node from its index. */
+    entry: RouteEntry;
+  } | null {
     // Delegate to Hono's router for matching.
     // honoMatch shape: [[[handler, routeInfo], params], ...]
     // honoMatch[0] is the flat array of candidates.
@@ -280,7 +331,7 @@ export class Router implements IRouterApi {
       const params = decodeParams(rawParams);
       // A malformed escape means this route does not match, mirroring the
       // multi-candidate path's `continue` when every candidate is dropped.
-      return params === null ? null : { definition: entry.definition, params };
+      return params === null ? null : { definition: entry.definition, params, entry };
     }
 
     // Build candidates array: map each Hono candidate to the kernel RouteEntry.
@@ -320,7 +371,7 @@ export class Router implements IRouterApi {
     // If only one candidate, return it directly.
     if (candidates.length === 1) {
       const { entry, params } = candidates[0];
-      return { definition: entry.definition, params };
+      return { definition: entry.definition, params, entry };
     }
 
     // Tie-break: more static segments, then fewer wildcards, then earliest
@@ -336,7 +387,7 @@ export class Router implements IRouterApi {
     });
 
     const best = candidates[0];
-    return { definition: best.entry.definition, params: best.params };
+    return { definition: best.entry.definition, params: best.params, entry: best.entry };
   }
 
   /**

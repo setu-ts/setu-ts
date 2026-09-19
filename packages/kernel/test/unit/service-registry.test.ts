@@ -211,4 +211,107 @@ describe('ServiceRegistry', () => {
       expect(parent.get('shared')).toEqual({ from: 'parent' });
     });
   });
+
+  describe('peekResolved', () => {
+    it('returns the cached instance of a resolved registration', () => {
+      const registry = new ServiceRegistry();
+      const instance = { kind: 'instance' };
+      registry.register('svc', instance);
+
+      expect(registry.peekResolved<{ kind: string }>('svc')).toBe(instance);
+    });
+
+    it('returns undefined for an unresolved factory without executing it', () => {
+      const registry = new ServiceRegistry();
+      let constructed = 0;
+      registry.registerFactory('lazy', () => {
+        constructed++;
+        return { built: true };
+      });
+
+      expect(registry.peekResolved('lazy')).toBeUndefined();
+      expect(constructed).toBe(0);
+      // The peek does not poison a later real resolution.
+      expect(registry.get('lazy')).toEqual({ built: true });
+    });
+
+    it('falls through to the parent for a token absent locally', () => {
+      const parent = new ServiceRegistry();
+      const instance = { from: 'parent' };
+      parent.register('shared', instance);
+      const child = parent.createChild();
+
+      expect(child.peekResolved<{ from: string }>('shared')).toBe(instance);
+      // A token on neither registry answers undefined.
+      expect(child.peekResolved('absent')).toBeUndefined();
+    });
+
+    it('never falls past an unresolved LOCAL registration to the parent', () => {
+      const parent = new ServiceRegistry();
+      parent.register('shared', { from: 'parent' });
+      const child = parent.createChild();
+      child.registerFactory('shared', () => ({ from: 'child' }));
+
+      // The local factory is unresolved: "present but never constructed" is
+      // the answer, not the parent's instance.
+      expect(child.peekResolved('shared')).toBeUndefined();
+      expect(child.get('shared')).toEqual({ from: 'child' });
+    });
+
+    it('uses the single-registration lookup precedence over multi-providers', () => {
+      const registry = new ServiceRegistry();
+      const single = { single: true };
+      registry.register('svc', single);
+      registry.register('svc', { multi: true }, { multi: true });
+
+      expect(registry.peekResolved('svc')).toBe(single);
+    });
+
+    it('peeks the first multi-provider without enumerating the rest', () => {
+      const registry = new ServiceRegistry();
+      const first = { first: true };
+      registry.register('svc', first, { multi: true });
+      registry.register('svc', { second: true }, { multi: true });
+
+      expect(registry.peekResolved('svc')).toBe(first);
+    });
+  });
+
+  describe('diagnostics sink', () => {
+    it('reports successful registrations and removals, never refused ones', () => {
+      const registry = new ServiceRegistry();
+      const events: { kind: string; token: string }[] = [];
+      registry.setDiagnosticsSink((event) => events.push(event));
+
+      registry.register('svc', {});
+      registry.registerFactory('lazy', () => ({}));
+      registry.register('multi', {}, { multi: true });
+      expect(events).toEqual([
+        { kind: 'register-single', token: 'svc' },
+        { kind: 'register-single', token: 'lazy' },
+        { kind: 'register-multi', token: 'multi' },
+      ]);
+
+      events.length = 0;
+      expect(registry.unregister('svc')).toBe(true);
+      expect(events).toEqual([{ kind: 'unregister', token: 'svc' }]);
+      // A removal that removed nothing reports nothing.
+      registry.unregister('absent');
+      expect(events.length).toBe(1);
+
+      // A refused duplicate throws and produces NO event.
+      events.length = 0;
+      expect(() => registry.register('lazy', {})).toThrow(/already registered/);
+      expect(events).toEqual([]);
+    });
+
+    it('detaches when the sink is set to undefined', () => {
+      const registry = new ServiceRegistry();
+      const events: unknown[] = [];
+      registry.setDiagnosticsSink((event) => events.push(event));
+      registry.setDiagnosticsSink(undefined);
+      registry.register('svc', {});
+      expect(events).toEqual([]);
+    });
+  });
 });
