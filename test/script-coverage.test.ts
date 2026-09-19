@@ -67,8 +67,8 @@ function fullTable(overrides: Readonly<Record<string, boolean>> = {}): string {
 }
 
 describe('script-coverage target-set completeness', () => {
-  it('has exactly eight canonical targets', () => {
-    expect(SCRIPT_TARGETS.length).toBe(8);
+  it('has exactly nine canonical targets', () => {
+    expect(SCRIPT_TARGETS.length).toBe(9);
     expect(SCRIPT_TARGETS).toContain('scripts/check-docs.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/check-prose-assertions.ts');
     // The @since gate (M95d): its registry fetch is the injected I/O seam;
@@ -87,6 +87,12 @@ describe('script-coverage target-set completeness', () => {
     // The residual-version gate. Its `sweepTrackedFiles`/`trackedFiles` walkers
     // are the I/O seam; the decidable core carries the bar.
     expect(SCRIPT_TARGETS).toContain('scripts/version-sweep.ts');
+    // The changelog-coverage gate: every export added to a published barrel
+    // since the last release, against the Unreleased section. Its git reads are
+    // the I/O seam; the comparison and the reporting carry the bar. Its failure
+    // mode is a SILENT PASS — an export ships unannounced and the gate says it
+    // did not — which is why it is a target rather than a convenience.
+    expect(SCRIPT_TARGETS).toContain('scripts/check-changelog-coverage.ts');
   });
 
   it('rejects zero rows (no coverage data)', () => {

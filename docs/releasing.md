@@ -180,6 +180,17 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
 
   Every line it prints must name the version being released.
 
+- **Widening `SHIPPED_VERSION_LINES` surfaces doc references the specifier sweep cannot see.**
+  `check:versions` matches `@setu-ts` SPECIFIERS; the document gates match version CLAIMS, and they
+  only match lines the alternation names. So the widening in the step above is what first reports
+  every `deno add jsr:@setu-ts/…@^<previous>` in the guides — 44 of them when `v0.7.0` was cut. Bump
+  those, then read the diff rather than trusting it: two of the 44 were HISTORICAL (a claim about
+  what a past release turned on, and an upgrading-guide heading naming the docs a broken example was
+  copied from), and bumping them made them false. Those get a `version:history` marker instead. A
+  comment that genuinely tracks the current release — the Dockerfile's quoted resolution error, the
+  chart's `appVersion` note — is bumped, which is what `VERSIONED_ARTIFACTS` in
+  `scripts/check-docs.ts` documents.
+
 - **A version bump must not rewrite both ends of a RANGE.** README's Versioning section explains the
   caret with a worked range — `^0.6.0` means `>=0.6.0 <0.7.0` — where the second number is the UPPER
   bound and is one minor AHEAD of the release. A line-oriented sweep rewrites both, producing
