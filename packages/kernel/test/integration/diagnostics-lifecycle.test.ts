@@ -44,6 +44,47 @@ describe('diagnostics lifecycle integration', () => {
     expect(app.diagnostics!.snapshot().state).toBe('failed');
   });
 
+  it('the kernel-supported retry after a resolve-stage failed start reports running', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        // Resolve-stage failure: resolvePluginOrder throws BEFORE any plugin
+        // registers, which is the correctable path unregister supports.
+        {
+          name: 'broken-dep',
+          version: '1.0.0',
+          dependencies: ['missing-capability'],
+          register() {},
+        },
+        {
+          name: 'server',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.router.get('/ok', (c) => c.response.json({ ok: true }));
+          },
+        },
+      ],
+      diagnostics: {},
+    });
+    await expect(app.start()).rejects.toThrow(/missing-capability/);
+    expect(app.diagnostics!.snapshot().state).toBe('failed');
+
+    // The kernel's own supported correction: unregister + start() again.
+    expect(app.unregister('broken-dep')).toBe(true);
+    await app.start();
+    const res = await app.inject({ method: 'GET', url: '/ok' });
+    expect(res.statusCode).toBe(200);
+    // The reader must NOT keep reporting the failed attempt while the
+    // retried application serves.
+    const snapshot = app.diagnostics!.snapshot();
+    expect(snapshot.state).toBe('running');
+    expect(snapshot.failureCode).toBeNull();
+    expect(snapshot.nodes.length).toBeGreaterThan(0);
+    const batch = app.diagnostics!.read(0);
+    expect(batch.events.some((event) => event.stage === 'request')).toBe(true);
+    await app.stop();
+  });
+
   it('observes the resolver, per-plugin registration, hooks, and the shutdown window', async () => {
     const order: string[] = [];
     // Captured from inside an onShutdown hook — the only reader position

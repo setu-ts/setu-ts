@@ -264,8 +264,26 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
   // State machine
   // ---------------------------------------------------------------------------
 
-  /** Application start has begun. */
+  /**
+   * Application start has begun. A start following a FAILED start resets the
+   * reader for the new attempt — the kernel rolls its own `#started` back so
+   * a failed start can be corrected and retried, and the reader must not keep
+   * reporting `failed` for a process that is starting (or later serving)
+   * again. The failed attempt's retained metadata was already cleared by
+   * `markStartupFailed`, so the reset recovers nothing sensitive; `closed`
+   * remains absolute (a stopped application never restarts its reader).
+   */
   markStarting(): void {
+    if (this.#state === 'failed') {
+      this.#failureCode = null;
+      this.#clearRetained();
+      // Deliberate latch reset (not #transition): a NEW start() after a
+      // failed one is the kernel's supported retry, and only this method may
+      // leave `failed`.
+      this.#state = 'starting';
+      this.#snapshotDirty = true;
+      return;
+    }
     this.#transition('starting');
   }
 

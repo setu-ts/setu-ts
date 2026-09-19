@@ -20,14 +20,14 @@ npx jsr add @setu-ts/kernel
 
 ## What's Inside
 
-| Area              | Exports                                                                                              |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| Application       | `createApplication()`, `ApplicationOptions`, `IKernelApplication`, `InjectRequest`, `InjectResponse` |
-| Plugin resolution | `resolvePluginOrder()` (internal), dependency topological sort, cycle detection                      |
-| Service registry  | `ServiceRegistry` (internal), single/multi/lazy-factory registrations, request-scoped children       |
-| Middleware        | `MiddlewarePipeline` (internal), priority-ordered execution, short-circuit, double-next guard        |
-| Router            | `Router` (internal), 7 verbs, route groups, static-over-param matching preference                    |
-| Lifecycle         | `LifecycleManager` (internal), init/bootstrap/shutdown (LIFO)/close + request/response/error         |
+| Area              | Exports                                                                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Application       | `createApplication()`, `ApplicationOptions`, `IKernelApplication`, `InjectRequest`, `InjectResponse`, `app.diagnostics` reader (opt-in) |
+| Plugin resolution | `resolvePluginOrder()` (internal), dependency topological sort, cycle detection                                                         |
+| Service registry  | `ServiceRegistry` (internal), single/multi/lazy-factory registrations, request-scoped children                                          |
+| Middleware        | `MiddlewarePipeline` (internal), priority-ordered execution, short-circuit, double-next guard                                           |
+| Router            | `Router` (internal), 7 verbs, route groups, static-over-param matching preference                                                       |
+| Lifecycle         | `LifecycleManager` (internal), init/bootstrap/shutdown (LIFO)/close + request/response/error                                            |
 
 Only the seven public exports listed above are part of the public API; all concrete classes are
 internal.

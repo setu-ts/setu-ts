@@ -128,6 +128,50 @@ describe('DiagnosticsCollector — snapshot contract', () => {
     expect(collector.snapshot().failureCode).toBe('startup-failed');
   });
 
+  it('a NEW start after a failed start resets the reader (the kernel supports retry)', () => {
+    const collector = collectorWith({ labels: { plugins: ['api'] } });
+    collector.markStarting();
+    collector.pluginRegistered({
+      name: 'api',
+      version: '1.0.0',
+      provides: ['db'],
+      requires: [],
+      optionalDependencies: [],
+      consumes: [],
+    });
+    collector.markStartupFailed();
+    expect(collector.snapshot().state).toBe('failed');
+
+    // The kernel's supported retry: unregister + start() again. markStarting
+    // resets the latch, clears the failure code, and drops the failed
+    // attempt's (already-cleared) retained metadata.
+    collector.markStarting();
+    const retried = collector.snapshot();
+    expect(retried.state).toBe('starting');
+    expect(retried.failureCode).toBeNull();
+    expect(retried.nodes).toEqual([]);
+    // The retry collects normally and reaches running.
+    collector.pluginRegistered({
+      name: 'api',
+      version: '1.0.0',
+      provides: ['db'],
+      requires: [],
+      optionalDependencies: [],
+      consumes: [],
+    });
+    collector.markRunning();
+    const running = collector.snapshot();
+    expect(running.state).toBe('running');
+    expect(running.nodes.length).toBeGreaterThan(0);
+    // A SECOND failure still terminates, and markClosed from failed is
+    // still ignored (only a new markStarting may leave failed).
+    collector.markStartupFailed();
+    expect(collector.snapshot().state).toBe('failed');
+    collector.markClosed(false);
+    expect(collector.snapshot().state).toBe('failed');
+    expect(collector.snapshot().failureCode).toBe('startup-failed');
+  });
+
   it('closed reads answer an empty, closed batch without throwing', () => {
     const collector = collectorWith();
     collector.markRunning();

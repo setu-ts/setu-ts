@@ -158,7 +158,10 @@ integration consumer test; compile a consumer against every proposed signature.
 - On startup failure and at final shutdown, clear retained node/edge/event buffers in a `finally`
   path while preserving the original application error. A reader then sees the coarse failed/closed
   state, failure code and counters; it cannot recover discarded sensitive metadata. This diagnostics
-  cleanup does not change which application lifecycle hooks run or their failure semantics.
+  cleanup does not change which application lifecycle hooks run or their failure semantics. A
+  resolve-stage failed start is retried by the kernel's supported correction (unregister + a new
+  `start()`), and that new `start()` resets the reader: the `failed` latch clears, the failure code
+  drops, and collection restarts — only `closed` (a stopped application) is absolute.
 - **Test home:** `diagnostics-registration.test.ts`, `diagnostics-lifecycle.test.ts`, and existing
   registry/router/lifecycle unit suites with observation enabled and absent.
 
