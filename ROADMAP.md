@@ -10943,6 +10943,41 @@ workspace. Those are the cases where the remedy that works for `setu new` — de
 tracking written files and unlinking them on failure is small, fixes all six call sites at once, and
 directly restores retryability. `Ctrl-C` mid-run hits the same path, so the trigger is ordinary.
 
+**A sweep for the same shape found one more gap the `writeFiles` fix would NOT close.** `adopt` is
+three phases — move the project's files, write the workspace files, rewrite the entry — and only the
+middle one goes through `writeFiles`. The third sits in a bare `catch {}` whose comment covers one
+case only ("No entry at all: a Workers project has `src/index.ts` and binds no port"). A genuine
+write failure — EACCES, disk full — is swallowed by that same catch, `rewritten` stays `undefined`,
+and the command then prints its no-port-literal guidance:
+
+```
+Its entry does not carry the port literal this rewrites, so bind the allocated
+port yourself — two lines in apps/<member>/main.ts:
+```
+
+So a **write failure is reported as a shape mismatch**, and the developer is told to do something by
+hand without being told anything failed. Narrow the catch to the missing-entry case and report a
+write failure as one.
+
+**Three places in the same codebase already do this correctly, which is why the above reads as an
+oversight rather than a policy.** They are the models for the fix:
+
+- **`moveFile`** is copy → verify → delete, with the ordering reasoned in its own comment: _"A crash
+  before this leaves the file in both places, which is recoverable; the other order loses it."_
+- **`adopt`'s move loop** — the phase immediately before the defective one — fails with _"Stopped
+  part-way. Every file moved so far exists in both places, so nothing is lost — finish or undo the
+  move by hand."_ It is not transactional either, but it is safe by ordering and it names the exact
+  state and the remedy. That is precisely what `writeFiles` does not do.
+- **`setu add`** recomputes its edit list from the files' current contents on every run and pushes
+  an edit only when it would change something, so a partially applied run self-heals on retry —
+  idempotence rather than rollback, the other legitimate answer.
+- **`scripts/publish-packages.ts`**, where a partial result is genuinely unrecoverable because JSR
+  versions are immutable, skips already-published versions so a failed run resumes. Its header says
+  so outright.
+
+Two correct patterns, both already in the tree: **roll back, or be idempotent**. `writeFiles` is
+neither, and `adopt`'s third phase is neither and silent as well.
+
 **Why they are one letter.** Both are the CLI's output being unusable rather than wrong, both are in
 one package, and both are cases no gate reaches because every gate drives the happy path.
 
