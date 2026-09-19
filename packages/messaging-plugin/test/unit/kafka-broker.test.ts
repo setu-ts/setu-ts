@@ -313,18 +313,33 @@ describe('KafkaBroker', () => {
   // Guarded real-import test - exercises the lazy-load path
   it('connect without an injected client exercises the loadKafkajs() lazy-import path', async () => {
     // Covers the real loadKafkajs() -> await import('npm:kafkajs@2.x') path by constructing
-    // a broker with NO injected client. connect() rejects either way: if kafkajs is present it
-    // fails to connect to the non-existent instance below; if kafkajs is absent the dynamic import
-    // rejects. In both cases loadKafkajs() is entered, so this remains coverage of the real import
-    // path rather than the injected-client seam (which validateClient covers separately).
+    // a broker with NO injected client. connect() rejects either way: if kafkajs is present the
+    // empty broker list below is refused, and if kafkajs is absent the dynamic import rejects. In
+    // both cases loadKafkajs() is entered, so this remains coverage of the real import path rather
+    // than the injected-client seam (which validateClient covers separately).
+    //
+    // An EMPTY broker list rather than a dead port. `brokers: ['localhost:9999']` reached the same
+    // lines and then spent 15 s doing it, because kafkajs treats a refused connection as retriable
+    // and works through its whole default retry budget — probed against the installed package:
+    // `retries: 5`, `initialRetryTime: 300`, `multiplier: 2` — before
+    // giving up — the slowest step in this package's unit tests. An empty list is a
+    // KafkaJSNonRetriableError raised in ~3 ms (measured), so the rejection is immediate AND
+    // deterministic: the dead-port form's duration also varied with DNS and firewall behaviour.
+    // `#brokers` is assigned with `??`, so `[]` is passed through rather than defaulted.
     const runtime = createFakeRuntime();
     const serializer = new JsonSerializer();
 
     const broker = new KafkaBroker(runtime, serializer, {
-      brokers: ['localhost:9999'], // Non-existent Kafka instance
+      brokers: [],
     });
 
-    await expect(broker.connect()).rejects.toThrow();
+    // Pinned to the EMPTY-LIST rejection rather than merely "it rejected". A
+    // revert to `brokers: ['localhost:9999']` still rejects, so a bare
+    // `rejects.toThrow()` would pass with the 15 s wait restored and nothing
+    // would notice. kafkajs answers a refused connection with
+    // `KafkaJSNumberOfRetriesExceeded: Connection error`, which this does not
+    // match.
+    await expect(broker.connect()).rejects.toThrow('brokers array is empty');
   });
 
   // K1: seeded-message delivery

@@ -78,6 +78,14 @@ export const SCRIPT_TARGETS: readonly string[] = [
   // is a SILENT PASS — an export ships unannounced and the gate says it did
   // not — so the comparison itself carries the bar, with its I/O injected.
   'scripts/check-changelog-coverage.ts',
+  // The suite partition's classifier. Its runner (`test-partition.ts`) is
+  // deliberately NOT a target — it is the process seam the decidable logic was
+  // extracted out of, and a test cannot drive it without spawning the whole
+  // suite. Its failure mode is a SILENT PASS: a signal dropped from
+  // `isolationReason` moves a hazardous suite into the parallel phase, nothing
+  // goes red, and the cost surfaces later as an intermittent failure somewhere
+  // else entirely.
+  'scripts/test-partition-rules.ts',
 ];
 
 interface FileCoverage {

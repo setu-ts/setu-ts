@@ -166,6 +166,14 @@ try {
     throw new Error(`Responder answered ${String(answer)}, expected 42.`);
   }
 } finally {
-  worker.kill('SIGTERM');
+  // `kill()` on an already-terminated child THROWS, and a throw from a `finally`
+  // replaces the in-flight exception — so a worker that died on its own reported
+  // `TypeError: Child process has already terminated` and discarded the real
+  // failure. Its status still needs awaiting below.
+  try {
+    worker.kill('SIGTERM');
+  } catch {
+    // Already gone.
+  }
   await worker.status;
 }

@@ -566,6 +566,38 @@ describe('workspace scaffolding — end to end', () => {
       stderr: 'piped',
     }).spawn();
 
+    // ONE teardown path, idempotent, reached from both the failure and the
+    // success route. It returns what the sibling printed, so a failure can name
+    // it.
+    //
+    // Two defects this replaces, both observed in a full sequential run on
+    // 2026-09-19. `kill()` on an already-terminated child THROWS, and a throw
+    // from a `finally` replaces the in-flight exception — so when `billing`
+    // exited on its own, the reported failure was `TypeError: Child process has
+    // already terminated` and the assertion failure that actually mattered was
+    // discarded. `workspace-mesh-e2e.test.ts` already carries this guard at its
+    // three spawn sites; this was the instance that missed it. And `billing`'s
+    // streams were piped and then cancelled unread, so even with the guard a
+    // dead sibling surfaced only as a non-200 from the probe, naming neither the
+    // peer nor the reason. Reading both to completion also releases the
+    // subprocess resource, which is what the cancels were there for.
+    let drained: { out: string; err: string } | null = null;
+    const shutdown = async (): Promise<{ out: string; err: string }> => {
+      if (drained !== null) return drained;
+      try {
+        server.kill();
+      } catch {
+        // Already exited; its status and streams still need draining.
+      }
+      await server.status;
+      const [out, err] = await Promise.all([
+        new Response(server.stdout).text(),
+        new Response(server.stderr).text(),
+      ]);
+      drained = { out, err };
+      return drained;
+    };
+
     try {
       const result = await bootAndProbe(`${ws}/apps/orders`, RESOLVE_PROBE);
 
@@ -576,12 +608,23 @@ describe('workspace scaffolding — end to end', () => {
       // The request arrived: the generated map and the sibling's binding agree.
       expect(result['status']).toBe(200);
       expect(String(result['body'])).toContain('Hello, World!');
+    } catch (error) {
+      // The shutdown is itself guarded, because a throw from here would replace
+      // this assertion failure with a teardown error — which is the exact defect
+      // this whole teardown was rewritten to remove, and it would have been
+      // reintroduced inside the fix for it. `new Response(stream).text()` throws
+      // on an already-disturbed stream, so the path is reachable.
+      let sibling = "  (sibling 'billing' output unavailable — its teardown failed)";
+      try {
+        const { out, err } = await shutdown();
+        sibling = `--- sibling 'billing' (expected on port ${base + 1}) stdout ---\n${out}\n` +
+          `--- sibling 'billing' stderr ---\n${err}`;
+      } catch (teardown) {
+        sibling += `\n  teardown: ${(teardown as Error).message}`;
+      }
+      throw new Error(`${(error as Error).message}\n\n${sibling}`, { cause: error });
     } finally {
-      server.kill();
-      await server.status;
-      // The piped streams keep the subprocess resource alive until they close.
-      await server.stdout.cancel();
-      await server.stderr.cancel();
+      await shutdown();
     }
   });
 });

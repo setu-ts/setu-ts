@@ -371,13 +371,21 @@ describe('GcpPubSubBroker B6 lifecycle', () => {
       // Resolve deferred to let inbox open complete
       openDeferred.resolve();
 
-      try {
-        await req;
-      } catch {
-        // May timeout without a responder — we're testing create count.
-      }
-
+      // Disconnect BEFORE settling the request, which is the same order test A
+      // uses. `createRuntime()` delegates to the real global `setTimeout`, so
+      // awaiting `req` first waited out the whole 10 s `timeoutMs` — a real ten
+      // seconds of the suite spent on a value no assertion here reads, and the
+      // single slowest step in this file. `RequestReplyCore.close()` rejects
+      // every pending request with `Broker disconnected before a reply was
+      // received` and clears its timer, so this settles immediately and
+      // deterministically rather than depending on a race between the timeout
+      // and the teardown.
       await broker.disconnect();
+
+      // Pinned to the DISCONNECT rejection rather than swallowed. Awaiting `req`
+      // before the disconnect also rejects — on the 10 s timeout — so a bare
+      // try/catch would pass with the wait restored and nothing would notice.
+      await expect(req).rejects.toThrow('Broker disconnected before a reply was received');
     });
   });
 });

@@ -243,7 +243,15 @@ export async function bootAndSignal(
     throw new Error(`The project never served a request:\n${await stderr.text()}`);
   }
 
-  child.kill(signal);
+  // Guarded for the same reason the `!served` branch above is: a project that
+  // served a request and then exited on its own leaves nothing to kill, and the
+  // throw would replace a usable result with `TypeError: Child process has
+  // already terminated` — discarding the output this function exists to return.
+  try {
+    child.kill(signal);
+  } catch {
+    // Already gone; its status and output are still collected below.
+  }
   const status = await child.status;
   const output = `${await stdout.text()}${await stderr.text()}`;
 
