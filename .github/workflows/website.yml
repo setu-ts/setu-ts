@@ -37,6 +37,12 @@ jobs:
         working-directory: website
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Executes third-party code: `deno task install` installs the site's
+          # npm graph, the Astro and Pagefind CLIs then run under it, and the
+          # Lighthouse step fetches and runs a CLI with `npx -y`. It runs no git
+          # command at all.
+          persist-credentials: false
 
       # Two toolchains, each load-bearing:
       # - Deno regenerates the API reference (deno task docs:api) and runs the site's

@@ -154,6 +154,16 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The most exposed checkout in this repository, and the reason the
+          # credential audit (issue #340) did not stop at ci.yml. This job
+          # deliberately resolves EVERY range fresh (`--reload --frozen=false`)
+          # and then runs the whole suite against whatever upstream published
+          # this week — unreviewed third-party code, by design. It needs no git
+          # credential: its only git command is a local `git ls-files`, and the
+          # issue-filing step gets its token explicitly through GH_TOKEN rather
+          # than from the git config.
+          persist-credentials: false
 
       - uses: denoland/setup-deno@v2
         with:

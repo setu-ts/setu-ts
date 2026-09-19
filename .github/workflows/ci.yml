@@ -8,10 +8,22 @@ on:
 permissions:
   contents: read
 
+# Credential persistence (issue #340). `actions/checkout` writes GITHUB_TOKEN into the local git
+# config by default, so anything the job runs afterwards can read it — including third-party code
+# this workflow resolves, installs and in places imports. Every job below was reviewed one at a
+# time, and NONE performs a networked git operation: the only git commands anywhere in these gates
+# are `git show <tag>:<path>`, `git rev-parse` and `git ls-files`, which are local object reads.
+# So every checkout here sets `persist-credentials: false`, each with its own reason recorded at
+# the step. `fetch-depth: 0` still works, because the fetch happens during checkout while the
+# credential is live; only its persistence afterwards is dropped. A job that later needs a real
+# git credential must say so at its own step and explain the operation — see the release job in
+# `release.yml`, which keeps one for exactly that reason.
+
 jobs:
   # This is deliberately the only job a fork PR can run. It does not check out contributor code,
   # start a service, or receive secrets. A failure prevents GitHub from treating the skipped,
-  # resource-intensive jobs below as successful required checks.
+  # resource-intensive jobs below as successful required checks. It has no checkout step, so there
+  # is no credential to persist and nothing to decide.
   fork-contribution-policy:
     name: Fork contribution policy
     runs-on: ubuntu-latest
@@ -157,9 +169,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Executes third-party code: `deno ci` resolves the whole graph, the
+          # suite lazily imports `npm:` drivers, and `check:apps` installs
+          # dependencies into the example projects. No step needs a credential
+          # afterwards — the only git this job runs is three LOCAL object reads
+          # (`git show` at a release tag, `git rev-parse`, `git ls-files`), none
+          # of which touches the remote.
+          persist-credentials: false
           # The changelog-coverage gate compares each published barrel against the
           # last RELEASE TAG, and a shallow checkout fetches no tags — it would fail
           # closed on every run. Full history is what makes the comparison possible.
+          # Fetched HERE, while checkout still holds the credential, so dropping it
+          # above costs the gate nothing.
           fetch-depth: 0
 
       - uses: denoland/setup-deno@v2
@@ -321,6 +342,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Executes third-party code: this job exists to install and exercise
+          # several supported third-party majors. It runs no git command at all.
+          persist-credentials: false
 
       - uses: denoland/setup-deno@v2
         with:
@@ -348,6 +373,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Executes third-party code: the image builds run `deno cache`, which
+          # resolves and compiles the dependency graph, and the cluster gate
+          # drives kind, kubectl and helm. It runs no git command at all.
+          persist-credentials: false
 
       - uses: denoland/setup-deno@v2
         with:
@@ -394,6 +424,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Resolves third-party code: `publish:check` type-checks every package,
+          # which fetches the whole graph. The only git here is `git ls-files`
+          # inside the version sweep — a local read.
+          persist-credentials: false
 
       - uses: denoland/setup-deno@v2
         with:
@@ -457,6 +492,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The strongest case in this workflow, and the same one the two compat
+          # jobs document: it resolves a package from a public registry and then
+          # dynamically IMPORTS it, so third-party code executes here. It runs no
+          # git command at all.
+          persist-credentials: false
 
       - uses: denoland/setup-deno@v2
         with:
@@ -487,6 +528,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Does NOT execute third-party code — it reads `deno.lock` and queries
+          # the advisory endpoints — but it needs no credential either, so the
+          # default persistence is a credential in reach for no benefit. It runs
+          # no git command at all.
+          persist-credentials: false
 
       - uses: denoland/setup-deno@v2
         with:
