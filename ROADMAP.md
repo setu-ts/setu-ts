@@ -10815,6 +10815,283 @@ need separate transport, retention and access-control designs before implementat
 
 ---
 
+## Milestone 99: The `v0.7.0` Smoke Closeout
+
+**Source:** the `v0.7.0` regression run (`smoke/V070-REGRESSION.md`) and the Part 12 exercise block
+(`smoke/X52-X55-FINDINGS.md`), both run 2026-09-19 against the published artifacts. Eight findings,
+three **High**. `M98` is held by the diagnostics work, so this block is `M99`.
+
+**Grouped by SHAPE, not by package** — the rule this register has used since M70. Two findings sit
+together when one fix reasoning covers both, so a letter is one coherent branch and one review.
+
+| Letter   | Shape                                                           | Rows                | Packages                                      |
+| -------- | --------------------------------------------------------------- | ------------------- | --------------------------------------------- |
+| **M99a** | a safety control that reports safe for a case it does not cover | V7-2 **High**, V7-4 | `logger-plugin`, `common`, `messaging-plugin` |
+| **M99b** | what the CLI writes cannot then be used                         | V7-5 **High**, V7-8 | `cli`, `docs`                                 |
+| **M99c** | two first-party components that must agree, and do not          | V7-6 **High**, V7-1 | `sdk`, `openapi-plugin`, `kernel`             |
+| **M99d** | a composition the framework silently declines to give you       | V7-3, V7-7          | `decorator-plugin`, `secrets-plugin`          |
+
+**Sequence.** M99a first — it is the only letter where the defect is live in a running deployment's
+security posture. M99b next, because V7-5 blocks the containerised story end to end. M99c and M99d
+are independent of both and of each other.
+
+---
+
+### Milestone 99a: A Control That Reports Safe For What It Does Not Cover
+
+**Package(s):** `packages/logger-plugin`, `packages/common`, `packages/messaging-plugin`
+
+**Objective:** two controls whose whole purpose is to answer "is this safe / is this alive" answer
+**yes** for the case they were introduced to cover.
+
+**V7-2 (High) — the new default redaction misses lowercase `authorization`.**
+`DEFAULT_SECRET_FIELD_PATTERNS` spells one of its six entries `'**.Authorization'`, and the legacy
+`redact` path that carries the defaults compiles case-SENSITIVELY (`console-logger.ts:97` and
+`logger-plugin.ts:286` both hardcode `{ caseSensitive: true }`). The Fetch API lowercases header
+names, so `Headers.entries()` can only ever yield `authorization`. Measured through a real kernel
+app on stock `LoggerPlugin()`:
+
+```
+{"msg":"inbound","authorization":"Bearer eyJ-REAL-SESSION-TOKEN","cookie":"[Redacted]"}
+```
+
+The cookie is masked and the bearer token beside it is not — one object, one call, one policy,
+identical on both transports.
+
+**The fix is already in the codebase, one path over.** `createRedactionService` defaults
+`caseSensitive: false`, so the identical six patterns supplied through the `redaction` policy option
+redact `authorization` correctly — measured, and Part 12's X54 confirms both logger and audit agree
+that way. So the seam is right and only its defaults are wrong. Preference order: lowercase the
+entry; or compile the DEFAULT list case-insensitively while leaving a user-supplied `redact` list
+case-sensitive for compatibility.
+
+**V7-4 — a dead Service Bus reverts to `up` five seconds after proving itself dead.** The data-plane
+evidence window works (`down`/`reachable:false`/503 at +0/+2000/+4000 ms) and then expires: past
+`dataPlaneEvidenceMs` the recorded failure ages out, the management probe resolves `unknown`, and
+`unknown` maps to **`up`**. The failing publish took **90,015 ms** to reject first, so the broker is
+dead and unreported for a minute and a half before any evidence exists at all. An outage does not
+heal by elapsed time: retain a negative outcome until a successful publish or a successful
+management probe contradicts it.
+
+**Why they are one letter.** Both are a control that fails OPEN, and both fail open through the same
+reasoning error — treating "I have no current evidence" as "it is fine". Fixing one without the
+other leaves the register's own rule half-applied.
+
+**Scope note.** V7-2 is **not a regression** — `0.6.0` had no default redaction, so both fields
+leaked there. `0.7.0` strictly improves matters; it just leaves the highest-value field uncovered
+while covering the one beside it. V7-4 is measured against the emulator, where the management plane
+is structurally unreachable; real Azure would likely catch it, unverified.
+
+---
+
+### Milestone 99b: What the CLI Writes Cannot Then Be Used
+
+**Package(s):** `packages/cli`, `docs/deployment.md`
+
+**Objective:** the CLI's two headline outputs — a generated deployment and a scaffolded project —
+each leave the developer with something they cannot proceed from.
+
+**V7-5 (High) — `--no-lock` makes a generated deployment fetch from npm at startup, so M95a is not
+closed.** The error moved from `Failed writing lockfile` to `Failed caching npm package …` /
+`Failed loading … for package "buffer-more-ints"`; the outcome is the same crash-loop. The generated
+Dockerfile does `COPY deno.json* deno.lock* ./`, then `RUN deno cache main.ts` — which resolves
+**through that lockfile** — and then runs `CMD ["run", "--no-lock", …]`, **ignoring the lockfile it
+shipped**. Unpinned, the runtime re-resolves every npm range to whatever the cached registry
+metadata calls `latest`, which is not what the build cached.
+
+Reproduced from a pristine published-CLI scaffold after the CLI's own printed `deno install`
+(lockfile 1,361 → 65,275 bytes). One image, one set of conditions, one flag different:
+
+| runtime flags                    | outcome                                                                                   |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `--no-lock` (what the CLI emits) | fetches `redis-errors`, `buffer-more-ints` → **dies**                                     |
+| lockfile used (no flag)          | resolves from the image cache; reaches only `ECONNREFUSED` on the broker                  |
+| **`--frozen`**                   | same, and with a broker reachable it **serves `/health` 200 under `ReadonlyRootfs=true`** |
+
+The packages it reaches for are transitive dependencies of the **lazily imported drivers**. Two
+promises break, not one: `readOnlyRootFilesystem: true` turns it into a crash, and
+`docs/deployment.md`'s rule that the image's module cache is the only runtime dependency source is
+false, so an air-gapped cluster fails even with a writable root. Observed in a real cluster
+splitting two replicas of one image — one Running, one CrashLoopBackOff.
+
+**Fix:** `--frozen` in place of `--no-lock`. It uses the shipped lockfile and never writes one, so
+the original read-only write remains impossible. **`check:deploy --generated` cannot see this** — it
+scaffolds, builds and runs without ever executing `deno install`, so it ships the stub lockfile and
+build and runtime coincidentally agree. The gate needs a `deno install` step.
+
+**V7-8 — a scaffold interrupted mid-write is not retryable, and the refusal blames the user.**
+Reported publicly from a source reading; the reading is accurate. `writeFiles`
+(`utils/file-writer.ts:193-208`) is a bare `mkdir`/`writeFile` loop with **no rollback**, so a
+failed write N leaves 1..N-1 behind and `findExisting` refuses them on retry — naming the files but
+not the cause, so the CLI's own debris is presented as the user's pre-existing project. Measured: a
+read-only `src/` leaves 5 files; the retry refuses all 5.
+
+**`setu generate` is the sharper case and was not in the report.** The aggregate barrel is `managed`
+and therefore **exempt** from `findExisting`, so a read-only barrel passes the preflight and fails
+LAST: the module's five files survive, the barrel does not list them, and the project is left
+silently incoherent — the "generated code is wired" property. Unlike `new`, this is inside a project
+holding the developer's own work, so deleting the directory is not available.
+
+**The blast radius is the whole write path, not one command.** `writeFiles` is the single writer
+behind **six** commands — `new`, `generate`, `generate app`, `generate library`, `workspace` and
+`adopt`. Two of those operate by definition on a directory that already holds the developer's code:
+`adopt` "converts an existing project into a workspace", and `generate library` adds to a live
+workspace. Those are the cases where the remedy that works for `setu new` — delete it and start over
+— is not available at all.
+
+**Fix:** make `writeFiles` transactional. It already tracks a `created` set for directories, so
+tracking written files and unlinking them on failure is small, fixes all six call sites at once, and
+directly restores retryability. `Ctrl-C` mid-run hits the same path, so the trigger is ordinary.
+
+**Why they are one letter.** Both are the CLI's output being unusable rather than wrong, both are in
+one package, and both are cases no gate reaches because every gate drives the happy path.
+
+---
+
+### Milestone 99c: Two First-Party Components That Must Agree, And Do Not
+
+**Package(s):** `packages/sdk`, `packages/openapi-plugin`, `packages/kernel`
+
+**Objective:** in both rows a producer and its intended first-party consumer disagree, so a
+documented loop cannot be completed.
+
+**V7-6 (High) — `generateOpenApiClient` aborts on a document this framework produces.**
+
+```
+OpenApiCodegenError: Duplicate generated name 'GetOrdersResponse200':
+  'component schema 'GetOrdersResponse200'' and 'the 200 response body of operation 'get-orders''
+```
+
+Two changes that shipped together derive the same name for the same shape and the registry correctly
+refuses the second claim. One made `openapi-plugin` name a hoisted component after its first use
+(replacing a meaningless `Schema1`); the other made the SDK hoist an inline multi-line response body
+and derive a name the same way. When a response schema is reused — so it becomes that component —
+**and** its enclosing body is inline — so it gets hoisted — both claim the identical name. Minimal
+reproduction with a passing `$ref` control is committed.
+
+**Not a regression:** the `0.6.0` SDK throws identically. Why no run caught it: the X11 exercise
+generates from a **committed fixture** that predates the component renaming and still says
+`Schema1`. Part 12's X53 now generates from a running application and carries the trigger by design,
+so it fails until this is fixed. **Fix:** give the two producers disjoint name spaces — suffix a
+hoisted response body, or have the hoister reuse a structurally identical existing component.
+
+**V7-1 — `inject()` drops `Blob.type`, so a multipart Blob `500`s where the same bytes serve
+`200`.** The byte-ish shapes pass through with no content-type default on the stated ground that
+"only the caller knows whether bytes are multipart, JSON, or an image". That holds for `Uint8Array`
+and `ArrayBuffer`. It does not hold for `Blob`, which carries `.type` — the caller **has** said —
+and the platform's own `new Request(url, { body: blob })` sets `Content-Type` from it. Measured on
+one Blob carrying `multipart/form-data; boundary=…`:
+
+```
+app.fetch(Blob)  -> 200 {"ct":"multipart/form-data; boundary=…","title":"hello"}
+app.inject(Blob) -> 500   UnsupportedFormEncodingError "…is not a … multipart/form-data body." (it IS one)
+```
+
+So an upload route tested through the framework's own test entry point fails, with an error naming
+the wrong cause, while the identical bytes work in production. **Fix:** default the content-type
+from a non-empty `blob.type`, matching the platform; leave `Uint8Array`/`ArrayBuffer` alone.
+
+**Why they are one letter.** Each is a first-party producer disagreeing with a first-party consumer
+about a shape they both own, and in both the disagreement only appears when the loop is driven end
+to end rather than each side tested alone.
+
+---
+
+### Milestone 99d: A Composition The Framework Silently Declines To Give You
+
+**Package(s):** `packages/decorator-plugin`, `packages/secrets-plugin`
+
+**Objective:** two places where a developer expresses a composition the framework then does not
+provide — one by ignoring half of it without a word, one by offering no way to express it at all.
+
+**V7-3 — `DecoratorPlugin` silently ignores the other decorator family on a listed class.** M97a
+added a second class list beside `controllers`. Each registers only its own family, and **neither
+warns about the other's decorators on a class it was given.** Measured on one class carrying
+`@Controller` + `@Get` + `@Processor`, with a logger attached so a warning would be visible:
+
+```
+controllers: [F]           HTTP=200  processor fired=false   diagnostic=NONE
+ingress:     [F]           HTTP=404  processor fired=true    diagnostic=NONE
+controllers+ingress: [F]   HTTP=200  processor fired=true    diagnostic=NONE
+```
+
+Both directions lose half the class; the `ingress`-only row is worse because the symptom is a
+**404**, which sends the reader to the router rather than the plugin options. The machinery already
+exists — five distinct misuses are refused at `register()` naming class, method and alternative —
+and the metadata is already in hand. The existing "class carries no `@Controller`" warning cannot
+cover this case, because the class legitimately has that metadata. **Fix:** warn when a class in
+`controllers` carries ingress metadata and vice versa, naming the other option. Secondary: the
+`decorator-plugin` README — the page jsr.io renders — documents the `ingress` option nowhere.
+
+**V7-7 — the cloud secrets providers cannot be pointed at an emulator.** `AwsKmsProviderOptions` is
+`region`/`accessKeyId`/`secretAccessKey`/`client` and has **no `endpoint`**; the GCP and Azure
+providers have no equivalent. On the documented **lazy** path they can only ever address the real
+cloud, so the inject-or-lazy design has a hole on exactly the providers where credentials are most
+sensitive. The inconsistency is inside one framework: `storage-plugin`'s `S3Provider` **does**
+expose `endpoint`, and its own JSDoc names the intended targets — _"R2, MinIO, B2, LocalStack, …"_.
+`HashiCorpVaultProvider` is unaffected; it takes `address`. **Fix:** add `endpoint?: string` to the
+three cloud secrets providers, matching `S3Provider`.
+
+**Why they are one letter.** Both are small, both are about the developer's expressed intent being
+quietly unmet, and both were invisible to every gate because the gates exercise one family or one
+provider arm at a time.
+
+---
+
+### Why the programme did not find V7-8 — a methodological gap, not a coverage gap
+
+V7-8 was found by an outside reader within an hour of the project being posted, by reading the
+source for an unhandled error path. Fifty-six exercises and eleven run reports had not. That is
+worth stating precisely, because the reason is structural and it predicts the next miss.
+
+**Every step of the protocol assumes the operation succeeds.** Start from empty, scaffold, use the
+CLI, follow the docs, drive the real entry point, prove causation, negative-control the result. The
+programme is exhaustively empirical and it is very good at what that method finds — two components
+that disagree, a control that reports the wrong thing, a composition nobody had built. Six of this
+run's eight findings are exactly that shape.
+
+What it has never done is **interrupt** an operation. Nothing in the catalogue kills a command
+mid-write, runs the same command twice, or starts from a damaged state. The harness actively
+prevents the last one: `repin.py` drops lockfiles, `build/` and `node_modules` so that "nothing
+stale survives", and protocol step 1 is literally _"Start from empty"_. A pristine starting state is
+an axiom of the programme, so a half-written project is a condition it cannot reach.
+
+The failure modes the register does cover are **dependency** failures (a stopped container, a paused
+broker) and **adversarial input** (hostile payloads, cross-origin attacks). Both are things done
+_to_ a healthy framework. Neither is the framework's own multi-step operation failing halfway
+through its own work.
+
+**The method gap matters as much as the coverage gap.** An error path that never executes in a
+healthy environment is invisible to a purely empirical programme, however many applications it
+composes. Reading source for paths with no rollback, no retry and no idempotency is a different
+technique, and the register has no step for it.
+
+**Three additions follow, and they are cheap:**
+
+1. **A protocol step** — _"Run it twice. Interrupt it once."_ Applied to every command that writes,
+   every migration, and every startup that mutates state.
+2. **An exercise class** — interrupt / retry / idempotency, of which X56 is the first instance.
+   Injection is a read-only directory for EACCES, `SIGINT` for the ordinary case.
+3. **A source sweep for the shape**, rather than waiting for the next report. The first sweep
+   produced the six-command blast radius above in under a minute, which is the argument for it.
+
+### Out of scope for M99 — the smoke harness
+
+Three defects were found in the harness rather than the framework and are fixed in `smoke/` and
+`~/Projects/hono-enterprise-published-smoke/`, recorded in `smoke/ENVIRONMENT.md`. They are listed
+because one of them invalidated part of a previous run's claims:
+
+- **`repin.py` silently skipped the npm-ALIAS specifier form**, leaving 98 specifiers across 10
+  manifests at the old version while reporting `0 manifest(s) rewritten … ['(none)']`. **This also
+  affected the `v0.6.0` run**: its `x11-consumer`, `x17-prompt`, `x27-runtimes` and `x37-runtimes`
+  npm arms and `x9-edge` were exercised at `0.1.0-alpha.8` … `0.5.0`, not `0.6.0`.
+- **`x51-health/check.py` targeted a container that was not running**, so `docker stop` was a no-op
+  and the indicator correctly reported `up` — a vacuous pass on the one condition the check exists
+  for.
+- **`x2-orders/docker/Dockerfile` still carried the `v0.6.0` hand-patch** for the defect `0.7.0`
+  fixes. It crash-looped in the cluster and looked exactly like a High regression; ruling it out is
+  what led to V7-5 being found properly.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                           |
@@ -10972,3 +11249,8 @@ need separate transport, retention and access-control designs before implementat
 | 98        | ⬜     | secure read-only devtool diagnostics (umbrella; planned)                                                                          |
 | 98a       | ⬜     | kernel + common — metadata and execution observation                                                                              |
 | 98b       | ⬜     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector                                               |
+| 99        | ⬜     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                        |
+| 99a       | ⬜     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                |
+| 99b       | ⬜     | cli + docs — what the CLI writes cannot then be used                                                                              |
+| 99c       | ⬜     | sdk + openapi-plugin + kernel — two first-party components that must agree, and do not                                            |
+| 99d       | ⬜     | decorator-plugin + secrets-plugin — a composition the framework silently declines to give you                                     |
