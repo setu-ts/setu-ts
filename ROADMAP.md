@@ -10920,11 +10920,11 @@ scaffolds, builds and runs without ever executing `deno install`, so it ships th
 build and runtime coincidentally agree. The gate needs a `deno install` step.
 
 **V7-8 — a scaffold interrupted mid-write is not retryable, and the refusal blames the user.**
-Reported publicly from a source reading; the reading is accurate. `writeFiles`
-(`utils/file-writer.ts:193-208`) is a bare `mkdir`/`writeFile` loop with **no rollback**, so a
-failed write N leaves 1..N-1 behind and `findExisting` refuses them on retry — naming the files but
-not the cause, so the CLI's own debris is presented as the user's pre-existing project. Measured: a
-read-only `src/` leaves 5 files; the retry refuses all 5.
+Reported by **`kantorcodes1`** on r/SideProject, from reading the source rather than running it; the
+reading is accurate. `writeFiles` (`utils/file-writer.ts:193-208`) is a bare `mkdir`/`writeFile`
+loop with **no rollback**, so a failed write N leaves 1..N-1 behind and `findExisting` refuses them
+on retry — naming the files but not the cause, so the CLI's own debris is presented as the user's
+pre-existing project. Measured: a read-only `src/` leaves 5 files; the retry refuses all 5.
 
 **`setu generate` is the sharper case and was not in the report.** The aggregate barrel is `managed`
 and therefore **exempt** from `findExisting`, so a read-only barrel passes the preflight and fails

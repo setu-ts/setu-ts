@@ -10,6 +10,10 @@ generated container reaches the npm registry at startup and dies under its own g
 posture; an interrupted scaffold leaves debris that the next run refuses, blaming the developer for
 files the CLI wrote seconds earlier.
 
+Rows: **V7-5** (the generated deployment) and **V7-8** (the interrupted scaffold). V7-8 was reported
+by `kantorcodes1` on r/SideProject from a source reading, and the same-shape sweep it prompted is
+what found the six-command blast radius below.
+
 - **In scope:** the generated Dockerfile's runtime flag; transactional behaviour for the one writer
   behind six commands; the third, non-`writeFiles` write phase in `adopt`.
 - **NOT this milestone:** the `check:deploy --generated` gate's missing `deno install` step is IN
@@ -39,11 +43,12 @@ the image cache and reaches only `ECONNREFUSED` on the broker; with `--frozen` i
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                             | Resolution (picked side)                                                                               | Doc deliverable (same PR)                                                               |
-| -- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| C1 | `docs/deployment.md` states the image's module cache is the member's only runtime dependency source; with `--no-lock` the container fetches from npm | The doc states the intended guarantee. Change the flag so the doc becomes true                         | `docs/deployment.md` gains the `--frozen` reasoning and drops any `--no-lock` rationale |
-| C2 | The generated Dockerfile's own comment says the lockfile "has no job left inside an image"                                                           | False: the lockfile is exactly what makes the build-time cache and the runtime resolution agree        | The emitted comment is rewritten in `packages/cli/src/templates/`                       |
-| C3 | M95a's ROADMAP section records V6-5 as closed                                                                                                        | It is not; the error moved. M95a's mechanism paragraph stays (it was correct about the lockfile write) | The M95a section gains a note pointing at M99b, rather than being rewritten             |
+| #  | Conflict                                                                                                                                                                                         | Resolution (picked side)                                                                               | Doc deliverable (same PR)                                                               |
+| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| C1 | `docs/deployment.md` states the image's module cache is the member's only runtime dependency source; with `--no-lock` the container fetches from npm                                             | The doc states the intended guarantee. Change the flag so the doc becomes true                         | `docs/deployment.md` gains the `--frozen` reasoning and drops any `--no-lock` rationale |
+| C2 | The generated Dockerfile's own comment says the lockfile "has no job left inside an image"                                                                                                       | False: the lockfile is exactly what makes the build-time cache and the runtime resolution agree        | The emitted comment is rewritten in `packages/cli/src/templates/`                       |
+| C4 | V7-8 came from outside the project and the repository has no convention for crediting an external reporter — the nearest precedents are `Reported in code review before merge` and an issue link | Credit the reporter by handle in the entry that ships the fix, as the durable public record            | `CHANGELOG.md`'s V7-8 entry names `kantorcodes1` and links the thread                   |
+| C3 | M95a's ROADMAP section records V6-5 as closed                                                                                                                                                    | It is not; the error moved. M95a's mechanism paragraph stays (it was correct about the lockfile write) | The M95a section gains a note pointing at M99b, rather than being rewritten             |
 
 ## 3. Design decisions
 
