@@ -11058,14 +11058,23 @@ cover this case, because the class legitimately has that metadata. **Fix:** warn
 `controllers` carries ingress metadata and vice versa, naming the other option. Secondary: the
 `decorator-plugin` README — the page jsr.io renders — documents the `ingress` option nowhere.
 
-**V7-7 — the cloud secrets providers cannot be pointed at an emulator.** `AwsKmsProviderOptions` is
-`region`/`accessKeyId`/`secretAccessKey`/`client` and has **no `endpoint`**; the GCP and Azure
-providers have no equivalent. On the documented **lazy** path they can only ever address the real
-cloud, so the inject-or-lazy design has a hole on exactly the providers where credentials are most
-sensitive. The inconsistency is inside one framework: `storage-plugin`'s `S3Provider` **does**
-expose `endpoint`, and its own JSDoc names the intended targets — _"R2, MinIO, B2, LocalStack, …"_.
-`HashiCorpVaultProvider` is unaffected; it takes `address`. **Fix:** add `endpoint?: string` to the
-three cloud secrets providers, matching `S3Provider`.
+**V7-7 — two cloud secrets providers cannot be pointed at an emulator.** **Two of four, not three —
+the original finding overstated it, and verifying against source while writing this plan is what
+caught it.** `AwsKmsProviderOptions` is `region`/`accessKeyId`/`secretAccessKey`/`client` with **no
+`endpoint`** (`providers/aws-kms.ts:32-41`), and `GcpSecretManagerProviderOptions` is
+`projectId`/`client` with no equivalent (`providers/gcp-secret-manager.ts:38-43`). On the documented
+**lazy** path those two can only ever address the real cloud, so the inject-or-lazy design has a
+hole on exactly the providers where credentials are most sensitive.
+
+**The other two already do it, and are the models.** `AzureKeyVaultProviderOptions.vaultUrl`
+(`providers/azure-key-vault.ts:36-37`) is handed straight to the SDK as
+`new SecretClient(vaultUrl, credential)` (`:74`), so it IS the endpoint and Azure can be pointed
+anywhere; `HashiCorpVaultProvider` takes `address`. Outside this package `storage-plugin`'s
+`S3Provider` exposes `endpoint`, its JSDoc naming the intended targets — _"R2, MinIO, B2,
+LocalStack, …"_.
+
+**Fix:** add `endpoint?: string` to the AWS and GCP providers, matching the shape the other two
+already have.
 
 **Why they are one letter.** Both are small, both are about the developer's expressed intent being
 quietly unmet, and both were invisible to every gate because the gates exercise one family or one
