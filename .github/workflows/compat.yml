@@ -45,6 +45,14 @@ jobs:
         working-directory: compat
     steps:
       - uses: actions/checkout@v4
+        with:
+          # These jobs install and then dynamically IMPORT 48 packages resolved
+          # at `latest` from a public registry, so third-party code runs on this
+          # runner. `actions/checkout` persists GITHUB_TOKEN into the local git
+          # config by default, which would put a usable credential within reach
+          # of it. Nothing here runs a git command — the same reasoning, and the
+          # same setting, as the publish job in `release.yml`.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -67,6 +75,14 @@ jobs:
         working-directory: compat
     steps:
       - uses: actions/checkout@v4
+        with:
+          # These jobs install and then dynamically IMPORT 48 packages resolved
+          # at `latest` from a public registry, so third-party code runs on this
+          # runner. `actions/checkout` persists GITHUB_TOKEN into the local git
+          # config by default, which would put a usable credential within reach
+          # of it. Nothing here runs a git command — the same reasoning, and the
+          # same setting, as the publish job in `release.yml`.
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@v2
         with:
