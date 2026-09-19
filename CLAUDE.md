@@ -5229,6 +5229,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   interpolate its generated markup, while escaping Hono templates use application-level `raw()`. It
   does not alter the global form-CSRF middleware policy and does not add multipart field parsing,
   which remains M94b — complete.
+- **Milestone 98a** (`packages/kernel` + `packages/common` — optional read-only kernel diagnostics):
+  `createApplication({ diagnostics: {} })` enables collection and exposes the pull-only
+  `IApplication.diagnostics` reader (`snapshot()` / `read(after, limit?)`); an omitted option
+  allocates nothing and leaves the property absent. DTO contracts live in
+  `common/src/services/diagnostics.ts`; the kernel owns collection at registration, lifecycle, and
+  execution boundaries with exact-allowlist labels (off by default), bounded topology/events, and
+  value-free failure codes; terminal failure and shutdown clear retained metadata. Ships
+  `scripts/inspect-kernel.ts` (runnable consumer, subprocess-tested) and
+  `scripts/benchmark-kernel-diagnostics.ts` (paired harness; measured near parity on this tree) —
+  complete (PR pending).
 
 ## Verification (run before declaring any work done)
 
