@@ -180,7 +180,7 @@ describe('RedisRateLimitStore', () => {
       expect(typeof RedisCtor).toBe('function');
     });
 
-    it('resolves a real client through the lazy path when no client is injected', async () => {
+    it('reaches the real ioredis constructor through the lazy path', async () => {
       try {
         await import('npm:ioredis@5.x');
       } catch {
@@ -211,6 +211,15 @@ describe('RedisRateLimitStore', () => {
       // assertions below distinguish "the real module was loaded and its
       // constructor was reached" from "the injected-client branch was taken".
       // No socket is opened, so no timer or handle outlives the test either.
+      //
+      // What this therefore no longer covers, stated rather than left implied:
+      // `resolveClient` RETURNING a constructed client, and a command issued on
+      // one. The constructor throws, so the return never completes. Recovering
+      // that needs a reachable Redis, and `auth-plugin`'s own
+      // `test.permissions` grants no `net` at all — so it would mean widening
+      // this package's permissions for one test. The injected-fake tests above
+      // cover the command sequence; what is uniquely covered here is the lazy
+      // import and reaching the real constructor, which is what the name says.
       const store = new RedisRateLimitStore({ runtime, url: 'redis://127.0.0.1:99999' });
       const failure = await store.increment('guarded-key', 1000).then(
         () => null,

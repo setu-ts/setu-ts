@@ -92,40 +92,63 @@ export interface TestPartition {
 }
 
 /**
- * Lists every tracked test file.
+ * Every file name shape `deno test` treats as a test file.
  *
- * `git ls-files` rather than a directory walk: it is the tracked, non-ignored
- * set, it needs no ignore rules of its own, and it is what every other gate here
- * uses. A failure THROWS rather than yielding an empty list, because an empty
- * list reads downstream as "nothing to isolate" and would put the whole suite
- * into the parallel phase.
- *
- * @returns Repository-relative `*.test.ts` paths, sorted
- * @throws {Error} If `git ls-files` fails
+ * Deno runs `*.test.*`, `*_test.*` and a file named exactly `test.*`, so all
+ * three are matched. Classifying only `*.test.ts` left the other two shapes
+ * unclassified AND still enumerated by phase 2 — that is, running in parallel
+ * whatever they touched.
  */
-export async function trackedTestFiles(): Promise<readonly string[]> {
-  const listed = await new Deno.Command('git', {
-    args: ['ls-files', '--', ...ROOTS],
-    stdout: 'piped',
-    stderr: 'piped',
-  }).output();
-  if (!listed.success) {
-    throw new Error(`git ls-files failed: ${new TextDecoder().decode(listed.stderr).trim()}`);
+const TEST_FILE = /(\.test\.[tj]sx?|_test\.[tj]sx?|(^|\/)test\.[tj]sx?)$/;
+
+/** Directories a walk never descends into. */
+const SKIP_DIRECTORIES = new Set(['node_modules', 'coverage', 'build', 'dist']);
+
+/**
+ * Lists every test file under {@linkcode ROOTS} by walking the filesystem.
+ *
+ * A walk rather than `git ls-files`, which is what every other gate here uses,
+ * and the difference is load-bearing in both directions. `git ls-files` names
+ * files that may not EXIST — an unstaged `rm` or `mv` leaves an index entry
+ * whose read throws, and since this runs before the suite it took down
+ * `deno task test` entirely with a bare `NotFound`. And it omits UNTRACKED
+ * files, which `deno test` still enumerates: a new suite written but not yet
+ * staged was therefore classified by neither phase and ran in parallel
+ * regardless of what it touched, which also made this module's own claim that a
+ * suite is "isolated the moment it is written" false until it was staged.
+ *
+ * Walking the same roots `deno test` is given makes the classified set the set
+ * that actually runs, which is the only version of this that can be correct.
+ *
+ * @returns Repository-relative test-file paths, sorted
+ */
+export async function discoverTestFiles(): Promise<readonly string[]> {
+  const found: string[] = [];
+  const walk = async (directory: string): Promise<void> => {
+    for await (const entry of Deno.readDir(directory)) {
+      if (entry.name.startsWith('.') || SKIP_DIRECTORIES.has(entry.name)) continue;
+      const path = `${directory}/${entry.name}`;
+      if (entry.isDirectory) {
+        await walk(path);
+      } else if (entry.isFile && TEST_FILE.test(entry.name)) {
+        found.push(path);
+      }
+    }
+  };
+  for (const root of ROOTS) {
+    await walk(root);
   }
-  return new TextDecoder().decode(listed.stdout)
-    .split('\n')
-    .filter((line) => line.endsWith('.test.ts'))
-    .sort();
+  return found.sort();
 }
 
 /**
- * Splits the tracked test files into the two phases.
+ * Splits the discovered test files into the two phases.
  *
- * @param files - Paths to classify; defaults to every tracked test file
+ * @param files - Paths to classify; defaults to every discovered test file
  * @returns The partition
  */
 export async function partitionTests(files?: readonly string[]): Promise<TestPartition> {
-  const paths = files ?? await trackedTestFiles();
+  const paths = files ?? await discoverTestFiles();
   const isolated: string[] = [];
   const hermetic: string[] = [];
   const reasons = new Map<string, string>();

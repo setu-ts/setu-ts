@@ -19,9 +19,9 @@
 import { expect } from '@std/expect';
 import { describe, it } from '@std/testing/bdd';
 import {
+  discoverTestFiles,
   isolationReason,
   partitionTests,
-  trackedTestFiles,
 } from '../../scripts/test-partition-rules.ts';
 
 /** The suite that failed on CI under the reverted, narrower partition. */
@@ -30,8 +30,8 @@ const CI_FLAKE = 'packages/storage-plugin/test/integration/stream-backpressure-r
 const LOCAL_FLAKE = 'packages/cli/test/e2e/workspace-mesh-e2e.test.ts';
 
 describe('test partition', () => {
-  it('reconciles with the tracked test tree', async () => {
-    const tracked = await trackedTestFiles();
+  it('reconciles with the discovered test tree', async () => {
+    const tracked = await discoverTestFiles();
     const { isolated, hermetic } = await partitionTests();
 
     // Vacuity guard: an empty listing would satisfy every set assertion below.
@@ -94,6 +94,67 @@ describe('test partition', () => {
     const { isolated, reasons } = await partitionTests();
     const unexplained = isolated.filter((path) => !reasons.has(path));
     expect(unexplained).toEqual([]);
+  });
+
+  it('classifies a file the git index does not name', async () => {
+    // Review of #343 found the file set came from `git ls-files`, so an UNTRACKED
+    // suite — one written but not yet staged — was classified by neither phase
+    // while `deno test` still enumerated it, i.e. it ran in parallel whatever it
+    // touched. Reproduced before the fix. It also made this module's own claim
+    // that a suite is isolated "the moment it is written" false until staged.
+    const path = 'packages/kernel/test/unit/zz-partition-probe.test.ts';
+    await Deno.writeTextFile(
+      path,
+      "import { describe, it } from '@std/testing/bdd';\n" +
+        "describe('probe', () => { it('REDIS_URL', () => {}); });\n",
+    );
+    try {
+      const { isolated, reasons } = await partitionTests();
+      expect(isolated).toContain(path);
+      expect(reasons.get(path)).toBe('shared backend (REDIS_URL)');
+    } finally {
+      await Deno.remove(path);
+    }
+  });
+
+  it('never yields a path that is not on disk', async () => {
+    // The other half of the same finding: `git ls-files` names a path left by an
+    // unstaged `rm`, and reading it threw a bare `NotFound` — which, because this
+    // runs before the suite, took `deno task test` down entirely rather than
+    // simply not running that file. A walk cannot name a file that is not there,
+    // which is the property this asserts: discovered, then removed, then gone.
+    const path = 'packages/kernel/test/unit/zz-vanishing-probe.test.ts';
+    await Deno.writeTextFile(path, "import '@std/expect';\n");
+    expect(await discoverTestFiles()).toContain(path);
+    await Deno.remove(path);
+    expect(await discoverTestFiles()).not.toContain(path);
+    // And the default path still classifies cleanly with it gone.
+    const { isolated, hermetic } = await partitionTests();
+    expect(isolated.length + hermetic.length).toBe((await discoverTestFiles()).length);
+  });
+
+  it("discovers Deno's other test-file shapes", async () => {
+    // `deno test` runs `*_test.ts` and a bare `test.ts` as well as `*.test.ts`.
+    // Matching only the last left the other two unclassified while phase 2 still
+    // enumerated them, i.e. running in parallel whatever they touched.
+    //
+    // This drives DISCOVERY, not `isolationReason`. A first version of this test
+    // asserted `isolationReason('…/a_test.ts', …)`, which passes whatever the
+    // file-shape pattern is — that function classifies any path handed to it and
+    // never filters by name — so it could not see the defect at all. Narrowing
+    // the pattern back to `*.test.ts` left it green; it now fails.
+    const directory = 'packages/kernel/test/unit';
+    const shapes = [`${directory}/zz_shape_test.ts`, `${directory}/zz-shape-dir/test.ts`];
+    await Deno.mkdir(`${directory}/zz-shape-dir`, { recursive: true });
+    await Deno.writeTextFile(shapes[0] as string, "import '@std/expect';\n");
+    await Deno.writeTextFile(shapes[1] as string, "import '@std/expect';\n");
+    try {
+      const discovered = await discoverTestFiles();
+      for (const shape of shapes) expect(discovered).toContain(shape);
+    } finally {
+      await Deno.remove(shapes[0] as string);
+      await Deno.remove(`${directory}/zz-shape-dir`, { recursive: true });
+    }
   });
 
   it('isolates both suites that actually flaked', async () => {

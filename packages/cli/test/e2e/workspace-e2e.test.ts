@@ -609,13 +609,20 @@ describe('workspace scaffolding — end to end', () => {
       expect(result['status']).toBe(200);
       expect(String(result['body'])).toContain('Hello, World!');
     } catch (error) {
-      const { out, err } = await shutdown();
-      throw new Error(
-        `${(error as Error).message}\n\n` +
-          `--- sibling 'billing' (expected on port ${base + 1}) stdout ---\n${out}\n` +
-          `--- sibling 'billing' stderr ---\n${err}`,
-        { cause: error },
-      );
+      // The shutdown is itself guarded, because a throw from here would replace
+      // this assertion failure with a teardown error — which is the exact defect
+      // this whole teardown was rewritten to remove, and it would have been
+      // reintroduced inside the fix for it. `new Response(stream).text()` throws
+      // on an already-disturbed stream, so the path is reachable.
+      let sibling = "  (sibling 'billing' output unavailable — its teardown failed)";
+      try {
+        const { out, err } = await shutdown();
+        sibling = `--- sibling 'billing' (expected on port ${base + 1}) stdout ---\n${out}\n` +
+          `--- sibling 'billing' stderr ---\n${err}`;
+      } catch (teardown) {
+        sibling += `\n  teardown: ${(teardown as Error).message}`;
+      }
+      throw new Error(`${(error as Error).message}\n\n${sibling}`, { cause: error });
     } finally {
       await shutdown();
     }

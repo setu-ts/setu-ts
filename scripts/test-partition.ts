@@ -120,6 +120,19 @@ if (import.meta.main) {
     Deno.exit(1);
   }
 
+  // Phase 2 excludes the isolated set with a COMMA-separated `--ignore`, so a
+  // path containing a comma would split into two non-existent paths, silently
+  // un-excluding the real one and running it in parallel. No such path exists
+  // today and none should; refusing is cheaper than encoding around it.
+  const comma = isolated.filter((path) => path.includes(','));
+  if (comma.length > 0) {
+    console.error(
+      `test-partition: cannot exclude a path containing a comma: ${comma.join(' ')}. ` +
+        `Rename the file.`,
+    );
+    Deno.exit(1);
+  }
+
   console.log(
     `test-partition: ${isolated.length} isolated, ${hermetic.length} in parallel ` +
       `(${new Set(reasons.values()).size} distinct isolation reasons)`,
