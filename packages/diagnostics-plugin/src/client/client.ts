@@ -1,0 +1,364 @@
+/**
+ * The native diagnostics client — the reviewed implementation of protocol
+ * v1's client side, consumed by the separately maintained devtool.
+ *
+ * Every dependency is injected (subtle, fetch, timing): no ambient runtime
+ * globals, no new optional dependency. Requests are serialized and reserve
+ * unique, strictly increasing sequence numbers — a number is never reused,
+ * including after a network failure. Every response is MAC-verified over
+ * its exact bounded bytes BEFORE parsing, displaying, or persisting
+ * anything, and bodies are read under a hard 256 KiB ceiling with a fixed
+ * 5-second abort deadline.
+ *
+ * @module
+ */
+
+import type { DiagnosticsBatch, DiagnosticsSnapshot } from '@setu-ts/common';
+
+import {
+  importSessionKey,
+  parseMac,
+  requestMacFields,
+  responseMacFields,
+  sha256Hex,
+  signFields,
+  verifyFields,
+} from '../security/authentication.ts';
+import type { DiagnosticsClientOptions, IDiagnosticsClient } from '../interfaces/index.ts';
+import {
+  isBatchProjection,
+  isSnapshotProjection,
+  isStatusBody,
+  SNAPSHOT_TARGET,
+  STATUS_TARGET,
+} from '../protocol/protocol.ts';
+
+/**
+ * The fixed request deadline, in milliseconds.
+ *
+ * @internal
+ */
+const REQUEST_DEADLINE_MS = 5_000;
+
+/**
+ * The hard ceiling on any response body, in bytes. `Content-Length` alone
+ * is insufficient — the response STREAM is bounded while reading.
+ *
+ * @internal
+ */
+const MAX_BODY_BYTES = 256 * 1024;
+
+/**
+ * Fixed client errors. None echo server input.
+ *
+ * @internal
+ */
+export const CLIENT_ERRORS = {
+  endpoint:
+    'Diagnostics client: endpoint must be exactly http://127.0.0.1:<port> with no credentials, path, query, or fragment.',
+  sessionId: 'Diagnostics client: sessionId must be exactly 32 lowercase hex characters.',
+  sessionKey: 'Diagnostics client: sessionKey must be exactly 32 bytes.',
+  arguments:
+    'Diagnostics client: read() requires a non-negative safe-integer cursor and a limit from 1 to 128.',
+  closed: 'Diagnostics client: the client is closed.',
+  pairingFailed:
+    'Diagnostics client: pairing failed terminally; relaunch the application and create a new session.',
+  connection:
+    'Diagnostics client: the connection failed verification or bounds; treat as a connection failure.',
+  exhausted: 'Diagnostics client: the sequence space is exhausted; relaunch the application.',
+} as const;
+
+/**
+ * Parses and validates the endpoint: exactly `http://127.0.0.1:<port>`.
+ *
+ * @param endpoint - The endpoint string
+ * @returns The numeric port
+ * @throws {Error} With one fixed message for any other shape
+ * @internal
+ */
+export function parseEndpoint(endpoint: string): number {
+  // Exact-string match, not URL decomposition: a URL parser cannot tell
+  // `http://127.0.0.1:4919` from `http://127.0.0.1:4919/` (both pathname
+  // '/'), and the plan's rule is that the endpoint is EXACTLY this string
+  // with no credentials, path, query, or fragment.
+  const match = /^http:\/\/127\.0\.0\.1:([0-9]+)$/.exec(endpoint);
+  if (match === null) {
+    throw new Error(CLIENT_ERRORS.endpoint);
+  }
+  const port = Number.parseInt(match[1], 10);
+  if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) {
+    throw new Error(CLIENT_ERRORS.endpoint);
+  }
+  return port;
+}
+
+/**
+ * Reads a response body under the hard byte ceiling, cancelling the stream
+ * the moment it would overflow.
+ *
+ * @param response - The (already status-checked) response
+ * @returns The exact body bytes
+ * @throws {Error} The fixed connection-failure error on overflow or a null
+ * body
+ * @internal
+ */
+export async function readBoundedBody(response: Response): Promise<Uint8Array> {
+  const body = response.body;
+  if (body === null) {
+    throw new Error(CLIENT_ERRORS.connection);
+  }
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      total += value.byteLength;
+      if (total > MAX_BODY_BYTES) {
+        throw new Error(CLIENT_ERRORS.connection);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+/**
+ * Creates the native diagnostics client.
+ *
+ * @param options - The injected client options
+ * @returns The client
+ * @throws {Error} At creation time for an invalid endpoint or credentials
+ * @example
+ * ```typescript
+ * const client = createDiagnosticsClient({
+ *   endpoint: 'http://127.0.0.1:4919',
+ *   sessionId,
+ *   sessionKey,
+ *   subtle: crypto.subtle,
+ *   fetch,
+ *   timing: { setTimeout, clearTimeout },
+ * });
+ * const snapshot = await client.snapshot();
+ * client.close();
+ * ```
+ * @since 0.8.0
+ */
+export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDiagnosticsClient {
+  const port = parseEndpoint(options.endpoint);
+  if (!/^[0-9a-f]{32}$/.test(options.sessionId)) {
+    throw new Error(CLIENT_ERRORS.sessionId);
+  }
+  if (!(options.sessionKey instanceof Uint8Array) || options.sessionKey.byteLength !== 32) {
+    throw new Error(CLIENT_ERRORS.sessionKey);
+  }
+
+  let closed = false;
+  let pairingFailed = false;
+  let instanceId: string | null = null;
+  let nextSequence = 1;
+  let keyPromise: Promise<CryptoKey> | null = null;
+  const inFlight = new Set<AbortController>();
+
+  const getKey = (): Promise<CryptoKey> => {
+    if (keyPromise === null) {
+      keyPromise = importSessionKey(options.subtle, options.sessionKey);
+    }
+    return keyPromise;
+  };
+
+  // Serialization: each exchange runs only after the previous one settled,
+  // so sequence numbers hit the wire strictly increasing.
+  let tail: Promise<unknown> = Promise.resolve();
+  const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
+    const run = tail.then(task, task);
+    tail = run.then(() => undefined, () => undefined);
+    return run;
+  };
+
+  const checkUsable = (): void => {
+    if (closed) {
+      throw new Error(CLIENT_ERRORS.closed);
+    }
+    if (pairingFailed) {
+      throw new Error(CLIENT_ERRORS.pairingFailed);
+    }
+    if (nextSequence > Number.MAX_SAFE_INTEGER) {
+      pairingFailed = true;
+      throw new Error(CLIENT_ERRORS.exhausted);
+    }
+  };
+
+  const exchange = async (target: string): Promise<{
+    status: number;
+    bodyBytes: Uint8Array;
+    bodyText: string;
+    responseInstance: string;
+  }> => {
+    checkUsable();
+    const sequence = nextSequence;
+    nextSequence += 1;
+    const key = await getKey();
+    const instance = instanceId ?? '';
+    const requestFields = requestMacFields(
+      options.sessionId,
+      instance,
+      String(sequence),
+      `127.0.0.1:${port}`,
+      target,
+    );
+    const mac = await signFields(options.subtle, key, requestFields);
+
+    const controller = new AbortController();
+    inFlight.add(controller);
+    const deadline = options.timing.setTimeout(
+      () => controller.abort(),
+      REQUEST_DEADLINE_MS,
+    );
+    let response: Response;
+    try {
+      response = await options.fetch(`http://127.0.0.1:${port}${target}`, {
+        method: 'GET',
+        headers: {
+          'x-setu-session': options.sessionId,
+          'x-setu-sequence': String(sequence),
+          ...(instance === '' ? {} : { 'x-setu-instance': instance }),
+          'x-setu-mac': mac,
+        },
+        credentials: 'omit',
+        redirect: 'error',
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+    } catch {
+      throw new Error(CLIENT_ERRORS.connection);
+    } finally {
+      options.timing.clearTimeout(deadline);
+      inFlight.delete(controller);
+    }
+
+    if (response.status !== 200) {
+      throw new Error(CLIENT_ERRORS.connection);
+    }
+    const bodyBytes = await readBoundedBody(response);
+    const bodyHex = await sha256Hex(options.subtle, bodyBytes);
+    const responseInstance = response.headers.get('x-setu-instance') ?? '';
+    const responseMac = response.headers.get('x-setu-mac') ?? '';
+    const responseFields = responseMacFields(
+      options.sessionId,
+      responseInstance,
+      String(sequence),
+      target,
+      String(response.status),
+      bodyHex,
+    );
+    const verified = parseMac(responseMac) !== null &&
+      await verifyFields(options.subtle, key, responseMac, responseFields);
+    if (!verified) {
+      throw new Error(CLIENT_ERRORS.connection);
+    }
+    return {
+      status: response.status,
+      bodyBytes,
+      bodyText: new TextDecoder().decode(bodyBytes),
+      responseInstance,
+    };
+  };
+
+  const exchangeAndBind = async (target: string): Promise<void> => {
+    let result;
+    try {
+      result = await exchange(target);
+    } catch (error) {
+      // ANY failure of the initial pairing exchange is terminal: discard
+      // the session and relaunch rather than accepting another server
+      // under the same identity.
+      pairingFailed = true;
+      throw error;
+    }
+    // The status body is parsed only AFTER its MAC verified, and the parsed
+    // instance must agree with the authenticated header.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(result.bodyText);
+    } catch {
+      pairingFailed = true;
+      throw new Error(CLIENT_ERRORS.connection);
+    }
+    if (!isStatusBody(parsed) || parsed.instanceId !== result.responseInstance) {
+      pairingFailed = true;
+      throw new Error(CLIENT_ERRORS.connection);
+    }
+    instanceId = parsed.instanceId;
+  };
+
+  return {
+    async snapshot(): Promise<DiagnosticsSnapshot> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const result = await exchange(SNAPSHOT_TARGET);
+        const parsed: unknown = JSON.parse(result.bodyText);
+        if (!isSnapshotProjection(parsed)) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return parsed;
+      });
+    },
+
+    async read(after: number, limit?: number): Promise<DiagnosticsBatch> {
+      return await enqueue(async () => {
+        checkUsable();
+        const effectiveLimit = limit ?? 128;
+        if (
+          !Number.isSafeInteger(after) ||
+          after < 0 ||
+          !Number.isSafeInteger(effectiveLimit) ||
+          effectiveLimit < 1 ||
+          effectiveLimit > 128
+        ) {
+          throw new Error(CLIENT_ERRORS.arguments);
+        }
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const target = `/v1/events?after=${after}&limit=${effectiveLimit}`;
+        const result = await exchange(target);
+        const parsed: unknown = JSON.parse(result.bodyText);
+        if (!isBatchProjection(parsed)) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return parsed;
+      });
+    },
+
+    close(): void {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      for (const controller of inFlight) {
+        controller.abort();
+      }
+      inFlight.clear();
+      // Drop the key reference; the raw bytes were already zeroed by the
+      // import. Nothing is promised about garbage-collected memory.
+      keyPromise = null;
+    },
+  };
+}

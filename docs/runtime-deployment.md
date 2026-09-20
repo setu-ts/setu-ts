@@ -316,6 +316,16 @@ deno compile --allow-net --allow-env --output my-app main.ts
 
 ---
 
+### Local diagnostics listener (Deno only)
+
+The RuntimePlugin provides `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER` — a factory that binds exactly
+ONE additional IPv4 loopback (`127.0.0.1`) listener on a port you choose (1024–65535), consumed by
+`@setu-ts/diagnostics-plugin` for the authenticated local diagnostics connection. On Node, Bun, and
+Cloudflare Workers the factory refuses every `listen` call before any bind. This listener is not a
+generic second HTTP server API: the connector supplies its protocol handler and never receives an
+adapter or server handle. See `docs/diagnostics-protocol.md` for the wire protocol and its trust
+limits.
+
 ## Bun Deployment
 
 ### Prerequisites

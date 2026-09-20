@@ -66,6 +66,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M90i: +1 for the trace-propagation example.
   'packages/queue-plugin/README.md': 9,
   'packages/worker-pool-plugin/README.md': 3,
+  'packages/diagnostics-plugin/README.md': 2,
   'packages/grpc-plugin/README.md': 2,
   'packages/graphql-plugin/README.md': 6,
   // M70n: every README the documentation workstream touched, folded into this
@@ -183,7 +184,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(39);
+    expect(Object.keys(READMES)).toHaveLength(40);
 
     // And pin the COVERAGE: every package README is gated or explicitly named
     // as a known gap. Half of them were in neither before v0.6.0, which is how

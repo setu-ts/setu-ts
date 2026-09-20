@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Local diagnostics connector (M98b): an authenticated loopback connection between a native
+  devtool client and M98a's kernel diagnostics.** New package `@setu-ts/diagnostics-plugin` with
+  `DiagnosticsPlugin(options)` / `IDiagnosticsPlugin.revoke()` and the native helper
+  `createDiagnosticsClient(options)` / `IDiagnosticsClient`. New public surface on
+  `@setu-ts/common`: `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`, `ILocalDiagnosticsListenerFactory`,
+  `ILocalDiagnosticsListener`, and `LocalDiagnosticsListenerOptions`. The RuntimePlugin provides the
+  factory: it binds exactly one `127.0.0.1` listener (port 1024–65535, zero-body policy,
+  duplicate-singleton-header refusal before framework mapping) on Deno and rejects every `listen` on
+  other platforms before any bind; its close hook releases an open listener on shutdown AND
+  failed-startup paths. Activation is explicit-only (`enabled: true`, port, per-launch session
+  ID/key; no environment fallback) and refuses startup without M98a's diagnostics. The wire protocol
+  is signed with HMAC-SHA-256 over canonical bytes on both ends (`docs/diagnostics-protocol.md`),
+  with strict monotonic sequences, instance binding, monotonic expiry, bounded polling (3 GET
+  operations, 256 KiB bodies, 128 events per read), value-free fixed errors, and flood isolation
+  (anonymous refusal budget 5/s burst 10; per-session budget 20/s burst 40; 8 handler slots with 7
+  for unpaired lanes). Every refusal drops supplied input; the connector's projection copies M98a's
+  exact field allowlist, so a hostile provider result cannot leak a canary.
+
 - **Kernel diagnostics (M98a): an optional, read-only view of application composition and kernel
   execution.** `createApplication({ diagnostics: {} })` enables collection and exposes
   `IApplication.diagnostics` — a pull-only `IDiagnosticsSource` with `snapshot()` and

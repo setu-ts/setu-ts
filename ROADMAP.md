@@ -10737,29 +10737,29 @@ runtime adapter.
 
 **Deliverables:**
 
-- [ ] Explicit plugin registration and explicit local-connection activation. Importing the package,
+- [x] Explicit plugin registration and explicit local-connection activation. Importing the package,
       registering unrelated plugins, or setting a development environment variable must not expose
       an endpoint. No automatic mounting on the application's public HTTP listener and no wildcard
       bind. The plan selects a Deno runtime-owned IPv4 loopback listener, polling and a native
       client. Authenticate both ends during pairing and document unsupported runtimes; inability to
       enforce local isolation refuses activation rather than falling back to a public endpoint.
-- [ ] Fresh per-session pairing credentials, expiration/revocation, and application-instance-bound
+- [x] Fresh per-session pairing credentials, expiration/revocation, and application-instance-bound
       authorization for snapshot and observation reads. Credentials never appear in URLs, captured
       records or diagnostic logs. Localhost, CORS, an Origin/Host check, or a Pro license is not
       authentication. For an HTTP/WebSocket transport, validate Host and browser Origin as
       additional checks, define the policy for native clients without Origin, and test cross-origin
       requests and DNS-rebinding attempts. No data is released before authentication completes.
-- [ ] A versioned, validated read-only protocol with explicit supported operations, size/rate/client
+- [x] A versioned, validated read-only protocol with explicit supported operations, size/rate/client
       limits and bounded polling responses. Unknown versions and operations fail closed. There is no
       arbitrary method invocation, expression evaluation, file read, credential reveal, service
       resolution or mutation command. Scope every session to its paired application instance;
       connection to one process does not authorize another process or tenant-data access.
-- [ ] An actual connector consumer exercise: pair, read the selected snapshot, observe a request,
+- [x] An actual connector consumer exercise: pair, read the selected snapshot, observe a request,
       disconnect, revoke and refuse reuse. Include protocol fixtures usable by the separate devtool
       repository. All display strings remain untrusted text; the extension must escape them and must
       not execute HTML or commands from diagnostic records. Source-file reading is outside this
       protocol. The framework milestone does not claim verification of an unreviewed UI.
-- [ ] No persistent recordings, cloud upload, or billing/analytics transmission of application
+- [x] No persistent recordings, cloud upload, or billing/analytics transmission of application
       diagnostics in this milestone. In-memory buffers are bounded and cleared on teardown. Any
       later persistence/export consumer must preserve the minimized record boundary, add retention
       and access controls, and receive its own review before shipping.
@@ -11326,7 +11326,7 @@ because one of them invalidated part of a previous run's claims:
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                |
 | 98        | ⬜     | secure read-only devtool diagnostics (umbrella; planned)                                                                          |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                        |
-| 98b       | ⬜     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector                                               |
+| 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector                                               |
 | 99        | ⬜     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                        |
 | 99a       | ⬜     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                |
 | 99b       | ⬜     | cli + docs — what the CLI writes cannot then be used                                                                              |

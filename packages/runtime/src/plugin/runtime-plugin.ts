@@ -10,6 +10,8 @@
 import type { IHttpAdapter, IPlugin, IPluginContext, RuntimePlatform } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
+import { createLocalDiagnosticsListenerFactory } from '../diagnostics/local-diagnostics-listener.ts';
+
 import { detectRuntime } from '../detector/runtime-detector.ts';
 import type { HttpAdapterOptions } from '../adapters/shared/adapter-options.ts';
 import type { RuntimeAdapterFactories } from '../adapters/shared/runtime-services-factory.ts';
@@ -168,7 +170,11 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
   return {
     name: 'runtime',
     version: denoJson.version,
-    provides: [CAPABILITIES.RUNTIME, CAPABILITIES.HTTP_ADAPTER],
+    provides: [
+      CAPABILITIES.RUNTIME,
+      CAPABILITIES.HTTP_ADAPTER,
+      CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER,
+    ],
     priority: PLUGIN_PRIORITY.HIGHEST,
 
     register(ctx: IPluginContext): void {
@@ -200,6 +206,22 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
         maxBodyBytes === undefined ? {} : { maxBodyBytes },
       );
       ctx.services.register(CAPABILITIES.HTTP_ADAPTER, httpAdapter);
+
+      // Register the runtime-owned local diagnostics listener factory (M98b).
+      // One factory per application: it permits one active loopback listener
+      // on Deno and refuses every listen on other platforms before any bind.
+      // The close hook releases an open listener on the normal shutdown path
+      // AND the failed-startup path — the kernel runs close hooks from both —
+      // so a connector's bind can never outlive the application that allowed
+      // it. The connector registers its own revoke hooks for session state;
+      // this hook is the socket's last line of defense.
+      const listenerFactory = createLocalDiagnosticsListenerFactory(platform);
+      ctx.services.register(CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER, listenerFactory);
+      // Optional-chained: a minimal third-party IPluginContext (or an older
+      // test double) may omit the lifecycle surface entirely. Skipping the
+      // hook there only loses this safety net — the connector's own
+      // revoke hooks and closeActive() still release the port.
+      ctx.lifecycle?.onClose?.(() => listenerFactory.closeActive());
     },
   };
 }

@@ -1,0 +1,65 @@
+{
+  "comment": "Protocol v1 fixtures for the local diagnostics connector. Every MAC and digest here was computed with PLAIN Web Crypto outside the production helpers (scratch generation), so the server and client cannot share a canonicalization bug with these vectors. The key, session ID, and instance are SYNTHETIC test values, never real credentials.",
+  "keyHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "sessionId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "instanceId": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+  "authority": "127.0.0.1:4919",
+  "statusExchange": {
+    "request": {
+      "method": "GET",
+      "target": "/v1/status",
+      "sequence": "1",
+      "instance": "",
+      "macInput": "setu-diagnostics-v1\nrequest\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\n1\nGET\n127.0.0.1:4919\n/v1/status",
+      "mac": "b929e0753d28002706df18e2e3b2fed3221279a89784f5dae25e0c846a2bc20c"
+    },
+    "response": {
+      "status": 200,
+      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000}",
+      "bodySha256": "c0ad490c67a860e524a272ce28d4b3fbf0f6e4230796cf4a930f41aa167cf3a6",
+      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\nc0ad490c67a860e524a272ce28d4b3fbf0f6e4230796cf4a930f41aa167cf3a6",
+      "mac": "6104cf8f27b6e900a527e4a78c017d47626a066589cc5bb79e577304a545cf82"
+    }
+  },
+  "rejectedTargets": [
+    "/v1/status/",
+    "/v1/status?x=1",
+    "/v1/unknown",
+    "/v2/status",
+    "/v1/snapshot?after=0",
+    "/%76%31/status",
+    "/v1/events?limit=1&after=0",
+    "/v1/events?after=0&limit=1&extra=2",
+    "/v1/events?after=007&limit=1",
+    "/v1/events?after=0&limit=129",
+    "/v1/events?after=-1&limit=1",
+    "/v1/events"
+  ],
+  "hostileSnapshotDto": {
+    "comment": "A hostile/buggy provider result: carries synthetic secrets in fields OUTSIDE the M98a allowlist. The projection must drop every one of them while keeping the allowed metadata, so suppressing everything cannot make the canary test pass vacuously.",
+    "version": 1,
+    "instanceId": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+    "state": "running",
+    "failureCode": null,
+    "password": "canary-password-SYNTHETIC",
+    "authorization": "Bearer canary-token-SYNTHETIC",
+    "setCookie": "session=canary-cookie-SYNTHETIC",
+    "databaseUrl": "postgres://user:canary-db-SYNTHETIC@host/db",
+    "connectionString": "canary-connstring-SYNTHETIC",
+    "nodes": [
+      {
+        "id": "p1",
+        "kind": "plugin",
+        "label": "catalog",
+        "version": "1.0.0",
+        "password": "canary-node-password-SYNTHETIC",
+        "options": { "secret": "canary-options-SYNTHETIC" }
+      },
+      { "id": "c1", "kind": "capability", "label": "catalog-items", "registered": true }
+    ],
+    "edges": [{ "from": "p1", "kind": "owns", "to": "c1" }],
+    "truncated": false,
+    "droppedEvents": 0,
+    "env": { "API_KEY": "canary-env-SYNTHETIC" }
+  }
+}

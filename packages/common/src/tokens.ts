@@ -144,6 +144,13 @@ export const CAPABILITIES = {
    * with markup it did not concatenate by hand.
    */
   VIEW: 'view',
+  /**
+   * Runtime-owned local diagnostics listener — the single IPv4-loopback port
+   * the RuntimePlugin can bind for the local diagnostics connector
+   * (`ILocalDiagnosticsListenerFactory`). Provided by the RuntimePlugin;
+   * consumed by the DiagnosticsPlugin. Not a generic second HTTP server API.
+   */
+  LOCAL_DIAGNOSTICS_LISTENER: 'local-diagnostics-listener',
 } as const;
 
 /**

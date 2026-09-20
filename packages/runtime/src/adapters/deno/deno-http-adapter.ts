@@ -80,9 +80,12 @@ export interface DenoServer {
  * Default Deno serve host built from the real `Deno.serve` global.
  * Only evaluated when no host is injected.
  *
+ * Reused by the local diagnostics listener (M98b), which owns its own private
+ * server through the same seam instead of the application adapter.
+ *
  * @internal - Not exported from package index
  */
-const defaultDenoServeHost: DenoServeHost = {
+export const defaultDenoServeHost: DenoServeHost = {
   serve: (options) => {
     const server = Deno.serve(
       {

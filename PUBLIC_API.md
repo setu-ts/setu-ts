@@ -27,47 +27,48 @@
 18. [SessionPlugin() (`@setu-ts/session-plugin`)](#sessionplugin-setu-tssession-plugin)
 19. [ReactRouterPlugin() (`@setu-ts/react-router-plugin`)](#reactrouterplugin-setu-tsreact-router-plugin)
 20. [WorkerPoolPlugin() (`@setu-ts/worker-pool-plugin`)](#workerpoolplugin-setu-tsworker-pool-plugin)
-21. [SecretsPlugin() (`@setu-ts/secrets-plugin`)](#secretsplugin-setu-tssecrets-plugin)
-22. [AuditPlugin() (`@setu-ts/audit-plugin`)](#auditplugin-setu-tsaudit-plugin)
-23. [CQRS (`@setu-ts/cqrs-plugin`)](#cqrs-setu-tscqrs-plugin)
-24. [Messaging (`@setu-ts/messaging-plugin`)](#messaging-setu-tsmessaging-plugin)
-25. [Queue (`@setu-ts/queue-plugin`)](#queue-setu-tsqueue-plugin)
-26. [Scheduler (`@setu-ts/scheduler-plugin`)](#scheduler-setu-tsscheduler-plugin)
-27. [Resilience (`@setu-ts/resilience-plugin`)](#resilience-setu-tsresilience-plugin)
-28. [Storage (`@setu-ts/storage-plugin`)](#storage-setu-tsstorage-plugin)
-29. [MailPlugin() (`@setu-ts/mail-plugin`)](#mailplugin-setu-tsmail-plugin)
-30. [Notifications (`@setu-ts/notification-plugin`)](#notifications-setu-tsnotification-plugin)
-31. [Feature Flags (`@setu-ts/feature-flags-plugin`)](#feature-flags-setu-tsfeature-flags-plugin)
-32. [Multi-Tenancy Plugin (`@setu-ts/multi-tenancy-plugin`)](#multi-tenancy-plugin-setu-tsmulti-tenancy-plugin)
-33. [Health (`@setu-ts/health-plugin`)](#health-setu-tshealth-plugin)
-34. [Metrics (`@setu-ts/metrics-plugin`)](#metrics-setu-tsmetrics-plugin)
-35. [Telemetry (`@setu-ts/telemetry-plugin`)](#telemetry-setu-tstelemetry-plugin)
-36. [OpenAPI (`@setu-ts/openapi-plugin`)](#openapi-setu-tsopenapi-plugin)
-37. [CLI (`@setu-ts/cli`)](#cli-setu-tscli)
-38. [REST API Application](#rest-api-application)
-39. [Microservice Application](#microservice-application)
-40. [CQRS Application](#cqrs-application)
-41. [Plugin Creation](#plugin-creation)
-42. [Custom Middleware](#custom-middleware)
-43. [Custom Decorators](#custom-decorators)
-44. [Service Discovery (`@setu-ts/service-discovery-plugin`)](#service-discovery-setu-tsservice-discovery-plugin)
-45. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
-46. [Developer Ergonomics](#developer-ergonomics)
-47. [API Reference: @setu-ts/common](#api-reference-setu-tscommon)
-48. [API Reference: @setu-ts/kernel](#api-reference-setu-tskernel)
-49. [API Reference: @setu-ts/runtime](#api-reference-setu-tsruntime)
-50. [API Reference: @setu-ts/exceptions](#api-reference-setu-tsexceptions)
-51. [API Reference: @setu-ts/di-plugin](#api-reference-setu-tsdi-plugin)
-52. [API Reference: @setu-ts/decorator-plugin](#api-reference-setu-tsdecorator-plugin)
-53. [Testing Package (`@setu-ts/testing`)](#testing-package-setu-tstesting)
-54. [SDK — Client SDK (`@setu-ts/sdk`)](#sdk--client-sdk-setu-tssdk)
-55. [API Reference: @setu-ts/grpc-plugin](#api-reference-setu-tsgrpc-plugin)
-56. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
-57. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
-58. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
-59. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
-60. [Boundary-Type Compatibility](#boundary-type-compatibility)
-61. [Summary](#summary)
+21. [Diagnostics Connector (`@setu-ts/diagnostics-plugin`)](#diagnostics-connector-setu-tsdiagnostics-plugin)
+22. [SecretsPlugin() (`@setu-ts/secrets-plugin`)](#secretsplugin-setu-tssecrets-plugin)
+23. [AuditPlugin() (`@setu-ts/audit-plugin`)](#auditplugin-setu-tsaudit-plugin)
+24. [CQRS (`@setu-ts/cqrs-plugin`)](#cqrs-setu-tscqrs-plugin)
+25. [Messaging (`@setu-ts/messaging-plugin`)](#messaging-setu-tsmessaging-plugin)
+26. [Queue (`@setu-ts/queue-plugin`)](#queue-setu-tsqueue-plugin)
+27. [Scheduler (`@setu-ts/scheduler-plugin`)](#scheduler-setu-tsscheduler-plugin)
+28. [Resilience (`@setu-ts/resilience-plugin`)](#resilience-setu-tsresilience-plugin)
+29. [Storage (`@setu-ts/storage-plugin`)](#storage-setu-tsstorage-plugin)
+30. [MailPlugin() (`@setu-ts/mail-plugin`)](#mailplugin-setu-tsmail-plugin)
+31. [Notifications (`@setu-ts/notification-plugin`)](#notifications-setu-tsnotification-plugin)
+32. [Feature Flags (`@setu-ts/feature-flags-plugin`)](#feature-flags-setu-tsfeature-flags-plugin)
+33. [Multi-Tenancy Plugin (`@setu-ts/multi-tenancy-plugin`)](#multi-tenancy-plugin-setu-tsmulti-tenancy-plugin)
+34. [Health (`@setu-ts/health-plugin`)](#health-setu-tshealth-plugin)
+35. [Metrics (`@setu-ts/metrics-plugin`)](#metrics-setu-tsmetrics-plugin)
+36. [Telemetry (`@setu-ts/telemetry-plugin`)](#telemetry-setu-tstelemetry-plugin)
+37. [OpenAPI (`@setu-ts/openapi-plugin`)](#openapi-setu-tsopenapi-plugin)
+38. [CLI (`@setu-ts/cli`)](#cli-setu-tscli)
+39. [REST API Application](#rest-api-application)
+40. [Microservice Application](#microservice-application)
+41. [CQRS Application](#cqrs-application)
+42. [Plugin Creation](#plugin-creation)
+43. [Custom Middleware](#custom-middleware)
+44. [Custom Decorators](#custom-decorators)
+45. [Service Discovery (`@setu-ts/service-discovery-plugin`)](#service-discovery-setu-tsservice-discovery-plugin)
+46. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
+47. [Developer Ergonomics](#developer-ergonomics)
+48. [API Reference: @setu-ts/common](#api-reference-setu-tscommon)
+49. [API Reference: @setu-ts/kernel](#api-reference-setu-tskernel)
+50. [API Reference: @setu-ts/runtime](#api-reference-setu-tsruntime)
+51. [API Reference: @setu-ts/exceptions](#api-reference-setu-tsexceptions)
+52. [API Reference: @setu-ts/di-plugin](#api-reference-setu-tsdi-plugin)
+53. [API Reference: @setu-ts/decorator-plugin](#api-reference-setu-tsdecorator-plugin)
+54. [Testing Package (`@setu-ts/testing`)](#testing-package-setu-tstesting)
+55. [SDK — Client SDK (`@setu-ts/sdk`)](#sdk--client-sdk-setu-tssdk)
+56. [API Reference: @setu-ts/grpc-plugin](#api-reference-setu-tsgrpc-plugin)
+57. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
+58. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
+59. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
+60. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
+61. [Boundary-Type Compatibility](#boundary-type-compatibility)
+62. [Summary](#summary)
 
 ---
 
@@ -4000,6 +4001,40 @@ app.router.post('/thumbnail', async (ctx) => {
   each state change, so the two surfaces cannot disagree, and no interval timer is armed.
 
 ---
+
+## Diagnostics Connector (`@setu-ts/diagnostics-plugin`)
+
+An authenticated local connector between a native devtool client and M98a's kernel diagnostics,
+served over a runtime-owned IPv4 loopback listener. Deno and bounded polling only; no browser UI, no
+application data, no control commands, and no environment fallback. Activation is explicit:
+`DiagnosticsPlugin({ enabled: true, port, sessionId, sessionKey, ttlMs? })` — an omitted or `false`
+`enabled`, an invalid port or credential, an unsupported runtime, or an application without M98a
+diagnostics refuses activation. Loopback is not authentication (the HMAC-SHA-256 signed protocol is)
+and not encryption (a privileged local sniffer reads authenticated bytes; remote and production use
+are unsupported).
+
+| Export                     | Kind      | Since |
+| -------------------------- | --------- | ----- |
+| `DiagnosticsPlugin`        | function  | 0.8.0 |
+| `IDiagnosticsPlugin`       | interface | 0.8.0 |
+| `DiagnosticsPluginOptions` | interface | 0.8.0 |
+| `createDiagnosticsClient`  | function  | 0.8.0 |
+| `IDiagnosticsClient`       | interface | 0.8.0 |
+| `DiagnosticsClientOptions` | interface | 0.8.0 |
+
+`IDiagnosticsPlugin.revoke()` immediately disables authorization, drops key references, and closes
+the listener without stopping the parent application; it is idempotent, and a revoked instance never
+reactivates. `createDiagnosticsClient({ endpoint, sessionId, sessionKey, subtle,
+fetch, timing })`
+requires `endpoint` to be exactly `http://127.0.0.1:<port>`; the client performs the signed status
+pairing automatically, serializes calls with strictly increasing sequence numbers, verifies every
+response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal.
+
+The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
+`ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
+(`LocalDiagnosticsListenerOptions { port, handler }` → `ILocalDiagnosticsListener.close()`), binding
+exactly one `127.0.0.1` listener on Deno and rejecting every `listen` on other platforms before any
+bind. The full wire specification lives in `docs/diagnostics-protocol.md`.
 
 ## SecretsPlugin() (`@setu-ts/secrets-plugin`)
 
