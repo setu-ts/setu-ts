@@ -5251,7 +5251,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   a zero-instruction one (the disabled path carries a handful of predictable `=== undefined` checks
   per request, which is why it reads as parity rather than as provably identical work), and the
   harness's shipped 20,000-request cap makes a run last ~0.12 s, where per-pass spread reached 48% —
-  the measurement needs its 10-second window to decide the run — complete (PR pending).
+  the measurement needs its 10-second window to decide the run — complete (PR #345).
 
 ## Verification (run before declaring any work done)
 
