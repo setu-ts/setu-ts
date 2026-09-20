@@ -643,14 +643,15 @@ export function generatedResources(): GeneratedResources {
 }
 
 /**
- * Installs the scaffold exactly as its printed next step requests, then builds
- * its Dockerfile. The lockfile produced by install must reach the image: a
- * scaffold-only lock missed the build/runtime resolution disagreement in M99b.
+ * Installs the scaffold exactly as its printed next step requests, resolves the
+ * selected application's entry point into that root lockfile, then builds its
+ * Dockerfile. Dynamic driver imports otherwise may be absent from an install's
+ * lock graph and fail the image's frozen cache step.
  *
  * @param root - Generated workspace root
  * @param image - Image tag owned by this invocation
  * @param execute - Subprocess seam for the ordered-command regression test
- * @returns The install failure, or the image build result
+ * @returns The install/cache failure, or the image build result
  */
 export async function buildGeneratedImage(
   root: string,
@@ -659,6 +660,15 @@ export async function buildGeneratedImage(
 ): ReturnType<typeof run> {
   const installed = await execute([Deno.execPath(), 'install'], { quiet: true, cwd: root });
   if (!installed.success) return installed;
+
+  const cached = await execute([
+    Deno.execPath(),
+    'cache',
+    '--lock=deno.lock',
+    `apps/${GENERATED_MEMBER}/main.ts`,
+  ], { quiet: true, cwd: root });
+  if (!cached.success) return cached;
+
   return await execute([
     'docker',
     'build',

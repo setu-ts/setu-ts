@@ -418,15 +418,19 @@ describe('rendered manifests', () => {
 });
 
 describe('generated deployment install ordering', () => {
-  it('builds the installed workspace using the same root as the build context', async () => {
+  it('locks the generated entry point before building from the same workspace root', async () => {
     const calls: { command: readonly string[]; cwd: string | undefined }[] = [];
     await buildGeneratedImage('/workspace/acme', 'test-image', (command, options) => {
       calls.push({ command, cwd: options?.cwd });
       return Promise.resolve({ success: true, stdout: '', stderr: '' });
     });
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(3);
     expect(calls[0]).toEqual({ command: [Deno.execPath(), 'install'], cwd: '/workspace/acme' });
-    expect(calls[1]!.command).toEqual([
+    expect(calls[1]).toEqual({
+      command: [Deno.execPath(), 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
+      cwd: '/workspace/acme',
+    });
+    expect(calls[2]!.command).toEqual([
       'docker',
       'build',
       '--quiet',
@@ -440,7 +444,7 @@ describe('generated deployment install ordering', () => {
     ]);
   });
 
-  it('never builds an image after install fails', async () => {
+  it('never caches or builds an image after install fails', async () => {
     const commands: string[][] = [];
     const failure = { success: false, stdout: '', stderr: 'install failed' };
     const result = await buildGeneratedImage('/workspace/acme', 'test-image', (command) => {
@@ -449,5 +453,21 @@ describe('generated deployment install ordering', () => {
     });
     expect(result).toBe(failure);
     expect(commands).toEqual([[Deno.execPath(), 'install']]);
+  });
+
+  it('never builds an image after entry point caching fails', async () => {
+    const commands: string[][] = [];
+    const failure = { success: false, stdout: '', stderr: 'cache failed' };
+    const result = await buildGeneratedImage('/workspace/acme', 'test-image', (command) => {
+      commands.push([...command]);
+      return Promise.resolve(
+        commands.length === 1 ? { success: true, stdout: '', stderr: '' } : failure,
+      );
+    });
+    expect(result).toBe(failure);
+    expect(commands).toEqual([
+      [Deno.execPath(), 'install'],
+      [Deno.execPath(), 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
+    ]);
   });
 });
