@@ -5237,8 +5237,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   execution boundaries with exact-allowlist labels (off by default), bounded topology/events, and
   value-free failure codes; terminal failure and shutdown clear retained metadata. Ships
   `scripts/inspect-kernel.ts` (runnable consumer, subprocess-tested) and
-  `scripts/benchmark-kernel-diagnostics.ts` (paired harness; measured near parity on this tree) —
-  complete (PR pending).
+  `scripts/benchmark-kernel-diagnostics.ts` (paired harness). **Measured in review against a
+  pre-change `main` worktree, five paired 10s runs**: the DISABLED path is at 102.6% of baseline
+  throughput (budget ≥98%) and enabled p95 at 100% (budget ≤110%), but the ENABLED path is at
+  **89.2%** (budget ≥90%) — a marginal miss of the plan's own floor, left open rather than silently
+  weakened; distributions archived under `.tmp/m98a-bench/`. The harness's shipped 20,000-request
+  cap makes a run last ~0.12 s, where per-pass spread reached 48%, so the measurement needs its
+  10-second window to decide the run — complete (PR pending).
 
 ## Verification (run before declaring any work done)
 
