@@ -118,15 +118,11 @@ describe('workspaceContainerFiles', () => {
       expect(dockerfile()).toContain('COPY lib[s] ./libs/');
     });
 
-    // M95a: under the generated manifest's `readOnlyRootFilesystem: true`, the
-    // first runtime code path whose lockfile edge is missing tries to WRITE it
-    // and the container dies before serving — measured on this machine, from a
-    // workspace this very file's output built: `Failed writing lockfile` /
-    // `os error 30` on `/srv/deno.lock`. Every package the graph reaches is
-    // already in the build-time cache, so the runtime needs the lockfile for
-    // nothing and the flag removes the write instead of the crash.
-    it('starts with --no-lock, so the read-only root cannot crash the start', () => {
-      expect(dockerfile()).toContain('"run", "--no-lock"');
+    // M99b: runtime must retain the exact versions cached at build time, while
+    // refusing lockfile writes on the generated read-only root.
+    it('starts with --frozen and retains the shipped dependency resolutions', () => {
+      expect(dockerfile()).toContain('"run", "--frozen"');
+      expect(dockerfile()).not.toContain('--no-lock');
     });
 
     // Considered and rejected (plan §3.5), then MEASURED: with a cold cache and
@@ -142,9 +138,9 @@ describe('workspaceContainerFiles', () => {
     // names BOTH halves — no network, no lockfile write — and cites the gate
     // that proves them, so the promise is checkable prose. The strings below
     // exist only in comments; the flag itself is asserted by the first test.
-    it('states the no-network, no-lockfile-write guarantee the generated gate proves', () => {
+    it('states the no-external-network, no-lockfile-write guarantee the generated gate proves', () => {
       const contents = dockerfile();
-      expect(contents).toContain('--read-only --network none');
+      expect(contents).toContain('--read-only with no external network');
       expect(contents).toContain('check:deploy --generated');
     });
   });

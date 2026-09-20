@@ -309,7 +309,7 @@ describe('workspace scaffolding — end to end', () => {
   it('emits a Dockerfile whose start survives the generated read-only posture', async () => {
     const ws = await twoMembers();
     const dockerfilePath = `${ws}/docker/Dockerfile`;
-    expect(await Deno.readTextFile(dockerfilePath)).toContain('"run", "--no-lock"');
+    expect(await Deno.readTextFile(dockerfilePath)).toContain('"run", "--frozen"');
 
     // The file is emitted `managed`, so regeneration re-renders it — an
     // existing workspace picks the change up on its next `generate app` with
@@ -317,7 +317,7 @@ describe('workspace scaffolding — end to end', () => {
     expect(await run(['g', 'app', 'shipping', '--template', 'microservice', '--dir', ws])).toBe(
       0,
     );
-    expect(await Deno.readTextFile(dockerfilePath)).toContain('"run", "--no-lock"');
+    expect(await Deno.readTextFile(dockerfilePath)).toContain('"run", "--frozen"');
   });
 
   it('does not start a dependent until its prerequisite answers /ready', async () => {

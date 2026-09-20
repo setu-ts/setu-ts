@@ -5,6 +5,7 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
+import { isMissingPath } from './filesystem-errors.ts';
 
 /**
  * One file a schematic asks the command layer to create.
@@ -18,9 +19,8 @@ export interface GeneratedFile {
    * Marks a file the CLI owns outright and regenerates, exempting it from the
    * overwrite refusal in {@linkcode findExisting}.
    *
-   * Set on exactly one emitted file today: the `src/modules/index.ts` aggregate
-   * barrel, which has to list every module and therefore has to be rewritten
-   * whenever one is added. Every other path keeps the refusal.
+   * Used by generated seam barrels and workspace manifests, deployment files,
+   * and discovery maps. A failed batch restores their previous bytes.
    *
    * Declared per FILE rather than as a `--force` flag on the command,
    * deliberately: a flag would lift the check for all fourteen schematics, so a
@@ -173,36 +173,127 @@ export async function findExisting(
     try {
       await fs.stat(file.path);
       existing.push(file.path);
-    } catch {
-      // Absent (or unreadable) — nothing to overwrite.
+    } catch (cause) {
+      // Only a positive missing-path response is safe to treat as absent. An
+      // access or I/O error must stop before the writer can touch this path.
+      if (!isMissingPath(cause)) throw cause;
     }
   }
   return existing;
 }
 
+/** One attempted write, recorded before the filesystem can partially modify it. */
+interface FileUndo {
+  readonly path: string;
+  readonly before: Uint8Array | undefined;
+}
+
+/** Creates missing parents individually so only directories we created are removed. */
+async function ensureDirectory(
+  fs: IFileSystem,
+  path: string,
+  created: string[],
+  known: Set<string>,
+): Promise<void> {
+  if (path === '' || path === '/' || known.has(path)) return;
+  try {
+    await fs.stat(path);
+    known.add(path);
+    return;
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+  }
+  await ensureDirectory(fs, dirName(path), created, known);
+  await fs.mkdir(path);
+  created.push(path);
+  known.add(path);
+}
+
+/** Captures bytes at the write boundary, never interpreting unreadability as absence. */
+async function previousBytes(fs: IFileSystem, path: string): Promise<Uint8Array | undefined> {
+  try {
+    return (await fs.readFile(path)).slice();
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return undefined;
+  }
+}
+
+/** Restores even a write that rejected after truncating its target. */
+async function restoreFile(fs: IFileSystem, undo: FileUndo): Promise<void> {
+  const { before } = undo;
+  if (before === undefined) {
+    try {
+      await fs.rm(undo.path);
+    } catch (cause) {
+      if (!isMissingPath(cause)) throw cause;
+    }
+    return;
+  }
+  const current = await previousBytes(fs, undo.path);
+  // A read-only file can reject without changing anything. Do not turn that
+  // into a spurious rollback failure by trying to rewrite the intact bytes.
+  if (
+    current?.length === before.length &&
+    current.every((byte, index) => byte === before[index])
+  ) return;
+  await fs.writeFile(undo.path, before);
+}
+
+/** Describes both the original error and each path whose recovery failed. */
+function failureMessage(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 /**
- * Writes every file in order, creating parent directories first.
+ * Writes every file in order and compensates for a caught filesystem failure.
  *
- * The caller is responsible for the overwrite check ({@linkcode findExisting});
- * this function writes unconditionally so that the "check everything, then
- * write everything" ordering lives in exactly one place — the command layer.
+ * The caller owns the overwrite preflight. Each attempted write captures its
+ * prior bytes; failure restores them, removes new files, and removes only this
+ * batch's empty directories. This is not crash-atomic storage or a lock against
+ * concurrent editors: process termination cannot execute asynchronous rollback.
  *
  * @param fs - The filesystem to write through
  * @param files - The files to create
+ * @throws The original failure, or an AggregateError naming incomplete recovery
  */
 export async function writeFiles(
   fs: IFileSystem,
   files: readonly GeneratedFile[],
 ): Promise<void> {
   const encoder = new TextEncoder();
-  const created = new Set<string>();
-
-  for (const file of files) {
-    const dir = dirName(file.path);
-    if (dir !== '' && !created.has(dir)) {
-      await fs.mkdir(dir, { recursive: true });
-      created.add(dir);
+  const directories: string[] = [];
+  const known = new Set<string>();
+  const attempted: FileUndo[] = [];
+  try {
+    for (const file of files) {
+      await ensureDirectory(fs, dirName(file.path), directories, known);
+      const before = await previousBytes(fs, file.path);
+      attempted.push({ path: file.path, before });
+      await fs.writeFile(file.path, encoder.encode(file.contents));
     }
-    await fs.writeFile(file.path, encoder.encode(file.contents));
+  } catch (cause) {
+    const failures: Error[] = [];
+    const recover = async (path: string, action: () => Promise<void>): Promise<void> => {
+      try {
+        await action();
+      } catch (error) {
+        failures.push(new Error(`${path}: ${failureMessage(error)}`, { cause: error }));
+      }
+    };
+    for (const undo of attempted.reverse()) {
+      await recover(undo.path, () => restoreFile(fs, undo));
+    }
+    for (const path of directories.reverse()) {
+      await recover(path, () => fs.rm(path));
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(
+        [cause, ...failures],
+        `${failureMessage(cause)}; rollback incomplete: ${failures.map(failureMessage).join('; ')}`,
+        { cause },
+      );
+    }
+    throw cause;
   }
 }

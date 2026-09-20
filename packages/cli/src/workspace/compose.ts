@@ -136,15 +136,11 @@ COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
 
 WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 
-# Resolve the whole module graph at build time, so the container starts without
-# reaching the network for its own dependencies and without ever writing
-# deno.lock: the CMD below runs --no-lock because a read-only root filesystem
-# turns Deno's first missing lockfile entry (measured: the messaging plugin's
-# driver edges) into a crash before the first request. The lockfile has no job
-# left inside an image — resolution already happened against the committed one,
-# this cache is immutable, and the packages it needs are already here. Both
-# halves are proven by \`check:deploy --generated\`, which builds a scaffolded
-# workspace's image and serves /health from it under --read-only --network none.
+# Cache the module graph against deno.lock at build time. Runtime --frozen
+# keeps those exact resolutions without writing the lockfile. Ignoring it can
+# select uncached npm transitive versions when lazy drivers load at startup.
+# check:deploy --generated installs a scaffold before building, then boots its
+# real broker drivers under --read-only with no external network (shared loopback).
 #
 # The chown FOLDS into this same RUN (X10-5): a standalone \`chown -R\` rewrites
 # metadata on every file the cache layer created, so overlayfs copies the
@@ -166,10 +162,8 @@ USER ${DENO_UID}:${DENO_UID}
 # member's own generated \`start\` task, plus \`--allow-sys\` for the hostname and
 # platform probes the health and metrics plugins make.
 #
-# --no-lock is the runtime half of the guarantee above: every package the graph
-# can reach is already in the build-time cache, so dropping the lockfile removes
-# the one write a read-only root cannot serve.
-CMD ["run", "--no-lock", "--allow-net", "--allow-env", "--allow-read", "--allow-sys", "main.ts"]
+# Keep build-time resolution, and fail rather than updating the shipped lock.
+CMD ["run", "--frozen", "--allow-net", "--allow-env", "--allow-read", "--allow-sys", "main.ts"]
 `;
 }
 
