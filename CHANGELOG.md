@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`cli` — generated workspace Dockerfiles now run with `deno run --frozen`.** The runtime uses the
+  lockfile that its build cached and still cannot modify it on a generated read-only root, so a lazy
+  broker driver cannot re-resolve an uncached npm transitive dependency at startup (M99b).
+- **`cli` — an interrupted scaffold compensates for caught write failures.** It restores files it
+  overwrote, removes files and empty directories it created, and reports any incomplete recovery;
+  `adopt` now reports an entry rewrite failure instead of presenting it as a port-literal mismatch.
+  Reported by [u/kantorcodes1](https://www.reddit.com/user/kantorcodes1/) (M99b).
+
 ### Added
 
 - **Kernel diagnostics (M98a): an optional, read-only view of application composition and kernel

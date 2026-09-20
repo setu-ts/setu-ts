@@ -5126,9 +5126,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it edits sit where `main` left them — `metadata-store.ts` 99.0, `openapi-generator.ts` 98.4 and
   `decorator-plugin.ts` 98.4/100/99.0, whose only uncovered lines are the pre-existing
   `replayCustomDecorators` skip and the `autoDiscover` error loop) — complete (PR #328)
-- **Next milestone** — **M40** (final polish and release: integration testing across all plugins,
-  performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the
-  Deno/Node/Bun/Workers portability matrix validated end to end).
+- **Next milestone** — **M99c** (`packages/sdk`, `packages/openapi-plugin`, and `packages/kernel` —
+  two first-party components that must agree, and do not).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
@@ -5260,6 +5259,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   per request, which is why it reads as parity rather than as provably identical work), and the
   harness's shipped 20,000-request cap makes a run last ~0.12 s, where per-pass spread reached 48% —
   the measurement needs its 10-second window to decide the run — complete (PR #345).
+- **Milestone 99b** (`packages/cli` + `docs` — generated output is usable): generated workspace
+  Dockerfiles use `deno run --frozen`, retaining the lockfile resolution cached at build time
+  without writing under a read-only root. The generated deployment gate installs the scaffold before
+  building it and boots a Redis-backed member without external network access. The shared writer
+  compensates caught I/O failures by restoring overwritten bytes, removing only files and empty
+  directories it created, and reporting incomplete recovery; `adopt` reports entry rewrite failures
+  rather than a port-literal mismatch — complete (PR #346).
 
 ## Verification (run before declaring any work done)
 

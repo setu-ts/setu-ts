@@ -9788,6 +9788,12 @@ what this finding shows cannot be complete, so a gate that asserts a hard-coded 
 while the defect persists. The honest gate builds a scaffolded microservice image and runs it under
 `--read-only --network none`, which is what discriminates.
 
+**M99b correction.** A later reproduction runs the scaffold's printed `deno install` before the
+image build. That lockfile exposes a second failure in the M95a remedy: runtime `--no-lock` ignores
+the exact resolution the build cached and can fetch a newer lazy npm transitive dependency. M99b
+changes the generated command to `--frozen` and exercises a real Redis driver in the generated gate;
+the earlier lockfile-write diagnosis remains historical context, not the final generated command.
+
 ### Milestone 95b: Reachability That Fails OPEN
 
 **Package(s):** `packages/common`, `packages/database-plugin`, `packages/messaging-plugin`
@@ -11002,7 +11008,8 @@ workspace. Those are the cases where the remedy that works for `setu new` — de
 
 **Fix:** make `writeFiles` transactional. It already tracks a `created` set for directories, so the
 bookkeeping is small, it fixes all six call sites at once, and it directly restores retryability.
-`Ctrl-C` mid-run hits the same path, so the trigger is ordinary.
+Caught filesystem failures reach that recovery path. Process termination does not run asynchronous
+rollback and is explicitly outside this milestone's guarantee.
 
 **Unlinking every written path is NOT the fix, and this row's own `managed` paragraph is why** —
 raised in code review on the plan PR and corrected there. `findExisting` skips a `managed` path, so
@@ -11385,6 +11392,6 @@ because one of them invalidated part of a previous run's claims:
 | 98c       | ⬜     | cli — devtool scaffolding for standalone projects and workspace members (planned)                                                 |
 | 99        | ⬜     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                        |
 | 99a       | ⬜     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                |
-| 99b       | ⬜     | cli + docs — what the CLI writes cannot then be used                                                                              |
+| 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                              |
 | 99c       | ⬜     | sdk + openapi-plugin + kernel — two first-party components that must agree, and do not                                            |
 | 99d       | ⬜     | decorator-plugin + secrets-plugin — a composition the framework silently declines to give you                                     |
