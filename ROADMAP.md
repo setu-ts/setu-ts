@@ -10639,9 +10639,15 @@ merging beyond what the schema itself expresses.
 
 ## Milestone 98: Secure Read-Only Devtool Diagnostics
 
-**Status:** Planned; implementation has not started. This milestone records the framework work
-needed by the separately maintained devtool. It is not a claim that the proposed interfaces or
-connector have passed a security review.
+**Status:** 98a complete ([#345](https://github.com/setu-ts/setu-ts/pull/345)) — the in-process
+observation boundary and its shared contracts shipped on `feat/m98a-kernel-diagnostics`; 98b remains
+planned. This milestone records the framework work needed by the separately maintained devtool. It
+is not a claim that the interfaces or connector have passed a security review.
+
+**Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
+`IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
+no devtool callbacks: internal collection stays synchronous and bounded, application execution never
+calls a devtool callback, and M98b's connector consumes the same pull-only contract.
 
 **Objective:** Let a developer inspect application composition and execution through supported,
 optional interfaces, without exposing live services, application data, credentials, or mutation
@@ -11319,7 +11325,7 @@ because one of them invalidated part of a previous run's claims:
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                              |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                |
 | 98        | ⬜     | secure read-only devtool diagnostics (umbrella; planned)                                                                          |
-| 98a       | ⬜     | kernel + common — metadata and execution observation                                                                              |
+| 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                        |
 | 98b       | ⬜     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector                                               |
 | 99        | ⬜     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                        |
 | 99a       | ⬜     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                |

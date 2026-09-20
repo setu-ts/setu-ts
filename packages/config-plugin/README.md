@@ -207,9 +207,9 @@ When `validationSchema` is not provided, all values remain as strings from the e
 | Export                | Kind      |
 | --------------------- | --------- |
 | `ConfigPlugin`        | function  |
-| `loadConfig`          | function  |
 | `defineConfigSection` | function  |
 | `getConfigSection`    | function  |
+| `loadConfig`          | function  |
 | `ConfigPluginOptions` | interface |
 | `ConfigSection`       | interface |
 | `StructuralSchema`    | interface |

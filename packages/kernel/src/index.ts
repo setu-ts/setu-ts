@@ -13,6 +13,8 @@ export type {
   IKernelApplication,
   InjectRequest,
   InjectResponse,
+  KernelDiagnosticsLabelOptions,
+  KernelDiagnosticsOptions,
 } from './application/application.ts';
 
 export { createApplication } from './application/application.ts';

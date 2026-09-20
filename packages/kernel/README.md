@@ -20,17 +20,55 @@ npx jsr add @setu-ts/kernel
 
 ## What's Inside
 
-| Area              | Exports                                                                                              |
-| ----------------- | ---------------------------------------------------------------------------------------------------- |
-| Application       | `createApplication()`, `ApplicationOptions`, `IKernelApplication`, `InjectRequest`, `InjectResponse` |
-| Plugin resolution | `resolvePluginOrder()` (internal), dependency topological sort, cycle detection                      |
-| Service registry  | `ServiceRegistry` (internal), single/multi/lazy-factory registrations, request-scoped children       |
-| Middleware        | `MiddlewarePipeline` (internal), priority-ordered execution, short-circuit, double-next guard        |
-| Router            | `Router` (internal), 7 verbs, route groups, static-over-param matching preference                    |
-| Lifecycle         | `LifecycleManager` (internal), init/bootstrap/shutdown (LIFO)/close + request/response/error         |
+| Area              | Exports                                                                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Application       | `createApplication()`, `ApplicationOptions`, `IKernelApplication`, `InjectRequest`, `InjectResponse`, `app.diagnostics` reader (opt-in) |
+| Plugin resolution | `resolvePluginOrder()` (internal), dependency topological sort, cycle detection                                                         |
+| Service registry  | `ServiceRegistry` (internal), single/multi/lazy-factory registrations, request-scoped children                                          |
+| Middleware        | `MiddlewarePipeline` (internal), priority-ordered execution, short-circuit, double-next guard                                           |
+| Router            | `Router` (internal), 7 verbs, route groups, static-over-param matching preference                                                       |
+| Lifecycle         | `LifecycleManager` (internal), init/bootstrap/shutdown (LIFO)/close + request/response/error                                            |
 
-Only the five public exports listed above are part of the public API; all concrete classes are
+Only the seven public exports listed above are part of the public API; all concrete classes are
 internal.
+
+## Kernel diagnostics (optional, since 0.8.0)
+
+Pass `diagnostics` to `createApplication` to enable an optional, read-only view of application
+composition and kernel execution, exposed as the pull-only `app.diagnostics` reader. An omitted
+option allocates nothing — no collector, ring, or timer — and the property is absent.
+
+```typescript
+const app = createApplication({
+  plugins: [RuntimePlugin()],
+  // labels is the disclosure decision: a name appears ONLY when it exactly
+  // matches an allowlist entry; everything else is projected as opaque ids.
+  diagnostics: { labels: { plugins: ['catalog'], routes: ['/items'] } },
+});
+await app.start();
+
+const snapshot = app.diagnostics!.snapshot(); // bounded composition view
+let cursor = 0;
+const poll = setInterval(() => {
+  // Poll non-destructively: each read returns the events after `cursor`
+  // (up to 128) and reports evicted records as `lost`. Other readers polling
+  // at their own cursors are unaffected — reads never consume.
+  const batch = app.diagnostics!.read(cursor, 128);
+  cursor = batch.next;
+}, 1000);
+```
+
+A plugin node's `version` is the one exception to the allowlist: it is emitted whenever it passes a
+bounded semver grammar, so enabling diagnostics discloses every registered plugin's version.
+
+`snapshot()` and `read()` never resolve a lazy factory, invoke application code, or mutate state,
+and everything they return is frozen. Timing is monotonic from runtime registration; records before
+that carry `null` timings. Startup failure and final shutdown clear retained metadata — a reader
+then sees only the coarse state, the failure code, and drop counters. Bounded by construction: 1,024
+nodes / 4,096 edges / 256 KiB per snapshot, 1,024 events / 1,024 bytes per event, with
+`droppedEvents` and `lost` reporting what did not fit. See
+[`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#kernel-diagnostics-setu-tskernel--setu-tscommon)
+for the full contract; `scripts/inspect-kernel.ts` in the repository is a runnable consumer.
 
 ## Usage
 
@@ -87,13 +125,15 @@ package fits the plugin architecture.
 
 ## Exports
 
-| Export               | Kind      |
-| -------------------- | --------- |
-| `createApplication`  | function  |
-| `ApplicationOptions` | interface |
-| `IKernelApplication` | interface |
-| `InjectRequest`      | interface |
-| `InjectResponse`     | interface |
+| Export                          | Kind      |
+| ------------------------------- | --------- |
+| `createApplication`             | function  |
+| `ApplicationOptions`            | interface |
+| `IKernelApplication`            | interface |
+| `InjectRequest`                 | interface |
+| `InjectResponse`                | interface |
+| `KernelDiagnosticsLabelOptions` | interface |
+| `KernelDiagnosticsOptions`      | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

@@ -339,6 +339,24 @@ export type {
 } from './services/telemetry.ts';
 export { TELEMETRY_CONTEXT_OPAQUE } from './services/telemetry.ts';
 
+// Kernel diagnostics read contracts (M98a) — the pull-only DTO projection the
+// kernel's optional `IApplication.diagnostics` reader serves
+export type {
+  DiagnosticsBatch,
+  DiagnosticsEdge,
+  DiagnosticsEdgeKind,
+  DiagnosticsEvent,
+  DiagnosticsEventKind,
+  DiagnosticsEventOutcome,
+  DiagnosticsEventStage,
+  DiagnosticsFailureCode,
+  DiagnosticsNode,
+  DiagnosticsNodeKind,
+  DiagnosticsSnapshot,
+  DiagnosticsSnapshotState,
+  IDiagnosticsSource,
+} from './services/diagnostics.ts';
+
 // SSE contracts
 export type { ISseConnection, ISseService, SseChannel, SseMessage } from './services/sse.ts';
 export type {

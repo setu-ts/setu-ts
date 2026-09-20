@@ -10,63 +10,64 @@
 1. [Installation](#installation)
 2. [Full Stack Application](#full-stack-application)
 3. [Minimal Application](#minimal-application)
-4. [createApplication() (`@setu-ts/kernel`)](#createapplication-setu-tskernel)
-5. [RuntimePlugin() (`@setu-ts/runtime`)](#runtimeplugin-setu-tsruntime)
-6. [LoggerPlugin() (`@setu-ts/logger-plugin`)](#loggerplugin-setu-tslogger-plugin)
-7. [ConfigPlugin() (`@setu-ts/config-plugin`)](#configplugin-setu-tsconfig-plugin)
-8. [ValidationPlugin() (`@setu-ts/validation-plugin`)](#validationplugin-setu-tsvalidation-plugin)
-9. [DatabasePlugin() (`@setu-ts/database-plugin`)](#databaseplugin-setu-tsdatabase-plugin)
-10. [AuthPlugin() (`@setu-ts/auth-plugin`)](#authplugin-setu-tsauth-plugin)
-11. [HttpSecurityPlugin() (`@setu-ts/http-security-plugin`)](#httpsecurityplugin-setu-tshttp-security-plugin)
-12. [CachePlugin() (`@setu-ts/cache-plugin`)](#cacheplugin-setu-tscache-plugin)
-13. [EventsPlugin() (`@setu-ts/events-plugin`)](#eventsplugin-setu-tsevents-plugin)
-14. [SsePlugin() (`@setu-ts/sse-plugin`)](#sseplugin-setu-tssse-plugin)
-15. [WebSocketPlugin() (`@setu-ts/websocket-plugin`)](#websocketplugin-setu-tswebsocket-plugin)
-16. [RealtimeBackplanePlugin() (`@setu-ts/realtime-backplane-plugin`)](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin)
-17. [SessionPlugin() (`@setu-ts/session-plugin`)](#sessionplugin-setu-tssession-plugin)
-18. [ReactRouterPlugin() (`@setu-ts/react-router-plugin`)](#reactrouterplugin-setu-tsreact-router-plugin)
-19. [WorkerPoolPlugin() (`@setu-ts/worker-pool-plugin`)](#workerpoolplugin-setu-tsworker-pool-plugin)
-20. [SecretsPlugin() (`@setu-ts/secrets-plugin`)](#secretsplugin-setu-tssecrets-plugin)
-21. [AuditPlugin() (`@setu-ts/audit-plugin`)](#auditplugin-setu-tsaudit-plugin)
-22. [CQRS (`@setu-ts/cqrs-plugin`)](#cqrs-setu-tscqrs-plugin)
-23. [Messaging (`@setu-ts/messaging-plugin`)](#messaging-setu-tsmessaging-plugin)
-24. [Queue (`@setu-ts/queue-plugin`)](#queue-setu-tsqueue-plugin)
-25. [Scheduler (`@setu-ts/scheduler-plugin`)](#scheduler-setu-tsscheduler-plugin)
-26. [Resilience (`@setu-ts/resilience-plugin`)](#resilience-setu-tsresilience-plugin)
-27. [Storage (`@setu-ts/storage-plugin`)](#storage-setu-tsstorage-plugin)
-28. [MailPlugin() (`@setu-ts/mail-plugin`)](#mailplugin-setu-tsmail-plugin)
-29. [Notifications (`@setu-ts/notification-plugin`)](#notifications-setu-tsnotification-plugin)
-30. [Feature Flags (`@setu-ts/feature-flags-plugin`)](#feature-flags-setu-tsfeature-flags-plugin)
-31. [Multi-Tenancy Plugin (`@setu-ts/multi-tenancy-plugin`)](#multi-tenancy-plugin-setu-tsmulti-tenancy-plugin)
-32. [Health (`@setu-ts/health-plugin`)](#health-setu-tshealth-plugin)
-33. [Metrics (`@setu-ts/metrics-plugin`)](#metrics-setu-tsmetrics-plugin)
-34. [Telemetry (`@setu-ts/telemetry-plugin`)](#telemetry-setu-tstelemetry-plugin)
-35. [OpenAPI (`@setu-ts/openapi-plugin`)](#openapi-setu-tsopenapi-plugin)
-36. [CLI (`@setu-ts/cli`)](#cli-setu-tscli)
-37. [REST API Application](#rest-api-application)
-38. [Microservice Application](#microservice-application)
-39. [CQRS Application](#cqrs-application)
-40. [Plugin Creation](#plugin-creation)
-41. [Custom Middleware](#custom-middleware)
-42. [Custom Decorators](#custom-decorators)
-43. [Service Discovery (`@setu-ts/service-discovery-plugin`)](#service-discovery-setu-tsservice-discovery-plugin)
-44. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
-45. [Developer Ergonomics](#developer-ergonomics)
-46. [API Reference: @setu-ts/common](#api-reference-setu-tscommon)
-47. [API Reference: @setu-ts/kernel](#api-reference-setu-tskernel)
-48. [API Reference: @setu-ts/runtime](#api-reference-setu-tsruntime)
-49. [API Reference: @setu-ts/exceptions](#api-reference-setu-tsexceptions)
-50. [API Reference: @setu-ts/di-plugin](#api-reference-setu-tsdi-plugin)
-51. [API Reference: @setu-ts/decorator-plugin](#api-reference-setu-tsdecorator-plugin)
-52. [Testing Package (`@setu-ts/testing`)](#testing-package-setu-tstesting)
-53. [SDK — Client SDK (`@setu-ts/sdk`)](#sdk--client-sdk-setu-tssdk)
-54. [API Reference: @setu-ts/grpc-plugin](#api-reference-setu-tsgrpc-plugin)
-55. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
-56. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
-57. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
-58. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
-59. [Boundary-Type Compatibility](#boundary-type-compatibility)
-60. [Summary](#summary)
+4. [Kernel diagnostics (`@setu-ts/kernel` + `@setu-ts/common`)](#kernel-diagnostics-setu-tskernel--setu-tscommon)
+5. [createApplication() (`@setu-ts/kernel`)](#createapplication-setu-tskernel)
+6. [RuntimePlugin() (`@setu-ts/runtime`)](#runtimeplugin-setu-tsruntime)
+7. [LoggerPlugin() (`@setu-ts/logger-plugin`)](#loggerplugin-setu-tslogger-plugin)
+8. [ConfigPlugin() (`@setu-ts/config-plugin`)](#configplugin-setu-tsconfig-plugin)
+9. [ValidationPlugin() (`@setu-ts/validation-plugin`)](#validationplugin-setu-tsvalidation-plugin)
+10. [DatabasePlugin() (`@setu-ts/database-plugin`)](#databaseplugin-setu-tsdatabase-plugin)
+11. [AuthPlugin() (`@setu-ts/auth-plugin`)](#authplugin-setu-tsauth-plugin)
+12. [HttpSecurityPlugin() (`@setu-ts/http-security-plugin`)](#httpsecurityplugin-setu-tshttp-security-plugin)
+13. [CachePlugin() (`@setu-ts/cache-plugin`)](#cacheplugin-setu-tscache-plugin)
+14. [EventsPlugin() (`@setu-ts/events-plugin`)](#eventsplugin-setu-tsevents-plugin)
+15. [SsePlugin() (`@setu-ts/sse-plugin`)](#sseplugin-setu-tssse-plugin)
+16. [WebSocketPlugin() (`@setu-ts/websocket-plugin`)](#websocketplugin-setu-tswebsocket-plugin)
+17. [RealtimeBackplanePlugin() (`@setu-ts/realtime-backplane-plugin`)](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin)
+18. [SessionPlugin() (`@setu-ts/session-plugin`)](#sessionplugin-setu-tssession-plugin)
+19. [ReactRouterPlugin() (`@setu-ts/react-router-plugin`)](#reactrouterplugin-setu-tsreact-router-plugin)
+20. [WorkerPoolPlugin() (`@setu-ts/worker-pool-plugin`)](#workerpoolplugin-setu-tsworker-pool-plugin)
+21. [SecretsPlugin() (`@setu-ts/secrets-plugin`)](#secretsplugin-setu-tssecrets-plugin)
+22. [AuditPlugin() (`@setu-ts/audit-plugin`)](#auditplugin-setu-tsaudit-plugin)
+23. [CQRS (`@setu-ts/cqrs-plugin`)](#cqrs-setu-tscqrs-plugin)
+24. [Messaging (`@setu-ts/messaging-plugin`)](#messaging-setu-tsmessaging-plugin)
+25. [Queue (`@setu-ts/queue-plugin`)](#queue-setu-tsqueue-plugin)
+26. [Scheduler (`@setu-ts/scheduler-plugin`)](#scheduler-setu-tsscheduler-plugin)
+27. [Resilience (`@setu-ts/resilience-plugin`)](#resilience-setu-tsresilience-plugin)
+28. [Storage (`@setu-ts/storage-plugin`)](#storage-setu-tsstorage-plugin)
+29. [MailPlugin() (`@setu-ts/mail-plugin`)](#mailplugin-setu-tsmail-plugin)
+30. [Notifications (`@setu-ts/notification-plugin`)](#notifications-setu-tsnotification-plugin)
+31. [Feature Flags (`@setu-ts/feature-flags-plugin`)](#feature-flags-setu-tsfeature-flags-plugin)
+32. [Multi-Tenancy Plugin (`@setu-ts/multi-tenancy-plugin`)](#multi-tenancy-plugin-setu-tsmulti-tenancy-plugin)
+33. [Health (`@setu-ts/health-plugin`)](#health-setu-tshealth-plugin)
+34. [Metrics (`@setu-ts/metrics-plugin`)](#metrics-setu-tsmetrics-plugin)
+35. [Telemetry (`@setu-ts/telemetry-plugin`)](#telemetry-setu-tstelemetry-plugin)
+36. [OpenAPI (`@setu-ts/openapi-plugin`)](#openapi-setu-tsopenapi-plugin)
+37. [CLI (`@setu-ts/cli`)](#cli-setu-tscli)
+38. [REST API Application](#rest-api-application)
+39. [Microservice Application](#microservice-application)
+40. [CQRS Application](#cqrs-application)
+41. [Plugin Creation](#plugin-creation)
+42. [Custom Middleware](#custom-middleware)
+43. [Custom Decorators](#custom-decorators)
+44. [Service Discovery (`@setu-ts/service-discovery-plugin`)](#service-discovery-setu-tsservice-discovery-plugin)
+45. [Programmatic vs Decorator API](#programmatic-vs-decorator-api)
+46. [Developer Ergonomics](#developer-ergonomics)
+47. [API Reference: @setu-ts/common](#api-reference-setu-tscommon)
+48. [API Reference: @setu-ts/kernel](#api-reference-setu-tskernel)
+49. [API Reference: @setu-ts/runtime](#api-reference-setu-tsruntime)
+50. [API Reference: @setu-ts/exceptions](#api-reference-setu-tsexceptions)
+51. [API Reference: @setu-ts/di-plugin](#api-reference-setu-tsdi-plugin)
+52. [API Reference: @setu-ts/decorator-plugin](#api-reference-setu-tsdecorator-plugin)
+53. [Testing Package (`@setu-ts/testing`)](#testing-package-setu-tstesting)
+54. [SDK — Client SDK (`@setu-ts/sdk`)](#sdk--client-sdk-setu-tssdk)
+55. [API Reference: @setu-ts/grpc-plugin](#api-reference-setu-tsgrpc-plugin)
+56. [API Reference: @setu-ts/cloudflare-plugin](#api-reference-setu-tscloudflare-plugin)
+57. [GraphQL (`@setu-ts/graphql-plugin`)](#graphql-setu-tsgraphql-plugin)
+58. [Static Files Plugin (`@setu-ts/static-plugin`)](#static-files-plugin-setu-tsstatic-plugin)
+59. [View Plugin (`@setu-ts/view-plugin`)](#view-plugin-setu-tsview-plugin)
+60. [Boundary-Type Compatibility](#boundary-type-compatibility)
+61. [Summary](#summary)
 
 ---
 
@@ -148,6 +149,59 @@ await app.start({ port: 3000 });
 No decorators. No DI. No reflection. Just a router and a runtime.
 
 ---
+
+## Kernel diagnostics (`@setu-ts/kernel` + `@setu-ts/common`)
+
+**Since 0.8.0.** An optional, read-only view of application composition and kernel execution. Enable
+it explicitly per application; an omitted `diagnostics` option creates no collector, metadata
+mirror, ring, or timer anywhere in the kernel, and `IApplication.diagnostics` is absent.
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+
+const app = createApplication({
+  plugins: [RuntimePlugin()],
+  // Explicit activation. `labels` is the disclosure decision: a name leaves
+  // the process ONLY when it exactly matches an allowlist entry.
+  diagnostics: {
+    labels: { plugins: ['catalog'], routes: ['/items'] },
+  },
+});
+await app.start();
+
+const snapshot = app.diagnostics!.snapshot(); // DiagnosticsSnapshot
+const batch = app.diagnostics!.read(0, 128); // DiagnosticsBatch
+```
+
+**The reader is pull-only.** `snapshot()` and `read()` are the whole surface: neither registers a
+callback, resolves a service, invokes application code, or mutates state. Returned data is deeply
+frozen; a slow or stopped reader cannot backpressure requests. DTOs (`DiagnosticsSnapshot`,
+`DiagnosticsNode`, `DiagnosticsEdge`, `DiagnosticsEvent`, `DiagnosticsBatch`) and
+`IDiagnosticsSource` are exported from `@setu-ts/common`; `KernelDiagnosticsOptions` and the
+`ApplicationOptions.diagnostics` field from `@setu-ts/kernel`.
+
+**Capture minimization.** No dynamic request path, query string, header, body, cookie, token,
+session value, database value, or raw error text is ever recorded. `labels` is an exact allowlist
+(≤256 entries per list, ≤160 UTF-8 bytes per entry, no control characters); un-allowlisted names are
+projected as opaque sequential ids (`p1`, `c1`, `r1`, `m1`), never truncated into new names.
+Approving a label is a disclosure decision, not a secret-detection guarantee.
+
+**One field is not allowlist-gated.** A plugin node's `version` is emitted whenever it passes a
+bounded `major.minor.patch` semver grammar, independently of `labels.plugins` — so an application
+that enables diagnostics with no labels at all still discloses the version of every registered
+plugin, including the framework's own through `RuntimePlugin`. A version that fails the grammar (a
+git sha, a sentence, any string over 64 characters) is omitted rather than projected.
+
+**Bounds.** Snapshots are capped at 1,024 nodes, 4,096 edges, and 256 KiB of compact JSON
+(`truncated` reports omission). Events are capped at 1,024 retained records and 1,024 bytes each;
+eviction is reported as `lost` sequence numbers, and drops as `droppedEvents`. Startup failure and
+final shutdown clear retained metadata while preserving the original application error — a reader
+then sees only the coarse `failed`/`closed` state, the failure code, and counters. Timing is
+monotonic from runtime registration; `atMs`/`durationMs` are `null` before that, never fabricated.
+
+The runnable consumer is `scripts/inspect-kernel.ts`; the paired throughput/latency harness is
+`scripts/benchmark-kernel-diagnostics.ts --mode=disabled|enabled`. Network authentication and
+transport for an external devtool belong to M98b, which consumes this same contract.
 
 ## createApplication() (`@setu-ts/kernel`)
 
@@ -9686,6 +9740,18 @@ Contract notes:
   distinct from `OPENAPI` so an OpenAPI plugin registering under `OPENAPI` does not populate
   `ctx.metadata`.
 
+### Kernel diagnostics contracts
+
+The read-only DTOs and reader interface the kernel's optional `IApplication.diagnostics` serves
+(Milestone 98a): `IDiagnosticsSource` (`snapshot()` / `read(after, limit?)`), `DiagnosticsSnapshot`,
+`DiagnosticsNode`, `DiagnosticsEdge`, `DiagnosticsEvent`, `DiagnosticsBatch`, and the closed
+vocabularies `DiagnosticsNodeKind`, `DiagnosticsEdgeKind`, `DiagnosticsSnapshotState`,
+`DiagnosticsFailureCode`, `DiagnosticsEventKind`, `DiagnosticsEventOutcome` and
+`DiagnosticsEventStage`. They are type-only exports: `@setu-ts/common` ships no diagnostics runtime
+value and no capability token, because the reader is reached through the application, never resolved
+from the registry. Activation, label allowlists, and the projection bounds are the kernel's — see
+[Kernel diagnostics](#kernel-diagnostics-setu-tskernel--setu-tscommon).
+
 ### Ingress behaviours
 
 `IngressKind` is `'queue' | 'scheduler' | 'messaging' | 'websocket'`. `IngressContext<TPayload>` is
@@ -9722,12 +9788,14 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 
 ### Types
 
-| Export               | Kind | Purpose                                                                                                                                                                                                                                    |
-| -------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                                                                                                                                                                                |
-| `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)`                                                                                                                                           |
-| `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }` — byte-ish bodies verbatim with no content-type default, `URLSearchParams` urlencoded-defaulted, plain object and string JSON-defaulted, anything else refused) |
-| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)                                                                                                                                                         |
+| Export                          | Kind | Purpose                                                                                                                                                                                                                                    |
+| ------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ApplicationOptions`            | type | Options for `createApplication` (`{ plugins?: IPlugin[]; diagnostics?: KernelDiagnosticsOptions }`)                                                                                                                                        |
+| `IKernelApplication`            | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)`                                                                                                                                           |
+| `InjectRequest`                 | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }` — byte-ish bodies verbatim with no content-type default, `URLSearchParams` urlencoded-defaulted, plain object and string JSON-defaulted, anything else refused) |
+| `InjectResponse`                | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)                                                                                                                                                         |
+| `KernelDiagnosticsOptions`      | type | Kernel-diagnostics activation passed as `ApplicationOptions.diagnostics` (`{ labels?: KernelDiagnosticsLabelOptions }`); its PRESENCE is the activation, and an omitted option allocates nothing                                           |
+| `KernelDiagnosticsLabelOptions` | type | The four exact-match label allowlists (`plugins`/`capabilities`/`routes`/`middleware`), each at most 256 entries of at most 160 UTF-8 bytes with no control characters                                                                     |
 
 Contract notes:
 
