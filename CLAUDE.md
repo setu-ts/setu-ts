@@ -5260,6 +5260,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   per request, which is why it reads as parity rather than as provably identical work), and the
   harness's shipped 20,000-request cap makes a run last ~0.12 s, where per-pass spread reached 48% —
   the measurement needs its 10-second window to decide the run — complete (PR #345).
+- **Milestone 99b** (`packages/cli` + `docs` — generated output is usable): generated workspace
+  Dockerfiles use `deno run --frozen`, retaining the lockfile resolution cached at build time
+  without writing under a read-only root. The generated deployment gate installs the scaffold before
+  building it and boots a Redis-backed member without external network access. The shared writer
+  compensates caught I/O failures by restoring overwritten bytes, removing only files and empty
+  directories it created, and reporting incomplete recovery; `adopt` reports entry rewrite failures
+  rather than a port-literal mismatch — complete (PR pending).
 
 ## Verification (run before declaring any work done)
 

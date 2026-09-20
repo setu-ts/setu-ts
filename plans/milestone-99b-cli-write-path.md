@@ -1,6 +1,6 @@
 # Milestone 99b — what the CLI writes cannot then be used
 
-> **Status:** Planning. Branch: `feat/m99b-cli-write-path`. `main` is protected — all work
+> **Status:** Complete. Branch: `feat/m99b-cli-write-path`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
@@ -16,9 +16,8 @@ what found the six-command blast radius below.
 
 - **In scope:** the generated Dockerfile's runtime flag; transactional behaviour for the one writer
   behind six commands; the third, non-`writeFiles` write phase in `adopt`.
-- **NOT this milestone:** the `check:deploy --generated` gate's missing `deno install` step is IN
-  scope (it is what let V7-5 ship); `--dry-run` exactness is already correct and unchanged; the
-  Kubernetes manifest content (M39/M70l, verified this run).
+- **Also in scope:** install before the generated deployment build.
+- **Out of scope:** Kubernetes manifest content and changes to dry-run output.
 
 ## 1. Contracts verified from SOURCE (not names)
 
@@ -46,8 +45,8 @@ the image cache and reaches only `ECONNREFUSED` on the broker; with `--frozen` i
 | #  | Conflict                                                                                                                                                                                         | Resolution (picked side)                                                                               | Doc deliverable (same PR)                                                               |
 | -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | C1 | `docs/deployment.md` states the image's module cache is the member's only runtime dependency source; with `--no-lock` the container fetches from npm                                             | The doc states the intended guarantee. Change the flag so the doc becomes true                         | `docs/deployment.md` gains the `--frozen` reasoning and drops any `--no-lock` rationale |
-| C2 | The generated Dockerfile's own comment says the lockfile "has no job left inside an image"                                                                                                       | False: the lockfile is exactly what makes the build-time cache and the runtime resolution agree        | The emitted comment is rewritten in `packages/cli/src/templates/`                       |
-| C4 | V7-8 came from outside the project and the repository has no convention for crediting an external reporter — the nearest precedents are `Reported in code review before merge` and an issue link | Credit the reporter by handle in the entry that ships the fix, as the durable public record            | `CHANGELOG.md`'s V7-8 entry names `kantorcodes1` and links the thread                   |
+| C2 | The generated Dockerfile's own comment says the lockfile "has no job left inside an image"                                                                                                       | False: the lockfile is exactly what makes the build-time cache and the runtime resolution agree        | The emitted comment is rewritten in `packages/cli/src/workspace/compose.ts`             |
+| C4 | V7-8 came from outside the project and the repository has no convention for crediting an external reporter — the nearest precedents are `Reported in code review before merge` and an issue link | Credit the reporter by handle in the entry that ships the fix, as the durable public record            | `CHANGELOG.md`'s V7-8 entry names and links `u/kantorcodes1`                            |
 | C3 | M95a's ROADMAP section records V6-5 as closed                                                                                                                                                    | It is not; the error moved. M95a's mechanism paragraph stays (it was correct about the lockfile write) | The M95a section gains a note pointing at M99b, rather than being rewritten             |
 
 ## 3. Design decisions
@@ -57,9 +56,9 @@ the image cache and reaches only `ECONNREFUSED` on the broker; with `--frozen` i
 - **Decision:** the generated `CMD` runs `--frozen` in place of `--no-lock`.
 - **Why:** `--frozen` uses the shipped lockfile, so build and runtime resolve identically, and it
   never writes, so M95a's original read-only lockfile write remains impossible. Measured to serve
-  `/health` `200` under `ReadonlyRootfs=true` with `--network none`.
-- **Test home:** `packages/cli/test/e2e/generated-deployment.test.ts` and the `check:deploy`
-  `--generated` mode below.
+  `/health` `200` under `ReadonlyRootfs=true` without external network access.
+- **Test home:** `check:deploy --generated` (real Docker) and `test/deploy-gate.test.ts` (command
+  sequence) and the `check:deploy` `--generated` mode below.
 
 ### 3.2 Making the gate able to see it
 
@@ -69,7 +68,7 @@ the image cache and reaches only `ECONNREFUSED` on the broker; with `--frozen` i
   stub lockfile, build and runtime coincidentally agree, and the defect is structurally invisible.
   Measured: the same scaffold's lockfile reaches 65,275 bytes after `deno install`, and the image
   built from that one fails.
-- **Test home:** `scripts/check-deploy.ts` itself, exercised by `test/unit/check-deploy.test.ts`.
+- **Test home:** `scripts/check-deploy.ts` itself, exercised by `test/deploy-gate.test.ts`.
 
 ### 3.3 How `writeFiles` becomes safe to interrupt
 
@@ -97,6 +96,28 @@ the image cache and reaches only `ECONNREFUSED` on the broker; with `--frozen` i
   cost lands only where there is something to protect.
 - **Test home:** `packages/cli/test/unit/write-files-rollback.test.ts`.
 
+### 3.3a Filesystem limits established from source
+
+`IFileSystem` has no rename, exclusive-create, lstat, or transaction primitive. This is compensation
+for caught I/O failures, not crash-atomic filesystem storage: process termination, power loss and
+concurrent editors are not covered. The ROADMAP's Ctrl-C assertion does not hold: `main.ts` installs
+no cancellation handler and process termination does not run a promise catch. No signal-safety claim
+ships with this change. A write-time snapshot covers a file arriving after preflight and before that
+snapshot; it cannot eliminate the remaining read/write race.
+
+Only a recognized missing-path error may mean absent: Deno's `NotFound`, Node's `code: ENOENT`, and
+the Bun adapter's explicit `ENOENT: no such file or directory, …` message. Other read/stat errors
+abort before mutation. The internal `utils/filesystem-errors.ts` owns this classification and is
+consumed by the writer and adoption's optional-entry read. Each missing parent is created
+individually (non-recursively), recorded only after successful creation, and removed deepest-first
+with no recursive delete. Record a file's undo before attempting its write, since a rejected write
+can have truncated it. Rollback skips a restore when the original bytes are already intact.
+
+Existing `test/deploy-gate.test.ts` and the CLI barrel test are extended rather than duplicated. The
+Docker proof stays in the existing gate; ordinary CLI tests have no Docker permission. The gate
+starts a generated Redis workspace with its broker and application sharing a network-none namespace,
+which exercises the ioredis lazy import while external network access remains unavailable.
+
 ### 3.4 What a rollback failure does
 
 - **Decision:** a failure DURING rollback is reported alongside the original error and does not
@@ -109,8 +130,9 @@ the image cache and reaches only `ECONNREFUSED` on the broker; with `--frozen` i
 
 ### 3.5 `adopt`'s third phase
 
-- **Decision:** the bare `catch` narrows to the missing-entry case — a failure to READ the entry is
-  swallowed as today, a failure to WRITE it is reported and the command exits non-zero.
+- **Decision:** the bare `catch` narrows to the missing-entry case — only a positively identified
+  missing entry is skipped; any other read failure or a write failure is reported and the command
+  exits non-zero. The write uses `writeFiles` so a partial write attempts to restore the entry too.
 - **Why:** the two are different outcomes with the same catch today, so a genuine write failure is
   reported as "your entry does not carry the port literal" and the developer is told to act by hand
   without being told anything failed. Splitting read from write is the smallest change that
@@ -147,29 +169,31 @@ reopens it.
 
 ## 5. Implementation files
 
-| File                                       | Purpose                                                                    |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
-| `packages/cli/src/index.ts`                | unchanged (pinned by test)                                                 |
-| `packages/cli/src/utils/file-writer.ts`    | `writeFiles` records written paths and created directories, and rolls back |
-| `packages/cli/src/commands/adopt.ts`       | phase 3's catch narrows to the read case; a write failure is reported      |
-| `packages/cli/src/templates/` (Dockerfile) | `--frozen` in the emitted `CMD`; the lockfile comment rewritten            |
-| `scripts/check-deploy.ts`                  | `--generated` installs before building                                     |
-| `docs/deployment.md`                       | C1 — the guarantee and the `--frozen` reasoning                            |
+| File                                          | Purpose                                                                    |
+| --------------------------------------------- | -------------------------------------------------------------------------- |
+| `packages/cli/src/utils/filesystem-errors.ts` | Internal missing-path classification shared by writer and adopt            |
+| `packages/cli/src/index.ts`                   | unchanged (pinned by test)                                                 |
+| `packages/cli/src/utils/file-writer.ts`       | `writeFiles` records written paths and created directories, and rolls back |
+| `packages/cli/src/commands/adopt.ts`          | phase 3's catch narrows to the read case; a write failure is reported      |
+| `packages/cli/src/workspace/compose.ts`       | `--frozen` in the emitted `CMD`; the lockfile comment rewritten            |
+| `scripts/check-deploy.ts`                     | `--generated` installs before building                                     |
+| `docs/deployment.md`                          | C1 — the guarantee and the `--frozen` reasoning                            |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                             | src covered                       | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                                                                     |
-| ----------------------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/cli/test/unit/write-files-rollback.test.ts` | `utils/file-writer.ts`            | a fake `IFileSystem` whose Nth `writeFile` rejects leaves no NEW file behind, restores every pre-existing file to its ORIGINAL bytes (the `managed` case), and removes only directories it created; a pre-existing directory survives; a path created between preflight and write is restored, not deleted; a rejecting `rm` reports both errors. Calls typed against `writeFiles(fs: IFileSystem, files: readonly GeneratedFile[])` |
-| `packages/cli/test/unit/adopt-entry-rewrite.test.ts`  | `commands/adopt.ts`               | a missing entry is still silent and exits `0`; an entry whose WRITE rejects exits non-zero and the message names the write, not the port literal                                                                                                                                                                                                                                                                                     |
-| `packages/cli/test/e2e/scaffold-interrupted.test.ts`  | `utils/file-writer.ts` end to end | `setu new` into a target whose nested directory is read-only leaves nothing behind, and an immediate retry SUCCEEDS. `setu generate app` into a two-member workspace, failing on the last write, leaves `compose.yaml`, the k8s manifests and the first member's discovery module byte-identical to their pre-run contents                                                                                                           |
-| `packages/cli/test/e2e/generated-deployment.test.ts`  | the Dockerfile template           | a scaffolded workspace, `deno install`ed, built from its own generated Dockerfile, serves `/health` `200` under `--read-only --network none`                                                                                                                                                                                                                                                                                         |
-| `test/unit/check-deploy.test.ts`                      | `scripts/check-deploy.ts`         | the `--generated` path invokes `deno install` before `docker build` — asserted on the command sequence, so removing the step fails                                                                                                                                                                                                                                                                                                   |
-| `packages/cli/test/unit/barrel-exports.test.ts`       | `src/index.ts`                    | published surface unchanged                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Test file                                                                                  | src covered                       | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/cli/test/unit/filesystem-errors.test.ts`                                         | `utils/filesystem-errors.ts`      | Deno, Node and Bun missing errors accepted; access, disk and unknown failures refused                                                                                                                                                                                                                                                                                                                                                |
+| `packages/cli/test/unit/write-files-rollback.test.ts`                                      | `utils/file-writer.ts`            | a fake `IFileSystem` whose Nth `writeFile` rejects leaves no NEW file behind, restores every pre-existing file to its ORIGINAL bytes (the `managed` case), and removes only directories it created; a pre-existing directory survives; a path created between preflight and write is restored, not deleted; a rejecting `rm` reports both errors. Calls typed against `writeFiles(fs: IFileSystem, files: readonly GeneratedFile[])` |
+| `packages/cli/test/unit/adopt-entry-rewrite.test.ts`                                       | `commands/adopt.ts`               | a missing entry is still silent and exits `0`; an entry whose WRITE rejects exits non-zero and the message names the write, not the port literal                                                                                                                                                                                                                                                                                     |
+| `packages/cli/test/e2e/scaffold-interrupted.test.ts`                                       | `utils/file-writer.ts` end to end | `setu new` into a target whose nested directory is read-only leaves nothing behind, and an immediate retry SUCCEEDS. `setu generate app` into a two-member workspace, failing on the last write, leaves `compose.yaml`, the k8s manifests and the first member's discovery module byte-identical to their pre-run contents                                                                                                           |
+| `check:deploy --generated` (real Docker) and `test/deploy-gate.test.ts` (command sequence) | the Dockerfile template           | a scaffolded workspace, `deno install`ed, built from its own generated Dockerfile, serves `/health` `200` under `--read-only` with no external network                                                                                                                                                                                                                                                                               |
+| `test/deploy-gate.test.ts`                                                                 | `scripts/check-deploy.ts`         | the `--generated` path invokes `deno install` before `docker build` — asserted on the command sequence, so removing the step fails                                                                                                                                                                                                                                                                                                   |
+| `packages/cli/test/unit/barrel-exports.test.ts`                                            | `src/index.ts`                    | published surface unchanged                                                                                                                                                                                                                                                                                                                                                                                                          |
 
 `scripts/check-deploy.ts` is deliberately NOT in `script-coverage.ts`'s target set (M39's recorded
 deviation: it is mostly `docker`/`kind` orchestration a test may not spawn); its decidable logic is
-exported and unit-tested, which is what `test/unit/check-deploy.test.ts` covers.
+exported and unit-tested, which is what `test/deploy-gate.test.ts` covers.
 
 ## 7. Verification gates
 
@@ -183,6 +207,7 @@ deno task test
 deno task test:coverage
 deno task check:deploy --generated
 deno task publish:check
+deno task release:verify 0.7.0
 ```
 
 Negative controls, each observed failing and reverted:
@@ -204,12 +229,13 @@ see the defect proves nothing on a healthy tree.
 
 ## 8. Risks & mitigations
 
-- `--frozen` fails a build whose lockfile is stale relative to its manifests → that is the intended
-  loud failure, and it surfaces at build time in CI rather than at container start in a cluster.
-- Rollback could remove a file this invocation did not create → it cannot: a path is unlinked only
-  when the read taken immediately before its write found nothing there. `findExisting` is NOT the
-  guarantee — it skips `managed` paths entirely — so the read, not the preflight, is what makes the
-  distinction, and the window between them is one `await`.
+- `--frozen` fails a build whose lockfile is stale relative to its manifests → that is a loud
+  failure; `deno cache` may extend the build lock and `--frozen` refuses any remaining runtime-only
+  resolution change. The real-image gate must check this pairing.
+- Rollback could remove a file this invocation did not create → a path is unlinked only when the
+  read taken immediately before its write found nothing there. `findExisting` is NOT the guarantee —
+  it skips `managed` paths entirely — so the read, not the preflight, is what makes the distinction,
+  and the window between them is one `await`.
 - An existing scaffolded project keeps `--no-lock` until its Dockerfile is regenerated → documented
   in `docs/deployment.md` with the one-line edit, matching how M95a handled the same situation.
 

@@ -2,6 +2,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import {
   BUILD_MATRIX,
+  buildGeneratedImage,
   type DriftReport,
   EXCLUDED_EXAMPLES,
   generatedResources,
@@ -413,5 +414,40 @@ describe('rendered manifests', () => {
     const preStop = Number(deployment.match(/seconds:\s*(\d+)/)?.[1]);
     expect(grace).toBeGreaterThan(0);
     expect(preStop).toBeLessThan(grace);
+  });
+});
+
+describe('generated deployment install ordering', () => {
+  it('builds the installed workspace using the same root as the build context', async () => {
+    const calls: { command: readonly string[]; cwd: string | undefined }[] = [];
+    await buildGeneratedImage('/workspace/acme', 'test-image', (command, options) => {
+      calls.push({ command, cwd: options?.cwd });
+      return Promise.resolve({ success: true, stdout: '', stderr: '' });
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual({ command: [Deno.execPath(), 'install'], cwd: '/workspace/acme' });
+    expect(calls[1]!.command).toEqual([
+      'docker',
+      'build',
+      '--quiet',
+      '-f',
+      '/workspace/acme/docker/Dockerfile',
+      '--build-arg',
+      'MEMBER=orders',
+      '-t',
+      'test-image',
+      '/workspace/acme',
+    ]);
+  });
+
+  it('never builds an image after install fails', async () => {
+    const commands: string[][] = [];
+    const failure = { success: false, stdout: '', stderr: 'install failed' };
+    const result = await buildGeneratedImage('/workspace/acme', 'test-image', (command) => {
+      commands.push([...command]);
+      return Promise.resolve(failure);
+    });
+    expect(result).toBe(failure);
+    expect(commands).toEqual([[Deno.execPath(), 'install']]);
   });
 });

@@ -373,12 +373,11 @@ grace period is real because the generated entry handles `SIGTERM`, and the star
 
 ### The image is the member's only dependency source at runtime
 
-The generated Deno image resolves the whole module graph at build time (`deno cache main.ts`
-downloads every package the member's plugins can reach) and its start command runs with `--no-lock`.
-Both halves close one measured failure: the first time `MessagingPlugin` registers, Deno adds its
-driver edges (`npm:amqplib`, `npm:ioredis`) to `deno.lock` — a write, which the generated manifest's
-`readOnlyRootFilesystem: true` forbids, so a scaffolded member used to crash-loop before serving
-anything:
+The generated Deno image resolves its graph at build time (`deno cache main.ts`) and its start
+command runs with `--frozen`. The generated Dockerfile copies `deno.lock` before caching, and
+`--frozen` makes runtime resolution use those same pinned versions without modifying the lockfile.
+That closes the original read-only-root failure, where the first lazy driver registration attempted
+to add an edge to `deno.lock`:
 
 ```
 error: Failed writing lockfile
@@ -386,19 +385,23 @@ Caused by:
     Read-only file system (os error 30) (for '/srv/deno.lock')
 ```
 
-The message points at the wrong remedy. This is not a volume to mount and not the cache being
-incomplete — the packages are already in the image. It is a lockfile doing a job it no longer has
-inside an image, where resolution already happened against the committed one and the module cache is
-immutable. `--no-lock` removes the write; the build-time cache is what keeps the start offline. To
-inspect a checkout's lockfile state without running anything, `deno install --frozen` exits non-zero
-and names the entries resolution would have added — the diagnostic the runtime error should have
-given you.
+`--no-lock` is not the remedy: it ignores the lockfile the build used and can choose a later npm
+transitive version that the image did not cache when a lazy driver loads. That forces an npm fetch
+at startup and fails in an air-gapped deployment. Run the workspace's printed `deno install` step
+before building an image so the lockfile records the resolved workspace graph; then `--frozen` keeps
+runtime resolution aligned with the cached build. `deno install --frozen` is a useful diagnostic for
+a checkout whose lockfile is stale: it exits non-zero instead of changing it.
+
+For an existing generated workspace, run `setu generate app <member>` to regenerate its managed
+Dockerfile, or replace its runtime `--no-lock` flag with `--frozen` before the next image build.
 
 Do not mount a volume over the image's `DENO_DIR` (the generated Deployment mounts only `/tmp` for
 exactly this reason): measured, a cold cache fails identically with and without network egress,
 because fetched packages have nowhere to persist under a read-only root. The cache baked into the
-image IS the dependency source, which is why the `--generated` gate below proves a scaffolded member
-serves under `--read-only --network none`.
+image IS the dependency source. The `--generated` gate installs a scaffold before building it, then
+starts a real Redis-backed member under `--read-only` in a network-none namespace shared only with
+its loopback broker. It proves both that a lazy driver uses the shipped lockfile and that the member
+serves without external network access.
 
 ### Sibling addresses come from the environment
 

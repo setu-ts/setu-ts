@@ -11,7 +11,7 @@ import { walk } from 'jsr:@std/fs@^1.0.19';
  *
  * Since M95a it also proves the deployment a USER gets: a workspace the CLI scaffolds is built
  * with its own generated Dockerfile and must serve `/health` under the security posture the
- * generated manifest sets — read-only root filesystem, no network.
+ * generated manifest sets — a read-only root filesystem and no external network.
  *
  * Modes are separable so the fast structural checks stay usable on every run while the slow
  * cluster proof is opt-in locally and mandatory in CI:
@@ -152,8 +152,9 @@ export interface ModeSet {
   readonly cluster: boolean;
   /**
    * Scaffold a workspace with the CLI, build its GENERATED Dockerfile, and run the image under
-   * `--read-only --network none` until it serves `/health` (M95a). Every other mode proves this
-   * repository's own deployment objects; this is the only one that proves what a user deploys.
+   * `--read-only` with no external network until it serves `/health` (M95a). Every other mode
+   * proves this repository's own deployment objects; this is the only one that proves what a
+   * user deploys.
    */
   readonly generated: boolean;
   /**
@@ -619,6 +620,8 @@ export interface GeneratedResources {
   readonly image: string;
   /** Unique Docker container name for this invocation. */
   readonly container: string;
+  /** Broker sharing an isolated loopback namespace with the application. */
+  readonly broker: string;
 }
 
 /**
@@ -635,7 +638,39 @@ export function generatedResources(): GeneratedResources {
   return {
     image: `${GENERATED_IMAGE_PREFIX}-${suffix}`,
     container: `${GENERATED_CONTAINER_PREFIX}-${suffix}`,
+    broker: `${GENERATED_CONTAINER_PREFIX}-broker-${suffix}`,
   };
+}
+
+/**
+ * Installs the scaffold exactly as its printed next step requests, then builds
+ * its Dockerfile. The lockfile produced by install must reach the image: a
+ * scaffold-only lock missed the build/runtime resolution disagreement in M99b.
+ *
+ * @param root - Generated workspace root
+ * @param image - Image tag owned by this invocation
+ * @param execute - Subprocess seam for the ordered-command regression test
+ * @returns The install failure, or the image build result
+ */
+export async function buildGeneratedImage(
+  root: string,
+  image: string,
+  execute: typeof run = run,
+): ReturnType<typeof run> {
+  const installed = await execute([Deno.execPath(), 'install'], { quiet: true, cwd: root });
+  if (!installed.success) return installed;
+  return await execute([
+    'docker',
+    'build',
+    '--quiet',
+    '-f',
+    `${root}/docker/Dockerfile`,
+    '--build-arg',
+    `MEMBER=${GENERATED_MEMBER}`,
+    '-t',
+    image,
+    root,
+  ], { quiet: true });
 }
 
 /**
@@ -645,15 +680,17 @@ export function generatedResources(): GeneratedResources {
  * workspace deploys with were generated, managed, and never once built by a gate. This mode
  * scaffolds a real workspace with the real CLI, builds its generated Dockerfile, and runs the
  * image under the posture the generated Kubernetes manifest sets — `readOnlyRootFilesystem: true`
- * with exactly one writable path (`/tmp`, mirrored here as a tmpfs) — and no network, which is
- * an air-gapped cluster's reachability. Success is a SERVED `/health` response, not a live
+ * with exactly one writable path (`/tmp`, mirrored here as a tmpfs) — and no external network,
+ * which is an air-gapped cluster's reachability. Its Redis broker owns a `--network none`
+ * namespace; the application shares it, so only loopback Redis remains reachable. Success is a
+ * SERVED `/health` response, not a live
  * process: the failure this closes kills the process at import, but a warm-list regression
  * could equally leave it running and unable to serve, and a gate that watched only for an exit
  * would call that a pass.
  *
- * The probe runs INSIDE the container because `--network none` leaves no interface a host
- * poll could reach; the container that dies at import is caught by its state check, and its
- * logs are printed before the failure is reported.
+ * The probe runs INSIDE the container because its network namespace leaves no interface a host
+ * poll could reach; the container that dies at import is caught by its state check, and its logs
+ * are printed before the failure is reported.
  *
  * @returns The outcome of the generated-deployment check
  */
@@ -665,19 +702,24 @@ async function checkGenerated(): Promise<CheckOutcome> {
     return 'skipped';
   }
 
-  const workspace = await Deno.makeTempDir({ prefix: 'setu-generated-' });
+  await Deno.mkdir('.tmp', { recursive: true });
+  const workspace = await Deno.makeTempDir({
+    dir: await Deno.realPath('.tmp'),
+    prefix: 'setu-generated-',
+  });
   const root = `${workspace}/${GENERATED_WORKSPACE}`;
   const resources = generatedResources();
   try {
     // Scaffold exactly what a user gets, with the real CLI as a subprocess. Scaffolding writes
-    // files and resolves nothing: the framework packages resolve later, inside the image build —
-    // the same order a user's first `docker build` sees.
+    // files, then the printed install step resolves the workspace before the image build.
     const cli = (args: readonly string[]) =>
       run([Deno.execPath(), 'run', '-A', CLI_ENTRY, ...args], { quiet: true, cwd: workspace });
     const created = await cli([
       'new',
       GENERATED_WORKSPACE,
       '--workspace',
+      '--transport',
+      'redis',
       '--port',
       String(GENERATED_PORT),
     ]);
@@ -715,22 +757,52 @@ async function checkGenerated(): Promise<CheckOutcome> {
     // The GENERATED Dockerfile, not this repository's own — the defect lives in what `setu`
     // emits. Framework resolution from jsr.io happens here, on the build's network; the run
     // below is the part that must not need one.
-    console.log('  building the generated image (jsr.io resolution happens here) …');
-    const built = await run([
-      'docker',
-      'build',
-      '--quiet',
-      '-f',
-      `${root}/docker/Dockerfile`,
-      '--build-arg',
-      `MEMBER=${GENERATED_MEMBER}`,
-      '-t',
-      resources.image,
-      root,
-    ], { quiet: true });
+    console.log('  installing the workspace and building its generated image …');
+    const built = await buildGeneratedImage(root, resources.image);
     if (!built.success) {
-      console.error('  ✗ the generated Dockerfile failed to build');
+      console.error(
+        '  ✗ the generated workspace failed to install or its Dockerfile failed to build',
+      );
       console.error(built.stderr);
+      return 'failed';
+    }
+
+    // Lazy driver imports must actually run. The old memory-only scaffold passed
+    // even with --no-lock after install. Redis loads the ioredis driver and its
+    // transitive npm modules. Redis and the app share a network-none namespace:
+    // loopback reaches the broker, while npm/jsr remain unreachable.
+    const broker = await run([
+      'docker',
+      'run',
+      '-d',
+      '--name',
+      resources.broker,
+      '--network',
+      'none',
+      'redis:7',
+    ], { quiet: true });
+    if (!broker.success) {
+      console.error(broker.stderr);
+      return 'failed';
+    }
+    let brokerReady = false;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      const ready = await run([
+        'docker',
+        'exec',
+        resources.broker,
+        'redis-cli',
+        'ping',
+      ], { quiet: true });
+      if (ready.success) {
+        brokerReady = true;
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, GENERATED_PROBE_INTERVAL_MS));
+    }
+    if (!brokerReady) {
+      const logs = await run(['docker', 'logs', resources.broker], { quiet: true });
+      console.error(`  ✗ isolated Redis did not become ready: ${logs.stdout}${logs.stderr}`);
       return 'failed';
     }
 
@@ -746,7 +818,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
       resources.container,
       '--read-only',
       '--network',
-      'none',
+      `container:${resources.broker}`,
       '--tmpfs',
       '/tmp',
       resources.image,
@@ -785,14 +857,17 @@ async function checkGenerated(): Promise<CheckOutcome> {
 
     const logs = await run(['docker', 'logs', resources.container], { quiet: true });
     if (!served) {
-      console.error('  ✗ the member never served /health under --read-only --network none');
+      console.error(
+        '  ✗ the member never served /health under --read-only with no external network',
+      );
       console.error(logs.stdout + logs.stderr);
       return 'failed';
     }
-    console.log('  ✓ served /health under --read-only --network none');
+    console.log('  ✓ served /health under --read-only with no external network');
     return 'passed';
   } finally {
     await run(['docker', 'rm', '-f', resources.container], { quiet: true });
+    await run(['docker', 'rm', '-f', '-v', resources.broker], { quiet: true });
     await run(['docker', 'image', 'rm', '-f', resources.image], { quiet: true });
     await Deno.remove(workspace, { recursive: true });
   }

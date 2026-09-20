@@ -15,6 +15,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import { APP_VERB, EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
@@ -261,11 +262,27 @@ export async function runAdoptCommand(
   try {
     const entry = new TextDecoder().decode(await deps.fs.readFile(entryPath));
     rewritten = rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER);
-    if (rewritten !== undefined) {
-      await deps.fs.writeFile(entryPath, new TextEncoder().encode(rewritten));
+  } catch (cause) {
+    if (!isMissingPath(cause)) {
+      deps.error(
+        `Failed to read ${entryPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+      return EXIT_ERROR;
     }
-  } catch {
-    // No entry at all: a Workers project has `src/index.ts` and binds no port.
+    // A Workers project has src/index.ts and no main.ts to rewrite.
+  }
+  if (rewritten !== undefined) {
+    try {
+      await writeFiles(deps.fs, [{ path: entryPath, contents: rewritten, managed: true }]);
+    } catch (cause) {
+      deps.error(
+        `Failed to rewrite ${entryPath}: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+      deps.error(
+        'Workspace files and moved project files remain in place; repair the entry before starting it.',
+      );
+      return EXIT_ERROR;
+    }
   }
 
   deps.log('');
