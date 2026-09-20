@@ -5277,7 +5277,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   hostile provider DTO), and the native client verifies every response MAC over the exact bounded
   bytes BEFORE parsing, with terminal failed pairing. Ships `scripts/inspect-local-diagnostics.ts`
   (real loopback consumer exercise, subprocess-tested, credentials stay in memory) and protocol
-  fixtures with independently computed Web Crypto vectors — complete (PR pending).
+  fixtures with independently computed Web Crypto vectors — complete (PR #347).
 
 ## Verification (run before declaring any work done)
 
