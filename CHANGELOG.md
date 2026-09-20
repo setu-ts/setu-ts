@@ -25,7 +25,13 @@ All notable changes to this project are documented here. The format follows
   operations, 256 KiB bodies, 128 events per read), value-free fixed errors, and flood isolation
   (anonymous refusal budget 5/s burst 10; per-session budget 20/s burst 40; 8 handler slots with 7
   for unpaired lanes). Every refusal drops supplied input; the connector's projection copies M98a's
-  exact field allowlist, so a hostile provider result cannot leak a canary.
+  exact field allowlist, so a hostile provider result cannot leak a canary. The connector announces
+  its own bind through the application's logger —
+  `Setu devtool: local diagnostics connector
+  listening on http://127.0.0.1:<port>` — replacing the
+  runtime's bare `Listening on …` banner, which in an application that also binds a port reads as a
+  second, unexplained application listener. `LocalDiagnosticsListenerOptions.onListen` carries it;
+  omitted, the runtime's own banner stands, so a bind is never silent.
 
 - **Kernel diagnostics (M98a): an optional, read-only view of application composition and kernel
   execution.** `createApplication({ diagnostics: {} })` enables collection and exposes
@@ -45,6 +51,12 @@ All notable changes to this project are documented here. The format follows
   framework's own. Snapshots are bounded (1,024 nodes / 4,096 edges / 256 KiB of compact JSON) and
   event batches are bounded (1,024 events, 1,024 bytes per event) with drop and loss counters.
   Startup failure and final shutdown clear retained metadata while preserving the original error.
+  The topology sinks are installed at CONSTRUCTION, so a route or capability registered between
+  `createApplication()` and `start()` is projected: a CLI-scaffolded project registers its routes
+  exactly there — through the generated `registerGeneratedRoutes(app.router, …)` setup call and the
+  hello-world route — and installing the sinks at startup instead would show no routes at all for
+  the default template while the application served them. A composition-time registration carries no
+  `owns` edge, because no plugin's `register()` was running: the application registered it.
 - **`deno task check:docs` now refuses an export added to a published barrel that no `Unreleased`
   changelog entry names.** Four releases in a row shipped, or nearly shipped, public surface that no
   entry announced — `alpha.10` lost PR #195, `v0.4.0` lost `ResponseSnapshotInit`, `v0.5.0` lost

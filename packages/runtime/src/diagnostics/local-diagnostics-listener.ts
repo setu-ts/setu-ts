@@ -213,6 +213,9 @@ class DenoLocalDiagnosticsListenerFactory implements ILocalDiagnosticsListenerFa
         port: options.port,
         hostname: '127.0.0.1',
         fetch: (request) => this.#handleNative(request, options),
+        // Omitted when the caller supplies none, so the default banner
+        // stands rather than the bind becoming silent.
+        ...(options.onListen !== undefined ? { onListen: options.onListen } : {}),
       });
     } catch (error) {
       // A port conflict (or any OS bind refusal) fails closed.

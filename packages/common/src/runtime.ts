@@ -551,6 +551,17 @@ export interface LocalDiagnosticsListenerOptions {
    * never reaches it.
    */
   readonly handler: (request: IRequest) => IResponse | Promise<IResponse>;
+  /**
+   * Announces the bound address, REPLACING whatever banner the underlying
+   * server would print itself.
+   *
+   * The listener is a developer-facing devtool port, and a bare
+   * `Listening on http://127.0.0.1:<port>/` is indistinguishable from the
+   * application's own listener — so the connector supplies a line that names
+   * the devtool. Omitted, the implementation's default banner stands, which
+   * is what a caller without a logger wants: a signal, if not a labelled one.
+   */
+  readonly onListen?: (address: { hostname: string; port: number }) => void;
 }
 
 /**

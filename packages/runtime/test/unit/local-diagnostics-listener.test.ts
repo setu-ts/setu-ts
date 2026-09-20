@@ -29,17 +29,21 @@ function fakeHost(): {
   servers: Array<{ shutdown(): Promise<void> }>;
   calls: Array<{ port: number; hostname: string | undefined }>;
   fetches: Array<(request: Request) => Response | Promise<Response>>;
+  listens: Array<((address: { hostname: string; port: number }) => void) | undefined>;
 } {
   const servers: Array<{ shutdown(): Promise<void> }> = [];
   const calls: Array<{ port: number; hostname: string | undefined }> = [];
   const fetches: Array<(request: Request) => Response | Promise<Response>> = [];
+  const listens: Array<((address: { hostname: string; port: number }) => void) | undefined> = [];
   return {
     servers,
     calls,
     fetches,
+    listens,
     host: {
       serve(options) {
         calls.push({ port: options.port, hostname: options.hostname });
+        listens.push(options.onListen);
         fetches.push(options.fetch);
         const server = {
           shutdown: () => Promise.resolve(),
@@ -234,5 +238,33 @@ describe('RuntimePlugin — provider registration', () => {
     expect(registrations).toContain(CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER);
     // The close hook is installed for shutdown/failure paths.
     expect(hooks.length).toEqual(1);
+  });
+});
+
+describe('local diagnostics listener | startup announcement', () => {
+  it('forwards a supplied onListen and omits the key when none is given', async () => {
+    const fake = fakeHost();
+    const factory = createLocalDiagnosticsListenerFactory('deno', fake.host);
+
+    // Omitted: the key must be ABSENT, not bound to a no-op, so the runtime's
+    // own banner still prints and the bind is never silent.
+    await factory.listen({ port: 4919, handler: echoHandler });
+    expect(fake.listens[0]).toBe(undefined);
+    await factory.closeActive();
+
+    // Supplied: forwarded verbatim, so the connector's labelled line REPLACES
+    // the bare `Listening on http://127.0.0.1:<port>/` banner.
+    const seen: Array<{ hostname: string; port: number }> = [];
+    await factory.listen({
+      port: 4920,
+      handler: echoHandler,
+      onListen: (address) => {
+        seen.push(address);
+      },
+    });
+    expect(typeof fake.listens[1]).toBe('function');
+    fake.listens[1]!({ hostname: '127.0.0.1', port: 4920 });
+    expect(seen).toEqual([{ hostname: '127.0.0.1', port: 4920 }]);
+    await factory.closeActive();
   });
 });

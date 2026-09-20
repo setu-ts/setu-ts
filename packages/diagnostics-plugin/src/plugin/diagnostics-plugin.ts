@@ -197,7 +197,32 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           source,
           clock: ctx.runtime,
         });
-        const opened = await factory.listen({ port: options.port, handler });
+        // The devtool's own startup line. Without it the runtime prints a
+        // bare `Listening on http://127.0.0.1:<port>/`, which in an
+        // application that also binds a port is indistinguishable from the
+        // application's own listener — the signal is wanted, the ambiguity
+        // is not. Supplying `onListen` REPLACES that banner.
+        //
+        // Read here, in `onBootstrap`, and not in `register()`: every
+        // plugin has registered by now, so a LoggerPlugin ordered after this
+        // one is still visible (the M52b capture-too-early defect). When no
+        // logger is registered at all the key is OMITTED rather than bound
+        // to a no-op, so the runtime's default banner stands and the bind is
+        // never silent.
+        const logger = ctx.logger;
+        const announce = logger === undefined ? undefined : (
+          address: { hostname: string; port: number },
+        ): void => {
+          logger.info(
+            `Setu devtool: local diagnostics connector listening on ` +
+              `http://${address.hostname}:${address.port}`,
+          );
+        };
+        const opened = await factory.listen({
+          port: options.port,
+          handler,
+          ...(announce !== undefined ? { onListen: announce } : {}),
+        });
         // Post-await check: a revoke during the bind closes the late-created
         // listener instead of leaking it.
         if (revoked || generation !== startGeneration) {

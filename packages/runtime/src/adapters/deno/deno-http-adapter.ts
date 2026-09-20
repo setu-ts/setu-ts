@@ -49,6 +49,13 @@ export interface DenoServeHost {
     port: number;
     hostname?: string;
     fetch: (request: Request) => Response | Promise<Response>;
+    /**
+     * Replaces `Deno.serve`'s own startup banner. Supplied by the local
+     * diagnostics listener so its line names the devtool rather than
+     * reading as a second, unexplained application listener; omitted by the
+     * application adapter, which keeps the default banner.
+     */
+    onListen?: (address: { hostname: string; port: number }) => void;
   }): DenoServer;
   /**
    * Performs an RFC 6455 handshake on an inbound request.
@@ -91,6 +98,9 @@ export const defaultDenoServeHost: DenoServeHost = {
       {
         port: options.port,
         hostname: options.hostname ?? '0.0.0.0',
+        // Passing `onListen` REPLACES Deno's own banner; omitting the key
+        // keeps it, so the application adapter is unchanged.
+        ...(options.onListen !== undefined ? { onListen: options.onListen } : {}),
       },
       options.fetch,
     );
