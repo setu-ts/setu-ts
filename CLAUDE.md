@@ -5240,10 +5240,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `scripts/benchmark-kernel-diagnostics.ts` (paired harness). **Measured in review against a
   pre-change `main` worktree, five paired 10s runs**: the DISABLED path is at 102.6% of baseline
   throughput (budget ≥98%) and enabled p95 at 100% (budget ≤110%), but the ENABLED path is at
-  **89.2%** (budget ≥90%) — a marginal miss of the plan's own floor, left open rather than silently
-  weakened; distributions archived under `.tmp/m98a-bench/`. The harness's shipped 20,000-request
-  cap makes a run last ~0.12 s, where per-pass spread reached 48%, so the measurement needs its
-  10-second window to decide the run — complete (PR pending).
+  **89.2%** (budget ≥90%). **Accepted by the maintainer** rather than tuned away: the two budgets
+  measure different properties, and the one that governs every application that does NOT opt in —
+  the disabled path — is at parity, so nobody pays for a capability they left off. The ~1-point miss
+  is the price of an active inspection session, the floor was set before anything existed to
+  measure, and per-pass spread on that machine is ~5%, so the gap sits inside the noise of the floor
+  itself; distributions archived under `.tmp/m98a-bench/`. Recorded rather than silently weakened —
+  the archived plan's §3.6 number stands as written, and this entry is where the decision lives. Two
+  caveats the measurement forced: "installs no hooks, buffers or timers" is an ALLOCATION claim, not
+  a zero-instruction one (the disabled path carries a handful of predictable `=== undefined` checks
+  per request, which is why it reads as parity rather than as provably identical work), and the
+  harness's shipped 20,000-request cap makes a run last ~0.12 s, where per-pass spread reached 48% —
+  the measurement needs its 10-second window to decide the run — complete (PR pending).
 
 ## Verification (run before declaring any work done)
 
