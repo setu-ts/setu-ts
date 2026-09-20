@@ -318,6 +318,31 @@ describe('runAdoptCommand', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  it('reports an inspection failure before moving project files', async () => {
+    const fs = createFakeFs(PROJECT);
+    const out = createRecorder();
+    const err = createRecorder();
+    const result = await runAdoptCommand(parseArgs([]), {
+      fs: {
+        ...fs,
+        stat(path) {
+          if (path === `/work/svc/${WORKSPACE_MANIFEST}`) {
+            return Promise.reject(new Error('inspection denied'));
+          }
+          return fs.stat(path);
+        },
+      },
+      cwd: '/work/svc',
+      log: out.sink,
+      error: err.sink,
+    });
+
+    expect(result).toBe(1);
+    expect(err.text()).toContain('Failed to inspect existing files: inspection denied');
+    expect(out.text()).not.toContain('moved ');
+    expect(fs.writes).toEqual([]);
+  });
+
   it('takes the member name from --name over the directory', async () => {
     const h = harness();
     expect(await h.run(['--name', 'orders'])).toBe(0);

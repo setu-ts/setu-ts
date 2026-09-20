@@ -201,10 +201,18 @@ export async function runAdoptCommand(
   // set for a Deno project and misses `package.json` and `.npmrc`, so converting
   // any npm or Bun project refused every time.
   const vacated = new Set(plan.files.map((file) => joinPath(project, file.from)));
-  const collisions = await findExisting(
-    deps.fs,
-    planned.filter((file) => !vacated.has(file.path)),
-  );
+  let collisions: readonly string[];
+  try {
+    collisions = await findExisting(
+      deps.fs,
+      planned.filter((file) => !vacated.has(file.path)),
+    );
+  } catch (cause) {
+    deps.error(
+      `Failed to inspect existing files: ${cause instanceof Error ? cause.message : String(cause)}`,
+    );
+    return EXIT_ERROR;
+  }
 
   if (args.flags['dry-run'] === true) {
     for (const file of plan.files) {

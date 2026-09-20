@@ -470,7 +470,7 @@ failing:
 | --------------------------------------------- | ------------------------------------------------------------------------------------- |
 | Probe path → `/health/live`                   | Rollout never completes; ready replicas stay 0.                                       |
 | Remove `COPY deno.json` from the Dockerfile   | Build fails resolving `@setu-ts/common`.                                              |
-| Drop `--no-lock` from the generated `CMD`     | The `--generated` run dies writing `deno.lock` on the read-only root.                 |
+| Restore `--no-lock` in the generated `CMD`    | The air-gapped `--generated` run dies fetching an uncached npm transitive dependency. |
 | Hand-edit a committed manifest                | `--render` fails and names the file.                                                  |
 | Drop `watch` from the discovery Role          | `kubectl auth can-i watch` answers `no`.                                              |
 | Point the Service selector at a missing label | Endpoints go empty and the request is refused — while `kubectl apply` still succeeds. |
