@@ -8,7 +8,12 @@
 
 import { RuntimePlugin } from '../../src/plugin/runtime-plugin.ts';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IHttpAdapter, IRuntimeServices, RuntimePlatform } from '@setu-ts/common';
+import type {
+  IHttpAdapter,
+  IPluginContext,
+  IRuntimeServices,
+  RuntimePlatform,
+} from '@setu-ts/common';
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
@@ -40,6 +45,23 @@ class FakeHttpAdapter implements IHttpAdapter {
     this.closeCallCount++;
     return Promise.resolve();
   }
+}
+
+// A lifecycle stub that honours the REQUIRED `ILifecycleApi` surface. A ctx
+// double omitting it violates `IPluginContext`, and a plugin that guards
+// against the omission is guarding against a fixture, not a caller.
+function noopLifecycle(): IPluginContext['lifecycle'] {
+  return {
+    onInit: () => {},
+    onBootstrap: () => {},
+    onStopping: () => {},
+    onShutdown: () => {},
+    onClose: () => {},
+    onRegister: () => {},
+    onRequest: () => {},
+    onResponse: () => {},
+    onError: () => {},
+  };
 }
 
 function createFakeRuntimeServices(platform: RuntimePlatform = 'deno'): IRuntimeServices {
@@ -78,6 +100,7 @@ describe('runtime-plugin | CF platform', () => {
   it('CF registers CloudflareWorkersHttpAdapter', async () => {
     const plugin = RuntimePlugin({ platform: 'cloudflare-workers' });
     const ctx = {
+      lifecycle: noopLifecycle(),
       services: {
         registry: new Map<string, unknown>(),
         register(capability: string, value: unknown, _opts?: unknown): void {
@@ -121,6 +144,7 @@ describe('runtime-plugin | CF platform', () => {
     });
 
     const ctx = {
+      lifecycle: noopLifecycle(),
       services: {
         registry: new Map<string, unknown>(),
         register(capability: string, value: unknown) {
@@ -146,6 +170,7 @@ describe('runtime-plugin | CF platform', () => {
 describe('runtime-plugin | default factory mappings', () => {
   function createCtx(): any {
     return {
+      lifecycle: noopLifecycle(),
       services: {
         registry: new Map<string, unknown>(),
         register(capability: string, value: unknown) {
@@ -200,6 +225,7 @@ describe('runtime-plugin | default factory mappings', () => {
     });
 
     const ctx = {
+      lifecycle: noopLifecycle(),
       services: {
         registry: new Map<string, unknown>(),
         register(capability: string, value: unknown) {
@@ -233,6 +259,7 @@ describe('runtime-plugin | fake adapter records calls', () => {
     });
 
     const ctx = {
+      lifecycle: noopLifecycle(),
       services: {
         registry: new Map<string, unknown>(),
         register(capability: string, value: unknown) {
@@ -274,6 +301,7 @@ describe('runtime-plugin | custom adapter overrides', () => {
     });
 
     const ctx = {
+      lifecycle: noopLifecycle(),
       services: {
         registry: new Map<string, unknown>(),
         register(capability: string, value: unknown) {
@@ -304,6 +332,7 @@ describe('runtime-plugin | missing factory throws', () => {
     });
 
     const ctx = {
+      lifecycle: noopLifecycle(),
       services: {
         registry: new Map<string, unknown>(),
         register(capability: string, value: unknown) {
@@ -324,6 +353,7 @@ describe('runtime-plugin | missing factory throws', () => {
     });
 
     const ctx = {
+      lifecycle: noopLifecycle(),
       services: {
         registry: new Map<string, unknown>(),
         register(capability: string, value: unknown) {
@@ -355,6 +385,7 @@ describe('runtime-plugin | bun platform factory', () => {
     });
 
     const ctx = {
+      lifecycle: noopLifecycle(),
       services: {
         registry: new Map<string, unknown>(),
         register(capability: string, value: unknown) {

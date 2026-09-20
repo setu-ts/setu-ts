@@ -1,8 +1,8 @@
 # Milestone 98b — Runtime-Owned Local Diagnostics Connector
 
-> **Status:** Planning; depends on M98a, whose APIs below are proposed, not shipped. Authored on
-> `docs/m98-secure-devtool-diagnostics`. Implementation branch:
-> `feat/m98b-local-diagnostics-connector`; implementation and fixes stay there until merge.
+> **Status:** Complete — implemented on `feat/m98b-local-diagnostics-connector` and archived in its
+> PR. M98a had merged before implementation began; its actual signatures were verified from source
+> during implementation.
 
 ## 0. Objective & scope
 

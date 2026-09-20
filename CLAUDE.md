@@ -5259,6 +5259,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   per request, which is why it reads as parity rather than as provably identical work), and the
   harness's shipped 20,000-request cap makes a run last ~0.12 s, where per-pass spread reached 48% —
   the measurement needs its 10-second window to decide the run — complete (PR #345).
+- **Milestone 98b** (`packages/runtime` + `packages/common` + new `packages/diagnostics-plugin` —
+  the authenticated local diagnostics connector): the RuntimePlugin now provides
+  `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER` — a factory binding exactly ONE `127.0.0.1` listener
+  (port 1024–65535, one-active-listener rule, zero-body and duplicate-singleton-header refusal
+  BEFORE framework mapping) on Deno and rejecting every `listen` elsewhere before any bind; its
+  close hook releases an open listener on normal shutdown AND the failed-startup path. New
+  `@setu-ts/diagnostics-plugin`: explicit-only activation (`enabled: true` + port + per-launch
+  session credentials; no environment fallback; refuses startup without M98a diagnostics), HMAC-
+  SHA-256-signed request AND response bytes over canonical newline-joined fields
+  (`docs/diagnostics-protocol.md`), strict monotonic sequences advanced in one synchronous
+  post-verify gate, instance binding on the first signed status, monotonic expiry with `revoke()` on
+  stopping/close, and flood isolation — unpaired requests are held to seven of eight handler slots
+  and pay a 5/s refusal budget while the paired session's 20/s budget debits only after
+  `subtle.verify`. The projection copies M98a's exact field allowlist (canary-tested against a
+  hostile provider DTO), and the native client verifies every response MAC over the exact bounded
+  bytes BEFORE parsing, with terminal failed pairing. Ships `scripts/inspect-local-diagnostics.ts`
+  (real loopback consumer exercise, subprocess-tested, credentials stay in memory) and protocol
+  fixtures with independently computed Web Crypto vectors — complete (PR #347).
 - **Milestone 99b** (`packages/cli` + `docs` — generated output is usable): generated workspace
   Dockerfiles use `deno run --frozen`, retaining the lockfile resolution cached at build time
   without writing under a read-only root. The generated deployment gate installs the scaffold before

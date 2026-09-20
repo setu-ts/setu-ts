@@ -526,3 +526,95 @@ export interface IHttpAdapter {
    */
   setRpcHandler?(handler: RpcFetchHandler): void;
 }
+
+/**
+ * Options for one runtime-owned local diagnostics listener.
+ *
+ * `handler` receives the NORMALIZED framework request (never a raw socket,
+ * web `Request`, adapter, or server handle) and returns the framework
+ * response the listener maps back onto the wire. The protocol logic behind
+ * the handler belongs to the local diagnostics connector; the listener only
+ * owns the socket.
+ *
+ * @since 0.8.0
+ */
+export interface LocalDiagnosticsListenerOptions {
+  /**
+   * The TCP port to bind on IPv4 loopback. The implementation accepts only
+   * `1024`–`65535`; port `0` (auto-selection) is refused so a session can
+   * never be bound to an address nobody agreed to.
+   */
+  readonly port: number;
+  /**
+   * Handles one normalized request. Called only after the listener's
+   * zero-body and duplicate-header framing checks passed; a refused request
+   * never reaches it.
+   */
+  readonly handler: (request: IRequest) => IResponse | Promise<IResponse>;
+  /**
+   * Announces the bound address, REPLACING whatever banner the underlying
+   * server would print itself.
+   *
+   * The listener is a developer-facing devtool port, and a bare
+   * `Listening on http://127.0.0.1:<port>/` is indistinguishable from the
+   * application's own listener — so the connector supplies a line that names
+   * the devtool. Omitted, the implementation's default banner stands, which
+   * is what a caller without a logger wants: a signal, if not a labelled one.
+   */
+  readonly onListen?: (address: { hostname: string; port: number }) => void;
+}
+
+/**
+ * One active runtime-owned local diagnostics listener.
+ *
+ * `close()` is idempotent: every call after the first awaits the same
+ * shutdown. Closing the listener never stops the owning application.
+ *
+ * @since 0.8.0
+ */
+export interface ILocalDiagnosticsListener {
+  /**
+   * Shuts the listener down and releases the port. Safe to call repeatedly
+   * and concurrently.
+   */
+  close(): Promise<void>;
+}
+
+/**
+ * The runtime-owned factory for the local diagnostics listener, provided by
+ * the RuntimePlugin under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`.
+ *
+ * Deliberately narrow, because the application's own {@linkcode IHttpAdapter}
+ * is stateful and cannot be reused or cloned for a second listener: this
+ * factory permits ONE active listener, binds ONLY `127.0.0.1`, accepts no
+ * hostname, adapter, or body-limit option, and returns a handle whose sole
+ * operation is {@linkcode ILocalDiagnosticsListener.close}. It is the local
+ * diagnostics transport, not a generic second HTTP server API.
+ *
+ * Implementations on runtimes without a supported local transport reject
+ * every `listen` call with one fixed unsupported-transport error before any
+ * bind is attempted.
+ *
+ * @example
+ * ```typescript
+ * const factory = ctx.services.get<ILocalDiagnosticsListenerFactory>(
+ *   CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER,
+ * );
+ * const listener = await factory.listen({ port: 4919, handler });
+ * await listener.close();
+ * ```
+ * @since 0.8.0
+ */
+export interface ILocalDiagnosticsListenerFactory {
+  /**
+   * Binds one IPv4 loopback listener.
+   *
+   * @param options - The port and the protocol handler to serve
+   * @returns The active listener handle
+   * @throws {Error} On an unsupported runtime, before any bind
+   * @throws {Error} When the port is outside `1024`–`65535`
+   * @throws {Error} When another listener is still active on this factory
+   * @throws {Error} When the operating system refuses the bind (port conflict)
+   */
+  listen(options: LocalDiagnosticsListenerOptions): Promise<ILocalDiagnosticsListener>;
+}

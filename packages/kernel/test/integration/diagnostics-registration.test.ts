@@ -199,3 +199,65 @@ describe('diagnostics registration projection', () => {
     await app.stop();
   });
 });
+
+describe('diagnostics registration — composition time', () => {
+  it('projects routes and capabilities registered BEFORE start(), without an owner', async () => {
+    // The shape a CLI-scaffolded project emits inside `createApp()`: a setup
+    // call that registers generated routes, plus the hello-world route, both
+    // BEFORE `start()`. The sinks used to be installed in `#runStartup()`, so
+    // the default template's routes were served by the application and absent
+    // from the snapshot entirely.
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'controllers',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.router.get('/from-plugin', (c) => c.response.json({ ok: 1 }));
+          },
+        },
+      ],
+      diagnostics: {
+        labels: {
+          routes: ['/', '/generated', '/from-plugin'],
+          capabilities: ['app-registered', 'runtime'],
+        },
+      },
+    });
+    app.router.get('/generated', (c) => c.response.json({ gen: 1 }));
+    app.router.get('/', (c) => c.response.json({ hello: 1 }));
+    app.services.register('app-registered', { v: 1 });
+    await app.start();
+
+    const snapshot = app.diagnostics!.snapshot();
+    const routes = snapshot.nodes
+      .filter((node) => node.kind === 'route')
+      .map((node) => node.label)
+      .sort();
+    expect(routes).toEqual(['/', '/from-plugin', '/generated']);
+    expect(
+      snapshot.nodes.some((node) => node.kind === 'capability' && node.label === 'app-registered'),
+    ).toBe(true);
+
+    // Owner attribution stays honest: no plugin's `register()` was running for
+    // the composition-time ones, so only the plugin-registered route is owned.
+    const routeIds = new Set(
+      snapshot.nodes.filter((node) => node.kind === 'route').map((node) => node.id),
+    );
+    const ownedRoutes = snapshot.edges.filter((edge) =>
+      edge.kind === 'owns' && routeIds.has(edge.to)
+    );
+    expect(ownedRoutes.length).toEqual(1);
+    const owned = snapshot.nodes.find((node) => node.id === ownedRoutes[0].to);
+    expect(owned?.label).toEqual('/from-plugin');
+
+    // And every one of them still serves.
+    for (const [path, body] of [['/', '{"hello":1}'], ['/generated', '{"gen":1}']] as const) {
+      const response = await app.inject({ method: 'GET', url: `http://localhost${path}` });
+      expect(response.statusCode).toEqual(200);
+      expect(response.body).toEqual(body);
+    }
+    await app.stop();
+  });
+});
