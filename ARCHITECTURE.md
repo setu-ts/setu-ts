@@ -923,6 +923,14 @@ during its own `register()` call.
 
 ### Auto-Detection
 
+The RuntimePlugin also provides `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER` (M98b): a runtime-owned
+factory that binds exactly one additional IPv4-loopback listener for the local diagnostics
+connector. The application's own `IHttpAdapter` is stateful and cannot serve a second handler, so
+this factory owns a private server through the same injectable Deno serve seam — and exposes no
+adapter, host, or handle to its consumer, which supplies only a normalized-request protocol handler.
+Non-Deno platforms refuse every `listen` before any bind, and the plugin registers a close hook so
+shutdown and failed-startup paths release the port.
+
 The `RuntimePlugin` auto-detects the runtime at startup:
 
 ```typescript

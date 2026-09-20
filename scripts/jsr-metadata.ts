@@ -280,6 +280,17 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     description: 'CPU-bound work on real worker threads, off the event loop',
     runtimeCompat: NO_EDGE,
   },
+  'diagnostics-plugin': {
+    description:
+      'Authenticated local diagnostics connector: signed loopback polling for the devtool',
+    runtimeCompat: {
+      browser: false,
+      deno: true,
+      node: false,
+      workerd: false,
+      bun: false,
+    },
+  },
 
   // ── Platform ──────────────────────────────────────────────────────────────
   'cloudflare-plugin': {

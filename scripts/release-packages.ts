@@ -40,6 +40,7 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
   'packages/database-plugin',
   'packages/decorator-plugin',
   'packages/di-plugin',
+  'packages/diagnostics-plugin',
   'packages/events-plugin',
   'packages/feature-flags-plugin',
   'packages/graphql-plugin',

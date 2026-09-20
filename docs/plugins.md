@@ -46,10 +46,10 @@ ever uses the in-memory broker.
 
 Every package NOT listed here declares zero npm dependencies — that includes `common`, `kernel`,
 `exceptions`, `sdk`, `cloudflare-plugin`, `session-plugin`, `validation-plugin`, `openapi-plugin`,
-`static-plugin`, `websocket-plugin`, `worker-pool-plugin`, and the three starters. `cli` is on that
-list too, which is worth saying out loud because its source is full of `npm:` strings: those are
-DATA it writes into a generated project's manifest, not specifiers it imports, so nothing follows
-them into its own dependency graph.
+`static-plugin`, `websocket-plugin`, `worker-pool-plugin`, `diagnostics-plugin`, and the three
+starters. `cli` is on that list too, which is worth saying out loud because its source is full of
+`npm:` strings: those are DATA it writes into a generated project's manifest, not specifiers it
+imports, so nothing follows them into its own dependency graph.
 
 | Package                     | Declared npm drivers                                                                                                                                | Arm that needs them                                                           |
 | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
@@ -1061,6 +1061,25 @@ named by reference.
 - [API Reference](./api/websocket-plugin/src/index.ts/index.html)
 
 ---
+
+### @setu-ts/diagnostics-plugin
+
+**Purpose:** Authenticated local diagnostics connector — signed loopback polling between a native
+devtool client and kernel diagnostics (M98a).
+
+**Capability Token:** `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER` (consumed; provided by the
+RuntimePlugin)
+
+**Runtime Compatibility:**
+
+| Deno | Node | Bun | Workers |
+| ---- | ---- | --- | ------- |
+| ✅   | ❌   | ❌  | ❌      |
+
+**Links:**
+
+- [README](../packages/diagnostics-plugin/README.md)
+- [API Reference](./api/diagnostics-plugin/src/index.ts/index.html)
 
 ### @setu-ts/worker-pool-plugin
 

@@ -47,7 +47,8 @@
     "./packages/cloudflare-plugin",
     "./packages/graphql-plugin",
     "./packages/static-plugin",
-    "./packages/view-plugin"
+    "./packages/view-plugin",
+    "./packages/diagnostics-plugin"
   ],
   "tasks": {
     "check": "deno check packages",

@@ -97,7 +97,21 @@ function createRegistryContext(): {
     },
   } as unknown as IServiceRegistry;
 
-  return { ctx: { services } as unknown as IPluginContext, registry };
+  // `lifecycle` is a REQUIRED member of `IPluginContext`; a double that omits
+  // it is not a context, and the plugin must not have to guard against it.
+  const lifecycle: IPluginContext['lifecycle'] = {
+    onInit: () => {},
+    onBootstrap: () => {},
+    onStopping: () => {},
+    onShutdown: () => {},
+    onClose: () => {},
+    onRegister: () => {},
+    onRequest: () => {},
+    onResponse: () => {},
+    onError: () => {},
+  };
+
+  return { ctx: { services, lifecycle } as unknown as IPluginContext, registry };
 }
 
 describe('createRuntimeServices | platform resolution', () => {

@@ -320,6 +320,44 @@ class Application implements IKernelApplication {
         },
       });
     });
+    // Diagnostics sinks, installed beside (never instead of) the logging
+    // observer registered at startup. They are installed HERE, at
+    // construction, and NOT in `#runStartup()`: a route or a capability
+    // registered between `createApplication()` and `start()` is registered
+    // before startup runs, and a sink attached later cannot see it. That is
+    // not an edge case — a CLI-scaffolded project's `createApp()` registers
+    // its routes exactly there, through the generated
+    // `registerGeneratedRoutes(app.router, …)` setup call and the hello-world
+    // route, so the snapshot showed NO routes at all for the default template
+    // while the application served them.
+    //
+    // Composition-time registrations carry no owner, because no plugin's
+    // `register()` is running: `#registeringPlugin` is `undefined` and the
+    // node is recorded without an `owns` edge. That is the honest answer —
+    // the application registered it, not a plugin.
+    this.#registry.setDiagnosticsSink((event) => {
+      collector.safeObserve('topology', () => {
+        collector.capabilityRegistrationObserved(event, this.#registeringPlugin);
+        // The runtime capability's OWN registration is the diagnostics
+        // epoch: origin and instance UUID start there — the earliest moment
+        // they can honestly exist — so every later observation carries
+        // timings while earlier ones stay null.
+        if (event.token === CAPABILITIES.RUNTIME && event.kind !== 'unregister') {
+          const runtime = this.#registry.peekResolved<IRuntimeServices>(CAPABILITIES.RUNTIME);
+          if (runtime !== undefined) {
+            collector.initializeRuntime(
+              runtime,
+              () => this.#registry.peekResolved<ITelemetryService>(CAPABILITIES.TELEMETRY),
+            );
+          }
+        }
+      });
+    });
+    this.#router.setDiagnosticsSink((event) => {
+      collector.safeObserve('topology', () => {
+        collector.routeRegistered(event);
+      });
+    });
   }
 
   /**
@@ -463,34 +501,9 @@ class Application implements IKernelApplication {
     registry.setObserver((kind, token) => {
       this.#reportRegistryMutation(kind, token, this.#registeringPlugin);
     });
-    // Diagnostics sinks, installed beside (never instead of) the logging
-    // observer. The collector's own safeObserve boundary guards each capture.
+    // The diagnostics SINKS are installed in the constructor (see there);
+    // this local is the startup path's own handle on the collector.
     const collector = this.#collector;
-    if (collector !== undefined) {
-      registry.setDiagnosticsSink((event) => {
-        collector.safeObserve('topology', () => {
-          collector.capabilityRegistrationObserved(event, this.#registeringPlugin);
-          // The runtime capability's OWN registration is the diagnostics
-          // epoch: origin and instance UUID start there — the earliest moment
-          // they can honestly exist — so every later observation carries
-          // timings while earlier ones stay null.
-          if (event.token === CAPABILITIES.RUNTIME && event.kind !== 'unregister') {
-            const runtime = this.#registry.peekResolved<IRuntimeServices>(CAPABILITIES.RUNTIME);
-            if (runtime !== undefined) {
-              collector.initializeRuntime(
-                runtime,
-                () => this.#registry.peekResolved<ITelemetryService>(CAPABILITIES.TELEMETRY),
-              );
-            }
-          }
-        });
-      });
-      this.#router.setDiagnosticsSink((event) => {
-        collector.safeObserve('topology', () => {
-          collector.routeRegistered(event);
-        });
-      });
-    }
     // Name of the plugin whose `register()` is currently running — read by
     // `environment.validate` to attribute each env-var declaration. `undefined`
     // outside the registration loop (e.g. a `validate` call from a lifecycle

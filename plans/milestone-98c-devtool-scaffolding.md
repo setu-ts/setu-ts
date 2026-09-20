@@ -23,9 +23,9 @@ launcher reads. It does not implement the launcher.
 
 ## 1. Contracts verified from SOURCE (not names)
 
-Every row was read at the cited line on `main` at plan time, except the M98b rows, which were read
-on `feat/m98b-local-diagnostics-connector` (PR #347) and are a dependency of this letter rather than
-a shipped contract.
+Every row was read at the cited line. The M98b rows were read on
+`feat/m98b-local-diagnostics-connector` while PR #347 was open; that branch has since merged, so
+they are shipped contracts on `main` and were re-checked there.
 
 | Reference                           | Source (file:line)                                                            | Verified surface / fact                                                                                                                                                                                                                                       |
 | ----------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
