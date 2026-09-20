@@ -131,6 +131,17 @@ function fakeServer(
       if (overrides.malformedBody && target !== '/v1/status') {
         bodyText = '{"version":1,"nodes":[';
       }
+      // An oversized body the server SIGNS, and which is otherwise a valid
+      // snapshot projection. Both halves are load-bearing: serving unsigned
+      // bytes would be refused by MAC verification, and serving invalid JSON
+      // would be refused by `isSnapshotProjection` — either way the test
+      // would pass with the read bound removed, which is what it used to do.
+      if (overrides.oversizedBody && target !== '/v1/status') {
+        bodyText = JSON.stringify({
+          ...minimalSnapshot(),
+          pad: 'x'.repeat(300 * 1024),
+        });
+      }
       // The MAC is computed over the UNMUTATED body; a mutation hook then
       // swaps the served bytes, simulating an attacker tampering AFTER the
       // honest server signed them.
@@ -154,11 +165,7 @@ function fakeServer(
           : await signFields(subtle, imported, responseFields),
       };
       let served = bodyBytes;
-      if (oversizedBodies && overrides.oversizedBody) {
-        served = encoder.encode(JSON.stringify({ pad: 'x'.repeat(300 * 1024) }));
-      } else if (overrides.oversizedBody) {
-        served = encoder.encode('x'.repeat(300 * 1024));
-      } else if (overrides.mutateBody !== undefined) {
+      if (overrides.mutateBody !== undefined) {
         served = encoder.encode(overrides.mutateBody(target, bodyText));
       }
       return new Response(served, { status: 200, headers });
@@ -166,8 +173,6 @@ function fakeServer(
   };
   return { fetch: fetchImpl as unknown as typeof fetch, requests };
 }
-
-let oversizedBodies = false;
 
 /**
  * Reads the headers of a fetch input the way the fake server receives it.
@@ -359,7 +364,9 @@ describe('Client — verification and bounds', () => {
   });
 
   it('refuses an oversized body through the read bound', async () => {
-    oversizedBodies = false;
+    // The body is correctly signed AND a well-formed snapshot projection, so
+    // the 256 KiB stream ceiling is the ONLY thing that can refuse it: raise
+    // MAX_BODY_BYTES and this resolves instead of rejecting. (Verified.)
     const { client } = buildClient({ server: { oversizedBody: true } });
     await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
     client.close();
