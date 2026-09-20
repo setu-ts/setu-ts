@@ -302,18 +302,54 @@ describe('DiagnosticsCollector — events', () => {
     const invalid = collector.read(1).events[0]!;
     expect(invalid.traceId).toBeUndefined();
     expect(invalid.spanId).toBeUndefined();
+  });
 
-    // A throwing read is reported as absence.
-    collector.initializeRuntime(
-      { uuid: () => 'u', hrtime: () => 0 },
-      () => {
-        throw new Error('telemetry gone');
+  it('reports every unreadable telemetry shape as absence, never a fabricated id', () => {
+    // Each arm needs its OWN collector: `initializeRuntime` is idempotent, so
+    // re-calling it on a collector that already has a reader installs
+    // nothing — an earlier version of this suite did exactly that and its
+    // "a throwing read is reported as absence" case therefore re-ran the
+    // PREVIOUS reader and asserted nothing about the catch.
+    const record = (
+      reader: (() => { activeSpanContext?(): unknown } | undefined) | undefined,
+    ): DiagnosticsEvent => {
+      const collector = collectorWith();
+      collector.initializeRuntime(
+        { uuid: () => 'u', hrtime: () => 0 },
+        reader as never,
+      );
+      const ctx: object = {};
+      collector.beginRequestOperation(ctx);
+      collector.endRequestOperation(ctx, { outcome: 'ok', statusCode: 200 });
+      return collector.read(0).events[0]!;
+    };
+
+    // The reader itself throws — the capability was registered but resolving
+    // its cached instance failed.
+    const readerThrew = record(() => {
+      throw new Error('telemetry gone');
+    });
+    expect(readerThrew.traceId).toBeUndefined();
+    expect(readerThrew.spanId).toBeUndefined();
+
+    // No telemetry is registered at all.
+    expect(record(() => undefined).traceId).toBeUndefined();
+
+    // A service that predates the accessor carries no `activeSpanContext`.
+    expect(record(() => ({})).traceId).toBeUndefined();
+
+    // A registered service with no ACTIVE span answers `undefined` — the
+    // ordinary case for a request outside any trace.
+    expect(record(() => ({ activeSpanContext: () => undefined })).traceId).toBeUndefined();
+
+    // The accessor itself throws.
+    const accessorThrew = record(() => ({
+      activeSpanContext: () => {
+        throw new Error('span read exploded');
       },
-    );
-    const ctxThree: object = {};
-    collector.beginRequestOperation(ctxThree);
-    collector.endRequestOperation(ctxThree, { outcome: 'ok', statusCode: 200 });
-    expect(collector.read(2).events[0]!.traceId).toBeUndefined();
+    }));
+    expect(accessorThrew.traceId).toBeUndefined();
+    expect(accessorThrew.spanId).toBeUndefined();
   });
 });
 
