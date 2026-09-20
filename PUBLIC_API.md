@@ -186,6 +186,12 @@ session value, database value, or raw error text is ever recorded. `labels` is a
 projected as opaque sequential ids (`p1`, `c1`, `r1`, `m1`), never truncated into new names.
 Approving a label is a disclosure decision, not a secret-detection guarantee.
 
+**One field is not allowlist-gated.** A plugin node's `version` is emitted whenever it passes a
+bounded `major.minor.patch` semver grammar, independently of `labels.plugins` — so an application
+that enables diagnostics with no labels at all still discloses the version of every registered
+plugin, including the framework's own through `RuntimePlugin`. A version that fails the grammar (a
+git sha, a sentence, any string over 64 characters) is omitted rather than projected.
+
 **Bounds.** Snapshots are capped at 1,024 nodes, 4,096 edges, and 256 KiB of compact JSON
 (`truncated` reports omission). Events are capped at 1,024 retained records and 1,024 bytes each;
 eviction is reported as `lost` sequence numbers, and drops as `droppedEvents`. Startup failure and
@@ -9734,6 +9740,18 @@ Contract notes:
   distinct from `OPENAPI` so an OpenAPI plugin registering under `OPENAPI` does not populate
   `ctx.metadata`.
 
+### Kernel diagnostics contracts
+
+The read-only DTOs and reader interface the kernel's optional `IApplication.diagnostics` serves
+(Milestone 98a): `IDiagnosticsSource` (`snapshot()` / `read(after, limit?)`), `DiagnosticsSnapshot`,
+`DiagnosticsNode`, `DiagnosticsEdge`, `DiagnosticsEvent`, `DiagnosticsBatch`, and the closed
+vocabularies `DiagnosticsNodeKind`, `DiagnosticsEdgeKind`, `DiagnosticsSnapshotState`,
+`DiagnosticsFailureCode`, `DiagnosticsEventKind`, `DiagnosticsEventOutcome` and
+`DiagnosticsEventStage`. They are type-only exports: `@setu-ts/common` ships no diagnostics runtime
+value and no capability token, because the reader is reached through the application, never resolved
+from the registry. Activation, label allowlists, and the projection bounds are the kernel's — see
+[Kernel diagnostics](#kernel-diagnostics-setu-tskernel--setu-tscommon).
+
 ### Ingress behaviours
 
 `IngressKind` is `'queue' | 'scheduler' | 'messaging' | 'websocket'`. `IngressContext<TPayload>` is
@@ -9770,12 +9788,14 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 
 ### Types
 
-| Export               | Kind | Purpose                                                                                                                                                                                                                                    |
-| -------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ApplicationOptions` | type | Options for `createApplication` (`{ plugins?: IPlugin[] }`)                                                                                                                                                                                |
-| `IKernelApplication` | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)`                                                                                                                                           |
-| `InjectRequest`      | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }` — byte-ish bodies verbatim with no content-type default, `URLSearchParams` urlencoded-defaulted, plain object and string JSON-defaulted, anything else refused) |
-| `InjectResponse`     | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)                                                                                                                                                         |
+| Export                          | Kind | Purpose                                                                                                                                                                                                                                    |
+| ------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ApplicationOptions`            | type | Options for `createApplication` (`{ plugins?: IPlugin[]; diagnostics?: KernelDiagnosticsOptions }`)                                                                                                                                        |
+| `IKernelApplication`            | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)`                                                                                                                                           |
+| `InjectRequest`                 | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }` — byte-ish bodies verbatim with no content-type default, `URLSearchParams` urlencoded-defaulted, plain object and string JSON-defaulted, anything else refused) |
+| `InjectResponse`                | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)                                                                                                                                                         |
+| `KernelDiagnosticsOptions`      | type | Kernel-diagnostics activation passed as `ApplicationOptions.diagnostics` (`{ labels?: KernelDiagnosticsLabelOptions }`); its PRESENCE is the activation, and an omitted option allocates nothing                                           |
+| `KernelDiagnosticsLabelOptions` | type | The four exact-match label allowlists (`plugins`/`capabilities`/`routes`/`middleware`), each at most 256 entries of at most 160 UTF-8 bytes with no control characters                                                                     |
 
 Contract notes:
 

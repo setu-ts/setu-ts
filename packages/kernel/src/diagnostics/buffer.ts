@@ -203,9 +203,13 @@ export class DiagnosticsEventRing {
   }
 
   /**
-   * Closes the ring to further writes. Retained events stay readable — a
-   * reader draining the tail after shutdown still gets them — but the
-   * application will never append again.
+   * Closes the ring to further writes.
+   *
+   * Retained events are NOT discarded here — {@linkcode clear} does that —
+   * but the collector's terminal shutdown path calls both, and its `read()`
+   * short-circuits on a closed ring, so a consumer never drains a tail after
+   * shutdown: it gets an empty `closed` batch. Closing and clearing are kept
+   * separate so the ring has one reason to change at a time.
    */
   close(): void {
     this.#closed = true;

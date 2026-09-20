@@ -19,10 +19,13 @@ All notable changes to this project are documented here. The format follows
   `KernelDiagnosticsOptions`, `KernelDiagnosticsLabelOptions`, and the
   `ApplicationOptions.diagnostics` option. An omitted option allocates nothing: no collector,
   mirror, ring, or timer, and the property is absent. Labels are OFF by default and gated by exact
-  allowlists; route patterns, plugin names, and versions leave the process only when explicitly
-  approved. Snapshots are bounded (1,024 nodes / 4,096 edges / 256 KiB of compact JSON) and event
-  batches are bounded (1,024 events, 1,024 bytes per event) with drop and loss counters. Startup
-  failure and final shutdown clear retained metadata while preserving the original error.
+  allowlists; route patterns, plugin names, capability tokens, and middleware names leave the
+  process only when explicitly approved. A plugin's `version` is the one projected field that is NOT
+  allowlist-gated — it is emitted whenever it passes a bounded `major.minor.patch` semver grammar,
+  so enabling diagnostics discloses the version of every registered plugin, including the
+  framework's own. Snapshots are bounded (1,024 nodes / 4,096 edges / 256 KiB of compact JSON) and
+  event batches are bounded (1,024 events, 1,024 bytes per event) with drop and loss counters.
+  Startup failure and final shutdown clear retained metadata while preserving the original error.
 - **`deno task check:docs` now refuses an export added to a published barrel that no `Unreleased`
   changelog entry names.** Four releases in a row shipped, or nearly shipped, public surface that no
   entry announced — `alpha.10` lost PR #195, `v0.4.0` lost `ResponseSnapshotInit`, `v0.5.0` lost

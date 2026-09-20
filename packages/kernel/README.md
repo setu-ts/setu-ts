@@ -58,6 +58,9 @@ const poll = setInterval(() => {
 }, 1000);
 ```
 
+A plugin node's `version` is the one exception to the allowlist: it is emitted whenever it passes a
+bounded semver grammar, so enabling diagnostics discloses every registered plugin's version.
+
 `snapshot()` and `read()` never resolve a lazy factory, invoke application code, or mutate state,
 and everything they return is frozen. Timing is monotonic from runtime registration; records before
 that carry `null` timings. Startup failure and final shutdown clear retained metadata — a reader

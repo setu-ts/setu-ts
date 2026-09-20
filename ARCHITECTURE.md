@@ -131,6 +131,16 @@ counted as a static segment, so `/*` tied with `/openapi.json` and won merely by
 The rule compares counts rather than positions, so `/a/*` loses to `/:x/b` on `/a/b`; that limit is
 documented in `Router.match` and pinned by a test.
 
+`listRoutes()` and the kernel-diagnostics route projection are two DIFFERENT surfaces and neither
+replaces the other. `RouteInfo.definition` carries the live handler, its middleware functions and
+its schema objects: it is an in-process contract for plugins that must call or wrap a route
+(`openapi-plugin` reads the Zod schemas; `M70g` reads `owner` for the duplicate-route refusal), and
+it is deliberately NOT wire-safe. The diagnostics projection added in Milestone 98a selects its own
+bounded primitives — an opaque id, the HTTP verb, and the registered pattern only when the
+application allowlisted that exact pattern — and can therefore leave the process. M98a widened
+neither `IRouterApi.listRoutes()` nor `RouteInfo`; the projection is captured at the router's own
+registration boundary through an internal sink.
+
 Hono is chosen for several reasons:
 
 1. **Performance** — Hono is one of the fastest TypeScript routers, competitive with Fastify.
@@ -2459,6 +2469,25 @@ All security plugins default to the most secure configuration:
 - Security headers: enabled by default.
 - Input validation: enabled by default.
 - Secret redaction in logs: enabled by default.
+
+### Diagnostics Capture Boundary (Milestone 98a)
+
+Kernel diagnostics are OFF unless `createApplication({ diagnostics })` is passed explicitly, and an
+omitted option allocates no collector, ring, or timer. When enabled, the security boundary is
+STRUCTURAL rather than a filter over captured data: the kernel selects bounded primitives at its own
+registration and execution boundaries, so no dynamic request path, query string, header, body,
+cookie, token, session value, database value, or raw error text is ever collected in the first
+place. There is nothing to redact afterwards, and `snapshot()`/`read()` cannot resolve a lazy
+factory, invoke application code, or mutate state.
+
+Registration names are a separate decision: plugin names, capability tokens, route patterns and
+middleware names appear only when the application listed that exact string in `diagnostics.labels`,
+which makes approving one a deliberate disclosure rather than a secret-detection guarantee. A
+plugin's `version` is the one field NOT gated that way — it is emitted whenever it passes a bounded
+semver grammar. Two trust limits are explicit: the projection is not a sandbox against malicious
+same-process code, and it cannot isolate deliberately blocking synchronous application code. Network
+authentication and transport for an external devtool are a separate milestone (M98b); this boundary
+is in-process only and registers no listener.
 
 ---
 
