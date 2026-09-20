@@ -136,17 +136,31 @@ COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
 
 WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 
-# Cache the module graph against deno.lock at build time. Runtime --frozen
-# keeps those exact resolutions without writing the lockfile. Ignoring it can
-# select uncached npm transitive versions when lazy drivers load at startup.
-# check:deploy --generated installs a scaffold before building, then boots its
-# real broker drivers under --read-only with no external network (shared loopback).
+# Three steps, and the LAST one is the guarantee. Deno records a jsr package's
+# npm edge list NONDETERMINISTICALLY on a cold cache: four \`--no-cache\` builds of
+# one unchanged workspace produced \`@setu-ts/messaging-plugin\` entries missing
+# \`npm:amqplib\`/\`npm:ioredis\` twice and complete twice, while both packages were
+# recorded in the lockfile's package section every time. Runtime \`--frozen\` does
+# not write the lockfile, so against an incomplete one it REFUSES — the container
+# dies at registration reporting a stale lockfile, from an image that built green.
+#
+# So \`deno cache main.ts\` compiles the entry's graph into the image, \`deno install\`
+# completes the lockfile from the manifests, and \`deno install --frozen\` VERIFIES
+# it: an edge still missing fails the BUILD, loudly and once, rather than every
+# container at startup. With the verify in place four consecutive cold builds were
+# complete, and that is structural rather than luck — an incomplete lockfile
+# cannot reach a published image.
+#
+# Together they are the no-external-network, no-lockfile-write guarantee that
+# check:deploy --generated proves: it scaffolds a workspace, builds this file, and
+# boots its real broker drivers under --read-only with no external network (shared
+# loopback).
 #
 # The chown FOLDS into this same RUN (X10-5): a standalone \`chown -R\` rewrites
 # metadata on every file the cache layer created, so overlayfs copies the
 # ENTIRE module cache into a second layer — measured at 563 MB vs 362 MB with
 # the fold, paid on every push and every node pull.
-RUN deno cache main.ts && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
+RUN deno cache main.ts && deno install && deno install --frozen && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
 # is a name — "cannot verify user is non-root" — while Docker resolves it happily,

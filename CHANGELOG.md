@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`cli` — a generated workspace image now verifies its lockfile at build time.** The build step is
+  `deno cache main.ts && deno install && deno install --frozen`, not `deno cache main.ts` alone.
+  Deno records a jsr package's npm edge list nondeterministically on a cold cache: four `--no-cache`
+  builds of one unchanged workspace left `@setu-ts/messaging-plugin` missing its `npm:amqplib` and
+  `npm:ioredis` edges twice and complete twice, while both packages were recorded in the lockfile's
+  package section every time. Runtime `--frozen` does not write the lockfile, so against an
+  incomplete one it refuses, and every container died at registration reporting a stale lockfile —
+  an image that built green and never served. `deno install` completes the lockfile from the
+  manifests and `deno install --frozen` verifies it, so a still-missing edge fails the build once
+  instead of every container at startup. Regenerate an existing workspace's managed Dockerfile with
+  `setu generate app <member>` to pick it up.
 - **`cli` — generated workspace Dockerfiles now run with `deno run --frozen`.** The runtime uses the
   lockfile that its build cached and still cannot modify it on a generated read-only root, so a lazy
   broker driver cannot re-resolve an uncached npm transitive dependency at startup (M99b).

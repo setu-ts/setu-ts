@@ -58,3 +58,37 @@ describe('generated Dockerfile chown fold (X10-5)', () => {
     expect(contents).toContain('cannot verify user is non-root');
   });
 });
+
+describe('generated Dockerfile lockfile verification', () => {
+  it('completes the lockfile and then VERIFIES it, in one build layer', () => {
+    const contents = dockerfile();
+    const buildRun = contents
+      .split('\n')
+      .find((line) => line.startsWith('RUN ') && line.includes('deno cache main.ts'));
+    expect(buildRun).toBeDefined();
+
+    // Deno records a jsr package's npm edge list nondeterministically on a cold
+    // cache: four `--no-cache` builds of one unchanged workspace left
+    // `@setu-ts/messaging-plugin` missing its `npm:amqplib`/`npm:ioredis` edges
+    // twice and complete twice, while both packages were recorded in the
+    // lockfile's package section every time. Runtime `--frozen` does not write
+    // the lockfile, so against an incomplete one it refuses and every container
+    // dies at registration from an image that built green.
+    //
+    // `deno install` completes the lockfile from the manifests and
+    // `deno install --frozen` verifies it, so a still-missing edge fails the
+    // BUILD rather than every container. The verify is the load-bearing half:
+    // without it the repair is one more nondeterministic pass.
+    expect(buildRun).toContain(
+      'deno cache main.ts && deno install && deno install --frozen',
+    );
+  });
+
+  it('pairs that verification with a `--frozen` runtime', () => {
+    // One decision in two halves: the build proves the lockfile complete and the
+    // runtime refuses to write it. Dropping either silently restores a failure —
+    // without `--frozen` a container updates the shipped lockfile, and without
+    // the verify an incomplete one reaches production and never serves.
+    expect(dockerfile()).toContain('CMD ["run", "--frozen"');
+  });
+});

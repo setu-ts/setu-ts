@@ -10933,6 +10933,27 @@ the original read-only write remains impossible. **`check:deploy --generated` ca
 scaffolds, builds and runs without ever executing `deno install`, so it ships the stub lockfile and
 build and runtime coincidentally agree. The gate needs a `deno install` step.
 
+**Correction — that fix was incomplete, and the mechanism is nondeterminism in Deno, not a missing
+step.** `--frozen` closed the npm fetch and opened a second failure in its place: **Deno records a
+jsr package's npm edge list nondeterministically on a cold cache.** Four `--no-cache` builds of one
+unchanged scaffolded workspace produced `@setu-ts/messaging-plugin` entries missing their
+`npm:amqplib` and `npm:ioredis` edges **twice and complete twice** — while both packages were
+recorded in the lockfile's package section every time, which is what M95a D1 measured. `--frozen`
+does not write the lockfile, so against an incomplete one it refuses: the container dies at
+registration reporting a stale lockfile, from an image that built green. Observed on CI run
+35534988846 against a tree containing every M99b fix, and reproduced byte-identically — line numbers
+included — by stripping those two edges from a scaffold's lockfile and building the generated
+Dockerfile from it.
+
+**The fix is verification, not another resolution pass.** The build step is now
+`deno cache main.ts && deno install && deno install --frozen`: the cache compiles the entry's graph
+into the image, the install completes the lockfile from the manifests, and the `--frozen` install
+proves it complete — so a still-missing edge fails the BUILD once, loudly, rather than every
+container at startup. Four consecutive cold builds under that form were complete and the image
+serves `/health` 200 under `--read-only` in a network-none namespace **from a bare scaffold with no
+host `deno install` at all**, which is the case the earlier form failed. The repair alone would have
+been one more nondeterministic pass; the verify is what makes the property structural.
+
 **V7-8 — a scaffold interrupted mid-write is not retryable, and the refusal blames the user.**
 Reported by **`kantorcodes1`** on r/SideProject, from reading the source rather than running it; the
 reading is accurate. `writeFiles` (`utils/file-writer.ts:193-208`) is a bare `mkdir`/`writeFile`
