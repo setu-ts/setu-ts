@@ -4,10 +4,9 @@ import { expect } from '@std/expect';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin } from '@setu-ts/common';
 
-import { createApplication } from '../../src/application/application.ts';
+import { collectorOf, createApplication } from '../../src/application/application.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { runtimePlugin } from '../fixtures/runtime-plugin.ts';
-import type { DiagnosticsCollector } from '../../src/diagnostics/collector.ts';
 
 function throwingClockRuntimePlugin(): IPlugin {
   const fake = createFakeRuntime();
@@ -88,7 +87,12 @@ describe('diagnostics fault isolation', () => {
       diagnostics: {},
     });
     await app.start();
-    const collector = app.diagnostics as DiagnosticsCollector;
+    // The app's own collector, through the kernel-internal seam — NOT through
+    // `app.diagnostics`, which hands out a frozen reader carrying no writer
+    // surface at all. Reaching it through the public member is what this
+    // milestone's review closed.
+    const collector = collectorOf(app)!;
+    expect(collector).toBeDefined();
     // Records already captured stay readable: disabling capture is not a
     // retroactive erasure.
     const before = app.diagnostics!.read(0);
@@ -127,7 +131,8 @@ describe('diagnostics fault isolation', () => {
       diagnostics: { labels: { capabilities: ['thing'] } },
     });
     // Drive the topology boundary BEFORE startup so the failure lands mid-capture.
-    const collector = app.diagnostics as DiagnosticsCollector;
+    const collector = collectorOf(app)!;
+    expect(collector).toBeDefined();
     collector.safeObserve('topology', () => {
       throw new Error('topology capture exploded');
     });

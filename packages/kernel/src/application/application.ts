@@ -65,9 +65,41 @@ import type {
   KernelDiagnosticsLabelOptions,
   KernelDiagnosticsOptions,
 } from '../diagnostics/projection.ts';
-import type { DiagnosticsEventOutcome } from '@setu-ts/common';
+import type {
+  DiagnosticsBatch,
+  DiagnosticsEventOutcome,
+  DiagnosticsSnapshot,
+} from '@setu-ts/common';
 
 export type { KernelDiagnosticsLabelOptions, KernelDiagnosticsOptions };
+
+/**
+ * Kernel-internal handle on an application's diagnostics collector.
+ *
+ * `IApplication.diagnostics` deliberately hands out a frozen two-method facade,
+ * so the collector's writer surface is unreachable from a plugin — which is the
+ * point, since `IPluginContext.app` gives every plugin the application. Kernel
+ * tests still need the real object to drive its `safeObserve` boundary, so it
+ * lives here: a module-scoped `WeakMap` that is NOT on the package barrel and
+ * that a plugin cannot enumerate off the instance the way a symbol property
+ * could. The `ServiceRegistry.peekResolved` precedent — an internal seam whose
+ * absence from the public surface is the whole design.
+ *
+ * @internal
+ */
+const COLLECTORS = new WeakMap<IApplication, DiagnosticsCollector>();
+
+/**
+ * Returns an application's diagnostics collector, or `undefined` when
+ * diagnostics were not enabled.
+ *
+ * @param app - The application to look up
+ * @returns The collector, or `undefined`
+ * @internal Kernel-internal; never exported from `src/index.ts`.
+ */
+export function collectorOf(app: IApplication): DiagnosticsCollector | undefined {
+  return COLLECTORS.get(app);
+}
 
 /** Options for {@linkcode createApplication}. */
 export interface ApplicationOptions {
@@ -253,6 +285,17 @@ class Application implements IKernelApplication {
    * gates instrumentation, so the disabled path performs no additional work.
    */
   readonly #collector: DiagnosticsCollector | undefined;
+  /**
+   * The frozen read-only facade `diagnostics` hands out. The collector itself
+   * is NEVER exposed: it carries the writer surface (`markClosed`,
+   * `markStartupFailed`, `safeObserve`, every `observe*`), and `ctx.app` gives
+   * every plugin the application, so returning the collector put those methods
+   * one cast away from any plugin in the process. Reproduced before fixing: a
+   * plugin calling `markClosed(false)` through that cast left the reader
+   * permanently `closed` with empty topology while the application went on
+   * serving — the contract's "never a writer" broken with no error anywhere.
+   */
+  readonly #diagnostics: IDiagnosticsSource | undefined;
 
   constructor(diagnostics?: KernelDiagnosticsOptions) {
     if (diagnostics === undefined) {
@@ -262,6 +305,13 @@ class Application implements IKernelApplication {
     // label allowlists throw here, value-free, before any collection exists.
     const collector = new DiagnosticsCollector(compileLabelAllowlists(diagnostics));
     this.#collector = collector;
+    // Frozen so the facade cannot be re-pointed either: a consumer holding it
+    // can reach exactly the two contract methods and nothing else.
+    COLLECTORS.set(this, collector);
+    this.#diagnostics = Object.freeze({
+      snapshot: (): DiagnosticsSnapshot => collector.snapshot(),
+      read: (after: number, limit?: number): DiagnosticsBatch => collector.read(after, limit),
+    });
     collector.safeObserve('topology', () => {
       this.#lifecycle.setLifecycleObserver({
         clock: () => collector.monotonicMs(),
@@ -276,10 +326,14 @@ class Application implements IKernelApplication {
    * The read-only diagnostics reader when diagnostics are enabled; `undefined`
    * — never a stub — when they are not. This member is the consumer's whole
    * access path: pull-only reads, never a registry token, never a writer.
+   *
+   * Returns a frozen two-method facade rather than the collector, so "never a
+   * writer" holds at RUNTIME and not only in the type — see
+   * {@linkcode Application.#diagnostics}.
    * @since 0.8.0
    */
   get diagnostics(): IDiagnosticsSource | undefined {
-    return this.#collector;
+    return this.#diagnostics;
   }
   /**
    * The application's resolved error responder, read from the compiled

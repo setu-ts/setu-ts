@@ -67,6 +67,59 @@ describe('diagnostics activation', () => {
     await app.stop();
   });
 
+  it('the reader a plugin reaches through ctx.app carries NO writer surface', async () => {
+    // `IPluginContext.app` hands every plugin the application, so returning the
+    // collector itself put its whole writer surface one cast away. Reproduced
+    // before the fix: `markClosed(false)` through that cast left the reader
+    // permanently `closed` with empty topology while the application kept
+    // serving — "never a writer" broken with no error anywhere.
+    let reached: Record<string, unknown> | undefined;
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'reaches-app',
+          version: '1.0.0',
+          register(ctx) {
+            reached = ctx.app.diagnostics as unknown as Record<string, unknown>;
+            ctx.router.get('/x', (c) => c.response.json({ x: 1 }));
+          },
+        },
+      ],
+      diagnostics: {},
+    });
+    await app.start();
+    expect(reached).toBeDefined();
+    // Exactly the contract's two methods, and the facade cannot be re-pointed.
+    expect(Object.keys(reached!).sort()).toEqual(['read', 'snapshot']);
+    expect(Object.isFrozen(reached)).toBe(true);
+    for (
+      const writer of [
+        'markClosed',
+        'markStartupFailed',
+        'markRunning',
+        'markStopping',
+        'safeObserve',
+        'initializeRuntime',
+        'pluginRegistered',
+        'routeRegistered',
+        'middlewareCompiled',
+        'beginRequestOperation',
+        'endRequestOperation',
+        'observeHandlerStage',
+        'observeLifecycleEvent',
+      ]
+    ) {
+      expect(typeof (reached as Record<string, unknown>)[writer]).toBe('undefined');
+    }
+    // Still a working reader, and the application is untouched.
+    expect(app.diagnostics!.snapshot().state).toBe('running');
+    const response = await app.inject({ method: 'GET', url: '/x' });
+    expect(response.statusCode).toBe(200);
+    expect(app.diagnostics!.read(0).closed).toBe(false);
+    await app.stop();
+  });
+
   it('a legacy structural application still type-checks alongside diagnostics', () => {
     // Compiles because the member is optional: nothing about the existing
     // surface moved.

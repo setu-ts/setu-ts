@@ -116,6 +116,10 @@ describe('diagnostics execution integration', () => {
 
   it('a throwing handler records error outcomes and propagates the SAME error', async () => {
     const boom = new Error('handler exploded');
+    // The title claims IDENTITY, so the test has to observe the error itself —
+    // a 500 and an `error` outcome are satisfied by any failure. `onError` is
+    // the only place the propagated value is reachable.
+    const seen: unknown[] = [];
     const app = createApplication({
       plugins: [
         runtimePlugin(),
@@ -123,9 +127,12 @@ describe('diagnostics execution integration', () => {
           name: 'thrower',
           version: '1.0.0',
           register(ctx) {
+            ctx.lifecycle.onError((error) => {
+              seen.push(error);
+            });
             ctx.router.get('/boom', () => {
               throw boom;
-            }) as never;
+            });
           },
         },
       ],
@@ -134,6 +141,10 @@ describe('diagnostics execution integration', () => {
     await app.start();
     const response = await app.inject({ method: 'GET', url: '/boom' });
     expect(response.statusCode).toBe(500);
+    // Same reference, not merely the same message: observation neither wraps
+    // nor replaces what the handler threw.
+    expect(seen).toEqual([boom]);
+    expect(seen[0]).toBe(boom);
     const events = app.diagnostics!.read(0).events;
     const handler = events.find((event) => event.kind === 'handler');
     expect(handler?.outcome).toBe('error');

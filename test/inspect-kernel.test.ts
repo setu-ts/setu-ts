@@ -121,8 +121,13 @@ describe('inspect-kernel consumer script', () => {
   });
 
   it('binds no port', async () => {
-    const { stderr } = await runInspectScript();
-    // A bound socket would surface a listen error or a port line; none.
-    expect(stderr).toBe('');
+    // The subprocess runs WITHOUT `--allow-net`, so a bind attempt would be
+    // refused and the script would exit non-zero — the exit code IS the proof.
+    // Asserting `stderr === ''` proved nothing about a listener and was
+    // brittle besides: a cold module cache makes Deno print download notices
+    // there, failing the test for a reason unrelated to sockets.
+    const { code, stderr } = await runInspectScript();
+    expect(code).toBe(0);
+    expect(stderr).not.toMatch(/NotCapable|Requires net access|AddrInUse|listen/i);
   });
 });
