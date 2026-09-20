@@ -46,6 +46,7 @@ function fakeListener(): ILocalDiagnosticsListener & { closeCount: number } {
 interface ListenRecord {
   readonly port: number;
   readonly handlerPresent: boolean;
+  readonly onListen?: ((address: { hostname: string; port: number }) => void) | undefined;
 }
 
 /**
@@ -55,12 +56,14 @@ interface ListenRecord {
  * @param listener - The listener the factory returns
  * @param diagnostics - The application's diagnostics facade
  * @param gate - Optional gate the factory awaits before answering listen
+ * @param logger - Optional logger, as a context with LoggerPlugin registered has
  * @returns The context, the captured hooks, and the listen records
  */
 function fakeContext(
   listener: ILocalDiagnosticsListener,
   diagnostics: unknown,
   gate?: Promise<void>,
+  logger?: { info(message: string): void },
 ): {
   ctx: IPluginContext;
   hooks: Record<string, Array<() => unknown>>;
@@ -78,6 +81,7 @@ function fakeContext(
       listened.push({
         port: options.port,
         handlerPresent: typeof options.handler === 'function',
+        onListen: options.onListen,
       });
       if (gate === undefined) {
         return Promise.resolve(listener);
@@ -109,6 +113,7 @@ function fakeContext(
         clearTimeout: (handle: unknown) => clearTimeout(handle as number),
       } as unknown as IPluginContext['runtime'],
       app: { diagnostics } as unknown as IPluginContext['app'],
+      ...(logger === undefined ? {} : { logger }),
     } as unknown as IPluginContext,
   };
 }
@@ -279,5 +284,36 @@ describe('Plugin — expiry close failure', () => {
     expect(unhandled).toEqual([]);
     // A direct caller still observes the rejection (same memoized promise).
     await expect(plugin.revoke()).rejects.toThrow(/shutdown exploded/);
+  });
+});
+
+describe('DiagnosticsPlugin — startup announcement', () => {
+  it('labels its own listening line when a logger is registered, and omits it otherwise', async () => {
+    const listener = { close: () => Promise.resolve() };
+
+    // No logger: the key must be ABSENT, so the runtime's own banner stands
+    // and a bind is never silent. Binding a no-op here would lose the signal.
+    const bare = fakeContext(listener, { snapshot: () => undefined });
+    DiagnosticsPlugin(OPTIONS).register!(bare.ctx);
+    await bare.hooks.bootstrap[0]!();
+    expect(bare.listened[0].onListen).toBe(undefined);
+
+    // With a logger: a labelled line that names the devtool, through the
+    // application's own logger rather than a raw write.
+    const lines: string[] = [];
+    const logged = fakeContext(
+      listener,
+      { snapshot: () => undefined },
+      undefined,
+      { info: (message: string) => lines.push(message) },
+    );
+    DiagnosticsPlugin(OPTIONS).register!(logged.ctx);
+    await logged.hooks.bootstrap[0]!();
+    const announce = logged.listened[0].onListen;
+    expect(typeof announce).toBe('function');
+    announce!({ hostname: '127.0.0.1', port: 4919 });
+    expect(lines).toEqual([
+      'Setu devtool: local diagnostics connector listening on http://127.0.0.1:4919',
+    ]);
   });
 });

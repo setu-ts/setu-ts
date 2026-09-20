@@ -37,7 +37,11 @@ describe('Activation', () => {
     // The factory exists but nothing ever listened on the port.
     let connectFailed = false;
     try {
-      await Deno.connect({ port, hostname: '127.0.0.1' });
+      // Closed on the branch that FAILS the assertion: an open connection
+      // here trips Deno's resource sanitizer, and the leak report masks the
+      // assertion that actually matters.
+      const connection = await Deno.connect({ port, hostname: '127.0.0.1' });
+      connection.close();
     } catch {
       connectFailed = true;
     }

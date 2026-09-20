@@ -17,7 +17,7 @@
  * this script.
  *
  * Usage:
- *   deno run --allow-read --allow-net=127.0.0.1 scripts/inspect-local-diagnostics.ts
+ *   deno run --allow-read --allow-env --allow-net=127.0.0.1 scripts/inspect-local-diagnostics.ts
  *
  * @module
  */
