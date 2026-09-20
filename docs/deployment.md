@@ -382,9 +382,9 @@ nondeterministically on a cold cache: four `--no-cache` builds of one unchanged 
 `@setu-ts/messaging-plugin` missing its `npm:amqplib` and `npm:ioredis` edges twice and complete
 twice, while both packages were recorded in the lockfile's package section every time. A runtime
 that refuses to write the lockfile therefore refuses to start against an incomplete one, from an
-image that built green. The install completes the lockfile from the manifests and the `--frozen`
-install verifies it, so a still-missing edge fails the build once rather than every container at
-startup.
+image that built green. The install completes the edge lists the frozen check compares against, and
+the `--frozen` install verifies it, so a still-missing edge fails the build once rather than every
+container at startup.
 
 Refusing to write is also what closes the original read-only-root failure, where the first lazy
 driver registration attempted to add an edge to `deno.lock`:

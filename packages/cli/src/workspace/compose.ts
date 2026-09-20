@@ -145,7 +145,7 @@ WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 # dies at registration reporting a stale lockfile, from an image that built green.
 #
 # So \`deno cache main.ts\` compiles the entry's graph into the image, \`deno install\`
-# completes the lockfile from the manifests, and \`deno install --frozen\` VERIFIES
+# completes the edge lists the frozen check compares against, and \`deno install --frozen\` VERIFIES
 # it: an edge still missing fails the BUILD, loudly and once, rather than every
 # container at startup. With the verify in place four consecutive cold builds were
 # complete, and that is structural rather than luck — an incomplete lockfile

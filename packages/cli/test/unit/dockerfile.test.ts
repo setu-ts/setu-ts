@@ -75,10 +75,13 @@ describe('generated Dockerfile lockfile verification', () => {
     // the lockfile, so against an incomplete one it refuses and every container
     // dies at registration from an image that built green.
     //
-    // `deno install` completes the lockfile from the manifests and
-    // `deno install --frozen` verifies it, so a still-missing edge fails the
-    // BUILD rather than every container. The verify is the load-bearing half:
-    // without it the repair is one more nondeterministic pass.
+    // `deno install` completes the edge lists the frozen check compares against
+    // — the same resolver writes and verifies them, which is what makes the pair
+    // coherent — so a still-missing edge fails the BUILD rather than every
+    // container. Both halves are load-bearing, measured against the real image
+    // from a lockfile with every framework npm edge stripped: dropping the
+    // repairing install fails the build (exit 1), and dropping `--frozen` is what
+    // let the incomplete lockfile reach production in the first place.
     expect(buildRun).toContain(
       'deno cache main.ts && deno install && deno install --frozen',
     );
