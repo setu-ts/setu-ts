@@ -372,6 +372,63 @@ describe('Connector handler — authentication and binding', () => {
     expect(eventsView.body.next).toEqual(1);
   });
 
+  it('signs and bounds the bytes it actually SENDS, not a re-serialization', async () => {
+    // "Sign what you send" must hold structurally. A provider whose DTO
+    // contract is violated — the plan's own risk register expects one — can
+    // carry a value that serializes differently on a second pass; if the
+    // digest and the 256 KiB ceiling are measured on one string while a
+    // second is emitted, the client rejects every response and the bound
+    // describes bytes nobody sent. One serialization, used for all three.
+    let serializations = 0;
+    const shifting = {
+      toJSON(): string {
+        serializations += 1;
+        return `pass-${serializations}`;
+      },
+    };
+    const hostile = minimalSnapshot();
+    (hostile.nodes as Record<string, unknown>[])[0].label = shifting;
+    const { handler, key } = await buildHarness({ snapshot: hostile });
+
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
+    const before = serializations;
+
+    const mac = await signRequest(crypto.subtle, key, '/v1/snapshot', 2, TEST_INSTANCE_ID);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/snapshot`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': '2',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    expect(view.status).toEqual(200);
+    // The body was produced by exactly ONE serialization pass.
+    expect(serializations - before).toEqual(1);
+
+    // The MAC verifies over the bytes the response actually carries.
+    const digest = await crypto.subtle.digest('SHA-256', utf8(view.bodyText) as BufferSource);
+    const bodyHex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    const verified = await verifyFields(crypto.subtle, key, view.headers.get('x-setu-mac') ?? '', [
+      'setu-diagnostics-v1',
+      'response',
+      'a'.repeat(32),
+      TEST_INSTANCE_ID,
+      '2',
+      '/v1/snapshot',
+      '200',
+      bodyHex,
+    ]);
+    expect(verified).toBe(true);
+  });
+
   it('refuses a wrong MAC as unauthorized and never reads the source', async () => {
     const { handler, key, source } = await buildHarness();
     // Signed for a DIFFERENT target than the one requested: the MAC cannot

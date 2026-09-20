@@ -10640,9 +10640,11 @@ merging beyond what the schema itself expresses.
 ## Milestone 98: Secure Read-Only Devtool Diagnostics
 
 **Status:** 98a complete ([#345](https://github.com/setu-ts/setu-ts/pull/345)) — the in-process
-observation boundary and its shared contracts shipped on `feat/m98a-kernel-diagnostics`; 98b remains
-planned. This milestone records the framework work needed by the separately maintained devtool. It
-is not a claim that the interfaces or connector have passed a security review.
+observation boundary and its shared contracts shipped on `feat/m98a-kernel-diagnostics`; 98b
+complete on `feat/m98b-local-diagnostics-connector` — the runtime-owned loopback listener, its
+`common` contract/token, and `packages/diagnostics-plugin`. This milestone records the framework
+work needed by the separately maintained devtool. It is not a claim that the interfaces or connector
+have passed a security review.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and

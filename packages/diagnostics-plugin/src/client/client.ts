@@ -138,6 +138,25 @@ export async function readBoundedBody(response: Response): Promise<Uint8Array> {
 }
 
 /**
+ * Parses a verified response body, converting a malformed one into the fixed
+ * connection error. A raw `JSON.parse` would throw a `SyntaxError` whose
+ * message quotes the offending server bytes — the client's contract is that
+ * no failure echoes peer input, and the pairing path already parsed this way.
+ *
+ * @param bodyText - The decoded, MAC-verified body
+ * @returns The parsed value
+ * @throws {Error} The fixed connection-failure error for a malformed body
+ * @internal
+ */
+export function parseBody(bodyText: string): unknown {
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    throw new Error(CLIENT_ERRORS.connection);
+  }
+}
+
+/**
  * Creates the native diagnostics client.
  *
  * @param options - The injected client options
@@ -308,10 +327,10 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
     // instance must agree with the authenticated header.
     let parsed: unknown;
     try {
-      parsed = JSON.parse(result.bodyText);
-    } catch {
+      parsed = parseBody(result.bodyText);
+    } catch (error) {
       pairingFailed = true;
-      throw new Error(CLIENT_ERRORS.connection);
+      throw error;
     }
     if (!isStatusBody(parsed) || parsed.instanceId !== result.responseInstance) {
       pairingFailed = true;
@@ -329,7 +348,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
           checkUsable();
         }
         const result = await exchange(SNAPSHOT_TARGET);
-        const parsed: unknown = JSON.parse(result.bodyText);
+        const parsed = parseBody(result.bodyText);
         if (!isSnapshotProjection(parsed)) {
           throw new Error(CLIENT_ERRORS.connection);
         }
@@ -356,7 +375,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         }
         const target = `/v1/events?after=${after}&limit=${effectiveLimit}`;
         const result = await exchange(target);
-        const parsed: unknown = JSON.parse(result.bodyText);
+        const parsed = parseBody(result.bodyText);
         if (!isBatchProjection(parsed)) {
           throw new Error(CLIENT_ERRORS.connection);
         }

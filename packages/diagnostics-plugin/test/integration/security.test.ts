@@ -157,6 +157,50 @@ describe('Security — hostile raw requests over a real socket', () => {
     await app.stop();
   });
 
+  it('refuses a request carrying a forwarding header, even with a valid MAC', async () => {
+    // A proxy in the path is not a supported caller: it rewrites the very
+    // authority the client signed, so the Host/authority check stops meaning
+    // what it is there to mean. Each case carries an HONEST signature for the
+    // real port — only the forwarding header makes it hostile, so a pass here
+    // cannot come from the MAC being wrong.
+    const { app, port } = await startApp();
+    const key = await importTestKey(crypto.subtle);
+    const forwarding = [
+      'Forwarded: for=1.2.3.4',
+      'X-Forwarded-For: 1.2.3.4',
+      'X-Forwarded-Host: attacker.example',
+      'X-Forwarded-Proto: https',
+      'X-Forwarded-Port: 443',
+      'X-Real-IP: 1.2.3.4',
+    ];
+    let sequence = 1;
+    for (const header of forwarding) {
+      const mac = await signForPort(crypto.subtle, key, port, '/v1/status', sequence);
+      const raw = `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+        `X-Setu-Session: ${TEST_SESSION_ID}\r\nX-Setu-Sequence: ${sequence}\r\n` +
+        `X-Setu-Instance: \r\nX-Setu-Mac: ${mac}\r\n${header}\r\n\r\n`;
+      const response = await rawRequest(port, raw);
+      expect(response.status).toEqual(400);
+      expect(JSON.parse(response.body)).toEqual({ version: 1, error: 'invalid-request' });
+      // The refusal never carries a MAC and never echoes the header.
+      expect(response.headers.get('x-setu-mac')).toBe(null);
+      expect(response.body.includes('1.2.3.4')).toBe(false);
+      sequence += 1;
+    }
+    // The identical request WITHOUT the forwarding header is served, so the
+    // cases above fail for the header and not for anything else.
+    const mac = await signForPort(crypto.subtle, key, port, '/v1/status', sequence);
+    const ok = await rawRequest(
+      port,
+      `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+        `X-Setu-Session: ${TEST_SESSION_ID}\r\nX-Setu-Sequence: ${sequence}\r\n` +
+        `X-Setu-Instance: \r\nX-Setu-Mac: ${mac}\r\n\r\n`,
+    );
+    expect(ok.status).toEqual(200);
+    expect(ok.headers.get('x-setu-mac')).not.toBe(null);
+    await app.stop();
+  });
+
   it('refuses a replayed signed request and a wrong-session request', async () => {
     const { app, port } = await startApp();
     const key = await importTestKey(crypto.subtle);

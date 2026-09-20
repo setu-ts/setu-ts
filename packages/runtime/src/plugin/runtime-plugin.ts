@@ -217,11 +217,13 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
       // this hook is the socket's last line of defense.
       const listenerFactory = createLocalDiagnosticsListenerFactory(platform);
       ctx.services.register(CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER, listenerFactory);
-      // Optional-chained: a minimal third-party IPluginContext (or an older
-      // test double) may omit the lifecycle surface entirely. Skipping the
-      // hook there only loses this safety net — the connector's own
-      // revoke hooks and closeActive() still release the port.
-      ctx.lifecycle?.onClose?.(() => listenerFactory.closeActive());
+      // NOT optional-chained: `IPluginContext.lifecycle` and `onClose` are
+      // REQUIRED contract members (common/src/plugin.ts), and every other
+      // `ctx.lifecycle.on*` call in this repository reads them directly. An
+      // optional chain here would fail OPEN — silently skipping the socket's
+      // last line of defense against a context that violates the contract —
+      // and could only ever be exercised by a test double that omits it.
+      ctx.lifecycle.onClose(() => listenerFactory.closeActive());
     },
   };
 }

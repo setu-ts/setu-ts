@@ -10,9 +10,10 @@ All notable changes to this project are documented here. The format follows
 
 - **Local diagnostics connector (M98b): an authenticated loopback connection between a native
   devtool client and M98a's kernel diagnostics.** New package `@setu-ts/diagnostics-plugin` with
-  `DiagnosticsPlugin(options)` / `IDiagnosticsPlugin.revoke()` and the native helper
-  `createDiagnosticsClient(options)` / `IDiagnosticsClient`. New public surface on
-  `@setu-ts/common`: `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`, `ILocalDiagnosticsListenerFactory`,
+  `DiagnosticsPlugin(options)` / `IDiagnosticsPlugin.revoke()` / `DiagnosticsPluginOptions` and the
+  native helper `createDiagnosticsClient(options)` / `IDiagnosticsClient` /
+  `DiagnosticsClientOptions`. New public surface on `@setu-ts/common`:
+  `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`, `ILocalDiagnosticsListenerFactory`,
   `ILocalDiagnosticsListener`, and `LocalDiagnosticsListenerOptions`. The RuntimePlugin provides the
   factory: it binds exactly one `127.0.0.1` listener (port 1024–65535, zero-body policy,
   duplicate-singleton-header refusal before framework mapping) on Deno and rejects every `listen` on

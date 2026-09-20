@@ -20,6 +20,7 @@ import {
   signFields,
   verifyFields,
 } from '../../src/security/authentication.ts';
+import { STATUS_BODY_KEYS } from '../../src/protocol/protocol.ts';
 import {
   minimalBatch,
   minimalSnapshot,
@@ -40,7 +41,6 @@ function assertTrue(value: boolean, label: string): void {
     throw new Error('PROBE FAIL: ' + label);
   }
 }
-import { STATUS_BODY_KEYS } from '../../src/protocol/protocol.ts';
 
 /**
  * A recorded request the fake server can assert on.
@@ -73,6 +73,7 @@ function fakeServer(
     status?: number;
     oversizedBody?: boolean;
     redirect?: boolean;
+    malformedBody?: boolean;
   } = {},
 ): { fetch: typeof fetch; requests: RecordedRequest[] } {
   const requests: RecordedRequest[] = [];
@@ -121,6 +122,14 @@ function fakeServer(
         bodyText = JSON.stringify(minimalSnapshot());
       } else {
         bodyText = JSON.stringify(minimalBatch());
+      }
+      // Signed, therefore authentic — and not JSON. Deliberately NOT applied
+      // to `/v1/status`: the pairing path has always guarded its parse, so a
+      // malformed status body fails there with the SAME fixed message and
+      // would make this fixture pass without ever reaching the data paths it
+      // exists to cover. (Observed: the first version of this test did.)
+      if (overrides.malformedBody && target !== '/v1/status') {
+        bodyText = '{"version":1,"nodes":[';
       }
       // The MAC is computed over the UNMUTATED body; a mutation hook then
       // swaps the served bytes, simulating an attacker tampering AFTER the
@@ -387,6 +396,21 @@ describe('Client — verification and bounds', () => {
     expect(requests[0].session).toEqual(TEST_SESSION_ID);
     expect(requests[0].mac).toMatch(/^[0-9a-f]{64}$/);
     client.close();
+  });
+
+  it('answers its own fixed error for an authentic but malformed body', async () => {
+    // The body VERIFIES (the server signed exactly these bytes) and is not
+    // JSON. A raw `JSON.parse` here throws a `SyntaxError` whose V8 message
+    // quotes the offending peer bytes — the client's stated contract is that
+    // no failure echoes server input, and the pairing path already guarded
+    // this. Both data paths must too.
+    const { client } = buildClient({ server: { malformedBody: true } });
+    await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+
+    const second = buildClient({ server: { malformedBody: true } });
+    await expect(second.client.read(0, 8)).rejects.toThrow(CLIENT_ERRORS.connection);
+    second.client.close();
   });
 
   it('carries the status body version and keys exactly once', () => {

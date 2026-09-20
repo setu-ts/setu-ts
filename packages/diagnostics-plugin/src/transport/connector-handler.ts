@@ -53,6 +53,25 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const MAC_HEADER_PATTERN = /^[0-9a-f]{64}$/;
 
 /**
+ * Forwarding headers. Their presence means the request reached this loopback
+ * listener THROUGH a proxy, which this transport does not support: it is a
+ * direct native-client endpoint, and a proxy in the path defeats the
+ * `Host`/authority check's purpose by rewriting the authority the client
+ * signed. Refused structurally, beside the `Origin` check — additional
+ * hardening, never authentication.
+ *
+ * @internal
+ */
+export const FORWARDING_HEADER_NAMES: readonly string[] = [
+  'forwarded',
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-port',
+  'x-real-ip',
+];
+
+/**
  * The `HandlerResult` brand value for this module's internal response
  * builder (only the kernel creates real ones; this is a plain conforming
  * object).
@@ -258,6 +277,12 @@ export function createConnectorHandler(
       if (headers.has('origin')) {
         return rawRefusal(deps.limits, 'invalid-request');
       }
+      // A proxy in the path is not a supported caller.
+      for (const name of FORWARDING_HEADER_NAMES) {
+        if (headers.has(name)) {
+          return rawRefusal(deps.limits, 'invalid-request');
+        }
+      }
       const parsed = validateProtocolHeaders(request);
       if (parsed === null) {
         return rawRefusal(deps.limits, 'invalid-request');
@@ -386,7 +411,14 @@ export function createConnectorHandler(
         return refusalResponse('expired');
       }
       const response = new ProtocolResponse();
-      response.status(200).json(projected);
+      // `send(bodyBytes)` — NOT `json(projected)`. The digest above and the
+      // 256 KiB ceiling were both measured on THESE bytes; re-serializing
+      // here would make the signed digest and the bound describe a second,
+      // separately produced string. `JSON.stringify` is deterministic for a
+      // plain record, so the two agree today — but "sign what you send" must
+      // hold structurally, not by the good behaviour of a provider whose DTO
+      // contract the plan's own risk register expects to be violated.
+      response.status(200).send(bodyBytes);
       response.header('x-setu-mac', mac);
       response.header('x-setu-instance', instanceId);
       return response;
