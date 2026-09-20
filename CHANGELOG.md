@@ -19,14 +19,18 @@ All notable changes to this project are documented here. The format follows
   duplicate-singleton-header refusal before framework mapping) on Deno and rejects every `listen` on
   other platforms before any bind; its close hook releases an open listener on shutdown AND
   failed-startup paths. Activation is explicit-only (`enabled: true`, port, per-launch session
-  ID/key; no environment fallback) and refuses startup without M98a's diagnostics. The wire protocol
-  is signed with HMAC-SHA-256 over canonical bytes on both ends (`docs/diagnostics-protocol.md`),
-  with strict monotonic sequences, instance binding, monotonic expiry, bounded polling (3 GET
-  operations, 256 KiB bodies, 128 events per read), value-free fixed errors, and flood isolation
-  (anonymous refusal budget 5/s burst 10; per-session budget 20/s burst 40; 8 handler slots with 7
-  for unpaired lanes). Every refusal drops supplied input; the connector's projection copies M98a's
-  exact field allowlist, so a hostile provider result cannot leak a canary. The connector announces
-  its own bind through the application's logger —
+  ID/key; no environment fallback) and refuses startup without M98a's diagnostics. `enabled` is the
+  LITERAL `true` rather than a `boolean`, because there is no disabled mode: `enabled: false` has
+  never activated anything, it is refused, so `enabled: !isProduction` would not yield an inert
+  connector but an application that throws at composition and never boots. The literal makes that a
+  compile error; keep the connector out of production by deciding whether to construct it. The wire
+  protocol is signed with HMAC-SHA-256 over canonical bytes on both ends
+  (`docs/diagnostics-protocol.md`), with strict monotonic sequences, instance binding, monotonic
+  expiry, bounded polling (3 GET operations, 256 KiB bodies, 128 events per read), value-free fixed
+  errors, and flood isolation (anonymous refusal budget 5/s burst 10; per-session budget 20/s burst
+  40; 8 handler slots with 7 for unpaired lanes). Every refusal drops supplied input; the
+  connector's projection copies M98a's exact field allowlist, so a hostile provider result cannot
+  leak a canary. The connector announces its own bind through the application's logger —
   `Setu devtool: local diagnostics connector
   listening on http://127.0.0.1:<port>` — replacing the
   runtime's bare `Listening on …` banner, which in an application that also binds a port reads as a

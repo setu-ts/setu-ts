@@ -70,6 +70,78 @@ await diagnostics.revoke();
 Activation refusals are startup failures: missing kernel diagnostics, an unsupported runtime, an
 invalid port, or invalid credentials. Port conflicts fail closed — no scan, no fallback address.
 
+## Development-only composition
+
+**`enabled` is an acknowledgement, not a toggle.** There is no disabled mode: `enabled: false` never
+activated anything, it is _refused_ at composition time. So the obvious line for "run it outside
+production only" —
+
+```text
+DiagnosticsPlugin({ enabled: !isProduction, … })
+```
+
+— would not give you an inert connector in production. It would give you an application that throws
+at composition and never boots. `enabled` is typed as the literal `true` so that shape is a compile
+error rather than a production outage. Decide by **inclusion**.
+
+The decision has to be made at `createApplication()` time — the kernel's collector is built in the
+constructor and `diagnostics` is a construction option — so the cleanest shape is a development-only
+entry point that production never imports:
+
+```typescript
+import type { IApplication, IPlugin } from '@setu-ts/common';
+import { createApplication, type KernelDiagnosticsOptions } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { DiagnosticsPlugin } from '@setu-ts/diagnostics-plugin';
+
+// setu.config.ts — no devtool import anywhere in the production graph.
+export function createApp(
+  extra?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
+): IApplication {
+  return createApplication({
+    plugins: [RuntimePlugin(), ...(extra?.plugins ?? [])],
+    ...(extra?.diagnostics !== undefined ? { diagnostics: extra.diagnostics } : {}),
+  });
+}
+
+// main.ts — production. Never imports @setu-ts/diagnostics-plugin.
+export const production: IApplication = createApp();
+
+// main.dev.ts — the ONLY module that imports the connector.
+const sessionId = Array.from(
+  crypto.getRandomValues(new Uint8Array(16)),
+  (b) => b.toString(16).padStart(2, '0'),
+).join('');
+const sessionKey = crypto.getRandomValues(new Uint8Array(32));
+
+export const development: IApplication = createApp({
+  plugins: [DiagnosticsPlugin({ enabled: true, port: 4919, sessionId, sessionKey })],
+  diagnostics: {},
+});
+```
+
+That makes exclusion a property of the build rather than of a runtime branch: the production entry
+cannot enable the connector, because it never imports it.
+
+On Deno you get a second, independent guarantee for free — scope the production task's network grant
+to the application port, and the runtime itself refuses the bind:
+
+```jsonc
+{
+  "tasks": {
+    "start": "deno run --allow-net=0.0.0.0:3000 --allow-env --allow-sys main.ts",
+    "dev": "deno run --allow-net=0.0.0.0:3000,127.0.0.1:4919 --allow-env --allow-sys main.dev.ts"
+  }
+}
+```
+
+Under the `start` grant a bind on `127.0.0.1:4919` fails with
+`NotCapable: Requires net access to "127.0.0.1:4919"`, so even a connector that reached production
+by mistake cannot open its port.
+
+Credentials come from the trusted launcher through the child process environment (see
+[Pairing](#pairing)); the plugin reads no environment variable itself, so nothing auto-enables.
+
 ## Protocol
 
 Three signed GET operations — `/v1/status`, `/v1/snapshot`, and `/v1/events?after=<N>&limit=<N>` —

@@ -24,12 +24,30 @@ import type { DiagnosticsBatch, DiagnosticsSnapshot, IPlugin } from '@setu-ts/co
  */
 export interface DiagnosticsPluginOptions {
   /**
-   * The explicit opt-in. `true` is the only value that activates the
-   * connector; an omitted or `false` value is refused at composition time
-   * rather than silently ignored, so a half-configured development launch
-   * fails loudly instead of half-starting.
+   * The explicit opt-in, and deliberately the LITERAL `true` rather than a
+   * `boolean`: this is an acknowledgement, not a toggle.
+   *
+   * There is no disabled mode. `enabled: false` has never activated
+   * anything — it is refused at composition time so a half-configured
+   * development launch fails loudly instead of half-starting — so a
+   * caller reaching for the obvious
+   * `enabled: !isProduction` would not get an inert connector, they would
+   * get an application that throws at composition and never boots in
+   * production. Typing the literal makes that a COMPILE error instead, and
+   * points at the only correct shape: decide whether to construct the
+   * plugin at all.
+   *
+   * @example
+   * ```typescript
+   * // Not a toggle — decide by INCLUSION, ideally from a development-only
+   * // entry point that production never imports.
+   * const plugins = [RuntimePlugin()];
+   * if (devtoolCredentials !== undefined) {
+   *   plugins.push(DiagnosticsPlugin({ enabled: true, port, sessionId, sessionKey }));
+   * }
+   * ```
    */
-  readonly enabled: boolean;
+  readonly enabled: true;
   /**
    * The IPv4 loopback port the runtime-owned listener binds. Only
    * `1024`–`65535` is accepted; there is no port auto-selection and no

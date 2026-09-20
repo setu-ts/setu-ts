@@ -4009,9 +4009,14 @@ served over a runtime-owned IPv4 loopback listener. Deno and bounded polling onl
 application data, no control commands, and no environment fallback. Activation is explicit:
 `DiagnosticsPlugin({ enabled: true, port, sessionId, sessionKey, ttlMs? })` — an omitted or `false`
 `enabled`, an invalid port or credential, an unsupported runtime, or an application without M98a
-diagnostics refuses activation. Loopback is not authentication (the HMAC-SHA-256 signed protocol is)
-and not encryption (a privileged local sniffer reads authenticated bytes; remote and production use
-are unsupported).
+diagnostics refuses activation. `enabled` is typed as the LITERAL `true`, not `boolean`: there is no
+disabled mode, so `enabled: !isProduction` — which would throw at composition and stop a production
+application booting — is a compile error rather than an outage. Keep the connector out of production
+by deciding whether to CONSTRUCT it, ideally from a development-only entry point the production
+graph never imports; the package README has the worked composition and the Deno permission grant
+that refuses the bind independently. Loopback is not authentication (the HMAC-SHA-256 signed
+protocol is) and not encryption (a privileged local sniffer reads authenticated bytes; remote and
+production use are unsupported).
 
 | Export                     | Kind      | Since |
 | -------------------------- | --------- | ----- |

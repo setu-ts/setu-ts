@@ -14,6 +14,7 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
+import type { DiagnosticsPluginOptions } from '../../src/interfaces/index.ts';
 import { DiagnosticsPlugin, PLUGIN_ERRORS } from '../../src/plugin/diagnostics-plugin.ts';
 import { MutableClock, TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
 
@@ -118,7 +119,10 @@ function fakeContext(
   };
 }
 
-const OPTIONS = {
+// Annotated, not inferred: without it `enabled: true` widens to `boolean`
+// and every spread of OPTIONS stops satisfying the literal type — which is
+// the narrowing doing its job.
+const OPTIONS: DiagnosticsPluginOptions = {
   enabled: true,
   port: 4919,
   sessionId: TEST_SESSION_ID,
@@ -136,7 +140,13 @@ describe('Plugin — metadata and validation', () => {
   });
 
   it('refuses every invalid option at composition with fixed errors', () => {
-    expect(() => DiagnosticsPlugin({ ...OPTIONS, enabled: false })).toThrow(
+    // `enabled` is typed as the LITERAL `true`, so this needs a cast: the
+    // runtime guard exists for a JavaScript caller and for a value laundered
+    // through `as`, not for a type-correct TypeScript one, who cannot write
+    // it at all (see the compile-time assertions below).
+    expect(() =>
+      DiagnosticsPlugin({ ...OPTIONS, enabled: false } as unknown as DiagnosticsPluginOptions)
+    ).toThrow(
       PLUGIN_ERRORS.notEnabled,
     );
     expect(() => DiagnosticsPlugin({ ...OPTIONS, port: 80 })).toThrow(PLUGIN_ERRORS.invalidPort);
@@ -315,5 +325,26 @@ describe('DiagnosticsPlugin — startup announcement', () => {
     expect(lines).toEqual([
       'Setu devtool: local diagnostics connector listening on http://127.0.0.1:4919',
     ]);
+  });
+});
+
+describe('DiagnosticsPlugin — enabled is an acknowledgement, not a toggle', () => {
+  it('refuses a computed flag at COMPILE time, so the prod-crash shape cannot be written', () => {
+    const isProduction = true;
+
+    // The single most natural line for "only run this outside production" —
+    // and the one that used to compile and then throw at composition, taking
+    // the production application down at boot. It is now a type error.
+    // @ts-expect-error `enabled` is `true`, not `boolean`: decide by inclusion.
+    const wrong: DiagnosticsPluginOptions = { ...OPTIONS, enabled: !isProduction };
+    void wrong;
+
+    // @ts-expect-error `false` never activated anything; there is no disabled mode.
+    const disabled: DiagnosticsPluginOptions = { ...OPTIONS, enabled: false };
+    void disabled;
+
+    // The correct shape type-checks and is the one the JSDoc points at.
+    const right: DiagnosticsPluginOptions = { ...OPTIONS, enabled: true };
+    expect(right.enabled).toBe(true);
   });
 });
