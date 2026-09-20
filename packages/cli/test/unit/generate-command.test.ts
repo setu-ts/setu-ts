@@ -67,7 +67,7 @@ describe('runGenerateCommand', () => {
   it('creates the parent directory before writing', async () => {
     const h = harness();
     await h.run(['service', 'billing']);
-    expect(h.fs.mkdirs).toEqual(['/app/src/services']);
+    expect(h.fs.mkdirs).toEqual(['/app', '/app/src', '/app/src/services']);
   });
 
   describe('--dry-run', () => {

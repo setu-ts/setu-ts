@@ -166,6 +166,14 @@ describe('findExisting', () => {
 
     expect(found).toEqual(['a.ts']);
   });
+
+  it('propagates an unreadable target instead of treating it as absent', async () => {
+    const fs = createFakeFs({ private: 'keep' });
+    await expect(findExisting({
+      ...fs,
+      stat: () => Promise.reject(new Error('permission denied')),
+    }, [{ path: 'private', contents: 'new' }])).rejects.toThrow('permission denied');
+  });
 });
 
 describe('writeFiles', () => {
@@ -180,7 +188,7 @@ describe('writeFiles', () => {
     expect(fs.read('src/b.ts')).toBe('B');
   });
 
-  it('creates each parent directory recursively, once', async () => {
+  it('creates each missing directory individually, once', async () => {
     const fs = createFakeFs();
     let recursive = false;
     const spy = {
@@ -195,8 +203,8 @@ describe('writeFiles', () => {
       { path: 'src/services/b.ts', contents: 'B' },
       { path: 'src/controllers/c.ts', contents: 'C' },
     ]);
-    expect(fs.mkdirs).toEqual(['src/services', 'src/controllers']);
-    expect(recursive).toBe(true);
+    expect(fs.mkdirs).toEqual(['src', 'src/services', 'src/controllers']);
+    expect(recursive).toBe(false);
   });
 
   it('does not mkdir for a file with no parent directory', async () => {
