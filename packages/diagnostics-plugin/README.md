@@ -95,7 +95,14 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { DiagnosticsPlugin } from '@setu-ts/diagnostics-plugin';
 
 // setu.config.ts — no devtool import anywhere in the production graph.
+//
+// `extra` is the SECOND parameter deliberately. `setu commands` builds the
+// application to discover plugin-contributed verbs, and it calls this factory
+// with its own inert discovery env as the FIRST positional argument on every
+// target (`app-loader.ts`) — so a single-parameter `createApp(extra?)` would
+// receive that proxy as `extra` and throw on the spread below.
 export function createApp(
+  _env?: Readonly<Record<string, unknown>>,
   extra?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
 ): IApplication {
   return createApplication({
@@ -114,7 +121,7 @@ const sessionId = Array.from(
 ).join('');
 const sessionKey = crypto.getRandomValues(new Uint8Array(32));
 
-export const development: IApplication = createApp({
+export const development: IApplication = createApp(undefined, {
   plugins: [DiagnosticsPlugin({ enabled: true, port: 4919, sessionId, sessionKey })],
   diagnostics: {},
 });
