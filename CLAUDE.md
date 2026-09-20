@@ -5265,7 +5265,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   building it and boots a Redis-backed member without external network access. The shared writer
   compensates caught I/O failures by restoring overwritten bytes, removing only files and empty
   directories it created, and reporting incomplete recovery; `adopt` reports entry rewrite failures
-  rather than a port-literal mismatch — complete (PR pending).
+  rather than a port-literal mismatch — complete (PR #346).
 
 ## Verification (run before declaring any work done)
 
