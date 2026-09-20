@@ -10953,7 +10953,8 @@ workspace. Those are the cases where the remedy that works for `setu new` — de
 
 **Fix:** make `writeFiles` transactional. It already tracks a `created` set for directories, so the
 bookkeeping is small, it fixes all six call sites at once, and it directly restores retryability.
-`Ctrl-C` mid-run hits the same path, so the trigger is ordinary.
+Caught filesystem failures reach that recovery path. Process termination does not run asynchronous
+rollback and is explicitly outside this milestone's guarantee.
 
 **Unlinking every written path is NOT the fix, and this row's own `managed` paragraph is why** —
 raised in code review on the plan PR and corrected there. `findExisting` skips a `managed` path, so

@@ -5126,9 +5126,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it edits sit where `main` left them — `metadata-store.ts` 99.0, `openapi-generator.ts` 98.4 and
   `decorator-plugin.ts` 98.4/100/99.0, whose only uncovered lines are the pre-existing
   `replayCustomDecorators` skip and the `autoDiscover` error loop) — complete (PR #328)
-- **Next milestone** — **M40** (final polish and release: integration testing across all plugins,
-  performance benchmarks, a code-quality audit, and the Hono-migration claims M22/M23 made — the
-  Deno/Node/Bun/Workers portability matrix validated end to end).
+- **Next milestone** — **M99c** (`packages/sdk`, `packages/openapi-plugin`, and `packages/kernel` —
+  two first-party components that must agree, and do not).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

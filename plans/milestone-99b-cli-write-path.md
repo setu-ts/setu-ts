@@ -100,10 +100,10 @@ the image cache and reaches only `ECONNREFUSED` on the broker; with `--frozen` i
 
 `IFileSystem` has no rename, exclusive-create, lstat, or transaction primitive. This is compensation
 for caught I/O failures, not crash-atomic filesystem storage: process termination, power loss and
-concurrent editors are not covered. The ROADMAP's Ctrl-C assertion does not hold: `main.ts` installs
-no cancellation handler and process termination does not run a promise catch. No signal-safety claim
-ships with this change. A write-time snapshot covers a file arriving after preflight and before that
-snapshot; it cannot eliminate the remaining read/write race.
+concurrent editors are not covered. `main.ts` installs no cancellation handler and process
+termination does not run a promise catch, so no signal-safety claim ships with this change. A
+write-time snapshot covers a file arriving after preflight and before that snapshot; it cannot
+eliminate the remaining read/write race.
 
 Only a recognized missing-path error may mean absent: Deno's `NotFound`, Node's `code: ENOENT`, and
 the Bun adapter's explicit `ENOENT: no such file or directory, …` message. Other read/stat errors
