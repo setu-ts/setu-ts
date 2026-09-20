@@ -5236,6 +5236,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `common/src/services/diagnostics.ts`; the kernel owns collection at registration, lifecycle, and
   execution boundaries with exact-allowlist labels (off by default), bounded topology/events, and
   value-free failure codes; terminal failure and shutdown clear retained metadata. Ships
+  `IApplication.diagnostics` hands out a **frozen two-method facade**, never the collector: review
+  found the getter returning the concrete `DiagnosticsCollector`, and since `IPluginContext.app`
+  gives every plugin the application, `markClosed`/`markStartupFailed`/`safeObserve`/every
+  `observe*` were one cast away — reproduced, a plugin calling `markClosed(false)` left the reader
+  permanently `closed` with empty topology while the application kept serving, with no error
+  anywhere. Kernel tests reach the real collector through an internal `collectorOf(app)` WeakMap
+  seam kept off the barrel (the `ServiceRegistry.peekResolved` precedent), because the
+  fault-isolation suite had itself been driving `safeObserve` through the leak. Ships
   `scripts/inspect-kernel.ts` (runnable consumer, subprocess-tested) and
   `scripts/benchmark-kernel-diagnostics.ts` (paired harness). **Measured in review against a
   pre-change `main` worktree, five paired 10s runs**: the DISABLED path is at 102.6% of baseline
