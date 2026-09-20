@@ -28,6 +28,18 @@ import {
   TEST_PORT,
   TEST_SESSION_ID,
 } from '../fixtures/helpers.ts';
+
+/**
+ * Local assertion helper: fails the test when the condition is false.
+ *
+ * @param value - The condition
+ * @param label - What the condition asserts
+ */
+function assertTrue(value: boolean, label: string): void {
+  if (!value) {
+    throw new Error('PROBE FAIL: ' + label);
+  }
+}
 import { STATUS_BODY_KEYS } from '../../src/protocol/protocol.ts';
 
 /**
@@ -382,5 +394,124 @@ describe('Client — verification and bounds', () => {
     // a hostile server is refused. STATUS_BODY_KEYS is the exported
     // allowlist the validator checks against.
     expect(STATUS_BODY_KEYS.length).toEqual(3);
+  });
+});
+
+/**
+ * Bounds a promise so a regression that HANGS (a body read nothing aborts)
+ * fails loudly instead of stalling the suite.
+ *
+ * @param promise - The promise under test
+ * @param ms - The bound
+ * @returns The original outcome
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('test timed out — the body read was never aborted')), ms)
+    ),
+  ]);
+}
+
+describe('Client — the deadline and close() govern the body read', () => {
+  const encoder = new TextEncoder();
+
+  /**
+   * A fetch whose 200 response streams one JSON chunk and then pends
+   * forever, unless its abort signal fires — the shape of a stalled
+   * loopback endpoint after headers.
+   *
+   * @param captured - Receives the request's AbortSignal
+   * @returns The fake fetch
+   */
+  function stallingFetch(captured: { signal: AbortSignal | null }): typeof fetch {
+    return ((_input: string | URL | Request, init?: RequestInit) => {
+      captured.signal = (init?.signal as AbortSignal) ?? null;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('{"version":1'));
+          captured.signal?.addEventListener('abort', () => {
+            try {
+              controller.error(new Error('aborted'));
+            } catch {
+              // already closed
+            }
+          });
+        },
+      });
+      return Promise.resolve(
+        new Response(body, {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': 'a'.repeat(64),
+          },
+        }),
+      );
+    }) as typeof fetch;
+  }
+
+  function stallClient(captured: { signal: AbortSignal | null }, timing: {
+    setTimeout(fn: () => void, ms: number): unknown;
+    clearTimeout(handle: unknown): void;
+  }): ReturnType<typeof createDiagnosticsClient> {
+    return createDiagnosticsClient({
+      endpoint: `http://127.0.0.1:${TEST_PORT}`,
+      sessionId: TEST_SESSION_ID,
+      sessionKey: TEST_KEY_BYTES,
+      subtle: crypto.subtle,
+      fetch: stallingFetch(captured),
+      timing,
+    });
+  }
+
+  it('keeps the 5-second deadline armed across the body read', async () => {
+    const captured: { signal: AbortSignal | null } = { signal: null };
+    let deadlineFn: (() => void) | undefined;
+    const client = stallClient(captured, {
+      setTimeout(fn: () => void, _ms: number): unknown {
+        deadlineFn = fn;
+        return 0;
+      },
+      clearTimeout(handle: unknown): void {
+        // Mirrors production clearing: once cleared, firing is a no-op.
+        if (deadlineFn !== undefined && handle === 0) {
+          deadlineFn = undefined;
+        }
+      },
+    });
+    const pending = client.snapshot();
+    // Let the fetch resolve (headers) and the body read pend on chunk two.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assertTrue(captured.signal !== null, 'request captured its abort signal');
+    // Fire the deadline: the WHOLE exchange must still be governed by it.
+    deadlineFn?.();
+    await withTimeout(
+      (async () => {
+        await expect(pending).rejects.toThrow(CLIENT_ERRORS.connection);
+      })(),
+      2_000,
+    );
+    client.close();
+  });
+
+  it('aborts an in-flight body read when close() is called', async () => {
+    const captured: { signal: AbortSignal | null } = { signal: null };
+    const client = stallClient(captured, {
+      setTimeout: (_fn: () => void, _ms: number) => 0,
+      clearTimeout: (_handle: unknown) => {},
+    });
+    const pending = client.snapshot();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    client.close();
+    await withTimeout(
+      (async () => {
+        await expect(pending).rejects.toThrow(CLIENT_ERRORS.connection);
+      })(),
+      2_000,
+    );
+    await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.closed);
   });
 });

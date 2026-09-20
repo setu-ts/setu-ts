@@ -251,3 +251,33 @@ describe('Plugin — activation', () => {
     expect(listener.closeCount).toEqual(0);
   });
 });
+
+describe('Plugin — expiry close failure', () => {
+  it('does not surface an unhandled rejection when the expiry close fails', async () => {
+    const unhandled: unknown[] = [];
+    const handler = (event: PromiseRejectionEvent): void => {
+      unhandled.push(event.reason);
+    };
+    globalThis.addEventListener('unhandledrejection', handler);
+
+    let closeCalls = 0;
+    const rejectingListener: ILocalDiagnosticsListener = {
+      close: () => {
+        closeCalls += 1;
+        return Promise.reject(new Error('shutdown exploded'));
+      },
+    };
+    const plugin = DiagnosticsPlugin({ ...OPTIONS, ttlMs: 30 });
+    const { ctx, hooks } = fakeContext(rejectingListener, { snapshot: () => undefined });
+    plugin.register(ctx);
+    await hooks.bootstrap[0]();
+    // The expiry timer fires revoke(); close() rejects. The timer must
+    // swallow the failure: an unhandled rejection terminates the process.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    globalThis.removeEventListener('unhandledrejection', handler);
+    expect(closeCalls).toEqual(1);
+    expect(unhandled).toEqual([]);
+    // A direct caller still observes the rejection (same memoized promise).
+    await expect(plugin.revoke()).rejects.toThrow(/shutdown exploded/);
+  });
+});

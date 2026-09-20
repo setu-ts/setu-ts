@@ -118,6 +118,9 @@ export async function readBoundedBody(response: Response): Promise<Uint8Array> {
       }
       total += value.byteLength;
       if (total > MAX_BODY_BYTES) {
+        // Cancel the source before refusing: an abandoned stream keeps the
+        // connection's body open until GC otherwise.
+        void reader.cancel().catch(() => {});
         throw new Error(CLIENT_ERRORS.connection);
       }
       chunks.push(value);
@@ -222,58 +225,72 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
 
     const controller = new AbortController();
     inFlight.add(controller);
+    // The deadline and the abort handle govern the WHOLE exchange — headers
+    // AND body. Clearing either at header time would let a stalled endpoint
+    // hold the body read open indefinitely (the 256 KiB cap bounds volume,
+    // not time) and would make close() unable to abort an in-flight read.
     const deadline = options.timing.setTimeout(
       () => controller.abort(),
       REQUEST_DEADLINE_MS,
     );
-    let response: Response;
     try {
-      response = await options.fetch(`http://127.0.0.1:${port}${target}`, {
-        method: 'GET',
-        headers: {
-          'x-setu-session': options.sessionId,
-          'x-setu-sequence': String(sequence),
-          ...(instance === '' ? {} : { 'x-setu-instance': instance }),
-          'x-setu-mac': mac,
-        },
-        credentials: 'omit',
-        redirect: 'error',
-        cache: 'no-store',
-        signal: controller.signal,
-      });
+      let response: Response;
+      try {
+        response = await options.fetch(`http://127.0.0.1:${port}${target}`, {
+          method: 'GET',
+          headers: {
+            'x-setu-session': options.sessionId,
+            'x-setu-sequence': String(sequence),
+            ...(instance === '' ? {} : { 'x-setu-instance': instance }),
+            'x-setu-mac': mac,
+          },
+          credentials: 'omit',
+          redirect: 'error',
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+      } catch {
+        throw new Error(CLIENT_ERRORS.connection);
+      }
+      if (response.status !== 200) {
+        throw new Error(CLIENT_ERRORS.connection);
+      }
+      const bodyBytes = await readBoundedBody(response);
+      // The deadline may fire between the last chunk and this line: an
+      // exchange that overran its window fails closed.
+      if (controller.signal.aborted) {
+        throw new Error(CLIENT_ERRORS.connection);
+      }
+      const bodyHex = await sha256Hex(options.subtle, bodyBytes);
+      const responseInstance = response.headers.get('x-setu-instance') ?? '';
+      const responseMac = response.headers.get('x-setu-mac') ?? '';
+      const responseFields = responseMacFields(
+        options.sessionId,
+        responseInstance,
+        String(sequence),
+        target,
+        String(response.status),
+        bodyHex,
+      );
+      const verified = parseMac(responseMac) !== null &&
+        await verifyFields(options.subtle, key, responseMac, responseFields);
+      if (!verified) {
+        throw new Error(CLIENT_ERRORS.connection);
+      }
+      return {
+        status: response.status,
+        bodyBytes,
+        bodyText: new TextDecoder().decode(bodyBytes),
+        responseInstance,
+      };
     } catch {
+      // One fixed failure for the whole exchange: network, non-200, bounds,
+      // deadline, abort (including close() during the read), verification.
       throw new Error(CLIENT_ERRORS.connection);
     } finally {
       options.timing.clearTimeout(deadline);
       inFlight.delete(controller);
     }
-
-    if (response.status !== 200) {
-      throw new Error(CLIENT_ERRORS.connection);
-    }
-    const bodyBytes = await readBoundedBody(response);
-    const bodyHex = await sha256Hex(options.subtle, bodyBytes);
-    const responseInstance = response.headers.get('x-setu-instance') ?? '';
-    const responseMac = response.headers.get('x-setu-mac') ?? '';
-    const responseFields = responseMacFields(
-      options.sessionId,
-      responseInstance,
-      String(sequence),
-      target,
-      String(response.status),
-      bodyHex,
-    );
-    const verified = parseMac(responseMac) !== null &&
-      await verifyFields(options.subtle, key, responseMac, responseFields);
-    if (!verified) {
-      throw new Error(CLIENT_ERRORS.connection);
-    }
-    return {
-      status: response.status,
-      bodyBytes,
-      bodyText: new TextDecoder().decode(bodyBytes),
-      responseInstance,
-    };
   };
 
   const exchangeAndBind = async (target: string): Promise<void> => {

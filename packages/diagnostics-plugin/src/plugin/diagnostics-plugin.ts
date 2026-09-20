@@ -206,7 +206,13 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
         }
         listener = opened;
         expiryTimer = ctx.runtime.setTimeout(() => {
-          void revoke();
+          // Swallow deliberately: revoke() awaits listener.close(), whose
+          // shutdown may reject on an already-errored socket. An unhandled
+          // rejection terminates the whole process — exactly what revoke()
+          // must never do to the parent application. The socket is released
+          // by the OS regardless, and a DIRECT revoke() caller still sees
+          // the rejection.
+          revoke().catch(() => {});
         }, ttlMs);
       });
     },
