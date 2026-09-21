@@ -6,6 +6,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import {
   readWorkspaceManifest,
   renderWorkspaceManifest,
+  WORKSPACE_VERSION,
   type WorkspaceManifest,
 } from '../../src/workspace/manifest.ts';
 
@@ -60,6 +61,36 @@ describe('devtoolPort in the workspace manifest', () => {
       ok: false,
       problem: { kind: 'invalid-port', port: 70000, field: 'member "orders" devtoolPort' },
     });
+  });
+
+  /**
+   * A DEFINED but wrong-shaped devtool port is malformed, not absent.
+   *
+   * Dropping it — the shape the two boolean siblings use — made the member read
+   * as devtool-disabled, so `ports --reallocate` rewrote the manifest WITHOUT
+   * the field and reported success, while the member's `main.dev.ts` went on
+   * binding the old number and the launcher had nothing left to dial. That is
+   * the caller's own rule ("one bad entry invalidates the manifest rather than
+   * being dropped") applied one level down.
+   */
+  it('refuses a defined non-numeric devtool port rather than silently dropping it', async () => {
+    for (const bad of ['4919', true, null, { port: 4919 }]) {
+      const source = JSON.stringify({
+        version: WORKSPACE_VERSION,
+        runtime: 'deno',
+        basePort: 3000,
+        transport: 'http',
+        members: [{ name: 'orders', port: 3000, devtoolPort: bad }],
+      });
+      const read = await readWorkspaceManifest(
+        fsWith({ '/ws/setu.workspace.json': source }),
+        '/ws',
+      );
+      expect(read, `devtoolPort: ${JSON.stringify(bad)}`).toEqual({
+        ok: false,
+        problem: { kind: 'malformed' },
+      });
+    }
   });
 
   it('still accepts members sharing a port, exactly as before the devtool', () => {

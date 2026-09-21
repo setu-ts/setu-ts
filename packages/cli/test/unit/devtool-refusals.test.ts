@@ -257,15 +257,47 @@ describe('devtool enable refuses by name and writes nothing', () => {
     h.fs.writeFile(
       '/ws/apps/orders/setu.config.ts',
       new TextEncoder().encode(
-        // The async starter opening, with an extra parameter so the async
-        // shape is NOT the byte-identical pre-M98c rendering — this isolates
-        // the starter refusal from the legacy-factory refusal that runs first.
+        // The async starter opening with an extra parameter, so this shape is
+        // NOT the byte-identical pre-M98c rendering — it reaches the starter
+        // refusal without also matching `LEGACY_FACTORY_SHAPES`. The case that
+        // DOES match both is the next test.
         'export async function createApp(\n  env?: Readonly<Record<string, unknown>>,\n  extra?: unknown,\n): Promise<IApplication> {\n  return await starter(env);\n}\n',
       ),
     );
     (h.fs.writes as string[]).length = 0;
     expect(await h.run(['enable', 'orders'])).toBe(1);
     expect(h.err.text()).toContain('starter');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  /**
+   * A starter project scaffolded BEFORE this letter matches BOTH textual
+   * checks, because `LEGACY_FACTORY_SHAPES` carries the pre-devtool starter
+   * signature as well as the plugin-list one. Order therefore decides which
+   * remedy the developer is handed, and the legacy one is catastrophic here:
+   * it names the PLUGIN-LIST signature, so a developer following it rewrites
+   * `createFullStackAppFromConfig` away — and the devtool still could not be
+   * enabled afterwards, because a starter owns its construction.
+   *
+   * The sibling test above is written to dodge this overlap; this one is the
+   * overlap.
+   */
+  it('prefers the starter refusal for a pre-M98c starter project, which matches both', async () => {
+    const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    h.fs.writeFile(
+      '/ws/apps/orders/setu.config.ts',
+      new TextEncoder().encode(
+        // Byte-identical to the pre-M98c starter rendering.
+        'export async function createApp(\n  env?: Readonly<Record<string, unknown>>,\n): Promise<IApplication> {\n  return await createFullStackAppFromConfig(build);\n}\n',
+      ),
+    );
+    (h.fs.writes as string[]).length = 0;
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    const message = h.err.text();
+    expect(message).toContain('starter');
+    // The exact failure: the legacy remedy would tell a starter project to
+    // declare the plugin-list signature, discarding its own composition.
+    expect(message).not.toContain('): IApplication {');
     expect(h.fs.writes).toEqual([]);
   });
 });

@@ -278,13 +278,24 @@ function toMember(value: unknown): WorkspaceMember | undefined {
     (!Array.isArray(dependsOn) ||
       !dependsOn.every((entry) => typeof entry === 'string' && entry !== ''))
   ) return undefined;
+  // A DEFINED but wrong-shaped devtool port invalidates the manifest rather
+  // than being dropped, which is the caller's own rule one level down: a
+  // silently omitted `devtoolPort` is an address `ports --reallocate` then
+  // rewrites the manifest without, reporting success, while the member's
+  // `main.dev.ts` goes on binding the old number and the launcher has nothing
+  // left to dial. The two boolean siblings below keep the drop behaviour
+  // deliberately: they are released, absent means "unknown" for both, and
+  // tightening them would refuse manifests the CLI accepts today. No manifest
+  // can carry a malformed `devtoolPort` yet, so this refuses nothing that
+  // already exists.
   const devtoolPort = record['devtoolPort'];
+  if (devtoolPort !== undefined && typeof devtoolPort !== 'number') return undefined;
   const healthProbes = record['healthProbes'];
   const metricsEndpoint = record['metricsEndpoint'];
   return {
     name,
     port,
-    ...(typeof devtoolPort === 'number' ? { devtoolPort } : {}),
+    ...(devtoolPort === undefined ? {} : { devtoolPort }),
     ...(dependsOn === undefined ? {} : { dependsOn }),
     ...(typeof healthProbes === 'boolean' ? { healthProbes } : {}),
     ...(typeof metricsEndpoint === 'boolean' ? { metricsEndpoint } : {}),

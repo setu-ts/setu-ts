@@ -380,10 +380,19 @@ async function enableInWorkspace(
       `No ${CONFIG_MODULE} in ${joinPath(memberRoot)} — this is not a Setu-TS project member.`,
     );
   }
-  const legacy = legacyFactoryRefusal(configSource);
-  if (legacy !== undefined) return reportInapplicable(deps, legacy);
+  // Starter FIRST. `LEGACY_FACTORY_SHAPES` carries the pre-devtool starter
+  // signature too, so a starter-composed project scaffolded before this letter
+  // matches the legacy check as well — and that check's remedy is the
+  // PLUGIN-LIST signature, which a developer following it would apply by
+  // rewriting `createFullStackAppFromConfig` away. The starter refusal is the
+  // true one for that project (a starter owns its construction, so the devtool
+  // can never be enabled there at all), and it has no cannot-classify
+  // fallback, so evaluating it first cannot mask a legacy plugin-list factory —
+  // that shape is not async and never matches it.
   const starter = starterConfigRefusal(configSource);
   if (starter !== undefined) return reportInapplicable(deps, starter);
+  const legacy = legacyFactoryRefusal(configSource);
+  if (legacy !== undefined) return reportInapplicable(deps, legacy);
 
   const handles: DenoJsonHandle[] = [];
   const planned: PlannedWrite[] = [];
@@ -617,10 +626,11 @@ async function enableStandalone(
       `No ${CONFIG_MODULE} in ${dir} — this is not a Setu-TS project.`,
     );
   }
-  const legacy = legacyFactoryRefusal(configSource);
-  if (legacy !== undefined) return reportInapplicable(deps, legacy);
+  // Starter FIRST, for the reason spelled out at the workspace site above.
   const starter = starterConfigRefusal(configSource);
   if (starter !== undefined) return reportInapplicable(deps, starter);
+  const legacy = legacyFactoryRefusal(configSource);
+  if (legacy !== undefined) return reportInapplicable(deps, legacy);
 
   const start = handle.tasks['start'];
   if (start === undefined) {

@@ -827,16 +827,14 @@ ${reExportBlock}`;
  * @returns Bare package names, deduplicated
  */
 function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly string[] {
-  // `common` is unconditional: the config module imports IApplication whichever
-  // way it builds the app. `kernel` is not — a starter factory returns the
-  // application, so `createApplication` is never imported on that path and
-  // declaring the dependency would be a package the project never references.
+  // Both are unconditional. `common`: the config module imports `IApplication`
+  // whichever way it builds the app. `kernel`: the factory's devtool parameter
+  // names `KernelDiagnosticsOptions` from `@setu-ts/kernel`, so every config
+  // module imports the package — as `createApplication` on the plugin-list
+  // path, as a type on the starter path. Before that parameter existed the
+  // starter path referenced nothing from the kernel and `kernel` was
+  // conditional; it is not any more.
   const packages = new Set<string>(['common', 'kernel']);
-  // `kernel` is unconditional: the factory's devtool parameter names
-  // `KernelDiagnosticsOptions` from `@setu-ts/kernel`, so every config module
-  // imports the package — as `createApplication` on the plugin-list path, as a
-  // type on the starter path. Before the parameter existed the starter path
-  // referenced nothing from the kernel and the dependency was conditional.
   // Every socket target's `main.ts` imports `createRuntimeServices` to read the
   // port and register its shutdown signals (M70h/B1). It is declared here
   // rather than left to the plugin scan because a starter-composed host
