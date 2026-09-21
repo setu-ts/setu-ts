@@ -10,6 +10,41 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+Both changes are to `app.inject()` and both are silent — they compile, so the compiler will not
+point at them. Neither affects a served request.
+
+### Check a test that asserts no `content-type` for a `Blob` body
+
+`inject()` now defaults the request's content type from a non-empty `Blob.type`, which is what the
+platform already does for `new Request(url, { body: blob })`. Before, a `Blob` was treated as bare
+bytes and contributed nothing, so an injected multipart upload answered `500` with an error claiming
+the body was not multipart — while the same bytes through `app.fetch` answered `200`.
+
+Nothing to do if you pass an untyped `Blob`, a `Uint8Array` or an `ArrayBuffer`: those still carry
+no default, because bytes alone say nothing about their encoding. Two cases DO change. A test that
+asserted the header's absence for a typed `Blob` now sees the type and should assert it instead. And
+a route that BRANCHES on the content type now takes the branch the blob declares — if the type does
+not describe the bytes, either correct the type or set `headers['content-type']` explicitly, which
+still wins over the default.
+
+### Stop relying on `inject()` mutating a `Headers` instance you passed
+
+`inject()` used to write its content-type default onto the caller's own object when
+`InjectRequest.headers` was a `Headers` rather than a plain record. Reusing one instance across two
+requests — the ordinary way to hoist a shared auth header into a fixture — therefore carried the
+first request's content type into the second, where it suppressed the correct default: a
+`URLSearchParams` body following a JSON body arrived as JSON. The default is now written onto a
+copy.
+
+Nothing to do in the normal case, and a test that was silently getting the wrong content type starts
+getting the right one. The one thing to change is code that READ the header back off its own
+`Headers` object after calling `inject()`, expecting to find what `inject()` had put there; read it
+from the response or set it explicitly instead.
+
+<!-- version:history -->
+
 ## 0.7.0
 
 ### Regenerate your client if you adopt `@HttpCode` or `@Redirect`

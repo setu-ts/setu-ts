@@ -865,9 +865,15 @@ class Application implements IKernelApplication {
     // caller can still hand `inject()` a value the type cannot see.
     const { bytes: bodyBytes, defaultContentType } = await coerceInjectBody(request.body);
 
-    const headers = request.headers instanceof Headers
-      ? request.headers
-      : new Headers(request.headers ?? {});
+    // A COPY, never the caller's own `Headers`. The per-shape default below
+    // WRITES here, and reusing one `Headers` instance across two injected
+    // requests is ordinary in a test: the first request's `content-type` used
+    // to stick to the caller's object, so the second silently inherited it and
+    // `!headers.has('content-type')` then declined to set the right one — a
+    // JSON body following a form body arrived as a form. Same aliasing hazard
+    // the byte copy in `coerceInjectBody` guards, one field over; a handler
+    // mutating `ctx.request.headers` is now contained too.
+    const headers = new Headers(request.headers ?? {});
 
     // The default is PER SHAPE: a URLSearchParams body defaulting to
     // `application/json` would arrive as a non-form and the form parse would
@@ -949,9 +955,11 @@ class Application implements IKernelApplication {
       formData(): Promise<FormBody> {
         // The shared parse (M94b): a non-form content-type rejects with the
         // `415`-branded UnsupportedFormEncodingError, so an injected request
-        // observes what a served request observes. A byte-ish body sets NO
-        // default content type (M95c §3.9), so an injected multipart must
-        // supply its own — exactly what a served request requires.
+        // observes what a served request observes. A `Uint8Array` or an
+        // `ArrayBuffer` sets NO default content type (M95c §3.9), so an
+        // injected multipart in those shapes must supply its own — exactly
+        // what a served request requires. A `Blob` supplies it from `.type`
+        // (M99c), as the platform does.
         form ??= Promise.resolve().then(() =>
           parseFormBody(bodyBytes ?? new Uint8Array(0), headers.get('content-type'))
         );

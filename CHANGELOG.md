@@ -132,6 +132,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`kernel` — `inject()` no longer MUTATES a caller-supplied `Headers` instance (M99c).** The
+  per-shape content-type default wrote onto the caller's own object when `InjectRequest.headers` was
+  a `Headers` rather than a record, so one instance reused across two injected requests — an
+  ordinary way to hoist a shared auth header in a test — carried the first request's `content-type`
+  into the second: `!headers.has('content-type')` then declined to set the right default, and a
+  `URLSearchParams` body following a JSON body arrived as JSON. `inject()` now defaults onto a copy,
+  which also contains a handler that mutates `ctx.request.headers`. This is the aliasing hazard the
+  byte copy in the same release guards against, one field over; it predates the `Blob` default
+  below, which only widened its reach, and is fixed here at the maintainer's direction rather than
+  on a separate branch. Nothing restores the old behaviour, because nothing could depend on it: a
+  caller wanting the header set passes it explicitly, which still wins.
 - **`kernel` — `inject()` defaults a `Blob` body's content type from `blob.type`, so an injected
   multipart Blob no longer 500s where the same Blob through `fetch()` answers 200 (M99c).** A `Blob`
   CARRIES its type — the caller has said what the bytes are — and the platform's

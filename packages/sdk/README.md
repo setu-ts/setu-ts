@@ -348,9 +348,21 @@ publish or format it has nowhere to go.
   signature and is the factory's return type; rename it with `apiTypeName`.
 - **Two names that derive onto one identifier throw** `OpenApiCodegenError` rather than emitting a
   file with a duplicate declaration, and the diagnostic names both originals. Component schemas,
-  `*Args` interfaces, `*Error` unions, `*Error<status>Body` aliases and the client interface all
-  draw from ONE registry, so a component named `ListUsersArgs` beside an operation `listUsers` is
-  refused rather than silently emitting two declarations of one name.
+  `*Args` interfaces, `*Error` unions, the client interface and the `apiTypeName` / `factoryName`
+  options all draw from ONE registry, so a component named `ListUsersArgs` beside an operation
+  `listUsers` is refused rather than silently emitting two declarations of one name. Each of those
+  names derives from something the document or the caller WROTE, so a clash is a real problem you
+  must see.
+- **A hoisted alias ALLOCATES its name instead of throwing.** The four hoisted aliases — a request
+  body, a parameter, a success response and an error body — name an anonymous inline schema the
+  document never named, so the generator may pick any identifier and a clash is its own problem to
+  solve. Each asks the registry for its preferred name first, so no alias that generates today is
+  ever renamed; a success response then tries `…Response<status>Body`, which reads correctly beside
+  a component of the same name; and every arm finally takes a numeric suffix (`…2`, `…3`) allocated
+  through the registry, because a suffix is not a namespace and a document may legally declare the
+  suffixed name too. This matters because `@setu-ts/openapi-plugin` names a reused response schema
+  `${operationId}Response${status}` — exactly the derivation used here — so a schema that is both
+  reused and enclosed in an inline body used to abort generation outright.
 - **Declared error responses are typed.** An operation declaring a non-2xx response also emits a
   union discriminated on the literal `status` and a narrowing guard:
 

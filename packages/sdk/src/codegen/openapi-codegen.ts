@@ -105,6 +105,10 @@ class TypeNameRegistry {
    * name too, and `claim` throwing there would move the abort rather than
    * remove it.
    *
+   * {@linkcode hoistMultiline} is the ONLY caller, deliberately: hoisting is
+   * what makes a name the generator's own to choose, so the two belong
+   * together and a new hoist site cannot reach `claim` by accident.
+   *
    * @param preferred - Today's name, tried first so no alias that generates
    *   today is renamed
    * @param origin - What the name was derived from, for the diagnostic
@@ -685,18 +689,39 @@ interface HoistedAlias {
  * is the whole of X11-9. Hoisting removes the question: every reference is a
  * single-line name, and the shape also becomes nameable by a consumer.
  *
+ * This function is also the SINGLE OWNER of how a hoisted alias is NAMED, and
+ * that ownership is load-bearing rather than tidy. Every alias here names an
+ * anonymous inline schema the document never named, so a name collision is the
+ * generator's problem to solve — it allocates through
+ * {@linkcode TypeNameRegistry.claimHoisted} instead of throwing, which is what
+ * M99c's V7-6 turns on. Letting each call site decide that for itself is the
+ * exact split the emission block below warns about: "splitting emission per
+ * source is what let the multi-line indent defect survive in three of them
+ * while the fourth was correct." A new hoist site therefore gets the rule by
+ * construction, because hoisting IS this function.
+ *
  * @param rendered - The rendered type
- * @param name - Produces the alias name; called only when hoisting
+ * @param types - Registry the alias name is allocated from, only when hoisting
+ * @param preferred - Today's name, tried first so no alias that generates
+ *   today is renamed
+ * @param origin - What the name was derived from, for the diagnostic
  * @param aliases - Collector the alias is appended to
- * @returns `rendered` when single-line, else the claimed alias name
+ * @param alternate - Second candidate; only the success-response arm passes
+ *   one (`…Response<status>Body`), where it reads correctly beside a component
+ *   of the same name — the numeric form there (`…Response2002`) reads as a
+ *   status code
+ * @returns `rendered` when single-line, else the allocated alias name
  */
 function hoistMultiline(
   rendered: string,
-  name: () => string,
+  types: TypeNameRegistry,
+  preferred: string,
+  origin: string,
   aliases: HoistedAlias[],
+  alternate?: string,
 ): string {
   if (!rendered.includes('\n')) return rendered;
-  const claimed = name();
+  const claimed = types.claimHoisted(preferred, origin, alternate);
   aliases.push({ name: claimed, body: rendered });
   return claimed;
 }
@@ -740,11 +765,9 @@ function getErrorArms(
       status,
       type: hoistMultiline(
         rendered,
-        () =>
-          types.claimHoisted(
-            `${sanitizeTypeName(operationId)}Error${status}Body`,
-            `the ${status} response body of operation '${operationId}'`,
-          ),
+        types,
+        `${sanitizeTypeName(operationId)}Error${status}Body`,
+        `the ${status} response body of operation '${operationId}'`,
         aliases,
       ),
     });
@@ -827,17 +850,15 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
     wireName: p.name,
     // A parameter with no `schema` is treated as a string: that is the only
     // shape that can be serialized into a URL or a header without guessing.
+    // `hoistMultiline` allocates the name rather than claiming it outright:
+    // it is the generator's choice for a schema the document never named, so
+    // a collision there is solved, not aborted. The `*Args`/`*Error`/guard
+    // names below keep the hard `claim` throw, because the caller wrote them.
     type: hoistMultiline(
       renderSchema(p.schema ?? { type: 'string' }, new Set(), path, method),
-      // Every hoisted alias allocates through `claimHoisted`: the name is
-      // the generator's choice for a schema the document never named, so
-      // a collision here is solved, not aborted. Component schemas, the
-      // `*Args`/`*Error`/guard names below keep the hard `claim` throw.
-      () =>
-        types.claimHoisted(
-          `${sanitizeTypeName(entry.operationId)}${sanitizeTypeName(p.name)}Param`,
-          `the '${p.name}' parameter of operation '${entry.operationId}'`,
-        ),
+      types,
+      `${sanitizeTypeName(entry.operationId)}${sanitizeTypeName(p.name)}Param`,
+      `the '${p.name}' parameter of operation '${entry.operationId}'`,
       aliases,
     ),
     required: forcedRequired ?? p.required === true,
@@ -854,11 +875,9 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   const bodyType = bodySchema
     ? hoistMultiline(
       renderSchema(bodySchema, new Set(), path, method),
-      () =>
-        types.claimHoisted(
-          `${sanitizeTypeName(entry.operationId)}Body`,
-          `the request body of operation '${entry.operationId}'`,
-        ),
+      types,
+      `${sanitizeTypeName(entry.operationId)}Body`,
+      `the request body of operation '${entry.operationId}'`,
       aliases,
     )
     : undefined;
@@ -940,19 +959,17 @@ function getSuccessTypes(
         // A success type is written at TWO indentation levels — the `Api`
         // signature and the `client.request<…>` argument — so a multi-line one
         // cannot be correct at both. Hoisting is the only fix available here.
+        // The response arm alone passes an alternate candidate: beside a
+        // component of the same name — the measured M99c collision —
+        // `…Response200Body` reads correctly, while the bare numeric form
+        // (`…Response2002`) reads as a status code.
         out.push(hoistMultiline(
           renderSchema(media.schema, new Set(), path, method),
-          // The response arm alone passes an alternate candidate: beside a
-          // component of the same name — the measured M99c collision —
-          // `…Response200Body` reads correctly, while the bare numeric form
-          // (`…Response2002`) reads as a status code.
-          () =>
-            types.claimHoisted(
-              `${sanitizeTypeName(operationId)}Response${s}`,
-              `the ${s} response body of operation '${operationId}'`,
-              `${sanitizeTypeName(operationId)}Response${s}Body`,
-            ),
+          types,
+          `${sanitizeTypeName(operationId)}Response${s}`,
+          `the ${s} response body of operation '${operationId}'`,
           aliases,
+          `${sanitizeTypeName(operationId)}Response${s}Body`,
         ));
       } else out.push('void');
     }
