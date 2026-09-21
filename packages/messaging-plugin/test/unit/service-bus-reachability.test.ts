@@ -131,6 +131,43 @@ describe('ServiceBusBroker data-plane evidence window (M95b §3.2)', () => {
     expect(probes).toBe(1);
   });
 
+  it('retains a failed publish past the window until a successful publish contradicts it', async () => {
+    const manual = createManualRuntime();
+    let failPublish = true;
+    const broker = new ServiceBusBroker(manual.runtime, new JsonSerializer(), {
+      connectionString: 'Endpoint=sb://test/',
+      dataPlaneEvidenceMs: 10,
+      client: makeTransport({
+        isHealthy: () => Promise.resolve(undefined),
+        send: () =>
+          failPublish ? Promise.reject(new Error('connection reset by peer')) : Promise.resolve(),
+      }),
+    });
+    await broker.connect();
+    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+
+    manual.advance(10);
+    expect(await broker.reachability()).toBe(false);
+
+    failPublish = false;
+    await broker.publish('orders', { id: 1 });
+    expect(await broker.reachability()).toBe(true);
+  });
+
+  it('accepts a fresh positive management probe as evidence of recovery', async () => {
+    const broker = new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
+      connectionString: 'Endpoint=sb://test/',
+      client: makeTransport({
+        isHealthy: () => Promise.resolve(true),
+        send: () => Promise.reject(new Error('connection reset by peer')),
+      }),
+    });
+    await broker.connect();
+    await expect(broker.publish('orders', { id: 1 })).rejects.toThrow('connection reset by peer');
+
+    expect(await broker.reachability()).toBe(true);
+  });
+
   it('a rejection thrown BEFORE the transport is never recorded as evidence', async () => {
     // Narrowed by origin: a serialization bug says nothing about the network
     // and must never mark the broker down.
@@ -197,18 +234,16 @@ describe('dataPlaneEvidenceMs is validated at construction (M95b review)', () =>
       dataPlaneEvidenceMs: evidenceMs,
     });
 
-  it('refuses NaN, which would freeze the window so evidence never ages out', () => {
+  it('refuses NaN, which would freeze positive evidence indefinitely', () => {
     // `Number(env.DATA_PLANE_EVIDENCE_MS)` for an unset variable is exactly
-    // NaN, and `elapsed >= NaN` is always false — one publish at boot would
-    // pin `reachability()` at its outcome indefinitely, which is the
-    // fail-open shape this broker exists to close.
+    // NaN, and `elapsed >= NaN` is always false — one successful publish at
+    // boot would pin `reachability()` at true indefinitely.
     expect(() => make(Number.NaN)).toThrow('dataPlaneEvidenceMs must be a positive integer');
   });
 
-  it('refuses 0 and negative, which would disable the window entirely', () => {
-    // Discarding every outcome instantly makes `reachability()` always fall
-    // through to the management probe — the pre-M95b behaviour. The option
-    // deliberately has no disable arm.
+  it('refuses 0 and negative, which would discard positive evidence instantly', () => {
+    // The option deliberately has no disable arm: a positive outcome needs a
+    // bounded evidence lifetime even though negative evidence is retained.
     expect(() => make(0)).toThrow('there is no value that disables');
     expect(() => make(-1)).toThrow('dataPlaneEvidenceMs must be a positive integer');
   });

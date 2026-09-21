@@ -111,6 +111,7 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
   const loggerRedaction = composeLoggerRedaction(
     redaction,
     options?.redact ?? DEFAULT_SECRET_FIELD_PATTERNS,
+    options?.redact !== undefined,
   );
 
   return {
@@ -127,7 +128,6 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
         level,
         runtime,
         options,
-        redaction,
         loggerRedaction,
       );
 
@@ -181,7 +181,6 @@ async function createLogger(
   level: LogLevel,
   runtime: IRuntimeServices,
   options?: LoggerPluginOptions,
-  redaction?: IRedactionService,
   loggerRedaction?: IRedactionService,
 ): Promise<ILogger> {
   switch (transport) {
@@ -191,7 +190,7 @@ async function createLogger(
       return await PinoLogger.create(buildPinoLoggerOptions(level, options, loggerRedaction));
     case 'console':
     default:
-      return new ConsoleLogger(runtime, buildConsoleOptions(level, options, redaction));
+      return new ConsoleLogger(runtime, buildConsoleOptions(level, options, loggerRedaction));
   }
 }
 
@@ -275,15 +274,17 @@ function resolveRedaction(
  *
  * @param policy - Optional application policy service
  * @param paths - Legacy logger paths, applied after the policy
+ * @param caseSensitive - Whether matching preserves the caller-supplied path casing
  * @returns Combined service
  */
 export function composeLoggerRedaction(
   policy: IRedactionService | undefined,
   paths: readonly string[],
+  caseSensitive: boolean = true,
 ): IRedactionService {
   const legacy = createRedactionService(
     { fields: Object.fromEntries(paths.map((path) => [path, 'secret'])) },
-    { caseSensitive: true },
+    { caseSensitive },
   );
   return {
     redactValue(path: string, value: unknown): unknown {

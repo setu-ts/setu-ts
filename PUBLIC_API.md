@@ -4613,18 +4613,17 @@ interface ServiceBusRetryOptions {
 ```
 
 `ServiceBusOptions` — the exported options type of a directly constructed `ServiceBusBroker` —
-carries one more member (**since M95b**): `dataPlaneEvidenceMs?: number`, how long a recorded
-data-plane outcome stays authoritative. Default `5000`, matching the management probe's TTL so the
-two signals age together. It is a broker option rather than a plugin-wide one because no other
-broker has two planes to choose between; the plugin arm does not forward it.
+carries one more member (**since M95b**): `dataPlaneEvidenceMs?: number`, how long a positive
+data-plane outcome stays authoritative. Default `5000`. A negative outcome remains authoritative
+until a successful publish or a positive management probe contradicts it; elapsed time alone never
+reports a known outage as healthy. It is a broker option rather than a plugin-wide one because no
+other broker has two planes to choose between; the plugin arm does not forward it.
 
 **It must be a safe positive integer, and the constructor REFUSES anything else** rather than
 accepting a value that reads as configured while the window misbehaves. `NaN` — what `Number(env.X)`
-yields for an unset or misspelled variable — would freeze the window so recorded evidence never ages
-out, pinning `reachability()` at one boot-time publish's outcome indefinitely; `0` or a negative
-value would discard every outcome instantly, so `reachability()` always fell through to the
-management probe, which is the behaviour the window exists to replace. The option therefore has no
-disable arm: omit it for the default.
+yields for an unset or misspelled variable — would freeze the positive-evidence window, pinning
+`reachability()` at one boot-time successful publish; `0` or a negative value would discard every
+positive outcome instantly. The option therefore has no disable arm: omit it for the default.
 
 ```typescript
 /** Azure Service Bus options — exclusive union of injected and production arms. */
@@ -5036,12 +5035,11 @@ at most one round trip per TTL.
 `data` reports `{ broker, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`.
 
 **Since M95b** reachability reads the plane the application actually uses. The Service Bus broker
-records the outcome of every real publish — the **data plane** — in a small evidence window and
-`reachability()` consults it FIRST: a recent success resolves `true`, a recent network-layer failure
-(a rejection carrying no `statusCode`; a rejected topic or a quota error is an application-level
-fact, never an outage) resolves `false`, and with no recent evidence the management probe answers
-exactly as before. `ServiceBusOptions.dataPlaneEvidenceMs` (default `5000`, matching the probe's
-TTL) bounds how long an outcome stays authoritative. The plane distinction is the substance: the
+records the outcome of every real publish — the **data plane** — and `reachability()` consults it
+FIRST: a positive success resolves `true` for `ServiceBusOptions.dataPlaneEvidenceMs` (default
+`5000`), while a network-layer failure (a rejection carrying no `statusCode`; a rejected topic or a
+quota error is an application-level fact, never an outage) resolves `false` until a successful
+publish or a positive management probe contradicts it. The plane distinction is the substance: the
 management round trip proves the **management** plane is reachable — evidence about the data plane,
 never proof of it — and that gap is what let a stopped namespace report `up` while every publish
 threw. Two further changes: every arm's probe is bounded by the indicator's `createCachedProbe`

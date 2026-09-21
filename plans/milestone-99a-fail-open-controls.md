@@ -1,6 +1,6 @@
 # Milestone 99a — a control that reports safe for what it does not cover
 
-> **Status:** Planning. Branch: `feat/m99a-fail-open-controls`. `main` is protected — all work
+> **Status:** Complete. Branch: `feat/m99a-fail-open-controls`. `main` is protected — all work
 > (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
@@ -40,10 +40,10 @@ than a redesign.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                          | Resolution (picked side)                                                                                             | Doc deliverable (same PR)                                                          |
-| -- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| C1 | `CHANGELOG.md` `0.7.0` presents default redaction as covering "common secret-shaped fields"; the shipped list cannot match the header casing real code emits                      | The CHANGELOG describes the intent; the list is wrong. Fix the list, leave the CHANGELOG's intent sentence standing  | `CHANGELOG.md` gains a `Fixed` entry naming the casing and the behaviour change    |
-| C2 | `packages/messaging-plugin/src/brokers/service-bus-broker.ts:216-218` documents the window as "the two signals age together", which is the behaviour that discards a known outage | The prose is accurate about what the code does and wrong about what it should do. Change the code, rewrite the JSDoc | The `dataPlaneEvidenceMs` JSDoc block is rewritten to state the new retention rule |
+| #  | Conflict                                                                                                                                                                          | Resolution (picked side)                                                                                             | Doc deliverable (same PR)                                                                                 |
+| -- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| C1 | `CHANGELOG.md` `0.7.0` presents default redaction as covering "common secret-shaped fields"; the shipped list cannot match the header casing real code emits                      | The CHANGELOG describes the intent; the list is wrong. Fix the list, leave the CHANGELOG's intent sentence standing  | `CHANGELOG.md` gains a `Fixed` entry naming the casing and the behaviour change                           |
+| C2 | `packages/messaging-plugin/src/brokers/service-bus-broker.ts:216-218` documents the window as "the two signals age together", which is the behaviour that discards a known outage | The prose is accurate about what the code does and wrong about what it should do. Change the code, rewrite the JSDoc | The `dataPlaneEvidenceMs` JSDoc block, messaging README, and `PUBLIC_API.md` state the new retention rule |
 
 ## 3. Design decisions
 
@@ -61,12 +61,12 @@ than a redesign.
 
 ### 3.2 Where the default/user split is made
 
-- **Decision:** `composeLoggerRedaction` takes a new internal `defaults: boolean` parameter and
-  selects the `caseSensitive` value from it; `ConsoleLogger` gains the same internal split. Neither
-  is a public option.
-- **Why:** the two hardcoded sites are the only places OUR matcher is configured, so the split
-  belongs there rather than in a third helper. It stays internal because a public
-  `redactCaseSensitive` option would be a new surface whose only consumer is this decision.
+- **Decision:** `composeLoggerRedaction` takes a new internal `caseSensitive` parameter. The factory
+  passes `false` only when it supplied `DEFAULT_SECRET_FIELD_PATTERNS`, then gives that composed
+  service to both transports; a caller-supplied list passes `true`. Neither is a public option.
+- **Why:** the composed service already runs before ConsoleLogger's legacy list and after metadata
+  normalization for Pino, so routing it to ConsoleLogger fixes both implementations without adding a
+  second option or changing the direct `ConsoleLogger` API.
 - **Why this covers pino, which never uses our matcher for the raw array:** the composed service
   from `composeLoggerRedaction` is handed to BOTH transports as `redaction`, and on pino it runs
   "after metadata normalization and before Pino"
@@ -118,24 +118,23 @@ defect class: a re-export file is fully covered merely by being loaded).
 
 ## 5. Implementation files
 
-| File                                                          | Purpose                                                                             |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `packages/common/src/index.ts`                                | unchanged (pinned by test)                                                          |
-| `packages/common/src/redaction/classification.ts`             | `'**.Authorization'` becomes `'**.authorization'`                                   |
-| `packages/logger-plugin/src/index.ts`                         | unchanged (pinned by test)                                                          |
-| `packages/logger-plugin/src/loggers/console-logger.ts`        | the legacy compile selects its `caseSensitive` from whether the list is the default |
-| `packages/logger-plugin/src/plugin/logger-plugin.ts`          | `composeLoggerRedaction` takes the same internal split                              |
-| `packages/messaging-plugin/src/index.ts`                      | unchanged (pinned by test)                                                          |
-| `packages/messaging-plugin/src/brokers/service-bus-broker.ts` | negative-outcome retention; `dataPlaneEvidenceMs` JSDoc rewritten                   |
+| File                                                          | Purpose                                                                                      |
+| ------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `packages/common/src/index.ts`                                | unchanged (pinned by test)                                                                   |
+| `packages/common/src/redaction/classification.ts`             | `'**.Authorization'` becomes `'**.authorization'`                                            |
+| `packages/logger-plugin/src/index.ts`                         | unchanged (pinned by test)                                                                   |
+| `packages/logger-plugin/src/plugin/logger-plugin.ts`          | `composeLoggerRedaction` selects default/user sensitivity and is supplied to both transports |
+| `packages/messaging-plugin/src/index.ts`                      | unchanged (pinned by test)                                                                   |
+| `packages/messaging-plugin/src/brokers/service-bus-broker.ts` | negative-outcome retention; `dataPlaneEvidenceMs` JSDoc rewritten                            |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
 | Test file                                                                    | src covered                                            | Key assertions (and the signature each call type-checks against)                                                                                                                                                                                                                           |
 | ---------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `packages/common/test/unit/redaction-default-patterns.test.ts`               | `redaction/classification.ts`                          | every entry of `DEFAULT_SECRET_FIELD_PATTERNS` is lowercase after its `**.` prefix — a table assertion, so a seventh entry added later in the wrong casing fails                                                                                                                           |
+| `packages/common/test/unit/redaction-default-patterns.test.ts`               | `redaction/classification.ts`                          | the default has `**.authorization`, not `**.Authorization`; this targets Fetch's normalized header spelling without changing the intentional `apiKey` field name                                                                                                                           |
 | `packages/logger-plugin/test/unit/redaction-defaults-casing.test.ts`         | `loggers/console-logger.ts`, `plugin/logger-plugin.ts` | with stock `LoggerPlugin()`, a record built from `Object.fromEntries(new Headers({Authorization, Cookie}).entries())` has BOTH redacted. Drives `console` and `pino`. A caller-supplied `redact: ['X-Tok']` still misses `x-tok`                                                           |
 | `packages/logger-plugin/test/unit/barrel-exports.test.ts`                    | `src/index.ts`                                         | the published surface is unchanged (M56 class)                                                                                                                                                                                                                                             |
-| `packages/messaging-plugin/test/unit/service-bus-evidence-retention.test.ts` | `brokers/service-bus-broker.ts`                        | a recorded failure still resolves `reachability() === false` past `dataPlaneEvidenceMs`; a later successful publish flips it to `true`; a positive outcome still ages out; the construction-time refusal of `0`/`NaN`/fractional is unchanged                                              |
+| `packages/messaging-plugin/test/unit/service-bus-reachability.test.ts`       | `brokers/service-bus-broker.ts`                        | a recorded failure still resolves `reachability() === false` past `dataPlaneEvidenceMs`; a later successful publish flips it to `true`; a positive management probe also clears it; a positive outcome still ages out; the construction-time refusal of `0`/`NaN`/fractional is unchanged  |
 | `packages/messaging-plugin/test/unit/barrel-exports.test.ts`                 | `src/index.ts`                                         | unchanged                                                                                                                                                                                                                                                                                  |
 | `packages/messaging-plugin/test/integration/service-bus-outage-real.test.ts` | `brokers/service-bus-broker.ts`                        | **guarded real-emulator**, extends the existing M95b 2×2 gate with a fourth cell: stopped, one failed publish, then wait past the window — the indicator must still report `down`. `ignore:`-guarded on `SERVICEBUS_CONNECTION_STRING`, never an early return (the M70c vacuous-pass trap) |
 

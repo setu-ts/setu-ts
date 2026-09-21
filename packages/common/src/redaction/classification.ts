@@ -23,6 +23,6 @@ export const DEFAULT_SECRET_FIELD_PATTERNS: readonly string[] = [
   '**.token',
   '**.secret',
   '**.apiKey',
-  '**.Authorization',
+  '**.authorization',
   '**.cookie',
 ] as const;

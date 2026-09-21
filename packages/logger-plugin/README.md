@@ -95,8 +95,8 @@ LoggerPlugin({
 ```
 
 The legacy `redact` option remains supported and wins when it overlaps a policy. With no explicit
-`redact` list, common secret-shaped fields are redacted by default; set `redact: []` to restore the
-previous no-default-redaction behaviour.
+`redact` list, common secret-shaped fields are redacted by default with case-insensitive matching;
+set `redact: []` to restore the previous no-default-redaction behaviour.
 
 ## Exports
 
