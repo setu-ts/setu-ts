@@ -1,6 +1,6 @@
 # Milestone 99a — a control that reports safe for what it does not cover
 
-> **Status:** Complete (PR pending; archived). Branch: `feat/m99a-fail-open-controls`. `main` is
+> **Status:** Complete (PR #350; archived). Branch: `feat/m99a-fail-open-controls`. `main` is
 > protected — all work (implementation + fixes) stays on this one branch until it merges via a
 > single PR.
 
