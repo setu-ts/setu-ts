@@ -24,6 +24,7 @@ import {
   PROGRAM_NAME,
   TEMPLATES,
 } from '../constants.ts';
+import { devtoolRuntimeRefusal, devtoolStarterRefusal, withDevtool } from '../devtool/planner.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
@@ -99,6 +100,10 @@ function printUsage(log: (message: string) => void): void {
   // gone on saying it after the refusal was lifted.
   log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
+  log(
+    '  --devtool           Enable the local diagnostics connector for this member (Deno only)',
+  );
+  log('  --devtool-port <n>  The loopback port the connector binds (allocated by default)');
   log('  --env-file <path>   Store local configuration in this ignored relative path');
   log("  --depends-on <name> Wait for this sibling's /ready endpoint before starting this member");
   log('  --dir <path>        The workspace root, instead of the working directory');
@@ -181,6 +186,7 @@ function planMember(
   transport: TransportSpec,
   profile: WorkspaceRuntimeProfile,
   rootManifest: string,
+  devtoolPort?: number,
 ): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
   readonly ok: false;
   readonly message: string;
@@ -263,9 +269,21 @@ function planMember(
     // on, and the parameter is optional.
     ...(next.transportUrl === undefined ? [] : [next.transportUrl]) as [string?],
   );
+  // A starter factory owns its construction, and kernel diagnostics reach the
+  // constructor only — refused here, before anything is planned, because the
+  // connector would refuse to activate at start with nothing saying why.
+  const starterRefusal = devtoolStarterRefusal(envHost);
+  if (devtoolPort !== undefined && starterRefusal !== undefined) {
+    return { ok: false, message: starterRefusal };
+  }
+
   const memberRoot = joinPath(MEMBERS_DIR, name);
 
-  const files: GeneratedFile[] = projectFiles(name, profile.runtime, host, {
+  const devHost = devtoolPort === undefined
+    ? host
+    : withDevtool(host, devtoolPort, { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER });
+
+  const files: GeneratedFile[] = projectFiles(name, profile.runtime, devHost, {
     symbol: SERVICE_PORT_EXPORT,
     from: DISCOVERY_SPECIFIER,
   }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
@@ -425,19 +443,43 @@ export async function runAppCommand(
     return EXIT_USAGE;
   }
 
+  // `--devtool-port` requires `--devtool`, and its value is read through the
+  // same helper as `--port`, so the two flag sites cannot disagree about what
+  // a bindable port is.
+  const devtoolRequested = args.flags['devtool'] !== undefined;
+  const devtoolPortFlag = readPortFlag(args.flags, 'devtool-port');
+  if (!devtoolPortFlag.ok) {
+    deps.error(devtoolPortFlag.message);
+    return EXIT_USAGE;
+  }
+  if (args.flags['devtool-port'] !== undefined && !devtoolRequested) {
+    deps.error('--devtool-port requires --devtool.');
+    return EXIT_USAGE;
+  }
+
   // An explicit `--port` wins over allocation, but never over another member: two
   // services on one port means the second fails to bind, while every sibling's
   // map still names both — so one name silently resolves to the OTHER service.
   // Refusing here is the only place that can see it, since the collision is
-  // between a flag and a file.
-  const taken = read.manifest.members.find((member) => member.port === requested.port);
+  // between a flag and a file. The collision space widened with the devtool:
+  // a member's devtool port is published exactly as its application port is,
+  // so `--port` colliding with one fails the same way.
+  // Guarded on the flag being present: an absent flag reads as `undefined`,
+  // and `undefined === undefined` would match every member carrying no
+  // devtool port at all.
+  const taken = read.manifest.members.find((member) =>
+    member.port === requested.port ||
+    (requested.port !== undefined && member.devtoolPort === requested.port)
+  );
   if (taken !== undefined) {
+    const devtoolHeld = taken.devtoolPort === requested.port && taken.port !== requested.port;
     deps.error(
-      `Port ${requested.port} is already bound by the member "${taken.name}" in this workspace.`,
+      `Port ${requested.port} is already ${devtoolHeld ? 'the devtool port of' : 'bound by'} ` +
+        `the member "${taken.name}" in this workspace.`,
     );
     deps.error(
-      `Two members on one port cannot both start, and every sibling's map would name both — ` +
-        `so requests for one would reach the other. Choose another port, or omit --port and ` +
+      `Two listeners on one port cannot both bind, and the launcher or a sibling would ` +
+        `connect to whichever process won. Choose another port, or omit --port and ` +
         `let the CLI allocate one.`,
     );
     return EXIT_ERROR;
@@ -463,6 +505,74 @@ export async function runAppCommand(
     );
     return EXIT_ERROR;
   }
+
+  // The devtool port is resolved from the manifest AS IT WILL BE — the pending
+  // member's own application port included — so allocating it can never hand
+  // back the port this very member is about to bind, and an explicit flag can
+  // never collide with it.
+  let devtoolPort: number | undefined;
+  if (devtoolRequested) {
+    const runtimeRefusal = devtoolRuntimeRefusal(read.manifest.runtime);
+    if (runtimeRefusal !== undefined) {
+      deps.error(runtimeRefusal);
+      return EXIT_USAGE;
+    }
+    if (devtoolPortFlag.port !== undefined) {
+      const devtoolTaken = read.manifest.members.find((member) =>
+        member.port === devtoolPortFlag.port ||
+        (devtoolPortFlag.port !== undefined && member.devtoolPort === devtoolPortFlag.port)
+      );
+      if (devtoolTaken !== undefined) {
+        const devtoolHeld = devtoolTaken.devtoolPort === devtoolPortFlag.port &&
+          devtoolTaken.port !== devtoolPortFlag.port;
+        deps.error(
+          `Port ${devtoolPortFlag.port} is already ` +
+            `${devtoolHeld ? 'the devtool port of' : 'bound by'} the member ` +
+            `"${devtoolTaken.name}" in this workspace.`,
+        );
+        deps.error(
+          'Two listeners on one port cannot both bind, and the launcher would connect to ' +
+            'whichever process won.',
+        );
+        return EXIT_ERROR;
+      }
+      if (devtoolPortFlag.port === port) {
+        deps.error(`--devtool-port ${port} is the port this member itself binds.`);
+        return EXIT_ERROR;
+      }
+      if (deps.portAvailable !== undefined && !(await deps.portAvailable(devtoolPortFlag.port))) {
+        deps.error(`Port ${devtoolPortFlag.port} is already in use outside this workspace.`);
+        deps.error('Choose another --devtool-port.');
+        return EXIT_ERROR;
+      }
+      devtoolPort = devtoolPortFlag.port;
+    } else {
+      let candidate = allocatePort({
+        ...read.manifest,
+        members: [...read.manifest.members, { name, port }],
+      });
+      if (deps.portAvailable !== undefined) {
+        while (candidate !== undefined && !(await deps.portAvailable(candidate))) {
+          candidate = allocatePort({
+            ...read.manifest,
+            members: [
+              ...read.manifest.members,
+              { name, port },
+              { name: '__occupied__', port: candidate },
+            ],
+          });
+        }
+      }
+      if (candidate === undefined) {
+        deps.error(
+          `This workspace has no port left to allocate: every number from its base up to ` +
+            `${MAX_PORT} is taken.`,
+        );
+        return EXIT_ERROR;
+      }
+      devtoolPort = candidate;
+    }
+  }
   if (deps.portAvailable !== undefined && !(await deps.portAvailable(port))) {
     deps.error(`Port ${port} is already in use outside this workspace.`);
     deps.error('Choose another --port, or omit it and let the CLI find the next bindable port.');
@@ -476,6 +586,7 @@ export async function runAppCommand(
       {
         name,
         port,
+        ...(devtoolPort === undefined ? {} : { devtoolPort }),
         ...(dependsOn.length === 0 ? {} : { dependsOn }),
         // Read from the FLAG rather than the resolved template, because the
         // manifest is built before `planMember` resolves one — and every named
@@ -508,7 +619,15 @@ export async function runAppCommand(
   // Total: the manifest reader refuses a transport it does not know, so this
   // resolves without a "cannot happen" branch.
   const profile = workspaceProfile(next.runtime);
-  const plan = planMember(name, next, args, transportSpec(next.transport), profile, rootManifest);
+  const plan = planMember(
+    name,
+    next,
+    args,
+    transportSpec(next.transport),
+    profile,
+    rootManifest,
+    ...(devtoolPort === undefined ? [] as const : [devtoolPort] as const),
+  );
   if (!plan.ok) {
     deps.error(plan.message);
     return EXIT_USAGE;

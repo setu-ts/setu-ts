@@ -96,18 +96,20 @@ import { DiagnosticsPlugin } from '@setu-ts/diagnostics-plugin';
 
 // setu.config.ts — no devtool import anywhere in the production graph.
 //
-// `extra` is the SECOND parameter deliberately. `setu commands` builds the
+// The composition is the SECOND parameter deliberately — and it is spelled
+// `devtool`, because this is the exact shape `setu new --devtool` and
+// `setu devtool enable` emit since M98c. `setu commands` builds the
 // application to discover plugin-contributed verbs, and it calls this factory
 // with its own inert discovery env as the FIRST positional argument on every
 // target (`app-loader.ts`) — so a single-parameter `createApp(extra?)` would
 // receive that proxy as `extra` and throw on the spread below.
 export function createApp(
   _env?: Readonly<Record<string, unknown>>,
-  extra?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
+  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
 ): IApplication {
   return createApplication({
-    plugins: [RuntimePlugin(), ...(extra?.plugins ?? [])],
-    ...(extra?.diagnostics !== undefined ? { diagnostics: extra.diagnostics } : {}),
+    plugins: [RuntimePlugin(), ...(devtool?.plugins ?? [])],
+    ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
   });
 }
 
@@ -130,24 +132,24 @@ export const development: IApplication = createApp(undefined, {
 That makes exclusion a property of the build rather than of a runtime branch: the production entry
 cannot enable the connector, because it never imports it.
 
-On Deno you get a second, independent guarantee for free — scope the production task's network grant
-to the application port, and the runtime itself refuses the bind:
-
-```jsonc
-{
-  "tasks": {
-    "start": "deno run --allow-net=0.0.0.0:3000 --allow-env --allow-sys main.ts",
-    "dev": "deno run --allow-net=0.0.0.0:3000,127.0.0.1:4919 --allow-env --allow-sys main.dev.ts"
-  }
-}
-```
-
-Under the `start` grant a bind on `127.0.0.1:4919` fails with
-`NotCapable: Requires net access to "127.0.0.1:4919"`, so even a connector that reached production
-by mistake cannot open its port.
-
 Credentials come from the trusted launcher through the child process environment (see
 [Pairing](#pairing)); the plugin reads no environment variable itself, so nothing auto-enables.
+`setu new --devtool` and `setu devtool enable` emit exactly this composition — the development
+entry, its `dev` task, and a `check` task that reaches `main.dev.ts`.
+
+### Optional hardening: a scoped network grant
+
+A generated project's `start` task carries a BARE `--allow-net`. Scoping it to the application port
+is OPTIONAL hardening for a project with no egress — not a default, and not a guarantee you already
+have. On Deno 2.9.6 an allowlist governs OUTBOUND connections as well as bind (measured): under
+`--allow-net=0.0.0.0:3000`, a `fetch` to any other address fails with `NotCapable` the same way a
+bind does, so a scoped grant refuses every database, broker and outbound API call the project makes.
+If you scope it anyway, you get a second, independent guarantee on top of the build-level isolation
+above: a bind on `127.0.0.1:4919` fails under the `start` grant with
+`NotCapable: Requires net access to "127.0.0.1:4919"`, so even a connector that reached production
+by mistake cannot open its port. The loopback restriction itself is the listener's, not a permission
+flag's — the runtime-owned listener binds `127.0.0.1` before anything else and refuses a
+non-loopback bind outright.
 
 ## Protocol
 

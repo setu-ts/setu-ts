@@ -18,6 +18,7 @@ import {
 } from './constants.ts';
 import { runGenerateCommand } from './commands/generate.ts';
 import { runAddCommand } from './commands/add.ts';
+import { runDevtoolCommand } from './commands/devtool.ts';
 import { runAdoptCommand } from './commands/adopt.ts';
 import { runNewCommand } from './commands/new.ts';
 import { runWorkspaceCommand } from './commands/workspace.ts';
@@ -91,6 +92,7 @@ function printHelp(log: (message: string) => void): void {
   log(`  generate, g ${APP_VERB} <name>          Add a service to a workspace`);
   log(`  add <plugin>                   Install a Setu-TS package into this project`);
   log(`  adopt                          Convert this project into a workspace`);
+  log(`  devtool enable [member]        Enable the local diagnostics connector`);
   log(`  workspace ports --reallocate    Reassign workspace ports that are currently bindable`);
   log(`  commands                       List commands this app's plugins provide`);
   log('');
@@ -203,6 +205,15 @@ export async function runCli(
         cwd: deps.cwd,
         log: deps.log,
         error: deps.error,
+      });
+
+    case 'devtool':
+      return await runDevtoolCommand(rest, {
+        fs: deps.fs,
+        cwd: deps.cwd,
+        log: deps.log,
+        error: deps.error,
+        ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
       });
 
     case 'adopt':

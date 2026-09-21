@@ -29,7 +29,16 @@ export interface WorkspaceCommandDependencies {
   readonly portAvailable?: PortProbe;
 }
 
-/** Reassigns all member ports to currently bindable ports at or above basePort. */
+/**
+ * Reassigns all member ports to currently bindable ports at or above basePort.
+ *
+ * A member's devtool port moves WITH it, from the same sequence: the two
+ * addresses a devtool launcher reads for one member — the application port in
+ * every sibling's discovery map, the devtool port in this manifest — must be
+ * reassigned as one unit, or a reallocation leaves the manifest's devtool
+ * address pointing at whatever process won the old port. A member carrying no
+ * devtool port gains none, exactly as before.
+ */
 async function reallocate(
   manifest: WorkspaceManifest,
   probe: PortProbe,
@@ -39,7 +48,15 @@ async function reallocate(
   for (const member of manifest.members) {
     while (candidate <= MAX_PORT && !(await probe(candidate))) candidate++;
     if (candidate > MAX_PORT) return undefined;
-    members.push({ ...member, port: candidate });
+    if (member.devtoolPort === undefined) {
+      members.push({ ...member, port: candidate });
+    } else {
+      let devtoolCandidate = candidate + 1;
+      while (devtoolCandidate <= MAX_PORT && !(await probe(devtoolCandidate))) devtoolCandidate++;
+      if (devtoolCandidate > MAX_PORT) return undefined;
+      members.push({ ...member, port: candidate, devtoolPort: devtoolCandidate });
+      candidate = devtoolCandidate;
+    }
     candidate++;
   }
   return { ...manifest, members };

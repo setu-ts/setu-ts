@@ -5277,6 +5277,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   bytes BEFORE parsing, with terminal failed pairing. Ships `scripts/inspect-local-diagnostics.ts`
   (real loopback consumer exercise, subprocess-tested, credentials stay in memory) and protocol
   fixtures with independently computed Web Crypto vectors — complete (PR #347).
+- **Milestone 98c** (`packages/cli` — devtool scaffolding): `setu new --devtool`,
+  `setu generate app
+  <name> --devtool`, and `setu devtool enable [member]` share one planner that
+  emits the M98b composition — a `main.dev.ts` the production graph never imports, `dev`/`check`
+  tasks, and a `WorkspaceMember.devtoolPort` walked by `allocatePort` and moved by
+  `ports --reallocate`. The emitted factory takes the devtool composition as its SECOND parameter on
+  every target (discovery passes its inert env first), the entry reads
+  `SETU_DEVTOOL_SESSION_ID`/`SETU_DEVTOOL_SESSION_KEY` and refuses without a valid pair, the
+  workspace runner forwards the pair to the named member alone under a root `dev` grant scoped
+  `--allow-env` to exactly those three names, and `devtool enable` merges into an existing
+  `deno.json`, refusing the pre-M98c zero-parameter factory by name with the signature to write —
+  complete (PR pending).
 - **Milestone 99b** (`packages/cli` + `docs` — generated output is usable): generated workspace
   Dockerfiles use `deno run --frozen`, retaining the lockfile resolution cached at build time
   without writing under a read-only root. The generated deployment gate installs the scaffold before

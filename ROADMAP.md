@@ -10802,14 +10802,14 @@ that drives the real loader.
 
 **Deliverables:**
 
-- [ ] A devtool opt-in on `setu new` and `setu generate app`, and one `setu devtool enable` command
+- [x] A devtool opt-in on `setu new` and `setu generate app`, and one `setu devtool enable` command
       for a project that already exists, all three calling one planner so the emitted files cannot
       drift between them. Every inapplicable case refuses by name and writes nothing: a non-Deno
       runtime, a member already enabled, an unreadable manifest, an out-of-range port.
-- [ ] A second allocated port per workspace member, recorded as `WorkspaceMember.devtoolPort` and
+- [x] A second allocated port per workspace member, recorded as `WorkspaceMember.devtoolPort` and
       walked by `allocatePort`, so no generated port ever collides. `ports --reallocate` moves both
       together and regenerates discovery, Compose and Kubernetes as it does today.
-- [ ] A development entry point the production entry never imports, reading per-launch credentials
+- [x] A development entry point the production entry never imports, reading per-launch credentials
       from the process environment under names this letter fixes as published CLI surface, refusing
       to start when they are absent or malformed, and never generating, writing or printing a pair.
       In a workspace the launcher also names the member it is inspecting, and the dev runner hands
@@ -10817,18 +10817,18 @@ that drives the real loader.
       application subprocess inheriting these values. All three names are approved under §10.2, and
       every generated file that spells one carries a comment warning that renaming it stops the
       devtool connecting.
-- [ ] The generated config factory takes the devtool composition as its SECOND parameter on every
+- [x] The generated config factory takes the devtool composition as its SECOND parameter on every
       target, with an integration test driving the real discovery loader so the collision above
       cannot return. Every project scaffolded BEFORE this letter declares a zero-parameter factory,
       where `deno run` discards both arguments in silence and leaves an application with no
       connector, so `setu devtool enable` refuses that shape by name and the opt-in emits a `check`
       task that reaches `main.dev.ts`.
-- [ ] `setu devtool enable` MERGES into an existing `deno.json` rather than rewriting it, so a
+- [x] `setu devtool enable` MERGES into an existing `deno.json` rather than rewriting it, so a
       developer's own tasks and unrelated keys survive; a task already present with a different
       value refuses by name, and one already matching is a no-op, so the command is idempotent.
       Three writes need it — a project's `dev` and `check` tasks, and the root workspace `dev`
       task's grant, which `managedFiles` never regenerates.
-- [ ] An end-to-end gate that scaffolds a devtool project, type-checks it against this workspace,
+- [x] An end-to-end gate that scaffolds a devtool project, type-checks it against this workspace,
       boots it, and reads a snapshot and an event batch through `createDiagnosticsClient` — the
       reviewed client from M98b, so the gate drives the real protocol rather than a stand-in. A
       second case boots without credentials and asserts the named refusal; a third enables the
@@ -11463,7 +11463,7 @@ because one of them invalidated part of a previous run's claims:
 | 98        | ⬜     | secure read-only devtool diagnostics (umbrella; planned)                                                                                  |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347)) |
-| 98c       | ⬜     | cli — devtool scaffolding for standalone projects and workspace members (planned)                                                         |
+| 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members                                                                   |
 | 99        | ⬜     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                                |
 | 99a       | ⬜     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                        |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                      |

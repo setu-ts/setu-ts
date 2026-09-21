@@ -22,6 +22,12 @@ import {
 } from '../templates/broker.ts';
 import type { ResolvedHost } from '../templates/project-files.ts';
 import {
+  DEFAULT_DEVTOOL_PORT,
+  devtoolRuntimeRefusal,
+  devtoolStarterRefusal,
+  withDevtool,
+} from '../devtool/planner.ts';
+import {
   APP_VERB,
   EXIT_ERROR,
   EXIT_OK,
@@ -94,11 +100,11 @@ export interface NewDependencies {
 /**
  * Plans a workspace root, refusing the flags a root cannot honor.
  *
- * `--template` and a non-Deno `--runtime` are refused rather than ignored: a
- * root registers no plugins and starts no server, so a template applied to it
- * has nothing to configure, and a Setu workspace is a Deno workspace. Silently
- * swallowing a flag is how `setu generate` once accepted an invalid `--runtime`
- * that `new` rejected.
+ * `--template` and a non-workspace `--runtime` are refused rather than ignored:
+ * a root registers no plugins and starts no server, so a template applied to it
+ * has nothing to configure, and a workspace targets three runtimes — Deno,
+ * Node and Bun — not one. Silently swallowing a flag is how `setu generate`
+ * once accepted an invalid `--runtime` that `new` rejected.
  *
  * @param name - The workspace directory name
  * @param runtimeFlag - The raw `--runtime` value, when given
@@ -156,6 +162,17 @@ function planWorkspace(
 
   if (args.flags['depends-on'] !== undefined) {
     return { ok: false, message: dependsOnRefusal() };
+  }
+
+  // The devtool belongs to a PROJECT: a root registers no plugins, starts no
+  // server, and offers no connector. Pointed at the command that can.
+  if (args.flags['devtool'] !== undefined || args.flags['devtool-port'] !== undefined) {
+    return {
+      ok: false,
+      message: `A workspace root registers no plugins, so there is nothing for the devtool to` +
+        ` enable. Create the workspace, add a member, then run` +
+        ` \`${PROGRAM_NAME} devtool enable <member>\`.`,
+    };
   }
 
   // The broker flags are a STANDALONE project's own composition choice; the
@@ -461,6 +478,24 @@ function planProject(
     if (refusal !== undefined) return { ok: false, message: refusal };
   }
 
+  const devtoolRequested = args.flags['devtool'] !== undefined;
+  const devtoolPortFlag = readPortFlag(args.flags, 'devtool-port');
+  if (!devtoolPortFlag.ok) return { ok: false, message: devtoolPortFlag.message };
+  if (args.flags['devtool-port'] !== undefined && !devtoolRequested) {
+    return { ok: false, message: '--devtool-port requires --devtool.' };
+  }
+  if (devtoolRequested) {
+    // Refused before anything is resolved: the listener refuses every
+    // non-Deno `listen`, so a devtool-enabled non-Deno project would fail at
+    // startup rather than degrade.
+    const runtimeRefusal = devtoolRuntimeRefusal(runtime);
+    if (runtimeRefusal !== undefined) return { ok: false, message: runtimeRefusal };
+    // A starter factory owns its construction, and kernel diagnostics reach
+    // the constructor only — refused where it can be named, not at run.
+    const starterRefusal = devtoolStarterRefusal(configured);
+    if (starterRefusal !== undefined) return { ok: false, message: starterRefusal };
+  }
+
   const overlaid = applyBrokerOverlay(
     configured,
     {
@@ -469,7 +504,14 @@ function planProject(
     },
     workspaceProfile(runtime),
   );
-  return { ok: true, files: projectFiles(name, runtime, overlaid) };
+
+  if (!devtoolRequested) {
+    return { ok: true, files: projectFiles(name, runtime, overlaid) };
+  }
+  // Absent, the port is the documented standalone default, overridable with
+  // --devtool-port and range-checked by the shared port-flag reader.
+  const devHost = withDevtool(overlaid, devtoolPortFlag.port ?? DEFAULT_DEVTOOL_PORT);
+  return { ok: true, files: projectFiles(name, runtime, devHost) };
 }
 
 /**
@@ -523,6 +565,13 @@ export async function runNewCommand(
     deps.log(
       `  --queue <name>      Job queue backend for a standalone project: ` +
         `${listQueues().join(' | ')} (default memory)`,
+    );
+    deps.log(
+      '  --devtool           Emit the development entry for the local diagnostics connector ' +
+        '(Deno only)',
+    );
+    deps.log(
+      `  --devtool-port <n>  The loopback port the connector binds (default ${DEFAULT_DEVTOOL_PORT})`,
     );
     deps.log('  --yes, -y           Take every default and ask nothing');
     deps.log('  --dir <path>        Create the project under this directory');

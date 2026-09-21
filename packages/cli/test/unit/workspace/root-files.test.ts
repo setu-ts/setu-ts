@@ -46,10 +46,16 @@ describe('workspaceRootFiles', () => {
     expect(manifest.workspace).toEqual(['./apps/*', './libs/*']);
   });
 
-  it('gives the root a readiness-aware development task', () => {
+  it('gives the root a readiness-aware development task with the scoped devtool grant', () => {
     const manifest = JSON.parse(contentsOf('deno.json')) as { tasks?: Record<string, string> };
+    // The environment grant is scoped to exactly the three devtool names the
+    // runner reads and forwards (M98c); the runner could not read them at all
+    // under the previous grant, and an unscoped --allow-env would be wider
+    // than three names justify.
     expect(manifest.tasks?.['dev']).toBe(
-      'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
+      'deno run --allow-read --allow-run --allow-net ' +
+        '--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER ' +
+        'scripts/dev.ts',
     );
   });
 

@@ -19,6 +19,7 @@ const PATTERNS = [/prompt\(/, /confirm\(/, /Deno\.stdin/, /Deno\.exit/] as const
 const ALLOWLIST = [
   'src/main.ts', // The process boundary: Deno.stdin.isTerminal(), the single exit.
   'src/workspace/dev-runner.ts', // Emitted runner source; its matches are written, never run here.
+  'src/devtool/dev-entry.ts', // Emitted dev-entry source; the refusal it writes is the project's exit, not this process's.
 ] as const;
 
 /** The package's own src directory, resolved independently of the CWD. */
@@ -39,9 +40,13 @@ describe('the process boundary of packages/cli/src', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('holds the allowlist to exactly its two named entries', () => {
-    // A third entry is a visible edit to THIS constant, reviewed as such.
-    expect([...ALLOWLIST].sort()).toEqual(['src/main.ts', 'src/workspace/dev-runner.ts']);
+  it('holds the allowlist to exactly its named entries', () => {
+    // Another entry is a visible edit to THIS constant, reviewed as such.
+    expect([...ALLOWLIST].sort()).toEqual([
+      'src/devtool/dev-entry.ts',
+      'src/main.ts',
+      'src/workspace/dev-runner.ts',
+    ]);
   });
 });
 

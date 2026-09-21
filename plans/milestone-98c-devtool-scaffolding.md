@@ -109,10 +109,15 @@ they are shipped contracts on `main` and were re-checked there.
   applied to a scaffolding verb; `generate app` and `new` only CREATE, so a project that already
   exists needs the standalone command regardless.
 - The planner refuses by name, never silently: a non-Deno runtime (the listener refuses every
-  non-Deno `listen` before binding), a member that already has a devtool port, a workspace whose
-  manifest cannot be read, and a config module still carrying the pre-M98c zero-parameter factory
-  (§3.1) — which is the only one of the four that `new --devtool` and `generate app --devtool`
-  cannot reach, since both write the factory themselves.
+  non-Deno `listen` before binding), a STARTER-COMPOSED template (added during implementation: a
+  starter factory owns its construction, and kernel diagnostics reach the application constructor
+  only, so a connector registered onto a finished application refuses to activate — refused at
+  scaffold and enable time rather than discovered at run), a workspace whose manifest cannot be
+  read, and a config module still carrying the pre-M98c zero-parameter factory (§3.1) — which is the
+  only one of those that `new --devtool` and `generate app --devtool` cannot reach, since both write
+  the factory themselves. A member that already carries a devtool port is NOT a refusal: the second
+  `devtool enable` is an idempotent no-op that reports and writes nothing (§3.9's three outcomes
+  applied at the command level).
 - **Test home:** `packages/cli/test/unit/devtool-planner.test.ts`,
   `test/unit/devtool-refusals.test.ts`.
 

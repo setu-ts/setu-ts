@@ -38,12 +38,43 @@ export function workspaceDevRunner(profile: WorkspaceRuntimeProfile): {
 
 function denoRunner(): string {
   return `${RUNNER_DOC}
-type Member = { name: string; port: number; dependsOn?: string[] };
+type Member = { name: string; port: number; dependsOn?: string[]; devtoolPort?: number };
 
 const manifest = JSON.parse(await Deno.readTextFile('setu.workspace.json')) as {
   members: Member[];
 };
 const members = new Map(manifest.members.map((member) => [member.name, member]));
+
+// The three variable names read below are a contract with the devtool
+// launcher. Renaming or removing any one stops the devtool connecting, and
+// the error will not say why. The same names appear in the root \`dev\` task's
+// --allow-env grant in deno.json and in each member's main.dev.ts — change
+// all of them together.
+const devtoolSelectedName = Deno.env.get('SETU_DEVTOOL_MEMBER');
+const devtoolSessionId = Deno.env.get('SETU_DEVTOOL_SESSION_ID');
+const devtoolSessionKey = Deno.env.get('SETU_DEVTOOL_SESSION_KEY');
+
+// Refused before anything is spawned: falling back to main.ts would leave the
+// launcher polling a port nothing ever binds, which reads as a hung
+// application rather than a misspelt member name.
+let devtoolSelected: Member | undefined;
+if (devtoolSelectedName !== undefined && devtoolSelectedName !== '') {
+  const named = members.get(devtoolSelectedName);
+  if (named === undefined) {
+    throw new Error(
+      \`SETU_DEVTOOL_MEMBER names "\${devtoolSelectedName}", which setu.workspace.json \` +
+        \`does not carry. Members: \${[...members.keys()].join(', ')}.\`,
+    );
+  }
+  if (named.devtoolPort === undefined) {
+    throw new Error(
+      \`SETU_DEVTOOL_MEMBER names "\${devtoolSelectedName}", but that member carries no \` +
+        \`devtoolPort. Run setu devtool enable \${devtoolSelectedName} first.\`,
+    );
+  }
+  devtoolSelected = named;
+}
+
 const started = new Set<string>();
 const visiting = new Set<string>();
 const children: Deno.ChildProcess[] = [];
@@ -73,6 +104,27 @@ async function waitForReady(member: Member): Promise<void> {
   throw new Error(\`Dependency "\${member.name}" did not become ready within 30 seconds.\`);
 }
 
+// Every child gets an EXPLICIT environment: Deno.Command MERGES \`env\` into
+// the inherited one and only clearEnv stops inheritance, so without the
+// explicit blanks below every member would inherit the runner's pair and hold
+// a working credential for another member's connector. An empty value is not
+// a credential, and main.ts — which every non-selected member runs — reads
+// none of the three names.
+const childEnv = (member: Member): Record<string, string> => {
+  const selected = devtoolSelected !== undefined && devtoolSelected.name === member.name;
+  return {
+    SETU_DEVTOOL_MEMBER: selected ? (devtoolSelectedName ?? '') : '',
+    SETU_DEVTOOL_SESSION_ID: selected ? (devtoolSessionId ?? '') : '',
+    SETU_DEVTOOL_SESSION_KEY: selected ? (devtoolSessionKey ?? '') : '',
+  };
+};
+
+// The selector chooses the entry, never the manifest field: a member carrying
+// devtoolPort still runs \`start\` unless the launcher named it, so \`deno task
+// dev\` with no devtool variables set is exactly the no-devtool behavior.
+const entryTask = (member: Member): string =>
+  devtoolSelected !== undefined && devtoolSelected.name === member.name ? 'dev' : 'start';
+
 async function start(member: Member): Promise<void> {
   if (started.has(member.name)) return;
   if (visiting.has(member.name)) {
@@ -89,11 +141,12 @@ async function start(member: Member): Promise<void> {
   }
   visiting.delete(member.name);
   const child = new Deno.Command('deno', {
-    args: ['task', 'start'],
+    args: ['task', entryTask(member)],
     cwd: \`apps/\${member.name}\`,
     stdin: 'inherit',
     stdout: 'inherit',
     stderr: 'inherit',
+    env: childEnv(member),
   }).spawn();
   children.push(child);
   started.add(member.name);

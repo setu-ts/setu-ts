@@ -124,6 +124,8 @@ const NEW: ICommandFlagSpec = spec(
     'env-file',
     'workspace',
     'port',
+    'devtool',
+    'devtool-port',
     'transport',
     'transport-url',
     'broker',
@@ -159,7 +161,7 @@ const GENERATE_CUSTOM: ICommandFlagSpec = spec(
 /** `setu generate app`: the workspace-member flags, plus the named refusals. */
 const GENERATE_APP: ICommandFlagSpec = spec(
   'generate app',
-  ['template', 'port', 'env-file', 'depends-on', 'dir', 'dry-run'],
+  ['template', 'port', 'devtool', 'devtool-port', 'env-file', 'depends-on', 'dir', 'dry-run'],
   // Read ONLY to be refused with their own guidance: the four transport flags
   // name the workspace-wide alternative, `--runtime` names the workspace's own
   // toolchain when it disagrees, and `--di` goes through `resolveTemplateChoice`.
@@ -189,6 +191,20 @@ const ADOPT: ICommandFlagSpec = spec(
   ['name', 'port', 'dir', 'dry-run'],
   [],
   { fixed: 1, taken: 0, noun: 'no arguments' },
+);
+
+/**
+ * `setu devtool enable [member]`: the member name is OPTIONAL — required inside
+ * a workspace, refused outside one — so the contract allows one argument and
+ * the command decides which case it is in. A subcommand word other than
+ * `enable` reaches the command's own usage refusal, like the non-`ports`
+ * `workspace` arm.
+ */
+const DEVTOOL_ENABLE: ICommandFlagSpec = spec(
+  'devtool',
+  ['devtool-port', 'dir', 'dry-run'],
+  [],
+  { fixed: 2, taken: 1, noun: 'at most one member name' },
 );
 
 /** `setu workspace ports --reallocate`: `ports` is the last word it reads. */
@@ -260,6 +276,8 @@ export function commandFlagsFor(
       return GENERATE;
     case 'add':
       return ADD;
+    case 'devtool':
+      return DEVTOOL_ENABLE;
     case 'adopt':
       return ADOPT;
     case 'workspace':
@@ -288,6 +306,7 @@ export const DOCUMENTED_FLAGS: ReadonlyMap<string, readonly string[]> = new Map(
   [GENERATE_LIBRARY.label, GENERATE_LIBRARY.documented],
   [ADD.label, ADD.documented],
   [ADOPT.label, ADOPT.documented],
+  [DEVTOOL_ENABLE.label, DEVTOOL_ENABLE.documented],
   [WORKSPACE_PORTS.label, WORKSPACE_PORTS.documented],
 ]);
 

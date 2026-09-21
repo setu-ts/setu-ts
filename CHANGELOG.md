@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`cli` — devtool scaffolding (M98c).** `setu new --devtool`,
+  `setu generate app <name> --devtool`, and `setu devtool enable [member]` opt a project into the
+  M98b local diagnostics connector through one shared planner: they emit a `main.dev.ts` the
+  production graph never imports, add `dev` and `check` tasks, and record a
+  `WorkspaceMember.devtoolPort` that `allocatePort` walks beside `port`, so no generated port
+  collides and `ports --reallocate` moves both addresses together. The emitted config factory takes
+  the devtool composition as its SECOND parameter on every target — `setu
+  commands` passes its
+  inert discovery env first, so a first-parameter composition would throw. The entry reads
+  `SETU_DEVTOOL_SESSION_ID` / `SETU_DEVTOOL_SESSION_KEY` from the environment, refuses to start
+  without a valid pair, and never mints one; the workspace runner forwards the pair to the member
+  the launcher names and blanks it for every sibling, under a root `dev` task whose `--allow-env`
+  grant is scoped to exactly those three names. `setu devtool enable` MERGES into an existing
+  `deno.json` (your tasks survive, a differing task refuses by name, a second run is a no-op) and
+  refuses by name — with the exact signature to write — on a factory scaffolded before this letter,
+  whose zero-parameter shape would otherwise discard the composition in silence. A project
+  type-checks, boots, and answers the reviewed `createDiagnosticsClient` through the new end-to-end
+  gate.
+
 ### Fixed
 
 - **`cli` — a generated workspace image now verifies its lockfile at build time.** The build step is

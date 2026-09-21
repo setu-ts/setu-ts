@@ -129,6 +129,33 @@ function nodeEnvRead(variable: string, fallback: string): string {
   return `process.env.${variable} ??\n          '${fallback}'`;
 }
 
+/**
+ * The root `dev` task's grant BEFORE M98c scoped an environment read into it,
+ * kept for exactly one reader: `setu devtool enable`, which widens an existing
+ * workspace root's `dev` task in place and must recognize the unmodified CLI
+ * output to do it. Anything else in the root task — a developer's own edit — is
+ * refused by name rather than widened, so a hand-written grant is never
+ * silently replaced.
+ */
+export const LEGACY_DENO_RUN_ALL = 'deno run --allow-read --allow-run --allow-net scripts/dev.ts';
+
+/**
+ * The three environment variable names the devtool contract publishes, as the
+ * scoped `--allow-env` list spells them.
+ *
+ * Measured under the previous unscoped read-free grant: `Deno.env.get` answers
+ * `NotCapable` for every name, so the runner could not read the pair the
+ * launcher handed it at all. Under the scoped grant it reads exactly these
+ * three and still answers `NotCapable` for `HOME` — the scoping is the
+ * least-privilege answer, not decoration. Renaming any of these is a breaking
+ * change to every scaffolded project (the names are approved CLI surface).
+ */
+export const DEVTOOL_ENV_NAMES: readonly string[] = [
+  'SETU_DEVTOOL_SESSION_ID',
+  'SETU_DEVTOOL_SESSION_KEY',
+  'SETU_DEVTOOL_MEMBER',
+];
+
 const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
   ['deno']: {
     runtime: 'deno',
@@ -139,7 +166,14 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     memberGlob: (directory) => `./${directory}/*`,
     envRead: denoEnvRead,
     install: 'deno install',
-    runAll: 'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
+    // The scoped `--allow-env` names exactly the three devtool variables the
+    // runner forwards per child (see DEVTOOL_ENV_NAMES); passing `env` to
+    // `Deno.Command` needs no environment permission, only `--allow-run`, so
+    // the read is the entire cost. Unscoped `--allow-env`, or
+    // `clearEnv: true` over `Deno.env.toObject()`, was rejected: either would
+    // put an UNSCOPED grant on every generated workspace to read three names.
+    runAll: 'deno run --allow-read --allow-run --allow-net ' +
+      `--allow-env=${DEVTOOL_ENV_NAMES.join(',')} scripts/dev.ts`,
     runScript: (script) => `deno task ${script}`,
     lockfile: 'deno.lock',
   },

@@ -1,0 +1,669 @@
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+
+import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
+import { parseArgs } from '../../src/args.ts';
+import { runDevtoolCommand } from '../../src/commands/devtool.ts';
+import { renderDevEntry } from '../../src/devtool/dev-entry.ts';
+import { DEFAULT_DEVTOOL_PORT } from '../../src/devtool/planner.ts';
+import { runNewCommand } from '../../src/commands/new.ts';
+import { runAppCommand } from '../../src/commands/app.ts';
+import {
+  renderWorkspaceManifest,
+  WORKSPACE_MANIFEST,
+  WORKSPACE_VERSION,
+  type WorkspaceMember,
+} from '../../src/workspace/manifest.ts';
+import { LEGACY_DENO_RUN_ALL, workspaceProfile } from '../../src/workspace/runtime-profile.ts';
+
+/** The config module a current CLI writes — the signature `enable` accepts. */
+const CURRENT_CONFIG = "import type { IApplication, IPlugin } from '@setu-ts/common';\n" +
+  'export function createApp(\n' +
+  '  _env?: Readonly<Record<string, unknown>>,\n' +
+  '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
+  '): IApplication {\n  return createApplication({ plugins: [] });\n}\n';
+
+/** The zero-parameter factory every pre-M98c project carries. */
+const LEGACY_CONFIG =
+  'export function createApp(): IApplication {\n  return createApplication({});\n}\n';
+
+interface Harness {
+  readonly fs: FakeFs;
+  readonly log: ReturnType<typeof createRecorder>;
+  readonly err: ReturnType<typeof createRecorder>;
+  run(argv: readonly string[]): Promise<number>;
+}
+
+function workspaceHarness(seed: Record<string, string>): Harness {
+  const fs = createFakeFs(seed);
+  const log = createRecorder();
+  const err = createRecorder();
+  return {
+    fs,
+    log,
+    err,
+    run: (argv) =>
+      runDevtoolCommand(parseArgs(argv), {
+        fs,
+        cwd: '/ws',
+        log: log.sink,
+        error: err.sink,
+      }),
+  };
+}
+
+function workspaceSeed(
+  members: readonly WorkspaceMember[],
+  rootDev?: string,
+): Record<string, string> {
+  return {
+    [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
+      version: WORKSPACE_VERSION,
+      runtime: 'deno',
+      basePort: 3000,
+      transport: 'http',
+      members,
+    }),
+    '/ws/deno.json': `${
+      JSON.stringify(
+        { workspace: ['./apps/*'], tasks: { dev: rootDev ?? LEGACY_DENO_RUN_ALL } },
+        null,
+        2,
+      )
+    }\n`,
+    '/ws/apps/orders/deno.json': JSON.stringify({
+      tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' },
+      imports: { '@setu-ts/common': 'jsr:@setu-ts/common@^0.7.0' },
+    }),
+    '/ws/apps/orders/setu.config.ts': CURRENT_CONFIG,
+  };
+}
+
+describe('devtool enable refuses by name and writes nothing', () => {
+  it('refuses a non-Deno workspace runtime — the listener refuses every non-Deno listen', async () => {
+    const h = workspaceHarness({
+      [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
+        version: WORKSPACE_VERSION,
+        runtime: 'node',
+        basePort: 3000,
+        transport: 'http',
+        members: [{ name: 'orders', port: 3000 }],
+      }),
+      '/ws/package.json': '{}',
+      '/ws/apps/orders/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('requires the Deno runtime');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('is a no-op for a member that already carries a devtool port', async () => {
+    // Idempotent at the command level: the merge has nothing left to add, so
+    // the second run reports and writes nothing.
+    const h = workspaceHarness(workspaceSeed([
+      { name: 'orders', port: 3000, devtoolPort: 4919 },
+    ]));
+    expect(await h.run(['enable', 'orders'])).toBe(0);
+    expect(h.log.text()).toContain('already enabled');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a manifest that cannot be read, rather than guessing standalone', async () => {
+    const h = workspaceHarness({
+      [`/ws/${WORKSPACE_MANIFEST}`]: '{ broken',
+    });
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain('cannot be read');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses an extra member name outside a workspace', async () => {
+    const h = workspaceHarness({
+      '/ws/shop/deno.json': '{"tasks":{"start":"deno run --allow-net main.ts"}}',
+      '/ws/shop/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable', 'orders'])).toBe(2);
+    expect(h.err.text()).toContain('takes no member name outside a workspace');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses an out-of-range --devtool-port', async () => {
+    const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    expect(await h.run(['enable', 'orders', '--devtool-port', '70000'])).toBe(2);
+    expect(h.err.text()).toContain('Invalid --devtool-port');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a --devtool-port equal to a sibling application port', async () => {
+    const h = workspaceHarness(workspaceSeed([
+      { name: 'orders', port: 3000 },
+      { name: 'billing', port: 4919 },
+    ]));
+    expect(await h.run(['enable', 'orders', '--devtool-port', '4919'])).toBe(1);
+    expect(h.err.text()).toContain('already used by the member "billing"');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a --devtool-port equal to a sibling devtool port', async () => {
+    const h = workspaceHarness(workspaceSeed([
+      { name: 'orders', port: 3000 },
+      { name: 'billing', port: 3100, devtoolPort: 4919 },
+    ]));
+    expect(await h.run(['enable', 'orders', '--devtool-port', '4919'])).toBe(1);
+    expect(h.err.text()).toContain('(its devtool port)');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a --port equal to a sibling devtool port — the widened check', async () => {
+    // Fails without the widening: the comparison read member.port alone.
+    const fs = createFakeFs(workspaceSeed([
+      { name: 'orders', port: 3000, devtoolPort: 3001 },
+    ]));
+    const err = createRecorder();
+    const code = await runAppCommand(parseArgs(['app', 'billing', '--port', '3001']), {
+      fs,
+      dir: '/ws',
+      log: () => {},
+      error: err.sink,
+    });
+    expect(code).toBe(1);
+    expect(err.text()).toContain('already the devtool port of');
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('refuses the pre-M98c zero-parameter factory by name, naming the fix', async () => {
+    const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    h.fs.writeFile('/ws/apps/orders/setu.config.ts', new TextEncoder().encode(LEGACY_CONFIG));
+    (h.fs.writes as string[]).length = 0;
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('discarded in silence');
+    expect(h.err.text()).toContain('SECOND parameter');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('proceeds on a factory the textual check cannot classify — the conservative half', async () => {
+    const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    h.fs.writeFile(
+      '/ws/apps/orders/setu.config.ts',
+      new TextEncoder().encode(
+        'export function createApp(myEnv: unknown): IApplication { return app; }\n',
+      ),
+    );
+    (h.fs.writes as string[]).length = 0;
+    expect(await h.run(['enable', 'orders'])).toBe(0);
+    expect(h.fs.writes.length).toBeGreaterThan(0);
+  });
+
+  it('refuses a dev or check task that already holds a different value', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    seed['/ws/apps/orders/deno.json'] = JSON.stringify({
+      tasks: {
+        start: 'deno run --allow-net --allow-env main.ts',
+        dev: 'deno run --allow-net main.dev.ts',
+      },
+    });
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('Refusing to replace the existing "dev" task');
+    expect(h.err.text()).toContain('deno run --allow-net main.dev.ts');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a hand-edited root dev task, quoting the current value', async () => {
+    const h = workspaceHarness(
+      workspaceSeed([{ name: 'orders', port: 3000 }], 'deno run -A scripts/dev.ts'),
+    );
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('Refusing to replace the existing "dev" task');
+    expect(h.err.text()).toContain('deno run -A scripts/dev.ts');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a starter-composed member — kernel diagnostics reach the constructor only', async () => {
+    const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    h.fs.writeFile(
+      '/ws/apps/orders/setu.config.ts',
+      new TextEncoder().encode(
+        // The async starter opening, with an extra parameter so the async
+        // shape is NOT the byte-identical pre-M98c rendering — this isolates
+        // the starter refusal from the legacy-factory refusal that runs first.
+        'export async function createApp(\n  env?: Readonly<Record<string, unknown>>,\n  extra?: unknown,\n): Promise<IApplication> {\n  return await starter(env);\n}\n',
+      ),
+    );
+    (h.fs.writes as string[]).length = 0;
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('starter');
+    expect(h.fs.writes).toEqual([]);
+  });
+});
+
+describe('the devtool opt-in refusals on the creating commands', () => {
+  it('refuses --devtool on a non-Deno standalone project', async () => {
+    const fs = createFakeFs({});
+    const err = createRecorder();
+    const code = await runNewCommand(parseArgs(['shop', '--devtool', '--runtime', 'node']), {
+      fs,
+      cwd: '/ws',
+      log: () => {},
+      error: err.sink,
+    });
+    expect(code).toBe(2);
+    expect(err.text()).toContain('requires the Deno runtime');
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('refuses --devtool on a workspace root, naming the command that can', async () => {
+    const fs = createFakeFs({});
+    const err = createRecorder();
+    const code = await runNewCommand(parseArgs(['shop', '--workspace', '--devtool']), {
+      fs,
+      cwd: '/ws',
+      log: () => {},
+      error: err.sink,
+    });
+    expect(code).toBe(2);
+    expect(err.text()).toContain('nothing for the devtool to');
+    expect(err.text()).toContain('devtool enable');
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('refuses --devtool-port without --devtool', async () => {
+    const fs = createFakeFs({});
+    const err = createRecorder();
+    const code = await runNewCommand(parseArgs(['shop', '--devtool-port', '4919']), {
+      fs,
+      cwd: '/ws',
+      log: () => {},
+      error: err.sink,
+    });
+    expect(code).toBe(2);
+    expect(err.text()).toContain('--devtool-port requires --devtool');
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('refuses --devtool on a starter-composed member, before anything is written', async () => {
+    const fs = createFakeFs(workspaceSeed([]));
+    const err = createRecorder();
+    const code = await runAppCommand(
+      parseArgs(['app', 'web', '--template', 'full-stack', '--devtool']),
+      {
+        fs,
+        dir: '/ws',
+        log: () => {},
+        error: err.sink,
+      },
+    );
+    expect(code).toBe(2);
+    expect(err.text()).toContain('starter');
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('refuses an unknown member and a member-name-free workspace call', async () => {
+    const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    expect(await h.run(['enable', 'nope'])).toBe(1);
+    expect(h.err.text()).toContain('is not in');
+    expect(h.fs.writes).toEqual([]);
+    expect(await h.run(['enable'])).toBe(2);
+    expect(h.err.text()).toContain('member name is required');
+  });
+
+  it('the widened grant reaches a NEW workspace from day one', () => {
+    // The widened string is what the profile emits; enable's three-outcome
+    // merge treats it as a no-op, which is what makes new workspaces and
+    // enable agree.
+    expect(workspaceProfile('deno').runAll).not.toBe(LEGACY_DENO_RUN_ALL);
+  });
+});
+
+describe('devtool enable branch coverage', () => {
+  it('prints its usage under --help and exits 0', async () => {
+    const h = workspaceHarness({});
+    expect(await h.run(['--help'])).toBe(0);
+    expect(h.log.text()).toContain('Usage: setu devtool enable [member]');
+  });
+
+  it('refuses a subcommand word other than enable', async () => {
+    const h = workspaceHarness({});
+    expect(await h.run(['disable'])).toBe(2);
+    expect(h.err.text()).toContain('Usage: setu devtool enable');
+  });
+
+  it('reports the exact dry-run plan and writes nothing (standalone)', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': '{"tasks":{"start":"deno run --allow-net --allow-env main.ts"}}',
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable', '--dry-run'])).toBe(0);
+    expect(h.log.text()).toContain('would update /ws/deno.json');
+    expect(h.log.text()).toContain('would create /ws/main.dev.ts');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('reports the exact dry-run plan and writes nothing (workspace)', async () => {
+    const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    expect(await h.run(['enable', 'orders', '--dry-run'])).toBe(0);
+    expect(h.log.text()).toContain('would create /ws/apps/orders/main.dev.ts');
+    expect(h.log.text()).toContain(`would update /ws/${WORKSPACE_MANIFEST}`);
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses an explicit devtool port another process holds outside the workspace', async () => {
+    const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    const fs = h.fs as FakeFs;
+    // Re-run through a probe that holds 4919.
+    const log = createRecorder();
+    const code = await runDevtoolCommand(
+      parseArgs(['enable', 'orders', '--devtool-port', '4919']),
+      {
+        fs,
+        cwd: '/ws',
+        log: log.sink,
+        error: () => {},
+        portAvailable: () => Promise.resolve(false),
+      },
+    );
+    expect(code).toBe(1);
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('skips an occupied port during devtool allocation, exactly as for the application port', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    const fs = createFakeFs(seed);
+    const log = createRecorder();
+    const code = await runDevtoolCommand(parseArgs(['enable', 'orders']), {
+      fs,
+      cwd: '/ws',
+      log: log.sink,
+      error: () => {},
+      portAvailable: (port) => Promise.resolve(port !== 3001),
+    });
+    expect(code).toBe(0);
+    const manifest = JSON.parse(fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
+      members: { devtoolPort?: number }[];
+    };
+    expect(manifest.members[0].devtoolPort).toBe(3002);
+  });
+
+  it('refuses when the workspace has no port left for the devtool address', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    const fs = createFakeFs(seed);
+    const errors: string[] = [];
+    const code = await runDevtoolCommand(parseArgs(['enable', 'orders']), {
+      fs,
+      cwd: '/ws',
+      log: () => {},
+      error: (message) => errors.push(message),
+      // Everything occupied: the allocation walk spends the whole range.
+      portAvailable: () => Promise.resolve(false),
+    });
+    expect(code).toBe(1);
+    expect(errors.at(-1)).toContain('no port left to allocate');
+    expect(fs.writes).toEqual([]);
+  });
+
+  it('refuses a member project without its own deno.json', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    delete seed['/ws/apps/orders/deno.json'];
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('No deno.json in apps/orders');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a member deno.json that is not JSON', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    seed['/ws/apps/orders/deno.json'] = '{ broken';
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('Cannot read /ws/apps/orders/deno.json as JSON');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a workspace root without the deno.json the widening targets', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    delete seed['/ws/deno.json'];
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('No deno.json in /ws');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a root deno.json that is not JSON', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    seed['/ws/deno.json'] = '{ broken';
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('Cannot read /ws/deno.json as JSON');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses to overwrite a development entry it did not write', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    seed['/ws/apps/orders/main.dev.ts'] = '// hand-written\n';
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('Refusing to overwrite');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a standalone project without deno.json or setu.config.ts', async () => {
+    const h = workspaceHarness({});
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain('No deno.json in /ws');
+  });
+
+  it('refuses a standalone project whose deno.json is not JSON', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': '{ broken',
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain('Cannot read /ws/deno.json as JSON');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a standalone project without setu.config.ts', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': '{"tasks":{"start":"deno run --allow-net main.ts"}}',
+    });
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain('No setu.config.ts in /ws');
+    expect(h.fs.writes).toEqual([]);
+  });
+});
+
+describe('generate app --devtool branch coverage', () => {
+  /** Seeds a one-member workspace and runs `generate app` with a probe. */
+  async function runApp(argv: readonly string[], probe?: (port: number) => Promise<boolean>) {
+    const fs = createFakeFs(workspaceSeed([{ name: 'orders', port: 3000 }]));
+    const errors: string[] = [];
+    const code = await runAppCommand(parseArgs(argv), {
+      fs,
+      dir: '/ws',
+      log: () => {},
+      error: (message) => errors.push(message),
+      ...(probe === undefined ? {} : { portAvailable: probe }),
+    });
+    return { fs, errors, code };
+  }
+
+  it('records an explicit devtool port that binds', async () => {
+    const { fs, code } = await runApp(
+      ['app', 'billing', '--devtool', '--devtool-port', '4919'],
+      () => Promise.resolve(true),
+    );
+    expect(code).toBe(0);
+    const manifest = JSON.parse(fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
+      members: { name: string; port: number; devtoolPort?: number }[];
+    };
+    const billing = manifest.members.at(-1)!;
+    expect(billing.name).toBe('billing');
+    expect(billing.port).toBe(3001);
+    expect(billing.devtoolPort).toBe(4919);
+    expect(fs.read('/ws/apps/billing/main.dev.ts')).toContain('port: 4919,');
+  });
+
+  it('refuses an explicit devtool port held outside the workspace', async () => {
+    const { code, errors } = await runApp(
+      ['app', 'billing', '--devtool', '--devtool-port', '4919'],
+      (port) => Promise.resolve(port !== 4919),
+    );
+    expect(code).toBe(1);
+    expect(errors).toContain('Port 4919 is already in use outside this workspace.');
+  });
+
+  it('skips an occupied port while allocating the devtool address', async () => {
+    const { fs, code } = await runApp(
+      ['app', 'billing', '--devtool'],
+      (port) => Promise.resolve(port !== 3002),
+    );
+    expect(code).toBe(0);
+    const manifest = JSON.parse(fs.read(`/ws/${WORKSPACE_MANIFEST}`)) as {
+      members: { name: string; devtoolPort?: number }[];
+    };
+    expect(manifest.members.at(-1)?.devtoolPort).toBe(3003);
+  });
+
+  it('refuses when no port is left for the devtool address', async () => {
+    // The FIRST probe (the application port) succeeds; every later one — the
+    // devtool allocation walk — refuses, so the walk spends the whole range.
+    let first = true;
+    const { code, errors } = await runApp(['app', 'billing', '--devtool'], () => {
+      if (first) {
+        first = false;
+        return Promise.resolve(true);
+      }
+      return Promise.resolve(false);
+    });
+    expect(code).toBe(1);
+    expect(errors.at(-1)).toContain('no port left to allocate');
+  });
+
+  it('refuses --devtool on a non-Deno workspace runtime', async () => {
+    const fs = createFakeFs({
+      [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
+        version: WORKSPACE_VERSION,
+        runtime: 'node',
+        basePort: 3000,
+        transport: 'http',
+        members: [{ name: 'orders', port: 3000 }],
+      }),
+      '/ws/package.json': '{}',
+    });
+    const errors: string[] = [];
+    const code = await runAppCommand(parseArgs(['app', 'billing', '--devtool']), {
+      fs,
+      dir: '/ws',
+      log: () => {},
+      error: (message) => errors.push(message),
+    });
+    expect(code).toBe(2);
+    expect(errors.at(-1)).toContain('requires the Deno runtime');
+  });
+
+  it('refuses --devtool-port without --devtool', async () => {
+    const { code, errors } = await runApp(['app', 'billing', '--devtool-port', '4919']);
+    expect(code).toBe(2);
+    expect(errors.at(-1)).toContain('--devtool-port requires --devtool');
+  });
+
+  it('refuses a --devtool-port equal to the member port this member binds', async () => {
+    const { code, errors } = await runApp(
+      ['app', 'billing', '--devtool', '--devtool-port', '3001'],
+      () => Promise.resolve(true),
+    );
+    expect(code).toBe(1);
+    expect(errors.at(-1)).toContain('is the port this member itself binds');
+  });
+});
+
+describe('devtool enable derives the dev task, refusing when it cannot', () => {
+  it('refuses a member whose config module is missing', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    delete seed['/ws/apps/orders/setu.config.ts'];
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('No setu.config.ts in apps/orders');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a member whose deno.json has no start task to derive from', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    seed['/ws/apps/orders/deno.json'] = '{"tasks":{"test":"deno test -A"}}';
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('no "start" task');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a start task that does not run main.ts directly', async () => {
+    const seed = workspaceSeed([{ name: 'orders', port: 3000 }]);
+    seed['/ws/apps/orders/deno.json'] = JSON.stringify({
+      tasks: { start: 'deno task build && deno run --allow-net src/index.ts' },
+    });
+    const h = workspaceHarness(seed);
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('Cannot derive a "dev" task');
+    expect(h.err.text()).toContain('deno task build && deno run --allow-net src/index.ts');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a standalone dev task that already holds a different value', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': JSON.stringify({
+        tasks: {
+          start: 'deno run --allow-net --allow-env main.ts',
+          dev: 'deno run --allow-net main.dev.ts',
+        },
+      }),
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain('Refusing to replace the existing "dev" task');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a standalone check task that already holds a different value', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': JSON.stringify({
+        tasks: {
+          start: 'deno run --allow-net --allow-env main.ts',
+          check: 'deno check main.ts',
+        },
+      }),
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain('Refusing to replace the existing "check" task');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a standalone start task that cannot derive a dev task', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': '{"tasks":{"start":"npm start"}}',
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain('Cannot derive a "dev" task');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('reports a standalone project that is already enabled without writing', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': JSON.stringify({
+        tasks: {
+          start: 'deno run --allow-net --allow-env main.ts',
+          dev: 'deno run --allow-net --allow-env main.dev.ts',
+          check: 'deno check main.ts setu.config.ts main.dev.ts',
+        },
+      }),
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+      // Byte-identical to what the command would write: the whole run is a
+      // no-op, which is what makes the command idempotent.
+      '/ws/main.dev.ts': renderDevEntry({ devtoolPort: DEFAULT_DEVTOOL_PORT }),
+    });
+    expect(await h.run(['enable'])).toBe(0);
+    expect(h.log.text()).toContain('already enabled');
+    expect(h.fs.writes).toEqual([]);
+  });
+});

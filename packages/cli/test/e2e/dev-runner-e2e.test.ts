@@ -98,7 +98,17 @@ async function writeWorkspace(members: readonly Member[], ordersDelayMs: number)
  */
 async function runRunner(timeoutMs: number): Promise<string> {
   const child = new Deno.Command(Deno.execPath(), {
-    args: ['run', '--allow-read', '--allow-run', '--allow-net', '--allow-write', 'scripts/dev.ts'],
+    // The root `dev` task's own grant, widened in M98c with the scoped
+    // --allow-env the runner reads the launcher's variables through.
+    args: [
+      'run',
+      '--allow-read',
+      '--allow-run',
+      '--allow-net',
+      '--allow-write',
+      '--allow-env',
+      'scripts/dev.ts',
+    ],
     cwd: root,
     stdout: 'piped',
     stderr: 'piped',
@@ -198,5 +208,199 @@ describe('the generated dev runner, executed', () => {
     await runRunner(6000);
 
     expect(await observed()).toBeUndefined();
+  });
+});
+
+/**
+ * Writes a two-member workspace whose members RECORD the devtool environment
+ * they were handed.
+ *
+ * The observation file each member writes carries the three variables as the
+ * child actually received them, so the assertions read the runner's env
+ * forwarding rather than its source. `orders` additionally runs a `dev` task
+ * (the entry the launcher selects), and both bind their own ports.
+ */
+async function writeDevtoolWorkspace(
+  devtoolPort: number,
+): Promise<{ orders: number; billing: number }> {
+  const orders = unusedPort();
+  const billing = unusedPort();
+  await Deno.writeTextFile(
+    `${root}/setu.workspace.json`,
+    JSON.stringify(
+      {
+        version: 1,
+        basePort: orders,
+        runtime: 'deno',
+        members: [
+          { name: 'orders', port: orders, devtoolPort },
+          { name: 'billing', port: billing },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+  await Deno.mkdir(`${root}/scripts`, { recursive: true });
+  const runner = workspaceDevRunner(workspaceProfile('deno'));
+  await Deno.writeTextFile(`${root}/${runner.path}`, runner.contents);
+
+  // Records the environment AS RECEIVED and binds the member's own port.
+  const recorder = (member: string, port: number, extraEnv = '') =>
+    `const seen = {
+  member: Deno.env.get('SETU_DEVTOOL_MEMBER') ?? '(unset)',
+  sessionId: Deno.env.get('SETU_DEVTOOL_SESSION_ID') ?? '(unset)',
+  sessionKey: Deno.env.get('SETU_DEVTOOL_SESSION_KEY') ?? '(unset)',
+};
+await Deno.writeTextFile('${root}/${member}.env.json', JSON.stringify(seen));
+await Deno.serve({ port: ${port}, onListen: () => {} }, () => new Response('ok'));
+${extraEnv}`;
+
+  for (const member of ['orders', 'billing']) {
+    await Deno.mkdir(`${root}/apps/${member}`, { recursive: true });
+    // BOTH members carry both tasks: `dev` for the selected member, `start`
+    // for everyone else — which is the observable under test.
+    await Deno.writeTextFile(
+      `${root}/apps/${member}/deno.json`,
+      JSON.stringify({
+        tasks: {
+          start: `deno run --allow-net --allow-write --allow-env start-${member}.ts`,
+          dev: `deno run --allow-net --allow-write --allow-env dev-${member}.ts`,
+        },
+      }),
+    );
+    await Deno.writeTextFile(
+      `${root}/apps/${member}/start-${member}.ts`,
+      recorder(member, member === 'orders' ? orders : billing),
+    );
+    await Deno.writeTextFile(
+      `${root}/apps/${member}/dev-${member}.ts`,
+      recorder(member, member === 'orders' ? orders : billing),
+    );
+  }
+  return { orders, billing };
+}
+
+/** Reads what one member recorded about the environment it was handed. */
+async function observedEnv(member: string): Promise<Record<string, string> | undefined> {
+  const text = await Deno.readTextFile(`${root}/${member}.env.json`).catch(() => undefined);
+  return text === undefined ? undefined : JSON.parse(text) as Record<string, string>;
+}
+
+/** Runs the runner with the given devtool environment until both ports answer. */
+async function runRunnerWithEnv(
+  ports: readonly number[],
+  env: Record<string, string>,
+  timeoutMs = 20_000,
+): Promise<void> {
+  const child = new Deno.Command(Deno.execPath(), {
+    args: [
+      'run',
+      '--allow-read',
+      '--allow-run',
+      '--allow-net',
+      '--allow-write',
+      '--allow-env',
+      'scripts/dev.ts',
+    ],
+    cwd: root,
+    env,
+    stdin: 'null',
+    stdout: 'piped',
+    stderr: 'piped',
+  }).spawn();
+  const deadline = performance.now() + timeoutMs;
+  try {
+    while (performance.now() < deadline) {
+      const both = await Promise.all(
+        ports.map((port) =>
+          fetch(`http://127.0.0.1:${port}/`).then((r) => r.ok).catch(() => false)
+        ),
+      );
+      if (both.every(Boolean)) return;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error('the runner never brought both members up');
+  } finally {
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      // Already exited.
+    }
+    await child.status;
+  }
+}
+
+describe('the generated dev runner, forwarding the devtool environment', () => {
+  const SESSION_ID = 'b'.repeat(32);
+  const SESSION_KEY = 'c'.repeat(64);
+
+  it('hands the pair to the named member alone and blanks it for every sibling', async () => {
+    const devtoolPort = unusedPort();
+    const ports = await writeDevtoolWorkspace(devtoolPort);
+    await runRunnerWithEnv([ports.orders, ports.billing], {
+      SETU_DEVTOOL_MEMBER: 'orders',
+      SETU_DEVTOOL_SESSION_ID: SESSION_ID,
+      SETU_DEVTOOL_SESSION_KEY: SESSION_KEY,
+    });
+
+    const selected = await observedEnv('orders');
+    // The selected member ran its DEV entry carrying the real pair.
+    expect(selected).toEqual({
+      member: 'orders',
+      sessionId: SESSION_ID,
+      sessionKey: SESSION_KEY,
+    });
+
+    const sibling = await observedEnv('billing');
+    // The sibling ran its START entry with every variable BLANKED — an empty
+    // value is not a credential, and inheritance would have handed it one.
+    expect(sibling).toEqual({ member: '', sessionId: '', sessionKey: '' });
+  });
+
+  it('runs every member on start with no devtool variables set — the no-launcher case', async () => {
+    const devtoolPort = unusedPort();
+    const ports = await writeDevtoolWorkspace(devtoolPort);
+    // `deno task dev` with no devtool variables: the pre-devtool behavior.
+    await runRunnerWithEnv([ports.orders, ports.billing], {});
+
+    for (const member of ['orders', 'billing']) {
+      const seen = await observedEnv(member);
+      // Unset, not blank: the runner read nothing and forwarded nothing.
+      expect(seen?.sessionId).toBe('');
+      expect(seen?.sessionKey).toBe('');
+      expect(seen?.member).toBe('');
+    }
+  });
+
+  it('refuses a SETU_DEVTOOL_MEMBER the manifest does not carry, before spawning', async () => {
+    const devtoolPort = unusedPort();
+    await writeDevtoolWorkspace(devtoolPort);
+    const child = new Deno.Command(Deno.execPath(), {
+      args: [
+        'run',
+        '--allow-read',
+        '--allow-run',
+        '--allow-net',
+        '--allow-write',
+        '--allow-env',
+        'scripts/dev.ts',
+      ],
+      cwd: root,
+      env: {
+        SETU_DEVTOOL_MEMBER: 'nope',
+        SETU_DEVTOOL_SESSION_ID: SESSION_ID,
+        SETU_DEVTOOL_SESSION_KEY: SESSION_KEY,
+      },
+      stdin: 'null',
+      stdout: 'piped',
+      stderr: 'piped',
+    }).spawn();
+    const { code, stderr } = await child.output();
+    const decoder = new TextDecoder();
+    expect(code).not.toBe(0);
+    expect(decoder.decode(stderr)).toContain('which setu.workspace.json does not carry');
+    // Nothing came up: the refusal precedes every spawn.
+    expect(await observedEnv('orders')).toBeUndefined();
   });
 });
