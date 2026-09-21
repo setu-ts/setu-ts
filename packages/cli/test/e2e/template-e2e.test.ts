@@ -449,7 +449,12 @@ describe('template scaffolding — end to end', () => {
       const config = await Deno.readTextFile(`${root}/shop/setu.config.ts`);
 
       expect(config).toContain('(config): FullStackStarterOptions => ({');
-      expect(config).toContain("type FullStackStarterOptions } from '@setu-ts/full-stack-starter'");
+      // A package import naming ONLY types renders in the `import type` form
+      // (M98c), which is what this repository writes and what the generated
+      // project's own `deno fmt` keeps.
+      expect(config).toContain(
+        "import type { FullStackStarterOptions } from '@setu-ts/full-stack-starter';",
+      );
     });
 
     it('makes a misspelled arm a COMPILE error in the generated project', async () => {

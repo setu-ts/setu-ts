@@ -69,6 +69,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'template',
   'config',
   'port',
+  'devtool-port',
   'transport',
   'transport-url',
   'broker',

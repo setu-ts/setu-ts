@@ -271,7 +271,10 @@ describe('runAppCommand', () => {
       // regeneration, so a task the developer added is not discarded.
       expect(root['workspace']).toEqual(['./apps/*']);
       expect(root['tasks']).toEqual({
-        dev: 'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
+        // Scoped to the three devtool names the runner forwards (M98c).
+        dev: 'deno run --allow-read --allow-run --allow-net ' +
+          '--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER ' +
+          'scripts/dev.ts',
       });
     });
 

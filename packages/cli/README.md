@@ -141,6 +141,44 @@ digit-leading such as `2fa`).
 
 A relative `--dir` is resolved against the working directory.
 
+## Devtool development
+
+`setu new --devtool` and `setu devtool enable <member>` opt a project into the
+[local diagnostics connector](https://github.com/setu-ts/setu-ts/blob/main/packages/diagnostics-plugin/README.md):
+they emit a `main.dev.ts` development entry the production graph never imports, add `dev` and
+`check` tasks, and — for a workspace member — record a `devtoolPort` in `setu.workspace.json`,
+allocated so it never collides with any member's application port
+(`setu workspace ports --reallocate` moves both together).
+
+```bash
+setu new my-app --devtool              # standalone; connector on 127.0.0.1:4919 by default
+setu new acme --workspace && cd acme
+setu generate app orders --devtool     # member; the devtool port is allocated
+setu devtool enable billing            # a member that already exists
+setu devtool enable                    # a standalone project that already exists
+```
+
+Run the development entry with `deno task dev`. The entry reads two environment variables the
+trusted launcher supplies — `SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` — and refuses
+to start when either is absent or malformed. It never generates, writes, or prints a pair; renaming
+either variable stops the devtool connecting and nothing else will say why. In a workspace the
+launcher also names the member it is inspecting (`SETU_DEVTOOL_MEMBER`), and the generated
+`scripts/dev.ts` forwards the pair to that member's child alone, blanking it for every sibling.
+Those three names are published CLI surface: renaming one is a breaking change, and the root `dev`
+task's `--allow-env` grant is scoped to exactly them.
+
+`setu devtool enable` merges into an existing `deno.json` — every task and key you added survives, a
+task or import pin you wrote is never replaced, and running the command twice is a no-op. A
+workspace created before the devtool existed carries a `scripts/dev.ts` that nothing regenerates,
+and that runner starts every member with its `start` task; the command refuses such a workspace by
+name rather than reporting a success the launcher could not use, and names the one-line remedy
+(delete the runner and run the command again). It also adds the `@setu-ts/diagnostics-plugin` pin
+the development entry resolves through, so the project's own `check` task passes on the new entry
+without any edit. The refusals name their fix: a non-Deno runtime (the connector's listener refuses
+every non-Deno bind), a starter-composed template (kernel diagnostics must be enabled at
+construction), and a factory scaffolded before the devtool existed, which needs its signature
+widened before the command proceeds.
+
 ## Generated modules
 
 ## Realtime starting points

@@ -41,6 +41,17 @@ import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 const RANGE = `^${VERSION}`;
 
 /**
+ * The devtool composition parameter every generated factory accepts as its
+ * SECOND parameter, rendered as source. The type matches the shape the M98b
+ * documentation publishes, so a hand-written composition and an emitted one
+ * are the same shape — which is what lets `setu devtool enable` recognize the
+ * parameter textually. Underscore-prefixed per target where nothing reads it;
+ * this constant carries the readable name.
+ */
+const DEVTOOL_PARAMETER =
+  'devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },';
+
+/**
  * The per-project Compose file a broker-selected project carries, starting the
  * backing services its selected transports connect to.
  *
@@ -308,15 +319,23 @@ function configModule(
   // With no extra symbols the statement is the type-only import every template
   // emitted before this merge existed, so their output is unchanged.
   const commonImport = extraCommonSymbols.length === 0
-    ? `import type { IApplication } from '@setu-ts/common';`
-    : renderImport([...extraCommonSymbols, 'type IApplication'], '@setu-ts/common');
+    ? `import type { IApplication, IPlugin } from '@setu-ts/common';`
+    : renderImport(
+      [...extraCommonSymbols, 'type IApplication', 'type IPlugin'],
+      '@setu-ts/common',
+    );
 
   const imports = [
-    // A starter factory returns the application, so the kernel is not imported
-    // at all on that path — the generated file names only what it uses.
+    // A starter factory returns the application, so `createApplication` is not
+    // imported on that path — but the factory's devtool parameter names
+    // `KernelDiagnosticsOptions` on EVERY target, so every config module still
+    // imports the kernel, as a type.
     ...(appFactory === undefined
-      ? [renderImport(['createApplication'], '@setu-ts/kernel')]
-      : [renderImport([appFactory.symbol], `@setu-ts/${appFactory.pkg}`)]),
+      ? [renderImport(['createApplication', 'type KernelDiagnosticsOptions'], '@setu-ts/kernel')]
+      : [
+        renderImport([appFactory.symbol], `@setu-ts/${appFactory.pkg}`),
+        renderImport(['type KernelDiagnosticsOptions'], '@setu-ts/kernel'),
+      ]),
     commonImport,
     ...plugins.map((p) => renderImport([p.symbol], `@setu-ts/${p.pkg}`)),
     ...middleware.map((m) => renderImport([m.symbol], `@setu-ts/${m.pkg}`)),
@@ -363,10 +382,17 @@ function configModule(
  * \`setu\` imports this factory to discover plugin-contributed CLI commands, so
  * it must NOT start the server — \`main.ts\` owns that.
  *
+ * @param env - The discovery environment \`setu commands\` passes positionally
+ * on every target; the starter reads configuration itself, so this is
+ * forwarded through unchanged.
+ * @param _devtool - Accepted for one signature on every target. The starter
+ * owns its construction, so a devtool composition cannot be honored here —
+ * the CLI refuses the devtool opt-in on this template by name.
  * @returns The configured, unstarted application
  */
 export async function ${CONFIG_EXPORT}(
   env?: Readonly<Record<string, unknown>>,
+  _${DEVTOOL_PARAMETER}
 ): Promise<IApplication> {
   const app = await ${appFactory.symbol}(${
       appFactory.args?.({
@@ -390,18 +416,49 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
         `      ${p.symbol}(${onWorkers ? p.workersArgs ?? pluginArgs(p) : pluginArgs(p)}),`
       ),
     ...pluginSpreads.map((spread) => `      ${spread},`),
+    // The devtool composition lands LAST: the kernel resolves plugins by
+    // declared dependencies, so position is presentation, and the production
+    // set above reads untouched. Workers never reads the parameter, so the
+    // spread is not emitted there.
+    ...(onWorkers ? [] : ['      ...(devtool?.plugins ?? []),']),
   ].join('\n');
 
   const wantsWaitUntil = onWorkers && consumesWaitUntil(plugins);
-  // Wrapped one-per-line when there are two, which is what `deno fmt` produces
-  // for a signature past the emitted line width — a generated project has to
-  // pass its OWN `deno fmt --check` (M63/D6).
+  // The devtool composition is the SECOND parameter on every target, never
+  // the first: `setu commands` calls this factory with its inert discovery
+  // env as the FIRST positional argument on every target (`app-loader.ts`), so
+  // a first-parameter composition would capture that proxy and throw on the
+  // spread. The parameter is emitted for every template and target — a
+  // project that adds the devtool later must not need its config module
+  // rewritten, and an optional parameter nothing supplies costs nothing.
+  // Underscore-prefixed where this target reads none of it. One parameter per
+  // line, which is what `deno fmt` produces for a signature past the emitted
+  // line width — a generated project has to pass its OWN `deno fmt --check`
+  // (M63/D6).
   const factoryParam = !onWorkers
-    ? ''
+    ? `\n  _env?: Readonly<Record<string, unknown>>,\n  ${DEVTOOL_PARAMETER}\n`
     : wantsWaitUntil
     ? '\n  env: Readonly<Record<string, unknown>> = {},' +
-      '\n  waitUntil?: (promise: Promise<unknown>) => void,\n'
-    : 'env: Readonly<Record<string, unknown>> = {}';
+      '\n  waitUntil?: (promise: Promise<unknown>) => void,' +
+      `\n  _${DEVTOOL_PARAMETER}\n`
+    : `\n  env: Readonly<Record<string, unknown>> = {},\n  _${DEVTOOL_PARAMETER}\n`;
+  // The kernel-diagnostics option is gated on the SAME condition as the plugin
+  // spread above: on Workers the parameter is rendered `_devtool`, so emitting
+  // a reference to `devtool` there produced a `setu.config.ts` that failed its
+  // own `deno check` with TS2552 and threw a ReferenceError at boot. The two
+  // halves of one composition must read one flag.
+  const devtoolDiagnostics = onWorkers ? '' : `
+    // Kernel diagnostics reach the CONSTRUCTOR only — the collector is built
+    // there — so the devtool option threads through this object rather than
+    // being registered onto a finished application.
+    ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),`;
+  const devtoolDoc = onWorkers
+    ? `\n * @param _devtool - Accepted for one signature on every target; the devtool is` +
+      `\n * Deno-only, so a Workers project never supplies it and nothing here reads it.`
+    : `\n * @param devtool - The development-only composition — the diagnostics plugin and` +
+      `\n * the kernel diagnostics option — supplied by \`main.dev.ts\` alone. The SECOND` +
+      `\n * parameter deliberately: \`setu commands\` passes its inert discovery env as the` +
+      `\n * FIRST argument on every target, which the unused \`_env\` above absorbs.`;
   const envDoc = onWorkers
     ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler${
       wantsWaitUntil
@@ -409,8 +466,10 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
           `\n * Only the Worker ENTRY can import it: \`setu\` loads this module under Deno,` +
           `\n * which cannot resolve \`cloudflare:workers\` at all.`
         : ''
-    }`
-    : '';
+    }${devtoolDoc}`
+    : `\n * @param _env - The discovery environment \`setu commands\` passes positionally on` +
+      `\n * every target; accepted and unused, because a socket project reads configuration` +
+      `\n * from the process environment.${devtoolDoc}`;
 
   return `${imports}
 
@@ -426,7 +485,7 @@ export function ${CONFIG_EXPORT}(${factoryParam}): IApplication {
   const app = createApplication({
     plugins: [
 ${pluginList}
-    ],
+    ],${devtoolDiagnostics}
   });
 ${middlewareLines}${setupLines}
   app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
@@ -526,7 +585,7 @@ ${shutdownBlock(runtime)}`;
  * @param runtime - The selected runtime target
  * @returns The block appended to the entry, empty on Cloudflare Workers
  */
-function shutdownBlock(runtime: TargetRuntime): string {
+export function shutdownBlock(runtime: TargetRuntime): string {
   // Workers never reaches here (it renders a `fetch` export, not a socket
   // entry), and has no process to signal: an isolate is evicted, not stopped.
   if (runtime === 'cloudflare-workers') return '';
@@ -768,11 +827,14 @@ ${reExportBlock}`;
  * @returns Bare package names, deduplicated
  */
 function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly string[] {
-  // `common` is unconditional: the config module imports IApplication whichever
-  // way it builds the app. `kernel` is not — a starter factory returns the
-  // application, so `createApplication` is never imported on that path and
-  // declaring the dependency would be a package the project never references.
-  const packages = new Set<string>(['common']);
+  // Both are unconditional. `common`: the config module imports `IApplication`
+  // whichever way it builds the app. `kernel`: the factory's devtool parameter
+  // names `KernelDiagnosticsOptions` from `@setu-ts/kernel`, so every config
+  // module imports the package — as `createApplication` on the plugin-list
+  // path, as a type on the starter path. Before that parameter existed the
+  // starter path referenced nothing from the kernel and `kernel` was
+  // conditional; it is not any more.
+  const packages = new Set<string>(['common', 'kernel']);
   // Every socket target's `main.ts` imports `createRuntimeServices` to read the
   // port and register its shutdown signals (M70h/B1). It is declared here
   // rather than left to the plugin scan because a starter-composed host
@@ -783,11 +845,7 @@ function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly
   if (runtime !== 'cloudflare-workers') {
     packages.add('runtime');
   }
-  if (host.appFactory === undefined) {
-    packages.add('kernel');
-  } else {
-    packages.add(host.appFactory.pkg);
-  }
+  if (host.appFactory !== undefined) packages.add(host.appFactory.pkg);
   for (const entry of host.packageImports) packages.add(entry.pkg);
   // Reads the SAME resolved plugin list the renderer emits, so a project never
   // imports a framework package without declaring it.
@@ -883,6 +941,39 @@ function denoTasks(
   };
 }
 
+/** The development entry module the devtool opt-in emits. */
+export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
+
+/**
+ * The tasks the devtool opt-in adds to a generated Deno project's `deno.json`.
+ *
+ * `dev` differs from `start` ONLY in the entry module — its flags come from
+ * the same {@linkcode denoPermissions} call and its build prefix from the same
+ * `npmBuild` check, so the two tasks cannot drift, and neither carries a
+ * scoped `--allow-net`: on Deno 2.9.6 an allowlist governs OUTBOUND as well
+ * as bind, so scoping would refuse every database, broker and outbound call
+ * the project makes (measured, M98c §3.7). The loopback guarantee is the
+ * listener's, not a permission flag's.
+ *
+ * `check` is what puts `main.dev.ts` inside a check path the project already
+ * runs: `denoTasks` emits no check task of its own, so without this the dev
+ * entry sits outside every gate a generated project executes.
+ *
+ * Rendered here — beside `denoTasks`, reading the same permission helper —
+ * rather than in the devtool planner, so both this create-time path and
+ * `setu devtool enable`'s merge write byte-identical strings.
+ *
+ * @param manifest - The template's manifest contributions, for its permissions
+ * @returns The `dev` and `check` task bodies
+ */
+export function devtoolTasks(manifest?: TemplateManifest): Record<string, string> {
+  const run = `deno run ${denoPermissions(manifest)} ${DEVTOOL_ENTRY_MODULE}`;
+  return {
+    dev: manifest?.npmBuild === undefined ? run : `deno task build && ${run}`,
+    check: `deno check main.ts ${CONFIG_MODULE} ${DEVTOOL_ENTRY_MODULE}`,
+  };
+}
+
 /**
  * The line width a generated project is formatted at.
  *
@@ -910,9 +1001,21 @@ const LINE_WIDTH = GENERATED_LINE_WIDTH;
  */
 function renderImport(symbols: readonly string[], from: string): string {
   const sorted = sortSpecifiers(symbols);
-  const oneLine = `import { ${sorted.join(', ')} } from '${from}';`;
+  // A type-ONLY import renders in the `import type` form, which is what this
+  // repository writes and what a mixed list (`{ createApplication, type X }`)
+  // keeps inline. Emitting `{ type X }` for the pure case would hand the
+  // generated project a style its own formatter may rewrite.
+  const allTypes = sorted.every((specifier) => specifier.startsWith('type '));
+  const keyword = allTypes ? 'import type' : 'import';
+  const body = allTypes
+    ? sorted.map((specifier) => specifier.replace(/^type\s+/, '')).join(', ')
+    : sorted.join(', ');
+  const oneLine = `${keyword} { ${body} } from '${from}';`;
   if (oneLine.length <= LINE_WIDTH) return oneLine;
-  return `import {\n${sorted.map((s) => `  ${s},`).join('\n')}\n} from '${from}';`;
+  const entries = allTypes
+    ? sorted.map((specifier) => `  ${specifier.replace(/^type\s+/, '')},`).join('\n')
+    : sorted.map((s) => `  ${s},`).join('\n');
+  return `${keyword} {\n${entries}\n} from '${from}';`;
 }
 
 /**

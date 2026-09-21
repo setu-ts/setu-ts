@@ -6,44 +6,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
-
-- **`logger-plugin` — default redaction now covers normalized `authorization` headers.** The shipped
-  default is lowercase and default matching is case-insensitive across both console and Pino
-  transports; a caller-supplied `redact` list remains case-sensitive. This prevents Fetch's
-  normalized bearer-token header from reaching structured logs (M99a).
-- **`messaging-plugin` — a known Service Bus data-plane outage no longer ages back to healthy.** A
-  network publish failure remains reachability evidence until a successful publish or a positive
-  management probe contradicts it; `dataPlaneEvidenceMs` now bounds positive evidence only (M99a).
-
-- **`cli` — a generated workspace image now verifies its lockfile at build time.** The build step is
-  `deno cache main.ts && deno install && deno install --frozen`, not `deno cache main.ts` alone.
-  Deno records a jsr package's npm edge list nondeterministically on a cold cache: four `--no-cache`
-  builds of one unchanged workspace left `@setu-ts/messaging-plugin` missing its `npm:amqplib` and
-  `npm:ioredis` edges twice and complete twice, while both packages were recorded in the lockfile's
-  package section every time. Runtime `--frozen` does not write the lockfile, so against an
-  incomplete one it refuses, and every container died at registration reporting a stale lockfile —
-  an image that built green and never served. `deno install` completes the edge lists the frozen
-  check compares against — the same resolver writes and verifies them — and `deno install --frozen`
-  proves it, so a still-missing edge fails the build once instead of every container at startup.
-  Regenerate an existing workspace's managed Dockerfile with `setu generate app <member>` to pick it
-  up.
-- **`check:deploy --generated` now sees this defect on every run rather than intermittently.** It
-  built from whatever lockfile the host's own install happened to write, so a Dockerfile regressed
-  to `deno cache main.ts` alone — the exact pre-fix form — passed it. The gate now strips every
-  framework `npm:` edge from the scaffolded workspace's lockfile before building the image, leaving
-  every resolved version pin intact, so the build has to establish lock completeness itself; that
-  same regressed Dockerfile now fails. A strip that removes nothing fails the gate rather than
-  passing quietly.
-- **`cli` — generated workspace Dockerfiles now run with `deno run --frozen`.** The runtime uses the
-  lockfile that its build cached and still cannot modify it on a generated read-only root, so a lazy
-  broker driver cannot re-resolve an uncached npm transitive dependency at startup (M99b).
-- **`cli` — an interrupted scaffold compensates for caught write failures.** It restores files it
-  overwrote, removes files and empty directories it created, and reports any incomplete recovery;
-  `adopt` now reports an entry rewrite failure instead of presenting it as a port-literal mismatch.
-  Reported by [u/kantorcodes1](https://www.reddit.com/user/kantorcodes1/) (M99b).
-
 ### Added
+
+- **`cli` — devtool scaffolding (M98c).** `setu new --devtool`,
+  `setu generate app <name> --devtool`, and `setu devtool enable [member]` opt a project into the
+  M98b local diagnostics connector through one shared planner: they emit a `main.dev.ts` the
+  production graph never imports, add `dev` and `check` tasks, and record a
+  `WorkspaceMember.devtoolPort` that `allocatePort` walks beside `port`, so no generated port
+  collides and `ports --reallocate` moves both addresses together. The emitted config factory takes
+  the devtool composition as its SECOND parameter on every target — `setu commands` passes its inert
+  discovery env first, so a first-parameter composition would throw. The entry reads
+  `SETU_DEVTOOL_SESSION_ID` / `SETU_DEVTOOL_SESSION_KEY` from the environment, refuses to start
+  without a valid pair, and never mints one; in a workspace the launcher also sets
+  `SETU_DEVTOOL_MEMBER`, and the generated `scripts/dev.ts` forwards all three to that member's
+  child alone while blanking them for every sibling, under a root `dev` task whose `--allow-env`
+  grant is scoped to exactly those three names. **All three are published CLI surface**: renaming
+  one is a breaking change to every scaffolded project. `setu devtool enable` MERGES into an
+  existing `deno.json` (your tasks survive, a differing task refuses by name, a second run is a
+  no-op) and refuses by name — with the exact signature to write — on a factory scaffolded before
+  this letter, whose zero-parameter shape would otherwise discard the composition in silence. It
+  refuses a workspace whose `scripts/dev.ts` predates the devtool for the same reason: nothing
+  regenerates that file, so it would still spawn every member's `start` task and pass no per-child
+  environment — the refusal names the remedy, and a workspace missing the runner entirely gets it
+  written. A project type-checks, boots, and answers the reviewed `createDiagnosticsClient` through
+  the new end-to-end gate.
 
 - **Local diagnostics connector (M98b): an authenticated loopback connection between a native
   devtool client and M98a's kernel diagnostics.** New package `@setu-ts/diagnostics-plugin` with
@@ -132,6 +118,54 @@ All notable changes to this project are documented here. The format follows
   tree reports none. What it does not catch is a release-worthy change that adds no export — PR #195
   was dependency ranges, a workflow and a release artifact — so reading the merged PR list stays in
   the runbook.
+
+### Changed
+
+- **`cli` — every newly scaffolded project declares `@setu-ts/kernel` and a two-parameter
+  `createApp` (M98c).** The config factory's devtool parameter names `KernelDiagnosticsOptions`, so
+  the kernel is now pinned on every target — including starter-composed templates, which referenced
+  nothing from it before. A package import naming only types renders in the `import type { … }`
+  form. Every generated Deno workspace's root `dev` task also carries the scoped
+  `--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER` grant its
+  runner reads, whether or not the devtool is enabled. Existing projects are unaffected: nothing
+  regenerates a scaffolded file, and `--allow-net` is unchanged and still unscoped.
+
+### Fixed
+
+- **`logger-plugin` — default redaction now covers normalized `authorization` headers.** The shipped
+  default is lowercase and default matching is case-insensitive across both console and Pino
+  transports; a caller-supplied `redact` list remains case-sensitive. This prevents Fetch's
+  normalized bearer-token header from reaching structured logs (M99a).
+- **`messaging-plugin` — a known Service Bus data-plane outage no longer ages back to healthy.** A
+  network publish failure remains reachability evidence until a successful publish or a positive
+  management probe contradicts it; `dataPlaneEvidenceMs` now bounds positive evidence only (M99a).
+
+- **`cli` — a generated workspace image now verifies its lockfile at build time.** The build step is
+  `deno cache main.ts && deno install && deno install --frozen`, not `deno cache main.ts` alone.
+  Deno records a jsr package's npm edge list nondeterministically on a cold cache: four `--no-cache`
+  builds of one unchanged workspace left `@setu-ts/messaging-plugin` missing its `npm:amqplib` and
+  `npm:ioredis` edges twice and complete twice, while both packages were recorded in the lockfile's
+  package section every time. Runtime `--frozen` does not write the lockfile, so against an
+  incomplete one it refuses, and every container died at registration reporting a stale lockfile —
+  an image that built green and never served. `deno install` completes the edge lists the frozen
+  check compares against — the same resolver writes and verifies them — and `deno install --frozen`
+  proves it, so a still-missing edge fails the build once instead of every container at startup.
+  Regenerate an existing workspace's managed Dockerfile with `setu generate app <member>` to pick it
+  up.
+- **`check:deploy --generated` now sees this defect on every run rather than intermittently.** It
+  built from whatever lockfile the host's own install happened to write, so a Dockerfile regressed
+  to `deno cache main.ts` alone — the exact pre-fix form — passed it. The gate now strips every
+  framework `npm:` edge from the scaffolded workspace's lockfile before building the image, leaving
+  every resolved version pin intact, so the build has to establish lock completeness itself; that
+  same regressed Dockerfile now fails. A strip that removes nothing fails the gate rather than
+  passing quietly.
+- **`cli` — generated workspace Dockerfiles now run with `deno run --frozen`.** The runtime uses the
+  lockfile that its build cached and still cannot modify it on a generated read-only root, so a lazy
+  broker driver cannot re-resolve an uncached npm transitive dependency at startup (M99b).
+- **`cli` — an interrupted scaffold compensates for caught write failures.** It restores files it
+  overwrote, removes files and empty directories it created, and reports any incomplete recovery;
+  `adopt` now reports an entry rewrite failure instead of presenting it as a port-literal mismatch.
+  Reported by [u/kantorcodes1](https://www.reddit.com/user/kantorcodes1/) (M99b).
 
 ## [0.7.0] — 2026-09-18
 

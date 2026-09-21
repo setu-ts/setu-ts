@@ -60,7 +60,7 @@ describe('generated imports match the formatter the project ships with', () => {
     // enough to leave alone, so emitting them unsorted makes the formatter
     // rewrite a file the CLI just wrote.
     expect(commonImportOf()).toContain(
-      'CAPABILITIES, type IApplication, type ILogger, type ISecretManager',
+      'CAPABILITIES, type IApplication, type ILogger, type IPlugin, type ISecretManager',
     );
   });
 

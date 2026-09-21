@@ -64,19 +64,20 @@ export function isUsablePort(value: unknown): value is number {
     value >= MIN_PORT && value <= MAX_PORT;
 }
 
-/** What reading a `--port` flag produced. */
+/** What reading a valued port flag produced. */
 export type PortFlagResult =
   | { readonly ok: true; readonly port?: number }
   | { readonly ok: false; readonly message: string };
 
 /**
- * Reads and validates a `--port` flag.
+ * Reads and validates a valued port flag.
  *
- * Shared by `setu new --workspace` (where it sets the base port) and
- * `setu generate app` (where it sets one member's), so the two cannot disagree
- * about what a bindable port is. They already could not disagree with the
- * MANIFEST reader — the range comes from {@linkcode isUsablePort} — and this
- * closes the same gap between the two flag sites.
+ * Shared by `setu new --workspace` (where it sets the base port), `setu
+ * generate app` (where it sets one member's), and the devtool opt-in (where it
+ * sets one member's devtool port), so no two sites can disagree about what a
+ * bindable port is. They already could not disagree with the MANIFEST reader —
+ * the range comes from {@linkcode isUsablePort} — and this closes the same gap
+ * between the flag sites.
  *
  * Presence is tested, not `stringFlag`: `parseArgs` records a valued flag as the
  * boolean `true` when the next token is itself flag-shaped or absent, so
@@ -84,17 +85,22 @@ export type PortFlagResult =
  * string instead would let the number the user typed vanish without a word.
  *
  * @param flags - The parsed flags
+ * @param flag - Which valued port flag to read. Every message names the flag as
+ * the user typed it, so a refusal never says `--port` when `--devtool-port` was
+ * supplied.
  * @returns The port, `ok` with no port when the flag is absent, or the refusal
  */
 export function readPortFlag(
   flags: Readonly<Record<string, string | boolean | readonly string[]>>,
+  flag: 'port' | 'devtool-port' = 'port',
 ): PortFlagResult {
-  const raw = flags['port'];
+  const raw = flags[flag];
   if (raw === undefined) return { ok: true };
   if (typeof raw !== 'string') {
     return {
       ok: false,
-      message: `--port needs a value: expected an integer between ${MIN_PORT} and ${MAX_PORT}. ` +
+      message:
+        `--${flag} needs a value: expected an integer between ${MIN_PORT} and ${MAX_PORT}. ` +
         `A negative number is read as another flag, so there is no port below ${MIN_PORT}.`,
     };
   }
@@ -103,7 +109,8 @@ export function readPortFlag(
   if (!isUsablePort(port)) {
     return {
       ok: false,
-      message: `Invalid --port "${raw}": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+      message:
+        `Invalid --${flag} "${raw}": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
     };
   }
   return { ok: true, port };
@@ -115,6 +122,24 @@ export interface WorkspaceMember {
   readonly name: string;
   /** The port this member binds, and the port its siblings dial. */
   readonly port: number;
+  /**
+   * The IPv4 loopback port this member's local diagnostics connector listens
+   * on, when the devtool opt-in recorded one.
+   *
+   * Recorded at `generate app --devtool` / `setu devtool enable` time for the
+   * same reason {@linkcode healthProbes} is: the value must be the SAME datum
+   * the launcher dials and the member's own generated dev entry binds, and the
+   * launcher reads only this manifest.
+   *
+   * ABSENT means "not enabled", not "unknown": unlike a probe path, a member
+   * without a devtool port runs exactly `main.ts` and offers no connector, and
+   * the dev runner keys on its presence only for the member the launcher named.
+   *
+   * Allocated from the same sequence as `port` and walked by
+   * {@linkcode allocatePort}, so no generated port ever collides — a fixed
+   * offset was rejected because nothing constrains `basePort` spacing.
+   */
+  readonly devtoolPort?: number;
   /** Sibling services that must answer `/ready` before this member starts. */
   readonly dependsOn?: readonly string[];
   /**
@@ -253,11 +278,24 @@ function toMember(value: unknown): WorkspaceMember | undefined {
     (!Array.isArray(dependsOn) ||
       !dependsOn.every((entry) => typeof entry === 'string' && entry !== ''))
   ) return undefined;
+  // A DEFINED but wrong-shaped devtool port invalidates the manifest rather
+  // than being dropped, which is the caller's own rule one level down: a
+  // silently omitted `devtoolPort` is an address `ports --reallocate` then
+  // rewrites the manifest without, reporting success, while the member's
+  // `main.dev.ts` goes on binding the old number and the launcher has nothing
+  // left to dial. The two boolean siblings below keep the drop behaviour
+  // deliberately: they are released, absent means "unknown" for both, and
+  // tightening them would refuse manifests the CLI accepts today. No manifest
+  // can carry a malformed `devtoolPort` yet, so this refuses nothing that
+  // already exists.
+  const devtoolPort = record['devtoolPort'];
+  if (devtoolPort !== undefined && typeof devtoolPort !== 'number') return undefined;
   const healthProbes = record['healthProbes'];
   const metricsEndpoint = record['metricsEndpoint'];
   return {
     name,
     port,
+    ...(devtoolPort === undefined ? {} : { devtoolPort }),
     ...(dependsOn === undefined ? {} : { dependsOn }),
     ...(typeof healthProbes === 'boolean' ? { healthProbes } : {}),
     ...(typeof metricsEndpoint === 'boolean' ? { metricsEndpoint } : {}),
@@ -361,6 +399,20 @@ export async function readWorkspaceManifest(
         problem: { kind: 'invalid-port', port: member.port, field: `member "${member.name}"` },
       };
     }
+    // Range-checked on the way IN for the same reason `port` is: the value is
+    // written into the member's generated dev entry and read by the launcher as
+    // its connect address, so one bad number produces a project that cannot
+    // start its connector from a command that reported success.
+    if (member.devtoolPort !== undefined && !isUsablePort(member.devtoolPort)) {
+      return {
+        ok: false,
+        problem: {
+          kind: 'invalid-port',
+          port: member.devtoolPort,
+          field: `member "${member.name}" devtoolPort`,
+        },
+      };
+    }
     members.push(member);
   }
 
@@ -418,6 +470,13 @@ export function allocatePort(manifest: WorkspaceManifest): number | undefined {
   let highest = manifest.basePort - 1;
   for (const member of manifest.members) {
     if (member.port > highest) highest = member.port;
+    // Walked alongside `port`, so the allocator's whole contract — it never
+    // hands out a port already in use — holds over the 2N-value space a
+    // devtool-enabled workspace occupies. Reading `port` alone would hand the
+    // next member a port this member's connector already holds.
+    if (member.devtoolPort !== undefined && member.devtoolPort > highest) {
+      highest = member.devtoolPort;
+    }
   }
   const next = highest + 1;
   return isUsablePort(next) ? next : undefined;

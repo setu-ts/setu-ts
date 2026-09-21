@@ -211,7 +211,16 @@ describe('runNewCommand', () => {
       // Plugin-command discovery needs one seam that always exists.
       const h = harness();
       await h.run(['app']);
-      expect(h.fs.read('/work/app/setu.config.ts')).toContain('export function createApp()');
+      // The devtool composition is the SECOND parameter on every target
+      // (M98c): `setu commands` passes its discovery env as the FIRST
+      // argument, so a first-parameter extra would capture that proxy.
+      expect(
+        h.fs.read('/work/app/setu.config.ts'),
+      ).toContain(
+        'export function createApp(\n  _env?: Readonly<Record<string, unknown>>,\n' +
+          '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
+          '): IApplication {',
+      );
     });
 
     it('carries only the runtime plugin without --template', async () => {
@@ -249,9 +258,11 @@ describe('runNewCommand', () => {
 
       expect(config).toContain('await createFullStackAppFromConfig(');
       expect(config).toContain("from '@setu-ts/full-stack-starter'");
-      // The kernel is not on this path at all.
+      // The kernel is not called on this path — the starter composes — but the
+      // devtool parameter's type names `KernelDiagnosticsOptions` (M98c), so
+      // the config still imports the package, as a type.
       expect(config).not.toContain('createApplication');
-      expect(config).not.toContain('@setu-ts/kernel');
+      expect(config).toContain('import type { KernelDiagnosticsOptions } from');
     });
 
     it('exports an async factory, which the loader already awaits', async () => {
@@ -265,7 +276,7 @@ describe('runNewCommand', () => {
       expect(config).not.toContain('.start(');
     });
 
-    it('pins the starter in the manifest and drops the kernel', async () => {
+    it('pins the starter and the kernel the devtool parameter names', async () => {
       const h = harness();
       await h.run(['shop', '--template', 'full-stack']);
       const manifest = JSON.parse(h.fs.read('/work/shop/deno.json'));
@@ -273,8 +284,10 @@ describe('runNewCommand', () => {
       expect(manifest.imports['@setu-ts/full-stack-starter']).toContain(
         'jsr:@setu-ts/full-stack-starter@',
       );
-      // Declaring the kernel would name a package the project never imports.
-      expect(manifest.imports['@setu-ts/kernel']).toBeUndefined();
+      // The factory's devtool parameter names `KernelDiagnosticsOptions`
+      // (M98c), so the config imports the kernel even on the starter path —
+      // as a type, never calling `createApplication`.
+      expect(manifest.imports['@setu-ts/kernel']).toMatch(/^jsr:@setu-ts\/kernel@\^/);
       // Still needed: the config module imports the IApplication type.
       expect(manifest.imports['@setu-ts/common']).toBeDefined();
     });
@@ -373,17 +386,23 @@ describe('runNewCommand', () => {
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
       expect(entry).toContain('await ensureBooted(env);');
       expect(entry).toContain('createApp(env)');
-      expect(config).toContain('export function createApp(env: Readonly<Record<string, unknown>>');
+      // The devtool parameter is the second one on every target (M98c), so
+      // the env parameter keeps its default and the signature wraps.
+      expect(config).toContain(
+        'export function createApp(\n  env: Readonly<Record<string, unknown>> = {},',
+      );
       expect(config).toContain('RuntimePlugin({ env })');
     });
 
-    it('leaves templates without a factory rendering exactly as before', async () => {
-      // The field is additive: the rest template must be untouched by it.
+    it('renders the plugin-list factory with the devtool parameter on every target', async () => {
+      // M98c changed the signature deliberately: the devtool composition is
+      // the SECOND parameter, and `_env` absorbs the discovery proxy `setu
+      // commands` passes first. The rest of the factory renders as before.
       const h = harness();
       await h.run(['api', '--template', 'rest']);
       const config = h.fs.read('/work/api/setu.config.ts');
 
-      expect(config).toContain('export function createApp(): IApplication');
+      expect(config).toContain('export function createApp(');
       expect(config).toContain('createApplication({');
       expect(config).toContain("app.router.get('/'");
       expect(config).not.toContain('await create');
