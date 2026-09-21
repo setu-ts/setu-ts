@@ -5338,7 +5338,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `KernelDiagnosticsOptions`, so even starter-composed templates reference it now), a type-only
   package import renders in the `import type { … }` form, and every generated Deno workspace's root
   `dev` task carries the scoped `--allow-env` grant whether or not the devtool is enabled. Each fix
-  carries a test verified to fail without it — complete (PR pending).
+  carries a test verified to fail without it — complete (PR #352).
 - **Milestone 99b** (`packages/cli` + `docs` — generated output is usable): generated workspace
   Dockerfiles use `deno run --frozen`, retaining the lockfile resolution cached at build time
   without writing under a read-only root. The generated deployment gate installs the scaffold before
