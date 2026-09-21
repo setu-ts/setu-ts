@@ -373,11 +373,21 @@ grace period is real because the generated entry handles `SIGTERM`, and the star
 
 ### The image is the member's only dependency source at runtime
 
-The generated Deno image resolves its graph at build time (`deno cache main.ts`) and its start
-command runs with `--frozen`. The generated Dockerfile copies `deno.lock` before caching, and
+The generated Deno image runs `deno cache main.ts && deno install && deno install --frozen` at build
+time and starts with `--frozen`. The generated Dockerfile copies `deno.lock` before that step, and
 `--frozen` makes runtime resolution use those same pinned versions without modifying the lockfile.
-That closes the original read-only-root failure, where the first lazy driver registration attempted
-to add an edge to `deno.lock`:
+
+The third step is the one that makes the first two safe. Deno records a jsr package's npm edge list
+nondeterministically on a cold cache: four `--no-cache` builds of one unchanged workspace left
+`@setu-ts/messaging-plugin` missing its `npm:amqplib` and `npm:ioredis` edges twice and complete
+twice, while both packages were recorded in the lockfile's package section every time. A runtime
+that refuses to write the lockfile therefore refuses to start against an incomplete one, from an
+image that built green. The install completes the edge lists the frozen check compares against, and
+the `--frozen` install verifies it, so a still-missing edge fails the build once rather than every
+container at startup.
+
+Refusing to write is also what closes the original read-only-root failure, where the first lazy
+driver registration attempted to add an edge to `deno.lock`:
 
 ```
 error: Failed writing lockfile
@@ -387,13 +397,14 @@ Caused by:
 
 `--no-lock` is not the remedy: it ignores the lockfile the build used and can choose a later npm
 transitive version that the image did not cache when a lazy driver loads. That forces an npm fetch
-at startup and fails in an air-gapped deployment. Run the workspace's printed `deno install` step
-before building an image so the lockfile records the resolved workspace graph; then `--frozen` keeps
-runtime resolution aligned with the cached build. `deno install --frozen` is a useful diagnostic for
-a checkout whose lockfile is stale: it exits non-zero instead of changing it.
+at startup and fails in an air-gapped deployment. The same `deno install --frozen` is a useful
+diagnostic outside a build, on any checkout whose lockfile may be stale: it exits non-zero instead
+of changing it.
 
 For an existing generated workspace, run `setu generate app <member>` to regenerate its managed
-Dockerfile, or replace its runtime `--no-lock` flag with `--frozen` before the next image build.
+Dockerfile. A Dockerfile emitted earlier needs both halves by hand: the build step extended to
+`deno cache main.ts && deno install && deno install --frozen`, and `--frozen` rather than
+`--no-lock` on the start command.
 
 Do not mount a volume over the image's `DENO_DIR` (the generated Deployment mounts only `/tmp` for
 exactly this reason): measured, a cold cache fails identically with and without network egress,

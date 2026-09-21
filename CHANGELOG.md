@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`cli` — a generated workspace image now verifies its lockfile at build time.** The build step is
+  `deno cache main.ts && deno install && deno install --frozen`, not `deno cache main.ts` alone.
+  Deno records a jsr package's npm edge list nondeterministically on a cold cache: four `--no-cache`
+  builds of one unchanged workspace left `@setu-ts/messaging-plugin` missing its `npm:amqplib` and
+  `npm:ioredis` edges twice and complete twice, while both packages were recorded in the lockfile's
+  package section every time. Runtime `--frozen` does not write the lockfile, so against an
+  incomplete one it refuses, and every container died at registration reporting a stale lockfile —
+  an image that built green and never served. `deno install` completes the edge lists the frozen
+  check compares against — the same resolver writes and verifies them — and `deno install --frozen`
+  proves it, so a still-missing edge fails the build once instead of every container at startup.
+  Regenerate an existing workspace's managed Dockerfile with `setu generate app <member>` to pick it
+  up.
+- **`check:deploy --generated` now sees this defect on every run rather than intermittently.** It
+  built from whatever lockfile the host's own install happened to write, so a Dockerfile regressed
+  to `deno cache main.ts` alone — the exact pre-fix form — passed it. The gate now strips every
+  framework `npm:` edge from the scaffolded workspace's lockfile before building the image, leaving
+  every resolved version pin intact, so the build has to establish lock completeness itself; that
+  same regressed Dockerfile now fails. A strip that removes nothing fails the gate rather than
+  passing quietly.
 - **`cli` — generated workspace Dockerfiles now run with `deno run --frozen`.** The runtime uses the
   lockfile that its build cached and still cannot modify it on a generated read-only root, so a lazy
   broker driver cannot re-resolve an uncached npm transitive dependency at startup (M99b).
