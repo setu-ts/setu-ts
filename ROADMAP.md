@@ -10933,6 +10933,60 @@ the original read-only write remains impossible. **`check:deploy --generated` ca
 scaffolds, builds and runs without ever executing `deno install`, so it ships the stub lockfile and
 build and runtime coincidentally agree. The gate needs a `deno install` step.
 
+**Correction — that fix was incomplete, and the mechanism is nondeterminism in Deno, not a missing
+step.** `--frozen` closed the npm fetch and opened a second failure in its place: **Deno records a
+jsr package's npm edge list nondeterministically on a cold cache.** Four `--no-cache` builds of one
+unchanged scaffolded workspace produced `@setu-ts/messaging-plugin` entries missing their
+`npm:amqplib` and `npm:ioredis` edges **twice and complete twice** — while both packages were
+recorded in the lockfile's package section every time, which is what M95a D1 measured. `--frozen`
+does not write the lockfile, so against an incomplete one it refuses: the container dies at
+registration reporting a stale lockfile, from an image that built green. Observed on CI runs
+35537690216 (`main`) and 35538017399, both against trees carrying every M99b fix, and reproduced
+byte-identically — line numbers included — by stripping those two edges from a scaffold's lockfile
+and building the generated Dockerfile from it. The same job had passed on `main` 67 minutes earlier
+(35534130695), and the diff between the two commits touches neither the CLI, the Dockerfile nor the
+gate — so the two outcomes are the nondeterminism rather than evidence of a second cause.
+
+**The fix is verification, not another resolution pass.** The build step is now
+`deno cache main.ts && deno install && deno install --frozen`: the cache compiles the entry's graph
+into the image, the install completes the edge lists the frozen check compares against, and the
+`--frozen` install proves it complete — so a still-missing edge fails the BUILD once, loudly, rather
+than every container at startup. Four consecutive cold builds under that form were complete and the
+image serves `/health` 200 under `--read-only` in a network-none namespace **from a bare scaffold
+with no host `deno install` at all**, which is the case the earlier form failed. The repair alone
+would have been one more nondeterministic pass; the verify is what makes the property structural —
+measured by dropping it, which is the one variant whose build still succeeds while shipping an
+incomplete lockfile.
+
+**Two things about that pair are measured rather than reasoned, because the obvious model of it is
+wrong.** The install does NOT complete the lockfile "from the manifests": `queue-plugin/deno.json`
+declares only its two AWS SDK packages, yet its jsr entry needs `npm:amqplib`/`npm:ioredis`, and
+`deno install` does not add them — `deno cache main.ts` does, from source analysis. Run against one
+scaffold, one lockfile, in one pass: `deno install` restored `@setu-ts/messaging-plugin`'s two edges
+and not `@setu-ts/queue-plugin`'s, while `deno cache main.ts` restored `queue-plugin`'s and not
+`messaging-plugin`'s. Their union is what the image ships. Why each misses the other's set is not
+established, and jsr's own per-version dependency list carries all four for both packages, so the
+two steps stand on the measurement rather than on a model of Deno's resolver.
+
+And the verify's scope is the INSTALL view of completeness, not that union. Built without the cache
+step, from a lockfile with every framework npm edge stripped, `deno install --frozen` exits 0 with
+`queue-plugin`'s `npm:ioredis` still absent — and that image serves anyway, so it is a latent limit
+rather than a live defect. It is recorded because it is the one way this could recur: a runtime path
+that needs a cache-only edge would pass the build-time verify and fail at registration. Nothing in
+the image catches that — **`check:deploy --generated` does**, and only because of the second half of
+this fix.
+
+**The gate could not see any of this, which is why it caught the defect intermittently at best.** It
+built from whatever lockfile the host's own install happened to write, so a host that got a complete
+one handed the image a property it never established. Measured: with the gate as it stood, the
+Dockerfile regressed to `RUN deno cache main.ts` alone — the exact pre-fix form — **passes**. The
+gate now strips every framework `npm:` edge from the scaffold's lockfile before the build
+(`stripFrameworkNpmEdges`), leaving every resolved version pin intact, so the build must establish
+lock completeness itself and every run drives that repair end to end through a served `/health`.
+Under the strip the same regressed Dockerfile fails with the register's own error at lines 118–119,
+dropping the repairing install fails the build, and a strip that removes nothing is refused rather
+than passing quietly.
+
 **V7-8 — a scaffold interrupted mid-write is not retryable, and the refusal blames the user.**
 Reported by **`kantorcodes1`** on r/SideProject, from reading the source rather than running it; the
 reading is accurate. `writeFiles` (`utils/file-writer.ts:193-208`) is a bare `mkdir`/`writeFile`
