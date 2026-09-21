@@ -137,10 +137,26 @@ describe('inject() carries each documented body shape', () => {
     expect(echoed.contentType).toBe(null);
   });
 
-  it('awaits a Blob to bytes with NO content-type default', async () => {
+  it('carries a typeless Blob verbatim with NO content-type default', async () => {
     const echoed = await echo(new Blob([encoder.encode('blob-bytes')]));
     expect(echoed.body).toBe('blob-bytes');
     expect(echoed.contentType).toBe(null);
+  });
+
+  it('defaults a typed Blob content type from blob.type, as the platform does (M99c V7-1)', async () => {
+    // `new Request(url, { body: blob })` sets the header from `blob.type` —
+    // the caller HAS said what the bytes are, so `inject()` now says it too.
+    const echoed = await echo(new Blob([encoder.encode('PNG-DATA')], { type: 'image/png' }));
+    expect(echoed.body).toBe('PNG-DATA');
+    expect(echoed.contentType).toBe('image/png');
+  });
+
+  it('lets an explicit header beat a typed Blob own type (M99c §3.4)', async () => {
+    const echoed = await echo(
+      new Blob([encoder.encode('x')], { type: 'image/png' }),
+      { 'content-type': 'multipart/form-data; boundary=m99c' },
+    );
+    expect(echoed.contentType).toBe('multipart/form-data; boundary=m99c');
   });
 
   it('lets an explicitly supplied content type win over every default', async () => {

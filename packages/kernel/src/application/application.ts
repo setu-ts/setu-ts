@@ -871,8 +871,10 @@ class Application implements IKernelApplication {
 
     // The default is PER SHAPE: a URLSearchParams body defaulting to
     // `application/json` would arrive as a non-form and the form parse would
-    // refuse the input this widening exists to carry, and a byte-ish body
-    // gets NO default at all because only the caller knows its encoding.
+    // refuse the input this widening exists to carry; a `Uint8Array` or an
+    // `ArrayBuffer` gets NO default at all because only the caller knows its
+    // encoding; and a `Blob` declares its own through `.type` (M99c), the
+    // same header the platform sets for `new Request(url, { body: blob })`.
     if (
       bodyBytes !== undefined && defaultContentType !== undefined && !headers.has('content-type')
     ) {
