@@ -24,7 +24,13 @@ import {
   PROGRAM_NAME,
   TEMPLATES,
 } from '../constants.ts';
-import { devtoolRuntimeRefusal, devtoolStarterRefusal, withDevtool } from '../devtool/planner.ts';
+import {
+  devtoolDevRunner,
+  devtoolRunnerRefusal,
+  devtoolRuntimeRefusal,
+  devtoolStarterRefusal,
+  withDevtool,
+} from '../devtool/planner.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
@@ -511,12 +517,34 @@ export async function runAppCommand(
   // back the port this very member is about to bind, and an explicit flag can
   // never collide with it.
   let devtoolPort: number | undefined;
+  // The workspace runner is written once, at workspace creation, and nothing
+  // regenerates it — so a workspace created before the devtool carries a runner
+  // that spawns every member's `start` task and passes no per-child
+  // environment. Adding a devtool member to it would report success and leave
+  // the connector unreachable, so it is refused here, before anything is
+  // planned, and created when it is simply absent.
+  let devtoolRunnerFile: GeneratedFile | undefined;
   if (devtoolRequested) {
     const runtimeRefusal = devtoolRuntimeRefusal(read.manifest.runtime);
     if (runtimeRefusal !== undefined) {
       deps.error(runtimeRefusal);
       return EXIT_USAGE;
     }
+    const runner = devtoolDevRunner();
+    let existingRunner: string | undefined;
+    try {
+      existingRunner = new TextDecoder().decode(
+        await deps.fs.readFile(joinPath(deps.dir, runner.path)),
+      );
+    } catch {
+      existingRunner = undefined;
+    }
+    const runnerRefusal = devtoolRunnerRefusal(existingRunner, runner.path);
+    if (runnerRefusal !== undefined) {
+      deps.error(runnerRefusal);
+      return EXIT_ERROR;
+    }
+    if (existingRunner === undefined) devtoolRunnerFile = runner;
     if (devtoolPortFlag.port !== undefined) {
       const devtoolTaken = read.manifest.members.find((member) =>
         member.port === devtoolPortFlag.port ||
@@ -639,7 +667,10 @@ export async function runAppCommand(
     return EXIT_ERROR;
   }
 
-  const files = plan.files.map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
+  const files = [
+    ...plan.files,
+    ...(devtoolRunnerFile === undefined ? [] : [devtoolRunnerFile]),
+  ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 
   if (args.flags['dry-run'] === true) {
     for (const file of files) deps.log(`would create ${file.path}`);

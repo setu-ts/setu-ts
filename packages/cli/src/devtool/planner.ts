@@ -16,6 +16,8 @@
 import { CONFIG_EXPORT, type TargetRuntime } from '../constants.ts';
 import type { EntryPort, ResolvedHost } from '../templates/project-files.ts';
 import { DEVTOOL_ENTRY_MODULE, devtoolTasks } from '../templates/project-files.ts';
+import { workspaceDevRunner } from '../workspace/dev-runner.ts';
+import { DEVTOOL_ENV_NAMES, workspaceProfile } from '../workspace/runtime-profile.ts';
 import { renderDevEntry } from './dev-entry.ts';
 
 /** Re-exported so command code reads one module for the devtool surface. */
@@ -30,6 +32,67 @@ export { DEVTOOL_ENTRY_MODULE };
  * listener's own named refusal, exactly as a colliding application port does.
  */
 export const DEFAULT_DEVTOOL_PORT = 4919;
+
+/**
+ * The workspace runner a devtool-enabled member needs, and where it goes.
+ *
+ * Only the Deno runner can host a devtool member — the connector refuses every
+ * non-Deno `listen`, and the opt-in is refused on the other two profiles before
+ * anything is written.
+ *
+ * @returns The runner's workspace-relative path and its current rendering
+ */
+export function devtoolDevRunner(): { readonly path: string; readonly contents: string } {
+  return workspaceDevRunner(workspaceProfile('deno'));
+}
+
+/**
+ * Names why a workspace's existing `scripts/dev.ts` cannot host the devtool.
+ *
+ * This is the three-outcome merge contract applied to the runner SCRIPT rather
+ * than only to the root `dev` task string that invokes it. The root task is
+ * widened in place from its pre-devtool value, so this command already knows it
+ * may be operating on a workspace created before the devtool existed; the
+ * script that task runs was left alone, and `devtool enable` therefore reported
+ * success on such a workspace while `deno task dev` went on spawning `main.ts`
+ * for every member. The connector never bound — and had it bound, the
+ * pre-devtool runner passes no per-child `env`, so every sibling would have
+ * inherited the credential pair M98b forbids them to see.
+ *
+ * Detection is the CONTRACT, not a byte comparison against a stored copy of the
+ * old rendering: a runner that reads {@linkcode DEVTOOL_ENV_NAMES} honors the
+ * handoff whether this CLI wrote it or the developer did, and one that does not
+ * cannot, however it got there. The file is the developer's once written —
+ * nothing regenerates it — so a runner this cannot classify is refused with its
+ * remedy rather than overwritten.
+ *
+ * @param existing - The current `scripts/dev.ts`, or `undefined` when absent
+ * @param path - The runner's path, for the refusal
+ * @returns The refusal message, or `undefined` when the runner already honors
+ * the contract, or is absent and will be created
+ */
+export function devtoolRunnerRefusal(
+  existing: string | undefined,
+  path: string,
+): string | undefined {
+  // Absent: the root `dev` task points at nothing, so this workspace cannot
+  // run at all today. Writing the current rendering repairs it rather than
+  // discarding anything.
+  if (existing === undefined) return undefined;
+  if (DEVTOOL_ENV_NAMES.every((name) => existing.includes(name))) return undefined;
+  return (
+    `${path} predates the devtool: it starts every member with that member's \`start\`` +
+    ` task and passes no per-child environment, so the development entry would never run` +
+    ` and the launcher would meet a closed port. It also hands every member the runner's` +
+    ` whole environment, which is how a sibling would come to hold this session's` +
+    ` credentials.\n` +
+    `The runner is yours once written, so this command will not overwrite it. Delete` +
+    ` ${path} and run this again — it is rewritten with the devtool-aware runner — or` +
+    ` port the change yourself: read ${DEVTOOL_ENV_NAMES.join(', ')}, spawn the named` +
+    ` member's \`dev\` task instead of \`start\`, and give every child an explicit \`env\`` +
+    ` that blanks all three for every other member.`
+  );
+}
 
 /**
  * The fragment that marks a config factory as carrying the devtool parameter.
@@ -101,9 +164,13 @@ export const STARTER_FACTORY_MARK = `export async function ${CONFIG_EXPORT}(`;
  * config rather than a resolved host.
  *
  * The starter-composed rendering is the only async factory shape this CLI
- * emits, so the async opening identifies it exactly; a hand-written async
- * factory that this check cannot classify proceeds, like the legacy-factory
- * check it runs beside.
+ * emits, so the async opening identifies it. Unlike
+ * {@linkcode legacyFactoryRefusal}, this check has no cannot-classify
+ * fallback — a hand-written async `createApp` is refused too, because the
+ * async shape is the only signal available and refusing is the safe side: a
+ * connector registered onto an application built elsewhere would refuse to
+ * activate at start with nothing saying why. The message therefore names the
+ * limit rather than asserting the project composes through a starter.
  *
  * @param source - The `setu.config.ts` contents
  * @returns The refusal message, or `undefined` for a plugin-list composition
@@ -111,11 +178,14 @@ export const STARTER_FACTORY_MARK = `export async function ${CONFIG_EXPORT}(`;
 export function starterConfigRefusal(source: string): string | undefined {
   if (!source.includes(STARTER_FACTORY_MARK)) return undefined;
   return (
-    `This project composes through a starter factory, which owns its construction — and` +
-    ` kernel diagnostics must be enabled at construction, the one place this CLI cannot` +
-    ` reach. The devtool therefore cannot be enabled here. The refusal is limited to the` +
-    ` factory shape this CLI emits; if you composed the application yourself, wire the` +
-    ` diagnostics plugin in your own development entry.`
+    `This project's createApp is async, which is the shape this CLI emits for a` +
+    ` starter-composed factory — and a starter owns its construction, while kernel` +
+    ` diagnostics must be enabled at construction, the one place this CLI cannot reach.` +
+    ` The devtool therefore cannot be enabled here.\nIf you wrote this factory yourself` +
+    ` rather than scaffolding a starter template, nothing is wrong with it: this check` +
+    ` cannot tell the two apart, so wire the diagnostics plugin into your own` +
+    ` development entry and pass the kernel diagnostics option where you construct the` +
+    ` application.`
   );
 }
 

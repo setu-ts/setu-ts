@@ -442,6 +442,16 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
       '\n  waitUntil?: (promise: Promise<unknown>) => void,' +
       `\n  _${DEVTOOL_PARAMETER}\n`
     : `\n  env: Readonly<Record<string, unknown>> = {},\n  _${DEVTOOL_PARAMETER}\n`;
+  // The kernel-diagnostics option is gated on the SAME condition as the plugin
+  // spread above: on Workers the parameter is rendered `_devtool`, so emitting
+  // a reference to `devtool` there produced a `setu.config.ts` that failed its
+  // own `deno check` with TS2552 and threw a ReferenceError at boot. The two
+  // halves of one composition must read one flag.
+  const devtoolDiagnostics = onWorkers ? '' : `
+    // Kernel diagnostics reach the CONSTRUCTOR only — the collector is built
+    // there — so the devtool option threads through this object rather than
+    // being registered onto a finished application.
+    ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),`;
   const devtoolDoc = onWorkers
     ? `\n * @param _devtool - Accepted for one signature on every target; the devtool is` +
       `\n * Deno-only, so a Workers project never supplies it and nothing here reads it.`
@@ -475,11 +485,7 @@ export function ${CONFIG_EXPORT}(${factoryParam}): IApplication {
   const app = createApplication({
     plugins: [
 ${pluginList}
-    ],
-    // Kernel diagnostics reach the CONSTRUCTOR only — the collector is built
-    // there — so the devtool option threads through this object rather than
-    // being registered onto a finished application.
-    ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
+    ],${devtoolDiagnostics}
   });
 ${middlewareLines}${setupLines}
   app.router.get('/', (ctx) => ctx.response.json({ message: 'Hello, World!' }));

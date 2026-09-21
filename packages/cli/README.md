@@ -168,12 +168,16 @@ Those three names are published CLI surface: renaming one is a breaking change, 
 task's `--allow-env` grant is scoped to exactly them.
 
 `setu devtool enable` merges into an existing `deno.json` — every task and key you added survives, a
-task or import pin you wrote is never replaced, and running the command twice is a no-op. It also
-adds the `@setu-ts/diagnostics-plugin` pin the development entry resolves through, so the project's
-own `check` task passes on the new entry without any edit. The refusals name their fix: a non-Deno
-runtime (the connector's listener refuses every non-Deno bind), a starter-composed template (kernel
-diagnostics must be enabled at construction), and a factory scaffolded before the devtool existed,
-which needs its signature widened before the command proceeds.
+task or import pin you wrote is never replaced, and running the command twice is a no-op. A
+workspace created before the devtool existed carries a `scripts/dev.ts` that nothing regenerates,
+and that runner starts every member with its `start` task; the command refuses such a workspace by
+name rather than reporting a success the launcher could not use, and names the one-line remedy
+(delete the runner and run the command again). It also adds the `@setu-ts/diagnostics-plugin` pin
+the development entry resolves through, so the project's own `check` task passes on the new entry
+without any edit. The refusals name their fix: a non-Deno runtime (the connector's listener refuses
+every non-Deno bind), a starter-composed template (kernel diagnostics must be enabled at
+construction), and a factory scaffolded before the devtool existed, which needs its signature
+widened before the command proceeds.
 
 ## Generated modules
 

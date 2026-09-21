@@ -14,18 +14,33 @@ All notable changes to this project are documented here. The format follows
   production graph never imports, add `dev` and `check` tasks, and record a
   `WorkspaceMember.devtoolPort` that `allocatePort` walks beside `port`, so no generated port
   collides and `ports --reallocate` moves both addresses together. The emitted config factory takes
-  the devtool composition as its SECOND parameter on every target — `setu
-  commands` passes its
-  inert discovery env first, so a first-parameter composition would throw. The entry reads
+  the devtool composition as its SECOND parameter on every target — `setu commands` passes its inert
+  discovery env first, so a first-parameter composition would throw. The entry reads
   `SETU_DEVTOOL_SESSION_ID` / `SETU_DEVTOOL_SESSION_KEY` from the environment, refuses to start
-  without a valid pair, and never mints one; the workspace runner forwards the pair to the member
-  the launcher names and blanks it for every sibling, under a root `dev` task whose `--allow-env`
-  grant is scoped to exactly those three names. `setu devtool enable` MERGES into an existing
-  `deno.json` (your tasks survive, a differing task refuses by name, a second run is a no-op) and
-  refuses by name — with the exact signature to write — on a factory scaffolded before this letter,
-  whose zero-parameter shape would otherwise discard the composition in silence. A project
-  type-checks, boots, and answers the reviewed `createDiagnosticsClient` through the new end-to-end
-  gate.
+  without a valid pair, and never mints one; in a workspace the launcher also sets
+  `SETU_DEVTOOL_MEMBER`, and the generated `scripts/dev.ts` forwards all three to that member's
+  child alone while blanking them for every sibling, under a root `dev` task whose `--allow-env`
+  grant is scoped to exactly those three names. **All three are published CLI surface**: renaming
+  one is a breaking change to every scaffolded project. `setu devtool enable` MERGES into an
+  existing `deno.json` (your tasks survive, a differing task refuses by name, a second run is a
+  no-op) and refuses by name — with the exact signature to write — on a factory scaffolded before
+  this letter, whose zero-parameter shape would otherwise discard the composition in silence. It
+  refuses a workspace whose `scripts/dev.ts` predates the devtool for the same reason: nothing
+  regenerates that file, so it would still spawn every member's `start` task and pass no per-child
+  environment — the refusal names the remedy, and a workspace missing the runner entirely gets it
+  written. A project type-checks, boots, and answers the reviewed `createDiagnosticsClient` through
+  the new end-to-end gate.
+
+### Changed
+
+- **`cli` — every newly scaffolded project declares `@setu-ts/kernel` and a two-parameter
+  `createApp` (M98c).** The config factory's devtool parameter names `KernelDiagnosticsOptions`, so
+  the kernel is now pinned on every target — including starter-composed templates, which referenced
+  nothing from it before. A package import naming only types renders in the `import type { … }`
+  form. Every generated Deno workspace's root `dev` task also carries the scoped
+  `--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER` grant its
+  runner reads, whether or not the devtool is enabled. Existing projects are unaffected: nothing
+  regenerates a scaffolded file, and `--allow-net` is unchanged and still unscoped.
 
 ### Fixed
 

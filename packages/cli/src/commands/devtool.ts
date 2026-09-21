@@ -38,6 +38,8 @@ import {
   deriveDevTask,
   DEVTOOL_ENTRY_MODULE,
   devtoolCheckTask,
+  devtoolDevRunner,
+  devtoolRunnerRefusal,
   devtoolRuntimeRefusal,
   legacyFactoryRefusal,
   starterConfigRefusal,
@@ -475,6 +477,22 @@ async function enableInWorkspace(
     );
   }
 
+  // The root `dev` task is only half the handoff: the SCRIPT it runs has to
+  // read the three variables and hand them to one child. A workspace created
+  // before the devtool carries the old runner, which nothing regenerates —
+  // widening the task above while leaving that script stale is a command that
+  // reports success and leaves the connector unreachable.
+  const runner = devtoolDevRunner();
+  const runnerPath = joinPath(dir, runner.path);
+  let existingRunner: string | undefined;
+  try {
+    existingRunner = new TextDecoder().decode(await deps.fs.readFile(runnerPath));
+  } catch {
+    existingRunner = undefined;
+  }
+  const runnerRefusal = devtoolRunnerRefusal(existingRunner, runner.path);
+  if (runnerRefusal !== undefined) return reportInapplicable(deps, runnerRefusal);
+
   const devtoolPort = await resolveDevtoolPort(manifest, requestedPort, deps);
   if (typeof devtoolPort === 'string') return reportInapplicable(deps, devtoolPort);
 
@@ -506,6 +524,9 @@ async function enableInWorkspace(
   };
 
   planManifestWrites(planned, handles);
+  if (existingRunner === undefined) {
+    planned.push({ path: runnerPath, contents: runner.contents, creating: true });
+  }
   if (existingEntry === undefined) {
     planned.push({ path: entryPath, contents: entry, creating: true });
   }

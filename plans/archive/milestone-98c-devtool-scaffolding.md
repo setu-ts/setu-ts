@@ -1,7 +1,7 @@
 # Milestone 98c — Devtool Scaffolding (`@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m98c-devtool-scaffolding`. `main` is protected — all work
-> (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete — archived. Branch: `feat/m98c-devtool-scaffolding`. `main` is protected —
+> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
 

@@ -290,8 +290,14 @@ describe('workspace scaffolding — end to end', () => {
     const root = JSON.parse(await Deno.readTextFile(`${ws}/deno.json`)) as {
       tasks?: Record<string, string>;
     };
+    // The scoped `--allow-env` is how the runner reads the three credential
+    // variables it forwards; `--allow-net` stays UNSCOPED, because an
+    // allowlist governs outbound as well as bind on Deno. The names themselves
+    // are pinned by unit/dev-runner-grant.test.ts.
     expect(root.tasks?.['dev']).toBe(
-      'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
+      'deno run --allow-read --allow-run --allow-net ' +
+        '--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER ' +
+        'scripts/dev.ts',
     );
     for (const member of ['orders', 'billing']) {
       const manifest = JSON.parse(
@@ -472,7 +478,9 @@ describe('workspace scaffolding — end to end', () => {
     // drop the globs that make it a workspace at all.
     expect(rootManifest.workspace).toEqual(['./apps/*', './libs/*']);
     expect(rootManifest.tasks?.['dev']).toBe(
-      'deno run --allow-read --allow-run --allow-net scripts/dev.ts',
+      'deno run --allow-read --allow-run --allow-net ' +
+        '--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER ' +
+        'scripts/dev.ts',
     );
 
     // The route whose absence made `/` a blank 200 in every scaffolded

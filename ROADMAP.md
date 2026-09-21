@@ -10805,7 +10805,12 @@ that drives the real loader.
 - [x] A devtool opt-in on `setu new` and `setu generate app`, and one `setu devtool enable` command
       for a project that already exists, all three calling one planner so the emitted files cannot
       drift between them. Every inapplicable case refuses by name and writes nothing: a non-Deno
-      runtime, a member already enabled, an unreadable manifest, an out-of-range port.
+      runtime, a starter-composed template (kernel diagnostics reach the application constructor,
+      which a starter factory owns), an unreadable manifest, an out-of-range port, and a workspace
+      whose `scripts/dev.ts` predates the devtool — nothing regenerates that file, so widening the
+      root `dev` task without it would report success and leave the connector unreachable. A member
+      that is ALREADY enabled is not a refusal but an idempotent no-op, so running the command twice
+      is not an error.
 - [x] A second allocated port per workspace member, recorded as `WorkspaceMember.devtoolPort` and
       walked by `allocatePort`, so no generated port ever collides. `ports --reallocate` moves both
       together and regenerates discovery, Compose and Kubernetes as it does today.

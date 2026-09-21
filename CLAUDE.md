@@ -5287,8 +5287,58 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `SETU_DEVTOOL_SESSION_ID`/`SETU_DEVTOOL_SESSION_KEY` and refuses without a valid pair, the
   workspace runner forwards the pair to the named member alone under a root `dev` grant scoped
   `--allow-env` to exactly those three names, and `devtool enable` merges into an existing
-  `deno.json`, refusing the pre-M98c zero-parameter factory by name with the signature to write —
-  complete (PR pending).
+  `deno.json`, refusing the pre-M98c zero-parameter factory by name with the signature to write.
+
+  **Verification and code review then found two defects that `deno fmt`, `deno lint`, `deno check`,
+  both publish gates and the per-file coverage bar all passed over, and the suite was RED when the
+  milestone was first handed back** — four failures, three of them assertions this branch changed
+  behaviour under and left unupdated. The first defect is one of those three: **every Cloudflare
+  Workers project the CLI scaffolds could not compile.** The plugin spread was gated on `onWorkers`
+  and the kernel-diagnostics option beside it was not, so the emitted factory declared `_devtool`
+  and then referenced `devtool` — `TS2552` under the project's own check, a `ReferenceError` at
+  boot. Both halves of one composition now read one flag. It survived because `deno fmt` and
+  `deno lint` both pass on that file and the only place a Workers scaffold is type-checked is a
+  single assertion in `template-e2e`; the guard is now an identifier assertion in
+  `config-module.test.ts`, asserted for EVERY target that underscore-prefixes the parameter, with a
+  positive control so a fix that suppressed the composition everywhere would fail rather than pass.
+  It is deliberately NOT a bare `\bdevtool\b` word match — the JSDoc above each factory says "the
+  devtool is Deno-only" in prose, so a word match reports a comment as a reference and fails on
+  correct output (observed, then narrowed to the optional-chaining read form the renderer emits).
+
+  The second is this letter's own §3.1 failure mode on a file §3.1 never considered.
+  **`scripts/dev.ts` is written once by `setu new --workspace` and nothing regenerates it** — it is
+  in no `managedFiles` list — so a workspace created before the devtool kept a runner that spawns
+  `deno task start` for every member and passes no per-child `env`. `devtool enable` widened the
+  root `dev` TASK in place from its pre-devtool value, which is proof the command knew it might be
+  operating on such a workspace, and then left the SCRIPT that task runs alone: it reported success,
+  recorded a port, wrote `main.dev.ts`, and printed `SETU_DEVTOOL_MEMBER=… deno task dev` as the
+  next step — a command that then ran `main.ts` for every member, so no connector bound and the
+  launcher met a closed port. Had it bound, the stale runner would have handed every sibling the
+  credential pair M98b forbids them to hold, and the CLI README's claim that the runner "forwards
+  the pair to that member's child alone" was false for exactly the path `devtool enable <member>` is
+  documented for. `generate app --devtool` had the identical hole. Both entry points now refuse by
+  name before anything is written, naming the remedy, and a workspace missing the runner entirely
+  gets it written. Detection is the CONTRACT — does the runner read the three names — rather than a
+  byte comparison against a stored copy of the old rendering: a runner that reads them honors the
+  handoff whoever wrote it, and one that does not cannot, however it got there. The file is the
+  developer's once written (§3.8), so an unclassifiable runner is refused rather than overwritten.
+  Nothing could have caught it: `dev-runner-e2e` always writes the CURRENT runner into its fixture,
+  and the devtool unit harnesses seeded no runner at all.
+
+  Three smaller findings shipped with them: `SETU_DEVTOOL_MEMBER` — one of the three names approved
+  as published CLI surface, and the one a launcher must emit to select a member — was in neither
+  `PUBLIC_API.md` nor the CHANGELOG, only the package README; `starterConfigRefusal`'s JSDoc claimed
+  a cannot-classify fallback the function does not have (it refuses EVERY async `createApp`,
+  including a hand-written one), so the doc and the message now name that limit rather than
+  asserting the project composes through a starter; and the ROADMAP's D1 bullet still listed "a
+  member already enabled" as a refusal, with the box ticked, after the plan was corrected
+  mid-implementation to the idempotent no-op the code implements. The CHANGELOG also gained a
+  `Changed` section for the generated-output changes the `Added` entry did not name: every
+  scaffolded project now pins `@setu-ts/kernel` (the factory parameter names
+  `KernelDiagnosticsOptions`, so even starter-composed templates reference it now), a type-only
+  package import renders in the `import type { … }` form, and every generated Deno workspace's root
+  `dev` task carries the scoped `--allow-env` grant whether or not the devtool is enabled. Each fix
+  carries a test verified to fail without it — complete (PR pending).
 - **Milestone 99b** (`packages/cli` + `docs` — generated output is usable): generated workspace
   Dockerfiles use `deno run --frozen`, retaining the lockfile resolution cached at build time
   without writing under a read-only root. The generated deployment gate installs the scaffold before
