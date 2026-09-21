@@ -286,16 +286,18 @@ For testing, prefer `createTestApp()` — it calls `start()` automatically (with
 so you can call `inject()` or `fetch()` directly. See
 [Testing Package](#testing-package-setu-tstesting) for the full API.
 
-`inject()` carries the body shapes a request actually has (M95c): a `Uint8Array`, an `ArrayBuffer`
-and a `Blob` pass through VERBATIM — with no content-type default, since only the caller knows
-whether those bytes are multipart, JSON, or an image; a `URLSearchParams` is serialised with its own
-`toString()` and defaults `content-type` to `application/x-www-form-urlencoded`; a plain object is
-JSON-serialised and a bare `string` is carried as-is, both defaulting to `application/json`. An
-explicitly supplied content type always wins. Any other shape — an array, a `Date`, a class
-instance, a number — is refused with a `TypeError` naming the received type, not silently
-JSON-stringified: the previous behaviour turned a `Uint8Array` into `{"0":97,…}` and every other
-non-string into `{}` while answering 200, which made an injected multipart upload parse as an empty
-form.
+`inject()` carries the body shapes a request actually has (M95c): a `Uint8Array` and an
+`ArrayBuffer` pass through VERBATIM with no content-type default, since only the caller knows
+whether those bytes are multipart, JSON, or an image; a `Blob` also passes through verbatim and
+defaults `content-type` to its own `type` when that is non-empty — exactly what the platform does
+for `new Request(url, { body: blob })` — contributing nothing when the blob has no type; a
+`URLSearchParams` is serialised with its own `toString()` and defaults `content-type` to
+`application/x-www-form-urlencoded`; a plain object is JSON-serialised and a bare `string` is
+carried as-is, both defaulting to `application/json`. An explicitly supplied content type always
+wins. Any other shape — an array, a `Date`, a class instance, a number — is refused with a
+`TypeError` naming the received type, not silently JSON-stringified: the previous behaviour turned a
+`Uint8Array` into `{"0":97,…}` and every other non-string into `{}` while answering 200, which made
+an injected multipart upload parse as an empty form.
 
 ---
 
@@ -9831,14 +9833,14 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 
 ### Types
 
-| Export                          | Kind | Purpose                                                                                                                                                                                                                                    |
-| ------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ApplicationOptions`            | type | Options for `createApplication` (`{ plugins?: IPlugin[]; diagnostics?: KernelDiagnosticsOptions }`)                                                                                                                                        |
-| `IKernelApplication`            | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)`                                                                                                                                           |
-| `InjectRequest`                 | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }` — byte-ish bodies verbatim with no content-type default, `URLSearchParams` urlencoded-defaulted, plain object and string JSON-defaulted, anything else refused) |
-| `InjectResponse`                | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)                                                                                                                                                         |
-| `KernelDiagnosticsOptions`      | type | Kernel-diagnostics activation passed as `ApplicationOptions.diagnostics` (`{ labels?: KernelDiagnosticsLabelOptions }`); its PRESENCE is the activation, and an omitted option allocates nothing                                           |
-| `KernelDiagnosticsLabelOptions` | type | The four exact-match label allowlists (`plugins`/`capabilities`/`routes`/`middleware`), each at most 256 entries of at most 160 UTF-8 bytes with no control characters                                                                     |
+| Export                          | Kind | Purpose                                                                                                                                                                                                                                                                            |
+| ------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ApplicationOptions`            | type | Options for `createApplication` (`{ plugins?: IPlugin[]; diagnostics?: KernelDiagnosticsOptions }`)                                                                                                                                                                                |
+| `IKernelApplication`            | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)`                                                                                                                                                                                   |
+| `InjectRequest`                 | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }` — bytes verbatim with no content-type default, a `Blob` defaulted from its own non-empty `type`, `URLSearchParams` urlencoded-defaulted, plain object and string JSON-defaulted, anything else refused) |
+| `InjectResponse`                | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)                                                                                                                                                                                                 |
+| `KernelDiagnosticsOptions`      | type | Kernel-diagnostics activation passed as `ApplicationOptions.diagnostics` (`{ labels?: KernelDiagnosticsLabelOptions }`); its PRESENCE is the activation, and an omitted option allocates nothing                                                                                   |
+| `KernelDiagnosticsLabelOptions` | type | The four exact-match label allowlists (`plugins`/`capabilities`/`routes`/`middleware`), each at most 256 entries of at most 160 UTF-8 bytes with no control characters                                                                                                             |
 
 Contract notes:
 

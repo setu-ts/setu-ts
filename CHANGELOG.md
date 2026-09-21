@@ -132,6 +132,30 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`kernel` — `inject()` defaults a `Blob` body's content type from `blob.type`, so an injected
+  multipart Blob no longer 500s where the same Blob through `fetch()` answers 200 (M99c).** A `Blob`
+  CARRIES its type — the caller has said what the bytes are — and the platform's
+  `new Request(url, { body: blob })` sets the header from it, so the injected entry point now says
+  the same thing: a non-empty `blob.type` becomes the content-type default, a typeless Blob
+  contributes nothing, and an explicit `headers['content-type']` still wins. `Uint8Array` and
+  `ArrayBuffer` keep NO default: bytes alone genuinely say nothing about their encoding, so the
+  `0.7.0` entry's stated reasoning now names only those two shapes, which is the correction to it
+  this fix ships alongside.
+- **`sdk` — two correct naming rules shipped together no longer collide with each other (M99c).**
+  X11-6 made `@setu-ts/openapi-plugin` name a reused schema after its first use
+  (`getOrdersResponse200` → component `GetOrdersResponse200`); X11-9 made the generated client hoist
+  an inline multi-line response body under the SAME derivation. One schema that is both reused (so
+  it becomes that component) and rendered inline (so its body is hoisted) claimed the identical name
+  twice, and generation aborted with `Duplicate generated name
+  'GetOrdersResponse200'` — the
+  `0.6.0` SDK throws identically, so this is not a regression, only invisible until a document
+  carried the trigger. Neither entry above is rewritten: each rule is individually correct, and the
+  interaction is what changed. The component name is published surface of the document, so the
+  HOISTED ALIAS yields — it asks for its preferred name first (byte-identical output for every
+  document that generates today), takes `…Response<status>Body` when that is claimed, then an
+  allocated numeric suffix; and because an alias names an anonymous inline schema the document never
+  named, the same preference-and-fallback now resolves all four hoist sites (request body,
+  parameter, success response, error body) instead of moving the abort.
 - **`logger-plugin` — default redaction now covers normalized `authorization` headers.** The shipped
   default is lowercase and default matching is case-insensitive across both console and Pino
   transports; a caller-supplied `redact` list remains case-sensitive. This prevents Fetch's
@@ -388,15 +412,17 @@ All notable changes to this project are documented here. The format follows
   shapes a request actually has and refuses every other by name.** `InjectRequest.body` widens from
   an anything-goes `unknown` (documented "will be stringified if not a string", implemented as
   `JSON.stringify` of whatever arrived) to
-  `string | Uint8Array | ArrayBuffer | Blob | URLSearchParams | Record<string, unknown>`: the
-  byte-ish shapes pass through verbatim with NO content-type default (only the caller knows whether
-  bytes are multipart, JSON, or an image), a `URLSearchParams` is serialised with its own
-  `toString()` and defaults `application/x-www-form-urlencoded`, and a plain object (JSON) and a
-  bare string keep the `application/json` default. A byte body is COPIED rather than aliased, so a
-  handler that mutates what `ctx.request.bytes()` returned cannot corrupt the
-  `Uint8Array`/`ArrayBuffer` the test passed in, and a fixture reused across two injected requests
-  carries none of the first request's mutation. Previously a `Uint8Array` arrived as `{"0":97,…}`,
-  an `ArrayBuffer`/`Blob`/`URLSearchParams` each arrived as the two bytes `{}`, and the same release
+  `string | Uint8Array | ArrayBuffer | Blob | URLSearchParams | Record<string, unknown>`: a
+  `Uint8Array` and an `ArrayBuffer` pass through verbatim with NO content-type default (only the
+  caller knows whether those bytes are multipart, JSON, or an image), a `Blob` contributes its own
+  non-empty `type` as the default — as the platform does for `new Request(url, { body: blob })` — a
+  `URLSearchParams` is serialised with its own `toString()` and defaults
+  `application/x-www-form-urlencoded`, and a plain object (JSON) and a bare string keep the
+  `application/json` default. A byte body is COPIED rather than aliased, so a handler that mutates
+  what `ctx.request.bytes()` returned cannot corrupt the `Uint8Array`/`ArrayBuffer` the test passed
+  in, and a fixture reused across two injected requests carries none of the first request's
+  mutation. Previously a `Uint8Array` arrived as `{"0":97,…}`, an
+  `ArrayBuffer`/`Blob`/`URLSearchParams` each arrived as the two bytes `{}`, and the same release
   named `inject()` a producer of `IRequest.formData?()` — so an injected multipart upload parsed as
   an empty form. **Migration:** TypeScript callers are compile-checked. A JavaScript caller passing
   an array, `Date`, class instance or number must convert first: arrays and plain data to a plain

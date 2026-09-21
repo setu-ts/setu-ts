@@ -5126,8 +5126,16 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it edits sit where `main` left them — `metadata-store.ts` 99.0, `openapi-generator.ts` 98.4 and
   `decorator-plugin.ts` 98.4/100/99.0, whose only uncovered lines are the pre-existing
   `replayCustomDecorators` skip and the `autoDiscover` error loop) — complete (PR #328)
-- **Next milestone** — **M99c** (`packages/sdk`, `packages/openapi-plugin`, and `packages/kernel` —
-  two first-party components that must agree, and do not).
+- **Milestone 99c** (`packages/sdk`, `packages/openapi-plugin`, and `packages/kernel` — two
+  first-party components that must agree, and do not) — complete (PR pending). V7-6: the SDK's
+  hoisted aliases now allocate through a preference-and-fallback registry method — preferred name
+  first, the response arm's `…Response<status>Body` alternate, then an allocated numeric suffix — so
+  a document carrying a component the generator would name identically GENERATES instead of
+  aborting, with every alias that emits today unchanged (the byte-for-byte fixture is the guard).
+  V7-1: `inject()`'s Blob arm contributes `blob.type` as its content-type default, matching the
+  platform, so the same multipart Blob parses through `inject()` and `fetch()` alike.
+- **Next milestone** — **M99d** (`packages/decorator-plugin` and `packages/secrets-plugin` — a
+  composition the framework silently declines to give you).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

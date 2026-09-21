@@ -11472,5 +11472,5 @@ because one of them invalidated part of a previous run's claims:
 | 99        | ⬜     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                                |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                        |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                      |
-| 99c       | ⬜     | sdk + openapi-plugin + kernel — two first-party components that must agree, and do not                                                    |
+| 99c       | ✅     | sdk + openapi-plugin + kernel — two first-party components that must agree, and do not                                                    |
 | 99d       | ⬜     | decorator-plugin + secrets-plugin — a composition the framework silently declines to give you                                             |
