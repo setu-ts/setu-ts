@@ -85,6 +85,45 @@ class TypeNameRegistry {
     this.#claimed.set(name, origin);
     return name;
   }
+
+  /**
+   * Allocates a HOISTED alias's name: the preferred name first, then one
+   * alternate, then a numeric suffix `2`, `3`, … on the last candidate until
+   * one is free.
+   *
+   * A hoisted alias names an anonymous inline schema the document never
+   * named, so a collision is the generator's problem to solve — the generator
+   * may pick any identifier for it, and renaming it costs no consumer because
+   * the preferred name is what every document that generates today already
+   * emits. That is why this path ALLOCATES where {@linkcode claim} throws:
+   * every name derived from something the caller wrote — a component schema,
+   * an `operationId`, an option — keeps the hard throw, because silently
+   * renaming caller-written surface hides a real problem.
+   *
+   * The numeric fallback is allocated rather than assumed free because a
+   * suffix is not a namespace: a document may legally declare the suffixed
+   * name too, and `claim` throwing there would move the abort rather than
+   * remove it.
+   *
+   * @param preferred - Today's name, tried first so no alias that generates
+   *   today is renamed
+   * @param origin - What the name was derived from, for the diagnostic
+   * @param alternate - Second candidate; only the success-response arm passes
+   *   one (`…Response<status>Body`), where it reads correctly beside a
+   *   component of the same name — the numeric form on that arm
+   *   (`…Response2002`) reads as a status code
+   * @returns The claimed name — `preferred` whenever it was free
+   */
+  claimHoisted(preferred: string, origin: string, alternate?: string): string {
+    if (!this.#claimed.has(preferred)) return this.claim(preferred, origin);
+    if (alternate !== undefined && !this.#claimed.has(alternate)) {
+      return this.claim(alternate, origin);
+    }
+    const base = alternate ?? preferred;
+    let n = 2;
+    while (this.#claimed.has(`${base}${n}`)) n++;
+    return this.claim(`${base}${n}`, origin);
+  }
 }
 
 const RESERVED = new Set([
@@ -702,7 +741,7 @@ function getErrorArms(
       type: hoistMultiline(
         rendered,
         () =>
-          types.claim(
+          types.claimHoisted(
             `${sanitizeTypeName(operationId)}Error${status}Body`,
             `the ${status} response body of operation '${operationId}'`,
           ),
@@ -790,8 +829,12 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
     // shape that can be serialized into a URL or a header without guessing.
     type: hoistMultiline(
       renderSchema(p.schema ?? { type: 'string' }, new Set(), path, method),
+      // Every hoisted alias allocates through `claimHoisted`: the name is
+      // the generator's choice for a schema the document never named, so
+      // a collision here is solved, not aborted. Component schemas, the
+      // `*Args`/`*Error`/guard names below keep the hard `claim` throw.
       () =>
-        types.claim(
+        types.claimHoisted(
           `${sanitizeTypeName(entry.operationId)}${sanitizeTypeName(p.name)}Param`,
           `the '${p.name}' parameter of operation '${entry.operationId}'`,
         ),
@@ -812,7 +855,7 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
     ? hoistMultiline(
       renderSchema(bodySchema, new Set(), path, method),
       () =>
-        types.claim(
+        types.claimHoisted(
           `${sanitizeTypeName(entry.operationId)}Body`,
           `the request body of operation '${entry.operationId}'`,
         ),
@@ -899,10 +942,15 @@ function getSuccessTypes(
         // cannot be correct at both. Hoisting is the only fix available here.
         out.push(hoistMultiline(
           renderSchema(media.schema, new Set(), path, method),
+          // The response arm alone passes an alternate candidate: beside a
+          // component of the same name — the measured M99c collision —
+          // `…Response200Body` reads correctly, while the bare numeric form
+          // (`…Response2002`) reads as a status code.
           () =>
-            types.claim(
+            types.claimHoisted(
               `${sanitizeTypeName(operationId)}Response${s}`,
               `the ${s} response body of operation '${operationId}'`,
+              `${sanitizeTypeName(operationId)}Response${s}Body`,
             ),
           aliases,
         ));
