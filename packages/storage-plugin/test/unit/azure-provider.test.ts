@@ -928,3 +928,59 @@ describe('AzureBlobProvider', () => {
     expect(provider.isReady()).toBe(true);
   });
 });
+
+// ── getStream cancellation safety (stream-cancel-race fix) ────────────────
+
+describe('AzureBlobProvider getStream cancellation safety', () => {
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('cancel releases the iterator and destroys the stream; later chunks are never enqueued', async () => {
+    let destroys = 0;
+    async function* source(): AsyncGenerator<Uint8Array> {
+      yield new Uint8Array([1]);
+      await tick();
+      yield new Uint8Array([2]); // lands after the consumer cancelled
+      await tick();
+      yield new Uint8Array([3]);
+    }
+    const fakeClient = {
+      getContainerClient: () => ({
+        getBlockBlobClient: () => ({
+          uploadData: async () => {},
+          // deno-lint-ignore require-await
+          async download() {
+            return {
+              deleted: false,
+              readableStreamBody: Object.assign(source(), {
+                destroy(): void {
+                  destroys++;
+                },
+              }),
+              contentLength: 3,
+            };
+          },
+          delete() {
+            return Promise.resolve();
+          },
+          exists() {
+            return true;
+          },
+        }),
+      }),
+    } as unknown as IAzureBlobClient;
+    const provider = new AzureBlobProvider({ containerName: 'c', client: fakeClient });
+    await provider.connect();
+    const stream = await provider.getStream('cancel-race');
+    const reader = (stream as ReadableStream<Uint8Array>).getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    await reader.cancel();
+    expect(destroys).toBe(1);
+    // Let the cancelled source's remaining yields land: they must be a
+    // deliberate drop, never an enqueue into the closed controller. No
+    // uncaught TypeError reaching this line IS the assertion.
+    await tick();
+    await tick();
+    await tick();
+  });
+});

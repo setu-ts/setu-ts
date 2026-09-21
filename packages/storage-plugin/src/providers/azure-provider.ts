@@ -8,6 +8,7 @@
  */
 import type { PutObjectOptions } from '@setu-ts/common';
 import type { IAzureBlobClient, StorageProvider } from '../interfaces/index.ts';
+import { createEagerIterableStream } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
@@ -485,6 +486,14 @@ export class AzureBlobProvider implements StorageProvider {
    * Native stream download — adapts Azure `readableStreamBody` (Node Readable)
    * into a web `ReadableStream` via async iteration.
    *
+   * Cancellation-safe: the stream's `cancel` hook releases the iterator and
+   * destroys the underlying request, so a consumer cancelling mid-download
+   * neither leaks the connection nor crashes the process (previously the
+   * eager drain kept flowing after a cancel and the next chunk enqueued into
+   * the closed controller as an uncaught TypeError). Still an EAGER drain by
+   * documented contract — see `provider-stream.ts` and the README's
+   * per-provider table.
+   *
    * @param path - Object key
    * @returns A `ReadableStream`, or `null` if absent
    */
@@ -494,18 +503,7 @@ export class AzureBlobProvider implements StorageProvider {
       const result = await this.#getBlockBlob(path).download();
       if (result.deleted) return null;
       const readable = result.readableStreamBody as AsyncIterable<Uint8Array>;
-      return Promise.resolve(
-        new ReadableStream({
-          start(controller) {
-            (async () => {
-              for await (const chunk of readable) {
-                controller.enqueue(chunk);
-              }
-              controller.close();
-            })().catch((err) => controller.error(err));
-          },
-        }),
-      );
+      return Promise.resolve(createEagerIterableStream(readable));
     } catch (error) {
       if (isAzureNotFound(error)) return null;
       throw error;

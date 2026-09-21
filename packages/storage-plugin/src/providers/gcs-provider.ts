@@ -8,6 +8,8 @@
  */
 import type { PutObjectOptions } from '@setu-ts/common';
 import type { IGcsClient, StorageProvider } from '../interfaces/index.ts';
+import { createEagerIterableStream } from './provider-stream.ts';
+import type { EagerIterableSource } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
@@ -421,6 +423,14 @@ export class GcsProvider implements StorageProvider {
    * Native stream download — adapts GCS `createReadStream()` (Node Readable)
    * into a web `ReadableStream` via async iteration (no `node:` import needed).
    *
+   * Cancellation-safe: the stream's `cancel` hook releases the iterator and
+   * destroys the underlying request, so a consumer cancelling mid-download
+   * neither leaks the connection nor crashes the process (previously the
+   * eager drain kept flowing after a cancel and the next chunk enqueued into
+   * the closed controller as an uncaught TypeError). Still an EAGER drain by
+   * documented contract — see `provider-stream.ts` and the README's
+   * per-provider table.
+   *
    * @param path - Object key
    * @returns A `ReadableStream`, or `null` if absent
    */
@@ -428,23 +438,11 @@ export class GcsProvider implements StorageProvider {
     this.#assertConnected();
     try {
       const readable = this.#getFile(path).createReadStream();
+      // The GCS file type carries `NodeJS.ReadableStream` only, but the real
+      // SDK stream (and every test fake) is also an AsyncIterable; destroy is
+      // optional on the source for exactly this typing gap.
       return Promise.resolve(
-        new ReadableStream({
-          start(controller) {
-            const on = (event: string, cb: (arg: unknown) => void) => {
-              (readable as NodeJS.ReadableStream).on(event, cb);
-            };
-            on('data', (chunk: unknown) => {
-              controller.enqueue(chunk as Uint8Array);
-            });
-            on('end', () => {
-              controller.close();
-            });
-            on('error', (err: unknown) => {
-              controller.error(err as Error);
-            });
-          },
-        }),
+        createEagerIterableStream(readable as unknown as EagerIterableSource),
       );
     } catch (error) {
       if (isGcsNotFound(error)) return Promise.resolve(null);

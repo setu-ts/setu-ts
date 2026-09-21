@@ -156,13 +156,13 @@ Demand-driven streaming is **not** a property of `getStream?` in general. It hol
 and is measured there; the other providers reach the object differently, and two of them read as
 fast as the backend will send regardless of what the consumer is doing.
 
-| Provider                      | Streaming                | Bounded memory for a slow consumer                                 |
-| ----------------------------- | ------------------------ | ------------------------------------------------------------------ |
-| `S3Provider` (and the B2 arm) | Native, demand-driven    | **Yes** — measured; cancelling releases the upstream connection.   |
-| `GcsProvider`                 | Native, but eager        | **No** — enqueues on `'data'` with no `pull` and no `cancel` hook. |
-| `AzureBlobProvider`           | Native, but eager        | **No** — drains the SDK stream in a `for await` with no `cancel`.  |
-| `MemoryProvider`              | None — buffered fallback | **No** — the whole object is already in memory.                    |
-| `LocalStorageProvider`        | None — buffered fallback | **No** — `StorageService` reads it whole, then emits one chunk.    |
+| Provider                      | Streaming                | Bounded memory for a slow consumer                                      |
+| ----------------------------- | ------------------------ | ----------------------------------------------------------------------- |
+| `S3Provider` (and the B2 arm) | Native, demand-driven    | **Yes** — measured; cancelling releases the upstream connection.        |
+| `GcsProvider`                 | Native, but eager        | **No** — enqueues eagerly; cancelling now releases the upstream stream. |
+| `AzureBlobProvider`           | Native, but eager        | **No** — drains eagerly; cancelling now releases the upstream stream.   |
+| `MemoryProvider`              | None — buffered fallback | **No** — the whole object is already in memory.                         |
+| `LocalStorageProvider`        | None — buffered fallback | **No** — `StorageService` reads it whole, then emits one chunk.         |
 
 For the two eager providers and the two fallbacks, a large object is resident in memory regardless
 of how slowly the client reads, and an aborted download does not stop the upstream transfer. Only

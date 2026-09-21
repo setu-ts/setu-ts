@@ -12,6 +12,7 @@
  */
 import type { PutObjectOptions } from '@setu-ts/common';
 import type { IS3Backend, StorageProvider } from '../interfaces/index.ts';
+import { createBoundedNodeStream, looksLikeNodeReadable } from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
@@ -199,6 +200,19 @@ export function adaptAwsS3Module(
         );
         // Real SDK v3 Body is an SdkStreamMixin with transformToWebStream().
         if (res.Body && typeof res.Body.transformToWebStream === 'function') {
+          // When the body is the SDK's node stream (Deno/Node/Bun), wrap it
+          // ourselves: the adapter stream `transformToWebStream()` produces
+          // crashes the PROCESS when a consumer cancels while the origin
+          // connection tears down — a late `'data'` emission lands in the
+          // closed controller (`onData` → enqueue) as an uncaught TypeError
+          // (upstream ext:deno_node adapter defect, live on Deno 2.9.6).
+          // createBoundedNodeStream drives the node stream in paused mode,
+          // destroys it on cancel, and keeps the measured ~3.2 MiB
+          // read-ahead this suite pins (stream-backpressure-real.test.ts).
+          // Non-node-shaped bodies (injected fakes) keep the historical path.
+          if (looksLikeNodeReadable(res.Body)) {
+            return createBoundedNodeStream(res.Body);
+          }
           return res.Body.transformToWebStream() as ReadableStream<Uint8Array>;
         }
         // Fallback: Body is already a Web ReadableStream (injected fake).

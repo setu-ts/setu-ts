@@ -132,6 +132,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`storage-plugin` — cancelling a download no longer crashes the process (S3, GCS, Azure).**
+  `S3Provider.getStream` returned the SDK's node stream through Deno's `node:stream`-to-web adapter,
+  which enqueues on `'data'` without checking whether the web controller was already closed: a
+  `reader.cancel()` that raced origin teardown (a connection dropped while bytes were still flowing)
+  enqueued into the closed controller and threw an uncaught
+  `TypeError: The stream controller cannot close or enqueue` out of the tick queue, killing the
+  process. Node-shaped bodies are now wrapped in a pull-driven adapter
+  (`src/providers/provider-stream.ts`) that guards every controller touch and destroys the node
+  stream on cancel; the measured read-ahead shape is unchanged. `GcsProvider` and
+  `AzureBlobProvider` carried the same hazard in a deterministic form — no cancel hook at all, so a
+  cancelled download kept flowing and the next chunk hit the closed controller — and now route
+  through the same wrapper, which releases the upstream stream on cancel (they remain eager, not
+  demand-driven). A real-backend regression test drives the firing shape — three back-to-back reads,
+  then concurrent origin teardown and cancel — against MinIO.
 - **`logger-plugin` — default redaction now covers normalized `authorization` headers.** The shipped
   default is lowercase and default matching is case-insensitive across both console and Pino
   transports; a caller-supplied `redact` list remains case-sensitive. This prevents Fetch's
