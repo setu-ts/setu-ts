@@ -32,9 +32,12 @@ export interface CoercedInjectBody {
   /**
    * The content type to default to when the caller supplied none:
    * `application/x-www-form-urlencoded` for a `URLSearchParams`,
-   * `application/json` for a string or a plain object, and NONE for the
-   * byte-ish shapes — only the caller knows whether those bytes are multipart,
-   * JSON, or an image, and guessing would make the form parse refuse them.
+   * `application/json` for a string or a plain object, a `Blob`'s own `type`
+   * when that string is non-empty (matching the platform, whose
+   * `new Request(url, { body: blob })` sets the header from it and omits it
+   * when the blob has none), and NONE for a `Uint8Array` or an `ArrayBuffer`
+   * — those bytes carry no declared type, and guessing would make the form
+   * parse refuse them.
    */
   readonly defaultContentType: string | undefined;
 }
@@ -84,7 +87,17 @@ export async function coerceInjectBody(
     return { bytes: new Uint8Array(body.slice(0)), defaultContentType: undefined };
   }
   if (body instanceof Blob) {
-    return { bytes: new Uint8Array(await body.arrayBuffer()), defaultContentType: undefined };
+    // A Blob DECLARES its type in `.type`, so it contributes that as the
+    // content-type default — exactly what the platform does for
+    // `new Request(url, { body: blob })`, header omitted when the type is
+    // empty. The bare byte shapes stay default-free: bytes alone say nothing
+    // about their encoding, which is why an injected multipart Blob used to
+    // answer 500 (`UnsupportedFormEncodingError`) where the same Blob through
+    // `fetch()` answered 200.
+    return {
+      bytes: new Uint8Array(await body.arrayBuffer()),
+      defaultContentType: body.type.length > 0 ? body.type : undefined,
+    };
   }
   if (typeof body === 'object' && body !== null && isPlainObject(body)) {
     return {
