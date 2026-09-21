@@ -4,7 +4,25 @@ reviews:
   # Suppress the bot's "review skipped" status comment when this PR has not yet been approved.
   review_status: false
   auto_review:
-    enabled: false
+    # MUST stay true, and `labels` below is what gates the review — not this flag.
+    #
+    # `labels` FILTERS automatic review; it cannot switch it on. This was `false` from 2026-09-16
+    # to 2026-09-22 on the belief that the label re-enabled it, so NO pull request was ever
+    # reviewed automatically in that window — labelled ones included — and every review had to be
+    # requested by hand with an `@coderabbitai review` comment. `review_status: false` above is
+    # what made that silent: there is no "review skipped" notice, so a PR that will never be
+    # reviewed is indistinguishable from one whose review has not landed yet.
+    #
+    # If the intent is ever to suspend automatic review entirely, setting this to `false` is the
+    # right switch — but delete the `labels` list at the same time, because it becomes dead
+    # configuration that reads as a working gate. CodeRabbit's own escape hatch for the disabled
+    # state is a description keyword, not a label.
+    enabled: true
+    # Only the FIRST review is automatic. A re-review after pushing fixes is requested with an
+    # `@coderabbitai review` comment.
     auto_incremental_review: false
+    # A positive list restricts automatic review to PRs carrying one of these labels, which is the
+    # external-contribution gate: applying a label needs the Triage role or above, so `--label`
+    # from a fork fails with a 403 and nothing is applied.
     labels:
       - maintainer-review
