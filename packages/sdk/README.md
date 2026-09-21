@@ -415,16 +415,16 @@ publish or format it has nowhere to go.
 `generateOpenApiClient` throws `OpenApiCodegenError` — carrying `path` and `method` where they apply
 — rather than emitting a client that misbehaves or does not compile:
 
-| Condition                                                        | Why it is rejected                                           |
-| ---------------------------------------------------------------- | ------------------------------------------------------------ |
-| Missing `operationId`                                            | No name to derive a method from                              |
-| Two operations deriving onto one method name                     | Duplicate declaration; both originals are named              |
-| Two emitted TYPE names colliding                                 | Duplicate declaration; one registry covers all four families |
-| Parameter with `in: 'cookie'`                                    | Unsupported location                                         |
-| Path placeholder with no matching `in: 'path'` parameter         | Emitted source would reference an undeclared argument        |
-| `in: 'path'` parameter absent from the path template             | The caller's value would be silently dropped                 |
-| Two placeholders in one template deriving onto one argument name | Duplicate parameter in the emitted signature                 |
-| Malformed local `$ref`                                           | No component name to resolve                                 |
+| Condition                                                        | Why it is rejected                                                                                                                                             |
+| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Missing `operationId`                                            | No name to derive a method from                                                                                                                                |
+| Two operations deriving onto one method name                     | Duplicate declaration; both originals are named                                                                                                                |
+| Two emitted TYPE names colliding                                 | Duplicate declaration; one registry covers every emitted name. A HOISTED alias is the exception and does NOT throw — it allocates (see the naming rules above) |
+| Parameter with `in: 'cookie'`                                    | Unsupported location                                                                                                                                           |
+| Path placeholder with no matching `in: 'path'` parameter         | Emitted source would reference an undeclared argument                                                                                                          |
+| `in: 'path'` parameter absent from the path template             | The caller's value would be silently dropped                                                                                                                   |
+| Two placeholders in one template deriving onto one argument name | Duplicate parameter in the emitted signature                                                                                                                   |
+| Malformed local `$ref`                                           | No component name to resolve                                                                                                                                   |
 
 ## Errors
 

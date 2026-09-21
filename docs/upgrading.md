@@ -40,8 +40,10 @@ copy.
 
 Nothing to do in the normal case, and a test that was silently getting the wrong content type starts
 getting the right one. The one thing to change is code that READ the header back off its own
-`Headers` object after calling `inject()`, expecting to find what `inject()` had put there; read it
-from the response or set it explicitly instead.
+`Headers` object after calling `inject()`, expecting to find what `inject()` had put there. That
+object is now untouched, and `InjectResponse.headers` is no substitute — those are the RESPONSE
+headers. Either set the request's `content-type` explicitly, in which case it is both what you
+passed and what the handler sees, or read `ctx.request.headers` inside the handler and report it.
 
 <!-- version:history -->
 

@@ -130,13 +130,19 @@ export interface InjectRequest {
   /** Request headers. */
   headers?: Record<string, string> | Headers;
   /**
-   * Request body. Carried VERBATIM for the byte-ish shapes (`Uint8Array`,
-   * `ArrayBuffer`, `Blob`) — with no content-type default, since only the
-   * caller knows whether those bytes are multipart, JSON, or an image. A
-   * `URLSearchParams` is serialised with its own `toString()` and defaults the
-   * content type to `application/x-www-form-urlencoded`; a plain object is
-   * JSON-serialised and a bare `string` is carried as-is, both defaulting to
-   * `application/json`. An explicitly supplied content type always wins.
+   * Request body. Carried VERBATIM for every byte-ish shape, but the
+   * content-type default differs between them: a `Uint8Array` and an
+   * `ArrayBuffer` get NONE, since only the caller knows whether those bytes
+   * are multipart, JSON, or an image, while a `Blob` DECLARES its own and
+   * contributes a non-empty `.type` as the default — matching the platform,
+   * whose `new Request(url, { body: blob })` sets the header from it and omits
+   * it when the blob has none. A `URLSearchParams` is serialised with its own
+   * `toString()` and defaults the content type to
+   * `application/x-www-form-urlencoded`; a plain object is JSON-serialised and
+   * a bare `string` is carried as-is, both defaulting to `application/json`.
+   * An explicitly supplied content type always wins, and the default is
+   * written onto a COPY of `headers`, so a `Headers` instance reused across
+   * two injected requests is never mutated.
    *
    * Any other shape — an array, a `Date`, a class instance, a number — is
    * REFUSED with a `TypeError` naming the received type, rather than silently
