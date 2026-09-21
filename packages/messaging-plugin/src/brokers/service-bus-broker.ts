@@ -211,11 +211,10 @@ export interface ServiceBusOptions {
    */
   retryOptions?: ServiceBusRetryOptions;
   /**
-   * How long a recorded data-plane outcome stays authoritative (M95b), in
-   * ms. Default `5000`, matching the management probe's 5 s TTL so the two
-   * signals age together: below the age the broker's evidence window
-   * answers `reachability()` directly, above it the management probe
-   * answers exactly as it did before this option existed.
+   * How long a positive data-plane outcome stays authoritative, in ms.
+   * Default `5000`. A negative data-plane outcome is retained until a
+   * successful publish or a positive management probe contradicts it; elapsed
+   * time alone does not report a known outage as healthy.
    *
    * Must be a positive integer; a non-finite, fractional, zero or negative
    * value is REFUSED at construction rather than accepted (M95b review).
@@ -336,13 +335,11 @@ function classifyProbeFailure(error: unknown): boolean | undefined {
  * The two out-of-domain cases each reinstate a defect this broker exists to
  * close, and both arrive from ordinary configuration. **`NaN`** — what
  * `Number(env.X)` yields for an unset or misspelled variable — makes every
- * `elapsed >= window` comparison `false`, so recorded evidence NEVER ages
+ * `elapsed >= window` comparison `false`, so positive evidence NEVER ages
  * out and one publish at boot pins `reachability()` at its outcome
- * indefinitely: the fail-open shape X51 was filed for. **`0` or negative**
- * discards every outcome instantly, so `reachability()` always falls
- * through to the management probe — the pre-M95b behaviour, i.e. a switch
- * that asks for the defect back, which is why the option deliberately has
- * no disable arm.
+ * indefinitely. **`0` or negative** discard positive evidence instantly,
+ * making an idle recovery depend only on the management probe. The option
+ * deliberately has no disable arm.
  *
  * @param value - The configured window, or `undefined` for the default
  * @returns The validated window in ms
@@ -641,18 +638,21 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    * were publishing fine.
    */
   #probe: (() => Promise<boolean | undefined>) | null = null;
+  /** The uncached management-probe operation, used to invalidate stale probe results after an outage. */
+  #probeSource: (() => Promise<boolean | undefined>) | null = null;
   /**
-   * How long a recorded data-plane outcome stays authoritative (M95b).
-   * Defaults to {@linkcode PROBE_TTL_MS} so the evidence window and the
-   * management probe age together.
+   * How long a positive data-plane outcome stays authoritative (M99a).
+   * A negative outcome stays authoritative until a successful publish or a
+   * positive management probe contradicts it.
    */
   #evidenceMs: number;
   /**
    * The most recent data-plane outcome (M95b): `at` is a monotonic
    * `runtime.hrtime()` reading and `reachable` is whether the last real
-   * `transport.send` completed. `null` — no recent evidence — is the state
-   * `reachability()` falls through to the management probe on. Private
-   * state, read only by this broker's own `reachability()`.
+   * `transport.send` completed. `null` means no authoritative evidence, so
+   * `reachability()` falls through to the management probe; a negative record
+   * stays authoritative until contradicted. Private state, read only by this
+   * broker's own `reachability()`.
    */
   #evidence: { at: number; reachable: boolean } | null = null;
 
@@ -770,19 +770,9 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
     const transport = this.#transport;
     if (transport !== null && typeof transport.isHealthy === 'function') {
       const isHealthy = transport.isHealthy;
-      this.#probe = createCachedProbe<boolean | undefined>({
-        // Bound call: a transport's `isHealthy` may read instance state.
-        probe: () => isHealthy.call(transport),
-        // A probe that times out or rejects has not reached the namespace, so
-        // it cannot report on it. `false` — the helper's default, and correct
-        // for a probe that reads the backend directly — is wrong here (V5-2).
-        fallback: undefined,
-        ttlMs: PROBE_TTL_MS,
-        timeoutMs: PROBE_TIMEOUT_MS,
-        hrtime: this.#runtime.hrtime.bind(this.#runtime),
-        setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
-        clearTimer: (handle) => this.#runtime.clearTimeout(handle),
-      });
+      // Bound call: a transport's `isHealthy` may read instance state.
+      this.#probeSource = () => isHealthy.call(transport);
+      this.#probe = this.#createManagementProbe();
     }
 
     this.#ready = true;
@@ -804,6 +794,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       // real I/O against the closed client. Post-close `reachability()`
       // answers `undefined` — not known down (M70c), never stale `true`.
       this.#probe = null;
+      this.#probeSource = null;
       // The evidence window shares the probe's fate (M95b): a surviving
       // outcome would serve stale `true` for a client that no longer exists.
       this.#evidence = null;
@@ -819,11 +810,13 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    * Tri-state backend reachability (M70c, bounded in M90b; evidence-first
    * in M95b).
    *
-   * The evidence window is consulted FIRST: a recent data-plane outcome —
+   * The evidence is consulted FIRST: a data-plane outcome —
    * the success or network-layer failure of a real publish, recorded in
    * {@linkcode ServiceBusBroker.publishWithHeaders} at zero extra round
    * trips — answers directly, because the thing reported on should be the
-   * plane the application actually uses. With no recent evidence the
+   * plane the application actually uses. Positive evidence expires after
+   * {@linkcode ServiceBusOptions.dataPlaneEvidenceMs}; negative evidence is
+   * retained until contradicted. With no authoritative evidence the
    * management probe answers exactly as it did before M95b: the probe
    * delegates to the transport's `isHealthy?()` — the real adapter reads
    * the namespace through the administration client — through the broker's
@@ -838,26 +831,57 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    */
   async reachability(): Promise<boolean | undefined> {
     const evidence = this.#dataPlaneEvidence();
-    if (evidence !== undefined) {
+    if (evidence === true) {
       return evidence;
     }
     if (this.#probe === null) {
-      return undefined;
+      return evidence;
     }
-    return await this.#probe();
+    const managementReachability = await this.#probe();
+    if (evidence === false) {
+      if (managementReachability === true) {
+        this.#evidence = null;
+        return true;
+      }
+      return false;
+    }
+    return managementReachability;
+  }
+
+  /** Creates one bounded, cached management-plane probe from the current transport. */
+  #createManagementProbe(): (() => Promise<boolean | undefined>) | null {
+    const source = this.#probeSource;
+    if (source === null) {
+      return null;
+    }
+    return createCachedProbe<boolean | undefined>({
+      probe: source,
+      // A probe that times out or rejects has not reached the namespace, so
+      // it cannot report on it. `false` — the helper's default, and correct
+      // for a probe that reads the backend directly — is wrong here (V5-2).
+      fallback: undefined,
+      ttlMs: PROBE_TTL_MS,
+      timeoutMs: PROBE_TIMEOUT_MS,
+      hrtime: this.#runtime.hrtime.bind(this.#runtime),
+      setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),
+      clearTimer: (handle) => this.#runtime.clearTimeout(handle),
+    });
   }
 
   /**
-   * Reads the data-plane evidence window (M95b), answering `undefined` —
-   * no recent evidence — whenever the caller should fall through to the
-   * management probe instead. Evidence older than
-   * {@linkcode ServiceBusOptions.dataPlaneEvidenceMs} is discarded, so an
-   * idle broker's answer ages back to the probe's.
+   * Reads authoritative data-plane evidence. A negative result is retained
+   * until a successful publish or a positive management probe contradicts
+   * it; elapsed time does not heal an outage. A positive result expires after
+   * {@linkcode ServiceBusOptions.dataPlaneEvidenceMs}, then falls through to
+   * the management probe.
    */
   #dataPlaneEvidence(): boolean | undefined {
     const recorded = this.#evidence;
     if (recorded === null) {
       return undefined;
+    }
+    if (!recorded.reachable) {
+      return false;
     }
     // Strictly-within-the-window is authoritative — the same half-open
     // interval the management probe's TTL uses, so the two signals age on
@@ -866,7 +890,7 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
       this.#evidence = null;
       return undefined;
     }
-    return recorded.reachable;
+    return true;
   }
 
   /**
@@ -877,6 +901,12 @@ export class ServiceBusBroker implements MessageBrokerAdapter {
    */
   #recordDataPlaneOutcome(reachable: boolean): void {
     this.#evidence = { at: this.#runtime.hrtime(), reachable };
+    if (!reachable) {
+      // A positive cached management answer from before the failed publish
+      // cannot contradict the outage. Rebuild the cache so the next check
+      // asks the management plane anew.
+      this.#probe = this.#createManagementProbe();
+    }
   }
 
   /**

@@ -5277,6 +5277,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   bytes BEFORE parsing, with terminal failed pairing. Ships `scripts/inspect-local-diagnostics.ts`
   (real loopback consumer exercise, subprocess-tested, credentials stay in memory) and protocol
   fixtures with independently computed Web Crypto vectors — complete (PR #347).
+- **Milestone 99a** (`packages/logger-plugin` + `packages/common` + `packages/messaging-plugin` — a
+  control that reports safe for what it does not cover): default LoggerPlugin redaction now masks
+  Fetch-normalized `authorization` headers on both console and Pino transports while preserving
+  caller-supplied path casing; a Service Bus network publish failure remains down until a successful
+  publish or positive management probe contradicts it, rather than aging back to healthy — complete
+  (PR #350).
 - **Milestone 99b** (`packages/cli` + `docs` — generated output is usable): generated workspace
   Dockerfiles use `deno run --frozen`, retaining the lockfile resolution cached at build time
   without writing under a read-only root. The generated deployment gate installs the scaffold before

@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`logger-plugin` — default redaction now covers normalized `authorization` headers.** The shipped
+  default is lowercase and default matching is case-insensitive across both console and Pino
+  transports; a caller-supplied `redact` list remains case-sensitive. This prevents Fetch's
+  normalized bearer-token header from reaching structured logs (M99a).
+- **`messaging-plugin` — a known Service Bus data-plane outage no longer ages back to healthy.** A
+  network publish failure remains reachability evidence until a successful publish or a positive
+  management probe contradicts it; `dataPlaneEvidenceMs` now bounds positive evidence only (M99a).
+
 - **`cli` — a generated workspace image now verifies its lockfile at build time.** The build step is
   `deno cache main.ts && deno install && deno install --frozen`, not `deno cache main.ts` alone.
   Deno records a jsr package's npm edge list nondeterministically on a cold cache: four `--no-cache`
