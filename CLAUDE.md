@@ -5686,18 +5686,19 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   skipped" notice and an unlabelled PR looks exactly like one whose review has not arrived. Check
   the label landed rather than trusting the flag. The label buys the FIRST review only —
   `auto_incremental_review: false` sits beside it, so a re-review after pushing fixes still needs
-  `@coderabbitai review`. **`enabled` is not the gate**, and a previous revision of this bullet said
-  it was: the file read `enabled: false` from 2026-09-16 to 2026-09-22 on the belief that the label
-  re-enabled review, which instead meant NO PR was reviewed automatically — labelled ones included —
-  since `labels` filters review and cannot switch it on. PR #328 was blamed on a missing label at
-  the time; #344 and #353 then went unreviewed while labelled, which found the real cause.
-  Suspending automatic review means `enabled: false` AND deleting the `labels` list, so nobody reads
-  a dead gate as a working one. The repo file also overrides the CodeRabbit dashboard, so the web
-  toggle changes nothing while the file sets the same key. The maintainer's gate on EXTERNAL
-  contributions is untouched, and does not depend on this rule being obeyed: applying a label needs
-  the Triage role or above on this repository, so from a fork `--label` fails with a 403 and nothing
-  is applied — that is the gate working, not something to retry around. AI_GUIDELINES §16.7 is
-  canonical.
+  `@coderabbitai review`. The file read `enabled: false` from 2026-09-16 to 2026-09-22, and labelled
+  PRs went unreviewed in that window (#344, #353) — but that is an observation, not a rule about
+  `enabled`: CodeRabbit's contract is that a positive label opts a PR in even while automatic review
+  is disabled, so the old form should have worked. **The cause was never established**, and
+  `enabled: true` is the form that does not depend on that path rather than a diagnosed fix. If a
+  labelled PR still is not reviewed, ask by hand and record it — do not flip the flag again on a
+  guess. Suspending automatic review deliberately means `enabled: false` AND removing the positive
+  `labels` entry, since a positive label would otherwise keep opting PRs in. The repo file also
+  overrides the CodeRabbit dashboard (YAML > repo UI > org UI), so the web toggle changes nothing
+  while the file sets the same key. The maintainer's gate on EXTERNAL contributions is untouched,
+  and does not depend on this rule being obeyed: applying a label needs the Triage role or above on
+  this repository, so from a fork `--label` fails with a 403 and nothing is applied — that is the
+  gate working, not something to retry around. AI_GUIDELINES §16.7 is canonical.
 - **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
   the code-quality bot anchor findings to lines; answer in the thread
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with

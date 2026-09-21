@@ -1073,16 +1073,21 @@ label to an ALREADY-OPEN PR starts a review, rather than only carrying it at cre
 the setting and not measured — if a review does not appear, ask for one with `@coderabbitai review`
 rather than waiting.
 
-**`enabled` is not the gate, and getting that wrong disabled review entirely for six days.** From
-2026-09-16 to 2026-09-22 this file read `enabled: false` with the same `labels` list, on the belief
-that the label re-enabled review for one PR. It does not: `labels` FILTERS automatic review and
-cannot switch it on, so with `enabled: false` the list is dead configuration and **no** pull request
-was reviewed automatically — labelled ones included. Every review in that window had to be requested
-by hand with an `@coderabbitai review` comment, and because `review_status: false` suppresses the
-skip notice, nothing said so. PR #328 was diagnosed at the time as an unlabelled PR; PR #344 and PR
-#353 then went unreviewed **while labelled**, which is what exposed the real cause. If automatic
-review is ever to be suspended, set `enabled: false` **and delete the `labels` list**, so no one
-reads a dead gate as a working one.
+**From 2026-09-16 to 2026-09-22 this file read `enabled: false`, and labelled PRs were not reviewed
+— but do not read that as a rule about `enabled`.** CodeRabbit's documented contract is that a
+positive label opts a PR in _even while automatic review is disabled_
+([auto-review](https://docs.coderabbit.ai/configuration/auto-review)), so the old form expressed the
+same gate and should have worked. It did not: PR #344 and PR #353 both carried the label and neither
+was reviewed until a human commented `@coderabbitai review`. **The cause was never established.**
+`enabled: true` is not a diagnosed fix, only the form that does not depend on the disabled-mode
+opt-in path, which removes one variable. One candidate the documentation does not settle is timing —
+whether a label applied _as_ the PR is opened is seen by the same webhook that decides to review, or
+only a label applied afterwards is. If a labelled PR still goes unreviewed, the cause is elsewhere;
+ask for the review by hand and say so here rather than adjusting the flag again on a guess.
+
+To suspend automatic review deliberately, set `enabled: false` **and remove the positive entry from
+`labels`** — a positive label would otherwise keep opting PRs in — and leave `description_keyword`
+unset, which is the other opt-in trigger for the disabled state.
 
 A repository `.coderabbit.yaml` takes precedence over the CodeRabbit dashboard, so changing the
 toggle in the web UI has no effect while this file sets the same key — the edit must be here.

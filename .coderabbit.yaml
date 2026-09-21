@@ -4,19 +4,21 @@ reviews:
   # Suppress the bot's "review skipped" status comment when this PR has not yet been approved.
   review_status: false
   auto_review:
-    # MUST stay true, and `labels` below is what gates the review — not this flag.
+    # `true` beside a POSITIVE `labels` list means only PRs carrying one of those labels are
+    # reviewed — the documented form of the gate this repository wants.
     #
-    # `labels` FILTERS automatic review; it cannot switch it on. This was `false` from 2026-09-16
-    # to 2026-09-22 on the belief that the label re-enabled it, so NO pull request was ever
-    # reviewed automatically in that window — labelled ones included — and every review had to be
-    # requested by hand with an `@coderabbitai review` comment. `review_status: false` above is
-    # what made that silent: there is no "review skipped" notice, so a PR that will never be
-    # reviewed is indistinguishable from one whose review has not landed yet.
+    # This read `false` from 2026-09-16 to 2026-09-22. That was ALSO a valid way to express the
+    # same gate: CodeRabbit's contract is that a positive label opts a PR in even while automatic
+    # review is disabled. In practice it did not happen — PR #344 and PR #353 both carried the
+    # label and neither was reviewed until a human commented `@coderabbitai review`. The cause was
+    # never established, so this is not a diagnosed fix: `enabled: true` simply does not depend on
+    # the disabled-mode opt-in path, which removes one variable. If a labelled PR still goes
+    # unreviewed, the cause lies elsewhere and the two documented triggers remain the label and a
+    # manual `@coderabbitai review`.
     #
-    # If the intent is ever to suspend automatic review entirely, setting this to `false` is the
-    # right switch — but delete the `labels` list at the same time, because it becomes dead
-    # configuration that reads as a working gate. CodeRabbit's own escape hatch for the disabled
-    # state is a description keyword, not a label.
+    # To suspend automatic review deliberately, set this to `false` AND remove the positive entry
+    # from `labels` — a positive label would otherwise keep opting PRs in — and leave
+    # `description_keyword` unset, which is the other opt-in trigger for the disabled state.
     enabled: true
     # Only the FIRST review is automatic. A re-review after pushing fixes is requested with an
     # `@coderabbitai review` comment.
