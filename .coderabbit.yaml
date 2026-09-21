@@ -4,7 +4,27 @@ reviews:
   # Suppress the bot's "review skipped" status comment when this PR has not yet been approved.
   review_status: false
   auto_review:
-    enabled: false
+    # `true` beside a POSITIVE `labels` list means only PRs carrying one of those labels are
+    # reviewed — the documented form of the gate this repository wants.
+    #
+    # This read `false` from 2026-09-16 to 2026-09-22. That was ALSO a valid way to express the
+    # same gate: CodeRabbit's contract is that a positive label opts a PR in even while automatic
+    # review is disabled. In practice it did not happen — PR #344 and PR #353 both carried the
+    # label and neither was reviewed until a human commented `@coderabbitai review`. The cause was
+    # never established, so this is not a diagnosed fix: `enabled: true` simply does not depend on
+    # the disabled-mode opt-in path, which removes one variable. If a labelled PR still goes
+    # unreviewed, the cause lies elsewhere and the two documented triggers remain the label and a
+    # manual `@coderabbitai review`.
+    #
+    # To suspend automatic review deliberately, set this to `false` AND remove the positive entry
+    # from `labels` — a positive label would otherwise keep opting PRs in — and leave
+    # `description_keyword` unset, which is the other opt-in trigger for the disabled state.
+    enabled: true
+    # Only the FIRST review is automatic. A re-review after pushing fixes is requested with an
+    # `@coderabbitai review` comment.
     auto_incremental_review: false
+    # A positive list restricts automatic review to PRs carrying one of these labels, which is the
+    # external-contribution gate: applying a label needs the Triage role or above, so `--label`
+    # from a fork fails with a 403 and nothing is applied.
     labels:
       - maintainer-review

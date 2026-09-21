@@ -1045,20 +1045,20 @@ Reviewers must verify:
 ### 16.7 A New Pull Request Carries the `maintainer-review` Label
 
 **Applies to every AI agent working this repository — Claude Code, ChatGPT/Codex, Roo Code, and any
-future one.** Automatic CodeRabbit review is **disabled by default**. `.coderabbit.yaml` turns
-`auto_review` off entirely and re-enables it for one label:
+future one.** Automatic CodeRabbit review is restricted to one label. `.coderabbit.yaml`:
 
 ```yaml
 reviews:
   review_status: false
   auto_review:
-    enabled: false
+    enabled: true
     auto_incremental_review: false
     labels:
       - maintainer-review
 ```
 
-A pull request without that label is never reviewed automatically. Apply it as you open the PR:
+A positive `labels` list restricts automatic review to pull requests carrying one of those labels,
+so a PR without it is never reviewed automatically. Apply it as you open the PR:
 
 ```bash
 gh pr create --label maintainer-review --title '…' --body '…'
@@ -1067,10 +1067,30 @@ gh pr edit <pr> --add-label maintainer-review   # one that is already open
 
 **The omission is silent, which is what makes this a rule rather than a preference.** The same file
 sets `review_status: false`, so CodeRabbit posts no "review skipped" notice: an unlabelled PR is
-indistinguishable from one whose review has not landed yet, and waiting produces nothing. PR #328
-was opened unlabelled and sat unreviewed until a maintainer typed `@coderabbitai review` by hand —
-the label is what removes that step. Verify the label is present after opening the PR rather than
-assuming the flag took effect.
+indistinguishable from one whose review has not landed yet, and waiting produces nothing. Verify the
+label is present after opening the PR rather than assuming the flag took effect. Whether adding the
+label to an ALREADY-OPEN PR starts a review, rather than only carrying it at creation, is read from
+the setting and not measured — if a review does not appear, ask for one with `@coderabbitai review`
+rather than waiting.
+
+**From 2026-09-16 to 2026-09-22 this file read `enabled: false`, and labelled PRs were not reviewed
+— but do not read that as a rule about `enabled`.** CodeRabbit's documented contract is that a
+positive label opts a PR in _even while automatic review is disabled_
+([auto-review](https://docs.coderabbit.ai/configuration/auto-review)), so the old form expressed the
+same gate and should have worked. It did not: PR #344 and PR #353 both carried the label and neither
+was reviewed until a human commented `@coderabbitai review`. **The cause was never established.**
+`enabled: true` is not a diagnosed fix, only the form that does not depend on the disabled-mode
+opt-in path, which removes one variable. One candidate the documentation does not settle is timing —
+whether a label applied _as_ the PR is opened is seen by the same webhook that decides to review, or
+only a label applied afterwards is. If a labelled PR still goes unreviewed, the cause is elsewhere;
+ask for the review by hand and say so here rather than adjusting the flag again on a guess.
+
+To suspend automatic review deliberately, set `enabled: false` **and remove the positive entry from
+`labels`** — a positive label would otherwise keep opting PRs in — and leave `description_keyword`
+unset, which is the other opt-in trigger for the disabled state.
+
+A repository `.coderabbit.yaml` takes precedence over the CodeRabbit dashboard, so changing the
+toggle in the web UI has no effect while this file sets the same key — the edit must be here.
 
 `auto_incremental_review: false` sits beside it, so the label buys the **first** review and not a
 re-review: commits pushed to an already-reviewed PR are not picked up on their own, and asking for
