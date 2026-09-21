@@ -10812,7 +10812,10 @@ that drives the real loader.
 - [ ] A development entry point the production entry never imports, reading per-launch credentials
       from the process environment under names this letter fixes as published CLI surface, refusing
       to start when they are absent or malformed, and never generating, writing or printing a pair.
-      The names need §10.2 approval before implementation.
+      In a workspace the launcher also names the member it is inspecting, and the dev runner hands
+      the pair to that member's child alone while scrubbing it from every sibling — M98b forbids an
+      application subprocess inheriting these values. All three names need §10.2 approval before
+      implementation.
 - [ ] The generated config factory takes the devtool composition as its SECOND parameter on every
       target, with an integration test driving the real discovery loader so the collision above
       cannot return.
@@ -10823,10 +10826,13 @@ that drives the real loader.
 
 **Open questions the plan resolves rather than inherits:** whether the devtool port is allocated or
 offset (allocated — an offset collides once a workspace has enough members), where the launcher
-discovers endpoints (the workspace manifest it must already read, not a second CLI-owned index), and
-whether the generated `start` task's unscoped `--allow-net` is narrowed (deferred — it is a
-behaviour change for every generated project, and the M98b README's permission claim is scoped to
-the new `dev` task instead).
+discovers endpoints (the workspace manifest it must already read, not a second CLI-owned index), how
+one pair per application survives a runner that spawns every member (the launcher names the member
+it is inspecting, and the runner builds each child's environment explicitly — `Deno.Command` merges
+`env` and only `clearEnv: true` stops inheritance, measured), and whether any generated task's
+`--allow-net` is narrowed (no, on `start` and on `dev` alike — a scoped allowlist governs outbound
+as well as bind on Deno 2.9.6, so it would refuse the application's own database and broker calls;
+the loopback guarantee is the listener's, not a permission flag's).
 
 ### Threat Model and Acceptance Evidence
 
