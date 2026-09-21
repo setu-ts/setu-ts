@@ -10920,7 +10920,7 @@ together when one fix reasoning covers both, so a letter is one coherent branch 
 | -------- | --------------------------------------------------------------- | ------------------- | --------------------------------------------- |
 | **M99a** | a safety control that reports safe for a case it does not cover | V7-2 **High**, V7-4 | `logger-plugin`, `common`, `messaging-plugin` |
 | **M99b** | what the CLI writes cannot then be used                         | V7-5 **High**, V7-8 | `cli`, `docs`                                 |
-| **M99c** | two first-party components that must agree, and do not          | V7-6 **High**, V7-1 | `sdk`, `openapi-plugin`, `kernel`             |
+| **M99c** | two first-party components that must agree, and do not          | V7-6 **High**, V7-1 | `sdk`, `kernel`                               |
 | **M99d** | a composition the framework silently declines to give you       | V7-3, V7-7          | `decorator-plugin`, `secrets-plugin`          |
 
 **Sequence.** M99a first — it is the only letter where the defect is live in a running deployment's
@@ -11141,7 +11141,11 @@ one package, and both are cases no gate reaches because every gate drives the ha
 
 ### Milestone 99c: Two First-Party Components That Must Agree, And Do Not
 
-**Package(s):** `packages/sdk`, `packages/openapi-plugin`, `packages/kernel`
+**Package(s):** `packages/sdk`, `packages/kernel` — **corrected from the three this row was opened
+with** (the M70b/M70g/M70k/M90a precedent). `openapi-plugin` is the producer in both halves of V7-6
+and it changes nothing: §3.1 decides that the component name is published surface of the document,
+so the SDK's hoisted alias is the side that yields, and the generator's own
+`${operationId}Response${statusCode}` derivation is left exactly as it is.
 
 **Objective:** in both rows a producer and its intended first-party consumer disagree, so a
 documented loop cannot be completed.
@@ -11472,5 +11476,5 @@ because one of them invalidated part of a previous run's claims:
 | 99        | ⬜     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                                |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                        |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                      |
-| 99c       | ⬜     | sdk + openapi-plugin + kernel — two first-party components that must agree, and do not                                                    |
+| 99c       | ✅     | sdk + kernel — two first-party components that must agree, and do not                                                                     |
 | 99d       | ⬜     | decorator-plugin + secrets-plugin — a composition the framework silently declines to give you                                             |

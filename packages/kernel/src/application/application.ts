@@ -130,13 +130,19 @@ export interface InjectRequest {
   /** Request headers. */
   headers?: Record<string, string> | Headers;
   /**
-   * Request body. Carried VERBATIM for the byte-ish shapes (`Uint8Array`,
-   * `ArrayBuffer`, `Blob`) — with no content-type default, since only the
-   * caller knows whether those bytes are multipart, JSON, or an image. A
-   * `URLSearchParams` is serialised with its own `toString()` and defaults the
-   * content type to `application/x-www-form-urlencoded`; a plain object is
-   * JSON-serialised and a bare `string` is carried as-is, both defaulting to
-   * `application/json`. An explicitly supplied content type always wins.
+   * Request body. Carried VERBATIM for every byte-ish shape, but the
+   * content-type default differs between them: a `Uint8Array` and an
+   * `ArrayBuffer` get NONE, since only the caller knows whether those bytes
+   * are multipart, JSON, or an image, while a `Blob` DECLARES its own and
+   * contributes a non-empty `.type` as the default — matching the platform,
+   * whose `new Request(url, { body: blob })` sets the header from it and omits
+   * it when the blob has none. A `URLSearchParams` is serialised with its own
+   * `toString()` and defaults the content type to
+   * `application/x-www-form-urlencoded`; a plain object is JSON-serialised and
+   * a bare `string` is carried as-is, both defaulting to `application/json`.
+   * An explicitly supplied content type always wins, and the default is
+   * written onto a COPY of `headers`, so a `Headers` instance reused across
+   * two injected requests is never mutated.
    *
    * Any other shape — an array, a `Date`, a class instance, a number — is
    * REFUSED with a `TypeError` naming the received type, rather than silently
@@ -865,14 +871,22 @@ class Application implements IKernelApplication {
     // caller can still hand `inject()` a value the type cannot see.
     const { bytes: bodyBytes, defaultContentType } = await coerceInjectBody(request.body);
 
-    const headers = request.headers instanceof Headers
-      ? request.headers
-      : new Headers(request.headers ?? {});
+    // A COPY, never the caller's own `Headers`. The per-shape default below
+    // WRITES here, and reusing one `Headers` instance across two injected
+    // requests is ordinary in a test: the first request's `content-type` used
+    // to stick to the caller's object, so the second silently inherited it and
+    // `!headers.has('content-type')` then declined to set the right one — a
+    // JSON body following a form body arrived as a form. Same aliasing hazard
+    // the byte copy in `coerceInjectBody` guards, one field over; a handler
+    // mutating `ctx.request.headers` is now contained too.
+    const headers = new Headers(request.headers ?? {});
 
     // The default is PER SHAPE: a URLSearchParams body defaulting to
     // `application/json` would arrive as a non-form and the form parse would
-    // refuse the input this widening exists to carry, and a byte-ish body
-    // gets NO default at all because only the caller knows its encoding.
+    // refuse the input this widening exists to carry; a `Uint8Array` or an
+    // `ArrayBuffer` gets NO default at all because only the caller knows its
+    // encoding; and a `Blob` declares its own through `.type` (M99c), the
+    // same header the platform sets for `new Request(url, { body: blob })`.
     if (
       bodyBytes !== undefined && defaultContentType !== undefined && !headers.has('content-type')
     ) {
@@ -947,9 +961,11 @@ class Application implements IKernelApplication {
       formData(): Promise<FormBody> {
         // The shared parse (M94b): a non-form content-type rejects with the
         // `415`-branded UnsupportedFormEncodingError, so an injected request
-        // observes what a served request observes. A byte-ish body sets NO
-        // default content type (M95c §3.9), so an injected multipart must
-        // supply its own — exactly what a served request requires.
+        // observes what a served request observes. A `Uint8Array` or an
+        // `ArrayBuffer` sets NO default content type (M95c §3.9), so an
+        // injected multipart in those shapes must supply its own — exactly
+        // what a served request requires. A `Blob` supplies it from `.type`
+        // (M99c), as the platform does.
         form ??= Promise.resolve().then(() =>
           parseFormBody(bodyBytes ?? new Uint8Array(0), headers.get('content-type'))
         );

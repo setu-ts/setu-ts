@@ -45,6 +45,7 @@ async function buildApp() {
       length: bytes.length,
       body: new TextDecoder().decode(bytes),
       contentType: ctx.request.headers.get('content-type'),
+      headers: Object.fromEntries(ctx.request.headers),
     });
   });
 
@@ -59,6 +60,7 @@ interface Echoed {
   readonly length: number;
   readonly body: string;
   readonly contentType: string | null;
+  readonly headers: Record<string, string>;
 }
 
 /**
@@ -137,10 +139,26 @@ describe('inject() carries each documented body shape', () => {
     expect(echoed.contentType).toBe(null);
   });
 
-  it('awaits a Blob to bytes with NO content-type default', async () => {
+  it('carries a typeless Blob verbatim with NO content-type default', async () => {
     const echoed = await echo(new Blob([encoder.encode('blob-bytes')]));
     expect(echoed.body).toBe('blob-bytes');
     expect(echoed.contentType).toBe(null);
+  });
+
+  it('defaults a typed Blob content type from blob.type, as the platform does (M99c V7-1)', async () => {
+    // `new Request(url, { body: blob })` sets the header from `blob.type` —
+    // the caller HAS said what the bytes are, so `inject()` now says it too.
+    const echoed = await echo(new Blob([encoder.encode('PNG-DATA')], { type: 'image/png' }));
+    expect(echoed.body).toBe('PNG-DATA');
+    expect(echoed.contentType).toBe('image/png');
+  });
+
+  it('lets an explicit header beat a typed Blob own type (M99c §3.4)', async () => {
+    const echoed = await echo(
+      new Blob([encoder.encode('x')], { type: 'image/png' }),
+      { 'content-type': 'multipart/form-data; boundary=m99c' },
+    );
+    expect(echoed.contentType).toBe('multipart/form-data; boundary=m99c');
   });
 
   it('lets an explicitly supplied content type win over every default', async () => {
@@ -229,5 +247,74 @@ describe('inject() refuses every shape outside the union — by name', () => {
       // @ts-expect-error M95c: a number was never a documented body; the old path stringified it anyway.
       body: 42,
     })).rejects.toThrow(/received number/);
+  });
+});
+
+describe('inject() never mutates the caller-supplied Headers', () => {
+  it('leaves a reused Headers instance clean, so the next body gets its OWN default', async () => {
+    const app = await buildApp();
+    // ONE Headers instance reused across two requests — ordinary in a test
+    // that hoists its auth header into a shared fixture.
+    const shared = new Headers({ 'x-api-key': 'k' });
+
+    const json = await app.inject({
+      method: 'POST',
+      url: '/echo',
+      headers: shared,
+      body: { a: 1 },
+    });
+    expect(json.json<Echoed>().contentType).toBe('application/json');
+    // The caller's object is untouched: `inject()` defaulted onto its COPY.
+    expect(shared.has('content-type')).toBe(false);
+
+    // Without the copy the first request's `application/json` stuck to
+    // `shared`, `!headers.has('content-type')` then declined to set the form
+    // default, and this urlencoded body arrived as JSON.
+    const form = await app.inject({
+      method: 'POST',
+      url: '/echo',
+      headers: shared,
+      body: new URLSearchParams({ a: '1' }),
+    });
+    expect(form.json<Echoed>().contentType).toBe('application/x-www-form-urlencoded');
+
+    // The same leak reached the M99c Blob default, which is how it was found.
+    const blob = await app.inject({
+      method: 'POST',
+      url: '/echo',
+      headers: shared,
+      body: new Blob([encoder.encode('PNG')], { type: 'image/png' }),
+    });
+    expect(blob.json<Echoed>().contentType).toBe('image/png');
+    expect(shared.has('content-type')).toBe(false);
+  });
+
+  it('still honours an explicit content-type carried on a Headers instance', async () => {
+    const app = await buildApp();
+    const explicit = new Headers({ 'content-type': 'application/vnd.setu+json' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/echo',
+      headers: explicit,
+      body: { a: 1 },
+    });
+    expect(res.json<Echoed>().contentType).toBe('application/vnd.setu+json');
+  });
+
+  it('carries every header the caller set, so copying loses nothing', async () => {
+    const app = await buildApp();
+    // Including a repeated name, which `Headers` combines rather than drops —
+    // a copy built the wrong way would keep only one of the two values.
+    const many = new Headers([
+      ['x-api-key', 'k'],
+      ['accept-language', 'en'],
+      ['accept-language', 'fr'],
+    ]);
+    const res = await app.inject({ method: 'POST', url: '/echo', headers: many, body: 'x' });
+    expect(res.statusCode).toBe(200);
+    const echoed = res.json<Echoed>();
+    expect(echoed.headers['x-api-key']).toBe('k');
+    expect(echoed.headers['accept-language']).toBe('en, fr');
+    expect(echoed.contentType).toBe('application/json');
   });
 });
