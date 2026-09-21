@@ -71,9 +71,35 @@ they are shipped contracts on `main` and were re-checked there.
   correct on all four targets at once.
 - The parameter is emitted for every template and target, not gated on the devtool flag: a project
   that adds the devtool later must not need its config module rewritten, and an unused optional
-  parameter costs a generated project nothing.
-- **Test home:** `packages/cli/test/unit/config-module.test.ts`, plus the discovery test in §6 that
-  drives the real loader.
+  parameter costs a generated project nothing. That covers projects scaffolded from this letter
+  onwards and nothing before it — see the next bullet.
+- **A project scaffolded BEFORE this letter has a zero-parameter factory, and enabling the devtool
+  on it fails silently at run.** `project-files.ts:400` renders `factoryParam` as the empty string
+  on Deno, Node and Bun, so every project the CLI has ever emitted declares
+  `export function createApp(): IApplication`. Measured on Deno 2.9.6: `createApp(undefined, { … })`
+  against that declaration is `TS2554: Expected 0 arguments, but got
+  2` under `deno check`, and
+  under `deno run` it is accepted in silence — both arguments are discarded and the returned
+  application carries no `DiagnosticsPlugin` and no kernel diagnostics. The launcher then meets a
+  closed port, which says nothing about the factory. `setu devtool enable` is the command for a
+  project that already exists (§3.2), so this is its commonest input, not an edge case.
+- **Resolution: refuse by name, and put the entry inside a check path.** `devtool enable` reads the
+  config module and refuses when it cannot see the second parameter, naming the file, the exact
+  signature to write, and the fact that nothing else in the project will report the mismatch.
+  Rewriting `setu.config.ts` for the developer was rejected on M58's already-recorded ground: an AST
+  edit needs a TypeScript parser in a zero-dependency package, cannot preserve formatting, and makes
+  `--dry-run` a prediction rather than the exact plan it is everywhere else. Detection is therefore
+  textual and CONSERVATIVE — it refuses only on the shapes the CLI itself has emitted, which are
+  known strings — so a hand-edited factory the check cannot classify proceeds rather than being
+  refused wrongly. The backstop for that case is the second half: the devtool opt-in emits a `check`
+  task naming `main.ts`, `setu.config.ts` AND `main.dev.ts`, so the arity mismatch is a `TS2554` at
+  the project's own gate instead of a file no gate reaches. `denoTasks` (`project-files.ts:849`)
+  emits `start`, `test` and `host.extraTasks` and no `check` task at all today, which is why the
+  entry would otherwise sit outside every check path the generated project runs — the M70h finding,
+  in a letter that adds a new entry point.
+- **Test home:** `packages/cli/test/unit/config-module.test.ts`, the refusal in
+  `test/unit/devtool-refusals.test.ts`, the legacy-scaffold regression in
+  `test/e2e/devtool-e2e.test.ts`, plus the discovery test in §6 that drives the real loader.
 
 ### 3.2 One planner, three entry points
 
@@ -83,8 +109,10 @@ they are shipped contracts on `main` and were re-checked there.
   applied to a scaffolding verb; `generate app` and `new` only CREATE, so a project that already
   exists needs the standalone command regardless.
 - The planner refuses by name, never silently: a non-Deno runtime (the listener refuses every
-  non-Deno `listen` before binding), a member that already has a devtool port, and a workspace whose
-  manifest cannot be read.
+  non-Deno `listen` before binding), a member that already has a devtool port, a workspace whose
+  manifest cannot be read, and a config module still carrying the pre-M98c zero-parameter factory
+  (§3.1) — which is the only one of the four that `new --devtool` and `generate app --devtool`
+  cannot reach, since both write the factory themselves.
 - **Test home:** `packages/cli/test/unit/devtool-planner.test.ts`,
   `test/unit/devtool-refusals.test.ts`.
 
@@ -125,8 +153,15 @@ they are shipped contracts on `main` and were re-checked there.
   characters), and refuses to start with a named message when a variable is absent or malformed. It
   never generates a pair of its own, never writes one to a file, and never prints one.
 - **This names a contract the separately maintained launcher must satisfy, and the names are
-  published CLI surface once emitted.** They need §10.2 approval before implementation, because a
-  later rename is a breaking change to every scaffolded project.
+  published CLI surface once emitted.** All three — `SETU_DEVTOOL_SESSION_ID`,
+  `SETU_DEVTOOL_SESSION_KEY` and `SETU_DEVTOOL_MEMBER` — are **approved** (maintainer, 2026-09-21)
+  under `AI_GUIDELINES.md` §10.2, "Public API Requires Approval", on the stated understanding that a
+  later rename is a breaking change to every scaffolded project. Every other `§` in this document
+  names a section of this document; the approval gate is the guidelines' and has no counterpart
+  here, which is why it is spelled out on first use. §10.2's second and third clauses are
+  deliverables of the implementation PR rather than of this plan: the approval is recorded in that
+  PR's description, and `PUBLIC_API.md` moves in the same PR (§5). That is also why §3.8 puts a
+  warning above every emitted use.
 - **In a workspace the launcher names the member it is inspecting**, setting `SETU_DEVTOOL_MEMBER`
   beside the same two variables; `scripts/dev.ts` gives the pair to THAT member's child and blanks
   it for every other. Inheritance is what makes the naive version wrong: `Deno.Command` MERGES `env`
@@ -154,7 +189,7 @@ they are shipped contracts on `main` and were re-checked there.
   name family the separately maintained launcher must produce by reimplementing `deriveNames`'
   kebab→`screaming` rule (`utils/names.ts:29`), and reimplementing it wrongly fails silently — the
   runner would simply find no pair for that member. `SETU_DEVTOOL_MEMBER` is the one additional
-  name, flagged for §10.2 approval with the pair above.
+  name, approved with the pair above.
 - **Test home:** `packages/cli/test/unit/dev-entry.test.ts`, `test/e2e/devtool-e2e.test.ts`,
   `test/e2e/dev-runner-e2e.test.ts`.
 
@@ -190,10 +225,11 @@ they are shipped contracts on `main` and were re-checked there.
   never meets one. Both are named so the implementation cannot wire one and miss the other.
 - **Test home:** `packages/cli/test/e2e/dev-runner-e2e.test.ts`, extending the M67 fixture.
 
-### 3.7 The `dev` task's permissions are the `start` task's
+### 3.7 A project's `dev` task permissions are its `start` task's
 
-- **Decision:** the emitted `dev` task takes its flags from the same `denoPermissions(manifest)`
-  call the `start` task takes them from (`project-files.ts:958`), so the two cannot drift. The only
+- **Decision:** the `dev` task emitted into a project — a standalone one or a workspace member, not
+  the root runner task §3.4 widens — takes its flags from the same `denoPermissions(manifest)` call
+  the `start` task takes them from (`project-files.ts:958`), so the two cannot drift. The only
   difference between the tasks is the entry module. Neither task carries a scoped `--allow-net`.
 - **A scoped grant would refuse the application's own egress, and that is measured rather than
   reasoned.** On Deno 2.9.6 an allowlist governs OUTBOUND as well as bind: under
@@ -210,8 +246,30 @@ they are shipped contracts on `main` and were re-checked there.
   every `listen` on a non-Deno platform outright, and `DiagnosticsPluginOptions.enabled` is the
   literal `true`, so the connector can be neither enabled by a computed flag nor moved off loopback
   by configuration. Nothing about the guarantee depended on the grant.
-- **Test home:** `packages/cli/test/unit/deno-tasks.test.ts` — the `dev` and `start` flag strings
-  are asserted identical, and `start` is asserted byte-identical to today.
+- **Test home:** `packages/cli/test/unit/deno-tasks.test.ts` — a project's `dev` and `start` flag
+  strings are asserted identical, and `start` is asserted byte-identical to today. The root runner
+  task is a different file and is covered by `unit/dev-runner-grant.test.ts`.
+
+### 3.8 Every generated file that names a credential variable warns above it
+
+- **Decision:** the three names are a contract with a launcher the developer cannot see, so every
+  generated file that spells one carries a comment directly above it saying that renaming or
+  removing the variable stops the devtool connecting, and naming the other sites that must change
+  with it. This matters because the files are the developer's after they are written: `main.dev.ts`
+  and `scripts/dev.ts` are emitted once and appear in neither `workspace.ts:49`'s `managedFiles` nor
+  any other regeneration path, so an edit to one of them is permanent and nothing restores it.
+- **Three sites, one comment.** A name appears in `main.dev.ts` (the two credentials it reads), in
+  `scripts/dev.ts` (all three, read and forwarded per §3.4), and in the root `dev` task's
+  `--allow-env` list. The third cannot hold the comment: `deno.json` is emitted through
+  `JSON.stringify` (`project-files.ts:1279`), and hand-rendering the whole manifest to carry one
+  comment is disproportionate. Both TypeScript comments therefore NAME the `deno.json` grant as a
+  site, so one warning covers the whole contract instead of two thirds of it.
+- **The comment states the failure accurately rather than dramatically.** A renamed variable is not
+  silent: the entry refuses to start with the §3.4 message, and a name dropped from the scoped grant
+  makes `Deno.env.get` answer `NotCapable`. What neither error says is "you renamed a variable", and
+  closing that gap is the comment's whole job — so it is written as "the devtool cannot connect and
+  the error will not say why", not as a warning about data loss.
+- **Test home:** `packages/cli/test/unit/dev-entry.test.ts`, `test/unit/dev-runner-grant.test.ts`.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -239,11 +297,11 @@ the renderers and their tests. Crypto, protocol and session internals stay M98b'
 
 | File                                                                                            | Purpose                                                                                                  |
 | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `packages/cli/src/commands/devtool.ts`                                                          | The `setu devtool enable` command and its refusals.                                                      |
+| `packages/cli/src/commands/devtool.ts`                                                          | The `setu devtool enable` command, its refusals, and the pre-M98c factory detection (§3.1).              |
 | `packages/cli/src/devtool/planner.ts`                                                           | The one planner all three entry points call.                                                             |
 | `packages/cli/src/devtool/dev-entry.ts`                                                         | Renders `main.dev.ts`, including the credential read and its refusal.                                    |
 | `packages/cli/src/commands/new.ts`, `commands/app.ts`                                           | The `--devtool` flag, its refusals, the widened `--port` collision check, and the call into the planner. |
-| `packages/cli/src/templates/project-files.ts`                                                   | The second factory parameter and the `dev` task.                                                         |
+| `packages/cli/src/templates/project-files.ts`                                                   | The second factory parameter, the `dev` task, and the devtool `check` task (§3.1).                       |
 | `packages/cli/src/workspace/manifest.ts`                                                        | `devtoolPort`, its validation, and the widened `allocatePort`.                                           |
 | `packages/cli/src/workspace/dev-runner.ts`                                                      | Spawning `main.dev.ts` for the selected member, and the per-child environment.                           |
 | `packages/cli/src/workspace/runtime-profile.ts`                                                 | The scoped `--allow-env` the root `dev` task needs (§3.4).                                               |
@@ -256,16 +314,16 @@ the renderers and their tests. Crypto, protocol and session internals stay M98b'
 | Test file                         | src covered                                                 | Key assertions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | --------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `unit/devtool-planner.test.ts`    | `devtool/planner.ts`                                        | One planner, three entry points: the files emitted by `new --devtool`, `generate app --devtool` and `devtool enable` are byte-identical for the same inputs.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `unit/devtool-refusals.test.ts`   | `commands/devtool.ts`, `commands/new.ts`, `commands/app.ts` | Non-Deno runtime, already-enabled member, unreadable manifest, an extra positional standalone, an out-of-range `--devtool-port`, a `--devtool-port` colliding with a sibling's `port`, and a `--devtool-port` colliding with a sibling's `devtoolPort` each refuse by name and write nothing. A `--port` colliding with a sibling's `devtoolPort` is refused too, which fails without the widened check.                                                                                                                                                                                                                                                                                                |
-| `unit/dev-entry.test.ts`          | `devtool/dev-entry.ts`                                      | Absent and malformed credentials refuse with a named message; no generated line prints a credential.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `unit/devtool-refusals.test.ts`   | `commands/devtool.ts`, `commands/new.ts`, `commands/app.ts` | Non-Deno runtime, already-enabled member, unreadable manifest, an extra positional standalone, an out-of-range `--devtool-port`, a `--devtool-port` colliding with a sibling's `port`, and a `--devtool-port` colliding with a sibling's `devtoolPort` each refuse by name and write nothing. A `--port` colliding with a sibling's `devtoolPort` is refused too, which fails without the widened check. `devtool enable` against a config module carrying the pre-M98c zero-parameter factory refuses by name and writes nothing (§3.1), while a factory the textual check cannot classify proceeds — the conservative half, asserted so a later tightening is deliberate.                             |
+| `unit/dev-entry.test.ts`          | `devtool/dev-entry.ts`                                      | Absent and malformed credentials refuse with a named message; no generated line prints a credential. The §3.8 warning precedes every credential read, and the set of variable names the emitted file READS equals the set its comment NAMES — so a fourth variable added later without documenting it fails, which a presence check alone would not catch.                                                                                                                                                                                                                                                                                                                                              |
 | `unit/allocate-port.test.ts`      | `workspace/manifest.ts`                                     | `allocatePort` walks `devtoolPort`, so a new member never receives a port an existing member's devtool already holds. Fails without the widening.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `unit/deno-tasks.test.ts`         | `templates/project-files.ts`                                | The `dev` and `start` flag strings are identical and carry no scoped `--allow-net`; `start` is byte-identical to today; the tasks differ only in the entry module.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `unit/deno-tasks.test.ts`         | `templates/project-files.ts`                                | A project's `dev` and `start` flag strings are identical and carry no scoped `--allow-net`; `start` is byte-identical to today; the tasks differ only in the entry module. A devtool-enabled project emits a `check` task naming `main.ts`, `setu.config.ts` and `main.dev.ts`, and a project without the devtool emits the task set it emits today, byte-identical.                                                                                                                                                                                                                                                                                                                                    |
 | `unit/config-module.test.ts`      | `templates/project-files.ts`                                | The factory's devtool parameter is SECOND on every target, and the Workers signature keeps `env` first.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `unit/workspace-manifest.test.ts` | `workspace/manifest.ts`                                     | `devtoolPort` round-trips, is range-checked on read, and absent stays absent. A manifest whose members share a port is accepted exactly as it is today, pinning §3.3's decision not to add a read-time duplicate check.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `unit/dev-runner-grant.test.ts`   | `workspace/runtime-profile.ts`                              | The root `dev` task carries `--allow-env` scoped to exactly the three devtool names, and its `--allow-net` is byte-identical to today.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `unit/reallocate.test.ts`         | `commands/workspace.ts`                                     | `ports --reallocate` moves a member's application port and its devtool port together and regenerates the discovery module, Compose and Kubernetes; a member with no devtool port is untouched.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `integration/discovery.test.ts`   | `app-loader.ts`, `templates/project-files.ts`               | A scaffolded project's factory survives the REAL discovery path. The single-parameter shape reproduces the `Symbol.iterator` throw; the emitted shape does not. This is the guard C1 exists for.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `e2e/devtool-e2e.test.ts`         | all of the above                                            | Scaffold with `--devtool`, type-check against this workspace, boot with credentials in the environment, and read a snapshot and an event batch with `createDiagnosticsClient`. Then boot WITHOUT the credentials and assert the named refusal.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `e2e/devtool-e2e.test.ts`         | all of the above                                            | Scaffold with `--devtool`, type-check against this workspace, boot with credentials in the environment, and read a snapshot and an event batch with `createDiagnosticsClient`. Then boot WITHOUT the credentials and assert the named refusal. A third case is the legacy-scaffold regression: scaffold WITHOUT `--devtool`, rewrite `setu.config.ts` to the zero-parameter factory every pre-M98c project carries, run `devtool enable`, and assert it refuses by name and writes nothing — then apply the two-line edit the refusal names, re-run, and assert the project type-checks AND serves a snapshot. Without both halves the test proves a refusal rather than a route through it.            |
 | `e2e/dev-runner-e2e.test.ts`      | `workspace/dev-runner.ts`                                   | A two-member workspace, BOTH carrying a `devtoolPort`, with `SETU_DEVTOOL_MEMBER` naming one: that member runs `main.dev.ts` and answers its connector with the supplied pair, the other runs `main.ts`, both application ports answer, and the non-selected child's own environment carries no usable value for any of the three devtool variables — the assertion that fails today, since `dev-runner.ts:91` passes no `env` and the child inherits the runner's. A third case runs with no devtool variables set and asserts both members run `main.ts`, so a devtool-enabled workspace is still runnable without the launcher. A fourth names a member that does not exist and asserts the refusal. |
 
 The e2e repoints the scaffolded project at this workspace rather than JSR, for the M34b reason: a
@@ -292,11 +350,17 @@ probe that only inspects emitted text verifies the renderer, not the feature.
 ## 8. Risks & mitigations
 
 - The credential variable names become published CLI surface before the launcher exists: fixed in
-  §3.4, flagged for §10.2 approval, and a rename after release is breaking for generated output.
+  §3.4 and approved under `AI_GUIDELINES.md` §10.2, with a rename after release breaking for
+  generated output — which is why §3.8 warns above every emitted use rather than trusting the plan
+  to be read.
 - A second port silently collides with a sibling's application port: the allocator is widened in
   §3.3 and a unit test fails without the widening.
 - The factory parameter breaks `setu commands`: reproduced at plan time, resolved in §3.1, and
   guarded by an integration test that drives the real loader.
+- `devtool enable` reports success on a project scaffolded before this letter and leaves an
+  application with no connector: measured in §3.1 (`deno run` discards the arguments in silence),
+  resolved by a named refusal plus a `check` task that reaches `main.dev.ts`, and guarded by the
+  legacy-scaffold e2e in §6.
 - Emitted text passes review while the generated project does not run: the e2e boots it and reads
   through the real client, which is the M58 and M63 lesson about generated output.
 - The devtool reaches a production composition: the entry point is a separate module the production

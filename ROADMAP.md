@@ -10813,16 +10813,22 @@ that drives the real loader.
       from the process environment under names this letter fixes as published CLI surface, refusing
       to start when they are absent or malformed, and never generating, writing or printing a pair.
       In a workspace the launcher also names the member it is inspecting, and the dev runner hands
-      the pair to that member's child alone while scrubbing it from every sibling — M98b forbids an
-      application subprocess inheriting these values. All three names need §10.2 approval before
-      implementation.
+      the pair to that member's child alone while blanking it for every sibling — M98b forbids an
+      application subprocess inheriting these values. All three names are approved under §10.2, and
+      every generated file that spells one carries a comment warning that renaming it stops the
+      devtool connecting.
 - [ ] The generated config factory takes the devtool composition as its SECOND parameter on every
       target, with an integration test driving the real discovery loader so the collision above
-      cannot return.
+      cannot return. Every project scaffolded BEFORE this letter declares a zero-parameter factory,
+      where `deno run` discards both arguments in silence and leaves an application with no
+      connector, so `setu devtool enable` refuses that shape by name and the opt-in emits a `check`
+      task that reaches `main.dev.ts`.
 - [ ] An end-to-end gate that scaffolds a devtool project, type-checks it against this workspace,
       boots it, and reads a snapshot and an event batch through `createDiagnosticsClient` — the
       reviewed client from M98b, so the gate drives the real protocol rather than a stand-in. A
-      second case boots without credentials and asserts the named refusal.
+      second case boots without credentials and asserts the named refusal; a third enables the
+      devtool on a project carrying the pre-M98c factory, asserts the refusal, applies the edit it
+      names, and asserts the project then type-checks and serves a snapshot.
 
 **Open questions the plan resolves rather than inherits:** whether the devtool port is allocated or
 offset (allocated — an offset collides once a workspace has enough members), where the launcher
