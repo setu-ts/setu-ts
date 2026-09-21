@@ -10823,6 +10823,11 @@ that drives the real loader.
       where `deno run` discards both arguments in silence and leaves an application with no
       connector, so `setu devtool enable` refuses that shape by name and the opt-in emits a `check`
       task that reaches `main.dev.ts`.
+- [ ] `setu devtool enable` MERGES into an existing `deno.json` rather than rewriting it, so a
+      developer's own tasks and unrelated keys survive; a task already present with a different
+      value refuses by name, and one already matching is a no-op, so the command is idempotent.
+      Three writes need it — a project's `dev` and `check` tasks, and the root workspace `dev`
+      task's grant, which `managedFiles` never regenerates.
 - [ ] An end-to-end gate that scaffolds a devtool project, type-checks it against this workspace,
       boots it, and reads a snapshot and an event batch through `createDiagnosticsClient` — the
       reviewed client from M98b, so the gate drives the real protocol rather than a stand-in. A
