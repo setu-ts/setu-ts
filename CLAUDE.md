@@ -5127,7 +5127,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `decorator-plugin.ts` 98.4/100/99.0, whose only uncovered lines are the pre-existing
   `replayCustomDecorators` skip and the `autoDiscover` error loop) — complete (PR #328)
 - **Milestone 99c** (`packages/sdk` + `packages/kernel` — two first-party components that must
-  agree, and do not) — complete (PR pending). **The package list is corrected from the three the
+  agree, and do not) — complete (PR #353). **The package list is corrected from the three the
   ROADMAP row was opened with** (the M70b/M70g/M70k/M90a precedent): `openapi-plugin` is the
   producer in both halves of V7-6 and changes nothing, because the component name is published
   surface of the DOCUMENT — read by every consumer including non-Setu ones, and unfixable for
