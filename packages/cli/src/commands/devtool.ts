@@ -11,11 +11,11 @@
  *
  * Every write into an existing `deno.json` is a MERGE from the parsed object
  * (the `withDependency` precedent), never a rewrite — except that the `tasks`
- * map is NOT sorted here: `denoTasks` emits it in a fixed insertion order, so
- * sorting would put this merge permanently at odds with the emitter. A task
- * already present with a different value refuses by name; one byte-identical
- * to what this command would write is a no-op, which is what makes the command
- * idempotent.
+ * and `imports` maps are NOT sorted here: `denoTasks` emits tasks in a fixed
+ * insertion order, so sorting would put this merge permanently at odds with
+ * the emitter. A key already present with a different value refuses by name;
+ * one byte-identical to what this command would write is a no-op, which is
+ * what makes the command idempotent.
  *
  * @module
  */
@@ -24,7 +24,14 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
-import { CONFIG_MODULE, EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
+import {
+  CONFIG_MODULE,
+  EXIT_ERROR,
+  EXIT_OK,
+  EXIT_USAGE,
+  PROGRAM_NAME,
+  VERSION,
+} from '../constants.ts';
 import { renderDevEntry } from '../devtool/dev-entry.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
@@ -51,6 +58,17 @@ import {
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { LEGACY_DENO_RUN_ALL, workspaceProfile } from '../workspace/runtime-profile.ts';
 
+/** The import-map key the development entry resolves the plugin through. */
+const DEVTOOL_DEPENDENCY = '@setu-ts/diagnostics-plugin';
+
+/**
+ * The exact specifier the entry's import must resolve to. The create-time
+ * paths pin the same range from `packageImports`, so a project scaffolded with
+ * `--devtool` and one enabled later carry the identical entry — which is what
+ * makes the byte-identical no-op outcome reachable on both.
+ */
+const DEVTOOL_IMPORT = `jsr:${DEVTOOL_DEPENDENCY}@^${VERSION}`;
+
 /** Dependencies reached by the devtool command. */
 export interface DevtoolCommandDependencies {
   /** The filesystem all reads and writes go through. */
@@ -76,18 +94,22 @@ interface PlannedWrite {
 /**
  * A `deno.json` opened for merging.
  *
- * Every other top-level key survives untouched: only `tasks` is rewritten, and
- * only the keys this command adds. Serialization is insertion-ordered at
- * two-space indent, which is what every other emitter here writes — no sort,
- * because the CLI's own task emitter is insertion-ordered and sorting here
- * would reorder a file the CLI wrote.
+ * Every other top-level key survives untouched: only `tasks` and `imports` are
+ * rewritten, and only the keys this command adds. Serialization is
+ * insertion-ordered at two-space indent, which is what every other emitter
+ * here writes — no sort, because the CLI's own task emitter is
+ * insertion-ordered and sorting here would reorder a file the CLI wrote.
  */
 interface DenoJsonHandle {
   /** The live tasks map — mutate it to plan an edit. */
   readonly tasks: Record<string, string>;
   /** The tasks map as it was when the file was read. */
   readonly originalTasks: string;
-  /** Re-serializes the file with the mutated tasks map. */
+  /** The live imports map — mutate it to plan an edit. */
+  readonly imports: Record<string, string>;
+  /** The imports map as it was when the file was read. */
+  readonly originalImports: string;
+  /** Re-serializes the file with the mutated tasks and imports maps. */
   readonly serialize: () => string;
   /** The absolute path, for refusals. */
   readonly path: string;
@@ -108,11 +130,26 @@ function openDenoJson(path: string, source: string): DenoJsonHandle {
   const tasks: Record<string, string> = rawTasks !== null && typeof rawTasks === 'object'
     ? { ...(rawTasks as Record<string, string>) }
     : {};
+  const rawImports = record['imports'];
+  const hadImports = rawImports !== null && typeof rawImports === 'object';
+  const imports: Record<string, string> = hadImports
+    ? { ...(rawImports as Record<string, string>) }
+    : {};
   return {
     tasks,
     originalTasks: JSON.stringify(tasks),
+    imports,
+    originalImports: JSON.stringify(imports),
     path,
-    serialize: () => `${JSON.stringify({ ...record, tasks }, null, 2)}\n`,
+    serialize: () => {
+      const out: Record<string, unknown> = { ...record, tasks };
+      // A file that declared no imports map gains one only when a pin was
+      // added — a tasks-only merge (the root widening) must not grow the file
+      // with an empty key.
+      if (hadImports || Object.keys(imports).length > 0) out['imports'] = imports;
+      else delete out['imports'];
+      return `${JSON.stringify(out, null, 2)}\n`;
+    },
   };
 }
 
@@ -147,6 +184,39 @@ function mergeTask(
 }
 
 /**
+ * Merges the diagnostics-plugin pin into a handle's imports map.
+ *
+ * The development entry imports `@setu-ts/diagnostics-plugin`, so the project
+ * MUST declare it or its own check task fails on an unresolvable specifier —
+ * which is what a pre-devtool project's import map lacks, and what the
+ * create-time paths get from `withDevtool`'s packageImports. Three outcomes,
+ * the same contract as the tasks: absent → add; byte-identical → no-op;
+ * different → refuse by name (a pin a developer rewrote is theirs).
+ *
+ * @param handle - The manifest being merged into
+ * @param expected - The full specifier to record
+ * @returns The refusal message when the specifier exists with a DIFFERENT
+ * value, or `undefined` when merged or already byte-identical
+ */
+function mergeImport(
+  handle: DenoJsonHandle,
+  expected: string,
+): string | undefined {
+  const current = handle.imports[DEVTOOL_DEPENDENCY];
+  if (current === expected) return undefined;
+  if (current !== undefined) {
+    return (
+      `Refusing to replace the existing "${DEVTOOL_DEPENDENCY}" import in ${handle.path}:\n` +
+      `  current: ${current}\n` +
+      `  would write: ${expected}\n` +
+      `A pin you rewrote is yours to change; update it to match, or remove it, and run this again.`
+    );
+  }
+  handle.imports[DEVTOOL_DEPENDENCY] = expected;
+  return undefined;
+}
+
+/**
  * Collects a rewrite for every manifest whose merges actually changed it.
  *
  * Called only after every merge has succeeded, so a refusal never leaves a
@@ -158,7 +228,9 @@ function mergeTask(
  */
 function planManifestWrites(planned: PlannedWrite[], handles: readonly DenoJsonHandle[]): void {
   for (const handle of handles) {
-    if (JSON.stringify(handle.tasks) === handle.originalTasks) continue;
+    const tasksChanged = JSON.stringify(handle.tasks) !== handle.originalTasks;
+    const importsChanged = JSON.stringify(handle.imports) !== handle.originalImports;
+    if (!tasksChanged && !importsChanged) continue;
     planned.push({ path: handle.path, contents: handle.serialize(), creating: false });
   }
 }
@@ -355,6 +427,11 @@ async function enableInWorkspace(
   if (devRefusal !== undefined) return reportInapplicable(deps, devRefusal);
   const checkRefusal = mergeTask(memberHandle, 'check', devtoolCheckTask());
   if (checkRefusal !== undefined) return reportInapplicable(deps, checkRefusal);
+  // The entry imports the diagnostics plugin, so the MEMBER's import map must
+  // pin it — the root map is untouched: the root has no development entry of
+  // its own.
+  const importRefusal = mergeImport(memberHandle, DEVTOOL_IMPORT);
+  if (importRefusal !== undefined) return reportInapplicable(deps, importRefusal);
 
   // The root `dev` task is a MODIFICATION of an existing string, not an added
   // key, and `managedFiles` contains no deno.json — so this command is the
@@ -548,6 +625,8 @@ async function enableStandalone(
   if (devRefusal !== undefined) return reportInapplicable(deps, devRefusal);
   const checkRefusal = mergeTask(handle, 'check', devtoolCheckTask());
   if (checkRefusal !== undefined) return reportInapplicable(deps, checkRefusal);
+  const importRefusal = mergeImport(handle, DEVTOOL_IMPORT);
+  if (importRefusal !== undefined) return reportInapplicable(deps, importRefusal);
 
   const devtoolPort = requestedPort ?? DEFAULT_DEVTOOL_PORT;
   const entryPath = joinPath(dir, DEVTOOL_ENTRY_MODULE);

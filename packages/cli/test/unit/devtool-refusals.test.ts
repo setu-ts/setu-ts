@@ -470,6 +470,55 @@ describe('devtool enable branch coverage', () => {
     expect(h.err.text()).toContain('No setu.config.ts in /ws');
     expect(h.fs.writes).toEqual([]);
   });
+
+  it('refuses a standalone import pin the developer rewrote, naming both values', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': JSON.stringify({
+        tasks: { start: 'deno run --allow-net --allow-env main.ts' },
+        imports: { '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.6.0' },
+      }),
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable'])).toBe(1);
+    expect(h.err.text()).toContain(
+      'Refusing to replace the existing "@setu-ts/diagnostics-plugin" import',
+    );
+    expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.6.0');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('adds the diagnostics-plugin pin to a standalone manifest with no imports map', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': '{"tasks":{"start":"deno run --allow-net --allow-env main.ts"}}',
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/ws/deno.json')) as {
+      imports: Record<string, string>;
+    };
+    expect(manifest.imports).toEqual({
+      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.7.0',
+    });
+  });
+
+  it('adds the pin to a standalone manifest beside unrelated entries', async () => {
+    const h = workspaceHarness({
+      '/ws/deno.json': JSON.stringify({
+        tasks: { start: 'deno run --allow-net --allow-env main.ts' },
+        imports: { '~': './src/', '@setu-ts/common': 'jsr:@setu-ts/common@^0.7.0' },
+      }),
+      '/ws/setu.config.ts': CURRENT_CONFIG,
+    });
+    expect(await h.run(['enable'])).toBe(0);
+    const manifest = JSON.parse(h.fs.read('/ws/deno.json')) as {
+      imports: Record<string, string>;
+    };
+    expect(manifest.imports).toEqual({
+      '~': './src/',
+      '@setu-ts/common': 'jsr:@setu-ts/common@^0.7.0',
+      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.7.0',
+    });
+  });
 });
 
 describe('generate app --devtool branch coverage', () => {
@@ -656,10 +705,12 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
           dev: 'deno run --allow-net --allow-env main.dev.ts',
           check: 'deno check main.ts setu.config.ts main.dev.ts',
         },
+        // The pin the enable flow merges: byte-identical, so the whole run is
+        // a no-op, which is what makes the command idempotent.
+        imports: { '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.7.0' },
       }),
       '/ws/setu.config.ts': CURRENT_CONFIG,
-      // Byte-identical to what the command would write: the whole run is a
-      // no-op, which is what makes the command idempotent.
+      // Byte-identical to what the command would write.
       '/ws/main.dev.ts': renderDevEntry({ devtoolPort: DEFAULT_DEVTOOL_PORT }),
     });
     expect(await h.run(['enable'])).toBe(0);

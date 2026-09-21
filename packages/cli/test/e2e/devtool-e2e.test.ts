@@ -18,7 +18,11 @@ import { expect } from '@std/expect';
 import { createDenoRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
-import { unusedPort, useWorkspacePackages } from '../fixtures/generated-project.ts';
+import {
+  unusedPort,
+  useWorkspacePackages,
+  workspaceEntrypoint,
+} from '../fixtures/generated-project.ts';
 
 const runtime = createDenoRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -328,12 +332,25 @@ describe('a scaffolded devtool project, driven end to end', () => {
       .toBe(0);
     const after = JSON.parse(await Deno.readTextFile(manifestPath)) as {
       tasks: Record<string, string>;
+      imports: Record<string, string>;
       '//devtool-note'?: string;
     };
     expect(after['//devtool-note']).toBe('hand-written key');
     expect(after.tasks['db:push']).toBe('deno run -A tools/push.ts');
     expect(after.tasks['dev']).toContain('main.dev.ts');
     expect(after.tasks['dev']).not.toBe(after.tasks['start']);
+    // The enable flow added the pin the entry resolves through — the exact
+    // specifier the create-time paths write, not a registry fall-through.
+    expect(after.imports['@setu-ts/diagnostics-plugin']).toBe(
+      'jsr:@setu-ts/diagnostics-plugin@^0.7.0',
+    );
+    // Repoint the pin at this workspace too, so the check and the boot below
+    // measure the workspace source rather than a published JSR snapshot —
+    // the same repointing `useWorkspacePackages` performs, applied to the key
+    // the enable flow just added.
+    const repointed = { ...after };
+    repointed.imports['@setu-ts/diagnostics-plugin'] = workspaceEntrypoint('diagnostics-plugin');
+    await Deno.writeTextFile(manifestPath, `${JSON.stringify(repointed, null, 2)}\n`);
 
     // The project type-checks THROUGH the new check task — the arity mismatch
     // would be TS2554 here — and serves a snapshot.

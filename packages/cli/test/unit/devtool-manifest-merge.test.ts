@@ -49,11 +49,13 @@ function harness(rootDev: string) {
     '/ws/apps/orders/setu.config.ts': CONFIG,
   });
   const log = createRecorder();
+  const err = createRecorder();
   return {
     fs,
     log,
+    err,
     run: (argv: readonly string[]) =>
-      runDevtoolCommand(parseArgs(argv), { fs, cwd: '/ws', log: log.sink, error: () => {} }),
+      runDevtoolCommand(parseArgs(argv), { fs, cwd: '/ws', log: log.sink, error: err.sink }),
   };
 }
 
@@ -67,7 +69,10 @@ describe('the devtool manifest merge', () => {
       imports: Record<string, string>;
       fmt: Record<string, unknown>;
     };
-    expect(member.imports).toEqual({ '@setu-ts/common': 'jsr:@setu-ts/common@^0.7.0' });
+    expect(member.imports).toEqual({
+      '@setu-ts/common': 'jsr:@setu-ts/common@^0.7.0',
+      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.7.0',
+    });
     expect(member.fmt).toEqual({ lineWidth: 100 });
     expect(member.tasks['db:push']).toBe('deno run -A tools/push.ts');
     expect(member.tasks['start']).toBe('deno run --allow-net --allow-env main.ts');
@@ -76,9 +81,68 @@ describe('the devtool manifest merge', () => {
     const root = JSON.parse(h.fs.read('/ws/deno.json')) as {
       fmt: Record<string, unknown>;
       tasks: Record<string, string>;
+      imports?: unknown;
     };
     expect(root.fmt).toEqual({ lineWidth: 100 });
     expect(root.tasks['dev']).toBe(workspaceProfile('deno').runAll);
+    // The root carries no development entry of its own, so its widening is a
+    // TASKS-only merge: a file that declared no imports map must not grow one.
+    expect(root.imports).toBeUndefined();
+  });
+
+  it('adds the diagnostics-plugin pin to a member with no imports map at all', async () => {
+    const h = harness(LEGACY_DENO_RUN_ALL);
+    h.fs.writeFile(
+      '/ws/apps/orders/deno.json',
+      new TextEncoder().encode(
+        JSON.stringify({ tasks: { start: 'deno run --allow-net --allow-env main.ts' } }) + '\n',
+      ),
+    );
+    expect(await h.run(['enable', 'orders'])).toBe(0);
+    const member = JSON.parse(h.fs.read('/ws/apps/orders/deno.json')) as {
+      imports: Record<string, string>;
+    };
+    expect(member.imports).toEqual({
+      '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.7.0',
+    });
+  });
+
+  it('refuses a member import pin the developer rewrote, naming both values', async () => {
+    const h = harness(LEGACY_DENO_RUN_ALL);
+    h.fs.writeFile(
+      '/ws/apps/orders/deno.json',
+      new TextEncoder().encode(
+        JSON.stringify({
+          tasks: { start: 'deno run --allow-net --allow-env main.ts' },
+          imports: { '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.6.0' },
+        }) + '\n',
+      ),
+    );
+    // The reseed above is itself a write; drop it so the assertion below
+    // measures the command's own writes.
+    (h.fs.writes as string[]).length = 0;
+    expect(await h.run(['enable', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain(
+      'Refusing to replace the existing "@setu-ts/diagnostics-plugin" import',
+    );
+    expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.6.0');
+    expect(h.err.text()).toContain('jsr:@setu-ts/diagnostics-plugin@^0.7.0');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('is a no-op for a member whose manifest already carries the pin and tasks', async () => {
+    const h = harness(LEGACY_DENO_RUN_ALL);
+    const memberSource = JSON.stringify({
+      tasks: {
+        start: 'deno run --allow-net --allow-env main.ts',
+        dev: 'deno run --allow-net --allow-env main.dev.ts',
+        check: 'deno check main.ts setu.config.ts main.dev.ts',
+      },
+      imports: { '@setu-ts/diagnostics-plugin': 'jsr:@setu-ts/diagnostics-plugin@^0.7.0' },
+    }) + '\n';
+    h.fs.writeFile('/ws/apps/orders/deno.json', new TextEncoder().encode(memberSource));
+    expect(await h.run(['enable', 'orders'])).toBe(0);
+    expect(h.fs.read('/ws/apps/orders/deno.json')).toBe(memberSource);
   });
 
   it('keeps the emitted task order instead of sorting it', async () => {
