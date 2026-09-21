@@ -10648,9 +10648,10 @@ merging beyond what the schema itself expresses.
 **Status:** 98a complete ([#345](https://github.com/setu-ts/setu-ts/pull/345)) — the in-process
 observation boundary and its shared contracts shipped on `feat/m98a-kernel-diagnostics`; 98b
 complete ([#347](https://github.com/setu-ts/setu-ts/pull/347)) — the runtime-owned loopback
-listener, its `common` contract/token, and `packages/diagnostics-plugin`. This milestone records the
-framework work needed by the separately maintained devtool. It is not a claim that the interfaces or
-connector have passed a security review.
+listener, its `common` contract/token, and `packages/diagnostics-plugin`; 98c planned — the
+`packages/cli` scaffolding that emits the composition 98b documents by hand. This milestone records
+the framework work needed by the separately maintained devtool. It is not a claim that the
+interfaces or connector have passed a security review.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -10666,12 +10667,15 @@ devtool subscription; licensing never grants permission to inspect an applicatio
 **Ownership and sequence:** M98a owns the kernel observation boundary, with only its necessary
 shared contracts in `packages/common`. M98b owns the runtime-local listener port, its common
 contract/token, and the new `packages/diagnostics-plugin` that consumes both M98a and that port.
-Implement the letters in order, with separate feature branches and verification; neither is
-permission to sweep unrelated packages. Each gets one canonical plan from `plans/TEMPLATE.md` and
-passes `deno task check:plan` before implementation. The plan must name the real consumer of every
-new export, resolve the exact contracts from source, and include the threat model and negative tests
-below. The canonical plans are `plans/milestone-98a-kernel-diagnostics.md` and
-`plans/milestone-98b-local-diagnostics-connector.md`; these specify proposed APIs, not shipped ones.
+M98c owns the `packages/cli` scaffolding that emits the composition M98b documents by hand, for a
+standalone project and for a member of a monorepo workspace. Implement the letters in order, with
+separate feature branches and verification; none is permission to sweep unrelated packages. Each
+gets one canonical plan from `plans/TEMPLATE.md` and passes `deno task check:plan` before
+implementation. The plan must name the real consumer of every new export, resolve the exact
+contracts from source, and include the threat model and negative tests below. The canonical plans
+are `plans/milestone-98a-kernel-diagnostics.md`,
+`plans/milestone-98b-local-diagnostics-connector.md` and
+`plans/milestone-98c-devtool-scaffolding.md`; these specify proposed APIs, not shipped ones.
 
 ### Existing seams and gaps
 
@@ -10772,9 +10776,78 @@ runtime adapter.
       later persistence/export consumer must preserve the minimized record boundary, add retention
       and access controls, and receive its own review before shipping.
 
+### Milestone 98c: Devtool Scaffolding
+
+**Packages:** `packages/cli`, plus the M98b README corrections its own findings force. Depends on
+M98b. The CLI emits the composition M98b documents; it does not implement the separately maintained
+launcher.
+
+**Why a letter rather than a flag:** the monorepo dimension is what makes this a design problem. A
+workspace member owns exactly one allocated port (`packages/cli/src/workspace/manifest.ts:113`), and
+`allocatePort` walks `member.port` and nothing else (`:417`), so a second port stored beside it is
+invisible to the allocator and collides with the next member's application port.
+`setu workspace
+ports --reallocate` regenerates the discovery module, Compose and Kubernetes
+together, so both ports have to move as one. M98b's §3.2 forbids sharing a session across
+applications, so N members need N credential pairs and the launcher has to discover N endpoints. And
+`setu generate app` only creates a member, so enabling the devtool on one that already exists needs
+its own verb.
+
+**The finding that motivated the plan:** `setu commands` builds the application to discover
+plugin-contributed verbs, and calls the config factory with its own inert discovery env as the FIRST
+positional argument on every target (`packages/cli/src/app-loader.ts:180`). The single-parameter
+`createApp(extra?)` shape M98b's README first documented therefore receives that proxy as `extra`
+and throws on the spread — reproduced at plan time, corrected in PR #347, and guarded here by a test
+that drives the real loader.
+
+**Deliverables:**
+
+- [ ] A devtool opt-in on `setu new` and `setu generate app`, and one `setu devtool enable` command
+      for a project that already exists, all three calling one planner so the emitted files cannot
+      drift between them. Every inapplicable case refuses by name and writes nothing: a non-Deno
+      runtime, a member already enabled, an unreadable manifest, an out-of-range port.
+- [ ] A second allocated port per workspace member, recorded as `WorkspaceMember.devtoolPort` and
+      walked by `allocatePort`, so no generated port ever collides. `ports --reallocate` moves both
+      together and regenerates discovery, Compose and Kubernetes as it does today.
+- [ ] A development entry point the production entry never imports, reading per-launch credentials
+      from the process environment under names this letter fixes as published CLI surface, refusing
+      to start when they are absent or malformed, and never generating, writing or printing a pair.
+      In a workspace the launcher also names the member it is inspecting, and the dev runner hands
+      the pair to that member's child alone while blanking it for every sibling — M98b forbids an
+      application subprocess inheriting these values. All three names are approved under §10.2, and
+      every generated file that spells one carries a comment warning that renaming it stops the
+      devtool connecting.
+- [ ] The generated config factory takes the devtool composition as its SECOND parameter on every
+      target, with an integration test driving the real discovery loader so the collision above
+      cannot return. Every project scaffolded BEFORE this letter declares a zero-parameter factory,
+      where `deno run` discards both arguments in silence and leaves an application with no
+      connector, so `setu devtool enable` refuses that shape by name and the opt-in emits a `check`
+      task that reaches `main.dev.ts`.
+- [ ] `setu devtool enable` MERGES into an existing `deno.json` rather than rewriting it, so a
+      developer's own tasks and unrelated keys survive; a task already present with a different
+      value refuses by name, and one already matching is a no-op, so the command is idempotent.
+      Three writes need it — a project's `dev` and `check` tasks, and the root workspace `dev`
+      task's grant, which `managedFiles` never regenerates.
+- [ ] An end-to-end gate that scaffolds a devtool project, type-checks it against this workspace,
+      boots it, and reads a snapshot and an event batch through `createDiagnosticsClient` — the
+      reviewed client from M98b, so the gate drives the real protocol rather than a stand-in. A
+      second case boots without credentials and asserts the named refusal; a third enables the
+      devtool on a project carrying the pre-M98c factory, asserts the refusal, applies the edit it
+      names, and asserts the project then type-checks and serves a snapshot.
+
+**Open questions the plan resolves rather than inherits:** whether the devtool port is allocated or
+offset (allocated — an offset collides once a workspace has enough members), where the launcher
+discovers endpoints (the workspace manifest it must already read, not a second CLI-owned index), how
+one pair per application survives a runner that spawns every member (the launcher names the member
+it is inspecting, and the runner builds each child's environment explicitly — `Deno.Command` merges
+`env` and only `clearEnv: true` stops inheritance, measured), and whether any generated task's
+`--allow-net` is narrowed (no, on `start` and on `dev` alike — a scoped allowlist governs outbound
+as well as bind on Deno 2.9.6, so it would refuse the application's own database and broker calls;
+the loopback guarantee is the listener's, not a permission flag's).
+
 ### Threat Model and Acceptance Evidence
 
-Before either letter starts, its plan identifies assets, trust boundaries and attacker actions:
+Before each letter starts, its plan identifies assets, trust boundaries and attacker actions:
 secrets in otherwise ordinary application fields; malicious HTTP inputs and diagnostic strings;
 unpaired local clients and hostile browser origins; accidental production exposure; cross-instance
 mixups; and stalled or oversized capture. Trusted application code and installed in-process plugins
@@ -11390,6 +11463,7 @@ because one of them invalidated part of a previous run's claims:
 | 98        | ⬜     | secure read-only devtool diagnostics (umbrella; planned)                                                                                  |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347)) |
+| 98c       | ⬜     | cli — devtool scaffolding for standalone projects and workspace members (planned)                                                         |
 | 99        | ⬜     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                                |
 | 99a       | ⬜     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                        |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                      |
