@@ -152,6 +152,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`cloudflare-plugin` — the R2 documentation said `getSignedUrl` "throws" where it rejects.** The
+  behaviour was always correct (`R2Storage.getSignedUrl` returns `Promise.reject`), but four
+  published sites — the class JSDoc, the method JSDoc, the README caveat and `PUBLIC_API.md` — read
+  as an instruction to catch it synchronously, which never works. Wording only; no behaviour, API or
+  export changed.
+
 - **`kernel` — `inject()` no longer MUTATES a caller-supplied `Headers` instance (M99c).** The
   per-shape content-type default wrote onto the caller's own object when `InjectRequest.headers` was
   a `Headers` rather than a record, so one instance reused across two injected requests — an

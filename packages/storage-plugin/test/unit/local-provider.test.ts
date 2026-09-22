@@ -140,11 +140,10 @@ describe('LocalStorageProvider', () => {
     expect(await provider.exists('nope')).toBe(false);
   });
 
-  // The two-step form is the discriminating one: `await
-  // expect(promise).rejects` alone would pass against a synchronous throw
-  // too, because `await` on the expression catches it either way. The
-  // `threwSync` flag is what proves the throw does not escape before the
-  // promise exists, where a caller using `.catch()` can never see it.
+  // `threwSync` is for legibility, not discrimination: a bare `await
+  // expect(...).rejects` also fails on a synchronous throw, but as an
+  // uncaught error rather than an assertion. Capturing it makes the report
+  // name the property under test. See assert-connected-rejects.test.ts.
   it('getSignedUrl rejects with the documented message, never a sync throw', async () => {
     const { fs } = makeFakeFs();
     const provider = new LocalStorageProvider(fs, { rootDir: '/root' });

@@ -11530,7 +11530,7 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   survives: `get` answers `null` for it (the contract has no other way to say so) while `has` and
   `delete` report it as present, and no path removes it.
 - **KV is eventually consistent.** Suitable for read-heavy caching, not for coordination.
-- **`R2Storage.getSignedUrl` throws.** The R2 Workers binding exposes no presign operation at all.
+- **`R2Storage.getSignedUrl` rejects.** The R2 Workers binding exposes no presign operation at all.
   `getStream` is implemented, so serving through a route is a zero-copy alternative.
 - **`R2Storage.delete` heads first.** R2's `delete` returns void and reports nothing, so the
   committed `Promise<boolean>` costs one extra round trip rather than a constant `true`.

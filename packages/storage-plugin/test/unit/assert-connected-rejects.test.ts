@@ -5,11 +5,15 @@
  * escapes before the promise is returned, so a caller using `.catch()`
  * never sees it and the error is uncaught.
  *
- * The table is the set, as data, not prose: one row per fixed method. The
- * discriminating assertion is the two-step form — `await
- * expect(promise).rejects` alone would pass against a synchronous throw
- * too, because `await` on the expression catches it either way; the
- * `threwSync` flag is what proves the throw no longer escapes.
+ * The table is the set, as data, not prose: one row per fixed method.
+ *
+ * The `threwSync` flag is a LEGIBILITY device, not the thing that makes the
+ * test discriminate — probed, and a bare `await expect(invoke()).rejects`
+ * DOES fail against a synchronous throw, because the argument is evaluated
+ * before `expect` is called, so the throw escapes the test body. What it
+ * escapes as is an uncaught error with a stack rather than an assertion
+ * failure, which names the wrong thing. Capturing it turns that into
+ * `expect(threwSync).toBe(false)`, so the report says what actually broke.
  *
  * The second block guards the same property one level up, on the PUBLISHED
  * `IStorage` contract. It exists because `StorageService.getSignedUrl` is a

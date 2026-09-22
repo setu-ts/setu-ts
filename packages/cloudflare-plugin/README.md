@@ -401,7 +401,7 @@ job.
 - **`clear()` needs a prefix and costs one delete per key.** The binding has no bulk delete, so the
   sweep pages `list` (1000 keys at a time) and deletes each one. Without a prefix it would delete
   keys the store does not own, so it throws instead.
-- **R2 cannot presign.** `getSignedUrl` throws. Serve the object through a route (`getStream` gives
+- **R2 cannot presign.** `getSignedUrl` rejects. Serve the object through a route (`getStream` gives
   you a zero-copy download) or put a custom domain in front of the bucket.
 - **Binding methods only work inside a request.** Cloudflare prohibits I/O in global scope. The
   plugin holds bindings at `register()` and never reads through them there, and the health indicator
