@@ -5975,11 +5975,12 @@ stays 2-3 MiB ahead of the consumer (measured constant in elapsed time and in by
 consumer that stops reading stops the wire, and cancelling releases the upstream connection. On
 every other provider a large object becomes memory-resident regardless of how slowly the client
 reads — `GcsProvider` and `AzureBlobProvider` stream natively but drain their SDK stream eagerly
-with no demand signal and no cancellation, while `MemoryProvider` and `LocalStorageProvider` have no
-native `getStream` at all and take `StorageService`'s buffered fallback. The storage-plugin README
-carries the per-provider table. Note also that process RSS does not measure any of this — a large
-download raises the allocator high-water mark while retaining nothing, and importing the AWS SDK
-costs ~29 MiB by itself.
+with no demand signal (cancelling releases the upstream stream, but cannot undo what has already
+been drained), while `MemoryProvider` and `LocalStorageProvider` have no native `getStream` at all
+and take `StorageService`'s buffered fallback. The storage-plugin README carries the per-provider
+table. Note also that process RSS does not measure any of this — a large download raises the
+allocator high-water mark while retaining nothing, and importing the AWS SDK costs ~29 MiB by
+itself.
 
 ### Providers
 

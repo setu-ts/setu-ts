@@ -510,10 +510,12 @@ describe('GcsProvider', () => {
           getMetadata: () => Promise.resolve([{}]),
           getSignedUrl: () => Promise.resolve(['https://x']),
           createReadStream: () => {
-            // Simulate Node.js stream - fire data and end synchronously
-            // so the ReadableStream completes before we read from it.
+            // Simulate a real GCS read stream (a node Readable): both the
+            // event contract AND the async-iteration contract the provider's
+            // wrapper drives.
             let dataRegistered = false;
             let endRegistered = false;
+            let iterated = false;
             return {
               on(event: string, fn: (arg?: unknown) => void) {
                 if (event === 'data' && !dataRegistered) {
@@ -524,6 +526,20 @@ describe('GcsProvider', () => {
                   endRegistered = true;
                   fn();
                 }
+              },
+              [Symbol.asyncIterator]() {
+                return {
+                  next() {
+                    if (!iterated) {
+                      iterated = true;
+                      return Promise.resolve({
+                        done: false,
+                        value: new Uint8Array([100, 200, 255]),
+                      });
+                    }
+                    return Promise.resolve({ done: true, value: undefined });
+                  },
+                };
               },
             } as unknown as NodeJS.ReadableStream;
           },
@@ -644,6 +660,13 @@ describe('GcsProvider', () => {
                   fn(new Error('stream error'));
                 }
               },
+              [Symbol.asyncIterator]() {
+                return {
+                  next() {
+                    return Promise.reject(new Error('stream error'));
+                  },
+                };
+              },
             } as unknown as NodeJS.ReadableStream;
           },
         }),
@@ -682,6 +705,13 @@ describe('GcsProvider', () => {
                   // Fire 'end' synchronously so controller.close() runs immediately.
                   fn();
                 }
+              },
+              [Symbol.asyncIterator]() {
+                return {
+                  next() {
+                    return Promise.resolve({ done: true, value: undefined });
+                  },
+                };
               },
             } as unknown as NodeJS.ReadableStream;
           },
@@ -749,6 +779,7 @@ describe('GcsProvider', () => {
             // Fire all three events synchronously during construction.
             let dataRegistered = false;
             let endRegistered = false;
+            let iterated = false;
             return {
               on(event: string, fn: (_arg?: unknown) => void) {
                 if (event === 'data' && !dataRegistered) {
@@ -759,6 +790,17 @@ describe('GcsProvider', () => {
                   endRegistered = true;
                   fn();
                 }
+              },
+              [Symbol.asyncIterator]() {
+                return {
+                  next() {
+                    if (!iterated) {
+                      iterated = true;
+                      return Promise.resolve({ done: false, value: new Uint8Array([42, 100]) });
+                    }
+                    return Promise.resolve({ done: true, value: undefined });
+                  },
+                };
               },
             } as unknown as NodeJS.ReadableStream;
           },
@@ -848,6 +890,7 @@ describe('GcsProvider', () => {
             const chunk = new Uint8Array([55, 66, 77]);
             let dataRegistered = false;
             let endRegistered = false;
+            let iterated = false;
             return {
               on(event: string, fn: (_arg?: unknown) => void) {
                 if (event === 'data' && !dataRegistered) {
@@ -858,6 +901,17 @@ describe('GcsProvider', () => {
                   endRegistered = true;
                   fn();
                 }
+              },
+              [Symbol.asyncIterator]() {
+                return {
+                  next() {
+                    if (!iterated) {
+                      iterated = true;
+                      return Promise.resolve({ done: false, value: chunk });
+                    }
+                    return Promise.resolve({ done: true, value: undefined });
+                  },
+                };
               },
             } as unknown as NodeJS.ReadableStream;
           },
@@ -1242,5 +1296,165 @@ describe('GcsProvider', () => {
       expect((e as Error).message).toBe('ConnectionError');
     }
     expect(threw).toBe(true);
+  });
+});
+
+// ── getStream cancellation safety (stream-cancel-race fix) ────────────────
+
+describe('GcsProvider getStream cancellation safety', () => {
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  it('cancel releases the iterator and destroys the stream; later chunks are never enqueued', async () => {
+    let destroys = 0;
+    const fakeClient = {
+      bucket: () => ({
+        file: () => ({
+          save: (
+            _data: Uint8Array,
+            _options: Record<string, unknown>,
+            cb: (err: Error | null) => void,
+          ) => cb(null),
+          download: () => Promise.resolve({ body: new Uint8Array([]) }),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: () => {
+            async function* source(): AsyncGenerator<Uint8Array> {
+              yield new Uint8Array([1]);
+              await tick();
+              yield new Uint8Array([2]); // lands after the consumer cancelled
+              await tick();
+              yield new Uint8Array([3]);
+            }
+            return Object.assign(source(), {
+              destroy(): void {
+                destroys++;
+              },
+            });
+          },
+        }),
+      }),
+    } as unknown as IGcsClient;
+    const provider = new GcsProvider({ bucket: 'b', client: fakeClient });
+    await provider.connect();
+    const stream = await provider.getStream('cancel-race');
+    const reader = (stream as ReadableStream<Uint8Array>).getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    await reader.cancel();
+    expect(destroys).toBe(1);
+    // Let the cancelled source's remaining yields land: they must be a
+    // deliberate drop, never an enqueue into the closed controller. No
+    // uncaught TypeError reaching this line IS the assertion.
+    await tick();
+    await tick();
+    await tick();
+  });
+});
+
+// ── Injected-client stream shapes (the 0.8.0 compat guarantee) ─────────────
+
+describe('GcsProvider getStream — injected client stream shapes', () => {
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  /** Builds a provider over a client whose `createReadStream` returns `make()`. */
+  function providerOver(make: () => unknown): GcsProvider {
+    const client = {
+      bucket: () => ({
+        file: () => ({
+          save: (
+            _d: Uint8Array,
+            _o: Record<string, unknown>,
+            cb: (e: Error | null) => void,
+          ) => cb(null),
+          download: () => Promise.resolve({ body: new Uint8Array([]) }),
+          delete: () => Promise.resolve(),
+          getMetadata: () => Promise.resolve([{}]),
+          getSignedUrl: () => Promise.resolve(['https://x']),
+          createReadStream: make,
+        }),
+      }),
+    } as unknown as IGcsClient;
+    return new GcsProvider({ bucket: 'b', client });
+  }
+
+  it('an event-only client stream still streams (the pre-0.8.0 fake shape)', async () => {
+    // This shape is all `IGcsClient` has ever promised — `bucket()` returns
+    // `unknown`, so nothing type-checks the stream. It must keep working.
+    const provider = providerOver(() => {
+      let fired = false;
+      return {
+        on(event: string, fn: (arg?: unknown) => void) {
+          if (event === 'data' && !fired) {
+            fired = true;
+            fn(new Uint8Array([10, 20, 30]));
+          }
+          if (event === 'end') fn();
+        },
+      };
+    });
+    await provider.connect();
+    const stream = await provider.getStream('legacy-shape');
+    expect(stream).not.toBeNull();
+    const reader = (stream as ReadableStream<Uint8Array>).getReader();
+    const first = await reader.read();
+    expect([...first.value!]).toEqual([10, 20, 30]);
+    expect((await reader.read()).done).toBe(true);
+  });
+
+  it('an event-only client stream cancels safely: destroyed, and later chunks dropped', async () => {
+    let destroys = 0;
+    let push: (chunk: Uint8Array) => void = () => {};
+    const provider = providerOver(() => ({
+      on(event: string, fn: (arg?: unknown) => void) {
+        if (event === 'data') push = (chunk) => fn(chunk);
+      },
+      destroy() {
+        destroys++;
+      },
+    }));
+    await provider.connect();
+    const reader = (await provider.getStream('cancel') as ReadableStream<Uint8Array>).getReader();
+    push(new Uint8Array([1]));
+    expect((await reader.read()).done).toBe(false);
+    await reader.cancel();
+    expect(destroys).toBe(1);
+    push(new Uint8Array([2])); // must NOT enqueue into the closed controller
+    await tick();
+  });
+
+  it('a CALLABLE read stream is streamed, not refused', async () => {
+    // `IGcsClient` types the stream as `unknown`, so a callable carrying the
+    // members is as legal as a plain object; it must reach an adapter.
+    const provider = providerOver(() =>
+      Object.assign(function () {}, {
+        async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+          yield new Uint8Array([7, 7]);
+        },
+      })
+    );
+    await provider.connect();
+    const stream = await provider.getStream('callable');
+    expect(stream).not.toBeNull();
+    const reader = (stream as ReadableStream<Uint8Array>).getReader();
+    expect([...(await reader.read()).value!]).toEqual([7, 7]);
+    expect((await reader.read()).done).toBe(true);
+  });
+
+  it('a stream carrying NEITHER shape rejects by name — never a sync throw', async () => {
+    const provider = providerOver(() => ({ nothingUseful: true }));
+    await provider.connect();
+    let threwSync = false;
+    let promise: Promise<unknown> | undefined;
+    try {
+      promise = provider.getStream('no-shape');
+    } catch {
+      threwSync = true;
+    }
+    // A synchronous throw from a `Promise`-returning method is invisible to a
+    // caller using `.catch()`; the refusal must be a rejection.
+    expect(threwSync).toBe(false);
+    await expect(promise).rejects.toThrow(/GcsProvider: createReadStream\(\) for 'no-shape'/);
+    await expect(promise).rejects.toThrow(/neither async-iterable nor an event emitter/);
   });
 });

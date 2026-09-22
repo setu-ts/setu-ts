@@ -1,0 +1,601 @@
+/**
+ * Tests for {@linkcode looksLikeNodeReadable}, {@linkcode createBoundedNodeStream},
+ * and {@linkcode createEagerIterableStream} — the cancellation-safe stream
+ * adapters behind the three cloud providers' `getStream`.
+ *
+ * The closed-flag tests are the deterministic core of the stream-cancel-race
+ * regression: a chunk that surfaces AFTER `cancel()` must be a deliberate
+ * drop, never an `enqueue()` into a closed controller (which escapes as an
+ * uncaught, process-killing TypeError).
+ *
+ * @module
+ */
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+import { PassThrough } from 'node:stream';
+import {
+  createBoundedNodeStream,
+  createEagerEventStream,
+  createEagerIterableStream,
+  looksLikeAsyncIterable,
+  looksLikeEventStream,
+  looksLikeNodeReadable,
+} from '../../src/providers/provider-stream.ts';
+import type { NodeSdkReadable } from '../../src/providers/provider-stream.ts';
+
+const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+// ── looksLikeNodeReadable ──────────────────────────────────────────────────
+
+describe('looksLikeNodeReadable', () => {
+  it('accepts a real node stream', () => {
+    expect(looksLikeNodeReadable(new PassThrough())).toBe(true);
+  });
+
+  it('accepts a hand-rolled shape carrying on/once/off/read/destroy', () => {
+    const fake = {
+      on() {},
+      once() {},
+      off() {},
+      read(): Uint8Array | null {
+        return null;
+      },
+      destroy() {},
+    };
+    expect(looksLikeNodeReadable(fake)).toBe(true);
+  });
+
+  it('accepts a CALLABLE carrying the node Readable members', () => {
+    // A function can carry these members exactly as a plain object can, and
+    // refusing one would reject a legal stream before its adapter is chosen.
+    const callable = Object.assign(function () {}, {
+      on() {},
+      once() {},
+      off() {},
+      read: (): Uint8Array | null => null,
+      destroy() {},
+    });
+    expect(looksLikeNodeReadable(callable)).toBe(true);
+  });
+
+  it('rejects a web ReadableStream, plain objects, and non-objects', () => {
+    expect(looksLikeNodeReadable(new ReadableStream())).toBe(false);
+    expect(looksLikeNodeReadable({ on() {} })).toBe(false);
+    expect(looksLikeNodeReadable(new Uint8Array(4))).toBe(false);
+    expect(looksLikeNodeReadable(null)).toBe(false);
+    expect(looksLikeNodeReadable(undefined)).toBe(false);
+    expect(looksLikeNodeReadable('readable')).toBe(false);
+  });
+});
+
+// ── createBoundedNodeStream (the S3 wrapper) ───────────────────────────────
+
+describe('createBoundedNodeStream', () => {
+  it('delivers written chunks in order and closes on end', async () => {
+    const pt = new PassThrough();
+    const stream = createBoundedNodeStream(pt);
+    pt.write(new Uint8Array([1, 2]));
+    pt.write(new Uint8Array([3]));
+    pt.end();
+    const reader = stream.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect([...first.value!]).toEqual([1, 2]);
+    const second = await reader.read();
+    expect(second.done).toBe(false);
+    expect([...second.value!]).toEqual([3]);
+    const done = await reader.read();
+    expect(done.done).toBe(true);
+  });
+
+  it('propagates an underlying error to the consumer', async () => {
+    const pt = new PassThrough();
+    // No sink: the wrapper attaches its own lifetime 'error' listener at
+    // construction, which is what keeps node from raising this as unhandled.
+    const stream = createBoundedNodeStream(pt);
+    pt.destroy(new Error('origin reset'));
+    const reader = stream.getReader();
+    await expect(reader.read()).rejects.toThrow('origin reset');
+  });
+
+  it('closes immediately when the source ended before the first pull', async () => {
+    const pt = new PassThrough();
+    pt.end(); // ended before anyone wrapped or read it
+    const stream = createBoundedNodeStream(pt);
+    const reader = stream.getReader();
+    const done = await reader.read();
+    expect(done.done).toBe(true);
+  });
+
+  it('errors immediately when the source errored before the first pull', async () => {
+    const pt = new PassThrough();
+    pt.on('error', () => {}); // sink — see the note in the test above
+    pt.destroy(new Error('pre-wrapped failure'));
+    const stream = createBoundedNodeStream(pt);
+    const reader = stream.getReader();
+    await expect(reader.read()).rejects.toThrow('pre-wrapped failure');
+  });
+
+  it('wraps a non-Error underlying error value into an Error before surfacing it', async () => {
+    const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+    const scripted = {
+      on(event: string, fn: (...args: unknown[]) => void) {
+        if (!listeners.has(event)) listeners.set(event, new Set());
+        listeners.get(event)!.add(fn);
+      },
+      once(event: string, fn: (...args: unknown[]) => void) {
+        scripted.on(event, fn);
+      },
+      off(event: string, fn: (...args: unknown[]) => void) {
+        listeners.get(event)?.delete(fn);
+      },
+      read(): Uint8Array | null {
+        return null;
+      },
+      destroy() {},
+      emit(event: string, ...args: unknown[]): void {
+        for (const fn of [...(listeners.get(event) ?? [])]) fn(...args);
+      },
+    } as unknown as NodeSdkReadable & { emit(event: string, ...args: unknown[]): void };
+    const stream = createBoundedNodeStream(scripted);
+    const reader = stream.getReader();
+    const pending = reader.read().catch((e: unknown) => e);
+    // Let the deferred pull run so its 'error' listener is attached first.
+    await tick();
+    scripted.emit('error', 'a string, not an Error');
+    const err = await pending;
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('a string, not an Error');
+  });
+
+  it('cancel destroys the underlying stream', async () => {
+    const pt = new PassThrough();
+    const stream = createBoundedNodeStream(pt);
+    const reader = stream.getReader();
+    pt.write(new Uint8Array([5]));
+    await reader.read();
+    await reader.cancel();
+    expect(pt.destroyed).toBe(true);
+  });
+
+  it('a chunk surfacing after cancel is a deliberate drop, NOT an enqueue into a closed controller', async () => {
+    // Hand-rolled source with the full node shape so the test can replay the
+    // exact defect timing: pull() is waiting for a chunk, cancel() runs, and
+    // THEN the source produces one more chunk (the node flow machinery's
+    // late 'data'). On the unwrapped adapter stream this threw the uncaught
+    // "The stream controller cannot close or enqueue"; here it must be a
+    // silent, deliberate drop.
+    let destroyed = false;
+    const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+    const buffer: Uint8Array[] = [];
+    const scripted = {
+      on(event: string, fn: (...args: unknown[]) => void) {
+        if (!listeners.has(event)) listeners.set(event, new Set());
+        listeners.get(event)!.add(fn);
+      },
+      once(event: string, fn: (...args: unknown[]) => void) {
+        if (!listeners.has(event)) listeners.set(event, new Set());
+        listeners.get(event)!.add(fn);
+      },
+      off(event: string, fn: (...args: unknown[]) => void) {
+        listeners.get(event)?.delete(fn);
+      },
+      read(): Uint8Array | null {
+        return buffer.shift() ?? null;
+      },
+      destroy() {
+        destroyed = true;
+      },
+      emit(event: string, ...args: unknown[]): void {
+        for (const fn of [...(listeners.get(event) ?? [])]) fn(...args);
+      },
+    } as unknown as NodeSdkReadable & { emit(event: string, ...args: unknown[]): void };
+
+    const stream = createBoundedNodeStream(scripted);
+    const reader = stream.getReader();
+    // Land one chunk so the wrapper has pulled and is waiting on 'readable'.
+    buffer.push(new Uint8Array([9]));
+    scripted.emit('readable');
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    // Re-enter the waiting pull: the wrapper's next pull attaches listeners
+    // and finds no buffered chunk. Let that deferred pull run so its
+    // 'readable' listener is attached, THEN cancel, THEN the late chunk
+    // arrives — the listener fires with the stream already closed and must
+    // settle without touching the closed controller.
+    const pendingRead = reader.read();
+    await tick();
+    await reader.cancel();
+    buffer.push(new Uint8Array([7, 7])); // the late 'data' the race produced
+    scripted.emit('readable'); // must NOT enqueue into the closed controller
+    scripted.emit('end'); // must NOT close an already-closed controller
+    await pendingRead;
+    await tick();
+    expect(destroyed).toBe(true);
+    // No uncaught TypeError reached this line — the assertion is the absence
+    // of the crash, which is what the defect was.
+  });
+
+  it('a real node stream pushing after cancel does not throw either', async () => {
+    const pt = new PassThrough();
+    pt.on('error', () => {}); // pipeline-owned errors; a post-destroy write raises one
+    const stream = createBoundedNodeStream(pt);
+    const reader = stream.getReader();
+    pt.write(new Uint8Array([5]));
+    await reader.read();
+    await reader.cancel();
+    pt.write(new Uint8Array([6])); // ERR_STREAM_DESTROYED — must be contained
+    await tick();
+    expect(pt.destroyed).toBe(true);
+  });
+
+  it('an origin error arriving while the consumer is BEHIND is contained, then surfaced', async () => {
+    // The state a slow consumer sits in: the web queue is full, so the stream
+    // has stopped calling pull() and pull's own 'error' listener is detached.
+    // With no lifetime listener a node stream emitting 'error' here has NO
+    // listener at all, which node raises as an unhandled error — an uncaught,
+    // process-killing throw, the same crash class as the cancel race. No sink
+    // is attached on purpose: a real SDK body has none either.
+    const pt = new PassThrough();
+    const stream = createBoundedNodeStream(pt);
+    const reader = stream.getReader();
+    pt.write(new Uint8Array([1])); // fills the default HWM=1 queue
+    await tick();
+    // Nothing is reading, so no pull is outstanding to hold a listener.
+    expect(pt.listenerCount('readable')).toBe(0);
+    pt.destroy(new Error('origin reset while the consumer is behind'));
+    await tick();
+    // Reaching here without an uncaught error IS half the assertion; the
+    // other half is that the failure is not swallowed — the queued chunk is
+    // delivered first, then the error reaches the consumer.
+    const queued = await reader.read();
+    expect(queued.done).toBe(false);
+    await expect(reader.read()).rejects.toThrow('origin reset while the consumer is behind');
+  });
+
+  it('closes immediately when the source reports readableEnded before the first pull', async () => {
+    // A source that has already ended by the time the first pull runs. Node
+    // will not re-emit 'end' retroactively, so the wrapper must consult the
+    // advisory `readableEnded` flag and close without waiting on an event.
+    const ended = {
+      on() {},
+      once() {},
+      off() {},
+      read(): Uint8Array | null {
+        return null;
+      },
+      destroy() {},
+      readableEnded: true,
+    };
+    const stream = createBoundedNodeStream(ended);
+    const reader = stream.getReader();
+    const done = await reader.read();
+    expect(done.done).toBe(true);
+  });
+});
+
+// ── createEagerIterableStream (the GCS/Azure wrapper) ──────────────────────
+
+describe('createEagerIterableStream', () => {
+  it('drains the iterable eagerly and closes when done', async () => {
+    async function* source(): AsyncGenerator<Uint8Array> {
+      yield new Uint8Array([1]);
+      yield new Uint8Array([2, 2]);
+    }
+    const stream = createEagerIterableStream(source());
+    const reader = stream.getReader();
+    const first = await reader.read();
+    expect([...first.value!]).toEqual([1]);
+    const second = await reader.read();
+    expect([...second.value!]).toEqual([2, 2]);
+    const done = await reader.read();
+    expect(done.done).toBe(true);
+  });
+
+  it('propagates an iterable error to the consumer', async () => {
+    async function* source(): AsyncGenerator<Uint8Array> {
+      yield new Uint8Array([1]);
+      throw new Error('connection dropped');
+    }
+    const stream = createEagerIterableStream(source());
+    const reader = stream.getReader();
+    await reader.read();
+    await expect(reader.read()).rejects.toThrow('connection dropped');
+  });
+
+  it('wraps a non-Error thrown value into an Error before surfacing it', async () => {
+    async function* source(): AsyncGenerator<Uint8Array> {
+      yield new Uint8Array([1]);
+      throw 'a string, not an Error';
+    }
+    const stream = createEagerIterableStream(source());
+    const reader = stream.getReader();
+    await reader.read();
+    const err = await reader.read().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('a string, not an Error');
+  });
+
+  it('cancel releases the iterator and destroys the source; later chunks are dropped, not enqueued', async () => {
+    let destroys = 0;
+    let afterCancelYields = 0;
+    async function* source(): AsyncGenerator<Uint8Array> {
+      yield new Uint8Array([1]);
+      // Reaching here means the consumer cancelled mid-download; the chunks
+      // below used to be enqueued into the closed controller (uncaught
+      // TypeError). Now they must simply never be enqueued.
+      for (let i = 0; i < 3; i++) {
+        await tick();
+        afterCancelYields++;
+        yield new Uint8Array([i]);
+      }
+    }
+    const generator = source();
+    const sourceWithDestroy = Object.assign(generator, {
+      destroy(): void {
+        destroys++;
+      },
+    });
+    const stream = createEagerIterableStream(sourceWithDestroy);
+    const reader = stream.getReader();
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    await reader.cancel();
+    expect(destroys).toBe(1);
+    await tick();
+    await tick();
+    await tick();
+    // The consumer sees a cleanly cancelled stream, and nothing crashed —
+    // the absence of the uncaught enqueue IS the regression assertion.
+    const done = await reader.read().catch(() => ({ done: true as const, value: undefined }));
+    expect(done.done).toBe(true);
+  });
+
+  it('cancel without a destroy-capable source still releases the iterator', async () => {
+    let returned = 0;
+    const iterator: AsyncIterator<Uint8Array> = {
+      next(): Promise<IteratorResult<Uint8Array>> {
+        return Promise.resolve({ done: false, value: new Uint8Array([1]) });
+      },
+      return(): Promise<IteratorResult<Uint8Array>> {
+        returned++;
+        return Promise.resolve({ done: true, value: undefined });
+      },
+    };
+    const source: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]() {
+        return iterator;
+      },
+    };
+    const stream = createEagerIterableStream(source);
+    const reader = stream.getReader();
+    await reader.read();
+    await reader.cancel();
+    expect(returned).toBe(1);
+  });
+
+  it('a failing iterator teardown is swallowed after cancel (nothing left to report)', async () => {
+    // The consumer already cancelled; the iterator's own return() rejecting is
+    // teardown noise the wrapper must absorb, not surface as an uncaught
+    // rejection.
+    let returned = 0;
+    const iterator: AsyncIterator<Uint8Array> = {
+      next(): Promise<IteratorResult<Uint8Array>> {
+        return Promise.resolve({ done: false, value: new Uint8Array([1]) });
+      },
+      return(): Promise<IteratorResult<Uint8Array>> {
+        returned++;
+        return Promise.reject(new Error('teardown failed'));
+      },
+    };
+    const source: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]() {
+        return iterator;
+      },
+    };
+    const stream = createEagerIterableStream(source);
+    const reader = stream.getReader();
+    await reader.read();
+    await reader.cancel();
+    await tick();
+    expect(returned).toBe(1);
+    // Reaching here without an uncaught rejection IS the assertion.
+  });
+
+  it('a throwing destroy is swallowed after cancel (already being torn down)', async () => {
+    let destroyed = 0;
+    async function* source(): AsyncGenerator<Uint8Array> {
+      yield new Uint8Array([1]);
+      await tick();
+      yield new Uint8Array([2]);
+    }
+    const sourceWithDestroy = Object.assign(source(), {
+      destroy(): void {
+        destroyed++;
+        throw new Error('already destroyed');
+      },
+    });
+    const stream = createEagerIterableStream(sourceWithDestroy);
+    const reader = stream.getReader();
+    await reader.read();
+    await reader.cancel();
+    await tick();
+    expect(destroyed).toBe(1);
+    // The throw was contained — no uncaught error reached this line.
+  });
+});
+
+// ── Shape classifiers + the event fallback (GCS injected-client path) ──────
+
+/** A faithful event-emitting stream double: real registration and removal. */
+function makeEventSource() {
+  const listeners = new Map<string, Set<(...a: unknown[]) => void>>();
+  let destroyed = false;
+  return {
+    on(event: string, fn: (...a: unknown[]) => void): void {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event)!.add(fn);
+    },
+    off(event: string, fn: (...a: unknown[]) => void): void {
+      listeners.get(event)?.delete(fn);
+    },
+    destroy(): void {
+      destroyed = true;
+    },
+    emit(event: string, ...args: unknown[]): void {
+      for (const fn of [...(listeners.get(event) ?? [])]) fn(...args);
+    },
+    isDestroyed: (): boolean => destroyed,
+    count: (event: string): number => listeners.get(event)?.size ?? 0,
+  };
+}
+
+describe('looksLikeAsyncIterable / looksLikeEventStream', () => {
+  it('a real node stream satisfies BOTH, so the iterable branch wins', () => {
+    const pt = new PassThrough();
+    expect(looksLikeAsyncIterable(pt)).toBe(true);
+    expect(looksLikeEventStream(pt)).toBe(true);
+  });
+
+  it('classifies an event-only source and a bare async generator apart', () => {
+    expect(looksLikeAsyncIterable(makeEventSource())).toBe(false);
+    expect(looksLikeEventStream(makeEventSource())).toBe(true);
+    async function* gen(): AsyncGenerator<Uint8Array> {
+      yield new Uint8Array([1]);
+    }
+    expect(looksLikeAsyncIterable(gen())).toBe(true);
+    expect(looksLikeEventStream(gen())).toBe(false);
+  });
+
+  it('accepts CALLABLES carrying either shape', () => {
+    const callableIterable = Object.assign(function () {}, {
+      async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+        yield new Uint8Array([1]);
+      },
+    });
+    const callableEmitter = Object.assign(function () {}, { on() {} });
+    expect(looksLikeAsyncIterable(callableIterable)).toBe(true);
+    expect(looksLikeEventStream(callableEmitter)).toBe(true);
+    // ...and a callable carrying NEITHER is still refused, so widening the
+    // guard did not turn it into "anything that is not nullish".
+    expect(looksLikeAsyncIterable(function () {})).toBe(false);
+    expect(looksLikeEventStream(function () {})).toBe(false);
+  });
+
+  it('rejects non-objects and shapes carrying neither', () => {
+    // Only `null`/`undefined` are excluded by the guard itself; every other
+    // primitive is excluded by simply not carrying the member.
+    for (const value of [null, undefined, 'stream', 42, true, 10n, {}]) {
+      expect(looksLikeAsyncIterable(value)).toBe(false);
+      expect(looksLikeEventStream(value)).toBe(false);
+      expect(looksLikeNodeReadable(value)).toBe(false);
+    }
+  });
+});
+
+describe('createEagerEventStream', () => {
+  it('delivers chunks in order and closes on end', async () => {
+    const source = makeEventSource();
+    const stream = createEagerEventStream(source);
+    const reader = stream.getReader();
+    source.emit('data', new Uint8Array([1, 2]));
+    source.emit('data', new Uint8Array([3]));
+    source.emit('end');
+    expect([...(await reader.read()).value!]).toEqual([1, 2]);
+    expect([...(await reader.read()).value!]).toEqual([3]);
+    expect((await reader.read()).done).toBe(true);
+  });
+
+  it('keeps an error listener for the whole stream, so an idle-consumer error is contained', async () => {
+    const source = makeEventSource();
+    const stream = createEagerEventStream(source);
+    const reader = stream.getReader();
+    // Nothing is reading; unlike the pull-driven adapter there is no window
+    // in which the source has no 'error' listener.
+    expect(source.count('error')).toBe(1);
+    source.emit('error', new Error('origin reset'));
+    await expect(reader.read()).rejects.toThrow('origin reset');
+  });
+
+  it('wraps a non-Error emitted value into an Error', async () => {
+    const source = makeEventSource();
+    const reader = createEagerEventStream(source).getReader();
+    source.emit('error', 'a string, not an Error');
+    const err = await reader.read().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('a string, not an Error');
+  });
+
+  it('cancel detaches every listener, destroys the source, and drops a late chunk', async () => {
+    const source = makeEventSource();
+    const reader = createEagerEventStream(source).getReader();
+    source.emit('data', new Uint8Array([9]));
+    expect((await reader.read()).done).toBe(false);
+    await reader.cancel();
+    expect(source.isDestroyed()).toBe(true);
+    expect(source.count('data')).toBe(0);
+    expect(source.count('end')).toBe(0);
+    expect(source.count('error')).toBe(0);
+    // Late events from a source still tearing down must not touch the closed
+    // controller — reaching the end of this test IS the assertion.
+    source.emit('data', new Uint8Array([7]));
+    source.emit('end');
+    source.emit('error', new Error('teardown noise'));
+    await tick();
+  });
+
+  it('a source with no `off` still drops a late end/error after cancel', async () => {
+    // Without `off` the listeners stay attached through cancel, so the
+    // `stopped` guard inside each handler is the only thing between a late
+    // teardown event and the closed controller.
+    const handlers = new Map<string, (...a: unknown[]) => void>();
+    const source = {
+      on(event: string, fn: (...a: unknown[]) => void): void {
+        handlers.set(event, fn);
+      },
+      destroy(): void {},
+    };
+    const reader = createEagerEventStream(source).getReader();
+    handlers.get('data')!(new Uint8Array([1]));
+    expect((await reader.read()).done).toBe(false);
+    await reader.cancel();
+    handlers.get('end')!(); // must NOT close an already-closed controller
+    handlers.get('error')!(new Error('late teardown noise')); // must NOT error it
+    await tick();
+  });
+
+  it('a throwing destroy is contained (the source is already tearing down)', async () => {
+    let destroys = 0;
+    const source = {
+      on(): void {},
+      destroy(): void {
+        destroys++;
+        throw new Error('already destroyed');
+      },
+    };
+    const reader = createEagerEventStream(source).getReader();
+    await reader.cancel();
+    expect(destroys).toBe(1);
+    // The throw was contained — reaching this line IS the assertion.
+  });
+
+  it('cancel on a source carrying only `on` still stops the stream', async () => {
+    // The minimum `IGcsClient` permits: no `off`, no `destroy`.
+    let delivered = 0;
+    let emit: (chunk: Uint8Array) => void = () => {};
+    const minimal = {
+      on(event: string, fn: (...a: unknown[]) => void): void {
+        if (event === 'data') emit = (chunk) => fn(chunk);
+      },
+    };
+    const stream = createEagerEventStream(minimal);
+    const reader = stream.getReader();
+    emit(new Uint8Array([1]));
+    await reader.read();
+    delivered++;
+    await reader.cancel();
+    emit(new Uint8Array([2])); // dropped, not enqueued into a closed controller
+    await tick();
+    expect(delivered).toBe(1);
+  });
+});

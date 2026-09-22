@@ -35,14 +35,37 @@
  * ## Scope
  *
  * This pins `S3Provider` ONLY, and that is the honest scope rather than a
- * convenience: `GcsProvider` and `AzureBlobProvider` stream natively but drain
- * their SDK stream eagerly with no `pull` and no `cancel`, and `MemoryProvider`
- * and `LocalStorageProvider` have no native `getStream` at all, so
- * `StorageService` reads the object whole and emits one chunk. None of those
- * four would pass this suite, and the README's per-provider table says so.
+ * convenience: `GcsProvider` and `AzureBlobProvider` stream natively and —
+ * since the stream-cancel-race fix (`provider-stream.ts`) — cancel safely, but
+ * still drain their SDK stream EAGERLY with no `pull`, so their read-ahead is
+ * the whole object and the demand-driven property below remains
+ * `S3Provider`-only. `MemoryProvider` and `LocalStorageProvider` have no
+ * native `getStream` at all, so `StorageService` reads the object whole and
+ * emits one chunk. None of those four would pass this suite, and the README's
+ * per-provider table says so.
  *
  * Guarded on `S3_ENDPOINT_URL` via `ignore:`, so an absent backend reports as
  * IGNORED rather than as a pass that asserted nothing.
+ *
+ * ## Cancel-race regression
+ *
+ * The second test reproduces the intermittent uncaught
+ * `TypeError: The stream controller cannot close or enqueue` this package
+ * shipped for months: `reader.cancel()` closes the web controller
+ * synchronously while Deno's `ext:deno_node/internal/webstreams/adapters.js`
+ * tears the node side of the SDK's `ChecksumStream` down asynchronously, so a
+ * `'data'` emission still inside the flow machinery enqueued into the closed
+ * controller and the throw escaped as an uncaught, module-failing error —
+ * 1 failure across 3 full-suite runs, never in isolation. The trigger needs
+ * the stream ACTIVELY FLOWING when the origin connection tears down (a
+ * stalled stream has no `resume_`/`flow` cycle to race — measured standalone:
+ * a 350 ms stall before the teardown never fires, back-to-back reads fire
+ * 2-in-5), which is also why the suite's own `proxy.close()` is the event
+ * that lands in the window. `S3Provider.getStream` now wraps the SDK body in
+ * `createBoundedNodeStream` (`provider-stream.ts`), which never routes a node
+ * stream through that adapter and destroys it inside `cancel()`; the same
+ * fix made `GcsProvider`/`AzureBlobProvider` (deterministically unsafe
+ * before: no `cancel` hook at all) cancellation-safe.
  *
  * @module
  */
@@ -370,5 +393,81 @@ describe('REAL MinIO/S3 streaming backpressure (X45-1)', { ignore: skip }, () =>
       await provider.disconnect();
       await proxy.close();
     }
+  });
+
+  it('cancelling mid-flow while the origin tears down does not crash the process', async () => {
+    const real = new URL(toIpv4(endpoint as string));
+    const bucket = Deno.env.get('S3_BUCKET') ?? 'm70c-verify';
+    const accessKeyId = Deno.env.get('S3_ACCESS_KEY_ID') ?? 'minioadmin';
+    const secretAccessKey = Deno.env.get('S3_SECRET_ACCESS_KEY') ?? 'minioadmin';
+    const originPort = real.port === '' ? 9000 : Number(real.port);
+
+    await ensureFixture(real.origin, bucket, accessKeyId, secretAccessKey);
+
+    // Per-trial proxy: the yank closes its listener for good.
+    for (let trial = 0; trial < 5; trial++) {
+      const proxy = startCountingProxy(real.hostname, originPort, PROXY_PORT);
+      const provider = new S3Provider({
+        bucket,
+        endpoint: `http://127.0.0.1:${proxy.port}`,
+        region: 'us-east-1',
+        accessKeyId,
+        secretAccessKey,
+      });
+      // Tracked so the `finally` can close a proxy whose trial threw before
+      // the yank: `S3Provider.disconnect()` does not close the listener, and a
+      // leaked one makes the NEXT trial fail to bind PROXY_PORT with AddrInUse
+      // — reporting an unrelated error in place of the one that actually broke.
+      let yank: Promise<void> | null = null;
+      try {
+        await provider.connect();
+        const stream = await provider.getStream(OBJECT_KEY);
+        expect(stream).not.toBeNull();
+        const reader = (stream as ReadableStream<Uint8Array>).getReader();
+        // Back-to-back reads, NO pacing: the defect needs the node flow
+        // machinery live when the teardown lands (measured standalone, a
+        // stalled stream never fires the race).
+        for (let i = 0; i < 3; i++) await reader.read();
+        // The failing interleaving: socket teardown CONCURRENT with the
+        // cancel — the shape the finally-block `proxy.close()` above
+        // produced against a cancelled stream, firing the uncaught
+        // "TypeError: The stream controller cannot close or enqueue" inside
+        // ext:deno_node/internal/webstreams/adapters.js.
+        yank = proxy.close();
+        await reader.cancel();
+        await yank;
+      } finally {
+        await (yank ?? proxy.close());
+        await provider.disconnect();
+      }
+      // Late ticks from the raced teardown land here. On the unwrapped
+      // adapter stream this surfaced as an uncaught, module-failing error
+      // ~2-in-5 standalone trials; with `createBoundedNodeStream` the node
+      // stream is destroyed inside cancel() and nothing can fire.
+      await wait(400);
+    }
+
+    // The provider still works after the raced cancels.
+    const lastProxy = startCountingProxy(real.hostname, originPort, PROXY_PORT);
+    const still = new S3Provider({
+      bucket,
+      endpoint: `http://127.0.0.1:${lastProxy.port}`,
+      region: 'us-east-1',
+      accessKeyId,
+      secretAccessKey,
+    });
+    try {
+      await still.connect();
+      const stream = await still.getStream(OBJECT_KEY);
+      expect(stream).not.toBeNull();
+      const reader = (stream as ReadableStream<Uint8Array>).getReader();
+      const first = await reader.read();
+      expect(first.done).toBe(false);
+      await reader.cancel();
+    } finally {
+      await still.disconnect();
+      await lastProxy.close();
+    }
+    await wait(300);
   });
 });

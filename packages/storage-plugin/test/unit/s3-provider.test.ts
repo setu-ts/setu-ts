@@ -8,6 +8,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import { PassThrough } from 'node:stream';
 import type { IS3Backend } from '../../src/interfaces/index.ts';
 import {
   adaptAwsS3Module,
@@ -1400,5 +1401,92 @@ describe('S3Provider', () => {
     } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
     const facade = adaptAwsS3Module(fakeMod, { bucket: 'nbucket4' });
     await expect(facade.getStream('timeout-key')).rejects.toThrow('TimeoutError');
+  });
+});
+
+// ── getStream SDK node-body wrapping (stream-cancel-race fix) ──────────────
+
+describe('adaptAwsS3Module getStream — SDK node-body wrapping', () => {
+  const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+  function sdkModuleReturning(getBody: () => unknown) {
+    return {
+      s3: {
+        S3Client: class {
+          // deno-lint-ignore no-explicit-any
+          send(cmd: any): Promise<unknown> {
+            if (cmd.constructor.name === 'GetObjectCommand') {
+              return Promise.resolve({ Body: getBody() });
+            }
+            return Promise.resolve({});
+          }
+        },
+        PutObjectCommand: class PutObjectCommand {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        GetObjectCommand: class GetObjectCommand {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        DeleteObjectCommand: class DeleteObjectCommand {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+        HeadObjectCommand: class HeadObjectCommand {
+          input: Record<string, unknown>;
+          constructor(i: Record<string, unknown>) {
+            this.input = i;
+          }
+        },
+      },
+      presigner: { getSignedUrl: () => Promise.resolve('https://x') },
+    } as unknown as import('../../src/providers/s3-provider.ts').AwsStorageSdkModule;
+  }
+
+  it('wraps a node-shaped Body so cancel destroys it and a late chunk cannot throw', async () => {
+    let transformCalled = false;
+    const body = new PassThrough();
+    // deno-lint-ignore no-explicit-any
+    (body as any).transformToWebStream = () => {
+      transformCalled = true;
+      return new ReadableStream();
+    };
+    body.on('error', () => {}); // pipeline-owned; a post-destroy write raises one
+    const facade = adaptAwsS3Module(sdkModuleReturning(() => body), { bucket: 'b' });
+    const stream = await facade.getStream('k');
+    body.write(new Uint8Array([1, 2]));
+    const reader = (stream as ReadableStream<Uint8Array>).getReader();
+    const chunk = await reader.read();
+    expect(chunk.done).toBe(false);
+    expect([...chunk.value!]).toEqual([1, 2]);
+    await reader.cancel();
+    expect(body.destroyed).toBe(true);
+    // The adapter stream — the thing whose onData raced the controller — is
+    // never built at all.
+    expect(transformCalled).toBe(false);
+    // The defect's exact moment: a chunk in flight at cancel time must be a
+    // deliberate drop, never controller.enqueue into a closed controller.
+    body.write(new Uint8Array([3]));
+    await tick();
+  });
+
+  it('keeps the legacy transformToWebStream path for non-node-shaped bodies', async () => {
+    const adapted = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([9]));
+        controller.close();
+      },
+    });
+    const body = { transformToWebStream: () => adapted };
+    const facade = adaptAwsS3Module(sdkModuleReturning(() => body), { bucket: 'b' });
+    const stream = await facade.getStream('k');
+    expect(stream).toBe(adapted);
   });
 });

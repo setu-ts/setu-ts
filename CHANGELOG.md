@@ -167,6 +167,29 @@ All notable changes to this project are documented here. The format follows
   allocated numeric suffix; and because an alias names an anonymous inline schema the document never
   named, the same preference-and-fallback now resolves all four hoist sites (request body,
   parameter, success response, error body) instead of moving the abort.
+- **`storage-plugin` — cancelling a download no longer crashes the process (S3, GCS, Azure).**
+  `S3Provider.getStream` returned the SDK's node stream through Deno's `node:stream`-to-web adapter,
+  which enqueues on `'data'` without checking whether the web controller was already closed: a
+  `reader.cancel()` that raced origin teardown (a connection dropped while bytes were still flowing)
+  enqueued into the closed controller and threw an uncaught
+  `TypeError: The stream controller cannot close or enqueue` out of the tick queue, killing the
+  process. Node-shaped bodies are now wrapped in a pull-driven adapter
+  (`src/providers/provider-stream.ts`) that guards every controller touch and destroys the node
+  stream on cancel; the measured read-ahead shape is unchanged. `GcsProvider` and
+  `AzureBlobProvider` carried the same hazard in a deterministic form — no cancel hook at all, so a
+  cancelled download kept flowing and the next chunk hit the closed controller — and now route
+  through that module's EAGER adapters, a different one from the pull-driven S3 wrapper above, which
+  release the upstream stream on cancel (they remain eager, never demand-driven). `GcsProvider`
+  picks its adapter by probing the stream's shape rather than assuming one, so an injected client
+  whose `createReadStream()` only emits `'data'`/`'end'`/`'error'` — all `IGcsClient` has ever
+  promised, since `bucket()` returns `unknown` — keeps streaming, now with the cancel hook it never
+  had; a value carrying neither shape is refused by name instead of failing with a bare `TypeError`.
+  The S3 wrapper also keeps a lifetime `'error'` listener on the node stream: its per-read listener
+  is detached between pulls, which is exactly where a slow consumer sits once the web queue is full,
+  so an origin failure in that window would otherwise emit an unhandled `'error'` and escape as the
+  same uncaught, process-killing throw — the error is now recorded and surfaced to the consumer on
+  the next read. A real-backend regression test drives the firing shape — three back-to-back reads,
+  then concurrent origin teardown and cancel — against MinIO.
 - **`logger-plugin` — default redaction now covers normalized `authorization` headers.** The shipped
   default is lowercase and default matching is case-insensitive across both console and Pino
   transports; a caller-supplied `redact` list remains case-sensitive. This prevents Fetch's
