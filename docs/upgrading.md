@@ -51,8 +51,8 @@ without awaiting it, so the throw came out of the `IStorage` you resolve from
 
 If you pass your OWN provider to the exported `StorageService`, its `delete`, `exists` and
 `getSignedUrl` used to hand your provider's promise straight back without awaiting it, so a
-synchronous throw from your provider escaped `IStorage` too. They now `return await`. Nothing
-changes for the five built-in providers, which all return promises.
+synchronous throw from your provider escaped `IStorage` too. They are now `async`. Nothing changes
+for the five built-in providers, which all return promises.
 
 Nothing to do if you `await` the call or attach `.catch()`: you see exactly what you saw before. The
 one thing that changes is code that wrapped one of the eleven calls in a synchronous `try`/`catch` —

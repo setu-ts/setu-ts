@@ -15,13 +15,12 @@ import type { StorageProvider } from '../interfaces/index.ts';
  * signal absence with `null`, and this service performs the `null → throw`
  * conversion so the throw contract lives in one place.
  *
- * Every method is `async` and every delegation is `return await`, which is
- * load-bearing rather than stylistic: this class is exported, so an
- * application can hand it its own provider (structural typing needs no
- * `StorageProvider` import), and a bare `return provider.x()` would let that
- * provider's SYNCHRONOUS throw escape `IStorage` before the promise exists,
- * where a caller using `.catch()` can never see it. The `await` keeps the
- * failure inside this method's own promise.
+ * Every method is `async`, which is load-bearing rather than stylistic: this
+ * class is exported, so an application can hand it its own provider
+ * (structural typing needs no `StorageProvider` import), and a non-`async`
+ * `return provider.x()` would let that provider's SYNCHRONOUS throw escape
+ * `IStorage` before the promise exists, where a caller using `.catch()` can
+ * never see it. `async` turns it into a rejection.
  *
  * @since 0.1.0
  */
@@ -73,8 +72,9 @@ export class StorageService implements IStorage {
    * @param path - Object path/key
    * @returns `true` if an object was deleted
    */
+  // deno-lint-ignore require-await -- a provider's refusal must REJECT, not throw synchronously
   async delete(path: string): Promise<boolean> {
-    return await this.#provider.delete(path);
+    return this.#provider.delete(path);
   }
 
   /**
@@ -83,8 +83,9 @@ export class StorageService implements IStorage {
    * @param path - Object path/key
    * @returns `true` if present
    */
+  // deno-lint-ignore require-await -- a provider's refusal must REJECT, not throw synchronously
   async exists(path: string): Promise<boolean> {
-    return await this.#provider.exists(path);
+    return this.#provider.exists(path);
   }
 
   /**
@@ -94,8 +95,9 @@ export class StorageService implements IStorage {
    * @param options - URL validity
    * @returns The signed URL
    */
+  // deno-lint-ignore require-await -- a provider's refusal must REJECT, not throw synchronously
   async getSignedUrl(path: string, options: SignedUrlOptions): Promise<string> {
-    return await this.#provider.getSignedUrl(path, options);
+    return this.#provider.getSignedUrl(path, options);
   }
 
   /**

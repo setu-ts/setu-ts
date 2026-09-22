@@ -150,10 +150,10 @@ All notable changes to this project are documented here. The format follows
   one of the eleven calls in a synchronous `try`/`catch` stops catching; move the catch onto the
   promise (`await …` in an `async` function, or `.catch(...)`). See `docs/upgrading.md`.
   `StorageService.delete`/`exists`/`getSignedUrl` were bare `return this.#provider.x()` passthroughs
-  and are now `return await`, so a THIRD-PARTY provider's synchronous throw can no longer escape
-  `IStorage` either. That path is reachable from the published surface: `StorageService` is
-  barrel-exported, and structural typing means an application needs no `StorageProvider` import to
-  pass its own provider. Nothing changes for the five built-in providers, which all return promises.
+  and are now `async`, so a THIRD-PARTY provider's synchronous throw can no longer escape `IStorage`
+  either. That path is reachable from the published surface: `StorageService` is barrel-exported,
+  and structural typing means an application needs no `StorageProvider` import to pass its own
+  provider. Nothing changes for the five built-in providers, which all return promises.
 
 ### Fixed
 
