@@ -5126,8 +5126,54 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it edits sit where `main` left them — `metadata-store.ts` 99.0, `openapi-generator.ts` 98.4 and
   `decorator-plugin.ts` 98.4/100/99.0, whose only uncovered lines are the pre-existing
   `replayCustomDecorators` skip and the `autoDiscover` error loop) — complete (PR #328)
-- **Next milestone** — **M99c** (`packages/sdk`, `packages/openapi-plugin`, and `packages/kernel` —
-  two first-party components that must agree, and do not).
+- **Milestone 99c** (`packages/sdk` + `packages/kernel` — two first-party components that must
+  agree, and do not) — complete (PR #353). **The package list is corrected from the three the
+  ROADMAP row was opened with** (the M70b/M70g/M70k/M90a precedent): `openapi-plugin` is the
+  producer in both halves of V7-6 and changes nothing, because the component name is published
+  surface of the DOCUMENT — read by every consumer including non-Setu ones, and unfixable for
+  documents already published — so the SDK's hoisted alias is the side that yields. **V7-6:** a
+  hoisted alias now ALLOCATES its name where every other emitted name still throws, and the split is
+  the design: an alias names an anonymous inline schema the document never named, so the generator
+  may pick any identifier for it, while a component schema, an `*Args`, an `*Error`, a guard or an
+  option derives from something the caller WROTE, where silently renaming would hide a real problem.
+  It asks for its preferred name first — so every alias that generates today is byte-identical,
+  which the committed `inline-shapes-client.ts` comparison and the three `PlaceOrderResponse201`
+  assertions are the guard for — then the success arm's `…Response<status>Body`, then a numeric
+  suffix **allocated through the registry**, because a suffix is not a namespace and a document may
+  legally declare the suffixed name too, which would merely move the abort. All four hoist sites get
+  it (fixing only the response arm the finding names leaves the identical defect in three others),
+  and the allocation lives **in `hoistMultiline`** rather than at the call sites — that function's
+  own source says why, having already watched "splitting emission per source" let a defect survive
+  in three of four arms, so a fifth hoist site now gets the rule by construction. **V7-1:**
+  `inject()`'s Blob arm contributes `blob.type` as its content-type default, matching the platform's
+  own `new Request(url, { body: blob })`, so the same multipart Blob parses through `inject()` and
+  `fetch()` alike; `Uint8Array`/`ArrayBuffer` keep no default, since bytes alone declare nothing.
+  Header injection is not reachable through the new read — probed, and the Blob spec's own
+  normalization empties `.type` for any character outside U+0020–U+007E, so CRLF, NUL and non-ASCII
+  all arrive as no header at all. **A third, pre-existing defect was fixed here at the maintainer's
+  direction** (the M58 `g controller` / M59 `detectRuntime` precedent, recorded rather than silent),
+  found while probing the Blob default: `inject()` MUTATED a caller-supplied `Headers` instance, so
+  one instance reused across two requests carried the first's `content-type` into the second and
+  suppressed the correct default — a `URLSearchParams` body following a JSON body arrived as JSON.
+  The control proves it predates M99c, which only widened its reach to `Blob`. It is the aliasing
+  hazard `coerceInjectBody`'s own byte-copy comment guards, one field over. **Four doc sites the
+  milestone's own change had falsified were corrected in the same PR**, and they were a plan miss
+  rather than an oversight — §2's committed-doc-conflicts table named C1–C3 and none of them:
+  `packages/sdk/README.md` and **two** `PUBLIC_API.md` sites each listed `*Error<status>Body`
+  aliases among the names that THROW on a collision (probed false — that document now generates
+  `ListUsersError400Body2`) and none documented the fallback at all, so a reader whose regenerated
+  client gained a `…Body` alias had no published explanation for it; and `inject()`'s own
+  `formData()` comment still said a byte-ish body sets no default, which is the very case V7-1
+  changed. No gate could see any of the four — the fence compiler compiles fences, not prose.
+  Verified past the gates by regenerating a client from a RUNNING application's `/openapi.json` (the
+  loop the finding names) and by driving one multipart Blob through the REAL `RuntimePlugin`
+  adapter, which is the production path the kernel's own integration test cannot reach, since a
+  kernel test may not import `runtime`. Six negative controls were each observed failing and
+  reverted; the fifth is the instructive one — appending a type error to the unimported third
+  fixture makes `deno check packages` exit 1 naming that file, so the committed generated output
+  really is gated (the M70m X11-9 precedent).
+- **Next milestone** — **M99d** (`packages/decorator-plugin` and `packages/secrets-plugin` — a
+  composition the framework silently declines to give you).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
@@ -5633,17 +5679,26 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   evidence, and wait for the human to ask. Publishing a branch is outward-facing and their call to
   time.
 - **A new PR carries the `maintainer-review` label** — `gh pr create --label maintainer-review`, or
-  `gh pr edit <pr> --add-label maintainer-review` for one already open. Automatic CodeRabbit review
-  is off by default in `.coderabbit.yaml`, which re-enables it for that label alone, so an
-  unlabelled PR is never reviewed. **The failure is silent**: the same file sets
-  `review_status: false`, so there is no "review skipped" notice and an unlabelled PR looks exactly
-  like one whose review has not arrived — PR #328 sat unreviewed until a maintainer typed
-  `@coderabbitai review` by hand. Check the label landed rather than trusting the flag. The label
-  buys the FIRST review only — `auto_incremental_review: false` sits beside it, so a re-review after
-  pushing fixes still needs `@coderabbitai review`. The maintainer's gate on EXTERNAL contributions
-  is untouched, and does not depend on this rule being obeyed: applying a label needs the Triage
-  role or above on this repository, so from a fork `--label` fails with a 403 and nothing is applied
-  — that is the gate working, not something to retry around. AI_GUIDELINES §16.7 is canonical.
+  `gh pr edit <pr> --add-label maintainer-review` for one already open. `.coderabbit.yaml` sets
+  `auto_review.enabled: true` with `labels: [maintainer-review]`, and a positive `labels` list
+  RESTRICTS automatic review to PRs carrying one of them, so an unlabelled PR is never reviewed.
+  **The failure is silent**: the same file sets `review_status: false`, so there is no "review
+  skipped" notice and an unlabelled PR looks exactly like one whose review has not arrived. Check
+  the label landed rather than trusting the flag. The label buys the FIRST review only —
+  `auto_incremental_review: false` sits beside it, so a re-review after pushing fixes still needs
+  `@coderabbitai review`. The file read `enabled: false` from 2026-09-16 to 2026-09-22, and labelled
+  PRs went unreviewed in that window (#344, #353) — but that is an observation, not a rule about
+  `enabled`: CodeRabbit's contract is that a positive label opts a PR in even while automatic review
+  is disabled, so the old form should have worked. **The cause was never established**, and
+  `enabled: true` is the form that does not depend on that path rather than a diagnosed fix. If a
+  labelled PR still is not reviewed, ask by hand and record it — do not flip the flag again on a
+  guess. Suspending automatic review deliberately means `enabled: false` AND removing the positive
+  `labels` entry, since a positive label would otherwise keep opting PRs in. The repo file also
+  overrides the CodeRabbit dashboard (YAML > repo UI > org UI), so the web toggle changes nothing
+  while the file sets the same key. The maintainer's gate on EXTERNAL contributions is untouched,
+  and does not depend on this rule being obeyed: applying a label needs the Triage role or above on
+  this repository, so from a fork `--label` fails with a 403 and nothing is applied — that is the
+  gate working, not something to retry around. AI_GUIDELINES §16.7 is canonical.
 - **Automated review comments get one reply per thread, never a bundled summary.** CodeRabbit and
   the code-quality bot anchor findings to lines; answer in the thread
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<id>/replies -f body='…'`), stating fixed (with

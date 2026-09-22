@@ -286,16 +286,20 @@ For testing, prefer `createTestApp()` — it calls `start()` automatically (with
 so you can call `inject()` or `fetch()` directly. See
 [Testing Package](#testing-package-setu-tstesting) for the full API.
 
-`inject()` carries the body shapes a request actually has (M95c): a `Uint8Array`, an `ArrayBuffer`
-and a `Blob` pass through VERBATIM — with no content-type default, since only the caller knows
-whether those bytes are multipart, JSON, or an image; a `URLSearchParams` is serialised with its own
-`toString()` and defaults `content-type` to `application/x-www-form-urlencoded`; a plain object is
-JSON-serialised and a bare `string` is carried as-is, both defaulting to `application/json`. An
-explicitly supplied content type always wins. Any other shape — an array, a `Date`, a class
-instance, a number — is refused with a `TypeError` naming the received type, not silently
-JSON-stringified: the previous behaviour turned a `Uint8Array` into `{"0":97,…}` and every other
-non-string into `{}` while answering 200, which made an injected multipart upload parse as an empty
-form.
+`inject()` carries the body shapes a request actually has (M95c): a `Uint8Array` and an
+`ArrayBuffer` pass through VERBATIM with no content-type default, since only the caller knows
+whether those bytes are multipart, JSON, or an image; a `Blob` also passes through verbatim and
+defaults `content-type` to its own `type` when that is non-empty — exactly what the platform does
+for `new Request(url, { body: blob })` — contributing nothing when the blob has no type; a
+`URLSearchParams` is serialised with its own `toString()` and defaults `content-type` to
+`application/x-www-form-urlencoded`; a plain object is JSON-serialised and a bare `string` is
+carried as-is, both defaulting to `application/json`. An explicitly supplied content type always
+wins, and the default is written onto a COPY of `headers` — a `Headers` instance the caller reuses
+across two injected requests is never mutated, so the second request still gets its own shape's
+default. Any other shape — an array, a `Date`, a class instance, a number — is refused with a
+`TypeError` naming the received type, not silently JSON-stringified: the previous behaviour turned a
+`Uint8Array` into `{"0":97,…}` and every other non-string into `{}` while answering 200, which made
+an injected multipart upload parse as an empty form.
 
 ---
 
@@ -9832,14 +9836,14 @@ This section is the authoritative export list (AI_GUIDELINES §10.5). All export
 
 ### Types
 
-| Export                          | Kind | Purpose                                                                                                                                                                                                                                    |
-| ------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ApplicationOptions`            | type | Options for `createApplication` (`{ plugins?: IPlugin[]; diagnostics?: KernelDiagnosticsOptions }`)                                                                                                                                        |
-| `IKernelApplication`            | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)`                                                                                                                                           |
-| `InjectRequest`                 | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }` — byte-ish bodies verbatim with no content-type default, `URLSearchParams` urlencoded-defaulted, plain object and string JSON-defaulted, anything else refused) |
-| `InjectResponse`                | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)                                                                                                                                                         |
-| `KernelDiagnosticsOptions`      | type | Kernel-diagnostics activation passed as `ApplicationOptions.diagnostics` (`{ labels?: KernelDiagnosticsLabelOptions }`); its PRESENCE is the activation, and an omitted option allocates nothing                                           |
-| `KernelDiagnosticsLabelOptions` | type | The four exact-match label allowlists (`plugins`/`capabilities`/`routes`/`middleware`), each at most 256 entries of at most 160 UTF-8 bytes with no control characters                                                                     |
+| Export                          | Kind | Purpose                                                                                                                                                                                                                                                                            |
+| ------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ApplicationOptions`            | type | Options for `createApplication` (`{ plugins?: IPlugin[]; diagnostics?: KernelDiagnosticsOptions }`)                                                                                                                                                                                |
+| `IKernelApplication`            | type | `IApplication` extended with `inject()` for serverless request injection, and `unregister(name)`                                                                                                                                                                                   |
+| `InjectRequest`                 | type | Synthetic request shape for `inject()` (`{ method, url, headers?, body? }` — bytes verbatim with no content-type default, a `Blob` defaulted from its own non-empty `type`, `URLSearchParams` urlencoded-defaulted, plain object and string JSON-defaulted, anything else refused) |
+| `InjectResponse`                | type | Response shape returned by `inject()` (`{ statusCode, headers, body, json<T>() }`)                                                                                                                                                                                                 |
+| `KernelDiagnosticsOptions`      | type | Kernel-diagnostics activation passed as `ApplicationOptions.diagnostics` (`{ labels?: KernelDiagnosticsLabelOptions }`); its PRESENCE is the activation, and an omitted option allocates nothing                                                                                   |
+| `KernelDiagnosticsLabelOptions` | type | The four exact-match label allowlists (`plugins`/`capabilities`/`routes`/`middleware`), each at most 256 entries of at most 160 UTF-8 bytes with no control characters                                                                                                             |
 
 Contract notes:
 
@@ -10987,19 +10991,19 @@ interface OpenApiCodegenOptions {
 
 #### Generated naming contract
 
-| Emitted symbol           | Derivation                                                                                                                                  |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Operation method         | lower-camelCase from `operationId`, split on non-alphanumeric runs, **interior casing preserved** (`listUsers` → `listUsers`)               |
-| Component type           | PascalCase from the component name (`User` → `export type User`)                                                                            |
-| Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                                   |
-| Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                  |
-| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx response                  |
-| Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                     |
-| Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                      |
-| Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                             |
-| Parameter alias          | PascalCase from `operationId` plus the parameter name plus `Param`, emitted only when the parameter schema is inline and spans lines        |
-| Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                                    |
-| Duplicate derived name   | throws `OpenApiCodegenError` naming both originals — component schemas, `*Args`, `*Error*` and the client interface share ONE name registry |
+| Emitted symbol           | Derivation                                                                                                                                                                                                                                                                                                                                                                                     |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Operation method         | lower-camelCase from `operationId`, split on non-alphanumeric runs, **interior casing preserved** (`listUsers` → `listUsers`)                                                                                                                                                                                                                                                                  |
+| Component type           | PascalCase from the component name (`User` → `export type User`)                                                                                                                                                                                                                                                                                                                               |
+| Argument interface       | PascalCase from `operationId` plus `Args` (`listUsers` → `ListUsersArgs`)                                                                                                                                                                                                                                                                                                                      |
+| Client interface         | `apiTypeName`, PascalCase-sanitized (default `Api`); the factory's written-out return type                                                                                                                                                                                                                                                                                                     |
+| Error union              | PascalCase from `operationId` plus `Error`, with guard `is<Operation>Error` — emitted only for a declared non-2xx response                                                                                                                                                                                                                                                                     |
+| Error body alias         | PascalCase from `operationId` plus `Error<status>Body`, emitted only when the rendered body spans lines                                                                                                                                                                                                                                                                                        |
+| Request body alias       | PascalCase from `operationId` plus `Body`, emitted only when the body schema is inline and spans lines                                                                                                                                                                                                                                                                                         |
+| Response alias           | PascalCase from `operationId` plus `Response<status>`, emitted only when a 2xx schema is inline and spans lines                                                                                                                                                                                                                                                                                |
+| Parameter alias          | PascalCase from `operationId` plus the parameter name plus `Param`, emitted only when the parameter schema is inline and spans lines                                                                                                                                                                                                                                                           |
+| Leading digit / reserved | digit run prefixed `n`; reserved word prefixed `_`; a name that sanitizes to nothing becomes `operation`                                                                                                                                                                                                                                                                                       |
+| Duplicate derived name   | a name the document or the caller WROTE throws `OpenApiCodegenError` naming both originals — component schemas, `*Args`, `*Error` unions, the guard, the client interface and the `apiTypeName`/`factoryName` options share ONE registry. A HOISTED alias instead allocates: its preferred name, then `…Response<status>Body` on the success arm, then a registry-allocated `2`, `3`, … suffix |
 
 **No multi-line type is written at a use site.** An inline (non-`$ref`) request body, parameter or
 success response is hoisted into an exported alias, so every reference to it is a single-line name.
@@ -11054,11 +11058,27 @@ so a hostile document cannot inject code into the generated file.
 `generateOpenApiClient` throws `OpenApiCodegenError` (carrying `path` and `method` where applicable)
 instead of emitting a client that misbehaves or does not compile, for: a missing `operationId`; two
 operations deriving onto one name; two emitted TYPE names colliding — component schemas, `*Args`
-interfaces, `*Error` unions, `*Error<status>Body` aliases and the client interface all draw from ONE
-registry, so a component named `ListUsersArgs` beside an operation `listUsers` is refused rather
-than emitting two declarations of one name; a `cookie` parameter; a path placeholder with no
-matching `in: 'path'` parameter; an `in: 'path'` parameter absent from the template; two
-placeholders deriving onto one argument name; and a malformed local `$ref`.
+interfaces, `*Error` unions, the narrowing guards, the client interface and the
+`apiTypeName`/`factoryName` options all draw from ONE registry, so a component named `ListUsersArgs`
+beside an operation `listUsers` is refused rather than emitting two declarations of one name; a
+`cookie` parameter; a path placeholder with no matching `in: 'path'` parameter; an `in: 'path'`
+parameter absent from the template; two placeholders deriving onto one argument name; and a
+malformed local `$ref`.
+
+**A hoisted alias is the one emitted name that does NOT throw on a collision — it allocates.** The
+four hoisted aliases (a request body, a parameter, a success response, an error body) name an
+anonymous inline schema the document never named, so the generator may pick any identifier for it
+and a clash is its own to resolve, whereas every throwing name above derives from something the
+document or the caller wrote. Each alias asks the registry for its preferred name first, so no alias
+that generates today is renamed; a success response then tries `…Response<status>Body`, which reads
+correctly beside a component of the same name where the numeric form (`…Response2002`) would read as
+a status code; and every arm finally takes a `2`, `3`, … suffix **allocated through the registry**,
+since a suffix is not a namespace and a document may legally declare the suffixed name too. One
+internal function owns both the decision to hoist and the allocation, so every hoisted alias follows
+this rule and a future one gets it by construction. This matters because `@setu-ts/openapi-plugin`
+names a reused response schema `${operationId}Response${statusCode}`, the identical derivation: a
+schema that is both reused (so it becomes that component) and enclosed in an inline multi-line body
+(so the body is hoisted) used to abort generation with `Duplicate generated name`.
 
 ### SdkOpenApi\* types
 
