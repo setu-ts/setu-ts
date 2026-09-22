@@ -15,6 +15,14 @@ import type { StorageProvider } from '../interfaces/index.ts';
  * signal absence with `null`, and this service performs the `null → throw`
  * conversion so the throw contract lives in one place.
  *
+ * Every method is `async` and every delegation is `return await`, which is
+ * load-bearing rather than stylistic: this class is exported, so an
+ * application can hand it its own provider (structural typing needs no
+ * `StorageProvider` import), and a bare `return provider.x()` would let that
+ * provider's SYNCHRONOUS throw escape `IStorage` before the promise exists,
+ * where a caller using `.catch()` can never see it. The `await` keeps the
+ * failure inside this method's own promise.
+ *
  * @since 0.1.0
  */
 export class StorageService implements IStorage {
@@ -65,8 +73,8 @@ export class StorageService implements IStorage {
    * @param path - Object path/key
    * @returns `true` if an object was deleted
    */
-  delete(path: string): Promise<boolean> {
-    return this.#provider.delete(path);
+  async delete(path: string): Promise<boolean> {
+    return await this.#provider.delete(path);
   }
 
   /**
@@ -75,8 +83,8 @@ export class StorageService implements IStorage {
    * @param path - Object path/key
    * @returns `true` if present
    */
-  exists(path: string): Promise<boolean> {
-    return this.#provider.exists(path);
+  async exists(path: string): Promise<boolean> {
+    return await this.#provider.exists(path);
   }
 
   /**
@@ -86,8 +94,8 @@ export class StorageService implements IStorage {
    * @param options - URL validity
    * @returns The signed URL
    */
-  getSignedUrl(path: string, options: SignedUrlOptions): Promise<string> {
-    return this.#provider.getSignedUrl(path, options);
+  async getSignedUrl(path: string, options: SignedUrlOptions): Promise<string> {
+    return await this.#provider.getSignedUrl(path, options);
   }
 
   /**
