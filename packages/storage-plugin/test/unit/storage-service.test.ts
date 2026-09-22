@@ -173,3 +173,56 @@ describe('StorageService', () => {
     });
   });
 });
+
+/**
+ * `StorageService` is barrel-exported and its constructor parameter type is
+ * not, so an application reaches this path with structural typing alone —
+ * `new StorageService(myProvider)` needs no `StorageProvider` import. A bare
+ * `return this.#provider.x()` therefore let a third-party provider's
+ * SYNCHRONOUS throw escape `IStorage` itself, before the promise existed,
+ * where a caller using `.catch()` could never see it.
+ *
+ * The three methods below are the ones that were bare passthroughs; `put`,
+ * `get` and `getStream` were always `async`. Driving all six keeps the set
+ * honest if a later method is added without the `await`.
+ */
+describe('StorageService converts a provider sync throw into a rejection', () => {
+  /** Throws synchronously from every method, as a rogue provider would. */
+  function createSyncThrowingProvider(): StorageProvider {
+    const boom = (method: string) => (): never => {
+      throw new Error(`rogue ${method} threw synchronously`);
+    };
+    return createFakeProvider({
+      put: boom('put'),
+      get: boom('get'),
+      delete: boom('delete'),
+      exists: boom('exists'),
+      getSignedUrl: boom('getSignedUrl'),
+      getStream: boom('getStream'),
+    });
+  }
+
+  const calls: readonly (readonly [string, (s: StorageService) => Promise<unknown>])[] = [
+    ['put', (s) => s.put('k', new Uint8Array())],
+    ['get', (s) => s.get('k')],
+    ['delete', (s) => s.delete('k')],
+    ['exists', (s) => s.exists('k')],
+    ['getSignedUrl', (s) => s.getSignedUrl('k', { expiresIn: 60 })],
+    ['getStream', (s) => s.getStream('k')],
+  ];
+
+  for (const [name, call] of calls) {
+    it(`${name} rejects rather than throwing out of the call`, async () => {
+      const storage = new StorageService(createSyncThrowingProvider());
+      let threwSync = false;
+      let promise: Promise<unknown> | undefined;
+      try {
+        promise = call(storage);
+      } catch {
+        threwSync = true;
+      }
+      expect(threwSync).toBe(false);
+      await expect(promise).rejects.toThrow(`rogue ${name} threw synchronously`);
+    });
+  }
+});

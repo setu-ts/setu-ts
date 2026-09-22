@@ -6019,7 +6019,7 @@ compiling; new code should use `IS3Backend`.
 | `get(path: string): Promise<Uint8Array>`                                 | Retrieves an object. **Throws** if absent.                                                                                                                                                         |
 | `delete(path: string): Promise<boolean>`                                 | Deletes an object. Returns `true` if present.                                                                                                                                                      |
 | `exists(path: string): Promise<boolean>`                                 | Checks existence.                                                                                                                                                                                  |
-| `getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>` | Creates a time-limited URL. Per-provider semantics: Memory → synthetic `memory://…?expires=…`; LocalStorage → throws; S3 → presigned GET; GCS → signed URL; Azure → SAS (requires `accountKey`).   |
+| `getSignedUrl(path: string, options: SignedUrlOptions): Promise<string>` | Creates a time-limited URL. Per-provider semantics: Memory → synthetic `memory://…?expires=…`; LocalStorage → rejects; S3 → presigned GET; GCS → signed URL; Azure → SAS (requires `accountKey`).  |
 | `getStream?(path: string): Promise<ReadableStream<Uint8Array>>`          | **Optional.** Streams an object for zero-copy downloads. Native on S3/GCS/Azure; Memory/Local fall back to wrapping `get(path)` in a one-chunk stream. Absent objects throw.                       |
 
 ### Per-provider `getSignedUrl` behavior
@@ -6027,10 +6027,10 @@ compiling; new code should use `IS3Backend`.
 | Provider               | Behavior                                                                                                                                       |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MemoryProvider`       | Returns deterministic synthetic URL `memory://<encoded-key>?expires=<epoch-seconds>`. Test/process affordance only — never grants real access. |
-| `LocalStorageProvider` | **Throws** `Error('LocalStorageProvider does not support signed URLs; use the s3, gcs, or azure provider')`.                                   |
+| `LocalStorageProvider` | **Rejects** with `Error('LocalStorageProvider does not support signed URLs; use the s3, gcs, or azure provider')`.                             |
 | `S3Provider`           | Real presigned GET URL via `getSignedUrl(GetObjectCommand, { expiresIn })`.                                                                    |
 | `GcsProvider`          | Real signed URL via `file.getSignedUrl([{ action: 'read', expires }])`.                                                                        |
-| `AzureBlobProvider`    | Real SAS URL via `generateBlobSASQueryParameters`. Requires `accountKey`; throws if only managed-identity / account-name-only config.          |
+| `AzureBlobProvider`    | Real SAS URL via `generateBlobSASQueryParameters`. Requires `accountKey`; rejects if only managed-identity / account-name-only config.         |
 
 ---
 
@@ -11530,7 +11530,7 @@ by `D1Adapter`'s constructor instead, where the adapter is built.)
   survives: `get` answers `null` for it (the contract has no other way to say so) while `has` and
   `delete` report it as present, and no path removes it.
 - **KV is eventually consistent.** Suitable for read-heavy caching, not for coordination.
-- **`R2Storage.getSignedUrl` throws.** The R2 Workers binding exposes no presign operation at all.
+- **`R2Storage.getSignedUrl` rejects.** The R2 Workers binding exposes no presign operation at all.
   `getStream` is implemented, so serving through a route is a zero-copy alternative.
 - **`R2Storage.delete` heads first.** R2's `delete` returns void and reports nothing, so the
   committed `Promise<boolean>` costs one extra round trip rather than a constant `true`.

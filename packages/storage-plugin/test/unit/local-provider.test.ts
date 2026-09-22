@@ -140,11 +140,23 @@ describe('LocalStorageProvider', () => {
     expect(await provider.exists('nope')).toBe(false);
   });
 
-  it('getSignedUrl throws with documented message', () => {
+  // `threwSync` is for legibility, not discrimination: a bare `await
+  // expect(...).rejects` also fails on a synchronous throw, but as an
+  // uncaught error rather than an assertion. Capturing it makes the report
+  // name the property under test. See assert-connected-rejects.test.ts.
+  it('getSignedUrl rejects with the documented message, never a sync throw', async () => {
     const { fs } = makeFakeFs();
     const provider = new LocalStorageProvider(fs, { rootDir: '/root' });
-    provider.connect();
-    expect(() => provider.getSignedUrl('key', { expiresIn: 60 })).toThrow(
+    await provider.connect();
+    let threwSync = false;
+    let promise: Promise<string> | undefined;
+    try {
+      promise = provider.getSignedUrl('key', { expiresIn: 60 });
+    } catch {
+      threwSync = true;
+    }
+    expect(threwSync).toBe(false);
+    await expect(promise).rejects.toThrow(
       'LocalStorageProvider does not support signed URLs; use the s3, gcs, or azure provider',
     );
   });

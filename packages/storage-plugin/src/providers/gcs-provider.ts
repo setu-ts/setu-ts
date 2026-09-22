@@ -332,7 +332,8 @@ export class GcsProvider implements StorageProvider {
    * @param data - Object bytes
    * @param options - Object attributes to record with the bytes
    */
-  put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async put(path: string, data: Uint8Array, options?: PutObjectOptions): Promise<void> {
     this.#assertConnected();
     // `save(data, opts, cb)` is the SDK's three-argument overload; the bag is
     // always passed (empty when the caller supplied nothing) so this package
@@ -448,7 +449,8 @@ export class GcsProvider implements StorageProvider {
    * @returns A `ReadableStream`, `null` if absent, or a rejection naming the
    *          unusable stream shape
    */
-  getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
     this.#assertConnected();
     try {
       const readable: unknown = this.#getFile(path).createReadStream();

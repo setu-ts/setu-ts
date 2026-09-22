@@ -27,7 +27,7 @@ export interface SignedUrlOptions {
  * the stored object, while the memory and local-filesystem providers accept and
  * do not persist them — neither backend has a reader for an object attribute
  * ({@linkcode IStorage.get} returns bytes, the local provider's
- * `getSignedUrl` throws, and the memory provider's URL is synthetic).
+ * `getSignedUrl` rejects, and the memory provider's URL is synthetic).
  *
  * @since 0.3.0
  */

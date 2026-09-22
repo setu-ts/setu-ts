@@ -15,6 +15,13 @@ import type { StorageProvider } from '../interfaces/index.ts';
  * signal absence with `null`, and this service performs the `null → throw`
  * conversion so the throw contract lives in one place.
  *
+ * Every method is `async`, which is load-bearing rather than stylistic: this
+ * class is exported, so an application can hand it its own provider
+ * (structural typing needs no `StorageProvider` import), and a non-`async`
+ * `return provider.x()` would let that provider's SYNCHRONOUS throw escape
+ * `IStorage` before the promise exists, where a caller using `.catch()` can
+ * never see it. `async` turns it into a rejection.
+ *
  * @since 0.1.0
  */
 export class StorageService implements IStorage {
@@ -65,7 +72,8 @@ export class StorageService implements IStorage {
    * @param path - Object path/key
    * @returns `true` if an object was deleted
    */
-  delete(path: string): Promise<boolean> {
+  // deno-lint-ignore require-await -- a provider's refusal must REJECT, not throw synchronously
+  async delete(path: string): Promise<boolean> {
     return this.#provider.delete(path);
   }
 
@@ -75,7 +83,8 @@ export class StorageService implements IStorage {
    * @param path - Object path/key
    * @returns `true` if present
    */
-  exists(path: string): Promise<boolean> {
+  // deno-lint-ignore require-await -- a provider's refusal must REJECT, not throw synchronously
+  async exists(path: string): Promise<boolean> {
     return this.#provider.exists(path);
   }
 
@@ -86,7 +95,8 @@ export class StorageService implements IStorage {
    * @param options - URL validity
    * @returns The signed URL
    */
-  getSignedUrl(path: string, options: SignedUrlOptions): Promise<string> {
+  // deno-lint-ignore require-await -- a provider's refusal must REJECT, not throw synchronously
+  async getSignedUrl(path: string, options: SignedUrlOptions): Promise<string> {
     return this.#provider.getSignedUrl(path, options);
   }
 

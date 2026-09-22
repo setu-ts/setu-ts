@@ -24,10 +24,12 @@ export interface R2StorageOptions {
  * `getStream` is implemented, so a download can be piped straight to the
  * response through `IResponse.stream()` without buffering the object.
  *
- * `getSignedUrl` **throws**: the R2 Workers binding exposes no presigned-URL
+ * `getSignedUrl` **rejects**: the R2 Workers binding exposes no presigned-URL
  * capability at all. Serving an object through a Worker route, or fronting the
  * bucket with a custom domain, are the available alternatives, and the error
- * says so.
+ * says so. The refusal is a rejection rather than a synchronous throw, because
+ * the method is typed `Promise<string>` and a throw escaping before the promise
+ * exists is invisible to a caller using `.catch()`.
  *
  * @since 0.2.0
  */
@@ -103,7 +105,9 @@ export class R2Storage implements IStorage {
   }
 
   /**
-   * Always throws — R2 bindings cannot presign.
+   * Always refuses — R2 bindings cannot presign.
+   *
+   * The refusal is a REJECTION, never a synchronous throw: see the class doc.
    *
    * The unused `_options` is kept, not deleted. Dropping it would narrow the
    * exported class below {@linkcode IStorage}, so a consumer holding an
@@ -113,8 +117,8 @@ export class R2Storage implements IStorage {
    *
    * @param path - The object path, named in the error
    * @param _options - Required by the contract; no counterpart on the binding
-   * @returns Never returns
-   * @throws {CloudflareUnsupportedError} Always
+   * @returns A rejected promise
+   * @throws {CloudflareUnsupportedError} Always, as a rejection
    */
   getSignedUrl(path: string, _options: SignedUrlOptions): Promise<string> {
     return Promise.reject(

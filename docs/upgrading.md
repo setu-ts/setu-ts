@@ -29,6 +29,44 @@ a route that BRANCHES on the content type now takes the branch the blob declares
 not describe the bytes, either correct the type or set `headers['content-type']` explicitly, which
 still wins over the default.
 
+### Stop catching the eleven storage provider methods in a synchronous `try`/`catch`
+
+`@setu-ts/storage-plugin`'s cloud providers guard every operation with a connection check that
+throws. Ten of the methods — `S3Provider` `get`/`delete`/`exists`/`getSignedUrl`/`getStream`,
+`GcsProvider` `put`/`getStream`, and `AzureBlobProvider` `delete`/`exists`/`getSignedUrl` — are
+typed `Promise<...>` but were not `async`, so that throw escaped **synchronously**:
+`provider.get('k').catch(handleIt)` never ran, and the error was uncaught instead of handled. The
+methods are now `async`, so the "not connected" precondition arrives as a REJECTION, matching the
+`IStorage` contract and the providers' own `async` methods (which always rejected).
+`AzureBlobProvider.getSignedUrl`'s second refusal — the resolved client has no account key to sign
+with — rejects for the same reason.
+
+`LocalStorageProvider.getSignedUrl` is the eleventh. Its refusal is permanent rather than a
+lifecycle precondition — local storage cannot presign at all — but it escaped the same way, and it
+escaped further: `StorageService.getSignedUrl` passes the provider's promise straight through
+without awaiting it, so the throw came out of the `IStorage` you resolve from
+`CAPABILITIES.STORAGE`, not just out of the provider class. If you configured
+`StoragePlugin({ provider: 'local' })` and called `storage.getSignedUrl(...).catch(...)`, the
+`catch` never ran. It now rejects with the same message.
+
+If you pass your OWN provider to the exported `StorageService`, its `delete`, `exists` and
+`getSignedUrl` used to hand your provider's promise straight back without awaiting it, so a
+synchronous throw from your provider escaped `IStorage` too. They are now `async`. Nothing changes
+for the five built-in providers, which all return promises.
+
+No source change is needed in either case, but the two differ in what they observe. An `await`
+caller sees exactly what it saw before: the operand is evaluated inside the surrounding
+`try`/`catch`, so a synchronous throw and a rejection were already caught the same way. A `.catch()`
+caller sees a real difference, and it is the point of the fix — `provider.get('k').catch(handleIt)`
+evaluated `provider.get('k')` BEFORE `.catch` was attached, so the throw escaped and `handleIt`
+never ran; now the promise rejects and `handleIt` runs.
+
+What does need a source change is code that wrapped one of the eleven calls in a synchronous
+`try`/`catch` without awaiting — `try { const p = provider.get(k); } catch { … }` — which now never
+catches, because the throw no longer happens at the call. Move the handling onto the promise:
+`await` the call inside an `async` function with a `try`/`catch` around the `await`, or attach
+`.catch(...)`.
+
 ### Stop relying on `inject()` mutating a `Headers` instance you passed
 
 `inject()` used to write its content-type default onto the caller's own object when

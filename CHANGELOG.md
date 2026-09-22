@@ -129,8 +129,41 @@ All notable changes to this project are documented here. The format follows
   `--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER` grant its
   runner reads, whether or not the devtool is enabled. Existing projects are unaffected: nothing
   regenerates a scaffolded file, and `--allow-net` is unchanged and still unscoped.
+- **`storage-plugin` — eleven provider methods now REJECT instead of throwing synchronously
+  (BREAKING for callers that caught the throw).** Ten guard with a private `#assertConnected()` that
+  throws — `S3Provider` `get`/`delete`/`exists`/`getSignedUrl`/`getStream`, `GcsProvider`
+  `put`/`getStream`, and `AzureBlobProvider` `delete`/`exists`/`getSignedUrl`. Each was typed
+  `Promise<...>` but not `async`, so the throw escaped synchronously —
+  `provider.get('k').catch(handleIt)` never ran and the error was uncaught, while `put()` on the
+  same class rejected. This is the recurring defect class fixed in M52b, M52c, M70j, M79 and PR
+  #355; all are now `async`, so the same precondition arrives as a rejection, matching the committed
+  `IStorage` contract and each provider's own `async` siblings. `AzureBlobProvider.getSignedUrl`'s
+  second refusal (no account key to sign with) moves with it. The eleventh is
+  `LocalStorageProvider.getSignedUrl`, whose refusal is permanent (local storage cannot presign)
+  rather than a lifecycle precondition — which is why it was nearly missed. It is the same defect in
+  the same shape, and it was reachable through the PUBLISHED contract rather than only the provider
+  class: `StorageService.getSignedUrl` is a bare passthrough, so the throw escaped out of the
+  `IStorage` an application resolves from `CAPABILITIES.STORAGE`. Leaving it would also have made
+  `local` the only one of six `getSignedUrl` implementations that throws — `cloudflare-plugin`'s
+  `R2Storage` already answers this exact cannot-presign case with `Promise.reject`. **Migration:**
+  no source change for callers using `await` or `.catch()`, but only the `await` ones see no
+  difference — a `.catch()` handler was previously BYPASSED by the synchronous throw and now
+  actually runs, which is the point of the fix. A caller that wrapped one of the eleven calls in a
+  synchronous `try`/`catch` without awaiting stops catching; move the catch onto the promise
+  (`await …` in an `async` function, or `.catch(...)`). See `docs/upgrading.md`.
+  `StorageService.delete`/`exists`/`getSignedUrl` were bare `return this.#provider.x()` passthroughs
+  and are now `async`, so a THIRD-PARTY provider's synchronous throw can no longer escape `IStorage`
+  either. That path is reachable from the published surface: `StorageService` is barrel-exported,
+  and structural typing means an application needs no `StorageProvider` import to pass its own
+  provider. Nothing changes for the five built-in providers, which all return promises.
 
 ### Fixed
+
+- **`cloudflare-plugin` — the R2 documentation said `getSignedUrl` "throws" where it rejects.** The
+  behaviour was always correct (`R2Storage.getSignedUrl` returns `Promise.reject`), but four
+  published sites — the class JSDoc, the method JSDoc, the README caveat and `PUBLIC_API.md` — read
+  as an instruction to catch it synchronously, which never works. Wording only; no behaviour, API or
+  export changed.
 
 - **`kernel` — `inject()` no longer MUTATES a caller-supplied `Headers` instance (M99c).** The
   per-shape content-type default wrote onto the caller's own object when `InjectRequest.headers` was

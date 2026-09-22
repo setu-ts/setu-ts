@@ -118,18 +118,18 @@ Backends differ in what they can hold, and that is a property of the backend rat
 | Local      | accepted, not persisted           | accepted, not persisted |
 
 Memory and local store bytes only: `IStorage.get` returns bytes, the local provider's `getSignedUrl`
-throws, and the memory provider's URL is synthetic, so nothing could read an attribute back.
+rejects, and the memory provider's URL is synthetic, so nothing could read an attribute back.
 
 ## Signed URLs
 
 `getSignedUrl` semantics differ by provider, deliberately:
 
-| Provider      | Behaviour                             |
-| ------------- | ------------------------------------- |
-| Memory        | synthetic URL                         |
-| Local         | **throws** — there is nothing to sign |
-| S3 / B2 / GCS | real presigned URL                    |
-| Azure Blob    | real SAS URL                          |
+| Provider      | Behaviour                     |
+| ------------- | ----------------------------- |
+| Memory        | synthetic URL                 |
+| Local         | **rejects** — nothing to sign |
+| S3 / B2 / GCS | real presigned URL            |
+| Azure Blob    | real SAS URL                  |
 
 A presigned URL serves the object under whatever content type it was stored with, which is why `put`
 takes one — see [Object metadata](#object-metadata).
