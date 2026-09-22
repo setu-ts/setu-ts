@@ -1423,6 +1423,24 @@ describe('GcsProvider getStream — injected client stream shapes', () => {
     await tick();
   });
 
+  it('a CALLABLE read stream is streamed, not refused', async () => {
+    // `IGcsClient` types the stream as `unknown`, so a callable carrying the
+    // members is as legal as a plain object; it must reach an adapter.
+    const provider = providerOver(() =>
+      Object.assign(function () {}, {
+        async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+          yield new Uint8Array([7, 7]);
+        },
+      })
+    );
+    await provider.connect();
+    const stream = await provider.getStream('callable');
+    expect(stream).not.toBeNull();
+    const reader = (stream as ReadableStream<Uint8Array>).getReader();
+    expect([...(await reader.read()).value!]).toEqual([7, 7]);
+    expect((await reader.read()).done).toBe(true);
+  });
+
   it('a stream carrying NEITHER shape rejects by name — never a sync throw', async () => {
     const provider = providerOver(() => ({ nothingUseful: true }));
     await provider.connect();

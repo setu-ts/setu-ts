@@ -69,6 +69,21 @@ export interface NodeSdkReadable {
 }
 
 /**
+ * Reports whether reading a member off `value` is safe and meaningful.
+ *
+ * Excludes ONLY `null` and `undefined`, and that is the whole job: probed,
+ * every other primitive answers a member read with `undefined` rather than
+ * throwing, so a `typeof value === 'object'` test excludes nothing extra —
+ * except a FUNCTION, which can carry `Symbol.asyncIterator`, `on` or the node
+ * Readable members exactly as a plain object can. Refusing a callable would
+ * reject a legal stream before its adapter was ever chosen, so the three
+ * classifiers below share this rule rather than restating it.
+ */
+function canBearMembers(value: unknown): boolean {
+  return value !== null && value !== undefined;
+}
+
+/**
  * Reports whether a value is a node Readable this module can drive.
  *
  * The real SDK body (`ChecksumStream`), a `PassThrough`, and any faithful
@@ -81,7 +96,7 @@ export interface NodeSdkReadable {
  * @since 0.8.0
  */
 export function looksLikeNodeReadable(value: unknown): value is NodeSdkReadable {
-  if (typeof value !== 'object' || value === null) return false;
+  if (!canBearMembers(value)) return false;
   const candidate = value as Partial<Record<keyof NodeSdkReadable, unknown>>;
   return (
     typeof candidate.on === 'function' &&
@@ -269,7 +284,7 @@ export function createEagerIterableStream(source: EagerIterableSource): Readable
  * @since 0.8.0
  */
 export function looksLikeAsyncIterable(value: unknown): value is EagerIterableSource {
-  if (typeof value !== 'object' || value === null) return false;
+  if (!canBearMembers(value)) return false;
   return typeof (value as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === 'function';
 }
 
@@ -298,7 +313,7 @@ export interface EventStreamSource {
  * @since 0.8.0
  */
 export function looksLikeEventStream(value: unknown): value is EventStreamSource {
-  if (typeof value !== 'object' || value === null) return false;
+  if (!canBearMembers(value)) return false;
   return typeof (value as EventStreamSource).on === 'function';
 }
 

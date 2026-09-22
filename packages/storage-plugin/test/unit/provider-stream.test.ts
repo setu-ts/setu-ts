@@ -45,6 +45,19 @@ describe('looksLikeNodeReadable', () => {
     expect(looksLikeNodeReadable(fake)).toBe(true);
   });
 
+  it('accepts a CALLABLE carrying the node Readable members', () => {
+    // A function can carry these members exactly as a plain object can, and
+    // refusing one would reject a legal stream before its adapter is chosen.
+    const callable = Object.assign(function () {}, {
+      on() {},
+      once() {},
+      off() {},
+      read: (): Uint8Array | null => null,
+      destroy() {},
+    });
+    expect(looksLikeNodeReadable(callable)).toBe(true);
+  });
+
   it('rejects a web ReadableStream, plain objects, and non-objects', () => {
     expect(looksLikeNodeReadable(new ReadableStream())).toBe(false);
     expect(looksLikeNodeReadable({ on() {} })).toBe(false);
@@ -454,10 +467,28 @@ describe('looksLikeAsyncIterable / looksLikeEventStream', () => {
     expect(looksLikeEventStream(gen())).toBe(false);
   });
 
+  it('accepts CALLABLES carrying either shape', () => {
+    const callableIterable = Object.assign(function () {}, {
+      async *[Symbol.asyncIterator](): AsyncGenerator<Uint8Array> {
+        yield new Uint8Array([1]);
+      },
+    });
+    const callableEmitter = Object.assign(function () {}, { on() {} });
+    expect(looksLikeAsyncIterable(callableIterable)).toBe(true);
+    expect(looksLikeEventStream(callableEmitter)).toBe(true);
+    // ...and a callable carrying NEITHER is still refused, so widening the
+    // guard did not turn it into "anything that is not nullish".
+    expect(looksLikeAsyncIterable(function () {})).toBe(false);
+    expect(looksLikeEventStream(function () {})).toBe(false);
+  });
+
   it('rejects non-objects and shapes carrying neither', () => {
-    for (const value of [null, undefined, 'stream', 42, {}]) {
+    // Only `null`/`undefined` are excluded by the guard itself; every other
+    // primitive is excluded by simply not carrying the member.
+    for (const value of [null, undefined, 'stream', 42, true, 10n, {}]) {
       expect(looksLikeAsyncIterable(value)).toBe(false);
       expect(looksLikeEventStream(value)).toBe(false);
+      expect(looksLikeNodeReadable(value)).toBe(false);
     }
   });
 });
