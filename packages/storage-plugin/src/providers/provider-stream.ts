@@ -49,7 +49,7 @@
  * SDK supplies a real node Readable (a `Transform` subclass) on Deno, Node
  * and Bun alike.
  *
- * @since 0.7.0
+ * @since 0.8.0
  */
 export interface NodeSdkReadable {
   /** Registers a listener; used for `'readable'`, `'end'` and `'error'`. */
@@ -78,7 +78,7 @@ export interface NodeSdkReadable {
  *
  * @param value - The candidate value
  * @returns `true` when the value carries the full {@linkcode NodeSdkReadable} shape
- * @since 0.7.0
+ * @since 0.8.0
  */
 export function looksLikeNodeReadable(value: unknown): value is NodeSdkReadable {
   if (typeof value !== 'object' || value === null) return false;
@@ -110,10 +110,21 @@ export function looksLikeNodeReadable(value: unknown): value is NodeSdkReadable 
  *
  * @param readable - The node Readable to wrap (an S3 SDK body)
  * @returns A bounded, cancellation-safe stream of the object's chunks
- * @since 0.7.0
+ * @since 0.8.0
  */
 export function createBoundedNodeStream(readable: NodeSdkReadable): ReadableStream<Uint8Array> {
   let closed = false;
+  let recorded: Error | null = null;
+  // Node throws an UNHANDLED 'error' when a stream emits one with no listener
+  // attached, and `pull` only holds a listener while a read is outstanding —
+  // so between pulls, which is exactly where a slow consumer sits once the
+  // web queue is full, a mid-download origin failure would escape as an
+  // uncaught, process-killing error. This listener lives for the whole stream
+  // and records the failure for the next pull to surface to the consumer.
+  const retain = (error: unknown): void => {
+    recorded ??= error instanceof Error ? error : new Error(String(error));
+  };
+  readable.on('error', retain);
   return new ReadableStream<Uint8Array>({
     pull(controller) {
       return new Promise<void>((resolve) => {
@@ -155,9 +166,9 @@ export function createBoundedNodeStream(readable: NodeSdkReadable): ReadableStre
           settle(() => controller.close());
           return;
         }
-        if (readable.errored != null) {
-          const recorded = readable.errored;
-          settle(() => controller.error(recorded));
+        const pending = recorded ?? readable.errored;
+        if (pending != null) {
+          settle(() => controller.error(pending));
           return;
         }
         onReadable(); // a chunk may already be buffered
@@ -165,6 +176,9 @@ export function createBoundedNodeStream(readable: NodeSdkReadable): ReadableStre
     },
     cancel(): void {
       closed = true;
+      // `retain` stays attached deliberately: `destroy()` tears the stream
+      // down asynchronously and may still emit 'error', which with no
+      // listener would be the very uncaught throw this guard exists to stop.
       readable.destroy();
     },
   });
@@ -178,7 +192,7 @@ export function createBoundedNodeStream(readable: NodeSdkReadable): ReadableStre
  * at runtime both are node Readables whose `destroy` aborts the underlying
  * HTTP request. When absent, cancellation still releases the iterator.
  *
- * @since 0.7.0
+ * @since 0.8.0
  */
 export type EagerIterableSource = AsyncIterable<Uint8Array> & {
   destroy?: (error?: Error) => void;
@@ -201,7 +215,7 @@ export type EagerIterableSource = AsyncIterable<Uint8Array> & {
  * @param source - The SDK's iterable body (GCS `createReadStream()`, Azure
  *                 `readableStreamBody`); `destroy` is optional and used when present
  * @returns An eager, cancellation-safe stream of the object's chunks
- * @since 0.7.0
+ * @since 0.8.0
  */
 export function createEagerIterableStream(source: EagerIterableSource): ReadableStream<Uint8Array> {
   let closed = false;

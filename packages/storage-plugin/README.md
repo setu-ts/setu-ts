@@ -165,8 +165,9 @@ fast as the backend will send regardless of what the consumer is doing.
 | `LocalStorageProvider`        | None — buffered fallback | **No** — `StorageService` reads it whole, then emits one chunk.         |
 
 For the two eager providers and the two fallbacks, a large object is resident in memory regardless
-of how slowly the client reads, and an aborted download does not stop the upstream transfer. Only
-the S3 path should be relied on for a large-object relay today.
+of how slowly the client reads. Cancelling a GCS or Azure download does now release the upstream
+stream, but it cannot undo the bytes already drained, and the two fallbacks have no upstream left to
+release. Only the S3 path should be relied on for a large-object relay today.
 
 Measured for `S3Provider` against real MinIO: it stays 2-3 MiB ahead of the reader — 3.1 MiB at 1
 MiB/s, 1.9-2.5 MiB at 2 MiB/s — and that figure is constant, moving by at most 0.30 MiB over an

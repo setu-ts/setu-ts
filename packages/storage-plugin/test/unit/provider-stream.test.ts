@@ -74,10 +74,8 @@ describe('createBoundedNodeStream', () => {
 
   it('propagates an underlying error to the consumer', async () => {
     const pt = new PassThrough();
-    // Node raises an unhandled 'error' event when a stream is destroyed with
-    // an error and no listener is attached yet; the wrapper re-delivers the
-    // error to the consumer itself, so this sink only satisfies node.
-    pt.on('error', () => {});
+    // No sink: the wrapper attaches its own lifetime 'error' listener at
+    // construction, which is what keeps node from raising this as unhandled.
     const stream = createBoundedNodeStream(pt);
     pt.destroy(new Error('origin reset'));
     const reader = stream.getReader();
@@ -213,6 +211,30 @@ describe('createBoundedNodeStream', () => {
     pt.write(new Uint8Array([6])); // ERR_STREAM_DESTROYED — must be contained
     await tick();
     expect(pt.destroyed).toBe(true);
+  });
+
+  it('an origin error arriving while the consumer is BEHIND is contained, then surfaced', async () => {
+    // The state a slow consumer sits in: the web queue is full, so the stream
+    // has stopped calling pull() and pull's own 'error' listener is detached.
+    // With no lifetime listener a node stream emitting 'error' here has NO
+    // listener at all, which node raises as an unhandled error — an uncaught,
+    // process-killing throw, the same crash class as the cancel race. No sink
+    // is attached on purpose: a real SDK body has none either.
+    const pt = new PassThrough();
+    const stream = createBoundedNodeStream(pt);
+    const reader = stream.getReader();
+    pt.write(new Uint8Array([1])); // fills the default HWM=1 queue
+    await tick();
+    // Nothing is reading, so no pull is outstanding to hold a listener.
+    expect(pt.listenerCount('readable')).toBe(0);
+    pt.destroy(new Error('origin reset while the consumer is behind'));
+    await tick();
+    // Reaching here without an uncaught error IS half the assertion; the
+    // other half is that the failure is not swallowed — the queued chunk is
+    // delivered first, then the error reaches the consumer.
+    const queued = await reader.read();
+    expect(queued.done).toBe(false);
+    await expect(reader.read()).rejects.toThrow('origin reset while the consumer is behind');
   });
 
   it('closes immediately when the source reports readableEnded before the first pull', async () => {
