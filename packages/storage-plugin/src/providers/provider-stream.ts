@@ -256,3 +256,117 @@ export function createEagerIterableStream(source: EagerIterableSource): Readable
     },
   });
 }
+
+/**
+ * Reports whether a value can be drained with `for await`.
+ *
+ * Checked BEFORE {@linkcode looksLikeEventStream} because a real node Readable
+ * satisfies both, so a real SDK body keeps taking the async-iteration path and
+ * the event fallback below changes nothing for it.
+ *
+ * @param value - The candidate value
+ * @returns `true` when the value carries a callable `Symbol.asyncIterator`
+ * @since 0.8.0
+ */
+export function looksLikeAsyncIterable(value: unknown): value is EagerIterableSource {
+  if (typeof value !== 'object' || value === null) return false;
+  return typeof (value as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] === 'function';
+}
+
+/**
+ * Structural shape of a stream that only emits `'data'`/`'end'`/`'error'`.
+ *
+ * `off` and `destroy` are optional: the minimum a caller can rely on from an
+ * injected client is `on`, which is all the pre-0.8.0 GCS adapter used.
+ *
+ * @since 0.8.0
+ */
+export interface EventStreamSource {
+  /** Registers a listener for `'data'`, `'end'` and `'error'`. */
+  on(event: string, listener: (...args: unknown[]) => void): unknown;
+  /** Removes a listener, when the source supports it. */
+  off?(event: string, listener: (...args: unknown[]) => void): unknown;
+  /** Tears the stream down and aborts its underlying work, when available. */
+  destroy?: (error?: Error) => void;
+}
+
+/**
+ * Reports whether a value emits events this module can drain.
+ *
+ * @param value - The candidate value
+ * @returns `true` when the value carries a callable `on`
+ * @since 0.8.0
+ */
+export function looksLikeEventStream(value: unknown): value is EventStreamSource {
+  if (typeof value !== 'object' || value === null) return false;
+  return typeof (value as EventStreamSource).on === 'function';
+}
+
+/**
+ * Wraps an event-emitting stream in an eager, cancellation-safe web stream.
+ *
+ * The fallback path for an injected GCS client whose `createReadStream()` is
+ * not async-iterable — the shape this package's own fakes used, and the shape
+ * `IGcsClient` still permits, since `bucket()` returns `unknown` and therefore
+ * guarantees nothing about the stream. Behaviourally identical to the
+ * pre-0.8.0 GCS adapter (same listeners, same registration order, so a fake
+ * that fires synchronously from `on()` behaves as it always did) with the one
+ * thing that adapter lacked: a `cancel` hook that stops the pump, detaches the
+ * listeners, and destroys the upstream when the shape allows. Unlike
+ * {@linkcode createBoundedNodeStream}, the `'error'` listener is registered for
+ * the stream's whole life, so there is no window in which a source error has
+ * no listener.
+ *
+ * @param source - An injected client's event-emitting read stream
+ * @returns An eager, cancellation-safe stream of the object's chunks
+ * @since 0.8.0
+ */
+export function createEagerEventStream(source: EventStreamSource): ReadableStream<Uint8Array> {
+  let stopped = false;
+  const attached: Array<[string, (...args: unknown[]) => void]> = [];
+  const detach = (): void => {
+    for (const [event, listener] of attached) source.off?.(event, listener);
+    attached.length = 0;
+  };
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      const onData = (chunk: unknown): void => {
+        if (stopped) return; // cancelled — a late chunk is a deliberate drop
+        controller.enqueue(chunk as Uint8Array);
+      };
+      const onEnd = (): void => {
+        if (stopped) return;
+        stopped = true;
+        detach();
+        controller.close();
+      };
+      const onError = (error: unknown): void => {
+        if (stopped) return;
+        stopped = true;
+        detach();
+        controller.error(error instanceof Error ? error : new Error(String(error)));
+      };
+      const listen = (event: string, listener: (...args: unknown[]) => void): void => {
+        // A source that fires synchronously from `on()` can finish the stream
+        // mid-registration; anything left is not worth attaching.
+        if (stopped) return;
+        attached.push([event, listener]);
+        source.on(event, listener);
+      };
+      // Registration order matches the pre-0.8.0 adapter: a fake that fires
+      // synchronously from `on()` must deliver its chunk before 'end' closes.
+      listen('data', onData);
+      listen('end', onEnd);
+      listen('error', onError);
+    },
+    cancel(): void {
+      stopped = true;
+      detach();
+      try {
+        source.destroy?.();
+      } catch {
+        // Already destroyed — destroying twice is a no-op on node streams.
+      }
+    },
+  });
+}

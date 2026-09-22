@@ -144,12 +144,17 @@ All notable changes to this project are documented here. The format follows
   `AzureBlobProvider` carried the same hazard in a deterministic form — no cancel hook at all, so a
   cancelled download kept flowing and the next chunk hit the closed controller — and now route
   through the same wrapper, which releases the upstream stream on cancel (they remain eager, not
-  demand-driven). The S3 wrapper also keeps a lifetime `'error'` listener on the node stream: its
-  per-read listener is detached between pulls, which is exactly where a slow consumer sits once the
-  web queue is full, so an origin failure in that window would otherwise emit an unhandled `'error'`
-  and escape as the same uncaught, process-killing throw — the error is now recorded and surfaced to
-  the consumer on the next read. A real-backend regression test drives the firing shape — three
-  back-to-back reads, then concurrent origin teardown and cancel — against MinIO.
+  demand-driven). `GcsProvider` picks its adapter by probing the stream's shape rather than assuming
+  one, so an injected client whose `createReadStream()` only emits `'data'`/`'end'`/`'error'` — all
+  `IGcsClient` has ever promised, since `bucket()` returns `unknown` — keeps streaming, now with the
+  cancel hook it never had; a value carrying neither shape is refused by name instead of failing
+  with a bare `TypeError`. The S3 wrapper also keeps a lifetime `'error'` listener on the node
+  stream: its per-read listener is detached between pulls, which is exactly where a slow consumer
+  sits once the web queue is full, so an origin failure in that window would otherwise emit an
+  unhandled `'error'` and escape as the same uncaught, process-killing throw — the error is now
+  recorded and surfaced to the consumer on the next read. A real-backend regression test drives the
+  firing shape — three back-to-back reads, then concurrent origin teardown and cancel — against
+  MinIO.
 - **`logger-plugin` — default redaction now covers normalized `authorization` headers.** The shipped
   default is lowercase and default matching is case-insensitive across both console and Pino
   transports; a caller-supplied `redact` list remains case-sensitive. This prevents Fetch's

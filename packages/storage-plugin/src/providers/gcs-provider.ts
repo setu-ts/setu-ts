@@ -8,8 +8,12 @@
  */
 import type { PutObjectOptions } from '@setu-ts/common';
 import type { IGcsClient, StorageProvider } from '../interfaces/index.ts';
-import { createEagerIterableStream } from './provider-stream.ts';
-import type { EagerIterableSource } from './provider-stream.ts';
+import {
+  createEagerEventStream,
+  createEagerIterableStream,
+  looksLikeAsyncIterable,
+  looksLikeEventStream,
+} from './provider-stream.ts';
 import { hasMethods } from './shape.ts';
 
 // ── SDK module shapes ─────────────────────────────────────────────────────
@@ -233,7 +237,9 @@ export async function loadGcsModule(): Promise<GcsSdkModule> {
 /**
  * Google Cloud Storage provider.
  *
- * Supports native streaming via `createReadStream()` async-iterated into a web `ReadableStream`.
+ * Supports native streaming via `createReadStream()` drained into a web `ReadableStream` — by
+ * async iteration when the stream supports it (every real SDK body does), by
+ * `'data'`/`'end'`/`'error'` events otherwise.
  *
  * @since 0.1.0
  */
@@ -420,33 +426,58 @@ export class GcsProvider implements StorageProvider {
   }
 
   /**
-   * Native stream download — adapts GCS `createReadStream()` (Node Readable)
-   * into a web `ReadableStream` via async iteration (no `node:` import needed).
+   * Native stream download — adapts GCS `createReadStream()` into a web
+   * `ReadableStream` (no `node:` import needed).
    *
-   * Cancellation-safe: the stream's `cancel` hook releases the iterator and
+   * The adapter is chosen by probing the stream, because `IGcsClient` types it
+   * as `unknown`: a real SDK body is a node Readable and is async-iterated, an
+   * injected client emitting only `'data'`/`'end'`/`'error'` takes the event
+   * path, and a value carrying neither is refused by name. The refusal is a
+   * REJECTION, never a synchronous throw — this method is typed `Promise<…>`,
+   * so a caller using `.catch()` must be able to see it.
+   *
+   * Cancellation-safe on both paths: the `cancel` hook releases the source and
    * destroys the underlying request, so a consumer cancelling mid-download
-   * neither leaks the connection nor crashes the process (previously the
-   * eager drain kept flowing after a cancel and the next chunk enqueued into
-   * the closed controller as an uncaught TypeError). Still an EAGER drain by
+   * neither leaks the connection nor crashes the process (previously the eager
+   * drain kept flowing after a cancel and the next chunk enqueued into the
+   * closed controller as an uncaught TypeError). Still an EAGER drain by
    * documented contract — see `provider-stream.ts` and the README's
    * per-provider table.
    *
    * @param path - Object key
-   * @returns A `ReadableStream`, or `null` if absent
+   * @returns A `ReadableStream`, `null` if absent, or a rejection naming the
+   *          unusable stream shape
    */
   getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
     this.#assertConnected();
     try {
-      const readable = this.#getFile(path).createReadStream();
-      // The GCS file type carries `NodeJS.ReadableStream` only, but the real
-      // SDK stream (and every test fake) is also an AsyncIterable; destroy is
-      // optional on the source for exactly this typing gap.
-      return Promise.resolve(
-        createEagerIterableStream(readable as unknown as EagerIterableSource),
+      const readable: unknown = this.#getFile(path).createReadStream();
+      // Shape-checked, never cast: `IGcsClient.bucket()` returns `unknown`, so
+      // an injected client's stream is guaranteed nothing by the type system.
+      // A real SDK read stream is a node Readable and takes the first branch;
+      // the second keeps a hand-rolled fake that only emits 'data'/'end'/
+      // 'error' working exactly as it did before 0.8.0. (`S3Provider` picks its
+      // adapter the same way, and it is what `@smithy/core`'s `sdkStreamMixin`
+      // does: probe, fall back, and only then refuse by name.)
+      if (looksLikeAsyncIterable(readable)) {
+        return Promise.resolve(createEagerIterableStream(readable));
+      }
+      if (looksLikeEventStream(readable)) {
+        return Promise.resolve(createEagerEventStream(readable));
+      }
+      return Promise.reject(
+        new Error(
+          `GcsProvider: createReadStream() for '${path}' returned a value that is neither ` +
+            `async-iterable nor an event emitter, so it cannot be streamed. A real GCS read ` +
+            `stream is a node Readable; an injected client must return one, or a value that ` +
+            `emits 'data', 'end' and 'error'.`,
+        ),
       );
     } catch (error) {
       if (isGcsNotFound(error)) return Promise.resolve(null);
-      throw error;
+      // Rejected, not thrown: this method is typed `Promise<…>`, and a
+      // synchronous throw is invisible to a caller using `.catch()`.
+      return Promise.reject(error);
     }
   }
 }

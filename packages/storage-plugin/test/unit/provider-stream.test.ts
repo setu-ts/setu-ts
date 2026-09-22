@@ -15,7 +15,10 @@ import { expect } from '@std/expect';
 import { PassThrough } from 'node:stream';
 import {
   createBoundedNodeStream,
+  createEagerEventStream,
   createEagerIterableStream,
+  looksLikeAsyncIterable,
+  looksLikeEventStream,
   looksLikeNodeReadable,
 } from '../../src/providers/provider-stream.ts';
 import type { NodeSdkReadable } from '../../src/providers/provider-stream.ts';
@@ -406,5 +409,162 @@ describe('createEagerIterableStream', () => {
     await tick();
     expect(destroyed).toBe(1);
     // The throw was contained — no uncaught error reached this line.
+  });
+});
+
+// ── Shape classifiers + the event fallback (GCS injected-client path) ──────
+
+/** A faithful event-emitting stream double: real registration and removal. */
+function makeEventSource() {
+  const listeners = new Map<string, Set<(...a: unknown[]) => void>>();
+  let destroyed = false;
+  return {
+    on(event: string, fn: (...a: unknown[]) => void): void {
+      if (!listeners.has(event)) listeners.set(event, new Set());
+      listeners.get(event)!.add(fn);
+    },
+    off(event: string, fn: (...a: unknown[]) => void): void {
+      listeners.get(event)?.delete(fn);
+    },
+    destroy(): void {
+      destroyed = true;
+    },
+    emit(event: string, ...args: unknown[]): void {
+      for (const fn of [...(listeners.get(event) ?? [])]) fn(...args);
+    },
+    isDestroyed: (): boolean => destroyed,
+    count: (event: string): number => listeners.get(event)?.size ?? 0,
+  };
+}
+
+describe('looksLikeAsyncIterable / looksLikeEventStream', () => {
+  it('a real node stream satisfies BOTH, so the iterable branch wins', () => {
+    const pt = new PassThrough();
+    expect(looksLikeAsyncIterable(pt)).toBe(true);
+    expect(looksLikeEventStream(pt)).toBe(true);
+  });
+
+  it('classifies an event-only source and a bare async generator apart', () => {
+    expect(looksLikeAsyncIterable(makeEventSource())).toBe(false);
+    expect(looksLikeEventStream(makeEventSource())).toBe(true);
+    async function* gen(): AsyncGenerator<Uint8Array> {
+      yield new Uint8Array([1]);
+    }
+    expect(looksLikeAsyncIterable(gen())).toBe(true);
+    expect(looksLikeEventStream(gen())).toBe(false);
+  });
+
+  it('rejects non-objects and shapes carrying neither', () => {
+    for (const value of [null, undefined, 'stream', 42, {}]) {
+      expect(looksLikeAsyncIterable(value)).toBe(false);
+      expect(looksLikeEventStream(value)).toBe(false);
+    }
+  });
+});
+
+describe('createEagerEventStream', () => {
+  it('delivers chunks in order and closes on end', async () => {
+    const source = makeEventSource();
+    const stream = createEagerEventStream(source);
+    const reader = stream.getReader();
+    source.emit('data', new Uint8Array([1, 2]));
+    source.emit('data', new Uint8Array([3]));
+    source.emit('end');
+    expect([...(await reader.read()).value!]).toEqual([1, 2]);
+    expect([...(await reader.read()).value!]).toEqual([3]);
+    expect((await reader.read()).done).toBe(true);
+  });
+
+  it('keeps an error listener for the whole stream, so an idle-consumer error is contained', async () => {
+    const source = makeEventSource();
+    const stream = createEagerEventStream(source);
+    const reader = stream.getReader();
+    // Nothing is reading; unlike the pull-driven adapter there is no window
+    // in which the source has no 'error' listener.
+    expect(source.count('error')).toBe(1);
+    source.emit('error', new Error('origin reset'));
+    await expect(reader.read()).rejects.toThrow('origin reset');
+  });
+
+  it('wraps a non-Error emitted value into an Error', async () => {
+    const source = makeEventSource();
+    const reader = createEagerEventStream(source).getReader();
+    source.emit('error', 'a string, not an Error');
+    const err = await reader.read().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('a string, not an Error');
+  });
+
+  it('cancel detaches every listener, destroys the source, and drops a late chunk', async () => {
+    const source = makeEventSource();
+    const reader = createEagerEventStream(source).getReader();
+    source.emit('data', new Uint8Array([9]));
+    expect((await reader.read()).done).toBe(false);
+    await reader.cancel();
+    expect(source.isDestroyed()).toBe(true);
+    expect(source.count('data')).toBe(0);
+    expect(source.count('end')).toBe(0);
+    expect(source.count('error')).toBe(0);
+    // Late events from a source still tearing down must not touch the closed
+    // controller — reaching the end of this test IS the assertion.
+    source.emit('data', new Uint8Array([7]));
+    source.emit('end');
+    source.emit('error', new Error('teardown noise'));
+    await tick();
+  });
+
+  it('a source with no `off` still drops a late end/error after cancel', async () => {
+    // Without `off` the listeners stay attached through cancel, so the
+    // `stopped` guard inside each handler is the only thing between a late
+    // teardown event and the closed controller.
+    const handlers = new Map<string, (...a: unknown[]) => void>();
+    const source = {
+      on(event: string, fn: (...a: unknown[]) => void): void {
+        handlers.set(event, fn);
+      },
+      destroy(): void {},
+    };
+    const reader = createEagerEventStream(source).getReader();
+    handlers.get('data')!(new Uint8Array([1]));
+    expect((await reader.read()).done).toBe(false);
+    await reader.cancel();
+    handlers.get('end')!(); // must NOT close an already-closed controller
+    handlers.get('error')!(new Error('late teardown noise')); // must NOT error it
+    await tick();
+  });
+
+  it('a throwing destroy is contained (the source is already tearing down)', async () => {
+    let destroys = 0;
+    const source = {
+      on(): void {},
+      destroy(): void {
+        destroys++;
+        throw new Error('already destroyed');
+      },
+    };
+    const reader = createEagerEventStream(source).getReader();
+    await reader.cancel();
+    expect(destroys).toBe(1);
+    // The throw was contained — reaching this line IS the assertion.
+  });
+
+  it('cancel on a source carrying only `on` still stops the stream', async () => {
+    // The minimum `IGcsClient` permits: no `off`, no `destroy`.
+    let delivered = 0;
+    let emit: (chunk: Uint8Array) => void = () => {};
+    const minimal = {
+      on(event: string, fn: (...a: unknown[]) => void): void {
+        if (event === 'data') emit = (chunk) => fn(chunk);
+      },
+    };
+    const stream = createEagerEventStream(minimal);
+    const reader = stream.getReader();
+    emit(new Uint8Array([1]));
+    await reader.read();
+    delivered++;
+    await reader.cancel();
+    emit(new Uint8Array([2])); // dropped, not enqueued into a closed controller
+    await tick();
+    expect(delivered).toBe(1);
   });
 });
