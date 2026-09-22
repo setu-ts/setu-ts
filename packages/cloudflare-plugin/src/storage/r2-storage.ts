@@ -117,7 +117,7 @@ export class R2Storage implements IStorage {
    *
    * @param path - The object path, named in the error
    * @param _options - Required by the contract; no counterpart on the binding
-   * @returns A promise that never resolves
+   * @returns A rejected promise
    * @throws {CloudflareUnsupportedError} Always, as a rejection
    */
   getSignedUrl(path: string, _options: SignedUrlOptions): Promise<string> {

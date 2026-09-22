@@ -6027,10 +6027,10 @@ compiling; new code should use `IS3Backend`.
 | Provider               | Behavior                                                                                                                                       |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `MemoryProvider`       | Returns deterministic synthetic URL `memory://<encoded-key>?expires=<epoch-seconds>`. Test/process affordance only — never grants real access. |
-| `LocalStorageProvider` | **Throws** `Error('LocalStorageProvider does not support signed URLs; use the s3, gcs, or azure provider')`.                                   |
+| `LocalStorageProvider` | **Rejects** with `Error('LocalStorageProvider does not support signed URLs; use the s3, gcs, or azure provider')`.                             |
 | `S3Provider`           | Real presigned GET URL via `getSignedUrl(GetObjectCommand, { expiresIn })`.                                                                    |
 | `GcsProvider`          | Real signed URL via `file.getSignedUrl([{ action: 'read', expires }])`.                                                                        |
-| `AzureBlobProvider`    | Real SAS URL via `generateBlobSASQueryParameters`. Requires `accountKey`; throws if only managed-identity / account-name-only config.          |
+| `AzureBlobProvider`    | Real SAS URL via `generateBlobSASQueryParameters`. Requires `accountKey`; rejects if only managed-identity / account-name-only config.         |
 
 ---
 

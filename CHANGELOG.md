@@ -146,9 +146,11 @@ All notable changes to this project are documented here. The format follows
   `IStorage` an application resolves from `CAPABILITIES.STORAGE`. Leaving it would also have made
   `local` the only one of six `getSignedUrl` implementations that throws — `cloudflare-plugin`'s
   `R2Storage` already answers this exact cannot-presign case with `Promise.reject`. **Migration:**
-  nothing for callers using `await` or `.catch()` — they see no difference. A caller that wrapped
-  one of the eleven calls in a synchronous `try`/`catch` stops catching; move the catch onto the
-  promise (`await …` in an `async` function, or `.catch(...)`). See `docs/upgrading.md`.
+  no source change for callers using `await` or `.catch()`, but only the `await` ones see no
+  difference — a `.catch()` handler was previously BYPASSED by the synchronous throw and now
+  actually runs, which is the point of the fix. A caller that wrapped one of the eleven calls in a
+  synchronous `try`/`catch` without awaiting stops catching; move the catch onto the promise
+  (`await …` in an `async` function, or `.catch(...)`). See `docs/upgrading.md`.
   `StorageService.delete`/`exists`/`getSignedUrl` were bare `return this.#provider.x()` passthroughs
   and are now `async`, so a THIRD-PARTY provider's synchronous throw can no longer escape `IStorage`
   either. That path is reachable from the published surface: `StorageService` is barrel-exported,

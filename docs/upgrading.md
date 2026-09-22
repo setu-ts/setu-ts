@@ -54,11 +54,18 @@ If you pass your OWN provider to the exported `StorageService`, its `delete`, `e
 synchronous throw from your provider escaped `IStorage` too. They are now `async`. Nothing changes
 for the five built-in providers, which all return promises.
 
-Nothing to do if you `await` the call or attach `.catch()`: you see exactly what you saw before. The
-one thing that changes is code that wrapped one of the eleven calls in a synchronous `try`/`catch` —
-`try { const p = provider.get(k); } catch { … }` — which now never catches, because the throw no
-longer happens at the call. Move the handling onto the promise: `await` the call inside an `async`
-function with a `try`/`catch` around the `await`, or attach `.catch(...)`.
+No source change is needed in either case, but the two differ in what they observe. An `await`
+caller sees exactly what it saw before: the operand is evaluated inside the surrounding
+`try`/`catch`, so a synchronous throw and a rejection were already caught the same way. A `.catch()`
+caller sees a real difference, and it is the point of the fix — `provider.get('k').catch(handleIt)`
+evaluated `provider.get('k')` BEFORE `.catch` was attached, so the throw escaped and `handleIt`
+never ran; now the promise rejects and `handleIt` runs.
+
+What does need a source change is code that wrapped one of the eleven calls in a synchronous
+`try`/`catch` without awaiting — `try { const p = provider.get(k); } catch { … }` — which now never
+catches, because the throw no longer happens at the call. Move the handling onto the promise:
+`await` the call inside an `async` function with a `try`/`catch` around the `await`, or attach
+`.catch(...)`.
 
 ### Stop relying on `inject()` mutating a `Headers` instance you passed
 
