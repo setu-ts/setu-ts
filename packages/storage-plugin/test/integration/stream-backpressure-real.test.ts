@@ -414,6 +414,11 @@ describe('REAL MinIO/S3 streaming backpressure (X45-1)', { ignore: skip }, () =>
         accessKeyId,
         secretAccessKey,
       });
+      // Tracked so the `finally` can close a proxy whose trial threw before
+      // the yank: `S3Provider.disconnect()` does not close the listener, and a
+      // leaked one makes the NEXT trial fail to bind PROXY_PORT with AddrInUse
+      // — reporting an unrelated error in place of the one that actually broke.
+      let yank: Promise<void> | null = null;
       try {
         await provider.connect();
         const stream = await provider.getStream(OBJECT_KEY);
@@ -428,10 +433,11 @@ describe('REAL MinIO/S3 streaming backpressure (X45-1)', { ignore: skip }, () =>
         // produced against a cancelled stream, firing the uncaught
         // "TypeError: The stream controller cannot close or enqueue" inside
         // ext:deno_node/internal/webstreams/adapters.js.
-        const yank = proxy.close();
+        yank = proxy.close();
         await reader.cancel();
         await yank;
       } finally {
+        await (yank ?? proxy.close());
         await provider.disconnect();
       }
       // Late ticks from the raced teardown land here. On the unwrapped
