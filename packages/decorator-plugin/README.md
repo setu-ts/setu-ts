@@ -52,6 +52,32 @@ class UsersController {
 app.register(DecoratorPlugin({ controllers: [UsersController] }));
 ```
 
+## Non-HTTP ingress
+
+The same explicit class list registers queue processors, scheduled jobs, domain-event and broker
+subscriptions, WebSocket gateways, and CQRS handlers. Put those classes in `ingress`; registration
+happens during `onInit`, after the corresponding provider plugin has registered its capability. A
+declared handler with no provider fails startup with the class, method, and missing plugin named.
+
+`controllers` and `ingress` are independent lists: a class listed in only one has the OTHER half of
+its composition ignored, and `register()` warns naming the ignored family and the option that would
+register it. Listing a class in both is the correct composition — both families register.
+
+```typescript
+import { DecoratorPlugin, Processor } from '@setu-ts/decorator-plugin';
+import type { IJob } from '@setu-ts/common';
+
+class BackgroundWork {
+  @Processor('email')
+  process(_job: IJob): void {}
+}
+
+app.register(DecoratorPlugin({ ingress: [BackgroundWork] }));
+```
+
+Register the provider plugins a class uses (`QueuePlugin`, `SchedulerPlugin`, `EventsPlugin`,
+`MessagingPlugin`, `WebSocketPlugin`, or `CqrsPlugin`) alongside the decorator plugin.
+
 ## Validation is enforced
 
 `@ValidateBody(schema)` (and `@ValidateQuery` / `@ValidateParams`) do not merely describe a route
@@ -200,6 +226,8 @@ schema and a description the declaration does not carry.
 - **Parameters** — `@Params(...)`, taking the sources `Body`, `Query`, `Param`, `Header`, `Cookie`,
   `CurrentUser`, `Ctx`, `Custom`
 - **Modules** — `@Module({ controllers, providers, imports })`
+- **Non-HTTP ingress** — `@Processor`, `@Cron`, `@Every`, `@OnEvent`, `@Subscribe`,
+  `@CommandHandler`, `@QueryHandler`, `@Gateway` (+ `@OnOpen`/`@OnMessage`/`@OnClose`)
 - **Injection** — `@Injectable`, `@Inject`, `@Optional`
 - **Security** — `@Roles`, `@Permissions` (enforced — see below), `@Public` (unrestricted OpenAPI
   marking)
@@ -217,6 +245,7 @@ schema and a description the declaration does not carry.
 | Option            | Type            | Default | Description                                                                                                                                                                       |
 | ----------------- | --------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `controllers`     | `Constructor[]` | `[]`    | Controller classes to register explicitly.                                                                                                                                        |
+| `ingress`         | `Constructor[]` | `[]`    | Classes carrying non-HTTP ingress decorators (`@Processor`, `@Cron`, `@OnEvent`, …); registered during `onInit`. Independent of `controllers` — see Non-HTTP ingress.             |
 | `services`        | `Constructor[]` | `[]`    | Service classes to register explicitly.                                                                                                                                           |
 | `modules`         | `Constructor[]` | `[]`    | Root `@Module` classes to flatten depth-first; imported module providers register before controllers.                                                                             |
 | `autoDiscover`    | `boolean`       | `false` | Scan `controllersPath` for decorated classes.                                                                                                                                     |

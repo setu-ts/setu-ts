@@ -72,7 +72,7 @@ describe('validateGcpClient / isGcpNotFound', () => {
 describe('adaptGcpModule', () => {
   it('reads bytes and string payloads and writes new versions', async () => {
     const store = new Map<string, string>([['token', 'v']]);
-    const facade = adaptGcpModule(fakeGcpModule(store), 'proj');
+    const facade = adaptGcpModule(fakeGcpModule(store), { projectId: 'proj' });
     expect(await facade.accessSecretVersion('token')).toBe('v');
     expect(await facade.accessSecretVersion('absent')).toBeNull();
 
@@ -81,21 +81,25 @@ describe('adaptGcpModule', () => {
 
     const strFacade = adaptGcpModule(
       fakeGcpModule(new Map([['s', 'plain']]), { stringData: true }),
-      'p',
+      { projectId: 'p' },
     );
     expect(await strFacade.accessSecretVersion('s')).toBe('plain');
   });
 
   it('returns null on NOT_FOUND and rethrows other errors', async () => {
-    const nf = adaptGcpModule(fakeGcpModule(new Map(), { error: { code: 5 } }), 'p');
+    const nf = adaptGcpModule(fakeGcpModule(new Map(), { error: { code: 5 } }), {
+      projectId: 'p',
+    });
     expect(await nf.accessSecretVersion('x')).toBeNull();
 
-    const boom = adaptGcpModule(fakeGcpModule(new Map(), { error: new Error('boom') }), 'p');
+    const boom = adaptGcpModule(fakeGcpModule(new Map(), { error: new Error('boom') }), {
+      projectId: 'p',
+    });
     await expect(boom.accessSecretVersion('x')).rejects.toThrow('boom');
   });
 
   it('requires a projectId', () => {
-    expect(() => adaptGcpModule(fakeGcpModule(new Map()), undefined)).toThrow(
+    expect(() => adaptGcpModule(fakeGcpModule(new Map()), {})).toThrow(
       'requires options.projectId',
     );
   });

@@ -36,6 +36,13 @@ export interface AwsKmsProviderOptions {
   accessKeyId?: string | undefined;
   /** AWS secret access key for the lazily-loaded client. */
   secretAccessKey?: string | undefined;
+  /**
+   * Endpoint for the lazily-loaded client — LocalStack, an emulator, or a
+   * private endpoint. Ignored when a `client` is injected, matching `region`.
+   *
+   * @since 0.8.0
+   */
+  endpoint?: string | undefined;
   /** Injected client facade; bypasses the lazy SDK import. */
   client?: IAwsSecretsClient | undefined;
 }
@@ -63,7 +70,12 @@ export function adaptAwsModule(
   options: AwsKmsProviderOptions,
 ): IAwsSecretsClient {
   const client = new mod.SecretsManagerClient(
-    buildAwsConfig(options.region, options.accessKeyId, options.secretAccessKey),
+    buildAwsConfig(
+      options.region,
+      options.accessKeyId,
+      options.secretAccessKey,
+      options.endpoint,
+    ),
   );
   return {
     async getSecretValue(secretId: string): Promise<string | null> {
@@ -101,6 +113,7 @@ function buildAwsConfig(
   region?: string,
   accessKeyId?: string,
   secretAccessKey?: string,
+  endpoint?: string,
 ): Record<string, unknown> {
   const config: Record<string, unknown> = {};
   if (region !== undefined) {
@@ -108,6 +121,9 @@ function buildAwsConfig(
   }
   if (accessKeyId !== undefined && secretAccessKey !== undefined) {
     config.credentials = { accessKeyId, secretAccessKey };
+  }
+  if (endpoint !== undefined) {
+    config.endpoint = endpoint;
   }
   return config;
 }

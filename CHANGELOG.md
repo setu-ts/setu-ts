@@ -8,6 +8,25 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`secrets-plugin` — `endpoint` on the AWS and GCP providers (M99d).**
+  `AwsKmsProviderOptions.endpoint` and `GcpSecretManagerProviderOptions.endpoint` point the lazily
+  loaded client at LocalStack, an emulator, or a private endpoint; both are ignored when a `client`
+  is injected. The option is TRANSLATED per SDK: AWS's config object takes `endpoint`, while
+  google-gax's `ClientOptions` declares `apiEndpoint` (and has no `endpoint` member — its
+  `ClientStubOptions` index signature would let a verbatim `endpoint` type-check and be silently
+  dropped, so the adapter passes `apiEndpoint` and the unit test asserts the exact key per
+  provider). This makes X28-1's question — does `get` on an absent secret return `null`? —
+  answerable against a real LocalStack for the first time. Azure (`vaultUrl`) and Vault (`address`)
+  already took an endpoint and are unchanged.
+
+- **`decorator-plugin` — cross-family misregistration warning (M99d).** A class listed in
+  `DecoratorPlugin({ controllers })` that carries non-HTTP ingress decorators (or one in `ingress`
+  that carries HTTP route decorators) now gets a `register()` warning naming the ignored family and
+  the option that would register it. Previously the ignored half was silent: `controllers`-only
+  served the routes `200` and never fired the processor; `ingress`-only fired the processor and
+  answered the routes `404`. A class in both lists is the correct composition and warns about
+  neither; nothing is auto-registered.
+
 - **`cli` — devtool scaffolding (M98c).** `setu new --devtool`,
   `setu generate app <name> --devtool`, and `setu devtool enable [member]` opt a project into the
   M98b local diagnostics connector through one shared planner: they emit a `main.dev.ts` the

@@ -22,7 +22,7 @@ interface GcpAccessResponse {
 
 /** The subset of the GCP SDK the adapter uses. */
 export interface GcpSdkModule {
-  SecretManagerServiceClient: new () => {
+  SecretManagerServiceClient: new (options?: Record<string, unknown>) => {
     accessSecretVersion(request: { name: string }): Promise<[GcpAccessResponse]>;
     addSecretVersion(
       request: { parent: string; payload: { data: Uint8Array } },
@@ -38,6 +38,14 @@ export interface GcpSdkModule {
 export interface GcpSecretManagerProviderOptions {
   /** GCP project id used to build secret resource paths. */
   projectId?: string | undefined;
+  /**
+   * Endpoint for the lazily-loaded client — an emulator host or a private
+   * endpoint. Passed to the SDK as `apiEndpoint`, the member its
+   * `ClientOptions` declares; ignored when a `client` is injected.
+   *
+   * @since 0.8.0
+   */
+  endpoint?: string | undefined;
   /** Injected client facade; bypasses the lazy SDK import. */
   client?: IGcpSecretsClient | undefined;
 }
@@ -62,19 +70,28 @@ export function isGcpNotFound(error: unknown): boolean {
  * Adapts the GCP SDK module to the facade. Pure — unit-tested with a fake
  * module.
  *
+ * The `endpoint` option is TRANSLATED, not forwarded: google-gax's
+ * `ClientOptions` declares `apiEndpoint` and has no `endpoint` member, and its
+ * `ClientStubOptions` index signature would let a verbatim `endpoint`
+ * type-check and be ignored at runtime — the client would then talk to the
+ * production endpoint with no diagnostic.
+ *
  * @param mod - The GCP SDK module (real or fake)
- * @param projectId - GCP project id (required for resource paths)
+ * @param options - GCP connection options
  * @returns The facade wrapping a `SecretManagerServiceClient`
  * @throws {Error} If the project id is missing
  */
 export function adaptGcpModule(
   mod: GcpSdkModule,
-  projectId: string | undefined,
+  options: GcpSecretManagerProviderOptions,
 ): IGcpSecretsClient {
+  const projectId = options.projectId;
   if (projectId === undefined || projectId === '') {
     throw new Error('GcpSecretManagerProvider requires options.projectId');
   }
-  const client = new mod.SecretManagerServiceClient();
+  const client = new mod.SecretManagerServiceClient(
+    buildGcpClientOptions(options.endpoint),
+  );
   return {
     async accessSecretVersion(name: string): Promise<string | null> {
       try {
@@ -100,6 +117,17 @@ export function adaptGcpModule(
       });
     },
   };
+}
+
+/**
+ * Builds the `SecretManagerServiceClient` constructor argument without
+ * assigning `undefined` to optional fields (required by `exactOptionalPropertyTypes`).
+ */
+function buildGcpClientOptions(endpoint?: string): Record<string, unknown> | undefined {
+  if (endpoint === undefined) {
+    return undefined;
+  }
+  return { apiEndpoint: endpoint };
 }
 
 /**
@@ -150,7 +178,7 @@ export class GcpSecretManagerProvider implements SecretProvider {
       this.#attachProbe(injected);
       return;
     }
-    this.#client = adaptGcpModule(await loadGcpModule(), this.#options.projectId);
+    this.#client = adaptGcpModule(await loadGcpModule(), this.#options);
   }
 
   disconnect(): Promise<void> {
