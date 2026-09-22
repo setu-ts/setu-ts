@@ -11,6 +11,14 @@
  * too, because `await` on the expression catches it either way; the
  * `threwSync` flag is what proves the throw no longer escapes.
  *
+ * The second block guards the same property one level up, on the PUBLISHED
+ * `IStorage` contract. It exists because `StorageService.getSignedUrl` is a
+ * bare `return this.#provider.getSignedUrl(...)` passthrough, so a provider
+ * throwing synchronously escapes straight out of the capability an
+ * application resolves from `CAPABILITIES.STORAGE` — which is how the
+ * `local` provider's refusal reached callers. Every provider is driven, so
+ * the set cannot silently lose a member.
+ *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
@@ -18,6 +26,10 @@ import { expect } from '@std/expect';
 import { AzureBlobProvider } from '../../src/providers/azure-provider.ts';
 import { GcsProvider } from '../../src/providers/gcs-provider.ts';
 import { S3Provider } from '../../src/providers/s3-provider.ts';
+import { LocalStorageProvider } from '../../src/providers/local-provider.ts';
+import { MemoryProvider } from '../../src/providers/memory-provider.ts';
+import { StorageService } from '../../src/services/storage-service.ts';
+import type { StorageProvider } from '../../src/interfaces/index.ts';
 
 interface Case {
   /** The provider method under test, as `<Class>.<method>`. */
@@ -67,6 +79,46 @@ describe('disconnected cloud providers reject, never throw synchronously', () =>
       }
       expect(threwSync).toBe(false);
       await expect(promise).rejects.toThrow(/not connected/i);
+    });
+  }
+});
+
+/**
+ * Every `IStorage.getSignedUrl` answers through a promise — a provider that
+ * CAN presign, one that cannot, and one that fabricates a synthetic URL.
+ * `local` is the row that regressed: its refusal is permanent rather than a
+ * lifecycle precondition, which is why it was missed when the ten
+ * `#assertConnected` methods were fixed.
+ */
+describe('IStorage.getSignedUrl never throws synchronously', () => {
+  const providers: readonly (readonly [string, () => StorageProvider])[] = [
+    // `undefined` is the constructor's own declared first argument, not a
+    // stand-in: this refusal is reached before any filesystem access, so a
+    // fake would only add a double cast and a contract to get wrong.
+    [
+      'local (refuses — cannot presign)',
+      () => new LocalStorageProvider(undefined, { rootDir: '/root' }),
+    ],
+    ['memory (resolves a synthetic URL)', () => new MemoryProvider()],
+    ['s3 (disconnected)', () => new S3Provider({ bucket: 'b' })],
+    ['gcs (disconnected)', () => new GcsProvider({ bucket: 'b' })],
+    ['azure (disconnected)', () => new AzureBlobProvider({ containerName: 'c' })],
+  ];
+
+  for (const [name, make] of providers) {
+    it(`${name} settles rather than throwing`, async () => {
+      const storage = new StorageService(make());
+      let threwSync = false;
+      let promise: Promise<string> | undefined;
+      try {
+        promise = storage.getSignedUrl('k', { expiresIn: 60 });
+      } catch {
+        threwSync = true;
+      }
+      expect(threwSync).toBe(false);
+      // Settled either way — the point is that it is a promise outcome, not
+      // an escaped throw. `catch` swallows the refusals; the flag is the test.
+      await promise?.catch(() => undefined);
     });
   }
 });

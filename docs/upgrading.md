@@ -29,7 +29,7 @@ a route that BRANCHES on the content type now takes the branch the blob declares
 not describe the bytes, either correct the type or set `headers['content-type']` explicitly, which
 still wins over the default.
 
-### Stop catching the ten storage provider methods in a synchronous `try`/`catch`
+### Stop catching the eleven storage provider methods in a synchronous `try`/`catch`
 
 `@setu-ts/storage-plugin`'s cloud providers guard every operation with a connection check that
 throws. Ten of the methods — `S3Provider` `get`/`delete`/`exists`/`getSignedUrl`/`getStream`,
@@ -41,8 +41,16 @@ methods are now `async`, so the "not connected" precondition arrives as a REJECT
 `AzureBlobProvider.getSignedUrl`'s second refusal — the resolved client has no account key to sign
 with — rejects for the same reason.
 
+`LocalStorageProvider.getSignedUrl` is the eleventh. Its refusal is permanent rather than a
+lifecycle precondition — local storage cannot presign at all — but it escaped the same way, and it
+escaped further: `StorageService.getSignedUrl` passes the provider's promise straight through
+without awaiting it, so the throw came out of the `IStorage` you resolve from
+`CAPABILITIES.STORAGE`, not just out of the provider class. If you configured
+`StoragePlugin({ provider: 'local' })` and called `storage.getSignedUrl(...).catch(...)`, the
+`catch` never ran. It now rejects with the same message.
+
 Nothing to do if you `await` the call or attach `.catch()`: you see exactly what you saw before. The
-one thing that changes is code that wrapped one of the ten calls in a synchronous `try`/`catch` —
+one thing that changes is code that wrapped one of the eleven calls in a synchronous `try`/`catch` —
 `try { const p = provider.get(k); } catch { … }` — which now never catches, because the throw no
 longer happens at the call. Move the handling onto the promise: `await` the call inside an `async`
 function with a `try`/`catch` around the `await`, or attach `.catch(...)`.

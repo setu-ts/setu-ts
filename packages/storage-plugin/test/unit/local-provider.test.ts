@@ -140,11 +140,24 @@ describe('LocalStorageProvider', () => {
     expect(await provider.exists('nope')).toBe(false);
   });
 
-  it('getSignedUrl throws with documented message', () => {
+  // The two-step form is the discriminating one: `await
+  // expect(promise).rejects` alone would pass against a synchronous throw
+  // too, because `await` on the expression catches it either way. The
+  // `threwSync` flag is what proves the throw does not escape before the
+  // promise exists, where a caller using `.catch()` can never see it.
+  it('getSignedUrl rejects with the documented message, never a sync throw', async () => {
     const { fs } = makeFakeFs();
     const provider = new LocalStorageProvider(fs, { rootDir: '/root' });
-    provider.connect();
-    expect(() => provider.getSignedUrl('key', { expiresIn: 60 })).toThrow(
+    await provider.connect();
+    let threwSync = false;
+    let promise: Promise<string> | undefined;
+    try {
+      promise = provider.getSignedUrl('key', { expiresIn: 60 });
+    } catch {
+      threwSync = true;
+    }
+    expect(threwSync).toBe(false);
+    await expect(promise).rejects.toThrow(
       'LocalStorageProvider does not support signed URLs; use the s3, gcs, or azure provider',
     );
   });

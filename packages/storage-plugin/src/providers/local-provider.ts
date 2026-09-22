@@ -265,13 +265,22 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   /**
-   * Throws — local storage cannot produce signed URLs.
+   * Refuses — local storage cannot produce signed URLs.
+   *
+   * The refusal is a REJECTION, never a synchronous throw: this method is
+   * typed `Promise<string>`, so a throw escaping before the promise exists is
+   * invisible to a caller using `.catch()`. Every other `IStorage.getSignedUrl`
+   * in the repo answers the same way — the S3/GCS/Azure providers reject, and
+   * `cloudflare-plugin`'s `R2Storage` returns `Promise.reject` for this exact
+   * cannot-presign reason.
    *
    * @param _path - Object path/key
    * @param _options - Expiry options
-   * @throws {Error} Always — signed URLs unsupported on LocalStorageProvider
+   * @throws {Error} Always, as a rejection — signed URLs unsupported on
+   *          LocalStorageProvider
    */
-  getSignedUrl(_path: string, _options: { expiresIn: number }): Promise<string> {
+  // deno-lint-ignore require-await -- the unsupported refusal must REJECT, not throw synchronously
+  async getSignedUrl(_path: string, _options: { expiresIn: number }): Promise<string> {
     throw new Error(
       'LocalStorageProvider does not support signed URLs; use the s3, gcs, or azure provider',
     );
