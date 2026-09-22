@@ -348,7 +348,8 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns The object bytes, or `null`
    */
-  get(path: string): Promise<Uint8Array | null> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async get(path: string): Promise<Uint8Array | null> {
     this.#assertConnected();
     return this.#client!.get(path);
   }
@@ -359,7 +360,8 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns `true` if deleted
    */
-  delete(path: string): Promise<boolean> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async delete(path: string): Promise<boolean> {
     this.#assertConnected();
     return this.#client!.delete(path);
   }
@@ -370,7 +372,8 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns `true` if present
    */
-  exists(path: string): Promise<boolean> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async exists(path: string): Promise<boolean> {
     this.#assertConnected();
     return this.#client!.head(path);
   }
@@ -382,7 +385,8 @@ export class S3Provider implements StorageProvider {
    * @param options - Expiry in seconds
    * @returns The presigned URL
    */
-  getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
     this.#assertConnected();
     return this.#client!.getSignedUrl(path, options.expiresIn);
   }
@@ -393,7 +397,8 @@ export class S3Provider implements StorageProvider {
    * @param path - Object key
    * @returns A `ReadableStream`, or `null` if absent
    */
-  getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async getStream(path: string): Promise<ReadableStream<Uint8Array> | null> {
     this.#assertConnected();
     return this.#client!.getStream(path);
   }

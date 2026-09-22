@@ -452,11 +452,11 @@ describe('AzureBlobProvider', () => {
     expect(provider.isReady()).toBe(false);
   });
 
-  it('getSignedUrl throws when the resolved client exposes no getSignedUrl', async () => {
+  it('getSignedUrl rejects when the resolved client exposes no getSignedUrl', async () => {
     const client: IAzureBlobClient = { getContainerClient: () => ({}) };
     const provider = new AzureBlobProvider({ containerName: 'c', client });
     await provider.connect();
-    expect(() => provider.getSignedUrl('x', { expiresIn: 60 })).toThrow(
+    await expect(provider.getSignedUrl('x', { expiresIn: 60 })).rejects.toThrow(
       'does not support signed URLs',
     );
   });

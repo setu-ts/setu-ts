@@ -449,7 +449,8 @@ export class AzureBlobProvider implements StorageProvider {
    * @param path - Object key
    * @returns `true` if deleted
    */
-  delete(path: string): Promise<boolean> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async delete(path: string): Promise<boolean> {
     this.#assertConnected();
     return this.#getBlockBlob(path).delete();
   }
@@ -460,7 +461,8 @@ export class AzureBlobProvider implements StorageProvider {
    * @param path - Object key
    * @returns `true` if present
    */
-  exists(path: string): Promise<boolean> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async exists(path: string): Promise<boolean> {
     this.#assertConnected();
     return this.#getBlockBlob(path).exists();
   }
@@ -471,9 +473,12 @@ export class AzureBlobProvider implements StorageProvider {
    * @param path - Object key
    * @param options - Expiry in seconds
    * @returns The SAS URL
-   * @throws {Error} When no account key is configured
+   * @throws {Error} When the provider is not connected, or when the resolved
+   *          client has no account key to sign with — both as REJECTIONS,
+   *          never a synchronous throw, so a caller using `.catch()` sees them.
    */
-  getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
+  // deno-lint-ignore require-await -- the not-connected refusal must REJECT, not throw synchronously
+  async getSignedUrl(path: string, options: { expiresIn: number }): Promise<string> {
     this.#assertConnected();
     const client = this.#client!;
     if (!client.getSignedUrl) {

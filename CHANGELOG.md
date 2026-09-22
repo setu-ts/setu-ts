@@ -129,6 +129,20 @@ All notable changes to this project are documented here. The format follows
   `--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER` grant its
   runner reads, whether or not the devtool is enabled. Existing projects are unaffected: nothing
   regenerates a scaffolded file, and `--allow-net` is unchanged and still unscoped.
+- **`storage-plugin` — ten cloud-provider methods now REJECT instead of throwing synchronously when
+  the provider is not connected (BREAKING for callers that caught the throw).** `S3Provider`
+  `get`/`delete`/`exists`/`getSignedUrl`/`getStream`, `GcsProvider` `put`/`getStream`, and
+  `AzureBlobProvider` `delete`/`exists`/`getSignedUrl` each guard with a private
+  `#assertConnected()` that throws; the methods were typed `Promise<...>` but not `async`, so the
+  throw escaped synchronously — `provider.get('k').catch(handleIt)` never ran and the error was
+  uncaught, while `put()` on the same class rejected. This is the recurring defect class fixed in
+  M52b, M52c, M70j, M79 and PR #355; the ten methods are now `async`, so the same precondition
+  arrives as a rejection, matching the committed `IStorage` contract and each provider's own `async`
+  siblings. `AzureBlobProvider.getSignedUrl`'s second refusal (no account key to sign with) moves
+  with it. **Migration:** nothing for callers using `await` or `.catch()` — they see no difference.
+  A caller that wrapped one of the ten calls in a synchronous `try`/`catch` stops catching; move the
+  catch onto the promise (`await …` in an `async` function, or `.catch(...)`). See
+  `docs/upgrading.md`.
 
 ### Fixed
 

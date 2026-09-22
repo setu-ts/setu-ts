@@ -29,6 +29,24 @@ a route that BRANCHES on the content type now takes the branch the blob declares
 not describe the bytes, either correct the type or set `headers['content-type']` explicitly, which
 still wins over the default.
 
+### Stop catching the ten storage provider methods in a synchronous `try`/`catch`
+
+`@setu-ts/storage-plugin`'s cloud providers guard every operation with a connection check that
+throws. Ten of the methods — `S3Provider` `get`/`delete`/`exists`/`getSignedUrl`/`getStream`,
+`GcsProvider` `put`/`getStream`, and `AzureBlobProvider` `delete`/`exists`/`getSignedUrl` — are
+typed `Promise<...>` but were not `async`, so that throw escaped **synchronously**:
+`provider.get('k').catch(handleIt)` never ran, and the error was uncaught instead of handled. The
+methods are now `async`, so the "not connected" precondition arrives as a REJECTION, matching the
+`IStorage` contract and the providers' own `async` methods (which always rejected).
+`AzureBlobProvider.getSignedUrl`'s second refusal — the resolved client has no account key to sign
+with — rejects for the same reason.
+
+Nothing to do if you `await` the call or attach `.catch()`: you see exactly what you saw before. The
+one thing that changes is code that wrapped one of the ten calls in a synchronous `try`/`catch` —
+`try { const p = provider.get(k); } catch { … }` — which now never catches, because the throw no
+longer happens at the call. Move the handling onto the promise: `await` the call inside an `async`
+function with a `try`/`catch` around the `await`, or attach `.catch(...)`.
+
 ### Stop relying on `inject()` mutating a `Headers` instance you passed
 
 `inject()` used to write its content-type default onto the caller's own object when
