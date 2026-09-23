@@ -140,6 +140,12 @@ export interface SecretsProviderOptions {
   accessKeyId?: string;
   /** (`aws-kms`) AWS secret access key for the lazily-loaded client. */
   secretAccessKey?: string;
+  /**
+   * (`aws-kms` | `gcp`) Endpoint for the lazily-loaded client — LocalStack,
+   * an emulator, or a private endpoint. Forwarded to the provider's
+   * `endpoint` option; ignored when a `client` is injected.
+   */
+  endpoint?: string;
   /** (`gcp`) GCP project id used to build secret resource paths. */
   projectId?: string;
   /** (`azure`) Key Vault URL for the lazily-loaded client. */

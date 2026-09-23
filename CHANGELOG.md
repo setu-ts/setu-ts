@@ -11,10 +11,13 @@ All notable changes to this project are documented here. The format follows
 - **`secrets-plugin` — `endpoint` on the AWS and GCP providers (M99d).**
   `AwsKmsProviderOptions.endpoint` and `GcpSecretManagerProviderOptions.endpoint` point the lazily
   loaded client at LocalStack, an emulator, or a private endpoint; both are ignored when a `client`
-  is injected. The option is TRANSLATED per SDK: AWS's config object takes `endpoint`, while
-  google-gax's `ClientOptions` declares `apiEndpoint` (and has no `endpoint` member — its
-  `ClientStubOptions` index signature would let a verbatim `endpoint` type-check and be silently
-  dropped, so the adapter passes `apiEndpoint` and the unit test asserts the exact key per
+  is injected. The option is also available through the plugin —
+  `SecretsPlugin({ provider:
+  'aws-kms' | 'gcp', options: { endpoint } })` — with `createProvider`
+  forwarding it to the provider. The option is TRANSLATED per SDK: AWS's config object takes
+  `endpoint`, while google-gax's `ClientOptions` declares `apiEndpoint` (and has no `endpoint`
+  member — its `ClientStubOptions` index signature would let a verbatim `endpoint` type-check and be
+  silently dropped, so the adapter passes `apiEndpoint` and the unit test asserts the exact key per
   provider). This makes X28-1's question — does `get` on an absent secret return `null`? —
   answerable against a real LocalStack for the first time. Azure (`vaultUrl`) and Vault (`address`)
   already took an endpoint and are unchanged.
