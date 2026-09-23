@@ -73,11 +73,11 @@ itself remains optional and is not required for authorization explanations.
 - **Decision:** `AuthorizationDiagnosticsOptions` requires `enabled: true`, `roles` and
   `permissions` exact-name to display-alias maps, and optional `policyRevision`. Every alias and the
   revision carry M98d's shape rule verbatim — non-empty UTF-8, 1–64 bytes, no control characters,
-  unique within a map — so the five plans validate an alias identically. Accept 128 entries per map,
-  16 evaluated steps/decision, 1,024 decisions retained, and 128/read. If any requested rule lacks
-  an alias, the complete decision is dropped before buffering and a saturated counter increments;
-  partial rule lists are never emitted. A granting principal role is included only when it has an
-  approved role alias.
+  unique within a map — so the inspector plans validate an alias identically. Accept 128 entries per
+  map, 16 evaluated steps/decision, 1,024 decisions retained, and 128/read. If any requested rule
+  lacks an alias, the complete decision is dropped before buffering and a saturated counter
+  increments; partial rule lists are never emitted. A granting principal role is included only when
+  it has an approved role alias.
 
   `RbacService.hasAnyRole` and `hasAllPermissions` take an unbounded `readonly string[]`
   (`packages/auth-plugin/src/services/rbac-service.ts:162,174`), so a compound evaluation CAN exceed
