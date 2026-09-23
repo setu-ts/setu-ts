@@ -78,18 +78,27 @@ itself remains optional and is not required for configuration provenance.
   source aliases. Limits: 128 keys, eight files, 64 UTF-8 bytes per alias, no controls.
   `ConfigProvenanceEntry` contains only `keyAlias`, `origin` (`environment`, `file`, `unknown`),
   optional `sourceAlias`, approved `overriddenSourceAliases`, `expanded`, approved
-  `referenceAliases`, and schema effect (`not-configured`, `validated`, `defaulted`, `removed`,
+  `referenceAliases`, and schema effect (`not-configured`, `validated`, `introduced`, `removed`,
   `unknown`). Every origin value names its producer, and there are exactly two producers of
   `unknown`: an opaque injected instance (§3.2, where the schema effect is `unknown` too), and a key
   the loader itself tracked that is present in the post-schema snapshot with no observed environment
-  or file source — a schema-introduced key, whose schema effect `defaulted` then says where it came
-  from. A separate `injected` origin was considered and CUT at plan time: `loadConfig` reads only
-  the environment and `.env` files (`packages/config-plugin/src/services/load-config.ts:55`), an
-  adopted record keeps each entry's real `environment`/`file` origin, and an opaque instance is
-  already `unknown` — so no code path could ever emit it, which is the dead-surface case the plan
-  checklist requires cutting rather than storing. `ConfigDiagnosticsSnapshot` adds version,
-  instance, inspector state, entries, truncation and fixed counters. It contains no presence flag
-  for opaque instances.
+  or file source, whose schema effect `introduced` then reports that it appeared only after schema
+  parsing.
+
+  The effect is `introduced` rather than `defaulted`, and the difference is the whole point of §3.1
+  and the §8 overclaim risk: effects are derived from approved input/output property PRESENCE, and
+  presence cannot distinguish a schema default from a transform that derived the key from other
+  inputs. `defaulted` names a mechanism the observation cannot establish, so it would misstate the
+  source for every transform-derived key; and it could only ever be established by inspecting schema
+  internals, which §0 excludes. `introduced` states exactly what was observed and nothing more.
+
+  A separate `injected` origin was considered and CUT at plan time: `loadConfig` reads only the
+  environment and `.env` files (`packages/config-plugin/src/services/load-config.ts:55`), an adopted
+  record keeps each entry's real `environment`/`file` origin, and an opaque instance is already
+  `unknown` — so no code path could ever emit it, which is the dead-surface case the plan checklist
+  requires cutting rather than storing. `ConfigDiagnosticsSnapshot` adds version, instance,
+  inspector state, entries, truncation and fixed counters. It contains no presence flag for opaque
+  instances.
 - **Why:** Even names and override relationships require deliberate approval; fixed categories avoid
   raw detail.
 - **Test home:** option compiler and exact DTO tests.
@@ -111,12 +120,17 @@ itself remains optional and is not required for configuration provenance.
 - **Decision:** Expansion metadata is evidenced only by the existing `${NAME}` grammar on an
   approved key's already-loaded string and includes references only when their aliases are approved.
   For schema output, input present/output present is `validated` regardless of coercion; input
-  absent/output present is `defaulted`; input present/output absent is `removed`. Arbitrary
-  transform dependencies and output keys not explicitly approved are not inferred. A
-  `get(key, { default })` fallback never changes startup provenance.
+  absent/output present is `introduced`; input present/output absent is `removed`. `introduced`
+  reports appearance and NOT cause: a schema default and a transform deriving the key from other
+  inputs produce the identical presence pattern, so naming one mechanism would be the §8 overclaim.
+  A consumer reading `introduced` knows the key was not in any observed source and must not conclude
+  a default supplied it. Arbitrary transform dependencies and output keys not explicitly approved
+  are not inferred. A `get(key, { default })` fallback never changes startup provenance.
 - **Why:** These facts can be observed without disclosing values or inventing schema semantics.
 - **Test home:** expansion/schema fixtures covering defaults, coercion, removal, transforms, and
-  call defaults.
+  call defaults — including an exact-output case where a schema DEFAULT and a schema TRANSFORM
+  deriving a key from other inputs both report `introduced`, which is what pins the effect to
+  presence rather than to a mechanism.
 
 ### 3.6 Projection and failure isolation
 

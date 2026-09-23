@@ -54,10 +54,9 @@ it.
 
 ### 3.2 Protocol support is negotiated before an addon read
 
-- **Decision:** Before this milestone's `/v1/health` route ships — and PREFERABLY before the
-  diagnostics package first publishes, which is an ordering preference and not a release gate on
-  M98a–M98c (ROADMAP "Milestone 98", release-requirements paragraph) — extend the authenticated v1
-  status body with one exact `inspectors` object containing the five fixed boolean keys `health`,
+- **Decision:** Before `packages/diagnostics-plugin` is first PUBLISHED — a hard gate, established
+  by reading the shipped validator rather than assumed — extend the authenticated v1 status body
+  with one exact `inspectors` object containing the five fixed boolean keys `health`,
   `configuration`, `queues`, `traces`, and `authorization`. M98d sets only `health: true`; M98e–M98h
   turn on their reserved key when their connector operation ships. A key means that the connector
   implements and validates that operation, independent of whether the application registered its
@@ -68,12 +67,33 @@ it.
   absent. Unknown/missing/extra manifest keys and non-booleans fail pairing. Inspectors beyond these
   five require a new protocol version.
 - **Why:** Client/server release skew has an explicit authenticated contract and never probes an
-  unknown route or infers support from a generic protocol error. Adding the manifest before the
-  package first publishes spares a released package a status-shape change; the legacy reading is
-  what makes that an optimisation rather than a dependency, so M98a–M98c can publish without waiting
-  for this letter.
+  unknown route or infers support from a generic protocol error.
+
+  The publication gate is not a preference, and the legacy reading does NOT make it one — it covers
+  only one of the two skew directions. A NEW client against an OLD server reads the three-field body
+  as all keys false, which is the case above. An OLD client against a NEW server is the case that
+  breaks: `isStatusBody` requires EXACTLY the three keys `version`, `instanceId` and `expiresInMs`,
+  rejecting any other key count outright
+  (`packages/diagnostics-plugin/src/protocol/protocol.ts:294-322`). The client then latches
+  `pairingFailed` and every later call throws (`client/client.ts:335-338`, `216-218`), and the error
+  it surfaces is `CLIENT_ERRORS.connection` — so a version skew reaches the user as a connection
+  fault, which is a misdiagnosis rather than merely a failure. The server cannot avoid this by
+  serving the old body to an old client: the request carries `x-setu-session`, `x-setu-sequence`,
+  `x-setu-instance` and `x-setu-mac` and NOTHING identifying the client's protocol capability
+  (`transport/connector-handler.ts:213-233`), so there is no signal to branch on. Adding one is
+  possible — absence of a new client header would mean "old" — but it would have to enter the MAC
+  canonicalization or be strippable, and it buys nothing while no client is published.
+
+  That is what makes the gate cheap: M98a–M98c are merged and awaiting publication, so there is no
+  client in the field to break, and settling the shape now costs one edit. Once the package
+  publishes, the status body is frozen for its lifetime and the manifest can no longer live there at
+  all — it would need its own authenticated target plus a compatibility rule, which is a separate
+  design decision, not this plan's.
 - **Test home:** diagnostics protocol/client compatibility matrix: legacy M98b status, M98d status,
-  false health key, true key with absent source, malformed manifests, and no request on false.
+  false health key, true key with absent source, malformed manifests, and no request on false. The
+  matrix pins BOTH directions, so the asymmetry above cannot be forgotten: a new client against the
+  legacy body pairs and reports all keys false, and the shipped `isStatusBody` rejects the new
+  four-field body — the test asserting the second is the reason the gate exists.
 
 ### 3.3 Exact public DTO
 

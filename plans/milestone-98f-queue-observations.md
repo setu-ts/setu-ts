@@ -67,7 +67,8 @@ itself remains optional and is not required for queue observations.
   The method is synchronous, defaults to 128, throws one fixed value-free `RangeError` unless
   `after` is a non-negative safe integer and `limit` is 1–128, and returns a deeply frozen batch.
   `QueueDiagnosticsSourceStatus` contains a connector-assigned opaque `q<N>` source ID, inspector
-  state, optional configured instance alias, depth coverage, and fixed failure category.
+  state, optional configured instance alias, depth coverage, fixed failure category, and a
+  saturating `lost` carrying that source's own ring eviction (see the two-ring rule below).
   `QueueAttemptObservation` contains only global response sequence, source ID, configured
   `instanceAlias`, approved `queueAlias`, session-local `jobAlias`, attempt, `durationMs`, processor
   outcome (`completed`, `retryable-error`, `terminal-error`), settlement (`acknowledged`,
@@ -85,15 +86,30 @@ itself remains optional and is not required for queue observations.
   starts at the oldest retained event; a cursor older than the oldest retained sequence returns the
   oldest retained events and reports the gap in a PER-BATCH `lost`; `next` is the last returned
   sequence, or the REQUESTED cursor when the batch is empty; a cursor beyond the current sequence
-  throws the fixed value-free `RangeError`. `lost` counts ring eviction only — `truncatedSources`
-  and the §3.4 dropped counter are separate facts and are never folded into it.
+  throws the fixed value-free `RangeError`. Those rules govern BOTH rings — the per-source ring
+  `IQueueDiagnosticsSource.read` pages, and the connector merge ring the client pages.
+
+  This design has two bounded rings (1,024 source events per source, 1,024 connector merge events),
+  so one `lost` cannot honestly cover both and it is not asked to. `QueueDiagnosticsBatch.lost`
+  counts MERGE-ring eviction only. A source's own ring can wrap between two connector polls — a busy
+  queue outrunning the poller — and that loss is reported separately, per source, as a saturating
+  `lost` on `QueueDiagnosticsSourceStatus`: the connector accumulates each source batch's per-batch
+  `lost` into that source's counter as it drains, because the source count is per-batch by the
+  contract above while the client polls at its own rate. Per source rather than summed, because the
+  counter names which queue instance dropped work and a total cannot. `truncatedSources` and the
+  §3.4 dropped counter stay separate from both: they are refusal and capacity facts, not eviction.
+  With those four counters a client can always say what it did not see, and never mistakes an
+  unbroken merge sequence for a complete one.
 - **Why:** Outcome and durable settlement remain separate facts; unavailable depth cannot look like
   zero. Paging that a client cannot reason about is how a queue view comes to claim it showed every
-  attempt.
-- **Test home:** common DTO tests and protocol exact-key tests, plus paging across eviction —
-  overflow the 1,024-event ring, resume from a pre-overflow cursor, and assert no repeated or
-  skipped sequence, a per-batch `lost`, an empty batch echoing its cursor, and a beyond-sequence
-  cursor throwing.
+  attempt — and with two rings the dangerous case is the invisible one, where the merge sequence is
+  contiguous because the attempts were already gone before the connector read them.
+- **Test home:** common DTO tests and protocol exact-key tests, plus paging across eviction at both
+  levels — overflow the 1,024-event merge ring, resume from a pre-overflow cursor, and assert no
+  repeated or skipped sequence, a per-batch `lost`, an empty batch echoing its cursor, and a
+  beyond-sequence cursor throwing; then overflow a SOURCE ring between two connector reads and
+  assert the loss surfaces on that source's status while the merge sequence stays contiguous and its
+  own `lost` stays zero — the case that discriminates the two counters.
 
 ### 3.3 Observe the authoritative attempt once
 
@@ -143,13 +159,17 @@ itself remains optional and is not required for queue observations.
   M98b permits one authenticated client session, the handler retains one internal cursor per source,
   drains newly captured source events into a connector-owned bounded merge ring on each queue read,
   and exposes only that ring's public numeric cursor. Source events enter the merge ring already
-  minimized; overflow increments `lost`. The client exposes `queues(after, limit)` with the standard
-  signed serialized exchange after the authenticated support manifest reports `queues: true`.
-  Projectors validate own properties and copy exact fields; source failures become a fixed source
-  state without details.
+  minimized; MERGE-ring overflow increments the batch's `lost`, while each drained source batch's
+  own `lost` accumulates onto that source's status counter (§3.2) rather than into the batch total,
+  so a source that outran the connector is visible even when the merge sequence is unbroken. The
+  client exposes `queues(after, limit)` with the standard signed serialized exchange after the
+  authenticated support manifest reports `queues: true`. Projectors validate own properties and copy
+  exact fields; source failures become a fixed source state without details.
 - **Why:** A single cursor remains usable across named queue instances without exposing registry
   tokens.
-- **Test home:** merge ordering/loss tests, client tests, real socket e2e.
+- **Test home:** merge ordering/loss tests, client tests, real socket e2e — including a source ring
+  that overflows BETWEEN two connector reads, asserting the accumulated per-source `lost` and a
+  merge `lost` of zero.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -228,6 +248,9 @@ the reviewed revision, adapter/runtime evidence, findings and dispositions befor
 - Depth polling overloads a backend: explicit opt-in, approved names, low concurrency, no
   overlapping raw promises.
 - Shared counts are double-counted: tag scope and prohibit aggregation across replicas.
+- A contiguous merge sequence is read as complete coverage: two bounded rings means a source can
+  evict attempts before the connector polls it, so per-source eviction is reported on that source's
+  status and is never folded into the batch `lost` (§3.2, §3.6).
 - Identity/payload leakage: alias before buffering and omit payload/header/error/claim fields from
   observer signatures.
 

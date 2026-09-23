@@ -10654,7 +10654,11 @@ and per-member credential handoff. These three are implemented and merged, await
 the next release cycle. **98d–98h are planned**, each with its own implementation plan and mandatory
 security audit. This umbrella records framework work for the separately maintained devtool; adding
 the later letters does not make them prerequisites for publishing 98a–98c or for the devtool's
-initial D01–D04 preview. A roadmap status is not evidence that a security audit has passed.
+initial D01–D04 preview, with ONE exception recorded under the release requirements below — M98d's
+status-shape change must precede the first publication of `packages/diagnostics-plugin`, because the
+shipped client refuses a status body it does not expect and that body is otherwise frozen for the
+lifetime of every published client. A roadmap status is not evidence that a security audit has
+passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -11047,21 +11051,27 @@ Any new reader/transport surface must have an explicit version/support contract 
 projections. Do not infer inspector support from plugin registration, a generic error or package
 name. Distinguish unsupported, disabled, no-data, stale and collection-failed states. Isolate
 optional collection failures without weakening session authentication or integrity failure handling.
-M98d owns a fixed, authenticated v1 inspector-support manifest in the status response, and it is a
-hard gate on the first PUBLISHED ADDON OPERATION — no M98d–M98h route ships without it. It is NOT a
-gate on publishing 98a–98c, which would contradict the decoupling stated above: landing it before
-`packages/diagnostics-plugin` first publishes is merely PREFERRED, because it spares a released
-package a status-shape change, and if the release cycle reaches that package first nothing is
-stranded. The manifest declares connector operation support separately from application source
-availability; M98e–M98h activate their reserved fixed entries as their operations ship. What makes
-the ordering optional is the fallback: a new client treats the exact legacy three-field M98b status
-body as all addon operations unsupported — a permanently supported reading with its own tests, not a
-migration crutch — so it never probes an unknown route or derives support from a generic error.
-Future inspectors beyond the five fixed entries require a new protocol version. Verify credential
-expiry/revocation, request/response instance binding, replay protection, protocol bounds and refusal
-of arbitrary method/file access or mutation for every added operation. Shared backends require their
-own allowed resource/tenant scope; a local session key does not authorize enumeration of all data
-reachable by the application.
+M98d owns a fixed, authenticated v1 inspector-support manifest in the status response, and landing
+it is a HARD GATE on the first publication of `packages/diagnostics-plugin`. That is the one narrow
+exception to the decoupling stated above, and it is a wire-compatibility constraint rather than a
+scope one: the shipped client accepts a status body of EXACTLY `version`, `instanceId` and
+`expiresInMs` (`packages/diagnostics-plugin/src/protocol/protocol.ts:294-322`) and latches a
+terminal pairing failure on anything else, so publishing the package first would freeze that body
+for the lifetime of every client in the field. The request carries no client-version signal, so a
+published server cannot serve the old shape to an old client. The gate costs nothing today, because
+98a–98c are merged and awaiting publication: no client exists to break, and settling the shape is
+one edit. Adding the later letters still makes none of them a prerequisite for the devtool's initial
+D01–D04 preview, and only M98d's status shape — not its route, its source or the other letters —
+must precede that publication. The manifest declares connector operation support separately from
+application source availability; M98e–M98h activate their reserved fixed entries as their operations
+ship. The reverse skew is covered by a fallback: a new client treats the exact legacy three-field
+M98b status body as all addon operations unsupported — a permanently supported reading with its own
+tests, not a migration crutch — so it never probes an unknown route or derives support from a
+generic error. Future inspectors beyond the five fixed entries require a new protocol version.
+Verify credential expiry/revocation, request/response instance binding, replay protection, protocol
+bounds and refusal of arbitrary method/file access or mutation for every added operation. Shared
+backends require their own allowed resource/tenant scope; a local session key does not authorize
+enumeration of all data reachable by the application.
 
 ### Threat Model and Acceptance Evidence
 
