@@ -58,25 +58,45 @@ itself remains optional and is not required for authorization explanations.
 
 - **Decision:** `AuthorizationDecisionObservation` contains sequence, opaque `d<N>` decision ID,
   operation (`role`, `permission`, `any-role`, `all-permissions`), result, approved rule alias(es),
-  at most 16 evaluated steps, optional approved `viaRoleAlias`, fixed reason (`direct-role`,
-  `inherited-role`, `direct-permission`, `direct-wildcard`, `role-permission`, `role-wildcard`,
-  `not-held`, `compound-satisfied`, `compound-unsatisfied`), optional policy revision alias, and
-  `ageMs`. It has no principal, request, route, credential, claim, resource, raw rule, error, or
-  arbitrary detail field. Unevaluated compound branches have no entry.
+  at most 16 evaluated steps, `stepsEvaluated` (the true count, saturating) and `stepsTruncated`
+  (§3.3), optional approved `viaRoleAlias`, fixed reason (`direct-role`, `inherited-role`,
+  `direct-permission`, `direct-wildcard`, `role-permission`, `role-wildcard`, `not-held`,
+  `compound-satisfied`, `compound-unsatisfied`), optional policy revision alias, and `ageMs`. It has
+  no principal, request, route, credential, claim, resource, raw rule, error, or arbitrary detail
+  field. Unevaluated compound branches have no entry, and a step count is a count only — it never
+  carries a rule name that was not approved.
 - **Why:** The devtool can explain the result without serializing policy or identity objects.
 - **Test home:** collector and protocol exact-key/reason tests.
 
 ### 3.3 Rule approval and bounds
 
 - **Decision:** `AuthorizationDiagnosticsOptions` requires `enabled: true`, `roles` and
-  `permissions` exact-name to display-alias maps, and optional safe `policyRevision`. Accept 128
-  entries per map, unique 1–64-byte aliases, 16 evaluated steps/decision, 1,024 decisions retained,
-  and 128/read. If any requested rule lacks an alias, the complete decision is dropped before
-  buffering and a saturated counter increments; partial rule lists are never emitted. A granting
-  principal role is included only when it has an approved role alias.
+  `permissions` exact-name to display-alias maps, and optional `policyRevision`. Every alias and the
+  revision carry M98d's shape rule verbatim — non-empty UTF-8, 1–64 bytes, no control characters,
+  unique within a map — so the five plans validate an alias identically. Accept 128 entries per map,
+  16 evaluated steps/decision, 1,024 decisions retained, and 128/read. If any requested rule lacks
+  an alias, the complete decision is dropped before buffering and a saturated counter increments;
+  partial rule lists are never emitted. A granting principal role is included only when it has an
+  approved role alias.
+
+  `RbacService.hasAnyRole` and `hasAllPermissions` take an unbounded `readonly string[]`
+  (`packages/auth-plugin/src/services/rbac-service.ts:162,174`), so a compound evaluation CAN exceed
+  16 steps: `hasAnyRole` short-circuits on the first satisfying role, so overflow is reachable when
+  the match sits past step 16 and on every unsatisfied compound over 16 inputs. The decision is then
+  RETAINED with its real result and an explicit `stepsTruncated: true` plus `stepsEvaluated`, the
+  true evaluated count; the step list holds only the first 16. It is not dropped, because the result
+  is authoritative — the real service computed it — and an inspector that silently omits every large
+  compound decision hides exactly the policies most worth explaining. The flag is required rather
+  than inferable from `steps.length === 16`: a decision that evaluated exactly 16 steps is complete,
+  and a consumer cannot tell the two apart without it. The devtool must not present a truncated
+  trace as the explanation of the result.
 - **Why:** Rule names and relationships can reveal security design; partial aliasing can still
-  identify them by position.
-- **Test home:** options, unapproved/drop, overflow and canary tests.
+  identify them by position. A trace that cannot show why is still worth keeping as long as it
+  cannot claim to be complete.
+- **Test home:** options, unapproved/drop, overflow and canary tests, including a `hasAnyRole` whose
+  granting role sits past step 16 and an unsatisfied `hasAllPermissions` over 20 permissions — both
+  asserting the correct result, `stepsTruncated: true`, the true `stepsEvaluated`, and exactly 16
+  retained steps — beside a 16-step decision asserting `stepsTruncated: false`.
 
 ### 3.4 Actual-provider availability
 
@@ -134,9 +154,30 @@ itself remains optional and is not required for authorization explanations.
   The method is synchronous, requires a non-empty instance ID, accepts only a non-negative safe
   cursor and limit 1–128 (default 128), throws one fixed value-free `RangeError` otherwise, and
   returns a deeply frozen batch matching the supplied instance.
+
+  Paging is M98a's committed cursor contract, adopted verbatim rather than restated — the same
+  wording M98g adopts, so one paging model covers every capability. From
+  `IDiagnosticsSource.read`/`DiagnosticsBatch`
+  (`packages/common/src/services/diagnostics.ts:253-318`): `after` is EXCLUSIVE, so `decisions` are
+  those whose sequence is strictly greater than it and `after: 0` starts at the oldest retained
+  decision. A cursor older than the ring's oldest retained sequence is NOT an error — the read
+  returns the oldest retained decisions and reports the gap in `lost`, which counts the sequences
+  evicted between the requested cursor and the first returned record, and is therefore PER BATCH
+  rather than cumulative. `next` is the last returned sequence, or the REQUESTED cursor when the
+  batch is empty, so an idle poll re-sends the same cursor and cannot skip a decision that has not
+  been recorded yet. A cursor beyond the current sequence is the one cursor that throws the fixed
+  value-free `RangeError`. `closed` is `true` once §3.5's `onClose` detached the observer.
+  `droppedUnapproved` is independent of `lost` and counts §3.3 approval drops, which consume no
+  sequence: a decision refused for an unapproved rule alias is never assigned one, so it can neither
+  appear in `lost` nor leave a hole a client could measure.
 - **Why:** An authorization explanation is data-only and gains no policy-execution or mutation
-  endpoint.
-- **Test home:** protocol/connector/client/e2e security tests.
+  endpoint. Undefined paging is how a security view silently repeats or skips a decision; defining
+  the eviction gap as reportable and per-batch is what lets a client say which decisions it never
+  saw.
+- **Test home:** protocol/connector/client/e2e security tests, including paging across eviction —
+  overflow the 1,024-decision ring, resume from a pre-overflow cursor, and assert the oldest
+  retained decisions with a per-batch `lost`, no repeated or skipped sequence across successive
+  reads, an empty batch echoing its cursor, and a beyond-sequence cursor throwing.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -220,6 +261,10 @@ implementation PR.
 - Rules or identities leak: explicit aliases; observer signature excludes principal data and
   arbitrary text.
 - Compound tree invents skipped work: record only loop iterations actually evaluated.
+- A truncated trace reads as the whole explanation: retain the real result but require
+  `stepsTruncated`, so a partial step list can never be presented as complete (§3.3). The
+  accompanying `stepsEvaluated` is a saturating count and never a name, so it discloses the size of
+  a compound check and nothing about unapproved rules.
 - Replaced provider is misrepresented: use non-resolving exact identity checks before capture and
   reads, then latch unsupported and clear.
 

@@ -77,9 +77,23 @@ itself remains optional and is not required for queue observations.
   version/instance, one status per retained source, events/depths/next/lost/truncatedSources. A mix
   of enabled, disabled, unavailable and failed named queues therefore remains visible. No extension
   record exists.
+
+  `after`, `next` and `lost` are M98a's committed cursor contract, adopted verbatim rather than
+  restated — the same wording M98g and M98h adopt, so one paging model covers every capability. From
+  `IDiagnosticsSource.read`/`DiagnosticsBatch`
+  (`packages/common/src/services/diagnostics.ts:253-318`): `after` is EXCLUSIVE and `after: 0`
+  starts at the oldest retained event; a cursor older than the oldest retained sequence returns the
+  oldest retained events and reports the gap in a PER-BATCH `lost`; `next` is the last returned
+  sequence, or the REQUESTED cursor when the batch is empty; a cursor beyond the current sequence
+  throws the fixed value-free `RangeError`. `lost` counts ring eviction only — `truncatedSources`
+  and the §3.4 dropped counter are separate facts and are never folded into it.
 - **Why:** Outcome and durable settlement remain separate facts; unavailable depth cannot look like
-  zero.
-- **Test home:** common DTO tests and protocol exact-key tests.
+  zero. Paging that a client cannot reason about is how a queue view comes to claim it showed every
+  attempt.
+- **Test home:** common DTO tests and protocol exact-key tests, plus paging across eviction —
+  overflow the 1,024-event ring, resume from a pre-overflow cursor, and assert no repeated or
+  skipped sequence, a per-batch `lost`, an empty batch echoing its cursor, and a beyond-sequence
+  cursor throwing.
 
 ### 3.3 Observe the authoritative attempt once
 
@@ -95,14 +109,22 @@ itself remains optional and is not required for queue observations.
 
 ### 3.4 Aliases and resource bounds
 
-- **Decision:** `QueueDiagnosticsOptions` requires `enabled: true`, a safe `instanceAlias`, and
-  `queues` mapping exact job names to unique aliases. Limits: 64 queues/source, 64-byte aliases,
-  1,024 events/source, 128 events/read, 4,096-entry LRU raw-ID→`j<N>` map, and 2,048 simultaneously
+- **Decision:** `QueueDiagnosticsOptions` requires `enabled: true`, an `instanceAlias`, and `queues`
+  mapping exact job names to unique aliases. "Safe" is a SHAPE, not secret detection: every alias —
+  `instanceAlias` and each queue alias alike — is a non-empty UTF-8 string of 1–64 bytes containing
+  no control characters, and queue aliases are unique within the map. The validator never inspects
+  an alias for anything else; approving an exact alias IS authorizing its disclosure, so rejecting
+  one because it resembles an address or a credential would refuse a legal configuration while
+  giving no guarantee about any alias it accepted. This is the rule M98d already states for health
+  aliases, spelled identically here so the two cannot drift. Limits: 64 queues/source, 1,024
+  events/source, 128 events/read, 4,096-entry LRU raw-ID→`j<N>` map, and 2,048 simultaneously
   observed attempts. Eviction may give a later retry a new alias and is reported by a saturated
   dropped counter. Raw IDs enter only the alias lookup and never an event, callback, log, source
   DTO, or frame.
 - **Why:** Correlation is useful within the launch while memory and identity lifetime stay bounded.
-- **Test home:** collector stress/eviction/canary tests.
+- **Test home:** collector stress/eviction/canary tests, plus option-validation tests refusing an
+  empty alias, a 65-byte alias, an alias carrying a control character, and a duplicate queue alias,
+  and a projection test proving an accepted alias reaches the DTO byte-for-byte.
 
 ### 3.5 Depth collection is separate from reads
 

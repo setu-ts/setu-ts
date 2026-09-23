@@ -54,7 +54,9 @@ it.
 
 ### 3.2 Protocol support is negotiated before an addon read
 
-- **Decision:** Before the diagnostics package's first publication, extend the authenticated v1
+- **Decision:** Before this milestone's `/v1/health` route ships — and PREFERABLY before the
+  diagnostics package first publishes, which is an ordering preference and not a release gate on
+  M98a–M98c (ROADMAP "Milestone 98", release-requirements paragraph) — extend the authenticated v1
   status body with one exact `inspectors` object containing the five fixed boolean keys `health`,
   `configuration`, `queues`, `traces`, and `authorization`. M98d sets only `health: true`; M98e–M98h
   turn on their reserved key when their connector operation ships. A key means that the connector
@@ -66,8 +68,10 @@ it.
   absent. Unknown/missing/extra manifest keys and non-booleans fail pairing. Inspectors beyond these
   five require a new protocol version.
 - **Why:** Client/server release skew has an explicit authenticated contract and never probes an
-  unknown route or infers support from a generic protocol error. The one pre-publication status
-  change gives later M98 letters a stable forward-compatible shape.
+  unknown route or infers support from a generic protocol error. Adding the manifest before the
+  package first publishes spares a released package a status-shape change; the legacy reading is
+  what makes that an optimisation rather than a dependency, so M98a–M98c can publish without waiting
+  for this letter.
 - **Test home:** diagnostics protocol/client compatibility matrix: legacy M98b status, M98d status,
   false health key, true key with absent source, malformed manifests, and no request on false.
 
@@ -116,13 +120,21 @@ it.
 - **Decision:** `diagnostics.scheduled` is absent by default. When present it names a subset of
   approved indicators and supplies `intervalMs` (1,000–300,000), `timeoutMs` (1–30,000), and
   `concurrency` (1–4). `onBootstrap` starts one guarded, non-awaited cycle and then one
-  runtime-owned interval; `onClose` clears it and the collector. Startup never awaits an application
-  indicator. A cycle never overlaps its predecessor. Each raw callback promise remains marked
-  in-flight after its reporting deadline, so no replacement check starts until that callback
-  actually settles. Work is capped at four callbacks and sixteen scheduled indicators.
+  runtime-owned interval; `onClose` marks the collector closed FIRST, then clears the interval and
+  every retained observation. Startup never awaits an application indicator. A cycle never overlaps
+  its predecessor. Each raw callback promise remains marked in-flight after its reporting deadline,
+  so no replacement check starts until that callback actually settles. A closed collector accepts no
+  write: an outcome from a callback that settles after `onClose` — the ordinary case, since a
+  reporting deadline bounds a callback without cancelling it — is discarded and never retained,
+  logged, or projected. Work is capped at four callbacks and sixteen scheduled indicators.
 - **Why:** A timeout is a reporting bound, not cancellation; retaining the in-flight gate prevents a
-  hung callback from accumulating work.
-- **Test home:** scheduler tests with hung, slow, rejecting, overlapping, and teardown cases.
+  hung callback from accumulating work. Closing before clearing is M98a's own teardown order
+  (`DiagnosticsCollector.markClosed` at `packages/kernel/src/diagnostics/collector.ts:321` closes
+  the ring and only then discards retained state), and it exists for this exact case: clearing alone
+  leaves a later write able to repopulate state the shutdown path had just discarded.
+- **Test home:** scheduler tests with hung, slow, rejecting, overlapping, and teardown cases,
+  including a callback still in flight at `onClose` whose later settlement retains no observation
+  and leaves the snapshot empty.
 
 ### 3.7 Connector and native client behavior
 
@@ -180,17 +192,17 @@ internal.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                       | src covered                     | Key assertions (and the signature each call type-checks against)                                                |
-| --------------------------------------------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts` | common diagnostics/tokens/index | DTO/source signatures and exact legal token.                                                                    |
-| `packages/health-plugin/test/unit/health-observation-options.test.ts`                                           | interfaces/index                | Bounds, aliases, duplicate/control refusal, disabled defaults.                                                  |
-| `packages/health-plugin/test/unit/health-observation-collector.test.ts`                                         | collector                       | Latest-only state, age/stale/failure, truncation, no data/error/path leakage, bounded hung work.                |
-| `packages/health-plugin/test/unit/health-service.test.ts`                                                       | health-service                  | One callback per normal check; identical report; collector throws/overflow without behavior change.             |
-| `packages/health-plugin/test/unit/health-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                    | plugin/index                    | Eager token/source, lifecycle start/clear, configured subset, public exports.                                   |
-| `packages/diagnostics-plugin/test/unit/protocol.test.ts`                                                        | protocol                        | Legacy/new status shapes, fixed support manifest, canonical `/v1/health`, exact projection refusal.             |
-| `packages/diagnostics-plugin/test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts`                   | connector/plugin                | Auth before read, unsupported/disabled states, source failure isolation, instance binding.                      |
-| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                    | client/interfaces/index         | Legacy/manifest negotiation, no false-key request, `health()` verification, close/deadline behavior.            |
-| `packages/diagnostics-plugin/test/e2e/health-observations.test.ts`                                              | all changed paths               | Real socket and health callbacks; canaries absent at callback, source, frame and client; useful status remains. |
+| Test file                                                                                                       | src covered                     | Key assertions (and the signature each call type-checks against)                                                                                                    |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts` | common diagnostics/tokens/index | DTO/source signatures and exact legal token.                                                                                                                        |
+| `packages/health-plugin/test/unit/health-observation-options.test.ts`                                           | interfaces/index                | Bounds, aliases, duplicate/control refusal, disabled defaults.                                                                                                      |
+| `packages/health-plugin/test/unit/health-observation-collector.test.ts`                                         | collector                       | Latest-only state, age/stale/failure, truncation, no data/error/path leakage, bounded hung work.                                                                    |
+| `packages/health-plugin/test/unit/health-service.test.ts`                                                       | health-service                  | One callback per normal check; identical report; collector throws/overflow without behavior change.                                                                 |
+| `packages/health-plugin/test/unit/health-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                    | plugin/index                    | Eager token/source, lifecycle start/clear, configured subset, public exports.                                                                                       |
+| `packages/diagnostics-plugin/test/unit/protocol.test.ts`                                                        | protocol                        | Legacy/new status shapes, fixed support manifest, canonical `/v1/health`, exact projection refusal.                                                                 |
+| `packages/diagnostics-plugin/test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts`                   | connector/plugin                | Auth before read, unsupported/disabled states, source failure isolation, instance binding.                                                                          |
+| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                    | client/interfaces/index         | Legacy/manifest negotiation, no false-key request, `health()` verification, close/deadline behavior.                                                                |
+| `packages/diagnostics-plugin/test/e2e/health-observations.test.ts`                                              | all changed paths               | Real socket and health callbacks; canaries planted in indicator data and errors, absent at the collector callback, source, frame and client; useful status remains. |
 
 ## 7. Verification gates
 

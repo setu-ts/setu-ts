@@ -70,17 +70,18 @@ itself remains optional and is not required for trace observations.
 
 ### 3.3 Approved fields and names
 
-- **Decision:** `TraceDiagnosticsOptions` requires `enabled: true`, a 1–64-byte `serviceAlias`, and
-  `operations` mapping exact raw span names to unique 1–64-byte aliases. Unapproved spans are
-  counted and dropped before the ring. `TraceObservation` contains sequence, service/operation
-  aliases, trace ID, span ID, optional parent span ID, at most eight link trace/span pairs, kind,
-  outcome (`ok`, `error`, `unset`), durationMs, and `ageMs`. Arbitrary name, attributes, events,
-  resource labels, tracestate, baggage and exceptions never enter collector state. Identifiers must
-  match W3C lowercase-hex grammar and all-zero values are rejected. `onEnd` reads only `name`,
-  `kind`, `spanContext()`, `parentSpanContext`, `links[].context`, `status.code`, and `duration`. It
-  maps numeric OTel kind/status values through fixed exhaustive tables and drops invalid values; it
-  never touches status messages, attributes, events, resources, instrumentation scope, baggage,
-  exception data, or link attributes.
+- **Decision:** `TraceDiagnosticsOptions` requires `enabled: true`, a `serviceAlias`, and
+  `operations` mapping exact raw span names to unique aliases. Every alias carries M98d's shape rule
+  verbatim — non-empty UTF-8, 1–64 bytes, no control characters — so the five plans validate an
+  alias identically. Unapproved spans are counted and dropped before the ring. `TraceObservation`
+  contains sequence, service/operation aliases, trace ID, span ID, optional parent span ID, at most
+  eight link trace/span pairs, kind, outcome (`ok`, `error`, `unset`), durationMs, and `ageMs`.
+  Arbitrary name, attributes, events, resource labels, tracestate, baggage and exceptions never
+  enter collector state. Identifiers must match W3C lowercase-hex grammar and all-zero values are
+  rejected. `onEnd` reads only `name`, `kind`, `spanContext()`, `parentSpanContext`,
+  `links[].context`, `status.code`, and `duration`. It maps numeric OTel kind/status values through
+  fixed exhaustive tables and drops invalid values; it never touches status messages, attributes,
+  events, resources, instrumentation scope, baggage, exception data, or link attributes.
 - **Why:** Trace relationships remain useful while dynamic paths and application data stay outside
   capture.
 - **Test home:** diagnostic processor exact-projection and canary tests.
@@ -126,8 +127,29 @@ itself remains optional and is not required for trace observations.
   returns a deeply frozen batch matching the supplied instance. Devtool correlation may join equal
   trace IDs from sessions the user independently paired; identifiers never discover endpoints or
   authorize reads.
-- **Why:** Correlation does not weaken M98b's per-application authentication boundary.
-- **Test home:** connector/client/e2e tests across two separately authenticated apps.
+
+  Paging is M98a's committed cursor contract, adopted verbatim rather than restated — one paging
+  model across every capability, and the devtool learns it once. From
+  `IDiagnosticsSource.read`/`DiagnosticsBatch`
+  (`packages/common/src/services/diagnostics.ts:253-318`): `after` is EXCLUSIVE, so `records` are
+  the spans whose sequence is strictly greater than it and `after: 0` starts at the oldest retained
+  span. A cursor older than the ring's oldest retained sequence is NOT an error — the read returns
+  the oldest retained records and reports the gap in `lost`, which counts the sequences evicted
+  between the requested cursor and the first returned record. `lost` is therefore PER BATCH, not
+  cumulative; a client that resumes after a quiet period sees the skipped count once and never
+  re-reads it. `next` is the last returned sequence, or the REQUESTED cursor when the batch is
+  empty, so polling an idle application re-sends the same cursor and cannot skip a span that has not
+  arrived yet. A cursor beyond the current sequence is the one cursor that throws the fixed
+  value-free `RangeError`, because it can only come from a client reading a different instance's
+  sequence space. `closed` is `true` once §3.5's `shutdown` marked the source closed.
+- **Why:** Correlation does not weaken M98b's per-application authentication boundary. A ring that
+  can evict under load must let a client detect the gap: a cursor that silently restarted, or a
+  `lost` a client had to accumulate itself, is how a devtool comes to claim it showed every span.
+- **Test home:** connector/client/e2e tests across two separately authenticated apps, plus paging
+  across eviction — overflow the 1,024-record ring, resume from the pre-overflow cursor, and assert
+  the oldest retained records with a per-batch `lost` that does not accumulate across successive
+  reads, no repeated or skipped sequence, an empty batch echoing its cursor as `next`, and a
+  beyond-sequence cursor throwing the fixed `RangeError`.
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -167,17 +189,17 @@ The OTel diagnostic processor, raw-readable-span adapter, ring and projectors re
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                                   | src covered                     | Key assertions (and the signature each call type-checks against)                                                                |
-| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts`             | common diagnostics/tokens/index | Source signature, DTOs, token and exports.                                                                                      |
-| `packages/telemetry-plugin/test/unit/trace-diagnostics-options.test.ts`, `test/unit/span-observation-collector.test.ts`     | interfaces/collector            | Alias bounds, source read signature, exact fields, W3C validation, ring loss, no raw canaries.                                  |
-| `packages/telemetry-plugin/test/unit/diagnostic-span-processor.test.ts`                                                     | processor                       | Every locked lifecycle method, onEnd minimization, links/parents/status/duration, no throw.                                     |
-| `packages/telemetry-plugin/test/unit/tracer.test.ts`                                                                        | tracer                          | Exporter processor preserved, diagnostic processor appended once, sampling/config unchanged.                                    |
-| `packages/telemetry-plugin/test/unit/telemetry-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                          | plugin/index                    | Disabled/noop/custom/built-in states, eager token, lifecycle and exports.                                                       |
-| `packages/telemetry-plugin/test/integration/diagnostic-span-processor-real-import.test.ts`                                  | tracer/processor                | Locked real OTel SDK exercises every required lifecycle method; exporter still receives the span.                               |
-| `packages/diagnostics-plugin/test/unit/protocol.test.ts`, `test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts` | protocol/connector/plugin       | Support key, target grammar, auth-before-read, exact projection, unsupported/failure states.                                    |
-| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                                | client/interfaces               | False-key no-request, `traces()` args, signed verification, exact DTO/instance checks.                                          |
-| `packages/diagnostics-plugin/test/e2e/distributed-tracing.test.ts`                                                          | all paths                       | Real HTTP plus enqueue/process hops, missing activation/sampling/loss/order, two independently paired apps, no fabricated edge. |
+| Test file                                                                                                                   | src covered                     | Key assertions (and the signature each call type-checks against)                                                                             |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts`             | common diagnostics/tokens/index | Source signature, DTOs, token and exports.                                                                                                   |
+| `packages/telemetry-plugin/test/unit/trace-diagnostics-options.test.ts`, `test/unit/span-observation-collector.test.ts`     | interfaces/collector            | Alias bounds, source read signature, exact fields, W3C validation, ring loss, no raw canaries, and the §3.6 cursor contract across overflow. |
+| `packages/telemetry-plugin/test/unit/diagnostic-span-processor.test.ts`                                                     | processor                       | Every locked lifecycle method, onEnd minimization, links/parents/status/duration, no throw.                                                  |
+| `packages/telemetry-plugin/test/unit/tracer.test.ts`                                                                        | tracer                          | Exporter processor preserved, diagnostic processor appended once, sampling/config unchanged.                                                 |
+| `packages/telemetry-plugin/test/unit/telemetry-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                          | plugin/index                    | Disabled/noop/custom/built-in states, eager token, lifecycle and exports.                                                                    |
+| `packages/telemetry-plugin/test/integration/diagnostic-span-processor-real-import.test.ts`                                  | tracer/processor                | Locked real OTel SDK exercises every required lifecycle method; exporter still receives the span.                                            |
+| `packages/diagnostics-plugin/test/unit/protocol.test.ts`, `test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts` | protocol/connector/plugin       | Support key, target grammar, auth-before-read, exact projection, unsupported/failure states.                                                 |
+| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                                | client/interfaces               | False-key no-request, `traces()` args, signed verification, exact DTO/instance checks.                                                       |
+| `packages/diagnostics-plugin/test/e2e/distributed-tracing.test.ts`                                                          | all paths                       | Real HTTP plus enqueue/process hops, missing activation/sampling/loss/order, two independently paired apps, no fabricated edge.              |
 
 ## 7. Verification gates
 

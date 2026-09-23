@@ -58,12 +58,15 @@ itself remains optional and is not required for configuration provenance.
 - **Decision:** `loadConfig(..., { diagnostics })` stores the frozen provenance projection in a
   module-private `WeakMap<IConfig, ConfigProvenanceRecord>`.
   `ConfigPlugin({ instance, diagnostics })` adopts that record when the exact instance was produced
-  by this loader. The WeakMap is non-enumerable and lifetime follows the config object. An arbitrary
-  injected instance yields approved aliases with origin and schema effect `unknown`; it exposes no
-  presence flag. Provenance collection never adds a `get`, `has`, enumeration, getter, or schema
-  call. Existing configured section validation remains authoritative and still calls `IConfig.get`
-  once per declared section key exactly as it does without diagnostics; tests compare enabled and
-  disabled call counts rather than claiming an opaque instance is never read by startup.
+  by this loader, and an adopted entry keeps the real origin the loader observed — `environment` or
+  `file` — because injection is how the snapshot reached the application, not where its values came
+  from. The WeakMap is non-enumerable and lifetime follows the config object. An arbitrary injected
+  instance is the only other case and yields approved aliases with origin and schema effect
+  `unknown`; it exposes no presence flag. Provenance collection never adds a `get`, `has`,
+  enumeration, getter, or schema call. Existing configured section validation remains authoritative
+  and still calls `IConfig.get` once per declared section key exactly as it does without
+  diagnostics; tests compare enabled and disabled call counts rather than claiming an opaque
+  instance is never read by startup.
 - **Why:** Pre-composition and plugin loading remain one snapshot while opaque instances stay
   honest.
 - **Test home:** load-then-inject integration tests and malicious custom `IConfig` tests.
@@ -73,11 +76,20 @@ itself remains optional and is not required for configuration provenance.
 - **Decision:** `ConfigDiagnosticsOptions` requires `enabled: true`, `keys` mapping exact config
   keys to unique display aliases, and optional `files` mapping exact configured paths to unique
   source aliases. Limits: 128 keys, eight files, 64 UTF-8 bytes per alias, no controls.
-  `ConfigProvenanceEntry` contains only `keyAlias`, `origin` (`environment`, `file`, `injected`,
-  `unknown`), optional `sourceAlias`, approved `overriddenSourceAliases`, `expanded`, approved
+  `ConfigProvenanceEntry` contains only `keyAlias`, `origin` (`environment`, `file`, `unknown`),
+  optional `sourceAlias`, approved `overriddenSourceAliases`, `expanded`, approved
   `referenceAliases`, and schema effect (`not-configured`, `validated`, `defaulted`, `removed`,
-  `unknown`). `ConfigDiagnosticsSnapshot` adds version, instance, inspector state, entries,
-  truncation and fixed counters. It contains no presence flag for opaque instances.
+  `unknown`). Every origin value names its producer, and there are exactly two producers of
+  `unknown`: an opaque injected instance (§3.2, where the schema effect is `unknown` too), and a key
+  the loader itself tracked that is present in the post-schema snapshot with no observed environment
+  or file source — a schema-introduced key, whose schema effect `defaulted` then says where it came
+  from. A separate `injected` origin was considered and CUT at plan time: `loadConfig` reads only
+  the environment and `.env` files (`packages/config-plugin/src/services/load-config.ts:55`), an
+  adopted record keeps each entry's real `environment`/`file` origin, and an opaque instance is
+  already `unknown` — so no code path could ever emit it, which is the dead-surface case the plan
+  checklist requires cutting rather than storing. `ConfigDiagnosticsSnapshot` adds version,
+  instance, inspector state, entries, truncation and fixed counters. It contains no presence flag
+  for opaque instances.
 - **Why:** Even names and override relationships require deliberate approval; fixed categories avoid
   raw detail.
 - **Test home:** option compiler and exact DTO tests.
@@ -158,17 +170,17 @@ barrel-exported.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                                   | src covered                        | Key assertions (and the signature each call type-checks against)                                             |
-| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts`             | common changed files               | Contracts export and token grammar.                                                                          |
-| `packages/config-plugin/test/unit/options.test.ts`, `test/unit/provenance.test.ts`                                          | options/provenance                 | Bounds, aliases, frozen value-free entries, WeakMap lifetime, opaque instances and no added reads.           |
-| `packages/config-plugin/test/unit/env-loader.test.ts`                                                                       | env-loader                         | Exact env/file precedence and path aliasing without another read.                                            |
-| `packages/config-plugin/test/unit/load-config.test.ts`                                                                      | load-config                        | One load/expand/schema/section pass; opaque get-call parity with diagnostics off/on; metadata adoption.      |
-| `packages/config-plugin/test/unit/variable-expander.test.ts`, `test/unit/config-validator.test.ts`                          | variable-expander/config-validator | Approved references and evidenced schema effects; errors remain value-free.                                  |
-| `packages/config-plugin/test/integration/config-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                         | plugin/index                       | Eager source, disabled/no-data/opaque states and exports.                                                    |
-| `packages/diagnostics-plugin/test/unit/protocol.test.ts`, `test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts` | protocol/connector/plugin          | Support key, canonical target, auth before read, exact projection, unsupported and source failure.           |
-| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                                | client/interfaces/index            | False-key no-request, `configuration()` verification, DTO rejection, close/deadline semantics.               |
-| `packages/diagnostics-plugin/test/e2e/config-provenance.test.ts`                                                            | all paths                          | Real load and socket; precedence useful; canary values, hashes, lengths, paths and errors absent everywhere. |
+| Test file                                                                                                                   | src covered                        | Key assertions (and the signature each call type-checks against)                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts`             | common changed files               | Contracts export and token grammar.                                                                                                                                                                                                  |
+| `packages/config-plugin/test/unit/options.test.ts`, `test/unit/provenance.test.ts`                                          | options/provenance                 | Bounds, aliases, frozen value-free entries, WeakMap lifetime, opaque instances and no added reads.                                                                                                                                   |
+| `packages/config-plugin/test/unit/env-loader.test.ts`                                                                       | env-loader                         | Exact env/file precedence and path aliasing without another read.                                                                                                                                                                    |
+| `packages/config-plugin/test/unit/load-config.test.ts`                                                                      | load-config                        | One load/expand/schema/section pass; opaque get-call parity with diagnostics off/on; metadata adoption keeping `environment`/`file` origins; both `unknown` producers — opaque instance and schema-introduced key — emitted exactly. |
+| `packages/config-plugin/test/unit/variable-expander.test.ts`, `test/unit/config-validator.test.ts`                          | variable-expander/config-validator | Approved references and evidenced schema effects; errors remain value-free.                                                                                                                                                          |
+| `packages/config-plugin/test/integration/config-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                         | plugin/index                       | Eager source, disabled/no-data/opaque states and exports.                                                                                                                                                                            |
+| `packages/diagnostics-plugin/test/unit/protocol.test.ts`, `test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts` | protocol/connector/plugin          | Support key, canonical target, auth before read, exact projection, unsupported and source failure.                                                                                                                                   |
+| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                                | client/interfaces/index            | False-key no-request, `configuration()` verification, DTO rejection, close/deadline semantics.                                                                                                                                       |
+| `packages/diagnostics-plugin/test/e2e/config-provenance.test.ts`                                                            | all paths                          | Real load and socket; precedence useful; canary values, hashes, lengths, paths and errors absent everywhere.                                                                                                                         |
 
 ## 7. Verification gates
 

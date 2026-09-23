@@ -11047,16 +11047,21 @@ Any new reader/transport surface must have an explicit version/support contract 
 projections. Do not infer inspector support from plugin registration, a generic error or package
 name. Distinguish unsupported, disabled, no-data, stale and collection-failed states. Isolate
 optional collection failures without weakening session authentication or integrity failure handling.
-M98d owns a fixed, authenticated v1 inspector-support manifest in the status response before the
-diagnostics package's first publication. The manifest declares connector operation support
-separately from application source availability; M98e–M98h activate their reserved fixed entries as
-their operations ship. A new client treats the exact legacy three-field M98b status body as all
-addon operations unsupported, so it never probes an unknown route or derives support from a generic
-error. Future inspectors beyond the five fixed entries require a new protocol version. Verify
-credential expiry/revocation, request/response instance binding, replay protection, protocol bounds
-and refusal of arbitrary method/file access or mutation for every added operation. Shared backends
-require their own allowed resource/tenant scope; a local session key does not authorize enumeration
-of all data reachable by the application.
+M98d owns a fixed, authenticated v1 inspector-support manifest in the status response, and it is a
+hard gate on the first PUBLISHED ADDON OPERATION — no M98d–M98h route ships without it. It is NOT a
+gate on publishing 98a–98c, which would contradict the decoupling stated above: landing it before
+`packages/diagnostics-plugin` first publishes is merely PREFERRED, because it spares a released
+package a status-shape change, and if the release cycle reaches that package first nothing is
+stranded. The manifest declares connector operation support separately from application source
+availability; M98e–M98h activate their reserved fixed entries as their operations ship. What makes
+the ordering optional is the fallback: a new client treats the exact legacy three-field M98b status
+body as all addon operations unsupported — a permanently supported reading with its own tests, not a
+migration crutch — so it never probes an unknown route or derives support from a generic error.
+Future inspectors beyond the five fixed entries require a new protocol version. Verify credential
+expiry/revocation, request/response instance binding, replay protection, protocol bounds and refusal
+of arbitrary method/file access or mutation for every added operation. Shared backends require their
+own allowed resource/tenant scope; a local session key does not authorize enumeration of all data
+reachable by the application.
 
 ### Threat Model and Acceptance Evidence
 
