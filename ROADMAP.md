@@ -10646,12 +10646,19 @@ merging beyond what the schema itself expresses.
 ## Milestone 98: Secure Read-Only Devtool Diagnostics
 
 **Status:** 98a complete ([#345](https://github.com/setu-ts/setu-ts/pull/345)) — the in-process
-observation boundary and its shared contracts shipped on `feat/m98a-kernel-diagnostics`; 98b
-complete ([#347](https://github.com/setu-ts/setu-ts/pull/347)) — the runtime-owned loopback
-listener, its `common` contract/token, and `packages/diagnostics-plugin`; 98c planned — the
-`packages/cli` scaffolding that emits the composition 98b documents by hand. This milestone records
-the framework work needed by the separately maintained devtool. It is not a claim that the
-interfaces or connector have passed a security review.
+observation boundary and its shared contracts; 98b complete
+([#347](https://github.com/setu-ts/setu-ts/pull/347)) — the runtime-owned loopback listener, its
+`common` contract/token, and `packages/diagnostics-plugin`; 98c complete
+([#352](https://github.com/setu-ts/setu-ts/pull/352)) — `packages/cli` development-entry scaffolding
+and per-member credential handoff. These three are implemented and merged, awaiting publication in
+the next release cycle. **98d–98h are planned**, each with its own implementation plan and mandatory
+security audit. This umbrella records framework work for the separately maintained devtool; adding
+the later letters does not make them prerequisites for publishing 98a–98c or for the devtool's
+initial D01–D04 preview, with ONE exception recorded under the release requirements below — M98d's
+status-shape change must precede the first publication of `packages/diagnostics-plugin`, because the
+shipped client refuses a status body it does not expect and that body is otherwise frozen for the
+lifetime of every published client. A roadmap status is not evidence that a security audit has
+passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -10668,14 +10675,29 @@ devtool subscription; licensing never grants permission to inspect an applicatio
 shared contracts in `packages/common`. M98b owns the runtime-local listener port, its common
 contract/token, and the new `packages/diagnostics-plugin` that consumes both M98a and that port.
 M98c owns the `packages/cli` scaffolding that emits the composition M98b documents by hand, for a
-standalone project and for a member of a monorepo workspace. Implement the letters in order, with
-separate feature branches and verification; none is permission to sweep unrelated packages. Each
-gets one canonical plan from `plans/TEMPLATE.md` and passes `deno task check:plan` before
-implementation. The plan must name the real consumer of every new export, resolve the exact
-contracts from source, and include the threat model and negative tests below. The canonical plans
-are `plans/milestone-98a-kernel-diagnostics.md`,
-`plans/milestone-98b-local-diagnostics-connector.md` and
-`plans/milestone-98c-devtool-scaffolding.md`; these specify proposed APIs, not shipped ones.
+standalone project and for a member of a monorepo workspace. M98d–M98h add health observations,
+configuration provenance, queue observations, distributed tracing and authorization explanations,
+respectively. Each letter gets its own feature branch, verification and one canonical plan from
+`plans/TEMPLATE.md`, checked with `deno task check:plan` before implementation. Its owning package
+is named below; shared-contract or connector changes must be necessary for that letter's real
+consumer and explicitly scoped in its plan, not a sweep across unrelated plugins.
+
+Review health first, then provenance, then queue/tracing together, then authorization. The owning
+plugins remain independently optional, but M98d supplies the fixed protocol-support manifest that
+M98e–M98h extend; those implementation branches therefore start after that shared compatibility
+substrate lands. All addons depend on the M98a/M98b minimized collection and authenticated
+connection boundaries; M98c supplies development launch wiring for consumer exercises. The first
+letter requiring a new typed reader or transport operation owns its design, compatibility and
+security evidence. Do not create a speculative provider bus or extend protocol v1 silently.
+
+The completed M98a–M98c design records are archived at
+`plans/archive/milestone-98a-kernel-diagnostics.md`,
+`plans/archive/milestone-98b-local-diagnostics-connector.md` and
+`plans/archive/milestone-98c-devtool-scaffolding.md`; current code and public documentation govern
+their implemented contracts. The canonical M98d–M98h plans now live at the paths named in each
+section below. They verify contracts from source, name the consumer of every export, and record the
+pre-implementation security review required by the gates below; they remain planning documents, not
+evidence that implementation or the committed-tree security audit is complete.
 
 ### Existing seams and gaps
 
@@ -10850,6 +10872,207 @@ it is inspecting, and the runner builds each child's environment explicitly — 
 as well as bind on Deno 2.9.6, so it would refuse the application's own database and broker calls;
 the loopback guarantee is the listener's, not a permission flag's).
 
+### Milestone 98d: Minimized Health Observations
+
+**Status:** planned; design security review and implementation security audit required. **Owner:**
+`packages/health-plugin`, with only the necessary shared diagnostic contract and authenticated
+connector/client changes. **Plan:** `plans/milestone-98d-health-observations.md`.
+
+**Existing foundation:** `IHealthService.check`, `checkLive` and `checkReady` run application
+callbacks. Reports allow arbitrary per-indicator `data`. `HealthService` already runs selected
+indicators concurrently with per-indicator deadlines and fixed error/timeout reasons, but its
+deadline does not cancel the callback's underlying work. Successful `data` is not minimized.
+
+**Deliverables:**
+
+- [ ] An explicitly enabled, bounded snapshot of observations from normal application health
+      collection. Diagnostic reads must not run indicators or poll `/health`, `/live` or `/ready`.
+      Any additional scheduled collection is separately opted into by the application, with an
+      indicator allowlist, cadence, concurrency and timeout policy fixed in the plan. Never
+      accumulate replacement checks while timed-out callbacks remain pending.
+- [ ] A projection containing approved indicator identities, reported status, measured latency and
+      observation age. Distinguish never-observed, stale and collection-failed states; absence is
+      not healthy, and a reported `up` is not proof of backend reachability. Omit arbitrary `data`,
+      exception text, connection details and absolute paths before diagnostic buffering.
+- [ ] A real consumer exercise proving reads add no indicator calls, slow/hung checks do not cause
+      unbounded work, useful status remains visible, and capture is cleared on teardown. Existing
+      readiness behavior and M98c's launch probes remain unchanged.
+- [ ] Pass both security gates below, including canaries in successful result `data` and failures,
+      callback-count evidence, freshness/timeout races and bounded collection under load.
+
+### Milestone 98e: Value-Free Configuration Provenance
+
+**Status:** planned; design security review and implementation security audit required. **Owner:**
+`packages/config-plugin`, with necessary shared diagnostic and connector/client changes. **Plan:**
+`plans/milestone-98e-configuration-provenance.md`.
+
+**Existing foundation:** `IConfig` exposes named reads and presence checks, not provenance or key
+enumeration. `loadConfig` and `loadEnv` know merge precedence before expansion and schema
+processing; injected snapshots bypass source loading. Provenance cannot be reconstructed reliably
+from a final value, and a call-site `get(key, { default })` fallback is not a startup-snapshot
+origin.
+
+**Deliverables:**
+
+- [ ] Explicitly opted-in metadata recorded at the existing configuration-resolution steps, covering
+      both pre-composition `loadConfig` and plugin-driven loading. Define activation and lifetime
+      for metadata collected before an application exists. Do not reread env files, rerun schemas or
+      enumerate a custom `IConfig` to populate the inspector.
+- [ ] Approved key aliases, source categories and evidenced precedence/transform steps, with
+      explicit unknown/unsupported origins for injected instances or opaque transformations. File
+      sources use approved aliases, not absolute paths. Do not invent a dependency graph for
+      arbitrary schemas.
+- [ ] No values, value hashes, lengths, full environment inventories, file contents or validation
+      error payloads in capture. Treat key names, presence and override relationships as sensitive
+      metadata requiring approval; this is not an extension endpoint for `IConfig.get`.
+- [ ] Pass both security gates below. Exercise source precedence, expansion, schema defaults and
+      transforms, injected snapshots and call-site fallbacks; prove useful approved origins without
+      canary values/paths escaping or an extra load/validation pass.
+
+### Milestone 98f: Queue Attempt, Outcome and Depth Observations
+
+**Status:** planned; design security review and implementation security audit required. **Owner:**
+`packages/queue-plugin`, with necessary shared diagnostic and connector/client changes. **Plan:**
+`plans/milestone-98f-queue-observations.md`.
+
+**Existing foundation:** `IQueue` has no job enumeration or dead-letter reader. Final-attempt
+`onFailed` callbacks, outcome counters and some depth reporting already exist. Memory supports
+depths; Redis exposes them when its connected client supports the required counts; RabbitMQ/SQS do
+not expose equivalent depths through this implementation. Existing outcome notifications occur
+before awaiting backend settlement, so they are not proof of durable ack/requeue/dead-letter
+success.
+
+**Deliverables:**
+
+- [ ] Bounded, opt-in live observations with session-local job aliases, approved queue labels,
+      attempt number, duration, outcome and explicit settlement state when known. Preserve
+      processors, failure callbacks, retries and settlement behavior; a failed diagnostic sink
+      cannot change them.
+- [ ] Minimized depth observations only where supported, with collection scope, freshness and
+      partial coverage. Distinguish unavailable from zero and per-process counters from backend
+      inventory. Do not sum shared backend depths across replicas or infer confirmed settlement from
+      an outcome notification. Define the count collection policy separately from diagnostic reads.
+- [ ] Exclude job payloads, headers, raw job IDs, receipt/claim tokens, credentials and raw
+      exceptions before capture. Bound alias maps and restrict observed queue/tenant scope. The
+      extension receives neither broker credentials nor access to private adapter state.
+- [ ] Pass both security gates below with an adapter support matrix, failed-settlement cases,
+      canaries, bounded sustained attempts and proof that observation adds no reserve/ack/retry
+      calls.
+
+**Outside M98f:** durable job/dead-letter enumeration, retry, purge, moving jobs and replay. A
+future browser needs a separately reviewed non-consuming read contract and resource/tenant
+authorization; `reserve` followed by requeue is not a read-only inspection technique.
+
+### Milestone 98g: Minimized Distributed Tracing and Correlation
+
+**Status:** planned; design security review and implementation security audit required. **Owner:**
+`packages/telemetry-plugin`, with necessary shared diagnostic and connector/client changes.
+**Plan:** `plans/milestone-98g-distributed-tracing.md`.
+
+**Existing foundation:** `ITelemetryService` creates spans and may expose active identifiers; it is
+not a completed-span feed. Telemetry already exports spans and queue/messaging code propagates
+context. The custom `TracerHost` factory is not a ready-made minimized reader. M98
+`parentOperationId` is instance-local, not a cross-service parent span ID. Raw span names and HTTP
+attributes may contain dynamic request paths even when query strings are omitted.
+
+**Deliverables:**
+
+- [ ] An explicitly supported, bounded local span/operation projection preserving existing exporter,
+      context activation, sampling and shutdown behavior. Reuse existing trace relationships instead
+      of installing a competing tracing system. Specify supported runtime/instrumentation coverage;
+      optional Node-only instrumentation cannot establish coverage for every Deno operation.
+- [ ] Approved operation/service identities, span/parent/link relationships, outcome and duration,
+      with explicit sampling, loss and missing-parent information. Do not forward raw OTLP, console
+      spans, arbitrary attributes, baggage, resource labels, exceptions or unapproved span names.
+- [ ] Correlation scoped to independently authenticated application sessions. Trace identifiers
+      grant no discovery/connection authority. Matching a trace ID does not prove a caller/callee
+      edge; preserve unobserved hops and do not align unrelated monotonic clocks as a global
+      timeline. Multi-application presentation alone is not evidence of distributed trace
+      reconstruction.
+- [ ] Pass both security gates below with real HTTP and queued-operation hops, missing/disabled
+      context activation, sampling, loss and out-of-order arrivals. Prove exporter behavior is
+      preserved, sensitive paths/attributes never enter diagnostic capture, and no automatic
+      cross-service access or fabricated causal edge occurs.
+
+### Milestone 98h: Authorization Decision Explanations
+
+**Status:** planned; design security review and implementation security audit required. **Owner:**
+`packages/auth-plugin`, with a necessary non-resolving registry identity predicate plus shared
+diagnostic and connector/client changes. **Plan:**
+`plans/milestone-98h-authorization-explanations.md`.
+
+**Existing foundation:** `IAuthorizationService` returns booleans. The RBAC implementation knows
+direct permissions, wildcard grants and inherited roles internally, but publishes no explanation
+tree. A 403 or skipped handler observed by M98 does not establish which authorization rule failed.
+
+**Deliverables:**
+
+- [ ] Opt-in observation of the actual evaluation once, with bounded decision IDs, allow/deny
+      result, approved rule aliases, fixed reason categories and policy revision when available. Do
+      not rerun policies to explain them, reconstruct reasons from status codes, or change
+      short-circuit order. Unexecuted branches remain not evaluated.
+- [ ] Explicit support/availability behavior for custom authorization services. A replaceable
+      service that exposes only a boolean cannot be assumed to supply detailed reasons. Keep the
+      actual authorization implementation authoritative and diagnostic failures isolated from its
+      result.
+- [ ] No credentials, JWTs, principal IDs, claims, request bodies, resource objects or arbitrary
+      policy error text in capture. Role/rule names require approval. The initial scope is bounded
+      observed RBAC reasons, not a general policy-tree serializer or hypothetical decision
+      simulator.
+- [ ] Pass both security gates below. Compare observed and actual decisions for direct/inherited/
+      wildcard/deny/short-circuit cases and custom replacements; prove no extra evaluations,
+      identity leakage or altered enforcement when observation fails or buffers overflow.
+
+### Mandatory Security Audit Gates for M98d–M98h
+
+Each letter requires **two recorded security gates**, in addition to ordinary code review and the
+verification requirements below. The planned status and these checkboxes are not audit evidence.
+
+1. **Before implementation:** complete a design security review in that letter's canonical plan.
+   Enumerate the exact fields and producer-to-buffer-to-wire-to-client flow; approve opt-in, label,
+   resource/tenant scope, availability and freshness semantics; set collection, retention, size,
+   concurrency and performance budgets; identify attacker inputs and negative tests. Resolve design
+   findings affecting the security boundary before implementation starts. A previous M98a/M98b
+   review does not approve a new inspector's data surface.
+2. **Before completion or publication:** audit the implemented, committed tree and exercise the real
+   producer, authenticated connector and supported client. Record the reviewed revision, tests and
+   results, coverage limitations, every finding and its disposition in the implementation PR. Fix
+   and reverify security/correctness findings within that letter's scope before marking it complete.
+   An untested adapter/runtime cannot be presented as audited support; remove it from the supported
+   scope or supply evidence. UI security remains a separate devtool acceptance gate.
+
+The shared audit must prove minimization **before** buffering, value-free errors, disabled
+collection doing no new work, bounded resource use and cleanup, and unchanged application behavior.
+Include positive controls showing useful approved data survives, so dropping every record cannot
+pass the audit. Existing redaction, read-only HTTP methods, local binding or Pro entitlement are not
+substitutes for these checks.
+
+Any new reader/transport surface must have an explicit version/support contract and validated typed
+projections. Do not infer inspector support from plugin registration, a generic error or package
+name. Distinguish unsupported, disabled, no-data, stale and collection-failed states. Isolate
+optional collection failures without weakening session authentication or integrity failure handling.
+M98d owns a fixed, authenticated v1 inspector-support manifest in the status response, and landing
+it is a HARD GATE on the first publication of `packages/diagnostics-plugin`. That is the one narrow
+exception to the decoupling stated above, and it is a wire-compatibility constraint rather than a
+scope one: the shipped client accepts a status body of EXACTLY `version`, `instanceId` and
+`expiresInMs` (`packages/diagnostics-plugin/src/protocol/protocol.ts:294-322`) and latches a
+terminal pairing failure on anything else, so publishing the package first would freeze that body
+for the lifetime of every client in the field. The request carries no client-version signal, so a
+published server cannot serve the old shape to an old client. The gate costs nothing today, because
+98a–98c are merged and awaiting publication: no client exists to break, and settling the shape is
+one edit. Adding the later letters still makes none of them a prerequisite for the devtool's initial
+D01–D04 preview, and only M98d's status shape — not its route, its source or the other letters —
+must precede that publication. The manifest declares connector operation support separately from
+application source availability; M98e–M98h activate their reserved fixed entries as their operations
+ship. The reverse skew is covered by a fallback: a new client treats the exact legacy three-field
+M98b status body as all addon operations unsupported — a permanently supported reading with its own
+tests, not a migration crutch — so it never probes an unknown route or derives support from a
+generic error. Future inspectors beyond the five fixed entries require a new protocol version.
+Verify credential expiry/revocation, request/response instance binding, replay protection, protocol
+bounds and refusal of arbitrary method/file access or mutation for every added operation. Shared
+backends require their own allowed resource/tenant scope; a local session key does not authorize
+enumeration of all data reachable by the application.
+
 ### Threat Model and Acceptance Evidence
 
 Before each letter starts, its plan identifies assets, trust boundaries and attacker actions:
@@ -10885,17 +11108,23 @@ records are redacted:
       trees. Update `PUBLIC_API.md`, `ARCHITECTURE.md`, package documentation, release manifests for
       the new package, and the progress/status records in the owning implementation PRs.
 
-### Explicit Follow-ons, Not M98 Deliverables
+### Outside the Planned M98a–M98h Scope
 
 The extension UI, Free/Pro packaging, subscriptions and any customer portal remain in the separate
 devtool product. Both tiers get the same security boundaries. This milestone adds no licensing check
 to the framework.
 
-Payload/log recording, configuration values/provenance, policy-decision explanations, source
-navigation metadata, custom-plugin inspection contributions and broader non-HTTP operation
-correlation require separately scoped follow-ons. Each must define exactly which fields it emits,
-who can read them, and how it behaves when information is unavailable; no promise of automatic
-visibility into every adapter or arbitrary application code.
+Health observations, value-free configuration provenance, live queue observations, minimized tracing
+and bounded authorization explanations now belong to M98d–M98h above, subject to their plans and
+security audits. Their framework APIs remain independent of licensing; Free/Pro presentation belongs
+to the devtool repository.
+
+Payload/log recording, configuration values, source navigation metadata, arbitrary custom-plugin
+inspection contributions and non-HTTP operation families beyond the explicitly supported queue/trace
+projections require separately scoped follow-ons. Each must define exactly which fields it emits,
+who can read them, and how unavailable information is reported; no promise of automatic visibility
+into every adapter or arbitrary application code. Full policy trees and hypothetical authorization
+simulation are also outside the bounded observed explanations of M98h.
 
 Database/cache/storage browsing, queue enumeration and retry, scheduler controls, tenant switching,
 request replay, fixture capture, fault injection and generated scenarios are also deferred. They
@@ -11469,10 +11698,15 @@ because one of them invalidated part of a previous run's claims:
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                  |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                      |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                        |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; planned)                                                                                  |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98c complete, 98d–98h planned with security audit gates)                              |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347)) |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))             |
+| 98d       | ⬜     | health-plugin — minimized health observations; design security review and implementation audit required                                   |
+| 98e       | ⬜     | config-plugin — value-free configuration provenance; design security review and implementation audit required                             |
+| 98f       | ⬜     | queue-plugin — attempt, outcome and depth observations; design security review and implementation audit required                          |
+| 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                |
+| 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                       |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                                |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                        |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                      |
