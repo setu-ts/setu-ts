@@ -17,6 +17,9 @@ without loading or validating twice.
   graphs, secret editing, reload, call-site default tracking, or support for arbitrary custom loader
   internals.
 
+Implementation starts from main containing M98d's fixed inspector-support manifest; HealthPlugin
+itself remains optional and is not required for configuration provenance.
+
 ## 1. Contracts verified from SOURCE (not names)
 
 | Reference                      | Source (file:line)                                             | Verified surface / fact                                                                       |
@@ -56,8 +59,11 @@ without loading or validating twice.
   module-private `WeakMap<IConfig, ConfigProvenanceRecord>`.
   `ConfigPlugin({ instance, diagnostics })` adopts that record when the exact instance was produced
   by this loader. The WeakMap is non-enumerable and lifetime follows the config object. An arbitrary
-  injected instance yields approved aliases with origin/presence/effects `unknown`; the plugin never
-  calls its `get`, `has`, getters, or schema to infer more.
+  injected instance yields approved aliases with origin and schema effect `unknown`; it exposes no
+  presence flag. Provenance collection never adds a `get`, `has`, enumeration, getter, or schema
+  call. Existing configured section validation remains authoritative and still calls `IConfig.get`
+  once per declared section key exactly as it does without diagnostics; tests compare enabled and
+  disabled call counts rather than claiming an opaque instance is never read by startup.
 - **Why:** Pre-composition and plugin loading remain one snapshot while opaque instances stay
   honest.
 - **Test home:** load-then-inject integration tests and malicious custom `IConfig` tests.
@@ -82,7 +88,9 @@ without loading or validating twice.
   `IConfigDiagnosticsSource`. ConfigPlugin always registers one: absent diagnostics reports
   `disabled`; enabled with no approved resolved entries reports `no-data`; opaque instances return
   entries marked `unknown`. DiagnosticsPlugin optionally consumes it and serves only
-  `GET /v1/config`; absence returns typed `unsupported`. The client adds `configuration()`.
+  `GET /v1/config`; absence returns typed `unsupported`. It sets the fixed authenticated status
+  manifest's `configuration` key true. `IDiagnosticsClient.configuration()` first checks that key; a
+  false key returns a frozen typed `unsupported` snapshot without requesting the route.
 - **Why:** Support and disabled state are explicit without widening `IConfig` into an inspector.
 - **Test home:** plugin, protocol, connector, client, and socket e2e tests.
 
@@ -100,11 +108,13 @@ without loading or validating twice.
 
 ### 3.6 Projection and failure isolation
 
-- **Decision:** Connector/client validators require exact own data properties, enums, bounded arrays
-  and matching instance IDs, copy fields individually, and apply the existing signed 256 KiB
-  response ceiling. A malformed or throwing source produces a fixed `collection-failed` snapshot
-  without its message. Reads use only frozen metadata and perform no env, filesystem, schema,
-  config, or lazy-service operation.
+- **Decision:** `IConfigDiagnosticsSource.snapshot(instanceId: string): ConfigDiagnosticsSnapshot`
+  is synchronous, requires a non-empty instance ID, throws one fixed value-free `RangeError` for
+  invalid input, and returns a deeply frozen snapshot with the same instance ID. Connector/client
+  validators require exact own data properties, enums, bounded arrays and matching instance IDs,
+  copy fields individually, and apply the existing signed 256 KiB response ceiling. A malformed or
+  throwing source produces a fixed `collection-failed` snapshot without its message. Reads use only
+  frozen metadata and perform no env, filesystem, schema, config, or lazy-service operation.
 - **Why:** A provenance read remains a bounded snapshot read and cannot become a secret lookup
   endpoint.
 - **Test home:** hostile source/getter tests and real-client canary tests.
@@ -119,6 +129,10 @@ without loading or validating twice.
 | `CAPABILITIES.CONFIG_DIAGNOSTICS`                    | common token      | Same provider/consumer path.                                   |
 | `ConfigDiagnosticsOptions`                           | config type       | `loadConfig` metadata builder and `ConfigPlugin` source setup. |
 | `IDiagnosticsClient.configuration`                   | interface method  | Native devtool reads provenance.                               |
+
+`IConfigDiagnosticsSource.snapshot(instanceId)` has the exact synchronous contract in §3.6.
+`IDiagnosticsClient.configuration(): Promise<ConfigDiagnosticsSnapshot>` performs pairing and
+support negotiation before any config request.
 
 Internal raw-key/path maps, WeakMap records, builders, validators and projectors are not
 barrel-exported.
@@ -140,21 +154,21 @@ barrel-exported.
 | `packages/config-plugin/src/services/env-loader.ts`, `src/services/load-config.ts`, `src/services/variable-expander.ts`                                                             | Single-pass source, precedence and expansion evidence.   |
 | `packages/config-plugin/src/validators/config-validator.ts`, `src/plugin/config-plugin.ts`, `src/index.ts`                                                                          | Schema effects, source registration, public type export. |
 | `packages/diagnostics-plugin/src/interfaces/index.ts`, `src/plugin/diagnostics-plugin.ts`, `src/protocol/protocol.ts`, `src/transport/connector-handler.ts`, `src/client/client.ts` | Fixed config operation and client.                       |
-| Public, protocol, architecture, package, release and tracking docs                                                                                                                  | Contract, privacy, support and audit record.             |
+| `PUBLIC_API.md`, `ARCHITECTURE.md`, `docs/diagnostics-protocol.md`, package READMEs, `CHANGELOG.md`, `ROADMAP.md`, `CLAUDE.md`                                                      | Contract, privacy, support and audit record.             |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                          | src covered                        | Key assertions (and the signature each call type-checks against)                                             |
-| ---------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| common diagnostics/token/index tests                                               | common changed files               | Contracts export and token grammar.                                                                          |
-| config `test/unit/options.test.ts`, `test/unit/provenance.test.ts`                 | options/provenance                 | Bounds, aliases, frozen value-free entries, WeakMap lifetime, opaque instances.                              |
-| config `test/unit/env-loader.test.ts`                                              | env-loader                         | Exact env/file precedence and path aliasing without another read.                                            |
-| config `test/unit/load-config.test.ts`                                             | load-config                        | One load/expand/schema/section pass; standalone metadata adoption.                                           |
-| config `test/unit/variable-expander.test.ts`, `test/unit/config-validator.test.ts` | variable-expander/config-validator | Approved references and evidenced schema effects; errors remain value-free.                                  |
-| config `test/unit/plugin.test.ts`, `test/index.test.ts`                            | plugin/index                       | eager source, disabled/no-data/opaque states and exports.                                                    |
-| diagnostics protocol/connector/plugin tests                                        | protocol/connector/plugin          | canonical target, auth before read, exact projection, unsupported and source failure.                        |
-| diagnostics client/index tests                                                     | client/interfaces/index            | `configuration()` verification, DTO rejection, close/deadline semantics.                                     |
-| diagnostics `test/e2e/config-provenance.test.ts`                                   | all paths                          | Real load and socket; precedence useful; canary values, hashes, lengths, paths and errors absent everywhere. |
+| Test file                                                                                                                   | src covered                        | Key assertions (and the signature each call type-checks against)                                             |
+| --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts`             | common changed files               | Contracts export and token grammar.                                                                          |
+| `packages/config-plugin/test/unit/options.test.ts`, `test/unit/provenance.test.ts`                                          | options/provenance                 | Bounds, aliases, frozen value-free entries, WeakMap lifetime, opaque instances and no added reads.           |
+| `packages/config-plugin/test/unit/env-loader.test.ts`                                                                       | env-loader                         | Exact env/file precedence and path aliasing without another read.                                            |
+| `packages/config-plugin/test/unit/load-config.test.ts`                                                                      | load-config                        | One load/expand/schema/section pass; opaque get-call parity with diagnostics off/on; metadata adoption.      |
+| `packages/config-plugin/test/unit/variable-expander.test.ts`, `test/unit/config-validator.test.ts`                          | variable-expander/config-validator | Approved references and evidenced schema effects; errors remain value-free.                                  |
+| `packages/config-plugin/test/integration/config-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                         | plugin/index                       | Eager source, disabled/no-data/opaque states and exports.                                                    |
+| `packages/diagnostics-plugin/test/unit/protocol.test.ts`, `test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts` | protocol/connector/plugin          | Support key, canonical target, auth before read, exact projection, unsupported and source failure.           |
+| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                                | client/interfaces/index            | False-key no-request, `configuration()` verification, DTO rejection, close/deadline semantics.               |
+| `packages/diagnostics-plugin/test/e2e/config-provenance.test.ts`                                                            | all paths                          | Real load and socket; precedence useful; canary values, hashes, lengths, paths and errors absent everywhere. |
 
 ## 7. Verification gates
 
@@ -178,7 +192,8 @@ tests, findings, dispositions and unsupported paths in the implementation PR.
 - Metadata changes config behavior: use the existing single path and assert invocation counts and
   object identity.
 - Paths leak machines: retain configured aliases only and never copy loader errors into diagnostics.
-- Opaque `IConfig` executes on read: mark unknown without invoking it.
+- Diagnostics adds reads to opaque `IConfig`: mark provenance unknown and assert identical existing
+  section-validation calls with diagnostics disabled and enabled.
 - Schema metadata overclaims causality: report only property-presence effects and no arbitrary
   dependency graph.
 
@@ -194,18 +209,20 @@ tests, findings, dispositions and unsupported paths in the implementation PR.
 **Reviewed flow:** configured aliases → existing env/file merge events → expansion grammar → schema
 input/output presence → primitive-only builder → frozen WeakMap record → typed source →
 authenticated fixed projector → signed frame → validating client. No value reaches the builder API.
+For an injected instance, provenance performs no read; separately configured sections retain their
+pre-existing `IConfig.get` calls whether diagnostics is disabled or enabled.
 
 **Approved budgets:** 128 keys, eight file aliases, eight precedence entries per key, sixteen
 expansion references per key, 64-byte aliases, one immutable snapshot, and the connector's 256 KiB
 ceiling. Disabled mode builds no metadata record; close drops connector access and GC owns the
 WeakMap lifetime.
 
-| Finding                                            | Resolution in this plan                                      |
-| -------------------------------------------------- | ------------------------------------------------------------ |
-| Hashes and lengths still reveal secrets.           | Neither is computed or represented.                          |
-| Pre-app load could require a second pass.          | Metadata travels with the exact `IConfig` through a WeakMap. |
-| Custom instances may have malicious getters.       | No `get`, `has`, enumeration or property read occurs.        |
-| Generic config inspection invites arbitrary reads. | Dedicated snapshot DTO, source token and `/v1/config` only.  |
+| Finding                                            | Resolution in this plan                                                       |
+| -------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Hashes and lengths still reveal secrets.           | Neither is computed or represented.                                           |
+| Pre-app load could require a second pass.          | Metadata travels with the exact `IConfig` through a WeakMap.                  |
+| Custom instances may have malicious reads.         | Diagnostics adds none; configured sections retain their existing `get` calls. |
+| Generic config inspection invites arbitrary reads. | Dedicated snapshot DTO, source token and `/v1/config` only.                   |
 
 The implementation audit plants canaries in env, files, expanded strings, defaults, transforms,
 validation errors and paths; checks builder inputs, retained records, frames and connector

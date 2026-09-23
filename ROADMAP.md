@@ -10678,20 +10678,22 @@ respectively. Each letter gets its own feature branch, verification and one cano
 is named below; shared-contract or connector changes must be necessary for that letter's real
 consumer and explicitly scoped in its plan, not a sweep across unrelated plugins.
 
-Review health first, then provenance, then queue/tracing together, then authorization. This is a
-design/audit sequence, not an artificial requirement that every earlier addon be installed or
-implemented before a later one. All addons depend on the M98a/M98b minimized collection and
-authenticated connection boundaries; M98c supplies development launch wiring for consumer exercises.
-The first letter requiring a new typed reader or transport operation owns its design, compatibility
-and security evidence. Do not create a speculative provider bus or extend protocol v1 silently.
+Review health first, then provenance, then queue/tracing together, then authorization. The owning
+plugins remain independently optional, but M98d supplies the fixed protocol-support manifest that
+M98e–M98h extend; those implementation branches therefore start after that shared compatibility
+substrate lands. All addons depend on the M98a/M98b minimized collection and authenticated
+connection boundaries; M98c supplies development launch wiring for consumer exercises. The first
+letter requiring a new typed reader or transport operation owns its design, compatibility and
+security evidence. Do not create a speculative provider bus or extend protocol v1 silently.
 
 The completed M98a–M98c design records are archived at
 `plans/archive/milestone-98a-kernel-diagnostics.md`,
 `plans/archive/milestone-98b-local-diagnostics-connector.md` and
 `plans/archive/milestone-98c-devtool-scaffolding.md`; current code and public documentation govern
-their implemented contracts. Plans for 98d–98h are not yet written. The paths named in each section
-below are the required future canonical plans, not claims that those files exist. Each must verify
-contracts from source, name the consumer of every export, and satisfy the security gates below.
+their implemented contracts. The canonical M98d–M98h plans now live at the paths named in each
+section below. They verify contracts from source, name the consumer of every export, and record the
+pre-implementation security review required by the gates below; they remain planning documents, not
+evidence that implementation or the committed-tree security audit is complete.
 
 ### Existing seams and gaps
 
@@ -10991,7 +10993,8 @@ attributes may contain dynamic request paths even when query strings are omitted
 ### Milestone 98h: Authorization Decision Explanations
 
 **Status:** planned; design security review and implementation security audit required. **Owner:**
-`packages/auth-plugin`, with necessary shared diagnostic and connector/client changes. **Plan:**
+`packages/auth-plugin`, with a necessary non-resolving registry identity predicate plus shared
+diagnostic and connector/client changes. **Plan:**
 `plans/milestone-98h-authorization-explanations.md`.
 
 **Existing foundation:** `IAuthorizationService` returns booleans. The RBAC implementation knows
@@ -11044,10 +11047,16 @@ Any new reader/transport surface must have an explicit version/support contract 
 projections. Do not infer inspector support from plugin registration, a generic error or package
 name. Distinguish unsupported, disabled, no-data, stale and collection-failed states. Isolate
 optional collection failures without weakening session authentication or integrity failure handling.
-Verify credential expiry/revocation, request/response instance binding, replay protection, protocol
-bounds and refusal of arbitrary method/file access or mutation for every added operation. Shared
-backends require their own allowed resource/tenant scope; a local session key does not authorize
-enumeration of all data reachable by the application.
+M98d owns a fixed, authenticated v1 inspector-support manifest in the status response before the
+diagnostics package's first publication. The manifest declares connector operation support
+separately from application source availability; M98e–M98h activate their reserved fixed entries as
+their operations ship. A new client treats the exact legacy three-field M98b status body as all
+addon operations unsupported, so it never probes an unknown route or derives support from a generic
+error. Future inspectors beyond the five fixed entries require a new protocol version. Verify
+credential expiry/revocation, request/response instance binding, replay protection, protocol bounds
+and refusal of arbitrary method/file access or mutation for every added operation. Shared backends
+require their own allowed resource/tenant scope; a local session key does not authorize enumeration
+of all data reachable by the application.
 
 ### Threat Model and Acceptance Evidence
 

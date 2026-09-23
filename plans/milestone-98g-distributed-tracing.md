@@ -16,18 +16,23 @@ Existing exporters, sampling, activation, propagation and shutdown remain author
   unsampled spans, custom TracerHost internals, automatic service discovery/access, or a globally
   ordered distributed timeline.
 
+Implementation starts from main containing M98d's fixed inspector-support manifest; HealthPlugin
+itself remains optional and is not required for trace observations.
+
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference           | Source (file:line)                                                    | Verified surface / fact                                                                              |
-| ------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `ITelemetryService` | `packages/common/src/services/telemetry.ts:166`                       | Creates spans and optionally reports only the currently active IDs; no completed-span feed.          |
-| `SpanOptions`       | `packages/common/src/services/telemetry.ts:43`                        | Carries kind, arbitrary attributes and optional explicit parent context.                             |
-| `TracerHost`        | `packages/telemetry-plugin/src/interfaces/index.ts:71`                | Custom host exposes start/activate/context/shutdown only; no readable completed spans.               |
-| `TelemetryService`  | `packages/telemetry-plugin/src/services/telemetry-service.ts:112`     | Ends framework spans in `finally`; exceptions and status go to the underlying span.                  |
-| OTel provider       | `packages/telemetry-plugin/src/tracing/tracer.ts:252`                 | Built-in provider receives a constructor-time `spanProcessors` array and current exporter processor. |
-| Middleware naming   | `packages/telemetry-plugin/src/middleware/telemetry-middleware.ts:44` | Raw server span names and route attributes use request paths and may be dynamic/sensitive.           |
-| Queue propagation   | `packages/queue-plugin/src/tracing/traced-queue.ts:90`                | Producer/consumer spans propagate W3C context; queue names and message IDs enter raw spans.          |
-| Kernel IDs          | `packages/common/src/services/diagnostics.ts:203`                     | M98a operation IDs are instance-local; optional trace/span IDs do not form a completed span tree.    |
+| Reference                | Source (file:line)                                                                                     | Verified surface / fact                                                                                                                                     |
+| ------------------------ | ------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ITelemetryService`      | `packages/common/src/services/telemetry.ts:166`                                                        | Creates spans and optionally reports only the currently active IDs; no completed-span feed.                                                                 |
+| `SpanOptions`            | `packages/common/src/services/telemetry.ts:43`                                                         | Carries kind, arbitrary attributes and optional explicit parent context.                                                                                    |
+| `TracerHost`             | `packages/telemetry-plugin/src/interfaces/index.ts:71`                                                 | Custom host exposes start/activate/context/shutdown only; no readable completed spans.                                                                      |
+| `TelemetryService`       | `packages/telemetry-plugin/src/services/telemetry-service.ts:112`                                      | Ends framework spans in `finally`; exceptions and status go to the underlying span.                                                                         |
+| OTel provider            | `packages/telemetry-plugin/src/tracing/tracer.ts:252`                                                  | Built-in provider receives a constructor-time `spanProcessors` array and current exporter processor.                                                        |
+| OTel processor contract  | `npm:@opentelemetry/sdk-trace@2.11.0/build/src/SpanProcessor.d.ts:7` (resolved by `deno.lock:45,1126`) | `SpanProcessor` requires `onStart`, `onEnd`, `forceFlush`, `shutdown`; `onEnding` is optional.                                                              |
+| OTel readable span input | `npm:@opentelemetry/sdk-trace@2.11.0/build/src/export/ReadableSpan.d.ts:4`                             | Exact readable fields include name/kind/context/parent/time/status/attributes/links/events/duration/resource; diagnostics approves only the subset in §3.3. |
+| Middleware naming        | `packages/telemetry-plugin/src/middleware/telemetry-middleware.ts:44`                                  | Raw server span names and route attributes use request paths and may be dynamic/sensitive.                                                                  |
+| Queue propagation        | `packages/queue-plugin/src/tracing/traced-queue.ts:90`                                                 | Producer/consumer spans propagate W3C context; queue names and message IDs enter raw spans.                                                                 |
+| Kernel IDs               | `packages/common/src/services/diagnostics.ts:203`                                                      | M98a operation IDs are instance-local; optional trace/span IDs do not form a completed span tree.                                                           |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -41,9 +46,11 @@ Existing exporters, sampling, activation, propagation and shutdown remain author
 
 - **Decision:** When `TelemetryPluginOptions.diagnostics` is enabled and the built-in provider is
   used, construct an internal `DiagnosticSpanProcessor` and append it after the configured exporter
-  processor in the same `BasicTracerProvider` constructor. It implements OTel processor lifecycle,
-  never exports, and minimizes on `onEnd` before writing its ring. The existing processor remains
-  unchanged and receives every span as before.
+  processor in the same `BasicTracerProvider` constructor. Against the locked 2.11.0 contract,
+  `onStart` is a synchronous no-op, optional `onEnding` is omitted, `onEnd` synchronously minimizes
+  and catches every failure, `forceFlush` returns an already-resolved promise without touching the
+  exporter, and `shutdown` idempotently closes/clears the collector. It never exports. The existing
+  processor remains unchanged and receives every span as before.
 - **Why:** This observes framework, queue/messaging and supported auto-instrumentation spans that
   actually finish, without a competing tracer or exporter.
 - **Test home:** tracer/provider tests with fake processors and real OTel guarded import/e2e tests.
@@ -69,7 +76,11 @@ Existing exporters, sampling, activation, propagation and shutdown remain author
   aliases, trace ID, span ID, optional parent span ID, at most eight link trace/span pairs, kind,
   outcome (`ok`, `error`, `unset`), durationMs, and `ageMs`. Arbitrary name, attributes, events,
   resource labels, tracestate, baggage and exceptions never enter collector state. Identifiers must
-  match W3C lowercase-hex grammar and all-zero values are rejected.
+  match W3C lowercase-hex grammar and all-zero values are rejected. `onEnd` reads only `name`,
+  `kind`, `spanContext()`, `parentSpanContext`, `links[].context`, `status.code`, and `duration`. It
+  maps numeric OTel kind/status values through fixed exhaustive tables and drops invalid values; it
+  never touches status messages, attributes, events, resources, instrumentation scope, baggage,
+  exception data, or link attributes.
 - **Why:** Trace relationships remain useful while dynamic paths and application data stay outside
   capture.
 - **Test home:** diagnostic processor exact-projection and canary tests.
@@ -102,8 +113,19 @@ Existing exporters, sampling, activation, propagation and shutdown remain author
   `GET /v1/traces?after=N&limit=N`; absence returns typed `unsupported`. `TraceDiagnosticsBatch`
   includes version, authenticated application instance, state, coverage, sampler, records,
   next/lost/closed. The connector copies exact fields and the native client validates them via
-  `traces(after, limit)`. Devtool correlation may join equal trace IDs from sessions the user
-  independently paired; identifiers never discover endpoints or authorize reads.
+  `traces(after, limit)`. It sets the fixed authenticated status manifest's `traces` key true; a
+  false key returns a frozen typed unsupported batch without a trace request.
+  `ITraceDiagnosticsSource` exposes exactly:
+
+  ```typescript
+  read(instanceId: string, after: number, limit?: number): TraceDiagnosticsBatch;
+  ```
+
+  The method is synchronous, requires a non-empty instance ID, accepts only a non-negative safe
+  cursor and limit 1–128 (default 128), throws one fixed value-free `RangeError` otherwise, and
+  returns a deeply frozen batch matching the supplied instance. Devtool correlation may join equal
+  trace IDs from sessions the user independently paired; identifiers never discover endpoints or
+  authorize reads.
 - **Why:** Correlation does not weaken M98b's per-application authentication boundary.
 - **Test home:** connector/client/e2e tests across two separately authenticated apps.
 
@@ -117,6 +139,10 @@ Existing exporters, sampling, activation, propagation and shutdown remain author
 | `CAPABILITIES.TRACE_DIAGNOSTICS`               | common token          | Same provider/consumer path.                                |
 | `TraceDiagnosticsOptions`                      | telemetry option type | Plugin/provider builder validates and configures collector. |
 | `IDiagnosticsClient.traces`                    | interface method      | Native devtool reads completed span batches.                |
+
+`ITraceDiagnosticsSource.read(instanceId, after, limit?)` has the exact synchronous contract in
+§3.6. `IDiagnosticsClient.traces(after: number, limit?: number): Promise<TraceDiagnosticsBatch>`
+applies the same cursor bounds and negotiates support before sending the operation.
 
 The OTel diagnostic processor, raw-readable-span adapter, ring and projectors remain internal.
 
@@ -132,25 +158,26 @@ The OTel diagnostic processor, raw-readable-span adapter, ring and projectors re
 
 | File                                                                                                                                                 | Purpose                                                        |
 | ---------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| common diagnostics/tokens/index source                                                                                                               | Trace DTO/source contracts, token and exports.                 |
+| `packages/common/src/services/diagnostics.ts`, `src/tokens.ts`, `src/index.ts`                                                                       | Trace DTO/source contracts, token and exports.                 |
 | `packages/telemetry-plugin/src/interfaces/index.ts`, `src/diagnostics/span-observation-collector.ts`, `src/diagnostics/diagnostic-span-processor.ts` | Options, ring, OTel processor.                                 |
 | `packages/telemetry-plugin/src/tracing/tracer.ts`, `src/plugin/telemetry-plugin.ts`, `src/index.ts`                                                  | Processor composition, availability, registration and exports. |
-| diagnostics interfaces/plugin/protocol/connector/client source                                                                                       | Fixed trace operation and native method.                       |
-| Public, architecture, protocol, package, release and tracking docs                                                                                   | Coverage and security contract.                                |
+| `packages/diagnostics-plugin/src/interfaces/index.ts`, `src/plugin/diagnostics-plugin.ts`                                                            | Client method, support key and optional source resolution.     |
+| `packages/diagnostics-plugin/src/protocol/protocol.ts`, `src/transport/connector-handler.ts`, `src/client/client.ts`                                 | Trace target, projection, authenticated dispatch and client.   |
+| `PUBLIC_API.md`, `ARCHITECTURE.md`, `docs/diagnostics-protocol.md`, package READMEs, `CHANGELOG.md`, `ROADMAP.md`, `CLAUDE.md`                       | Coverage and security contract.                                |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                  | src covered               | Key assertions (and the signature each call type-checks against)                                                                |
-| ---------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| common diagnostics/token/index tests                       | common changed files      | Types, token and exports.                                                                                                       |
-| telemetry options/collector tests                          | interfaces/collector      | Alias bounds, exact fields, W3C validation, ring loss, no raw canaries.                                                         |
-| telemetry `test/unit/diagnostic-span-processor.test.ts`    | processor                 | onEnd minimization, links/parents/status/duration, no throw, flush/shutdown.                                                    |
-| telemetry `test/unit/tracer.test.ts`                       | tracer                    | exporter processor preserved, diagnostic processor appended once, sampling/config unchanged.                                    |
-| telemetry `test/unit/plugin.test.ts`, `test/index.test.ts` | plugin/index              | disabled/noop/custom/built-in states, eager token, lifecycle and exports.                                                       |
-| telemetry guarded real-import integration test             | tracer/processor          | Real pinned OTel SDK ends an approved span and exporter still receives it.                                                      |
-| diagnostics protocol/connector/plugin tests                | protocol/connector/plugin | target grammar, auth-before-read, exact projection, unsupported/failure states.                                                 |
-| diagnostics client/index tests                             | client/interfaces         | `traces()` args, signed verification, exact DTO/instance checks.                                                                |
-| diagnostics `test/e2e/distributed-tracing.test.ts`         | all paths                 | Real HTTP plus enqueue/process hops, missing activation/sampling/loss/order, two independently paired apps, no fabricated edge. |
+| Test file                                                                                                                   | src covered                     | Key assertions (and the signature each call type-checks against)                                                                |
+| --------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts`             | common diagnostics/tokens/index | Source signature, DTOs, token and exports.                                                                                      |
+| `packages/telemetry-plugin/test/unit/trace-diagnostics-options.test.ts`, `test/unit/span-observation-collector.test.ts`     | interfaces/collector            | Alias bounds, source read signature, exact fields, W3C validation, ring loss, no raw canaries.                                  |
+| `packages/telemetry-plugin/test/unit/diagnostic-span-processor.test.ts`                                                     | processor                       | Every locked lifecycle method, onEnd minimization, links/parents/status/duration, no throw.                                     |
+| `packages/telemetry-plugin/test/unit/tracer.test.ts`                                                                        | tracer                          | Exporter processor preserved, diagnostic processor appended once, sampling/config unchanged.                                    |
+| `packages/telemetry-plugin/test/unit/telemetry-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                          | plugin/index                    | Disabled/noop/custom/built-in states, eager token, lifecycle and exports.                                                       |
+| `packages/telemetry-plugin/test/integration/diagnostic-span-processor-real-import.test.ts`                                  | tracer/processor                | Locked real OTel SDK exercises every required lifecycle method; exporter still receives the span.                               |
+| `packages/diagnostics-plugin/test/unit/protocol.test.ts`, `test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts` | protocol/connector/plugin       | Support key, target grammar, auth-before-read, exact projection, unsupported/failure states.                                    |
+| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                                | client/interfaces               | False-key no-request, `traces()` args, signed verification, exact DTO/instance checks.                                          |
+| `packages/diagnostics-plugin/test/e2e/distributed-tracing.test.ts`                                                          | all paths                       | Real HTTP plus enqueue/process hops, missing activation/sampling/loss/order, two independently paired apps, no fabricated edge. |
 
 ## 7. Verification gates
 

@@ -27,6 +27,7 @@ it.
 | `HealthPlugin`                    | `packages/health-plugin/src/plugin/health-plugin.ts:59`              | Registers instances immediately, factories and contributions at `onInit`, then serves three existing endpoints. |
 | `IDiagnosticsSource`              | `packages/common/src/services/diagnostics.ts:300`                    | Kernel reader has only frozen `snapshot()` and `read()`; it must not run application callbacks.                 |
 | Connector dispatch                | `packages/diagnostics-plugin/src/transport/connector-handler.ts:248` | Every operation passes method, authority, origin, MAC, replay, instance, byte, and post-await session checks.   |
+| Status/client compatibility       | `packages/diagnostics-plugin/src/protocol/protocol.ts:260`           | Status is an exact three-field v1 body today; the client rejects extra fields and all non-200 responses.        |
 | Plugin ordering                   | `packages/kernel/src/registry/plugin-resolver.ts:38`                 | An optional capability dependency orders its provider first when present without requiring it.                  |
 | Registry semantics                | `packages/common/src/registry.ts:86`                                 | Eager `register` avoids lazy construction; the application registry is sealed after bootstrap.                  |
 
@@ -51,7 +52,26 @@ it.
 - **Test home:** common contract tests, health `plugin.test.ts`, and diagnostics protocol/connector
   tests.
 
-### 3.2 Exact public DTO
+### 3.2 Protocol support is negotiated before an addon read
+
+- **Decision:** Before the diagnostics package's first publication, extend the authenticated v1
+  status body with one exact `inspectors` object containing the five fixed boolean keys `health`,
+  `configuration`, `queues`, `traces`, and `authorization`. M98d sets only `health: true`; M98e–M98h
+  turn on their reserved key when their connector operation ships. A key means that the connector
+  implements and validates that operation, independent of whether the application registered its
+  owning source. The new client recognizes the exact legacy M98b three-field status body and the
+  exact new four-field body; legacy means all five keys are false. It caches the authenticated
+  manifest, returns a frozen typed `unsupported` DTO without sending an addon request when a key is
+  false, and uses the operation's `unsupported` response only when the key is true but its source is
+  absent. Unknown/missing/extra manifest keys and non-booleans fail pairing. Inspectors beyond these
+  five require a new protocol version.
+- **Why:** Client/server release skew has an explicit authenticated contract and never probes an
+  unknown route or infers support from a generic protocol error. The one pre-publication status
+  change gives later M98 letters a stable forward-compatible shape.
+- **Test home:** diagnostics protocol/client compatibility matrix: legacy M98b status, M98d status,
+  false health key, true key with absent source, malformed manifests, and no request on false.
+
+### 3.3 Exact public DTO
 
 - **Decision:** Add
   `DiagnosticsInspectorState = 'unsupported' | 'disabled' | 'no-data' | 'ready' |
@@ -67,7 +87,7 @@ it.
 - **Test home:** common diagnostics types compile checks and diagnostics `protocol.test.ts`
   exact-key tests.
 
-### 3.3 Capture normal checks once
+### 3.4 Capture normal checks once
 
 - **Decision:** Add an internal `HealthObservationCollector` and a non-barrel-exported
   `attachHealthObservation(service, collector)` WeakMap seam in `health-service.ts`. The existing
@@ -80,7 +100,7 @@ it.
 - **Test home:** `health-service.test.ts` and `health-observation-collector.test.ts` compare
   callback counts, reports, and snapshots.
 
-### 3.4 Approval and fixed bounds
+### 3.5 Approval and fixed bounds
 
 - **Decision:** `HealthDiagnosticsOptions` requires `enabled: true`, an `indicators` record mapping
   exact registered names to display aliases, and optional `staleAfterMs` (default 30,000). Accept at
@@ -91,7 +111,7 @@ it.
 - **Why:** Indicator names and topology are sensitive metadata and memory stays constant.
 - **Test home:** `health-observation-options.test.ts` and sustained-input tests.
 
-### 3.5 Separately controlled scheduled collection
+### 3.6 Separately controlled scheduled collection
 
 - **Decision:** `diagnostics.scheduled` is absent by default. When present it names a subset of
   approved indicators and supplies `intervalMs` (1,000–300,000), `timeoutMs` (1–30,000), and
@@ -104,10 +124,12 @@ it.
   hung callback from accumulating work.
 - **Test home:** scheduler tests with hung, slow, rejecting, overlapping, and teardown cases.
 
-### 3.6 Connector and native client behavior
+### 3.7 Connector and native client behavior
 
-- **Decision:** The source accepts the already-authenticated instance ID and returns a frozen
-  snapshot. The connector validates own data properties and exact enums/numbers, copies fields
+- **Decision:** `IHealthDiagnosticsSource.snapshot(instanceId: string): HealthDiagnosticsSnapshot`
+  is synchronous. It requires a non-empty instance ID, throws one fixed value-free `RangeError` for
+  invalid input, and returns a deeply frozen snapshot whose `instanceId` exactly equals the
+  argument. The connector validates own data properties and exact enums/numbers, copies fields
   individually, applies the existing 256 KiB serialized ceiling, and catches source failure as a
   value-free `collection-failed` snapshot. `IDiagnosticsClient.health()` uses the existing
   serialized, signed exchange and exact DTO validator. All original session and request checks run
@@ -127,6 +149,11 @@ it.
 | `CAPABILITIES.HEALTH_DIAGNOSTICS` | common token       | HealthPlugin provider and DiagnosticsPlugin optional consumer.              |
 | `HealthDiagnosticsOptions`        | health option type | `HealthPluginOptions.diagnostics` validation and collector construction.    |
 | `IDiagnosticsClient.health`       | interface method   | Native devtool reads the typed health projection.                           |
+
+`IHealthDiagnosticsSource.snapshot(instanceId)` has the exact synchronous signature and behavior in
+§3.7. `IDiagnosticsClient.health(): Promise<HealthDiagnosticsSnapshot>` performs pairing first and
+returns the negotiated typed `unsupported` snapshot without an addon request when
+`inspectors.health` is false.
 
 `HealthObservationCollector`, scheduler helpers, attachment seam, validators, and projectors remain
 internal.
@@ -153,17 +180,17 @@ internal.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                               | src covered                     | Key assertions (and the signature each call type-checks against)                                                |
-| --------------------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| common `test/services/diagnostics.test.ts`, `test/tokens.test.ts`, `test/index.test.ts` | common diagnostics/tokens/index | DTO/source signatures and exact legal token.                                                                    |
-| health `test/unit/health-observation-options.test.ts`                                   | interfaces/index                | Bounds, aliases, duplicate/control refusal, disabled defaults.                                                  |
-| health `test/unit/health-observation-collector.test.ts`                                 | collector                       | Latest-only state, age/stale/failure, truncation, no data/error/path leakage, bounded hung work.                |
-| health `test/unit/health-service.test.ts`                                               | health-service                  | One callback per normal check; identical report; collector throws/overflow without behavior change.             |
-| health `test/unit/plugin.test.ts`, `test/index.test.ts`                                 | plugin/index                    | eager token/source, lifecycle start/clear, configured subset, public exports.                                   |
-| diagnostics `test/unit/protocol.test.ts`                                                | protocol                        | canonical `/v1/health`, exact field allowlist, malformed/getter/extra-field refusal.                            |
-| diagnostics `test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts`           | connector/plugin                | auth before read, unsupported/disabled states, source failure isolation, instance binding.                      |
-| diagnostics `test/unit/client.test.ts`, `test/index.test.ts`                            | client/interfaces/index         | `health()` pairing, verification, exact validation, close/deadline behavior.                                    |
-| diagnostics `test/e2e/health-observations.test.ts`                                      | all changed paths               | Real socket and health callbacks; canaries absent at callback, source, frame and client; useful status remains. |
+| Test file                                                                                                       | src covered                     | Key assertions (and the signature each call type-checks against)                                                |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts` | common diagnostics/tokens/index | DTO/source signatures and exact legal token.                                                                    |
+| `packages/health-plugin/test/unit/health-observation-options.test.ts`                                           | interfaces/index                | Bounds, aliases, duplicate/control refusal, disabled defaults.                                                  |
+| `packages/health-plugin/test/unit/health-observation-collector.test.ts`                                         | collector                       | Latest-only state, age/stale/failure, truncation, no data/error/path leakage, bounded hung work.                |
+| `packages/health-plugin/test/unit/health-service.test.ts`                                                       | health-service                  | One callback per normal check; identical report; collector throws/overflow without behavior change.             |
+| `packages/health-plugin/test/unit/health-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                    | plugin/index                    | Eager token/source, lifecycle start/clear, configured subset, public exports.                                   |
+| `packages/diagnostics-plugin/test/unit/protocol.test.ts`                                                        | protocol                        | Legacy/new status shapes, fixed support manifest, canonical `/v1/health`, exact projection refusal.             |
+| `packages/diagnostics-plugin/test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts`                   | connector/plugin                | Auth before read, unsupported/disabled states, source failure isolation, instance binding.                      |
+| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                    | client/interfaces/index         | Legacy/manifest negotiation, no false-key request, `health()` verification, close/deadline behavior.            |
+| `packages/diagnostics-plugin/test/e2e/health-observations.test.ts`                                              | all changed paths               | Real socket and health callbacks; canaries absent at callback, source, frame and client; useful status remains. |
 
 ## 7. Verification gates
 
@@ -194,6 +221,8 @@ support limits in the implementation PR before marking M98d complete.
   truncating them.
 - Diagnostics failure changes readiness: guard every observer call and compare responses and side
   effects.
+- Release-skew looks like connector failure: pair against the fixed support manifest; map the exact
+  legacy status shape to addon-unsupported without probing an unknown target.
 
 ## 9. Out of scope
 
@@ -223,6 +252,7 @@ ceiling, runtime-owned timers, and full cleanup on close/failure.
 | Timeout alone could create unbounded callbacks.            | Deadline controls reporting while raw-promise gates suppress replacement work. |
 | A generic inspector provider could widen the wire surface. | Dedicated token, route, source, validator and projector only.                  |
 | Disabled collection could still schedule work.             | Inert source has no buffer, timer, callback wrapper, or registration observer. |
+| An older connector cannot serve the new route.             | Authenticated status negotiation prevents the request and returns unsupported. |
 
 The implementation audit must plant canaries in successful data, thrown errors, names and paths;
 prove their absence from collector callbacks, memory, frames, errors and logs; exercise

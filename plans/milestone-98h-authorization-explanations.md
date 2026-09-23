@@ -11,29 +11,35 @@ authoritative and unchanged; diagnostic failure cannot alter allow/deny or guard
 order.
 
 - **In scope:** direct/inherited/wildcard/deny explanations for `RbacService`, compound evaluation
-  steps actually executed, policy revision alias, custom-provider availability, typed source/token,
-  `/v1/authorization`, native `authorization(after, limit)`, tests/docs, and both security gates.
+  steps actually executed, policy revision alias, a non-resolving registry identity predicate,
+  custom-provider availability, typed source/token, `/v1/authorization`, native
+  `authorization(after, limit)`, tests/docs, and both security gates.
 - **NOT this milestone:** authentication/JWT explanations, principal/claim/resource display,
   arbitrary custom policy trees, hypothetical simulation, rerunning a decision, or changes to
   401/403/501 responses.
 
+Implementation starts from main containing M98d's fixed inspector-support manifest; HealthPlugin
+itself remains optional and is not required for authorization explanations.
+
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference                 | Source (file:line)                                                    | Verified surface / fact                                                                                    |
-| ------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `IAuthorizationService`   | `packages/common/src/services/auth.ts:152`                            | Four synchronous boolean methods; no reason or decision context.                                           |
-| `RbacService`             | `packages/auth-plugin/src/services/rbac-service.ts:15`                | Knows direct permissions, wildcard, transitive roles and short-circuit order internally.                   |
-| AuthPlugin registration   | `packages/auth-plugin/src/plugin/auth-plugin.ts:47`                   | Authorization exists only when `rbac` is configured and is replaceable in the registry.                    |
-| Auth guards               | `packages/auth-plugin/src/guards/index.ts:92`                         | Resolve the live service, call it once, and short-circuit without `next()` on denial.                      |
-| Decorator authorization   | `packages/decorator-plugin/src/plugin/authorization-middleware.ts:42` | Uses the same service; roles call `hasAnyRole`, permissions use short-circuiting repeated `hasPermission`. |
-| Registry replacement/seal | `packages/kernel/src/registry/service-registry.ts:187`                | Overrides may occur during startup; registry becomes immutable after bootstrap.                            |
-| M98 event inference limit | `packages/common/src/services/diagnostics.ts:226`                     | Kernel events contain status/outcome only; a 403 cannot identify the rule that failed.                     |
+| Reference                 | Source (file:line)                                                    | Verified surface / fact                                                                                                                    |
+| ------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `IAuthorizationService`   | `packages/common/src/services/auth.ts:152`                            | Four synchronous boolean methods; no reason or decision context.                                                                           |
+| `RbacService`             | `packages/auth-plugin/src/services/rbac-service.ts:15`                | Knows direct permissions, wildcard, transitive roles and short-circuit order internally.                                                   |
+| AuthPlugin registration   | `packages/auth-plugin/src/plugin/auth-plugin.ts:47`                   | Authorization exists only when `rbac` is configured and is replaceable in the registry.                                                    |
+| Auth guards               | `packages/auth-plugin/src/guards/index.ts:92`                         | Resolve the live service, call it once, and short-circuit without `next()` on denial.                                                      |
+| Decorator authorization   | `packages/decorator-plugin/src/plugin/authorization-middleware.ts:42` | Uses the same service; roles call `hasAnyRole`, permissions use short-circuiting repeated `hasPermission`.                                 |
+| Registry replacement/seal | `packages/kernel/src/registry/service-registry.ts:187`                | Overrides may occur during startup; registry becomes immutable after bootstrap.                                                            |
+| Non-resolving lookup      | `packages/kernel/src/registry/service-registry.ts:86`                 | `peekResolved` can compare an existing instance without running a factory, but is intentionally absent from the public registry interface. |
+| M98 event inference limit | `packages/common/src/services/diagnostics.ts:226`                     | Kernel events contain status/outcome only; a 403 cannot identify the rule that failed.                                                     |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                        | Resolution (picked side)                                                                                    | Doc deliverable (same PR)                                                                      |
-| -- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| C1 | Existing public contracts promise booleans and current docs expose no explanation tree; ROADMAP asks for observed explanations. | Preserve the boolean interface and attach an internal observer only to the first-party RBAC implementation. | Update `PUBLIC_API.md`, `ARCHITECTURE.md`, protocol/package docs, changelog and tracking docs. |
+| #  | Conflict                                                                                                                                                                                              | Resolution (picked side)                                                                                                                                       | Doc deliverable (same PR)                                                                                                                                     |
+| -- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 | Existing public contracts promise booleans and current docs expose no explanation tree; ROADMAP asks for observed explanations.                                                                       | Preserve the boolean interface and attach an internal observer only to the first-party RBAC implementation.                                                    | Update `PUBLIC_API.md`, `ARCHITECTURE.md`, protocol/package docs, changelog and tracking docs.                                                                |
+| C2 | ServiceRegistry has an internal non-resolving peek, while `IServiceRegistry` intentionally exposes only resolving `get`; exact provider checks through `get` could instantiate a custom lazy service. | Add only an optional identity predicate, `isCurrent?(token, instance)`, with no returned service or enumeration; absence conservatively disables explanations. | Document the new registry method, compatibility fallback and non-resolving semantics in `PUBLIC_API.md`, `ARCHITECTURE.md`, common/kernel docs and changelog. |
 
 ## 3. Design decisions
 
@@ -77,20 +83,35 @@ order.
 - **Decision:** Add eager `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS` (`authorization-diagnostics`) and
   `IAuthorizationDiagnosticsSource`. AuthPlugin always registers a source. It reports `disabled`
   without the option, `no-data` with active observed RBAC, `unsupported` with fixed coverage
-  `rbac-not-configured`, and `unsupported` with coverage `custom-provider` when the final
-  `CAPABILITIES.AUTHORIZATION` provider at `onBootstrap` is not the exact RbacService instance the
-  plugin created. `collection-failed` remains reserved for failure in supported capture. On
-  replacement the plugin detaches/clears the collector. Registry sealing makes the bootstrap result
-  stable. Direct custom-service decisions are never guessed from booleans/status.
+  `rbac-not-configured`, `unsupported` with coverage `provider-identity-unavailable` when the
+  registry lacks the optional identity predicate, and `unsupported` with coverage `custom-provider`
+  when the current `CAPABILITIES.AUTHORIZATION` provider is not the exact RbacService instance the
+  plugin created. Add this optional method to `IServiceRegistry`:
+
+  ```typescript
+  isCurrent?<T extends object>(token: CapabilityToken, instance: T): boolean;
+  ```
+
+  ServiceRegistry implements it as an identity comparison against the registration that `get` would
+  select, without resolving a lazy factory, enumerating services, or exposing the current value.
+  Keeping it optional avoids breaking third-party registry-shaped test/context implementations;
+  AuthPlugin never falls back to resolving `get`. The enabled observer checks it before buffering
+  and the source checks it again before every read. Absence latches `provider-identity-unavailable`;
+  a false result latches `custom-provider`. Both are terminal for that source: detach, clear, and
+  never resume even if startup code later restores the old registration. `collection-failed` remains
+  reserved for failure in supported capture. Direct custom-service decisions are never guessed from
+  booleans/status.
 - **Why:** Records cannot claim to explain enforcement performed by a replacement service.
-- **Test home:** override-before-bootstrap and custom-provider integration tests.
+- **Test home:** registry non-resolution tests plus overrides during register, init, before and
+  after AuthPlugin's bootstrap hook, and source reads before/after replacement.
 
 ### 3.5 Observer isolation
 
 - **Decision:** Store the observer in a package-private WeakMap keyed by RbacService and attach it
   from AuthPlugin. Each public method computes its decision first, then invokes the observer inside
-  `try/catch`, and returns the already-computed boolean unchanged. Overflow, malformed aliases,
-  source close and throwing observers only drop diagnostics. `onClose` detaches and clears the ring.
+  `try/catch`, and returns the already-computed boolean unchanged. The observer's non-resolving
+  `isCurrent` check happens before aliasing or buffering. Overflow, malformed aliases, source close
+  and throwing observers only drop diagnostics. `onClose` detaches and clears the ring.
 - **Why:** A diagnostic path cannot permit, deny, throw, or alter guard short-circuiting.
 - **Test home:** observer-throw/full/closed parity tests through real guards and decorator
   middleware.
@@ -102,21 +123,39 @@ order.
   `AuthorizationDiagnosticsBatch` carries version, authenticated instance, state/coverage,
   decisions, next/lost/closed/droppedUnapproved. The projector copies exact own fields, catches
   source failures with fixed categories, and the client validates through
-  `authorization(after, limit)`.
+  `authorization(after, limit)`. It sets the fixed authenticated status manifest's `authorization`
+  key true; a false key returns a frozen typed unsupported batch without sending the operation.
+  `IAuthorizationDiagnosticsSource` exposes exactly:
+
+  ```typescript
+  read(instanceId: string, after: number, limit?: number): AuthorizationDiagnosticsBatch;
+  ```
+
+  The method is synchronous, requires a non-empty instance ID, accepts only a non-negative safe
+  cursor and limit 1–128 (default 128), throws one fixed value-free `RangeError` otherwise, and
+  returns a deeply frozen batch matching the supplied instance.
 - **Why:** An authorization explanation is data-only and gains no policy-execution or mutation
   endpoint.
 - **Test home:** protocol/connector/client/e2e security tests.
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol                                                                                  | Kind              | Consumer / real code path that READS it                  |
-| ------------------------------------------------------------------------------------------------ | ----------------- | -------------------------------------------------------- |
-| Authorization diagnostic operation/reason/coverage types                                         | common types      | Collector, protocol/client and devtool explanation view. |
-| `AuthorizationDecisionStep`, `AuthorizationDecisionObservation`, `AuthorizationDiagnosticsBatch` | common interfaces | RBAC source and devtool.                                 |
-| `IAuthorizationDiagnosticsSource`                                                                | common interface  | AuthPlugin provider and DiagnosticsPlugin consumer.      |
-| `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`                                                         | common token      | Same provider/consumer path.                             |
-| `AuthorizationDiagnosticsOptions`                                                                | auth option type  | AuthPlugin validates and attaches collector.             |
-| `IDiagnosticsClient.authorization`                                                               | interface method  | Native devtool reads decisions.                          |
+| Exported symbol                                                                                  | Kind                      | Consumer / real code path that READS it                                            |
+| ------------------------------------------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------- |
+| Authorization diagnostic operation/reason/coverage types                                         | common types              | Collector, protocol/client and devtool explanation view.                           |
+| `AuthorizationDecisionStep`, `AuthorizationDecisionObservation`, `AuthorizationDiagnosticsBatch` | common interfaces         | RBAC source and devtool.                                                           |
+| `IServiceRegistry.isCurrent?`                                                                    | optional interface method | AuthPlugin verifies its known RbacService without resolving a replacement factory. |
+| `IAuthorizationDiagnosticsSource`                                                                | common interface          | AuthPlugin provider and DiagnosticsPlugin consumer.                                |
+| `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`                                                         | common token              | Same provider/consumer path.                                                       |
+| `AuthorizationDiagnosticsOptions`                                                                | auth option type          | AuthPlugin validates and attaches collector.                                       |
+| `IDiagnosticsClient.authorization`                                                               | interface method          | Native devtool reads decisions.                                                    |
+
+`IServiceRegistry.isCurrent?(token, instance)` is read by AuthPlugin's enabled observer and source;
+it never resolves a factory, and absence yields fixed unsupported coverage rather than a `get`
+fallback. `IAuthorizationDiagnosticsSource.read(instanceId, after, limit?)` has the exact
+synchronous contract in §3.6. `IDiagnosticsClient.authorization(after, limit?)` returns
+`Promise<AuthorizationDiagnosticsBatch>`, applies the same cursor bounds, and negotiates support
+before sending the operation.
 
 Private evaluator results, WeakMap observer, collector, raw maps and projectors are not exported.
 
@@ -131,27 +170,30 @@ Private evaluator results, WeakMap observer, collector, raw maps and projectors 
 
 ## 5. Implementation files
 
-| File                                                                                                     | Purpose                                                                      |
-| -------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| common diagnostics/tokens/index source                                                                   | Authorization DTO/source contracts, token and exports.                       |
-| `packages/auth-plugin/src/interfaces/index.ts`, `src/diagnostics/authorization-observation-collector.ts` | Options, bounded ring/source and attachment seam.                            |
-| `packages/auth-plugin/src/services/rbac-service.ts`, `src/plugin/auth-plugin.ts`, `src/index.ts`         | Single-pass evaluators, authoritative-provider check, lifecycle and exports. |
-| diagnostics interfaces/plugin/protocol/connector/client source                                           | Fixed authorization operation and client method.                             |
-| Public, architecture, protocol, package, release and tracking docs                                       | Semantics, custom-provider limits and audit evidence.                        |
+| File                                                                                                                           | Purpose                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `packages/common/src/registry.ts`, `src/services/diagnostics.ts`, `src/tokens.ts`, `src/index.ts`                              | Non-resolving identity method, authorization DTO/source contracts and token. |
+| `packages/kernel/src/registry/service-registry.ts`                                                                             | Side-effect-free current-provider identity implementation.                   |
+| `packages/auth-plugin/src/interfaces/index.ts`, `src/diagnostics/authorization-observation-collector.ts`                       | Options, bounded ring/source and attachment seam.                            |
+| `packages/auth-plugin/src/services/rbac-service.ts`, `src/plugin/auth-plugin.ts`, `src/index.ts`                               | Single-pass evaluators, authoritative-provider check, lifecycle and exports. |
+| `packages/diagnostics-plugin/src/interfaces/index.ts`, `src/plugin/diagnostics-plugin.ts`                                      | Client method, support key and optional source resolution.                   |
+| `packages/diagnostics-plugin/src/protocol/protocol.ts`, `src/transport/connector-handler.ts`, `src/client/client.ts`           | Authorization target, projection, dispatch and client.                       |
+| `PUBLIC_API.md`, `ARCHITECTURE.md`, `docs/diagnostics-protocol.md`, package READMEs, `CHANGELOG.md`, `ROADMAP.md`, `CLAUDE.md` | Semantics, registry method, support and audit evidence.                      |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                 | src covered                           | Key assertions (and the signature each call type-checks against)                                                         |
-| --------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| common diagnostics/token/index tests                      | common changed files                  | Types, exports and legal token.                                                                                          |
-| auth options/collector tests                              | interfaces/collector                  | Alias/revision bounds, ring/loss, exact fields, no identity/rule canaries.                                               |
-| auth `test/unit/rbac-service.test.ts`                     | rbac-service                          | Existing boolean truth table plus direct/inherited/wildcard/deny reasons and exact evaluated steps.                      |
-| auth `test/unit/plugin.test.ts`, `test/index.test.ts`     | plugin/index                          | eager source; disabled/no-rbac/replaced/authoritative states; detach/clear; exports.                                     |
-| auth guard integration tests                              | rbac-service/collector through guards | Same 401/403/next behavior with observer absent/enabled/throwing/full; one evaluation only.                              |
-| decorator authorization integration tests                 | actual service path                   | Role compound and permission `.some` short-circuit observations match actual calls; no fabricated skipped branch.        |
-| diagnostics protocol/connector/plugin tests               | protocol/connector/plugin             | canonical query, auth-before-read, exact projection, unsupported/source-failure handling.                                |
-| diagnostics client/index tests                            | client/interfaces                     | `authorization()` args, signed verification, exact DTO/instance checks.                                                  |
-| diagnostics `test/e2e/authorization-explanations.test.ts` | all paths                             | Real socket/guards; positive reasons; JWT/principal/claim/request/error canaries absent; custom replacement unsupported. |
+| Test file                                                                                                                                              | src covered                              | Key assertions (and the signature each call type-checks against)                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `packages/common/test/unit/registry-contract.test.ts`, `test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts` | common registry/diagnostics/tokens/index | Optional identity method contract, source signature, types, exports and token.                                           |
+| `packages/kernel/test/unit/registry/service-registry-current.test.ts`                                                                                  | service-registry                         | Exact identity, absent/multi/parent/override cases and proof that lazy factories are never invoked.                      |
+| `packages/auth-plugin/test/unit/authorization-diagnostics-options.test.ts`, `test/unit/authorization-observation-collector.test.ts`                    | interfaces/collector                     | Alias/revision bounds, source read signature, ring/loss, absent identity predicate, replacement and canaries.            |
+| `packages/auth-plugin/test/unit/rbac-service.test.ts`                                                                                                  | rbac-service                             | Existing boolean truth table plus direct/inherited/wildcard/deny reasons and exact evaluated steps.                      |
+| `packages/auth-plugin/test/unit/auth-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                                                               | plugin/index                             | Eager source; register/init/early-and-late-bootstrap replacement; detach/clear; exports.                                 |
+| `packages/auth-plugin/test/unit/guards.test.ts`, `test/integration/auth-integration.test.ts`                                                           | rbac-service/collector through guards    | Same 401/403/next behavior with observer absent/enabled/throwing/full; one evaluation only.                              |
+| `packages/decorator-plugin/test/unit/plugin/authorization-enforcement.test.ts`, `test/integration/roles-enforced.test.ts`                              | actual service path                      | Compound and permission short-circuits match actual calls; no fabricated branch.                                         |
+| `packages/diagnostics-plugin/test/unit/protocol.test.ts`, `test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts`                            | protocol/connector/plugin                | Support key, canonical query, auth-before-read, exact projection, unsupported/source-failure handling.                   |
+| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                                                           | client/interfaces                        | False-key no-request, `authorization()` args, signed verification, exact DTO/instance checks.                            |
+| `packages/diagnostics-plugin/test/e2e/authorization-explanations.test.ts`                                                                              | all paths                                | Real socket/guards; positive reasons; JWT/principal/claim/request/error canaries absent; custom replacement unsupported. |
 
 ## 7. Verification gates
 
@@ -178,8 +220,8 @@ implementation PR.
 - Rules or identities leak: explicit aliases; observer signature excludes principal data and
   arbitrary text.
 - Compound tree invents skipped work: record only loop iterations actually evaluated.
-- Replaced provider is misrepresented: compare exact provider at bootstrap and detach first-party
-  collector.
+- Replaced provider is misrepresented: use non-resolving exact identity checks before capture and
+  reads, then latch unsupported and clear.
 
 ## 9. Out of scope
 
@@ -191,24 +233,26 @@ implementation PR.
 ## 10. Design security review — completed before implementation
 
 **Reviewed flow:** authoritative RBAC method → private evaluator result → alias-only guarded
-observer → bounded ring → typed source → authenticated fixed connector → signed frame → validating
-client. The principal is used by the evaluator but is not an observer argument; minimization occurs
-before retention.
+observer → non-resolving current-provider identity check → bounded ring → repeated provider check at
+source read → authenticated fixed connector → signed frame → validating client. The principal is
+used by the evaluator but is not an observer argument; minimization occurs before retention.
 
 **Approved budgets:** 128 role aliases, 128 permission aliases, 16 steps/decision, 1,024 records,
-128/read, 64-byte aliases/revision and 256 KiB/frame. Disabled, no-policy and replaced-provider
-modes retain no decision ring.
+128/read, 64-byte aliases/revision and 256 KiB/frame. Disabled, no-policy, identity-unavailable and
+replaced-provider modes retain no decision ring.
 
-| Finding                                                         | Resolution in this plan                                                            |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Calling authorization again can change results or side effects. | Explain the same private evaluator result; never replay.                           |
-| A 403 cannot identify the failed rule.                          | Capture only at the actual RBAC service, never infer from HTTP status.             |
-| Custom providers expose booleans only.                          | Explicit unsupported-service coverage after exact-provider check.                  |
-| Names and principal roles reveal policy/identity.               | Approved aliases only; principal, claims and unapproved granting roles are absent. |
+| Finding                                                         | Resolution in this plan                                                                   |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Calling authorization again can change results or side effects. | Explain the same private evaluator result; never replay.                                  |
+| A 403 cannot identify the failed rule.                          | Capture only at the actual RBAC service, never infer from HTTP status.                    |
+| Custom providers expose booleans only.                          | Non-resolving exact-provider checks before capture/read; replacement latches unsupported. |
+| Names and principal roles reveal policy/identity.               | Approved aliases only; principal, claims and unapproved granting roles are absent.        |
+| An `onBootstrap` check can precede a later override.            | Check at every capture/read; do not treat hook order as final-provider proof.             |
 
 The implementation audit compares observed and returned decisions for direct/inherited/wildcard/deny
 and compound short-circuits, including custom replacement. It plants canaries in JWTs, IDs, roles,
 permissions, claims, requests, resources and thrown values; checks observer calls, ring, frames,
-errors and logs; proves useful approved explanations survive; and repeats every M98b
-credential/replay/origin/authority/expiry/revocation/ instance/version/mutation refusal for
-`/v1/authorization`.
+errors and logs; proves a lazy custom provider is never constructed by diagnostics, exercises a
+replacement in a later bootstrap hook, proves useful approved explanations survive, and repeats
+every M98b credential/replay/origin/authority/expiry/revocation/ instance/version/mutation refusal
+for `/v1/authorization`.

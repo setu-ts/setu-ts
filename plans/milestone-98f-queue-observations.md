@@ -15,6 +15,9 @@ reads never reserve, acknowledge, retry, dead-letter, enumerate, or mutate a job
 - **NOT this milestone:** job/dead-letter listing, payload/header/error display, retry/purge/replay
   controls, exact depth support for RabbitMQ/SQS, or tenant switching.
 
+Implementation starts from main containing M98d's fixed inspector-support manifest; HealthPlugin
+itself remains optional and is not required for queue observations.
+
 ## 1. Contracts verified from SOURCE (not names)
 
 | Reference                 | Source (file:line)                                         | Verified surface / fact                                                                                     |
@@ -43,15 +46,29 @@ reads never reserve, acknowledge, retry, dead-letter, enumerate, or mutate a job
   but does not claim the token in `provides`, matching the framework's contribution-token pattern
   and avoiding resolver collisions. DiagnosticsPlugin reads all sources once at bootstrap, caps them
   at 16, and serves one fixed `GET /v1/queues?after=N&limit=N` response. No QueuePlugin yields
-  `unsupported`; present-but-unconfigured sources report `disabled`.
+  `unsupported`; present-but-unconfigured sources report `disabled`. The connector sets the fixed
+  authenticated status manifest's `queues` key true; a client seeing false returns a frozen typed
+  unsupported batch without sending the queue request.
 - **Why:** Named queues remain independently observable without an illegal duplicate provider.
 - **Test home:** plugin-resolver/queue multi-instance integration and diagnostics plugin tests.
 
 ### 3.2 Exact event and batch contracts
 
-- **Decision:** `QueueDiagnosticsSourceStatus` contains a connector-assigned opaque `q<N>` source
-  ID, inspector state, optional configured instance alias, depth coverage, and fixed failure
-  category. `QueueAttemptObservation` contains only global response sequence, source ID, configured
+- **Decision:** `QueueSourceAttemptObservation` carries a source-local sequence and the approved
+  queue/job aliases, attempt, duration, processor outcome, settlement and age fields below.
+  `QueueDiagnosticsSourceBatch` contains one source's state, optional configured instance alias,
+  depth coverage, fixed failure category, source-local attempts/depths, next/lost/closed and bounded
+  drop counters. `IQueueDiagnosticsSource` exposes exactly:
+
+  ```typescript
+  read(after: number, limit?: number): QueueDiagnosticsSourceBatch;
+  ```
+
+  The method is synchronous, defaults to 128, throws one fixed value-free `RangeError` unless
+  `after` is a non-negative safe integer and `limit` is 1–128, and returns a deeply frozen batch.
+  `QueueDiagnosticsSourceStatus` contains a connector-assigned opaque `q<N>` source ID, inspector
+  state, optional configured instance alias, depth coverage, and fixed failure category.
+  `QueueAttemptObservation` contains only global response sequence, source ID, configured
   `instanceAlias`, approved `queueAlias`, session-local `jobAlias`, attempt, `durationMs`, processor
   outcome (`completed`, `retryable-error`, `terminal-error`), settlement (`acknowledged`,
   `requeued`, `dead-lettered`, `failed`, `unknown`), and monotonic `ageMs`. `QueueDepthObservation`
@@ -105,8 +122,9 @@ reads never reserve, acknowledge, retry, dead-letter, enumerate, or mutate a job
   drains newly captured source events into a connector-owned bounded merge ring on each queue read,
   and exposes only that ring's public numeric cursor. Source events enter the merge ring already
   minimized; overflow increments `lost`. The client exposes `queues(after, limit)` with the standard
-  signed serialized exchange. Projectors validate own properties and copy exact fields; source
-  failures become a fixed source state without details.
+  signed serialized exchange after the authenticated support manifest reports `queues: true`.
+  Projectors validate own properties and copy exact fields; source failures become a fixed source
+  state without details.
 - **Why:** A single cursor remains usable across named queue instances without exposing registry
   tokens.
 - **Test home:** merge ordering/loss tests, client tests, real socket e2e.
@@ -116,11 +134,16 @@ reads never reserve, acknowledge, retry, dead-letter, enumerate, or mutate a job
 | Exported symbol                                                                                             | Kind               | Consumer / real code path that READS it                     |
 | ----------------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------- |
 | Queue diagnostic outcome/settlement/depth types                                                             | common types       | Queue collector, connector validator, client and devtool.   |
+| `QueueSourceAttemptObservation`, `QueueDiagnosticsSourceBatch`                                              | common interfaces  | QueuePlugin source and connector merge input.               |
 | `QueueDiagnosticsSourceStatus`, `QueueAttemptObservation`, `QueueDepthObservation`, `QueueDiagnosticsBatch` | common interfaces  | Typed source and devtool queue panel.                       |
 | `IQueueDiagnosticsSource`                                                                                   | common interface   | QueuePlugin multi providers and DiagnosticsPlugin consumer. |
 | `CAPABILITIES.QUEUE_DIAGNOSTICS`                                                                            | common token       | Multi registration and connector bootstrap drain.           |
 | `QueueDiagnosticsOptions`, `QueueDepthDiagnosticsOptions`                                                   | queue option types | QueuePlugin validates and builds collectors.                |
 | `IDiagnosticsClient.queues`                                                                                 | interface method   | Native devtool consumes the queue batch.                    |
+
+`IQueueDiagnosticsSource.read(after, limit?)` has the exact synchronous contract in §3.2.
+`IDiagnosticsClient.queues(after: number, limit?: number): Promise<QueueDiagnosticsBatch>` applies
+the same cursor bounds and negotiates support before sending the operation.
 
 Collectors, alias maps, merge ring, settlement hooks and depth scheduler remain internal.
 
@@ -135,28 +158,29 @@ Collectors, alias maps, merge ring, settlement hooks and depth scheduler remain 
 
 ## 5. Implementation files
 
-| File                                                                                              | Purpose                                                         |
-| ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `packages/common/src/services/diagnostics.ts`, `src/tokens.ts`, `src/index.ts`                    | Queue DTO/source contracts, token, exports.                     |
-| `packages/queue-plugin/src/interfaces/index.ts`, `src/diagnostics/queue-observation-collector.ts` | Options, event/depth collector, aliaser, source.                |
-| `packages/queue-plugin/src/processors/job-processor.ts`, `src/services/queue-service.ts`          | Processor/settlement hooks and scheduled supported depth reads. |
-| `packages/queue-plugin/src/plugin/queue-plugin.ts`, `src/index.ts`                                | Per-instance source registration, adapter scope and lifecycle.  |
-| diagnostics interfaces/plugin/protocol/connector/client source files                              | Fixed queue operation, bounded merge and native method.         |
-| Public, architecture, protocol, package, release and tracking docs                                | Semantics, adapter matrix, security evidence.                   |
+| File                                                                                                                           | Purpose                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `packages/common/src/services/diagnostics.ts`, `src/tokens.ts`, `src/index.ts`                                                 | Queue DTO/source contracts, token, exports.                     |
+| `packages/queue-plugin/src/interfaces/index.ts`, `src/diagnostics/queue-observation-collector.ts`                              | Options, event/depth collector, aliaser, source.                |
+| `packages/queue-plugin/src/processors/job-processor.ts`, `src/services/queue-service.ts`                                       | Processor/settlement hooks and scheduled supported depth reads. |
+| `packages/queue-plugin/src/plugin/queue-plugin.ts`, `src/index.ts`                                                             | Per-instance source registration, adapter scope and lifecycle.  |
+| `packages/diagnostics-plugin/src/interfaces/index.ts`, `src/plugin/diagnostics-plugin.ts`                                      | Client method, fixed support key and multi-source resolution.   |
+| `packages/diagnostics-plugin/src/protocol/protocol.ts`, `src/transport/connector-handler.ts`, `src/client/client.ts`           | Queue target, bounded merge, projection and client.             |
+| `PUBLIC_API.md`, `ARCHITECTURE.md`, `docs/diagnostics-protocol.md`, package READMEs, `CHANGELOG.md`, `ROADMAP.md`, `CLAUDE.md` | Semantics, adapter matrix, security evidence.                   |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                              | src covered                                     | Key assertions (and the signature each call type-checks against)                                                     |
-| ------------------------------------------------------ | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| common diagnostics/token/index tests                   | common changed files                            | Types, exports and legal token.                                                                                      |
-| queue options/collector tests                          | interfaces/collector                            | Bounds, aliases, ring/loss/LRU, canary exclusion, disabled mode.                                                     |
-| queue `test/unit/job-processor.test.ts`                | job-processor                                   | completed/retry/dead/settlement-failed ordering; unchanged adapter and callback calls.                               |
-| queue `test/unit/queue-service.test.ts`                | queue-service                                   | durations, depth schedule, no overlap, zero added reserve/settlement calls.                                          |
-| queue adapter-specific existing tests                  | queue-service against memory/redis/rabbitmq/sqs | support matrix: real counts where supported, unavailable elsewhere, correct scope.                                   |
-| queue `test/unit/plugin.test.ts`, `test/index.test.ts` | plugin/index                                    | multi sources, named instances, lifecycle cleanup, exports.                                                          |
-| diagnostics protocol/connector/plugin tests            | protocol/connector/plugin                       | canonical query, merge/loss, auth-before-read, exact projection and partial source failure.                          |
-| diagnostics client/index tests                         | client/interfaces                               | `queues()` argument validation, MAC/DTO/instance checks, close/deadline.                                             |
-| diagnostics `test/e2e/queue-observations.test.ts`      | all paths                                       | Real socket and jobs; useful attempts/depths; payload/header/id/token/error canaries absent; app behavior identical. |
+| Test file                                                                                                                                                  | src covered                     | Key assertions (and the signature each call type-checks against)                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/diagnostics-contract.test.ts`, `test/unit/tokens.test.ts`, `test/unit/index.test.ts`                                            | common diagnostics/tokens/index | Source/final DTO signatures, exports and legal token.                                                                |
+| `packages/queue-plugin/test/unit/queue-diagnostics-options.test.ts`, `test/unit/queue-observation-collector.test.ts`                                       | interfaces/collector            | Bounds, aliases, source read signature, ring/loss/LRU, canary exclusion, disabled mode.                              |
+| `packages/queue-plugin/test/unit/job-processor.test.ts`                                                                                                    | job-processor                   | Completed/retry/dead/settlement-failed ordering; unchanged adapter and callback calls.                               |
+| `packages/queue-plugin/test/unit/queue-service.test.ts`                                                                                                    | queue-service                   | Durations, depth schedule, no overlap, zero added reserve/settlement calls.                                          |
+| `packages/queue-plugin/test/unit/memory-queue.test.ts`, `test/unit/redis-queue.test.ts`, `test/unit/rabbitmq-queue.test.ts`, `test/unit/sqs-queue.test.ts` | queue-service/adapters          | Support matrix: real counts where supported, unavailable elsewhere, correct scope.                                   |
+| `packages/queue-plugin/test/unit/queue-plugin.test.ts`, `test/unit/barrel-exports.test.ts`                                                                 | plugin/index                    | Multi sources, named instances, lifecycle cleanup, exports.                                                          |
+| `packages/diagnostics-plugin/test/unit/protocol.test.ts`, `test/unit/connector-handler.test.ts`, `test/unit/plugin.test.ts`                                | protocol/connector/plugin       | Support key, canonical query, merge/loss, auth-before-read, exact projection and partial source failure.             |
+| `packages/diagnostics-plugin/test/unit/client.test.ts`, `test/index.test.ts`                                                                               | client/interfaces               | False-key no-request, `queues()` argument validation, MAC/DTO/instance checks, close/deadline.                       |
+| `packages/diagnostics-plugin/test/e2e/queue-observations.test.ts`                                                                                          | all paths                       | Real socket and jobs; useful attempts/depths; payload/header/id/token/error canaries absent; app behavior identical. |
 
 ## 7. Verification gates
 
