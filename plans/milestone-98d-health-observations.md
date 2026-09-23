@@ -56,16 +56,17 @@ it.
 
 - **Decision:** Before `packages/diagnostics-plugin` is first PUBLISHED — a hard gate, established
   by reading the shipped validator rather than assumed — extend the authenticated v1 status body
-  with one exact `inspectors` object containing the five fixed boolean keys `health`,
-  `configuration`, `queues`, `traces`, and `authorization`. M98d sets only `health: true`; M98e–M98h
-  turn on their reserved key when their connector operation ships. A key means that the connector
-  implements and validates that operation, independent of whether the application registered its
-  owning source. The new client recognizes the exact legacy M98b three-field status body and the
-  exact new four-field body; legacy means all five keys are false. It caches the authenticated
-  manifest, returns a frozen typed `unsupported` DTO without sending an addon request when a key is
-  false, and uses the operation's `unsupported` response only when the key is true but its source is
-  absent. Unknown/missing/extra manifest keys and non-booleans fail pairing. Inspectors beyond these
-  five require a new protocol version.
+  with one exact `inspectors` object containing the eleven fixed boolean keys `health`,
+  `configuration`, `queues`, `traces`, `authorization`, `cache`, `events`, `scheduler`, `realtime`,
+  `storage`, and `outboundHttp`. M98d sets only `health: true`; M98e–M98n turn on their reserved key
+  when their connector operation ships. A key means that the connector implements and validates that
+  operation, independent of whether the application registered its owning source. The new client
+  recognizes the exact legacy M98b three-field status body and the exact new four-field body; legacy
+  means all eleven keys are false. It caches the authenticated manifest, returns a frozen typed
+  `unsupported` DTO without sending an addon request when a key is false, and uses the operation's
+  `unsupported` response only when the key is true but its source is absent. Unknown/missing/extra
+  manifest keys and non-booleans fail pairing. Inspectors beyond these eleven require a new protocol
+  version.
 - **Why:** Client/server release skew has an explicit authenticated contract and never probes an
   unknown route or infers support from a generic protocol error.
 
@@ -94,6 +95,15 @@ it.
   matrix pins BOTH directions, so the asymmetry above cannot be forgotten: a new client against the
   legacy body pairs and reports all keys false, and the shipped `isStatusBody` rejects the new
   four-field body — the test asserting the second is the reason the gate exists.
+
+Implementation must verify the package publication state before changing the wire shape. If any
+released client already accepts the five-key manifest or the legacy body only, stop this in-place
+change and amend the plan with an authenticated version-negotiation design and skew tests first. The
+historical unpublished assumption is not permission to break a released client.
+
+This reservation expands the earlier five-key planning proposal before first publication. No new
+inspector is advertised as supported until its route and client validation ship. All keys remain
+present and false in earlier implementations. No generic plugin-supplied keys are accepted.
 
 ### 3.3 Exact public DTO
 
@@ -174,7 +184,7 @@ it.
 
 | Exported symbol                   | Kind               | Consumer / real code path that READS it                                     |
 | --------------------------------- | ------------------ | --------------------------------------------------------------------------- |
-| `DiagnosticsInspectorState`       | common type        | All five inspector DTOs and devtool state rendering.                        |
+| `DiagnosticsInspectorState`       | common type        | All planned inspector DTOs and devtool state rendering.                     |
 | `HealthDiagnosticsObservation`    | common interface   | Health source, connector validator/projector, client, devtool health panel. |
 | `HealthDiagnosticsSnapshot`       | common interface   | `IHealthDiagnosticsSource`, `IDiagnosticsClient.health`, and devtool.       |
 | `IHealthDiagnosticsSource`        | common interface   | HealthPlugin registers it; DiagnosticsPlugin consumes it.                   |

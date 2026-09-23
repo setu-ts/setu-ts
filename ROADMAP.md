@@ -10651,7 +10651,7 @@ observation boundary and its shared contracts; 98b complete
 `common` contract/token, and `packages/diagnostics-plugin`; 98c complete
 ([#352](https://github.com/setu-ts/setu-ts/pull/352)) — `packages/cli` development-entry scaffolding
 and per-member credential handoff. These three are implemented and merged, awaiting publication in
-the next release cycle. **98d–98h are planned**, each with its own implementation plan and mandatory
+the next release cycle. **98d–98n are planned**, each with its own implementation plan and mandatory
 security audit. This umbrella records framework work for the separately maintained devtool; adding
 the later letters does not make them prerequisites for publishing 98a–98c or for the devtool's
 initial D01–D04 preview, with ONE exception recorded under the release requirements below — M98d's
@@ -10682,22 +10682,26 @@ respectively. Each letter gets its own feature branch, verification and one cano
 is named below; shared-contract or connector changes must be necessary for that letter's real
 consumer and explicitly scoped in its plan, not a sweep across unrelated plugins.
 
-Review health first, then provenance, then queue/tracing together, then authorization. The owning
-plugins remain independently optional, but M98d supplies the fixed protocol-support manifest that
-M98e–M98h extend; those implementation branches therefore start after that shared compatibility
-substrate lands. All addons depend on the M98a/M98b minimized collection and authenticated
-connection boundaries; M98c supplies development launch wiring for consumer exercises. The first
-letter requiring a new typed reader or transport operation owns its design, compatibility and
-security evidence. Do not create a speculative provider bus or extend protocol v1 silently.
+Review health first, then provenance, then queue/tracing together, then authorization. M98i–M98n add
+cache, event dispatch, scheduler, realtime, storage and outbound HTTP observations, respectively.
+Prioritize cache/events/scheduler, then realtime, then storage and outbound HTTP. The newer plans
+record design-review requirements, not completed review evidence. The owning plugins remain
+independently optional, but M98d supplies the fixed protocol-support manifest that M98e–M98n extend;
+those implementation branches therefore start after that shared compatibility substrate lands. All
+addons depend on the M98a/M98b minimized collection and authenticated connection boundaries; M98c
+supplies development launch wiring for consumer exercises. The first letter requiring a new typed
+reader or transport operation owns its design, compatibility and security evidence. Do not create a
+speculative provider bus or extend protocol v1 silently.
 
 The completed M98a–M98c design records are archived at
 `plans/archive/milestone-98a-kernel-diagnostics.md`,
 `plans/archive/milestone-98b-local-diagnostics-connector.md` and
 `plans/archive/milestone-98c-devtool-scaffolding.md`; current code and public documentation govern
-their implemented contracts. The canonical M98d–M98h plans now live at the paths named in each
+their implemented contracts. The canonical M98d–M98n plans now live at the paths named in each
 section below. They verify contracts from source, name the consumer of every export, and record the
-pre-implementation security review required by the gates below; they remain planning documents, not
-evidence that implementation or the committed-tree security audit is complete.
+pre-implementation security review requirements and status required by the gates below; they remain
+planning documents, not evidence that implementation or the committed-tree security audit is
+complete.
 
 ### Existing seams and gaps
 
@@ -11023,7 +11027,141 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
       wildcard/deny/short-circuit cases and custom replacements; prove no extra evaluations,
       identity leakage or altered enforcement when observation fails or buffers overflow.
 
-### Mandatory Security Audit Gates for M98d–M98h
+### Milestone 98i: Cache Observations
+
+**Status:** Planned. Owner: `packages/cache-plugin`. Canonical plan:
+`plans/milestone-98i-cache-observations.md`.
+
+- [ ] Instrument actual CacheService backend calls once. get records hit only for a non-null result;
+      null is miss, and rejection is failure. has records present/absent separately from get hit
+      rate. getOrSet internal get/set calls count as backend operations; joining the coalescer does
+      not invent a backend read. Do not change factory execution or fallback behavior. Noop remains
+      a legitimate miss-producing implementation. No eviction count is inferred from misses or
+      expiration.
+- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+      reader and native client method; activate only the reserved `cache` manifest entry.
+- [ ] Exclude keys, prefixes, values, Redis URLs, factory results, raw errors before buffering.
+- [ ] Only calls through the owned CacheService; direct store calls and replacement services are
+      outside coverage.
+- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+      audit. Compare TTL, prefix, concurrent getOrSet factory counts, null semantics and original
+      rejection identity with observation enabled, disabled and failing. Assert evictions are
+      unsupported rather than fabricated.
+
+### Milestone 98j: Event Dispatch Observations
+
+**Status:** Planned. Owner: `packages/events-plugin`. Canonical plan:
+`plans/milestone-98j-event-observations.md`.
+
+- [ ] Instrument publish entry and each existing handler await, without subscribing an extra handler
+      or changing dispatch. Count publications, handler starts, successes and failures separately.
+      async publication completion is not handler completion. A thrown errorHandler retains its
+      existing propagation behavior. Aggregate handlers under their approved event alias; individual
+      handler names and function identities are excluded. publishBatch counts constituent publish
+      calls once.
+- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+      reader and native client method; activate only the reserved `events` manifest entry.
+- [ ] Exclude event data, event IDs, aggregate IDs, handler function names, arbitrary event types,
+      raw errors before buffering.
+- [ ] Only the in-process InMemoryEventBus; broker acknowledgements and cross-service delivery
+      remain separate messaging work.
+- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+      audit. Exercise sync/async dispatch, handler rejection, errorHandler throwing, publishBatch,
+      unsubscribe during dispatch, and shutdown while handlers are pending. Assert exact invocation
+      order/count and no second evaluation.
+
+### Milestone 98k: Scheduler Execution Observations
+
+**Status:** Planned. Owner: `packages/scheduler-plugin`. Canonical plan:
+`plans/milestone-98k-scheduler-observations.md`.
+
+- [ ] Observe timer fire, slot-lock and handler-lock outcomes inside SchedulerService, and actual
+      attempt settlement inside the executor. Use runtime.now only to compare intended epoch fire
+      and actual start; use hrtime for duration. Distinguish contention, lock failure, actual
+      attempt failure and completion. Record lateness as max(0, actualStart-intendedFire), not an
+      absolute schedule. Observation never acquires a lock or invokes a handler. A skipped local
+      fire is not a globally missed execution.
+- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+      reader and native client method; activate only the reserved `scheduler` manifest entry.
+- [ ] Exclude job data, raw names, job IDs, cron expressions, lock keys/tokens, exception messages
+      before buffering.
+- [ ] Local observed execution only; durable history, cluster completeness and job control are
+      excluded.
+- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+      audit. Compare fire times, pause/resume/remove, delay/cron/every, retries, slot dedup and
+      overlap locks with diagnostics off/on/failing. Prove lock losers do not produce handler
+      records.
+
+### Milestone 98l: Realtime Lifecycle Observations
+
+**Status:** Planned. Owner: `packages/websocket-plugin`; SSE and realtime-backplane are explicit
+co-owners. Canonical plan: `plans/milestone-98l-realtime-observations.md`.
+
+- [ ] Each WebSocket/SSE plugin owns a separate source. Capture open/close and local send/enqueue
+      outcomes at the existing connection code. Read only existing aggregate connection/group
+      counts. SSE backlog closes get a fixed backpressure category; websocket native pressure is
+      unsupported in this milestone. Backplane sources count publish and receive callbacks without
+      inspecting frame fields. Do not enumerate memberships, call room/channel to inspect them, or
+      add a network subscription. Transport publish completion is not remote delivery. Count sends
+      at the connection boundary only, not again at room broadcast.
+- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+      reader and native client method; activate only the reserved `realtime` manifest entry.
+- [ ] Exclude frames, messages, headers, query strings, principals, connection IDs, group names,
+      close reason text, backplane origin before buffering.
+- [ ] Aggregate local outcomes. No delivery guarantee, message inspection, native websocket backlog
+      measurement or per-user presence.
+- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+      audit. Exercise SSE overflow, client abort, websocket normal/error close, heartbeat, broadcast
+      exceptions, backplane rejection and own-origin filtering. Assert identical sends, disconnect
+      timing, membership and transport calls.
+
+### Milestone 98m: Storage Operation Observations
+
+**Status:** Planned. Owner: `packages/storage-plugin`. Canonical plan:
+`plans/milestone-98m-storage-observations.md`.
+
+- [ ] Observe service operation settlement once. For put/get record byteLength already available
+      from the application argument/result, without copying bytes. getStream records only stream
+      acquisition duration and outcome; bytes remain null and transfer completion is unknown. Its
+      buffered fallback must not double count internal get as another public operation. getSignedUrl
+      records success/failure only and never reads the returned URL. No additional
+      exists/get/list/probe call is allowed.
+- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+      reader and native client method; activate only the reserved `storage` manifest entry.
+- [ ] Exclude object paths, contents, metadata, content types, signed URLs, provider credentials,
+      raw errors before buffering.
+- [ ] Operation/acquisition timings, not transfer progress, inventory or object browsing.
+- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+      audit. Test all existing provider arms using injected clients and existing guarded real-import
+      suites. Compare optional put arguments, sync provider throws, missing objects, stream
+      identity/cancellation/backpressure and fallback call counts.
+
+### Milestone 98n: Outbound HTTP Attempt Observations
+
+**Status:** Planned. Owner: `packages/sdk`. Canonical plan:
+`plans/milestone-98n-outbound-http-observations.md`.
+
+- [ ] Export createObservedFetch with an explicitly injected fetch and monotonic clock. Applications
+      pass the returned fetch to ClientOptions.fetch or call it directly. Call the injected fetch
+      exactly once with unchanged input/init and return the original Response or throw the original
+      rejection. Record elapsed time until response headers or rejection, status class and fixed
+      success/failure only. Never read request URLs, headers, bodies, signals or rejection
+      properties. No monkey-patching global fetch. Retries appear as separate attempts; logical
+      request counts, redirect-hop counts and timeout attribution are explicitly unavailable. No new
+      HTTP client plugin is introduced.
+- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+      reader and native client method; activate only the reserved `outboundHttp` manifest entry.
+- [ ] Exclude URLs, origin/hostnames, headers, cookies, request/response bodies, signal reasons,
+      exception properties before buffering.
+- [ ] Explicitly adopted server-side fetch attempts only. Browser SDK collection is not
+      automatically sent to the framework; unrelated fetches and third-party internal calls are
+      invisible.
+- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+      audit. Verify exact input/init and Response identity, stream untouched, original synchronous
+      throws and promise rejections, abort, SDK retry count and redirects delegated unchanged. Test
+      with real local HTTP via SDK injected fetch; no public network test dependency.
+
+### Mandatory Security Audit Gates for M98d–M98n
 
 Each letter requires **two recorded security gates**, in addition to ordinary code review and the
 verification requirements below. The planned status and these checkboxes are not audit evidence.
@@ -11063,15 +11201,18 @@ published server cannot serve the old shape to an old client. The gate costs not
 one edit. Adding the later letters still makes none of them a prerequisite for the devtool's initial
 D01–D04 preview, and only M98d's status shape — not its route, its source or the other letters —
 must precede that publication. The manifest declares connector operation support separately from
-application source availability; M98e–M98h activate their reserved fixed entries as their operations
+application source availability; M98e–M98n activate their reserved fixed entries as their operations
 ship. The reverse skew is covered by a fallback: a new client treats the exact legacy three-field
 M98b status body as all addon operations unsupported — a permanently supported reading with its own
 tests, not a migration crutch — so it never probes an unknown route or derives support from a
-generic error. Future inspectors beyond the five fixed entries require a new protocol version.
-Verify credential expiry/revocation, request/response instance binding, replay protection, protocol
-bounds and refusal of arbitrary method/file access or mutation for every added operation. Shared
-backends require their own allowed resource/tenant scope; a local session key does not authorize
-enumeration of all data reachable by the application.
+generic error. The eleven reserved keys are `health`, `configuration`, `queues`, `traces`,
+`authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`, and `outboundHttp`. This
+expands the unpublished M98d proposal; reserve all keys before first publication, with false values
+until their operations ship. Future inspectors beyond the eleven fixed entries require a new
+protocol version. Verify credential expiry/revocation, request/response instance binding, replay
+protection, protocol bounds and refusal of arbitrary method/file access or mutation for every added
+operation. Shared backends require their own allowed resource/tenant scope; a local session key does
+not authorize enumeration of all data reachable by the application.
 
 ### Threat Model and Acceptance Evidence
 
@@ -11108,7 +11249,7 @@ records are redacted:
       trees. Update `PUBLIC_API.md`, `ARCHITECTURE.md`, package documentation, release manifests for
       the new package, and the progress/status records in the owning implementation PRs.
 
-### Outside the Planned M98a–M98h Scope
+### Outside the Planned M98a–M98n Scope
 
 The extension UI, Free/Pro packaging, subscriptions and any customer portal remain in the separate
 devtool product. Both tiers get the same security boundaries. This milestone adds no licensing check
@@ -11117,14 +11258,15 @@ to the framework.
 Health observations, value-free configuration provenance, live queue observations, minimized tracing
 and bounded authorization explanations now belong to M98d–M98h above, subject to their plans and
 security audits. Their framework APIs remain independent of licensing; Free/Pro presentation belongs
-to the devtool repository.
+to the devtool repository. M98i–M98n extend this with operation observations, not cache/storage
+browsing or scheduler/realtime controls. Database diagnostics remain deferred.
 
 Payload/log recording, configuration values, source navigation metadata, arbitrary custom-plugin
-inspection contributions and non-HTTP operation families beyond the explicitly supported queue/trace
-projections require separately scoped follow-ons. Each must define exactly which fields it emits,
-who can read them, and how unavailable information is reported; no promise of automatic visibility
-into every adapter or arbitrary application code. Full policy trees and hypothetical authorization
-simulation are also outside the bounded observed explanations of M98h.
+inspection contributions and operation families beyond the explicitly planned M98d–M98n projections
+require separately scoped follow-ons. Each must define exactly which fields it emits, who can read
+them, and how unavailable information is reported; no promise of automatic visibility into every
+adapter or arbitrary application code. Full policy trees and hypothetical authorization simulation
+are also outside the bounded observed explanations of M98h.
 
 Database/cache/storage browsing, queue enumeration and retry, scheduler controls, tenant switching,
 request replay, fixture capture, fault injection and generated scenarios are also deferred. They
@@ -11698,7 +11840,7 @@ because one of them invalidated part of a previous run's claims:
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                  |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                      |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                        |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98c complete, 98d–98h planned with security audit gates)                              |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98c complete, 98d–98n planned with security audit gates)                              |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347)) |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))             |
@@ -11707,6 +11849,12 @@ because one of them invalidated part of a previous run's claims:
 | 98f       | ⬜     | queue-plugin — attempt, outcome and depth observations; design security review and implementation audit required                          |
 | 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                       |
+| 98i       | ⬜     | cache observations — design security review and implementation audit required                                                             |
+| 98j       | ⬜     | event dispatch observations — design security review and implementation audit required                                                    |
+| 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                               |
+| 98l       | ⬜     | realtime lifecycle observations — design security review and implementation audit required                                                |
+| 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                 |
+| 98n       | ⬜     | outbound http attempt observations — design security review and implementation audit required                                             |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                                |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                        |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                      |

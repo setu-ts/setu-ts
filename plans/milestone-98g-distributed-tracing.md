@@ -72,7 +72,7 @@ itself remains optional and is not required for trace observations.
 
 - **Decision:** `TraceDiagnosticsOptions` requires `enabled: true`, a `serviceAlias`, and
   `operations` mapping exact raw span names to unique aliases. Every alias carries M98d's shape rule
-  verbatim — non-empty UTF-8, 1–64 bytes, no control characters — so the five plans validate an
+  verbatim — non-empty UTF-8, 1–64 bytes, no control characters — so the inspector plans validate an
   alias identically. Unapproved spans are counted and dropped before the ring. `TraceObservation`
   contains sequence, service/operation aliases, trace ID, span ID, optional parent span ID, at most
   eight link trace/span pairs, kind, outcome (`ok`, `error`, `unset`), durationMs, and `ageMs`.
