@@ -166,7 +166,11 @@ itself remains optional and is not required for authorization explanations.
   rather than cumulative. `next` is the last returned sequence, or the REQUESTED cursor when the
   batch is empty, so an idle poll re-sends the same cursor and cannot skip a decision that has not
   been recorded yet. A cursor beyond the current sequence is the one cursor that throws the fixed
-  value-free `RangeError`. `closed` is `true` once §3.5's `onClose` detached the observer.
+  value-free `RangeError`. `closed` is `true` once §3.5's `onClose` detached the observer. The gap
+  is exact rather than approximate, which is what makes it assertable: the reference implementation
+  computes `start = max(after + 1, firstSequence)` and `lost = start - after - 1`
+  (`packages/kernel/src/diagnostics/collector.ts:242-248`), and `after: 0` takes that same
+  arithmetic with no special case — on an evicted ring it reports `firstSequence - 1`, not zero.
   `droppedUnapproved` is independent of `lost` and counts §3.3 approval drops, which consume no
   sequence: a decision refused for an unapproved rule alias is never assigned one, so it can neither
   appear in `lost` nor leave a hole a client could measure.
@@ -176,8 +180,11 @@ itself remains optional and is not required for authorization explanations.
   saw.
 - **Test home:** protocol/connector/client/e2e security tests, including paging across eviction —
   overflow the 1,024-decision ring, resume from a pre-overflow cursor, and assert the oldest
-  retained decisions with a per-batch `lost`, no repeated or skipped sequence across successive
-  reads, an empty batch echoing its cursor, and a beyond-sequence cursor throwing.
+  retained decisions with a per-batch `lost`; no DUPLICATE sequence across successive reads; a first
+  returned sequence that MAY skip, with the gap `first - after - 1` EQUAL to that batch's `lost`,
+  since the skip IS the eviction; every later sequence in the batch consecutive; an empty batch
+  echoing its cursor; and a beyond-sequence cursor throwing. A security view must be able to say
+  exactly how many decisions it did not see, so the equality is the assertion that matters.
 
 ## 4. Exported surface — every symbol names its consumer
 

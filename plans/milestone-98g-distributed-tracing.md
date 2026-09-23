@@ -141,14 +141,20 @@ itself remains optional and is not required for trace observations.
   empty, so polling an idle application re-sends the same cursor and cannot skip a span that has not
   arrived yet. A cursor beyond the current sequence is the one cursor that throws the fixed
   value-free `RangeError`, because it can only come from a client reading a different instance's
-  sequence space. `closed` is `true` once §3.5's `shutdown` marked the source closed.
+  sequence space. `closed` is `true` once §3.5's `shutdown` marked the source closed. The gap is
+  exact rather than approximate, which is what makes it assertable: the reference implementation
+  computes `start = max(after + 1, firstSequence)` and `lost = start - after - 1`
+  (`packages/kernel/src/diagnostics/collector.ts:242-248`), and `after: 0` takes that same
+  arithmetic with no special case — on an evicted ring it reports `firstSequence - 1`, not zero.
 - **Why:** Correlation does not weaken M98b's per-application authentication boundary. A ring that
   can evict under load must let a client detect the gap: a cursor that silently restarted, or a
   `lost` a client had to accumulate itself, is how a devtool comes to claim it showed every span.
 - **Test home:** connector/client/e2e tests across two separately authenticated apps, plus paging
   across eviction — overflow the 1,024-record ring, resume from the pre-overflow cursor, and assert
   the oldest retained records with a per-batch `lost` that does not accumulate across successive
-  reads, no repeated or skipped sequence, an empty batch echoing its cursor as `next`, and a
+  reads; no DUPLICATE sequence; a first returned sequence that MAY skip, with the gap
+  `first - after - 1` EQUAL to that batch's `lost`, since the skip IS the eviction; every later
+  sequence in the batch consecutive; an empty batch echoing its cursor as `next`; and a
   beyond-sequence cursor throwing the fixed `RangeError`.
 
 ## 4. Exported surface — every symbol names its consumer

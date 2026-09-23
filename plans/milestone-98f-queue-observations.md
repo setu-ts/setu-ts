@@ -86,7 +86,12 @@ itself remains optional and is not required for queue observations.
   starts at the oldest retained event; a cursor older than the oldest retained sequence returns the
   oldest retained events and reports the gap in a PER-BATCH `lost`; `next` is the last returned
   sequence, or the REQUESTED cursor when the batch is empty; a cursor beyond the current sequence
-  throws the fixed value-free `RangeError`. Those rules govern BOTH rings — the per-source ring
+  throws the fixed value-free `RangeError`. The gap is exact rather than approximate, which is what
+  makes it assertable: the reference implementation computes `start = max(after + 1, firstSequence)`
+  and `lost = start - after - 1` (`packages/kernel/src/diagnostics/collector.ts:242-248`), so `lost`
+  is precisely the count of sequences between the requested cursor and the first returned record.
+  `after: 0` takes that same arithmetic and is NOT special-cased — on an evicted ring it reports
+  `firstSequence - 1`, not zero. Those rules govern BOTH rings — the per-source ring
   `IQueueDiagnosticsSource.read` pages, and the connector merge ring the client pages.
 
   This design has two bounded rings (1,024 source events per source, 1,024 connector merge events),
@@ -105,11 +110,15 @@ itself remains optional and is not required for queue observations.
   attempt — and with two rings the dangerous case is the invisible one, where the merge sequence is
   contiguous because the attempts were already gone before the connector read them.
 - **Test home:** common DTO tests and protocol exact-key tests, plus paging across eviction at both
-  levels — overflow the 1,024-event merge ring, resume from a pre-overflow cursor, and assert no
-  repeated or skipped sequence, a per-batch `lost`, an empty batch echoing its cursor, and a
-  beyond-sequence cursor throwing; then overflow a SOURCE ring between two connector reads and
-  assert the loss surfaces on that source's status while the merge sequence stays contiguous and its
-  own `lost` stays zero — the case that discriminates the two counters.
+  levels. Overflow the 1,024-event merge ring, resume from a pre-overflow cursor, and assert: no
+  DUPLICATE sequence across successive reads; the first returned sequence MAY skip, because that
+  skip is the eviction, and the gap `first - after - 1` EQUALS the batch's `lost`; every sequence
+  after that first one is consecutive within the batch; an empty batch echoes its cursor; a
+  beyond-sequence cursor throws. `after: 0` is not special-cased and gets the same rule — on an
+  evicted ring it starts at the oldest retained event and reports `lost = firstSequence - 1`, and
+  only on a ring that never evicted is that zero. Then overflow a SOURCE ring between two connector
+  reads and assert the loss surfaces on that source's status while the merge sequence stays
+  contiguous and the batch's own `lost` stays zero — the case that discriminates the two counters.
 
 ### 3.3 Observe the authoritative attempt once
 
