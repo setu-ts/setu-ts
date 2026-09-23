@@ -94,7 +94,7 @@ milliseconds). Numbers are finite, nonnegative and clamped at Number.MAX_SAFE_IN
 integer milliseconds. count counts settled observations, not currently active calls. Counters are
 cumulative within the retention window. Nonapplicable numeric counters are zero. lastDurationMs is
 null for instantaneous lifecycle observations; otherwise it is the last settled duration. Record
-alias is the approved event/job alias when configured, and the instance alias for other inspectors.
+alias is the approved job alias from diagnostics.jobs; snapshot.alias identifies the owning source.
 On failed collection the source clears records and exposes only state, approved alias, coverage and
 dropped. Lifecycle-closed and disabled states take precedence over collection-failed. Read only
 framework-owned primitive fields; never pass a business object or an Error to the collector.
@@ -121,15 +121,17 @@ the same contract.
 
 ### 3.4 Opt-in, retention and overhead
 
-Plugin option `diagnostics?: { enabled: true, alias: string }` is absent by default; absent means an
-inert disabled source with no collector or observation clock reads.
+Plugin option
+`diagnostics?: { enabled: true, alias: string, jobs: Readonly<Record<string, string>> }` is absent
+by default; absent means an inert disabled source with no collector or observation clock reads. When
+diagnostics is supplied, `jobs` is required; an empty map approves no observations.
 `diagnostics.jobs: Readonly<Record<string, string>>` maps exact declared or imperatively registered
 job names to aliases; all others are omitted.
 
 Aliases are explicit non-secret labels, unique, 1–64 UTF-8 bytes, without controls; do not derive
-aliases by truncating or hashing sensitive values. Event/job maps admit at most 64 exact entries.
-Map lookup must use own entries, not inherited properties. Configuration maps may retain approved
-source names for matching; diagnostic records never retain those names. No user mapping callback.
+aliases by truncating or hashing sensitive values. The jobs map admits at most 64 exact entries. Map
+lookup must use own entries, not inherited properties. Configuration maps may retain approved source
+names for matching; diagnostic records never retain those names. No user mapping callback.
 
 Each source admits at most 64 record slots keyed by approved alias and fixed operation. At capacity,
 ignore new tuples and increment saturating dropped; existing tuples continue updating. Records

@@ -115,13 +115,15 @@ the same contract.
 
 ### 3.4 Opt-in, retention and overhead
 
-Plugin option `diagnostics?: { enabled: true, alias: string }` is absent by default; absent means an
-inert disabled source with no collector or observation clock reads.
+Plugin option
+`diagnostics?: { enabled: true, alias: string, events: Readonly<Record<string, string>> }` is absent
+by default; absent means an inert disabled source with no collector or observation clock reads. When
+diagnostics is supplied, `events` is required; an empty map approves no observations.
 `diagnostics.events: Readonly<Record<string, string>>` maps exact event types to approved aliases;
 unknown types are omitted before capture. No dynamic handler enumeration.
 
 Aliases are explicit non-secret labels, unique, 1–64 UTF-8 bytes, without controls; do not derive
-aliases by truncating or hashing sensitive values. Event/job maps admit at most 64 exact entries.
+aliases by truncating or hashing sensitive values. The events map admits at most 64 exact entries.
 Map lookup must use own entries, not inherited properties. Configuration maps may retain approved
 source names for matching; diagnostic records never retain those names. No user mapping callback.
 

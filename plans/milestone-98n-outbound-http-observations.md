@@ -90,8 +90,8 @@ rejections. Numbers are finite, nonnegative and clamped at Number.MAX_SAFE_INTEG
 integer milliseconds. count counts settled observations, not currently active calls. Counters are
 cumulative within the retention window. Nonapplicable numeric counters are zero. lastDurationMs is
 null for instantaneous lifecycle observations; otherwise it is the last settled duration. Record
-alias is the approved event/job alias when configured, and the instance alias for other inspectors.
-On failed collection the source clears records and exposes only state, approved alias, coverage and
+alias is exactly the configured source alias (snapshot.alias); no event/job mapping exists. On
+failed collection the source clears records and exposes only state, approved alias, coverage and
 dropped. Lifecycle-closed and disabled states take precedence over collection-failed. Read only
 framework-owned primitive fields; never pass a business object or an Error to the collector.
 
