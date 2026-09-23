@@ -11296,16 +11296,18 @@ three **High**. `M98` is held by the diagnostics work, so this block is `M99`.
 **Grouped by SHAPE, not by package** — the rule this register has used since M70. Two findings sit
 together when one fix reasoning covers both, so a letter is one coherent branch and one review.
 
-| Letter   | Shape                                                           | Rows                | Packages                                      |
-| -------- | --------------------------------------------------------------- | ------------------- | --------------------------------------------- |
-| **M99a** | a safety control that reports safe for a case it does not cover | V7-2 **High**, V7-4 | `logger-plugin`, `common`, `messaging-plugin` |
-| **M99b** | what the CLI writes cannot then be used                         | V7-5 **High**, V7-8 | `cli`, `docs`                                 |
-| **M99c** | two first-party components that must agree, and do not          | V7-6 **High**, V7-1 | `sdk`, `kernel`                               |
-| **M99d** | a composition the framework silently declines to give you       | V7-3, V7-7          | `decorator-plugin`, `secrets-plugin`          |
+| Letter   | Shape                                                           | Rows                         | Packages                                      |
+| -------- | --------------------------------------------------------------- | ---------------------------- | --------------------------------------------- |
+| **M99a** | a safety control that reports safe for a case it does not cover | V7-2 **High**, V7-4          | `logger-plugin`, `common`, `messaging-plugin` |
+| **M99b** | what the CLI writes cannot then be used                         | V7-5 **High**, V7-8          | `cli`, `docs`                                 |
+| **M99c** | two first-party components that must agree, and do not          | V7-6 **High**, V7-1          | `sdk`, `kernel`                               |
+| **M99d** | a composition the framework silently declines to give you       | V7-3, V7-7                   | `decorator-plugin`, `secrets-plugin`          |
+| **M99e** | a template axis that forces one style                           | maintainer report 2026-09-24 | `cli`, `docs`                                 |
 
 **Sequence.** M99a first — it is the only letter where the defect is live in a running deployment's
 security posture. M99b next, because V7-5 blocks the containerised story end to end. M99c and M99d
-are independent of both and of each other.
+are independent of both and of each other. M99e was opened after the others shipped and depends on
+none of them.
 
 ---
 
@@ -11641,6 +11643,64 @@ provider arm at a time.
 
 ---
 
+### Milestone 99e: A Template Axis That Forces One Style
+
+**Package(s):** `packages/cli`, `docs`
+
+**Source:** a maintainer report on 2026-09-24, not the smoke register. It is filed under M99 because
+it has this block's shape: a composition the framework can run and the CLI will not produce. The
+plan is `plans/milestone-99e-class-based-style.md`.
+
+**Objective:** a NestJS team migrating a microservice can scaffold a class-based microservice with
+one command. Today it cannot. `setu new` takes one `--template`, and the style and the plugin set
+are the same choice: `microservice` is functional (M65), and `class-based` is the REST set plus the
+decorator and DI pair. There is no template that gives you both, and `docs/migration-nestjs.md`
+never mentions `setu new` or microservices at all.
+
+**The runtime is not the gap. The scaffolder is.** This was checked with a real boot, not by reading
+source. A project scaffolded with `--template class-based`, then given the eight microservice
+plugins (`setu add` for the six ingress providers, a hand edit for resilience, telemetry and service
+discovery), then given one of each decorated ingress artifact through `setu g`, booted and served
+all of it. A `@CommandHandler` and a `@QueryHandler` answered through the buses, an `@OnEvent`
+handler received a published event, a `@Processor` consumed an enqueued job, and the showcase
+`@Controller` answered `200`. The generator side is already style-aware: every schematic picks its
+shape with `generatorMode(plugins)` (`packages/cli/src/utils/generator-mode.ts:22`), which reads
+`decorator-plugin` from the project's manifest. So once a project holds that package, the generator
+emits class-based artifacts whatever template scaffolded it. The only thing refusing the combination
+is template selection (`packages/cli/src/templates/choice.ts:69`).
+
+**Fix: style becomes its own flag, separate from the template.**
+`setu new <name> --template microservice --style class-based`, with the same flag on
+`setu generate app`. This does not reopen what M65 closed. M65 removed `--di` because it split
+decorators from DI, which produced two incoherent compositions. `--style` keeps the decorator and DI
+pair indivisible, and only chooses which plugin set the pair is added to — the same move
+`class-based` already makes on top of REST.
+
+- [ ] `--style functional|class-based` on `setu new` and `setu generate app`, resolved in the one
+      `resolveTemplateChoice`. Accepted on `rest` and `microservice`. Refused by name without
+      `--template`, on `full-stack`, and on a workspace root.
+- [ ] `--template class-based` stays and produces a byte-identical project. It becomes an alias of
+      `--template rest --style class-based`, marked as an alias in help and left out of the
+      interactive template prompt. It is not removed (§9.2).
+- [ ] A class-based host does not scaffold the functional CQRS and events barrels. Decorated
+      handlers register through `DecoratorPlugin({ ingress })`, and a second registration site would
+      deliver each message twice (`packages/cli/src/seams/ingress.ts:4-6`).
+- [ ] `--broker` and `--queue` work under the class-based style. They already key on the plugin list
+      rather than on the template name, so this is a test, not a code change.
+- [ ] The interactive prompt asks for a style after a styleable template.
+- [ ] A booted e2e drives every decorated ingress family on the new host. Compiling is not the bar
+      (M58).
+- [ ] `docs/migration-nestjs.md` gains a Microservices section and scaffolding commands. The CLI
+      docs, `PUBLIC_API.md` and `docs/decorators.md` stop describing the template as the only style
+      choice.
+
+**Out of scope, named:** a class-based `full-stack` (the starter has `decorators` and `di` arms, but
+the template has no controller or ingress seam); converting an existing functional project; a
+`g subscription` schematic for `@Subscribe`; and a decorator for brokered request/reply. NestJS
+`@MessagePattern` maps to `broker.respond(...)`, which has no decorator form.
+
+---
+
 ### Why the programme did not find V7-8 — a methodological gap, not a coverage gap
 
 V7-8 was found by an outside reader within an hour of the project being posted, by reading the
@@ -11864,8 +11924,9 @@ because one of them invalidated part of a previous run's claims:
 | 98l       | ⬜     | realtime lifecycle observations — design security review and implementation audit required                                                |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                 |
 | 98n       | ⬜     | outbound http attempt observations — design security review and implementation audit required                                             |
-| 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High)                                                                                |
+| 99        | ⬜     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High, plus the 99e maintainer report)                                                |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                        |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                      |
 | 99c       | ✅     | sdk + kernel — two first-party components that must agree, and do not                                                                     |
 | 99d       | ✅     | decorator-plugin + secrets-plugin — a composition the framework silently declines to give you                                             |
+| 99e       | ⬜     | cli + docs — a template axis that forces one style (class-based microservice)                                                             |
