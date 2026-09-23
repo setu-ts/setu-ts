@@ -32,7 +32,11 @@ const SECRETS = new Map<string, string>([['plugin/secret', 'plugin-value']]);
 /** The minimal JSON 1.1 stub the real SDK client talks to. */
 function startStub(): { url: string; close: () => Promise<void> } {
   let port = 0;
+  // Loopback only: the package's test `net` grant is scoped to `127.0.0.1`
+  // (any port, since this stub's is ephemeral), so no test can reach a real
+  // cloud endpoint by accident.
   const server = Deno.serve({
+    hostname: '127.0.0.1',
     port: 0,
     onListen: (l) => {
       port = l.port;
@@ -102,7 +106,11 @@ describe('SecretsPlugin endpoint option (M99d review fix)', () => {
 
       // X28-1 through the plugin path: an absent secret is a clean throw from
       // the service (provider `null`), not a credentials failure.
-      await expect(secrets.get('absent/secret')).rejects.toThrow();
+      // The exact message: a bare `toThrow()` would also pass on the credentials
+      // or network failure this assertion exists to rule out.
+      await expect(secrets.get('absent/secret')).rejects.toThrow(
+        'Secret not found: absent/secret',
+      );
       expect(await secrets.has('absent/secret')).toBe(false);
     } finally {
       await app.stop();

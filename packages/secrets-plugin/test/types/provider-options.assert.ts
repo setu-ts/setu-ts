@@ -26,7 +26,7 @@ const awsWithoutEndpoint: AwsKmsProviderOptions = { region: 'us-east-1' };
 
 const gcpWithEndpoint: GcpSecretManagerProviderOptions = {
   projectId: 'my-project',
-  endpoint: 'http://localhost:4443',
+  endpoint: 'secretmanager.private.example:443',
 };
 
 const gcpWithoutEndpoint: GcpSecretManagerProviderOptions = {

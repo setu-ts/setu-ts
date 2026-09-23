@@ -61,7 +61,9 @@ declared handler with no provider fails startup with the class, method, and miss
 
 `controllers` and `ingress` are independent lists: a class listed in only one has the OTHER half of
 its composition ignored, and `register()` warns naming the ignored family and the option that would
-register it. Listing a class in both is the correct composition — both families register.
+register it. Listing a class in both is the correct composition — both families register. A
+controller contributed by a `@Module` or by `autoDiscover` counts as registered for this check;
+`@Module` has no ingress list, so a module controller with ingress decorators still needs `ingress`.
 
 ```typescript
 import { DecoratorPlugin, Processor } from '@setu-ts/decorator-plugin';

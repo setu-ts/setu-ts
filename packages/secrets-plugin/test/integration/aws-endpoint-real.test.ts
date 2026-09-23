@@ -11,7 +11,9 @@
  * Guarded on `AWS_ENDPOINT_URL`: absent it, the suite is IGNORED rather than a
  * pass that asserted nothing. It does not manage the container — `AWS_ENDPOINT_URL`
  * is expected to point at an already-running `localstack:3` (the same arrangement
- * the storage real-emulator suites use for `S3_ENDPOINT_URL`).
+ * the storage real-emulator suites use for `S3_ENDPOINT_URL`). The package's
+ * test `net` grant covers `127.0.0.1` (any port) and `localhost:4566`, so point
+ * it at one of those — e.g. `AWS_ENDPOINT_URL=http://127.0.0.1:4566`.
  *
  * @module
  */

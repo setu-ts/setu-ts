@@ -39,9 +39,13 @@ export interface GcpSecretManagerProviderOptions {
   /** GCP project id used to build secret resource paths. */
   projectId?: string | undefined;
   /**
-   * Endpoint for the lazily-loaded client — an emulator host or a private
-   * endpoint. Passed to the SDK as `apiEndpoint`, the member its
-   * `ClientOptions` declares; ignored when a `client` is injected.
+   * Endpoint for the lazily-loaded client — a private or regional endpoint,
+   * written as `host` or `host:port` (`[::1]:8443` for IPv6), with NO URL
+   * scheme. The host is passed to the SDK as `apiEndpoint`, the member its
+   * `ClientOptions` declares, and a port as `port` (default 443). The SDK
+   * always speaks TLS through this option, so a plaintext emulator is not
+   * reachable with it — inject a `client` for that. Ignored when a `client`
+   * is injected.
    *
    * @since 0.8.0
    */
@@ -79,7 +83,7 @@ export function isGcpNotFound(error: unknown): boolean {
  * @param mod - The GCP SDK module (real or fake)
  * @param options - GCP connection options
  * @returns The facade wrapping a `SecretManagerServiceClient`
- * @throws {Error} If the project id is missing
+ * @throws {Error} If the project id is missing, or the endpoint is malformed
  */
 export function adaptGcpModule(
   mod: GcpSdkModule,
@@ -119,15 +123,34 @@ export function adaptGcpModule(
   };
 }
 
+/** `host`, `host:port`, `[v6]` or `[v6]:port` — nothing else. */
+const GCP_ENDPOINT = /^(\[[0-9A-Fa-f:.]+\]|[^\s:/?#[\]@]+)(?::(\d{1,5}))?$/;
+
 /**
  * Builds the `SecretManagerServiceClient` constructor argument without
  * assigning `undefined` to optional fields (required by `exactOptionalPropertyTypes`).
+ *
+ * The endpoint is SPLIT, not forwarded whole: google-gax builds the address
+ * as `servicePath + ':' + port`, so a verbatim `localhost:8085` becomes
+ * `localhost:8085:443` and a URL becomes `http://…:443` — neither reachable,
+ * and neither reported until the first call. A scheme, path or malformed port
+ * is refused here instead, naming the value.
+ *
+ * @throws {Error} If the endpoint is not `host` or `host:port`
  */
 function buildGcpClientOptions(endpoint?: string): Record<string, unknown> | undefined {
   if (endpoint === undefined) {
     return undefined;
   }
-  return { apiEndpoint: endpoint };
+  const match = GCP_ENDPOINT.exec(endpoint);
+  const port = match?.[2] === undefined ? undefined : Number(match[2]);
+  if (match === null || (port !== undefined && (port < 1 || port > 65535))) {
+    throw new Error(
+      `GcpSecretManagerProvider options.endpoint must be 'host' or 'host:port' with no URL ` +
+        `scheme; got '${endpoint}'`,
+    );
+  }
+  return port === undefined ? { apiEndpoint: match[1] } : { apiEndpoint: match[1], port };
 }
 
 /**

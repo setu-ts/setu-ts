@@ -9,7 +9,7 @@
       "import": true,
       "env": true,
       "sys": ["hostname", "osRelease"],
-      "net": true
+      "net": ["127.0.0.1", "localhost:4566"]
     }
   }
 }

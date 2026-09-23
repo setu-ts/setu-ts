@@ -133,9 +133,9 @@ describe('GcpSecretManagerProvider endpoint (M99d)', () => {
 
   it('translates the endpoint to the SDK `apiEndpoint` key, not `endpoint`', () => {
     const { configs, mod } = recordingGcpModule(new Map());
-    adaptGcpModule(mod, { projectId: 'p', endpoint: 'http://localhost:4443' });
+    adaptGcpModule(mod, { projectId: 'p', endpoint: 'secretmanager.private.example' });
     expect(configs).toHaveLength(1);
-    expect(configs[0]).toEqual({ apiEndpoint: 'http://localhost:4443' });
+    expect(configs[0]).toEqual({ apiEndpoint: 'secretmanager.private.example' });
     // The wrong key would type-check against gax's index signature and be
     // ignored at runtime; asserting its absence is what catches that.
     expect(configs[0]?.endpoint).toBeUndefined();
@@ -149,7 +149,7 @@ describe('GcpSecretManagerProvider endpoint (M99d)', () => {
     const provider = new GcpSecretManagerProvider({
       projectId: 'p',
       client,
-      endpoint: 'http://localhost:4443',
+      endpoint: 'secretmanager.private.example:8443',
     });
     await provider.connect();
     // The injected facade is used, not the lazy module — the endpoint never
@@ -157,4 +157,39 @@ describe('GcpSecretManagerProvider endpoint (M99d)', () => {
     expect(await provider.get('any')).toBe('injected');
     await provider.disconnect();
   });
+
+  // google-gax builds its address as `servicePath + ':' + port`, so a
+  // `host:port` forwarded whole as `apiEndpoint` became `host:port:443` —
+  // unreachable, and reported only at the first call. The value is split.
+  it('splits `host:port` into `apiEndpoint` and a numeric `port`', () => {
+    const { configs, mod } = recordingGcpModule(new Map());
+    adaptGcpModule(mod, { projectId: 'p', endpoint: 'localhost:8085' });
+    expect(configs[0]).toEqual({ apiEndpoint: 'localhost', port: 8085 });
+  });
+
+  it('splits a bracketed IPv6 host from its port', () => {
+    const { configs, mod } = recordingGcpModule(new Map());
+    adaptGcpModule(mod, { projectId: 'p', endpoint: '[::1]:8443' });
+    expect(configs[0]).toEqual({ apiEndpoint: '[::1]', port: 8443 });
+  });
+
+  const REFUSED = [
+    'http://localhost:4443',
+    'https://secretmanager.googleapis.com',
+    'host/path',
+    'host:',
+    'host:0',
+    'host:70000',
+    'host:80:443',
+    '',
+  ];
+  for (const endpoint of REFUSED) {
+    it(`refuses ${JSON.stringify(endpoint)} before constructing a client`, () => {
+      const { configs, mod } = recordingGcpModule(new Map());
+      expect(() => adaptGcpModule(mod, { projectId: 'p', endpoint })).toThrow(
+        `options.endpoint must be 'host' or 'host:port' with no URL scheme; got '${endpoint}'`,
+      );
+      expect(configs).toHaveLength(0);
+    });
+  }
 });

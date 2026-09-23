@@ -28,16 +28,16 @@ import { LoggerPlugin } from '@setu-ts/logger-plugin';
 import { QueuePlugin } from '@setu-ts/queue-plugin';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
-import { Controller, Get, Processor } from '../../src/index.ts';
+import { Controller, Get, Module, Processor } from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
 import type { DecoratorPluginOptions } from '../../src/plugin/decorator-plugin.ts';
 
 /** The two cross-family diagnostics, by exact message. */
 const CONTROLLERS_SIDE =
-  'Class is listed in `controllers` but carries non-HTTP ingress metadata; its ingress decorators are ignored';
+  'Class is registered as a controller but carries non-HTTP ingress metadata; its ingress decorators are ignored';
 const INGRESS_SIDE =
-  'Class is listed in `ingress` but carries HTTP route metadata; its routes are not registered';
+  'Class is listed in `ingress` and carries HTTP route metadata but is not registered as a controller; its routes are not registered';
 
 /** Captures the JSON lines the real ConsoleLogger writes to `console.log`. */
 function captureConsole(): { lines: Record<string, unknown>[]; restore: () => void } {
@@ -213,6 +213,81 @@ describe('cross-family misregistration warning (M99d)', () => {
       // Listing a class in BOTH options is the correct composition — both
       // families register — so neither cross-family diagnostic fires.
       expect(crossFamily(lines)).toEqual([]);
+    } finally {
+      await app.stop();
+      restore();
+    }
+  });
+
+  // The controller list the warning reads is the MERGED one. Reading only the
+  // `controllers` option warned "routes are not registered" for a class whose
+  // routes a `@Module` had registered, and stayed silent for a module-listed
+  // controller whose ingress half was dropped — the generated class-based path.
+  it('@Module controllers + ingress: no warning, both families register', async () => {
+    const received: string[] = [];
+    @Controller('/mixed')
+    class Both {
+      @Get('/')
+      read() {
+        return { ok: true };
+      }
+
+      @Processor('m99d-job')
+      process(job: IJob<{ readonly id: string }>) {
+        received.push(job.data.id);
+      }
+    }
+    @Module({ controllers: [Both] })
+    class Feature {}
+
+    const { app, lines, restore } = await boot({ modules: [Feature], ingress: [Both] });
+    try {
+      const response = await app.fetch(new Request('http://localhost/mixed'));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+
+      const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
+      await queue.add('m99d-job', { id: 'job-1' });
+      await until(() => received.length === 1, 'the decorated queue processor');
+
+      expect(crossFamily(lines)).toEqual([]);
+    } finally {
+      await app.stop();
+      restore();
+    }
+  });
+
+  it('@Module controllers only: warns that the ingress half is ignored', async () => {
+    const received: string[] = [];
+    @Controller('/mixed')
+    class Both {
+      @Get('/')
+      read() {
+        return { ok: true };
+      }
+
+      @Processor('m99d-job')
+      process(job: IJob<{ readonly id: string }>) {
+        received.push(job.data.id);
+      }
+    }
+    @Module({ controllers: [Both] })
+    class Feature {}
+
+    const { app, lines, restore } = await boot({ modules: [Feature] });
+    try {
+      const response = await app.fetch(new Request('http://localhost/mixed'));
+      expect(response.status).toBe(200);
+
+      const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
+      await queue.add('m99d-job', { id: 'job-1' });
+      await settle();
+      expect(received).toEqual([]);
+
+      const warnings = crossFamily(lines);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]['msg']).toBe(CONTROLLERS_SIDE);
+      expect(warnings[0]['controller']).toBe('Both');
     } finally {
       await app.stop();
       restore();

@@ -5181,15 +5181,27 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   correct composition and warns about neither; nothing is auto-registered, so the two options keep
   their exact meanings. The `decorator-plugin` README — the page jsr.io renders — documents the
   `ingress` option for the first time. **V7-7:** `AwsKmsProviderOptions.endpoint` and
-  `GcpSecretManagerProviderOptions.endpoint` point the lazily loaded client at LocalStack, an
-  emulator, or a private endpoint; both are ignored when a `client` is injected. The option is
-  TRANSLATED per SDK rather than forwarded — AWS's config object takes `endpoint`, while
-  google-gax's `ClientOptions` declares `apiEndpoint` and has no `endpoint` member (its
-  `ClientStubOptions` index signature would let a verbatim `endpoint` type-check, construct, and be
-  silently dropped, so the adapter passes `apiEndpoint` and the unit test asserts the exact key per
-  provider) — which makes X28-1's absent-secret question answerable against a real LocalStack for
-  the first time. Azure (`vaultUrl`) and Vault (`address`) already took an endpoint and are
-  unchanged, which is why the original "three providers" finding corrected to two.
+  `GcpSecretManagerProviderOptions.endpoint` point the lazily loaded client at a non-default
+  endpoint (LocalStack or a private endpoint for AWS; a private or regional TLS host for GCP); both
+  are ignored when a `client` is injected. The option is TRANSLATED per SDK rather than forwarded —
+  AWS's config object takes `endpoint`, while google-gax's `ClientOptions` declares `apiEndpoint`
+  and has no `endpoint` member (its `ClientStubOptions` index signature would let a verbatim
+  `endpoint` type-check, construct, and be silently dropped, so the adapter passes `apiEndpoint` and
+  the unit test asserts the exact key per provider) — which makes X28-1's absent-secret question
+  answerable against a real LocalStack for the first time. Azure (`vaultUrl`) and Vault (`address`)
+  already took an endpoint and are unchanged, which is why the original "three providers" finding
+  corrected to two. **Verification and code review then found two defects every gate had passed.**
+  The V7-3 warning read the `controllers` OPTION alone, before `@Module` and `autoDiscover`
+  controllers were merged — so a class a module registered and `ingress` also listed was warned "its
+  routes are not registered" while serving `200`, and a module controller carrying `@Processor`
+  stayed silent, which is the path generated class-based projects take (`modules: [...]`). It now
+  reads the merged list, and both cases are tests verified to fail against the old call. And the GCP
+  `endpoint` was documented as an emulator host while google-gax builds its address as
+  `servicePath + ':' + port`: measured against the real SDK, `localhost:8085` resolved to
+  `localhost:8085:443`. The value is now split into `apiEndpoint` + `port`, a scheme or malformed
+  port is refused by name, the docs say TLS-only, and a real-SDK test asserts the resolved address.
+  Also tightened: the plugin-path absent-secret assertion now names its message rather than
+  accepting any throw, and the package's test `net` grant is scoped to loopback instead of `true`.
 - **Next milestone** — the `v0.7.0` smoke closeout (M99) completes with this letter; no next
   numbered milestone is planned on the roadmap.
 

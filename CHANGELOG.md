@@ -10,25 +10,30 @@ All notable changes to this project are documented here. The format follows
 
 - **`secrets-plugin` — `endpoint` on the AWS and GCP providers (M99d).**
   `AwsKmsProviderOptions.endpoint` and `GcpSecretManagerProviderOptions.endpoint` point the lazily
-  loaded client at LocalStack, an emulator, or a private endpoint; both are ignored when a `client`
-  is injected. The option is also available through the plugin —
-  `SecretsPlugin({ provider:
-  'aws-kms' | 'gcp', options: { endpoint } })` — with `createProvider`
-  forwarding it to the provider. The option is TRANSLATED per SDK: AWS's config object takes
-  `endpoint`, while google-gax's `ClientOptions` declares `apiEndpoint` (and has no `endpoint`
-  member — its `ClientStubOptions` index signature would let a verbatim `endpoint` type-check and be
-  silently dropped, so the adapter passes `apiEndpoint` and the unit test asserts the exact key per
-  provider). This makes X28-1's question — does `get` on an absent secret return `null`? —
-  answerable against a real LocalStack for the first time. Azure (`vaultUrl`) and Vault (`address`)
-  already took an endpoint and are unchanged.
+  loaded client at a non-default endpoint — LocalStack or a private endpoint for AWS, a private or
+  regional host for GCP; both are ignored when a `client` is injected. The option is also available
+  through the plugin — `SecretsPlugin({ provider:
+  'aws-kms' | 'gcp', options: { endpoint } })` —
+  with `createProvider` forwarding it to the provider. The option is TRANSLATED per SDK: AWS's
+  config object takes `endpoint`, while google-gax's `ClientOptions` declares `apiEndpoint` (and has
+  no `endpoint` member — its `ClientStubOptions` index signature would let a verbatim `endpoint`
+  type-check and be silently dropped, so the adapter passes `apiEndpoint` and the unit test asserts
+  the exact key per provider). This makes X28-1's question — does `get` on an absent secret return
+  `null`? — answerable against a real LocalStack for the first time. The GCP value is `host` or
+  `host:port` with no URL scheme, split into the SDK's `apiEndpoint` and `port` because google-gax
+  appends `:<port>` (default 443) itself — a forwarded `localhost:8085` would resolve to
+  `localhost:8085:443` — and a scheme, path or out-of-range port is refused at `connect()`. It is
+  TLS-only: a plaintext emulator is not reachable through it, so inject a `client` for that. Azure
+  (`vaultUrl`) and Vault (`address`) already took an endpoint and are unchanged.
 
-- **`decorator-plugin` — cross-family misregistration warning (M99d).** A class listed in
-  `DecoratorPlugin({ controllers })` that carries non-HTTP ingress decorators (or one in `ingress`
-  that carries HTTP route decorators) now gets a `register()` warning naming the ignored family and
-  the option that would register it. Previously the ignored half was silent: `controllers`-only
-  served the routes `200` and never fired the processor; `ingress`-only fired the processor and
-  answered the routes `404`. A class in both lists is the correct composition and warns about
-  neither; nothing is auto-registered.
+- **`decorator-plugin` — cross-family misregistration warning (M99d).** A class registered as a
+  controller — through `DecoratorPlugin({ controllers })`, a `@Module`'s `controllers`, or
+  `autoDiscover` — that carries non-HTTP ingress decorators (or one in `ingress` that carries HTTP
+  route decorators and is registered as a controller by none of those) now gets a `register()`
+  warning naming the ignored family and the option that would register it. Previously the ignored
+  half was silent: `controllers`-only served the routes `200` and never fired the processor;
+  `ingress`-only fired the processor and answered the routes `404`. A class in both lists is the
+  correct composition and warns about neither; nothing is auto-registered.
 
 - **`cli` — devtool scaffolding (M98c).** `setu new --devtool`,
   `setu generate app <name> --devtool`, and `setu devtool enable [member]` opt a project into the
