@@ -807,6 +807,66 @@ function warnControllersWithoutMetadata(
 }
 
 /**
+ * Warns about a class listed in one option that carries the OTHER family's
+ * metadata, because the list it was given registers only that one family and
+ * the rest is ignored without a word.
+ *
+ * A class in `controllers` with ingress decorators answers its routes and
+ * never fires its processors; a class in `ingress` with route decorators fires
+ * its processors and answers its routes 404. Both are measured, not inferred
+ * (M99d §1). "Registered as a controller" means the merged controller list —
+ * `controllers`, every `@Module`'s `controllers`, and auto-discovered classes —
+ * because all three register routes identically. The `controllers`-side
+ * warning cannot come from
+ * `warnControllersWithoutMetadata`: the class legitimately HAS `@Controller`
+ * metadata, so that reader sees nothing wrong. A class in BOTH lists is the
+ * correct composition — both families register — so it is skipped, and the
+ * warning, not a refusal, is the remedy, matching M64.
+ */
+function warnCrossFamilyMisregistration(
+  ctx: IPluginContext,
+  controllers: readonly Constructor[],
+  ingress: readonly Constructor[],
+): void {
+  if (ctx.logger === undefined) {
+    return;
+  }
+  const inControllers = new Set<Constructor>(controllers);
+  const inIngress = new Set<Constructor>(ingress);
+  for (const target of controllers) {
+    if (inIngress.has(target)) {
+      continue;
+    }
+    if (metadataStore.getIngress(target).length > 0) {
+      ctx.logger.warn(
+        'Class is registered as a controller but carries non-HTTP ingress metadata; its ingress decorators are ignored',
+        {
+          controller: className(target),
+          hint:
+            'List the class in `ingress` as well (or instead) to register its non-HTTP ingress ' +
+            'handlers, or remove the ingress decorators.',
+        },
+      );
+    }
+  }
+  for (const target of ingress) {
+    if (inControllers.has(target)) {
+      continue;
+    }
+    if (metadataStore.getRoutesFor(target).length > 0) {
+      ctx.logger.warn(
+        'Class is listed in `ingress` and carries HTTP route metadata but is not registered as a controller; its routes are not registered',
+        {
+          controller: className(target),
+          hint: "List the class in `controllers` (or a `@Module`'s `controllers`) as well to " +
+            'register its routes, or remove the HTTP route decorators.',
+        },
+      );
+    }
+  }
+}
+
+/**
  * Warns about custom parameters that no resolver can satisfy, which would
  * otherwise reach the handler as `undefined` and fail on first use with no
  * indication of the cause.
@@ -1010,6 +1070,13 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
         ...fromModules.controllers,
         ...discoveredControllers,
       ]);
+      // Against the MERGED list, never `opts.controllers` alone: a controller
+      // contributed by `@Module` or `autoDiscover` is registered exactly like a
+      // listed one, so reading only the option both missed its ignored ingress
+      // half and warned "routes are not registered" for an `ingress` class whose
+      // routes a module had registered.
+      warnCrossFamilyMisregistration(ctx, controllers, ingress);
+
       const services = dedup([
         ...fromModules.providers,
         ...(opts.services ?? []),

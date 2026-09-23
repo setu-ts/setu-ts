@@ -8,7 +8,8 @@
       "read": true,
       "import": true,
       "env": true,
-      "sys": ["hostname"]
+      "sys": ["hostname", "osRelease"],
+      "net": ["127.0.0.1", "localhost:4566"]
     }
   }
 }

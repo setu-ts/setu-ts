@@ -4089,17 +4089,19 @@ await secrets.rotate('database/password', newPassword); // throws for the env pr
 
 ### Options
 
-| Option                                               | Provider                | Description                                                    |
-| ---------------------------------------------------- | ----------------------- | -------------------------------------------------------------- |
-| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`. |
-| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.        |
-| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                       |
-| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).            |
-| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                             |
-| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                 |
-| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).      |
-| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).      |
-| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`). |
+| Option                                               | Provider                | Description                                                                                                                   |
+| ---------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                                           | —                       | `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'`, `'vault'`.                                                                |
+| `options.cacheTtl`                                   | all                     | Read-cache TTL in seconds; `0` disables. Default `300`.                                                                       |
+| `options.prefix`                                     | `env`                   | Prefix prepended to the derived env key.                                                                                      |
+| `options.region` / `accessKeyId` / `secretAccessKey` | `aws-kms`               | AWS client config (ignored when `client` injected).                                                                           |
+| `options.endpoint`                                   | `aws-kms`               | LocalStack / emulator / private endpoint for the lazy client (ignored when `client` injected).                                |
+| `options.projectId`                                  | `gcp`                   | GCP project id for resource paths.                                                                                            |
+| `options.endpoint`                                   | `gcp`                   | Private/regional endpoint for the lazy client as `host` or `host:port`, no scheme; TLS only (ignored when `client` injected). |
+| `options.vaultUrl`                                   | `azure`                 | Key Vault URL.                                                                                                                |
+| `options.address` / `token` / `mount`                | `vault`                 | Vault server address, token, KV mount (default `secret`).                                                                     |
+| `options.client`                                     | `aws-kms`/`gcp`/`azure` | Injected structural client facade (bypasses lazy import).                                                                     |
+| `options.http`                                       | `vault`                 | Injected `fetch`-shaped function (defaults to global `fetch`).                                                                |
 
 ### Exports
 

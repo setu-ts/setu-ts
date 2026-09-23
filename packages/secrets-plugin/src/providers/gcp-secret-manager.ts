@@ -22,7 +22,7 @@ interface GcpAccessResponse {
 
 /** The subset of the GCP SDK the adapter uses. */
 export interface GcpSdkModule {
-  SecretManagerServiceClient: new () => {
+  SecretManagerServiceClient: new (options?: Record<string, unknown>) => {
     accessSecretVersion(request: { name: string }): Promise<[GcpAccessResponse]>;
     addSecretVersion(
       request: { parent: string; payload: { data: Uint8Array } },
@@ -38,6 +38,18 @@ export interface GcpSdkModule {
 export interface GcpSecretManagerProviderOptions {
   /** GCP project id used to build secret resource paths. */
   projectId?: string | undefined;
+  /**
+   * Endpoint for the lazily-loaded client — a private or regional endpoint,
+   * written as `host` or `host:port` (`[::1]:8443` for IPv6), with NO URL
+   * scheme. The host is passed to the SDK as `apiEndpoint`, the member its
+   * `ClientOptions` declares, and a port as `port` (default 443). The SDK
+   * always speaks TLS through this option, so a plaintext emulator is not
+   * reachable with it — inject a `client` for that. Ignored when a `client`
+   * is injected.
+   *
+   * @since 0.8.0
+   */
+  endpoint?: string | undefined;
   /** Injected client facade; bypasses the lazy SDK import. */
   client?: IGcpSecretsClient | undefined;
 }
@@ -62,19 +74,28 @@ export function isGcpNotFound(error: unknown): boolean {
  * Adapts the GCP SDK module to the facade. Pure — unit-tested with a fake
  * module.
  *
+ * The `endpoint` option is TRANSLATED, not forwarded: google-gax's
+ * `ClientOptions` declares `apiEndpoint` and has no `endpoint` member, and its
+ * `ClientStubOptions` index signature would let a verbatim `endpoint`
+ * type-check and be ignored at runtime — the client would then talk to the
+ * production endpoint with no diagnostic.
+ *
  * @param mod - The GCP SDK module (real or fake)
- * @param projectId - GCP project id (required for resource paths)
+ * @param options - GCP connection options
  * @returns The facade wrapping a `SecretManagerServiceClient`
- * @throws {Error} If the project id is missing
+ * @throws {Error} If the project id is missing, or the endpoint is malformed
  */
 export function adaptGcpModule(
   mod: GcpSdkModule,
-  projectId: string | undefined,
+  options: GcpSecretManagerProviderOptions,
 ): IGcpSecretsClient {
+  const projectId = options.projectId;
   if (projectId === undefined || projectId === '') {
     throw new Error('GcpSecretManagerProvider requires options.projectId');
   }
-  const client = new mod.SecretManagerServiceClient();
+  const client = new mod.SecretManagerServiceClient(
+    buildGcpClientOptions(options.endpoint),
+  );
   return {
     async accessSecretVersion(name: string): Promise<string | null> {
       try {
@@ -100,6 +121,36 @@ export function adaptGcpModule(
       });
     },
   };
+}
+
+/** `host`, `host:port`, `[v6]` or `[v6]:port` — nothing else. */
+const GCP_ENDPOINT = /^(\[[0-9A-Fa-f:.]+\]|[^\s:/?#[\]@]+)(?::(\d{1,5}))?$/;
+
+/**
+ * Builds the `SecretManagerServiceClient` constructor argument without
+ * assigning `undefined` to optional fields (required by `exactOptionalPropertyTypes`).
+ *
+ * The endpoint is SPLIT, not forwarded whole: google-gax builds the address
+ * as `servicePath + ':' + port`, so a verbatim `localhost:8085` becomes
+ * `localhost:8085:443` and a URL becomes `http://…:443` — neither reachable,
+ * and neither reported until the first call. A scheme, path or malformed port
+ * is refused here instead, naming the value.
+ *
+ * @throws {Error} If the endpoint is not `host` or `host:port`
+ */
+function buildGcpClientOptions(endpoint?: string): Record<string, unknown> | undefined {
+  if (endpoint === undefined) {
+    return undefined;
+  }
+  const match = GCP_ENDPOINT.exec(endpoint);
+  const port = match?.[2] === undefined ? undefined : Number(match[2]);
+  if (match === null || (port !== undefined && (port < 1 || port > 65535))) {
+    throw new Error(
+      `GcpSecretManagerProvider options.endpoint must be 'host' or 'host:port' with no URL ` +
+        `scheme; got '${endpoint}'`,
+    );
+  }
+  return port === undefined ? { apiEndpoint: match[1] } : { apiEndpoint: match[1], port };
 }
 
 /**
@@ -150,7 +201,7 @@ export class GcpSecretManagerProvider implements SecretProvider {
       this.#attachProbe(injected);
       return;
     }
-    this.#client = adaptGcpModule(await loadGcpModule(), this.#options.projectId);
+    this.#client = adaptGcpModule(await loadGcpModule(), this.#options);
   }
 
   disconnect(): Promise<void> {

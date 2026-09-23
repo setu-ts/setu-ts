@@ -60,11 +60,13 @@ export function createProvider(
         region: options.region,
         accessKeyId: options.accessKeyId,
         secretAccessKey: options.secretAccessKey,
+        endpoint: options.endpoint,
         client: isAwsClient(options.client) ? options.client : undefined,
       });
     case 'gcp':
       return new GcpSecretManagerProvider({
         projectId: options.projectId,
+        endpoint: options.endpoint,
         client: isGcpClient(options.client) ? options.client : undefined,
       });
     case 'azure':
