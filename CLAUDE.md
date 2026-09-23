@@ -5172,8 +5172,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   reverted; the fifth is the instructive one — appending a type error to the unimported third
   fixture makes `deno check packages` exit 1 naming that file, so the committed generated output
   really is gated (the M70m X11-9 precedent).
-- **Next milestone** — **M99d** (`packages/decorator-plugin` and `packages/secrets-plugin` — a
-  composition the framework silently declines to give you).
+- **Milestone 99d** (`packages/decorator-plugin` and `packages/secrets-plugin` — a composition the
+  framework silently declines to give you) — complete (PR pending). **V7-3:** `register()` now warns
+  when a class listed in `controllers` carries non-HTTP ingress metadata (or one in `ingress`
+  carries HTTP route metadata), naming the ignored family and the option that would register it —
+  previously silent: `controllers`-only served its routes `200` and never fired the processor,
+  `ingress`-only fired the processor and answered its routes `404`. A class in BOTH lists is the
+  correct composition and warns about neither; nothing is auto-registered, so the two options keep
+  their exact meanings. The `decorator-plugin` README — the page jsr.io renders — documents the
+  `ingress` option for the first time. **V7-7:** `AwsKmsProviderOptions.endpoint` and
+  `GcpSecretManagerProviderOptions.endpoint` point the lazily loaded client at LocalStack, an
+  emulator, or a private endpoint; both are ignored when a `client` is injected. The option is
+  TRANSLATED per SDK rather than forwarded — AWS's config object takes `endpoint`, while
+  google-gax's `ClientOptions` declares `apiEndpoint` and has no `endpoint` member (its
+  `ClientStubOptions` index signature would let a verbatim `endpoint` type-check, construct, and be
+  silently dropped, so the adapter passes `apiEndpoint` and the unit test asserts the exact key per
+  provider) — which makes X28-1's absent-secret question answerable against a real LocalStack for
+  the first time. Azure (`vaultUrl`) and Vault (`address`) already took an endpoint and are
+  unchanged, which is why the original "three providers" finding corrected to two.
+- **Next milestone** — the `v0.7.0` smoke closeout (M99) completes with this letter; no next
+  numbered milestone is planned on the roadmap.
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
