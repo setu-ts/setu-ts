@@ -11036,8 +11036,9 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
       null is miss, and rejection is failure. has records present/absent separately from get hit
       rate. getOrSet internal get/set calls count as backend operations; joining the coalescer does
       not invent a backend read. Do not change factory execution or fallback behavior. Noop remains
-      a legitimate miss-producing implementation. No eviction count is inferred from misses or
-      expiration.
+      a legitimate miss-producing implementation. Every operation includes explicit succeeded/failed
+      counters, including set and clear; rejected calls are not collection failures. No eviction
+      count is inferred from misses or expiration.
 - [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
       reader and native client method; activate only the reserved `cache` manifest entry.
 - [ ] Exclude keys, prefixes, values, Redis URLs, factory results, raw errors before buffering.
@@ -11104,6 +11105,12 @@ co-owners. Canonical plan: `plans/milestone-98l-realtime-observations.md`.
       inspecting frame fields. Do not enumerate memberships, call room/channel to inspect them, or
       add a network subscription. Transport publish completion is not remote delivery. Count sends
       at the connection boundary only, not again at room broadcast.
+- [ ] Include an explicit websocket/sse/backplane source kind; reserve unknown for synthetic failed
+      reads. Backpressure counts are numeric only for SSE close records, null elsewhere.
+- [ ] Keep current connection/group gauges outside expiring operation records. Authenticated reads
+      use only the owned framework service's size getters, without creating groups or enumerating
+      memberships. Idle connections and group-only changes remain visible; disabled/closed sources
+      return explicitly unavailable gauges without invoking the reader.
 - [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
       reader and native client method; activate only the reserved `realtime` manifest entry.
 - [ ] Exclude frames, messages, headers, query strings, principals, connection IDs, group names,
@@ -11113,7 +11120,9 @@ co-owners. Canonical plan: `plans/milestone-98l-realtime-observations.md`.
 - [ ] Pass recorded pre-implementation design review and committed-tree implementation security
       audit. Exercise SSE overflow, client abort, websocket normal/error close, heartbeat, broadcast
       exceptions, backplane rejection and own-origin filtering. Assert identical sends, disconnect
-      timing, membership and transport calls.
+      timing, membership and transport calls. Test opaque source aliases, unsupported versus
+      measured zero pressure, idle connections beyond record expiry, group-only changes, and
+      gauge-reader detachment on shutdown.
 
 ### Milestone 98m: Storage Operation Observations
 

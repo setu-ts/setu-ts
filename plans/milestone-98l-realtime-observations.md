@@ -58,10 +58,16 @@ applications consume it through that package's existing options. All three use t
 IRealtimeDiagnosticsSource and REALTIME_DIAGNOSTICS token. Capture backplane publish completion and
 existing subscription dispatch inside the three transport implementations, using an internal
 attachment seam; no wrapper subscription or extra frame delivery. The plugin closes that attachment
-before transport teardown. For backplane records connection/group gauges are null. For WS/SSE, read
-the existing aggregate gauges at observation time, not via membership iteration. Backpressure closes
-increment only the SSE close record. Unsupported pressure metrics are not zero-valued claims:
-documentation explicitly limits backpressureCloses to SSE.
+before transport teardown. Connection/group gauges belong to a separate current-state snapshot, not
+operation records. Each enabled WS/SSE source captures a private reader for its original owned
+service's built-in size getters at registration. snapshot invokes that reader once, after connector
+authentication, to read connectionCount and roomCount/channelCount. These getters read existing Set
+or registry sizes (websocket-service.ts:232 and sse-service.ts:156); they perform no network work,
+allocation of groups, membership enumeration or application callback. Do not resolve a service from
+the registry on a read or invoke a replacement provider's getters. Backplane gauges are unsupported.
+The immutable sourceKind identifies websocket, sse or backplane independently of display aliases.
+Backpressure counts are supported only on SSE close records; all other kinds/operations use null,
+not zero. A supported SSE close record with zero backpressure closes carries the number 0.
 
 Attach the internal collector to the owned implementation during plugin registration through a
 non-barrel-exported WeakMap attachment helper. Existing exported constructor signatures remain
@@ -98,20 +104,40 @@ and `RealtimeDiagnosticsResponse`.
 
 `IRealtimeDiagnosticsSource.snapshot(): RealtimeDiagnosticsSnapshot` is synchronous, takes no
 caller-selected resource, and returns a deeply frozen exact-key object:
-`{ state: DiagnosticsInspectorState, alias: string | null, coverage: 'owned-instance', records: readonly RealtimeDiagnosticsRecord[], dropped: number }`.
+`{ state: DiagnosticsInspectorState, alias: string | null, sourceKind: 'websocket' | 'sse' | 'backplane' | 'unknown', coverage: 'owned-instance', gauges: { state: 'available' | 'unsupported' | 'disabled' | 'collection-failed', openConnections: number | null, groups: number | null }, records: readonly RealtimeDiagnosticsRecord[], dropped: number }`.
+
+Built-in sources set their fixed sourceKind at construction, including when disabled or closed.
+`unknown` is reserved for the connector's synthetic collection-failed snapshot when a source throws
+or fails validation; it is never a built-in provider kind. The synthetic snapshot has alias=null,
+gauges.state=collection-failed, both gauge values null, records=[] and dropped=0. Never salvage a
+kind or alias from an invalid source result. No sourceKind is inferred from alias, sourceId or
+plugin registration order.
+
+For enabled healthy WS/SSE sources, gauges.state=available and both values are current nonnegative
+safe integers, including measured zeros before any connection opens. For an enabled healthy
+backplane, gauges.state=unsupported and both values are null. Disabled/closed sources use disabled
+and null values without calling the gauge reader. A collection failure uses collection-failed and
+null values. Validators reject mixed combinations, including numeric backplane gauges, null
+available gauges and unknown kinds with usable records. The native client uses sourceKind and the
+explicit gauge state to select labels and distinguish measured zero from unavailable data.
 
 A record has exactly `alias: string`,
 `operation: 'open' | 'close' | 'send' | 'backplane-publish' | 'backplane-receive'`, `count: number`,
-`lastDurationMs: number | null`, `ageMs: number`, plus `succeeded`, `failed`, `backpressureCloses`,
-`openConnections`, `groups` (safe integers); unavailable gauges are null, never invented zeros.
-Numbers are finite, nonnegative and clamped at Number.MAX_SAFE_INTEGER; durations are integer
-milliseconds. count counts settled observations, not currently active calls. Counters are cumulative
-within the retention window. Nonapplicable numeric counters are zero. lastDurationMs is null for
-instantaneous lifecycle observations; otherwise it is the last settled duration. Record alias is the
-approved event/job alias when configured, and the instance alias for other inspectors. On failed
-collection the source clears records and exposes only state, approved alias, coverage and dropped.
-Lifecycle-closed and disabled states take precedence over collection-failed. Read only
-framework-owned primitive fields; never pass a business object or an Error to the collector.
+`lastDurationMs: number | null`, `ageMs: number`, plus `succeeded`, `failed` (safe integers), and
+`backpressureCloses: number | null`. The latter is a safe integer only for sourceKind=sse with
+operation=close; otherwise it must be null. Websocket/SSE admit open/close/send operations, while
+backplane admits only backplane-publish/backplane-receive. Reject mismatched kind/operation pairs.
+openConnections and groups are absent from records: their only home is snapshot.gauges. Numbers are
+finite, nonnegative and clamped at Number.MAX_SAFE_INTEGER; durations are integer milliseconds.
+count counts settled observations, not currently active calls. Counters are cumulative within the
+retention window. succeeded and failed are zero before their first matching outcome;
+backpressureCloses follows the nullable support rule above. lastDurationMs is null for instantaneous
+lifecycle observations; otherwise it is the last settled duration. Record alias is the approved
+event/job alias when configured, and the instance alias for other inspectors. On failed collection
+the source clears records, sets gauges to collection-failed with null values, and retains its fixed
+kind and approved alias in the exact snapshot shape. Lifecycle-closed and disabled states take
+precedence over collection-failed. Read only framework-owned primitive fields; never pass a business
+object or an Error to the collector.
 
 `RealtimeDiagnosticsResponse` is exactly
 `{ version: 1, instanceId: string, state: DiagnosticsInspectorState, sources: readonly { sourceId: string, snapshot: RealtimeDiagnosticsSnapshot }[] }`.
@@ -125,7 +151,7 @@ records; no error text. Response state is ready if any source is ready, otherwis
 stale, no-data, disabled, unsupported in that priority order. Individual states remain visible.
 
 Projectors accept exact own data properties and reject getters, prototypes with unexpected shape,
-extra keys, invalid enums or oversized arrays. Snapshot and record values are plain objects
+extra keys, invalid enums or oversized arrays. Snapshot, gauges and record values are plain objects
 (Object.prototype or null prototype) containing only own data properties; custom prototypes are
 rejected. Proxy traps cannot be sandboxed: catch their failures and never copy unknown fields. Copy
 approved primitives individually. The full response is limited to 256 KiB; on exceeding it return a
@@ -146,12 +172,18 @@ source names for matching; diagnostic records never retain those names. No user 
 Each source admits at most 64 record slots keyed by approved alias and fixed operation. At capacity,
 ignore new tuples and increment saturating dropped; existing tuples continue updating. Records
 expire after 60 seconds without an observation, checked during update/read; clear their counters on
-expiry. age >30 seconds means stale; any fresh record means ready; no records means no-data. No
-background timer and no per-request diagnostic queue. On close mark closed before clearing; late
-results cannot repopulate state, and snapshot returns disabled. Each observed call retains only
-primitive timing/alias state, no additional wait on external work, body copy or diagnostic I/O.
-Promise observation may add a microtask; tests must preserve application ordering guarantees without
-claiming identical promise identity or a literally zero-cost enabled path.
+expiry. This TTL applies only to operation records. Current gauges never expire because of missing
+traffic and are freshly read on each enabled healthy snapshot. WS/SSE source state is ready whenever
+gauges are available, even with records=[] after 60 seconds, or before any operations occur. Record
+age still indicates operation freshness independently. Backplane has no available gauges: any record
+aged <=30 seconds means ready; only older retained records means stale; records=[] means no-data.
+Disabled/closed and collection-failed override these readiness rules. No background timer and no
+per-request diagnostic queue. On close mark closed before clearing; late results cannot repopulate
+state, and snapshot returns disabled with empty records and disabled null gauges. Release the
+private gauge reader on close so later snapshots never read a closed service. Each observed call
+retains only primitive timing/alias state, no additional wait on external work, body copy or
+diagnostic I/O. Promise observation may add a microtask; tests must preserve application ordering
+guarantees without claiming identical promise identity or a literally zero-cost enabled path.
 
 Use runtime.hrtime for plugin durations; SDK uses the injected monotonic now. Clamp negative deltas.
 Catch observer and clock failures without changing application errors or results; latch
@@ -260,6 +292,25 @@ contract release; no external dependency is introduced.
 Exercise SSE overflow, client abort, websocket normal/error close, heartbeat, broadcast exceptions,
 backplane rejection and own-origin filtering. Assert identical sends, disconnect timing, membership
 and transport calls.
+
+Unit and real-connector tests must cover the following review regressions:
+
+- Use opaque aliases unrelated to provider kinds. Assert websocket/sse/backplane sourceKind survives
+  projection; a websocket close carries backpressureCloses=null, while an SSE normal close carries 0
+  and an SSE backlog close increments it. Reject forged kind/operation and kind/gauge combinations.
+- Open an idle connection with heartbeats disabled; advance beyond 60 seconds and read via the
+  client. Records expire, but gauges remain available, openConnections=1 and source state=ready.
+  Repeat at zero traffic before any open: both measured counts are zero, not unsupported or no-data.
+- Create a room/channel through the normal application API without a send/open/close event. The next
+  authenticated snapshot reports the new group count. Repeated reads do not create additional
+  groups, iterate members, connect the backplane, invoke application callbacks, or instantiate lazy
+  services.
+- Close the last connection and check the next snapshot reports openConnections=0. On plugin
+  shutdown, verify reader detachment, disabled/null gauges and no calls to the service after close.
+  Failed collection latches collection-failed; malformed/throwing sources yield the unknown
+  synthetic kind.
+- Verify disabled capture and failed authentication never call the gauge reader. Gauge reads use
+  only the original framework-owned instance even after an application capability is replaced.
 
 Every mapped test calls the §3 signatures. Exercise legacy status and all eleven reserved keys,
 false-key no-request, absent source, source throw, malformed source objects including throwing

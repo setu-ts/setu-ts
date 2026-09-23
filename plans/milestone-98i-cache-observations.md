@@ -87,17 +87,23 @@ caller-selected resource, and returns a deeply frozen exact-key object:
 `{ state: DiagnosticsInspectorState, alias: string | null, coverage: 'owned-instance', records: readonly CacheDiagnosticsRecord[], dropped: number }`.
 
 A record has exactly `alias: string`, `operation: 'get' | 'set' | 'delete' | 'has' | 'clear'`,
-`count: number`, `lastDurationMs: number | null`, `ageMs: number`, plus `hits`, `misses`, `present`,
-`absent`, `removed`, `notRemoved` (nonnegative safe integers; increment only for the matching
-successful operation). Numbers are finite, nonnegative and clamped at Number.MAX_SAFE_INTEGER;
-durations are integer milliseconds. count counts settled observations, not currently active calls.
-Counters are cumulative within the retention window. Nonapplicable numeric counters are zero.
-lastDurationMs is null for instantaneous lifecycle observations; otherwise it is the last settled
-duration. Record alias is the approved event/job alias when configured, and the instance alias for
-other inspectors. On failed collection the source clears records and exposes only state, approved
-alias, coverage and dropped. Lifecycle-closed and disabled states take precedence over
-collection-failed. Read only framework-owned primitive fields; never pass a business object or an
-Error to the collector.
+`count: number`, `lastDurationMs: number | null`, `ageMs: number`, plus `succeeded`, `failed`,
+`hits`, `misses`, `present`, `absent`, `removed`, `notRemoved` (nonnegative safe integers). Every
+settled backend call increments count and exactly one outcome counter: succeeded on fulfillment,
+failed on rejection or a synchronous backend throw. A null get, false has, or false delete is a
+successful call; increment its miss/absent/notRemoved detail counter as well. The detail counters
+increment only for their matching successful operation. set and clear therefore have explicit
+success/failure outcomes even though all detail counters remain zero. Before saturation, count
+equals succeeded + failed; after saturation each counter independently clamps. A backend failure is
+observed application behavior, not a collection-failed source state. Numbers are finite, nonnegative
+and clamped at Number.MAX_SAFE_INTEGER; durations are integer milliseconds. count counts settled
+observations, not currently active calls. Counters are cumulative within the retention window.
+Nonapplicable numeric counters are zero. lastDurationMs is null for instantaneous lifecycle
+observations; otherwise it is the last settled duration. Record alias is the approved event/job
+alias when configured, and the instance alias for other inspectors. On failed collection the source
+clears records and exposes only state, approved alias, coverage and dropped. Lifecycle-closed and
+disabled states take precedence over collection-failed. Read only framework-owned primitive fields;
+never pass a business object or an Error to the collector.
 
 `CacheDiagnosticsResponse` is exactly
 `{ version: 1, instanceId: string, state: DiagnosticsInspectorState, sources: readonly { sourceId: string, snapshot: CacheDiagnosticsSnapshot }[] }`.
@@ -217,7 +223,13 @@ contract release; no external dependency is introduced.
 
 Compare TTL, prefix, concurrent getOrSet factory counts, null semantics and original rejection
 identity with observation enabled, disabled and failing. Assert evictions are unsupported rather
-than fabricated.
+than fabricated. For each of get/set/delete/has/clear, assert one fulfilled call yields count=1,
+succeeded=1, failed=0, and one rejection yields count=1, succeeded=0, failed=1 in separate fresh
+collectors. Repeat with synchronous backend throws and verify original error identity. Assert null
+get and false has/delete count as succeeded, with the correct detail counter; failed operations
+never increment those detail counters. Exercise mixed outcomes, saturation and retention reset.
+Connector/client exact-key tests require both outcome fields and reject missing, extra or invalid
+fields. A backend failure must remain visible as a ready observation.
 
 Every mapped test calls the §3 signatures. Exercise legacy status and all eleven reserved keys,
 false-key no-request, absent source, source throw, malformed source objects including throwing
