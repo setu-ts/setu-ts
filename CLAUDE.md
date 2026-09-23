@@ -5173,7 +5173,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   fixture makes `deno check packages` exit 1 naming that file, so the committed generated output
   really is gated (the M70m X11-9 precedent).
 - **Milestone 99d** (`packages/decorator-plugin` and `packages/secrets-plugin` — a composition the
-  framework silently declines to give you) — complete (PR pending). **V7-3:** `register()` now warns
+  framework silently declines to give you) — complete (PR #358). **V7-3:** `register()` now warns
   when a class listed in `controllers` carries non-HTTP ingress metadata (or one in `ingress`
   carries HTTP route metadata), naming the ignored family and the option that would register it —
   previously silent: `controllers`-only served its routes `200` and never fired the processor,
