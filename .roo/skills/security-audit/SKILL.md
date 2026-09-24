@@ -234,6 +234,14 @@ For each security control the milestone ADDS (a check, a bound, a refusal, a min
 revert that control in the working tree, re-run the probe that is supposed to cover it, observe the
 probe FAIL, then restore the file and confirm `git status --short` is empty again.
 
+**The probe must run the reverted code, not code loaded before the revert.** A driver that imports
+the package fresh on each `deno run` picks the revert up. An application already running — a server
+a socket probe connects to, a started connector, a container built from the tree — still executes
+what it loaded, so a probe against it passes with the control gone on disk. Stop every such target,
+start it again from the reverted tree, and only then run the probe. After restoring the file,
+restart the target once more before any later probe, so nothing downstream runs against the reverted
+build.
+
 A probe that still passes with its control removed was never testing it. Record each control, the
 revert applied, the observed failure, and the restore. This step is the only one that edits tracked
 files, and the edits never survive it: restore with `git checkout -- <file>`, never commit, and
