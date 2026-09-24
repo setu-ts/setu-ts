@@ -33,7 +33,9 @@ design security review as probes against a local instance of the committed code.
   blocked**, naming the dirty paths. Do not stash.
 - **Probe only local instances.** Every probe targets an application this run started on `127.0.0.1`
   or an in-process kernel application. Never a remote host, a shared environment, or a real
-  credential.
+  credential. Run every probe sandboxed with scoped grants and an emptied environment (`SKILL.md`
+  Step 3), never `-A`: the probe imports the code under audit, so what the probe is granted, that
+  code is granted.
 - **Never push or open a PR.** Those are human-only steps.
 
 ## Start from "an attacker can get through" — proving otherwise is the whole job

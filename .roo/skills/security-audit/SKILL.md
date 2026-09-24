@@ -125,8 +125,26 @@ Step 4 — not yet a finding.
 
 For each obligation from Step 1 and each resolution in the design-review findings table, write one
 probe in a scratch driver under `.verify-<milestone>/` (a plain top-level-`await` script, NOT a test
-file, run with `deno run -A`), at the real surface — a kernel application, the real connector, the
-real socket.
+file), at the real surface — a kernel application, the real connector, the real socket.
+
+**Run every probe sandboxed, never with `-A`.** The driver imports the code under audit, so whatever
+the probe is granted, that code is granted too — and `-A` gives an untrusted branch the host's
+files, environment, and network. Fetch dependencies first, then run with an emptied environment and
+grants scoped to the probe:
+
+```bash
+deno cache .verify-<N>/driver.ts
+env -i PATH="$PATH" HOME="$HOME" deno run --no-prompt \
+  --allow-read=. --allow-write=.verify-<N> --allow-net=127.0.0.1 --allow-env \
+  .verify-<N>/driver.ts
+```
+
+`--allow-env` is safe only because `env -i` empties the environment first: `RuntimePlugin` reads the
+whole environment at `start()`, so a list of names is not enough, and the host's variables must not
+be what it reads. Pass the variables the probe needs explicitly after `env -i` (`REDIS_URL=…`). Add
+`--allow-run=docker` only for a probe that stops or starts a container. A `NotCapable` error is
+evidence, not an obstacle: when it is the code under audit asking for access the design review does
+not account for, record it as a finding rather than widening the grant.
 
 Every probe has two halves, and both are mandatory:
 
