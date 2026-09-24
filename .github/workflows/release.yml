@@ -242,24 +242,28 @@ jobs:
           exit 1
 
       # M70c §3.7: the S3 outage suite (storage-plugin) needs a real
-      # S3-compatible server, and it cannot be a `services:` container.
-      # Docker Hub's `minio/minio` stopped serving anonymous pulls on
-      # 2026-09-11 (`pull access denied … repository does not exist`), which
-      # failed container init — and because a service that never starts SKIPS
-      # every gate step rather than failing one, the job reported a Format /
-      # Lint failure it had never run. quay.io still serves the image, but its
-      # tags are the stock server: entrypoint `minio` with no subcommand, so it
-      # prints usage and exits 0 (probed, both `latest-cicd` and this RELEASE).
-      # The retired `edge-cicd` was the only self-starting tag, so `server
-      # /data` has to be passed as an argument — which a service block cannot
-      # do, `options` reaching `docker create` before the image while arguments
-      # come after it. That is the constraint behind the NATS and Kafka steps
-      # above, and MinIO is now the third instance of it.
+      # S3-compatible server, and it cannot be a `services:` container: the
+      # image's entrypoint is the bare `minio` binary, so `server /data` must
+      # be passed as an argument, which a service block cannot do (`options`
+      # reaches `docker create` before the image, arguments come after it) —
+      # the constraint behind the NATS and Kafka steps too.
+      #
+      # Registry history, because this has broken twice. Docker Hub's
+      # `minio/minio` stopped serving anonymous pulls on 2026-09-11, and
+      # quay.io's `minio/minio` followed on 2026-09-24 (the repository API
+      # answers 401 and every pull is `unauthorized`); upstream no longer
+      # distributes images. Chainguard builds MinIO from source and serves it
+      # anonymously, but only as `:latest` — so the image is pinned by DIGEST
+      # (RELEASE.2026-09-22T19-25-18Z, verified against both storage-plugin
+      # real-backend suites). If that digest ever stops pulling, repin to the
+      # current `cgr.dev/chainguard/minio:latest` digest
+      # (`docker inspect --format '{{index .RepoDigests 0}}'`) and re-run
+      # those suites against it.
       - name: Start MinIO (S3 storage outage suite)
         run: |
           docker run -d --name m70c-minio -p 127.0.0.1:9000:9000 \
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data
+            cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data
           for _ in $(seq 1 60); do
             if curl -fs http://localhost:9000/minio/health/ready >/dev/null; then
               echo 'minio ready'
