@@ -5203,8 +5203,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Also tightened: the plugin-path absent-secret assertion now names its message rather than
   accepting any throw, and the package's test `net` grant is scoped to loopback instead of `true`.
 - **Next milestone** — **M98d** (`packages/health-plugin` — minimized health observations; design
-  security review and implementation audit required). The `v0.7.0` smoke closeout (M99) completes
-  with M99d.
+  security review and implementation audit required). The `v0.7.0` smoke closeout (M99) reopened
+  with **M99e** (`packages/cli` — `--style class-based` as its own axis, so a class-based
+  microservice is one command; planned in `plans/milestone-99e-class-based-style.md`, not started).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
