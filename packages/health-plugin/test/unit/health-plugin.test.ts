@@ -1624,9 +1624,26 @@ describe('HealthPlugin', () => {
           intervalArmed = 0;
         },
       } as unknown as IRuntimeServices;
+      // A recording logger honouring the ILogger contract (the shared fake's
+      // `{}` has no methods, which would hide a real `warn` call).
+      const warnings: string[] = [];
+      const noop = () => {};
+      const logger = {
+        level: 'debug',
+        fatal: noop,
+        error: noop,
+        warn: (message: string) => {
+          warnings.push(message);
+        },
+        info: noop,
+        debug: noop,
+        trace: noop,
+        child: () => logger,
+      } as unknown as ILogger;
       const ctx = {
         ...base,
         runtime,
+        logger,
         services: {
           register: (token: string, service: unknown) => {
             registered.set(token, service);
@@ -1653,7 +1670,7 @@ describe('HealthPlugin', () => {
           },
         } as ILifecycleApi,
       } as IPluginContext;
-      return { ctx, registered, bootstrapHooks, closeHooks };
+      return { ctx, registered, bootstrapHooks, closeHooks, warnings };
     }
 
     it('provides HEALTH_DIAGNOSTICS alongside HEALTH', () => {
@@ -1684,7 +1701,7 @@ describe('HealthPlugin', () => {
           scheduled: { indicators: ['db.check'], intervalMs: 1000, timeoutMs: 50, concurrency: 1 },
         },
       });
-      const { ctx, registered, bootstrapHooks, closeHooks } = buildContext();
+      const { ctx, registered, bootstrapHooks, closeHooks, warnings } = buildContext();
       plugin.register(ctx);
       const source = registered.get(
         CAPABILITIES.HEALTH_DIAGNOSTICS,
@@ -1699,9 +1716,27 @@ describe('HealthPlugin', () => {
       // bootstrap starts the bounded scheduler (one guarded cycle), close tears
       // it down. The recording timer runtime keeps this leak-free.
       bootstrapHooks[0]();
-      // Let the fire-and-forget first cycle settle (it races an unknown
-      // indicator, which rejects and is handled inside the cycle).
+      // 'db.check' is approved but no indicator carries it: one count-only
+      // warning that never names the indicator.
+      expect(warnings).toEqual([
+        'Health diagnostics: 1 approved indicator name(s) match no registered indicator ' +
+        'and will stay never-observed.',
+      ]);
+      // The unregistered name is skipped by the first cycle, not run.
       await new Promise((resolve) => setTimeout(resolve, 0));
+      expect((source.snapshot('instance-1') as { state: string }).state).toBe('no-data');
+      closeHooks[0]();
+    });
+
+    it('warns about nothing when every approved name is registered', () => {
+      const plugin = HealthPlugin({
+        indicators: [{ name: 'db.check', check: () => Promise.resolve({ status: 'up' }) }],
+        diagnostics: { enabled: true, indicators: { 'db.check': 'database', self: 'self' } },
+      });
+      const { ctx, bootstrapHooks, closeHooks, warnings } = buildContext();
+      plugin.register(ctx);
+      bootstrapHooks[0]();
+      expect(warnings).toEqual([]);
       closeHooks[0]();
     });
 

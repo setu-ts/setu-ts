@@ -13,13 +13,20 @@ All notable changes to this project are documented here. The format follows
   / `HealthDiagnosticsScheduledOptions`, exported from `@setu-ts/health-plugin`) that retains only
   the LATEST minimized outcome per explicitly allowlisted indicator alias — never a history, and
   never an indicator's `data`, error text, or absolute time. `diagnostics.enabled` is the LITERAL
-  `true` (an absent option is the disabled path; `enabled: false` is refused at construction);
+  `true` (an absent option is the disabled path; `enabled: false`, or any other value, is refused
+  when `HealthPlugin(...)` is called — checked at runtime, not only by the type);
   `diagnostics.indicators` is the exact registered-name to display-alias allowlist (at most 64
   entries, unique aliases, 1–64 UTF-8 bytes, no control characters); `diagnostics.staleAfterMs`
   (default 30,000) marks an observation `stale` past its monotonic age; and the optional
   `diagnostics.scheduled` block performs bounded scheduled checks (a subset of the approved names,
   at most 16; `intervalMs` 1,000–300,000; `timeoutMs` 1–30,000 as a reporting bound, not a
-  cancellation; `concurrency` 1–4). The plugin registers a read-only source under the new
+  cancellation; `concurrency` 1–4). Each cycle covers every scheduled indicator not still in flight,
+  from a rotating start; a timed-out callback that has not settled keeps its one concurrency slot
+  and is never replaced early, so a hung indicator cannot accumulate work or stall the others. Every
+  option is validated when `HealthPlugin(...)` is called, with fixed messages that never echo a
+  value. An indicator result whose `status` is not `up`/`degraded`/`down` is observed as `failed`
+  and the value is never retained; an approved name no indicator carries stays `never-observed`,
+  with a count-only warning at bootstrap. The plugin registers a read-only source under the new
   `CAPABILITIES.HEALTH_DIAGNOSTICS` token and, when scheduled, starts the bounded scheduler from
   `onBootstrap` and tears it down from `onClose`. The `/health`, `/live`, and `/ready` endpoints are
   unchanged: observation is a side channel over the already-produced result, with one callback per
@@ -37,10 +44,12 @@ All notable changes to this project are documented here. The format follows
   `unsupported` without sending the request. The connector resolves the optional health source under
   `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source answers `unsupported`, a
   registered-but-disabled source answers `disabled`, and a source that throws answers a value-free
-  `collection-failed` snapshot — none of which runs an indicator or changes the application's
-  readiness. The answer is projected field-by-field, signed over the exact body bytes, and bounded
-  by the same 256 KiB response ceiling. `docs/diagnostics-protocol.md` documents the operation and
-  the manifest.
+  `collection-failed` snapshot — as does a source whose DTO fails the exact validator (unknown keys
+  are dropped by the field-by-field copy; an unknown enum, a non-finite or negative measurement, an
+  oversized alias or a malformed shape is never signed) — none of which runs an indicator or changes
+  the application's readiness. The answer is projected field-by-field, signed over the exact body
+  bytes, and bounded by the same 256 KiB response ceiling. `docs/diagnostics-protocol.md` documents
+  the operation and the manifest.
 
 - **`secrets-plugin` — `endpoint` on the AWS and GCP providers (M99d).**
   `AwsKmsProviderOptions.endpoint` and `GcpSecretManagerProviderOptions.endpoint` point the lazily

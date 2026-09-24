@@ -194,8 +194,9 @@ environment values ever cross the protocol. Diagnostic counters are in-process a
 The M98d health inspector carries the same discipline: each observation holds only the approved
 display alias, the framework's own status, the outcome state, and monotonic timing. An indicator's
 `data`, the thrown value of a failure, and any absolute time are never projected — the canary test
-plants both and asserts their absence at the collector, the source, the signed frame, and the client
-DTO.
+plants both and asserts their absence at the source, in the raw signed bytes captured below the
+client, and in the client DTO. The connector validates the projected DTO before signing it; a source
+that violates it answers `collection-failed`.
 
 ## Exports
 

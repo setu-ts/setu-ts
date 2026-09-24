@@ -41,6 +41,50 @@ export function attachHealthObservation(
   OBSERVATION_COLLECTORS.set(service, collector);
 }
 
+/** Set by `HealthService`'s static block; see {@linkcode runIndicatorRaw}. */
+let rawRunner: (service: HealthService, name: string) => Promise<HealthCheckResult> | null;
+
+/**
+ * Runs one indicator by its registered name, returning the RAW result
+ * promise with no deadline applied, or `null` when no indicator is
+ * registered under the name (M98d). The health-observation scheduler
+ * consumes this: it races the returned promise against its own reporting
+ * deadline and holds the name's in-flight slot until the promise settles.
+ *
+ * Deliberately a module function rather than a method: the exported
+ * `HealthService` class gains no public surface, and the barrel does not
+ * export this. The scheduler reads only the framework-owned `status` of the
+ * result — never its `data`, never a thrown value.
+ *
+ * @param service - The health service owning the indicator
+ * @param name - The registered indicator name
+ * @returns The raw result promise, or `null` for an unregistered name
+ * @internal
+ */
+export function runIndicatorRaw(
+  service: HealthService,
+  name: string,
+): Promise<HealthCheckResult> | null {
+  return rawRunner(service, name);
+}
+
+/** Set by `HealthService`'s static block; see {@linkcode isIndicatorRegistered}. */
+let registeredProbe: (service: HealthService, name: string) => boolean;
+
+/**
+ * Reports whether an indicator is registered under the name, without running
+ * it (M98d). The plugin uses it at `onBootstrap` to warn about an approved
+ * diagnostics name that no indicator carries. Not barrel-exported.
+ *
+ * @param service - The health service
+ * @param name - The indicator name
+ * @returns `true` when an indicator is registered under `name`
+ * @internal
+ */
+export function isIndicatorRegistered(service: HealthService, name: string): boolean {
+  return registeredProbe(service, name);
+}
+
 /**
  * Internal representation of a registered indicator.
  *
@@ -129,6 +173,17 @@ export class HealthService implements IHealthService {
   #runtime: IRuntimeServices;
   readonly #indicatorTimeoutMs: number;
 
+  static {
+    // The raw-runner seam (M98d), wired from inside the class body so it can
+    // read the private indicator map without exposing a public method on
+    // this barrel-exported class.
+    rawRunner = (service, name) => {
+      const indicator = service.#indicators.get(name);
+      return indicator === undefined ? null : Promise.resolve().then(indicator.check);
+    };
+    registeredProbe = (service, name) => service.#indicators.has(name);
+  }
+
   /**
    * Creates a new health service.
    *
@@ -184,27 +239,6 @@ export class HealthService implements IHealthService {
   }
 
   /**
-   * Runs one indicator by its registered name, returning the RAW result
-   * promise with no deadline applied (M98d). The health-observation
-   * scheduler consumes this: it races the returned promise against its own
-   * reporting deadline and waits for it to settle before releasing the
-   * in-flight gate. An unknown name returns a rejecting promise.
-   *
-   * The thrown value and the indicator's `data` are never serialized by the
-   * caller — the scheduler reads only the framework-owned `status`.
-   *
-   * @param name - The registered indicator name
-   * @returns The raw result promise
-   */
-  runIndicatorRaw(name: string): Promise<HealthCheckResult> {
-    const indicator = this.#indicators.get(name);
-    if (indicator === undefined) {
-      return Promise.reject(new Error('Unknown health indicator'));
-    }
-    return Promise.resolve().then(indicator.check);
-  }
-
-  /**
    * Runs indicators filtered by the provided predicate — concurrently, and
    * deadline-bounded per indicator.
    */
@@ -236,7 +270,7 @@ export class HealthService implements IHealthService {
         const latencyMs = this.#runtime.hrtime() - startTime;
         // Observation follows the authoritative evaluation: report the
         // already-computed outcome once, never re-invoking the indicator.
-        this.#observe(name, observationState, result.status, latencyMs);
+        this.#observe(name, observationState, result, latencyMs);
         return [name, result, latencyMs] as const;
       }),
     );
@@ -315,7 +349,7 @@ export class HealthService implements IHealthService {
   #observe(
     name: string,
     state: HealthObservationState,
-    status: HealthStatus,
+    result: HealthCheckResult,
     latencyMs: number,
   ): void {
     const collector = OBSERVATION_COLLECTORS.get(this);
@@ -327,7 +361,7 @@ export class HealthService implements IHealthService {
         name,
         {
           state,
-          ...(state === 'reported' ? { status } : {}),
+          ...(state === 'reported' ? { status: result.status } : {}),
           latencyMs,
         },
         'application',

@@ -430,10 +430,18 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         }
         const result = await exchange(HEALTH_TARGET);
         const parsed = parseBody(result.bodyText);
-        if (!isHealthSnapshotProjection(parsed)) {
+        // The exact DTO validator, plus the body's own instance binding: the
+        // signed body must describe the instance this session paired with.
+        if (!isHealthSnapshotProjection(parsed) || parsed.instanceId !== bound) {
           throw new Error(CLIENT_ERRORS.connection);
         }
-        return parsed;
+        // The parsed value is a fresh object graph owned by nobody else;
+        // freezing it is what makes the documented "frozen" true.
+        for (const observation of parsed.observations) {
+          Object.freeze(observation);
+        }
+        Object.freeze(parsed.observations);
+        return Object.freeze(parsed);
       });
     },
 

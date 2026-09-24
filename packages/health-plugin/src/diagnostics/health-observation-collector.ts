@@ -3,20 +3,26 @@
  * retention and bounded scheduler behind `IHealthDiagnosticsSource`.
  *
  * The collector is the minimization seam. It accepts only framework-owned
- * primitives — the fixed observation state, the status (only when reported),
- * the measured latency, and the registered name used for an exact alias
- * lookup — and never an indicator's `data`, a thrown value, or an absolute
- * time. It retains ONE frozen observation per approved alias, never a
- * history, so memory stays constant under sustained input.
+ * primitives — the fixed observation state, the status (only when reported,
+ * and only one of `up`/`degraded`/`down`), the measured latency, and the
+ * registered name used for an exact alias lookup — and never an indicator's
+ * `data`, a thrown value, an unrecognized status string, or an absolute time.
+ * It retains ONE frozen observation per approved alias, never a history, so
+ * memory stays constant under sustained input.
  *
  * A separately-controlled scheduler, enabled only when `options.scheduled` is
  * present, runs bounded cycles of approved indicators. A timeout is a
  * REPORTING bound, not a cancellation: a check that has not settled within
  * `timeoutMs` is reported as `timed-out`, but its raw callback remains marked
  * in-flight until it actually settles, so no replacement check for it starts
- * early and a hung callback cannot accumulate work. Closing the collector
- * marks it closed FIRST (so a late settlement is discarded), then clears the
- * interval and every retained observation — M98a's own teardown order.
+ * early and a hung callback cannot accumulate work. The in-flight callback
+ * keeps its concurrency slot, and ONLY that slot: a cycle waits for each
+ * check's reporting race, never for a raw callback, so the other scheduled
+ * indicators keep refreshing. Each cycle covers every scheduled indicator
+ * not still in flight, starting from a rotating cursor so none is starved.
+ * Closing the collector marks it closed FIRST (so a late settlement is
+ * discarded), then clears the interval, every armed deadline timer, and every
+ * retained observation — M98a's own teardown order.
  *
  * @module
  */
@@ -38,11 +44,15 @@ import type { HealthDiagnosticsOptions } from '../interfaces/index.ts';
  * fixed observation state, the status (only when reported), and the measured
  * latency. It never carries `result.data` or any thrown value.
  *
+ * `status` is typed `unknown` on purpose: an indicator is application code,
+ * so the value it returned is untrusted until the collector has checked it
+ * against the fixed `up`/`degraded`/`down` vocabulary.
+ *
  * @internal
  */
 export interface IndicatorOutcome {
   readonly state: HealthObservationState;
-  readonly status?: HealthStatus;
+  readonly status?: unknown;
   readonly latencyMs: number;
 }
 
@@ -56,15 +66,16 @@ export interface IndicatorOutcome {
 export interface HealthIndicatorRunner {
   /**
    * Runs one indicator by its registered name, returning the raw (undeadlined)
-   * result promise. The collector races this against the scheduled reporting
-   * deadline and waits for it to settle before releasing the in-flight gate.
-   * The collector reads only the framework-owned `status`; the `data` field is
-   * never read or retained.
+   * result promise, or `null` when no indicator is registered under the name.
+   * The collector races the promise against the scheduled reporting deadline
+   * and holds the name's in-flight slot until it settles. The collector reads
+   * only the framework-owned `status`; the `data` field is never read or
+   * retained.
    *
    * @param name - The registered indicator name
-   * @returns The raw result promise
+   * @returns The raw result promise, or `null` for an unregistered name
    */
-  run(name: string): Promise<HealthCheckResult>;
+  run(name: string): Promise<HealthCheckResult> | null;
 }
 
 /** C0/C1 control code points, described by code point to avoid a literal regex class. */
@@ -97,6 +108,41 @@ function saturatingNext(current: number): number {
   return current >= Number.MAX_SAFE_INTEGER ? current : current + 1;
 }
 
+/** The framework's fixed health-status vocabulary. */
+const HEALTH_STATUSES: ReadonlySet<unknown> = new Set<unknown>(['up', 'degraded', 'down']);
+
+/**
+ * Reports whether a value is one of the framework's own health statuses.
+ * Anything else an indicator returned is untrusted application data and is
+ * never retained.
+ *
+ * @param value - The candidate status
+ * @returns `true` for `up`, `degraded`, or `down`
+ * @internal
+ */
+export function isHealthStatus(value: unknown): value is HealthStatus {
+  return HEALTH_STATUSES.has(value);
+}
+
+/**
+ * Reads the `status` of a settled indicator result without trusting its
+ * shape: a `null` or non-object result, or a throwing getter, yields
+ * `undefined` rather than an exception.
+ *
+ * @param result - The settled indicator result
+ * @returns The raw `status` value, or `undefined`
+ */
+function readStatus(result: unknown): unknown {
+  if (result === null || typeof result !== 'object') {
+    return undefined;
+  }
+  try {
+    return (result as { readonly status?: unknown }).status;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Fixed bounds (not configurable). */
 const MAX_APPROVED_ALIASES = 64;
 const MAX_ALIAS_BYTES = 64;
@@ -125,11 +171,15 @@ export const MAX_HEALTH_SNAPSHOT_BYTES = 262_144;
  * @internal
  */
 export const COLLECTOR_ERRORS = {
+  notEnabled: 'Health diagnostics: enabled must be the literal true.',
+  badOptions: 'Health diagnostics: the diagnostics option must be an object.',
+  badIndicators: 'Health diagnostics: indicators must map indicator names to aliases.',
   tooManyAliases: 'Health diagnostics: more than 64 approved indicators.',
   aliasBytes: 'Health diagnostics: an alias must be 1 to 64 UTF-8 bytes.',
   aliasControl: 'Health diagnostics: an alias contains a control character.',
   duplicateAlias: 'Health diagnostics: an alias is not unique.',
   badStaleAfter: 'Health diagnostics: staleAfterMs must be a positive finite integer.',
+  badScheduled: 'Health diagnostics: scheduled.indicators must be an array of names.',
   tooManyScheduled: 'Health diagnostics: more than 16 scheduled indicators.',
   scheduledNotApproved: 'Health diagnostics: a scheduled indicator is not an approved indicator.',
   badInterval: 'Health diagnostics: intervalMs must be an integer from 1000 to 300000.',
@@ -138,10 +188,147 @@ export const COLLECTOR_ERRORS = {
   badInstanceId: 'Health diagnostics: snapshot requires a non-empty instance identifier.',
 } as const;
 
-/** One retained latest-per-alias observation. */
+/**
+ * The scheduled-collection policy after validation.
+ *
+ * @internal
+ */
+export interface CompiledScheduledPolicy {
+  /** The approved names to collect, in declared order, de-duplicated. */
+  readonly names: readonly string[];
+  readonly intervalMs: number;
+  readonly timeoutMs: number;
+  readonly concurrency: number;
+}
+
+/**
+ * A validated health-observation policy. Produced once by
+ * {@linkcode compileHealthDiagnosticsPolicy} at plugin construction.
+ *
+ * @internal
+ */
+export interface CompiledHealthDiagnosticsPolicy {
+  /** Exact registered name → approved alias. */
+  readonly aliasBySourceName: ReadonlyMap<string, string>;
+  /** Approved alias → registered name, in declared (projection) order. */
+  readonly sourceNameByAlias: ReadonlyMap<string, string>;
+  readonly staleAfterMs: number;
+  /** `null` when no scheduled collection was configured. */
+  readonly scheduled: CompiledScheduledPolicy | null;
+}
+
+/** Reports whether a value is a plain non-null, non-array object. */
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Validates an integer option against an inclusive range. */
+function inRange(value: unknown, min: number, max: number): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
+}
+
+/**
+ * Validates the health-observation options and compiles them into the
+ * policy the collector runs. The ONE validation of these options: the plugin
+ * factory calls it at construction, so an invalid option refuses before any
+ * application exists, and the collector consumes only the compiled result.
+ *
+ * `enabled` is checked at runtime, not only by its literal-`true` type: a
+ * JavaScript or configuration-driven caller passing `enabled: false` is
+ * refused rather than silently opted in.
+ *
+ * @param options - The raw health-observation options
+ * @returns The validated, compiled policy
+ * @throws {RangeError} With a fixed, value-free message for any violation
+ * @internal
+ */
+export function compileHealthDiagnosticsPolicy(
+  options: HealthDiagnosticsOptions,
+): CompiledHealthDiagnosticsPolicy {
+  if (!isPlainRecord(options)) {
+    throw new RangeError(COLLECTOR_ERRORS.badOptions);
+  }
+  if (options.enabled !== true) {
+    throw new RangeError(COLLECTOR_ERRORS.notEnabled);
+  }
+  if (!isPlainRecord(options.indicators)) {
+    throw new RangeError(COLLECTOR_ERRORS.badIndicators);
+  }
+
+  // Compile the exact source-name -> alias map, validating every bound.
+  const entries = Object.entries(options.indicators);
+  if (entries.length > MAX_APPROVED_ALIASES) {
+    throw new RangeError(COLLECTOR_ERRORS.tooManyAliases);
+  }
+  const encoder = new TextEncoder();
+  const aliasBySourceName = new Map<string, string>();
+  const sourceNameByAlias = new Map<string, string>();
+  for (const [sourceName, alias] of entries) {
+    if (typeof alias !== 'string') {
+      throw new RangeError(COLLECTOR_ERRORS.badIndicators);
+    }
+    const bytes = encoder.encode(alias).length;
+    if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
+      throw new RangeError(COLLECTOR_ERRORS.aliasBytes);
+    }
+    if (hasControlCharacter(alias)) {
+      throw new RangeError(COLLECTOR_ERRORS.aliasControl);
+    }
+    if (sourceNameByAlias.has(alias)) {
+      throw new RangeError(COLLECTOR_ERRORS.duplicateAlias);
+    }
+    aliasBySourceName.set(sourceName, alias);
+    sourceNameByAlias.set(alias, sourceName);
+  }
+
+  const staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
+  if (!inRange(staleAfterMs, 1, Number.MAX_SAFE_INTEGER)) {
+    throw new RangeError(COLLECTOR_ERRORS.badStaleAfter);
+  }
+
+  const scheduled = options.scheduled;
+  if (scheduled === undefined) {
+    return { aliasBySourceName, sourceNameByAlias, staleAfterMs, scheduled: null };
+  }
+  if (!isPlainRecord(scheduled) || !Array.isArray(scheduled.indicators)) {
+    throw new RangeError(COLLECTOR_ERRORS.badScheduled);
+  }
+  if (scheduled.indicators.length > MAX_SCHEDULED_INDICATORS) {
+    throw new RangeError(COLLECTOR_ERRORS.tooManyScheduled);
+  }
+  const names: string[] = [];
+  for (const name of scheduled.indicators) {
+    if (typeof name !== 'string' || !aliasBySourceName.has(name)) {
+      throw new RangeError(COLLECTOR_ERRORS.scheduledNotApproved);
+    }
+    if (!names.includes(name)) {
+      names.push(name);
+    }
+  }
+  if (!inRange(scheduled.intervalMs, MIN_INTERVAL_MS, MAX_INTERVAL_MS)) {
+    throw new RangeError(COLLECTOR_ERRORS.badInterval);
+  }
+  if (!inRange(scheduled.timeoutMs, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS)) {
+    throw new RangeError(COLLECTOR_ERRORS.badTimeout);
+  }
+  if (!inRange(scheduled.concurrency, MIN_CONCURRENCY, MAX_CONCURRENCY)) {
+    throw new RangeError(COLLECTOR_ERRORS.badConcurrency);
+  }
+  return {
+    aliasBySourceName,
+    sourceNameByAlias,
+    staleAfterMs,
+    scheduled: {
+      names,
+      intervalMs: scheduled.intervalMs,
+      timeoutMs: scheduled.timeoutMs,
+      concurrency: scheduled.concurrency,
+    },
+  };
+}
+
+/** One retained latest-per-alias observation. Holds the alias, never the source name. */
 interface RetainedObservation {
-  readonly alias: string;
-  readonly sourceName: string;
   readonly state: HealthObservationState;
   readonly status?: HealthStatus;
   readonly latencyMs: number;
@@ -151,7 +338,7 @@ interface RetainedObservation {
 
 /** The outcome of racing one raw indicator against the reporting deadline. */
 type RaceOutcome =
-  | { readonly kind: 'reported'; readonly status: HealthStatus }
+  | { readonly kind: 'reported'; readonly status: unknown }
   | { readonly kind: 'timed-out' }
   | { readonly kind: 'failed' };
 
@@ -163,129 +350,47 @@ type RaceOutcome =
  * @since 0.8.0
  */
 export class HealthObservationCollector implements IHealthDiagnosticsSource {
-  readonly #aliasBySourceName: ReadonlyMap<string, string>;
-  readonly #sourceNameByAlias: ReadonlyMap<string, string>;
-  readonly #scheduledSourceNames: ReadonlySet<string>;
-  readonly #staleAfterMs: number;
+  readonly #policy: CompiledHealthDiagnosticsPolicy;
   readonly #clock: IRuntimeServices;
   readonly #runner: HealthIndicatorRunner;
-  readonly #scheduledIntervalMs: number;
-  readonly #scheduledTimeoutMs: number;
-  readonly #scheduledConcurrency: number;
   readonly #retained = new Map<string, RetainedObservation>();
+  /** Scheduled names whose RAW callback has not settled yet. */
   readonly #inFlight = new Set<string>();
+  /** Armed reporting-deadline timers, cleared on close. */
+  readonly #deadlineTimers = new Set<TimerHandle>();
   #droppedObservations = 0;
   #closed = false;
   #started = false;
   #cycleInFlight = false;
+  /** Rotation offset into the scheduled names, so no name is starved. */
+  #cursor = 0;
   #intervalHandle: TimerHandle | null = null;
 
   /**
-   * Creates the collector, validating the option bounds with value-free
-   * errors. An invalid option refuses at plugin construction, before any
-   * application exists.
+   * Creates the collector over an already-validated policy.
    *
-   * @param options - The health-observation policy
+   * @param policy - The compiled health-observation policy
    * @param clock - The runtime services (monotonic clock and timers)
    * @param runner - The single-indicator runner the scheduler uses
-   * @throws {RangeError} When any option violates a fixed bound
    */
   constructor(
-    options: HealthDiagnosticsOptions,
+    policy: CompiledHealthDiagnosticsPolicy,
     clock: IRuntimeServices,
     runner: HealthIndicatorRunner,
   ) {
+    this.#policy = policy;
     this.#clock = clock;
     this.#runner = runner;
-
-    // Compile the exact source-name -> alias map, validating every bound.
-    const entries = Object.entries(options.indicators);
-    if (entries.length > MAX_APPROVED_ALIASES) {
-      throw new RangeError(COLLECTOR_ERRORS.tooManyAliases);
-    }
-    const aliasBySourceName = new Map<string, string>();
-    const sourceNameByAlias = new Map<string, string>();
-    const seenAliases = new Set<string>();
-    for (const [sourceName, alias] of entries) {
-      const bytes = new TextEncoder().encode(alias).length;
-      if (bytes < 1 || bytes > MAX_ALIAS_BYTES) {
-        throw new RangeError(COLLECTOR_ERRORS.aliasBytes);
-      }
-      if (hasControlCharacter(alias)) {
-        throw new RangeError(COLLECTOR_ERRORS.aliasControl);
-      }
-      if (seenAliases.has(alias)) {
-        throw new RangeError(COLLECTOR_ERRORS.duplicateAlias);
-      }
-      seenAliases.add(alias);
-      aliasBySourceName.set(sourceName, alias);
-      sourceNameByAlias.set(alias, sourceName);
-    }
-    this.#aliasBySourceName = aliasBySourceName;
-    this.#sourceNameByAlias = sourceNameByAlias;
-
-    const staleAfterMs = options.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
-    if (
-      typeof staleAfterMs !== 'number' ||
-      !Number.isFinite(staleAfterMs) ||
-      !Number.isInteger(staleAfterMs) ||
-      staleAfterMs <= 0
-    ) {
-      throw new RangeError(COLLECTOR_ERRORS.badStaleAfter);
-    }
-    this.#staleAfterMs = staleAfterMs;
-
-    // Compile the scheduled subset, validating every bound.
-    const scheduled = options.scheduled;
-    if (scheduled === undefined) {
-      this.#scheduledSourceNames = new Set<string>();
-      this.#scheduledIntervalMs = 0;
-      this.#scheduledTimeoutMs = 0;
-      this.#scheduledConcurrency = 0;
-      return;
-    }
-    if (scheduled.indicators.length > MAX_SCHEDULED_INDICATORS) {
-      throw new RangeError(COLLECTOR_ERRORS.tooManyScheduled);
-    }
-    const scheduledSourceNames = new Set<string>();
-    for (const name of scheduled.indicators) {
-      if (!aliasBySourceName.has(name)) {
-        throw new RangeError(COLLECTOR_ERRORS.scheduledNotApproved);
-      }
-      scheduledSourceNames.add(name);
-    }
-    if (
-      !Number.isInteger(scheduled.intervalMs) ||
-      scheduled.intervalMs < MIN_INTERVAL_MS ||
-      scheduled.intervalMs > MAX_INTERVAL_MS
-    ) {
-      throw new RangeError(COLLECTOR_ERRORS.badInterval);
-    }
-    if (
-      !Number.isInteger(scheduled.timeoutMs) ||
-      scheduled.timeoutMs < MIN_TIMEOUT_MS ||
-      scheduled.timeoutMs > MAX_TIMEOUT_MS
-    ) {
-      throw new RangeError(COLLECTOR_ERRORS.badTimeout);
-    }
-    if (
-      !Number.isInteger(scheduled.concurrency) ||
-      scheduled.concurrency < MIN_CONCURRENCY ||
-      scheduled.concurrency > MAX_CONCURRENCY
-    ) {
-      throw new RangeError(COLLECTOR_ERRORS.badConcurrency);
-    }
-    this.#scheduledSourceNames = scheduledSourceNames;
-    this.#scheduledIntervalMs = scheduled.intervalMs;
-    this.#scheduledTimeoutMs = scheduled.timeoutMs;
-    this.#scheduledConcurrency = scheduled.concurrency;
   }
 
   /**
    * The retention seam. Reports one settled indicator's already-computed
    * outcome. The source name is used ONLY for the exact alias lookup; an
-   * unapproved name is counted as dropped and never retained. A closed
-   * collector accepts no write: a late settlement is discarded.
+   * unapproved name is counted as dropped and never retained. A `reported`
+   * outcome whose status is not one of the framework's own statuses is
+   * retained as `failed` with no status — the untrusted value is never
+   * stored. A closed collector accepts no write: a late settlement is
+   * discarded.
    *
    * @param sourceName - The indicator's registered name
    * @param outcome - The framework-owned outcome primitives
@@ -299,22 +404,21 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
     if (this.#closed) {
       return;
     }
-    const alias = this.#aliasBySourceName.get(sourceName);
+    const alias = this.#policy.aliasBySourceName.get(sourceName);
     if (alias === undefined) {
       this.#droppedObservations = saturatingNext(this.#droppedObservations);
       return;
     }
-    this.#retained.set(alias, {
+    const status = outcome.status;
+    const base = { latencyMs: outcome.latencyMs, capturedAtMs: this.#clock.hrtime(), origin };
+    this.#retained.set(
       alias,
-      sourceName,
-      state: outcome.state,
-      ...(outcome.state === 'reported' && outcome.status !== undefined
-        ? { status: outcome.status }
-        : {}),
-      latencyMs: outcome.latencyMs,
-      capturedAtMs: this.#clock.hrtime(),
-      origin,
-    });
+      outcome.state !== 'reported'
+        ? { ...base, state: outcome.state }
+        : isHealthStatus(status)
+        ? { ...base, state: 'reported', status }
+        : { ...base, state: 'failed' },
+    );
   }
 
   /**
@@ -331,10 +435,11 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
       throw new RangeError(COLLECTOR_ERRORS.badInstanceId);
     }
     const now = this.#clock.hrtime();
+    const scheduledNames = this.#policy.scheduled?.names ?? [];
     const observations: HealthDiagnosticsObservation[] = [];
     let reportedCount = 0;
     let anyStale = false;
-    for (const [alias, sourceName] of this.#sourceNameByAlias) {
+    for (const [alias, sourceName] of this.#policy.sourceNameByAlias) {
       const retained = this.#retained.get(alias);
       if (retained === undefined) {
         observations.push({
@@ -342,21 +447,18 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
           state: 'never-observed',
           latencyMs: null,
           ageMs: null,
-          origin: this.#scheduledSourceNames.has(sourceName) ? 'scheduled' : 'application',
+          origin: scheduledNames.includes(sourceName) ? 'scheduled' : 'application',
         });
         continue;
       }
       const ageMs = now - retained.capturedAtMs;
-      const stale = ageMs > this.#staleAfterMs;
       reportedCount += 1;
-      if (stale) {
+      if (ageMs > this.#policy.staleAfterMs) {
         anyStale = true;
       }
       observations.push({
         indicatorAlias: alias,
-        ...(retained.state === 'reported' && retained.status !== undefined
-          ? { status: retained.status }
-          : {}),
+        ...(retained.status !== undefined ? { status: retained.status } : {}),
         state: retained.state,
         latencyMs: retained.latencyMs,
         ageMs,
@@ -375,25 +477,26 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
   /**
    * Starts the bounded scheduler, if one was configured. Called once from the
    * plugin's `onBootstrap`: it starts one guarded, non-awaited cycle and then
-   * one runtime-owned interval. A no-op when closed or when no scheduled
-   * indicators were configured.
+   * one runtime-owned interval. A no-op when closed, already started, or when
+   * no scheduled indicators were configured.
    */
   startScheduled(): void {
-    if (this.#closed || this.#started || this.#scheduledSourceNames.size === 0) {
+    const scheduled = this.#policy.scheduled;
+    if (this.#closed || this.#started || scheduled === null || scheduled.names.length === 0) {
       return;
     }
     this.#started = true;
-    void this.#runCycle().catch(() => {});
+    void this.#runCycle(scheduled).catch(() => {});
     this.#intervalHandle = this.#clock.setInterval(() => {
-      void this.#runCycle().catch(() => {});
-    }, this.#scheduledIntervalMs);
+      void this.#runCycle(scheduled).catch(() => {});
+    }, scheduled.intervalMs);
   }
 
   /**
-   * Marks the collector closed FIRST, then clears the interval and every
-   * retained observation. A raw callback still in flight will settle later
-   * and find the collector closed, so its outcome is discarded rather than
-   * retained. Idempotent.
+   * Marks the collector closed FIRST, then clears the interval, every armed
+   * reporting-deadline timer, and every retained observation. A raw callback
+   * still in flight will settle later and find the collector closed, so its
+   * outcome is discarded rather than retained. Idempotent.
    */
   close(): void {
     if (this.#closed) {
@@ -404,103 +507,121 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
       this.#clock.clearInterval(this.#intervalHandle);
       this.#intervalHandle = null;
     }
+    for (const handle of this.#deadlineTimers) {
+      this.#clock.clearTimeout(handle);
+    }
+    this.#deadlineTimers.clear();
     this.#retained.clear();
   }
 
   /**
-   * Runs one guarded cycle. Skipped when closed or when a predecessor cycle
-   * is still in flight, so cycles never overlap. Runs up to `concurrency`
-   * approved, not-in-flight indicators concurrently.
+   * Runs one guarded cycle over EVERY scheduled name that is not still in
+   * flight, starting at the rotation cursor, with at most `concurrency`
+   * callbacks running at once — counting raw callbacks left over from an
+   * earlier cycle that have not settled. Skipped when closed or when a
+   * predecessor cycle is still reporting, so cycles never overlap.
+   *
+   * The cycle waits only for each check's REPORTING race (bounded by
+   * `timeoutMs`), never for a raw callback: a hung indicator keeps its own
+   * in-flight slot until it settles, and the remaining slots keep serving
+   * the other indicators. A name the slots could not reach this cycle is
+   * first in line on the next one.
    */
-  async #runCycle(): Promise<void> {
+  async #runCycle(scheduled: CompiledScheduledPolicy): Promise<void> {
     if (this.#closed || this.#cycleInFlight) {
       return;
     }
     this.#cycleInFlight = true;
     try {
-      const candidates = [...this.#scheduledSourceNames].filter(
-        (name) => !this.#inFlight.has(name),
-      );
-      const batch = candidates.slice(0, this.#scheduledConcurrency);
-      if (batch.length === 0) {
-        return;
-      }
-      for (const name of batch) {
-        this.#inFlight.add(name);
-      }
-      await Promise.all(batch.map((name) => this.#checkOne(name)));
+      const names = scheduled.names;
+      const order = [...names.slice(this.#cursor), ...names.slice(0, this.#cursor)];
+      let next = 0;
+      const worker = async (): Promise<void> => {
+        while (
+          !this.#closed && next < order.length && this.#inFlight.size < scheduled.concurrency
+        ) {
+          const name = order[next];
+          next += 1;
+          if (this.#inFlight.has(name)) {
+            continue;
+          }
+          await this.#checkOne(name, scheduled.timeoutMs);
+        }
+      };
+      const workers = Math.max(0, scheduled.concurrency - this.#inFlight.size);
+      await Promise.all(Array.from({ length: workers }, worker));
+      this.#cursor = (this.#cursor + next) % names.length;
     } finally {
       this.#cycleInFlight = false;
     }
   }
 
   /**
-   * Runs one scheduled indicator: races the raw callback against the
-   * reporting deadline, reports the bounded outcome, and waits for the raw
-   * callback to actually settle before releasing the in-flight gate — so a
-   * check that timed out for REPORTING purposes cannot start a replacement
-   * until its underlying work is done.
+   * Runs one scheduled indicator. The name's in-flight slot is claimed
+   * synchronously and released only when the RAW callback settles; the
+   * returned promise resolves as soon as the outcome is REPORTED — a check
+   * that timed out for reporting purposes does not block the cycle, and
+   * cannot start a replacement until its underlying work is done.
+   *
+   * A name with no registered indicator is skipped: it stays
+   * `never-observed` rather than reporting a failure no indicator produced.
    */
-  async #checkOne(name: string): Promise<void> {
+  #checkOne(name: string, timeoutMs: number): Promise<void> {
     const startedAtMs = this.#clock.hrtime();
+    let raw: Promise<HealthCheckResult> | null;
     try {
-      const raw = this.#runner.run(name);
-      const race = await this.#raceWithDeadline(raw, this.#scheduledTimeoutMs);
-      const latencyMs = this.#clock.hrtime() - startedAtMs;
-      const outcome: IndicatorOutcome = race.kind === 'reported'
-        ? { state: 'reported', status: race.status, latencyMs }
-        : race.kind === 'timed-out'
-        ? { state: 'timed-out', latencyMs }
-        : { state: 'failed', latencyMs };
-      this.report(name, outcome, 'scheduled');
-      // The raw callback may still be running after the reporting deadline;
-      // wait for it to settle so the in-flight gate is held until the work is
-      // actually done, not merely reported.
-      await raw.catch(() => {});
+      raw = this.#runner.run(name);
     } catch {
       // A runner that throws synchronously is a failed check, never a fault
       // that escapes the cycle.
-      const latencyMs = this.#clock.hrtime() - startedAtMs;
-      this.report(name, { state: 'failed', latencyMs }, 'scheduled');
-    } finally {
-      this.#inFlight.delete(name);
+      this.report(
+        name,
+        { state: 'failed', latencyMs: this.#clock.hrtime() - startedAtMs },
+        'scheduled',
+      );
+      return Promise.resolve();
     }
+    if (raw === null) {
+      return Promise.resolve();
+    }
+    this.#inFlight.add(name);
+    const release = (): void => {
+      this.#inFlight.delete(name);
+    };
+    raw.then(release, release);
+    return this.#raceWithDeadline(raw, timeoutMs).then((race) => {
+      const latencyMs = this.#clock.hrtime() - startedAtMs;
+      const outcome: IndicatorOutcome = race.kind === 'reported'
+        ? { state: 'reported', status: race.status, latencyMs }
+        : { state: race.kind, latencyMs };
+      this.report(name, outcome, 'scheduled');
+    });
   }
 
   /**
    * Races one raw indicator against the reporting deadline. A deadline hit
    * resolves `timed-out` without cancelling the raw callback; a normal
-   * settlement resolves `reported` with the framework's own status; a
+   * settlement resolves `reported` with the (still untrusted) status; a
    * rejection resolves `failed`. The timer is cleared on either settle path
-   * so no handle leaks per check.
+   * and tracked so `close()` can clear it too — no handle outlives the
+   * collector.
    */
-  #raceWithDeadline(
-    raw: Promise<{ readonly status: HealthStatus }>,
-    timeoutMs: number,
-  ): Promise<RaceOutcome> {
+  #raceWithDeadline(raw: Promise<HealthCheckResult>, timeoutMs: number): Promise<RaceOutcome> {
     return new Promise<RaceOutcome>((resolve) => {
       let settled = false;
-      const handle = this.#clock.setTimeout(() => {
+      const finish = (outcome: RaceOutcome): void => {
         if (!settled) {
           settled = true;
-          resolve({ kind: 'timed-out' });
+          this.#clock.clearTimeout(handle);
+          this.#deadlineTimers.delete(handle);
+          resolve(outcome);
         }
-      }, timeoutMs);
+      };
+      const handle = this.#clock.setTimeout(() => finish({ kind: 'timed-out' }), timeoutMs);
+      this.#deadlineTimers.add(handle);
       raw.then(
-        (result) => {
-          if (!settled) {
-            settled = true;
-            this.#clock.clearTimeout(handle);
-            resolve({ kind: 'reported', status: result.status });
-          }
-        },
-        () => {
-          if (!settled) {
-            settled = true;
-            this.#clock.clearTimeout(handle);
-            resolve({ kind: 'failed' });
-          }
-        },
+        (result) => finish({ kind: 'reported', status: readStatus(result) }),
+        () => finish({ kind: 'failed' }),
       );
     });
   }

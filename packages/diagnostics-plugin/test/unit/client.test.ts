@@ -517,6 +517,50 @@ describe('Client — health negotiation (M98d)', () => {
     await expect(client.health()).rejects.toThrow(CLIENT_ERRORS.connection);
     client.close();
   });
+
+  it('refuses a health body bound to a different instance than the pairing', async () => {
+    const { client } = buildClient({
+      server: {
+        healthBody: {
+          version: 1,
+          instanceId: '00000000-0000-4000-8000-000000000000',
+          state: 'no-data',
+          observations: [],
+          truncated: false,
+          droppedObservations: 0,
+        },
+      },
+    });
+    await expect(client.health()).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('refuses a health body carrying a field outside the DTO', async () => {
+    const { client } = buildClient({
+      server: {
+        healthBody: {
+          version: 1,
+          instanceId: TEST_INSTANCE_ID,
+          state: 'no-data',
+          observations: [],
+          truncated: false,
+          droppedObservations: 0,
+          extra: 'canary',
+        },
+      },
+    });
+    await expect(client.health()).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('returns a deeply frozen snapshot, as documented', async () => {
+    const { client } = buildClient();
+    const health = await client.health();
+    expect(Object.isFrozen(health)).toBe(true);
+    expect(Object.isFrozen(health.observations)).toBe(true);
+    expect(Object.isFrozen(health.observations[0])).toBe(true);
+    client.close();
+  });
 });
 
 /**

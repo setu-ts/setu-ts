@@ -22,7 +22,9 @@ import type { IHealthIndicator, RegistryFactory } from '@setu-ts/common';
 export interface HealthDiagnosticsScheduledOptions {
   /**
    * The approved indicator names to collect on a schedule. Each must be a key
-   * of {@linkcode HealthDiagnosticsOptions.indicators}. At most 16 entries.
+   * of {@linkcode HealthDiagnosticsOptions.indicators}. At most 16 entries. A
+   * name no indicator is registered under is skipped (it stays
+   * `never-observed`), and the plugin logs a count-only warning at bootstrap.
    */
   readonly indicators: readonly string[];
   /**
@@ -36,7 +38,12 @@ export interface HealthDiagnosticsScheduledOptions {
    */
   readonly timeoutMs: number;
   /**
-   * The maximum number of checks running at once within a cycle. `1`–`4`.
+   * The maximum number of scheduled callbacks running at once, `1`–`4`. A
+   * timed-out callback that has not settled still occupies its slot, so a
+   * hung indicator costs one slot and no more; the remaining slots keep
+   * refreshing the other indicators. Each cycle covers every scheduled
+   * indicator that is not still in flight, rotating its starting point so
+   * no indicator is starved.
    */
   readonly concurrency: number;
 }
@@ -61,8 +68,9 @@ export interface HealthDiagnosticsOptions {
   /**
    * The explicit opt-in, and deliberately the LITERAL `true` rather than a
    * `boolean`: this is an acknowledgement, not a toggle. An absent option is
-   * the disabled path; `enabled: false` is refused at construction so a
-   * half-configured composition fails loudly.
+   * the disabled path; `enabled: false` (or any value other than `true`) is
+   * refused when `HealthPlugin(...)` is called, so a half-configured
+   * composition fails loudly instead of silently opting in.
    */
   readonly enabled: true;
   /**
@@ -70,7 +78,8 @@ export interface HealthDiagnosticsOptions {
    * 64 entries. Each alias must be unique, `1`–`64` UTF-8 bytes, and contain
    * no control characters. An indicator whose registered name is not a key
    * here is never retained — its outcome is counted as dropped, not
-   * projected.
+   * projected. Every option is validated when `HealthPlugin(...)` is called,
+   * with fixed messages that never echo a supplied value.
    */
   readonly indicators: Readonly<Record<string, string>>;
   /**

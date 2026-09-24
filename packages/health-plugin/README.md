@@ -79,9 +79,12 @@ HealthPlugin({
 Only the latest outcome per approved alias is retained — never a history. Each observation carries
 the approved alias, the framework's own status (present only when `reported`), the outcome state
 (`reported` / `timed-out` / `failed` / `never-observed`), and monotonic `latencyMs`/`ageMs`. No
-indicator `data`, no error text, and no absolute time is ever projected. `enabled` is the LITERAL
-`true`; an omitted option registers an inert, disabled source and performs no capture. The source is
-registered under `CAPABILITIES.HEALTH_DIAGNOSTICS`; see
+indicator `data`, no error text, and no absolute time is ever projected; a result whose `status` is
+not `up`/`degraded`/`down` is observed as `failed`. `enabled` is the LITERAL `true` — any other
+value is refused when `HealthPlugin(...)` is called, as is every other invalid option — and an
+omitted option registers an inert, disabled source and performs no capture. Scheduled cycles cover
+every scheduled indicator from a rotating start; a hung check keeps only its own concurrency slot,
+so the rest keep refreshing. The source is registered under `CAPABILITIES.HEALTH_DIAGNOSTICS`; see
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#health-setu-tshealth-plugin)
 and `docs/diagnostics-protocol.md` for the wire shape.
 

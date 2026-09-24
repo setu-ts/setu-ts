@@ -25,6 +25,7 @@ import {
   statusBody,
 } from '../../src/protocol/protocol.ts';
 import { minimalBatch, minimalSnapshot, TEST_INSTANCE_ID } from '../fixtures/helpers.ts';
+import { m98bIsStatusBody } from '../fixtures/m98b-status-validator.ts';
 
 describe('Protocol — canonical target parsing', () => {
   it('accepts exactly the four canonical targets', () => {
@@ -376,5 +377,61 @@ describe('Protocol — health projection and validator (M98d)', () => {
     expect(check({ ...neverObserved, latencyMs: 5 })).toBe(true);
     expect(check({ ...reported, latencyMs: '3' })).toBe(false);
     expect(check({ ...reported, ageMs: '12' })).toBe(false);
+  });
+
+  it('requires EXACT keys, with status present if and only if reported', () => {
+    const check = (obs: Record<string, unknown>): boolean =>
+      isHealthSnapshotProjection({ ...snapshot, observations: [obs] });
+    expect(isHealthSnapshotProjection({ ...snapshot, extra: 1 })).toBe(false);
+    const missingKey: Record<string, unknown> = { ...snapshot };
+    delete missingKey.truncated;
+    expect(isHealthSnapshotProjection(missingKey)).toBe(false);
+    expect(check({ ...reported, leak: 'x' })).toBe(false);
+    const reportedWithoutStatus: Record<string, unknown> = { ...reported };
+    delete reportedWithoutStatus.status;
+    expect(check(reportedWithoutStatus)).toBe(false);
+    expect(check({ ...neverObserved, status: 'up' })).toBe(false);
+  });
+
+  it('bounds aliases, measurements, the drop count, and the observation count', () => {
+    const check = (obs: Record<string, unknown>): boolean =>
+      isHealthSnapshotProjection({ ...snapshot, observations: [obs] });
+    expect(check({ ...reported, indicatorAlias: 'x'.repeat(64) })).toBe(true);
+    expect(check({ ...reported, indicatorAlias: 'x'.repeat(65) })).toBe(false);
+    // 22 three-byte characters are 66 UTF-8 bytes in 22 code units.
+    expect(check({ ...reported, indicatorAlias: '€'.repeat(22) })).toBe(false);
+    expect(check({ ...reported, latencyMs: -1 })).toBe(false);
+    expect(check({ ...reported, ageMs: Infinity })).toBe(false);
+    expect(check({ ...reported, ageMs: Number.NaN })).toBe(false);
+    expect(isHealthSnapshotProjection({ ...snapshot, droppedObservations: -1 })).toBe(false);
+    expect(isHealthSnapshotProjection({ ...snapshot, droppedObservations: 0.5 })).toBe(false);
+    const many = Array.from({ length: 65 }, (_, i) => ({ ...reported, indicatorAlias: `a${i}` }));
+    expect(isHealthSnapshotProjection({ ...snapshot, observations: many.slice(0, 64) })).toBe(
+      true,
+    );
+    expect(isHealthSnapshotProjection({ ...snapshot, observations: many })).toBe(false);
+  });
+});
+
+describe('Protocol — status-body release skew, BOTH directions (M98d gate)', () => {
+  const legacy = legacyStatusBody(TEST_INSTANCE_ID, 900_000);
+  const current = statusBody(TEST_INSTANCE_ID, 900_000, currentInspectorsManifest());
+
+  it('a NEW client pairs against an OLD server and reads every inspector as false', () => {
+    const parsed = parseStatusBody(legacy);
+    expect(parsed).not.toBeNull();
+    expect(Object.values(parsed!.inspectors).every((supported) => supported === false)).toBe(
+      true,
+    );
+  });
+
+  it('an OLD (shipped M98b) client REJECTS the new four-field body — why the gate exists', () => {
+    // The frozen M98b validator accepts the body it was written for...
+    expect(m98bIsStatusBody(legacy)).toBe(true);
+    // ...and refuses the M98d body outright. A published M98b client would
+    // therefore latch pairingFailed against any M98d server, and the request
+    // carries no signal a server could branch on: the status body had to be
+    // settled before the package's first publication.
+    expect(m98bIsStatusBody(current)).toBe(false);
   });
 });

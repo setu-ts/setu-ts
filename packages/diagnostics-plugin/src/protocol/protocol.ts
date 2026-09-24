@@ -619,45 +619,99 @@ export function projectHealthSnapshot(
   };
 }
 
+/** The exact snapshot keys a health projection carries. */
+const HEALTH_SNAPSHOT_KEYS: readonly string[] = [
+  'version',
+  'instanceId',
+  'state',
+  'observations',
+  'truncated',
+  'droppedObservations',
+];
+
+/** The observation keys always present; `status` is added exactly when `reported`. */
+const HEALTH_OBSERVATION_KEYS: readonly string[] = [
+  'indicatorAlias',
+  'state',
+  'latencyMs',
+  'ageMs',
+  'origin',
+];
+
+/** The fixed upper bound on approved aliases, and so on projected observations. */
+const MAX_HEALTH_OBSERVATIONS = 64;
+
+/** The fixed upper bound on an alias's UTF-8 byte length. */
+const MAX_ALIAS_BYTES = 64;
+
+const ALIAS_ENCODER = new TextEncoder();
+
+/** Reports whether a record has exactly the given own keys. */
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const own = Object.keys(value);
+  return own.length === keys.length && keys.every((k) => Object.hasOwn(value, k));
+}
+
+/** A finite, non-negative millisecond measurement, or `null` where allowed. */
+function isMeasurement(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
+/** Validates one projected observation against the exact M98d DTO. */
+function isHealthObservationProjection(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const reported = value.state === 'reported';
+  const keys = reported ? [...HEALTH_OBSERVATION_KEYS, 'status'] : HEALTH_OBSERVATION_KEYS;
+  if (!hasExactKeys(value, keys)) {
+    return false;
+  }
+  const alias = value.indicatorAlias;
+  if (typeof alias !== 'string') {
+    return false;
+  }
+  const aliasBytes = ALIAS_ENCODER.encode(alias).length;
+  return aliasBytes >= 1 && aliasBytes <= MAX_ALIAS_BYTES &&
+    typeof value.state === 'string' && OBSERVATION_STATES.has(value.state) &&
+    (!reported || (typeof value.status === 'string' && HEALTH_STATUSES.has(value.status))) &&
+    isMeasurement(value.latencyMs) &&
+    isMeasurement(value.ageMs) &&
+    typeof value.origin === 'string' && ORIGINS.has(value.origin);
+}
+
 /**
- * Reports whether a parsed value is a well-formed M98d health-snapshot
- * projection: version `1`, a non-empty instance string, a fixed inspector
- * state, and every observation present with the right primitive types and
- * fixed enums. Used by the native client before it hands data to a consumer.
+ * Reports whether a value is a well-formed M98d health-snapshot projection:
+ * EXACTLY the six snapshot keys, version `1`, a non-empty instance string, a
+ * fixed inspector state, at most 64 observations, a non-negative safe-integer
+ * drop count, and every observation carrying exactly its allowed keys —
+ * `status` present if and only if the state is `reported`, every enum from
+ * its fixed vocabulary, every measurement finite and non-negative or `null`,
+ * every alias 1–64 UTF-8 bytes.
  *
- * @param value - The parsed JSON value
+ * ONE validator for both sides of the wire: the connector runs it over its
+ * own field-by-field projection before signing (a source that violates the
+ * DTO is answered `collection-failed`, so nothing unvalidated is signed),
+ * and the native client runs it again before handing data to a consumer.
+ *
+ * @param value - The parsed JSON value, or a fresh projection
  * @returns `true` when the value is a well-formed health snapshot
  * @internal
  */
 export function isHealthSnapshotProjection(value: unknown): value is HealthDiagnosticsSnapshot {
-  if (!isRecord(value)) {
+  if (!isRecord(value) || !hasExactKeys(value, HEALTH_SNAPSHOT_KEYS)) {
     return false;
   }
-  if (
-    value.version !== 1 ||
-    typeof value.instanceId !== 'string' ||
-    value.instanceId.length === 0 ||
-    typeof value.state !== 'string' ||
-    !INSPECTOR_STATES.has(value.state) ||
-    !Array.isArray(value.observations) ||
-    typeof value.truncated !== 'boolean' ||
-    typeof value.droppedObservations !== 'number'
-  ) {
-    return false;
-  }
-  return value.observations.every((observation) => {
-    if (!isRecord(observation)) {
-      return false;
-    }
-    return typeof observation.indicatorAlias === 'string' &&
-      observation.indicatorAlias.length > 0 &&
-      (observation.status === undefined ||
-        (typeof observation.status === 'string' && HEALTH_STATUSES.has(observation.status))) &&
-      typeof observation.state === 'string' &&
-      OBSERVATION_STATES.has(observation.state) &&
-      (observation.latencyMs === null || typeof observation.latencyMs === 'number') &&
-      (observation.ageMs === null || typeof observation.ageMs === 'number') &&
-      typeof observation.origin === 'string' &&
-      ORIGINS.has(observation.origin);
-  });
+  return value.version === 1 &&
+    typeof value.instanceId === 'string' &&
+    value.instanceId.length > 0 &&
+    typeof value.state === 'string' &&
+    INSPECTOR_STATES.has(value.state) &&
+    Array.isArray(value.observations) &&
+    value.observations.length <= MAX_HEALTH_OBSERVATIONS &&
+    typeof value.truncated === 'boolean' &&
+    typeof value.droppedObservations === 'number' &&
+    Number.isSafeInteger(value.droppedObservations) &&
+    value.droppedObservations >= 0 &&
+    value.observations.every(isHealthObservationProjection);
 }

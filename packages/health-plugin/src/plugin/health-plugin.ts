@@ -24,12 +24,15 @@ import { CAPABILITIES, resolveRegistryEntry } from '@setu-ts/common';
 import type { HealthIndicatorEntry, HealthPluginOptions } from '../interfaces/index.ts';
 import {
   COLLECTOR_ERRORS,
+  compileHealthDiagnosticsPolicy,
   HealthObservationCollector,
 } from '../diagnostics/health-observation-collector.ts';
 import {
   attachHealthObservation,
   HealthService,
+  isIndicatorRegistered,
   resolveIndicatorTimeout,
+  runIndicatorRaw,
 } from '../services/health-service.ts';
 import { createSelfIndicator } from '../indicators/self-indicator.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -105,6 +108,13 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
   // configuration error the caller can fix before any plugin runs, and the
   // failure names the option (M90b).
   const indicatorTimeoutMs = resolveIndicatorTimeout(options?.indicatorTimeoutMs);
+  // The health-observation policy (M98d) is validated at CONSTRUCTION for the
+  // same reason: an invalid option — including `enabled: false` from a
+  // caller the literal type cannot reach — refuses before any application
+  // exists, with a fixed, value-free message.
+  const diagnosticsPolicy = options?.diagnostics === undefined
+    ? null
+    : compileHealthDiagnosticsPolicy(options.diagnostics);
 
   // Split the two arms once, at plugin construction, so `register` and the
   // `onInit` hook each read a single list. Instances keep their pre-factory
@@ -158,12 +168,11 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       // present option builds the collector, attaches it to the service so the
       // runner reports each settled indicator, and registers the active source
       // under CAPABILITIES.HEALTH_DIAGNOSTICS.
-      const diagnosticsOptions = options?.diagnostics;
-      if (diagnosticsOptions !== undefined) {
+      if (diagnosticsPolicy !== null) {
         const collector = new HealthObservationCollector(
-          diagnosticsOptions,
+          diagnosticsPolicy,
           runtime,
-          { run: (name) => service.runIndicatorRaw(name) },
+          { run: (name) => runIndicatorRaw(service, name) },
         );
         attachHealthObservation(service, collector);
         ctx.services.register<IHealthDiagnosticsSource>(
@@ -171,6 +180,22 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
           collector,
         );
         ctx.lifecycle.onBootstrap(() => {
+          // Every indicator — instance, factory, contribution — is registered
+          // by now. An approved name no indicator carries would stay
+          // `never-observed` forever; say so once, with a count rather than
+          // the names (indicator names are treated as sensitive topology).
+          let missing = 0;
+          for (const name of diagnosticsPolicy.aliasBySourceName.keys()) {
+            if (!isIndicatorRegistered(service, name)) {
+              missing += 1;
+            }
+          }
+          if (missing > 0) {
+            ctx.logger?.warn(
+              `Health diagnostics: ${missing} approved indicator name(s) match no registered ` +
+                'indicator and will stay never-observed.',
+            );
+          }
           collector.startScheduled();
         });
         ctx.lifecycle.onClose(() => {

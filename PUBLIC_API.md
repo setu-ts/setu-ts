@@ -4048,12 +4048,15 @@ through `client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector res
 health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source
 answers a typed `unsupported` snapshot (no indicator runs, startup never fails), a
 registered-but-disabled source answers `disabled`, and a throwing source answers a value-free
-`collection-failed` snapshot — none of which changes the application's readiness. The snapshot is
-the health plugin's minimized DTO (approved alias, framework status, outcome state, monotonic timing
-only — no indicator `data`, no error text, no absolute time), projected field-by-field and bounded
-by the same 256 KiB response ceiling as every other operation. A client paired against a legacy M98b
-status body (no manifest) resolves all inspectors to `false` and its `health()` answers
-`unsupported` without sending the request. The full wire shape is in `docs/diagnostics-protocol.md`.
+`collection-failed` snapshot — as does a source whose projected DTO fails the exact validator (an
+unknown enum, a non-finite or negative measurement, an oversized alias, more than 64 observations, a
+malformed shape), so nothing unvalidated is ever signed — none of which changes the application's
+readiness. The snapshot is the health plugin's minimized DTO (approved alias, framework status,
+outcome state, monotonic timing only — no indicator `data`, no error text, no absolute time),
+projected field-by-field and bounded by the same 256 KiB response ceiling as every other operation.
+A client paired against a legacy M98b status body (no manifest) resolves all inspectors to `false`
+and its `health()` answers `unsupported` without sending the request. The full wire shape is in
+`docs/diagnostics-protocol.md`.
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
@@ -6760,14 +6763,21 @@ app.register(HealthPlugin({
 
 `diagnostics.enabled` is the LITERAL `true`, not `boolean`: an absent option is the disabled path
 (an inert source is still registered under `CAPABILITIES.HEALTH_DIAGNOSTICS`, answering `disabled`),
-and `enabled: false` is refused at construction. `indicators` is the exact registered-name to
-display-alias allowlist — at most 64 entries, each alias unique, 1–64 UTF-8 bytes, no control
-characters; an indicator whose registered name is not a key is never retained. `staleAfterMs`
-(default `30000`) marks an observation `stale` once it is older than that many monotonic
-milliseconds from capture. `scheduled` — when present — must name a subset of the approved indicator
-names and supplies a cadence (`intervalMs`, 1,000–300,000), a per-check reporting deadline
-(`timeoutMs`, 1–30,000 — a reporting bound, not a cancellation), and a concurrency cap (1–4); at
-most 16 indicators are scheduled.
+and `enabled: false` (or any value other than `true`) is refused when `HealthPlugin(...)` is called
+— every diagnostics option is validated there, with fixed messages that never echo a value.
+`indicators` is the exact registered-name to display-alias allowlist — at most 64 entries, each
+alias unique, 1–64 UTF-8 bytes, no control characters; an indicator whose registered name is not a
+key is never retained. `staleAfterMs` (default `30000`) marks an observation `stale` once it is
+older than that many monotonic milliseconds from capture. `scheduled` — when present — must name a
+subset of the approved indicator names and supplies a cadence (`intervalMs`, 1,000–300,000), a
+per-check reporting deadline (`timeoutMs`, 1–30,000 — a reporting bound, not a cancellation), and a
+concurrency cap (1–4); at most 16 indicators are scheduled. Each cycle covers every scheduled
+indicator not still in flight, starting from a rotating cursor so none is starved. A timed-out
+callback that has not settled keeps its concurrency slot — and only that slot — until it does, so it
+is never replaced early and the other indicators keep refreshing. An approved name no indicator is
+registered under stays `never-observed`, and the plugin logs one count-only warning at bootstrap. An
+indicator result whose `status` is not `up`/`degraded`/`down` is observed as `failed`; the value is
+never retained.
 
 The plugin retains only the latest outcome per approved alias (never a history). Each observation
 carries the approved alias, the framework's own status (present only when `reported`), the outcome

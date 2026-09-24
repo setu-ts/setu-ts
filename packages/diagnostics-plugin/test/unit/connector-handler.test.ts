@@ -717,6 +717,137 @@ describe('Connector handler — health operation (M98d)', () => {
     });
   });
 
+  /** Reads `/v1/health` through a fresh handler over the given source. */
+  async function readHealthWith(
+    healthSource: { snapshot: (instanceId: string) => unknown },
+  ): Promise<{ status: number; body: unknown }> {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
+    });
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/health`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': '2',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    return { status: view.status, body: view.body };
+  }
+
+  const COLLECTION_FAILED = {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'collection-failed',
+    observations: [],
+    truncated: false,
+    droppedObservations: 0,
+  };
+
+  const observation = healthSnapshot.observations[0];
+
+  // Each row is a DTO violation a third-party provider of the token could
+  // return. None may be signed: every one answers the value-free
+  // `collection-failed`, never a 503 and never the offending value.
+  const VIOLATIONS: ReadonlyArray<readonly [string, () => unknown]> = [
+    ['non-array observations', () => ({ ...healthSnapshot, observations: 'nope' })],
+    ['a non-framework status', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, status: 'canary-status' }],
+    })],
+    ['a status on a non-reported state', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, state: 'failed' }],
+    })],
+    ['a reported state with no status', () => ({
+      ...healthSnapshot,
+      observations: [{
+        indicatorAlias: 'database',
+        state: 'reported',
+        latencyMs: 1,
+        ageMs: 1,
+        origin: 'application',
+      }],
+    })],
+    ['an unknown inspector state', () => ({ ...healthSnapshot, state: 'canary-state' })],
+    ['an oversized alias', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, indicatorAlias: 'x'.repeat(65) }],
+    })],
+    ['a negative latency', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, latencyMs: -1 }],
+    })],
+    ['a non-finite age', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, ageMs: Infinity }],
+    })],
+    ['a fractional drop count', () => ({ ...healthSnapshot, droppedObservations: 0.5 })],
+    ['more than 64 observations', () => ({
+      ...healthSnapshot,
+      observations: Array.from(
+        { length: 65 },
+        (_, i) => ({ ...observation, indicatorAlias: `a${i}` }),
+      ),
+    })],
+    ['a throwing getter', () => ({
+      ...healthSnapshot,
+      get observations(): never {
+        throw new Error('canary-getter');
+      },
+    })],
+  ];
+
+  for (const [label, build] of VIOLATIONS) {
+    it(`answers collection-failed for ${label}`, async () => {
+      const result = await readHealthWith({ snapshot: () => build() });
+      expect(result.status).toEqual(200);
+      expect(result.body).toEqual(COLLECTION_FAILED);
+      expect(JSON.stringify(result.body)).not.toContain('canary');
+    });
+  }
+
+  it('drops fields outside the DTO rather than signing them', async () => {
+    const result = await readHealthWith({
+      snapshot: () => ({
+        ...healthSnapshot,
+        secret: 'canary-extra',
+        observations: [{ ...observation, leak: 'canary-extra' }],
+      }),
+    });
+    expect(result.status).toEqual(200);
+    expect(result.body).toEqual(healthSnapshot);
+  });
+
+  it('refuses a DTO for another version or another instance', async () => {
+    const wrongVersion = await readHealthWith({
+      snapshot: () => ({ ...healthSnapshot, version: 2 }),
+    });
+    expect(wrongVersion.status).toEqual(400);
+    expect(wrongVersion.body).toEqual({ version: 1, error: 'unsupported-version' });
+    const wrongInstance = await readHealthWith({
+      snapshot: () => ({ ...healthSnapshot, instanceId: '00000000-0000-4000-8000-000000000000' }),
+    });
+    expect(wrongInstance.status).toEqual(401);
+  });
+
   it('refuses a cross-instance health read', async () => {
     const { handler, key } = await buildHarness();
     // Bind the session to TEST_INSTANCE_ID, then read for a DIFFERENT

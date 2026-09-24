@@ -2515,12 +2515,14 @@ cannot backpressure the health endpoint.
 
 The optional `scheduled` block is the one part that performs work: a bounded scheduler (at most 16
 approved indicators, `concurrency` 1–4, a per-check reporting `timeoutMs` that is a bound — not a
-cancellation — so a hung check stays in-flight until it settles and no replacement starts for it) is
-started from the plugin's `onBootstrap` hook and torn down from `onClose`, including the
-failed-startup path. The M98b connector consumes the source to serve `GET /v1/health`, projecting
-the DTO field-by-field and bounding it by the same 256 KiB response ceiling; an absent source
-answers `unsupported`, a throwing source a value-free `collection-failed`, and neither changes the
-application's readiness.
+cancellation — so a hung check stays in-flight until it settles and no replacement starts for it;
+the hung callback holds its own concurrency slot and nothing more, cycles wait only for reporting,
+and a rotating cursor keeps every scheduled indicator reachable) is started from the plugin's
+`onBootstrap` hook and torn down from `onClose`, including the failed-startup path. The M98b
+connector consumes the source to serve `GET /v1/health`, projecting the DTO field-by-field and
+bounding it by the same 256 KiB response ceiling; an absent source answers `unsupported`, a throwing
+source — or one whose projected DTO fails the exact validator — a value-free `collection-failed`,
+and neither changes the application's readiness.
 
 ---
 

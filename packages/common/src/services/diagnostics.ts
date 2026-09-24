@@ -359,10 +359,12 @@ export type HealthObservationState = 'reported' | 'timed-out' | 'failed' | 'neve
  * `indicatorAlias` is the display alias the application explicitly
  * allowlisted for the indicator's registered name — never the name itself.
  * `status` is present only when {@linkcode state} is `reported`. `latencyMs`
- * and `ageMs` are monotonic measurements relative to the runtime: `ageMs`
- * is the elapsed time since the observation was captured, and is `null` for
- * an observation that predates the runtime. No absolute time, no error text,
- * and no indicator `data` is admitted.
+ * and `ageMs` are monotonic measurements on the runtime clock: `latencyMs`
+ * is how long the check took, `ageMs` the elapsed time since the observation
+ * was captured, and both are `null` exactly when the alias was never
+ * observed. No absolute time, no error text, and no indicator `data` is
+ * admitted; a status outside `up`/`degraded`/`down` is never carried — such
+ * a check is projected as `failed`.
  *
  * @since 0.8.0
  */
@@ -375,7 +377,7 @@ export interface HealthDiagnosticsObservation {
   readonly state: HealthObservationState;
   /** Monotonic elapsed ms of the check; `null` when never observed. */
   readonly latencyMs: number | null;
-  /** Monotonic ms since capture; `null` when never observed or pre-runtime. */
+  /** Monotonic ms since capture; `null` when never observed. */
   readonly ageMs: number | null;
   /** Whether the observation came from a normal check or a scheduled one. */
   readonly origin: 'application' | 'scheduled';
@@ -388,8 +390,8 @@ export interface HealthDiagnosticsObservation {
  * {@linkcode state}, {@linkcode observations}, {@linkcode truncated}, and
  * {@linkcode droppedObservations}. `observations` is a complete projection of
  * the collector's retained latest-per-alias records at read time; when the
- * serialized size exceeded the kernel's fixed bounds, later entries are
- * omitted and {@linkcode truncated} is set. The exact UTF-8 byte length of
+ * serialized size would exceed the fixed 256 KiB snapshot budget, later
+ * entries are omitted and {@linkcode truncated} is set. The exact UTF-8 byte length of
  * the compact `JSON.stringify` of this object is bounded by the connector's
  * response budget.
  *

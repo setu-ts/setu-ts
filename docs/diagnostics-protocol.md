@@ -152,12 +152,13 @@ plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-fie
 `state` is the inspector's coarse availability: `unsupported` (no health plugin, or a health plugin
 without diagnostics — the connector's answer), `disabled` (source present but observation not opted
 in — the plugin's answer), `no-data` (opted in, nothing captured yet), `ready`, `stale`, or
-`collection-failed` (the source threw; the answer is value-free, never a fault that changes the
-application's readiness). Each observation carries only the approved display alias, the framework's
-own status (present only when `reported`), the outcome state, and monotonic `latencyMs`/`ageMs`. No
-indicator `data`, no error text, and no absolute time is admitted. The response is signed and
-bounded exactly like every other operation: the MAC covers the exact body bytes, and the parsed
-`instanceId` must equal the authenticated header.
+`collection-failed` (the source threw, or its DTO failed the exact validator the connector runs
+before signing; the answer is value-free, never a fault that changes the application's readiness).
+Each observation carries only the approved display alias, the framework's own status (present only
+when `reported`), the outcome state, and monotonic `latencyMs`/`ageMs`. No indicator `data`, no
+error text, and no absolute time is admitted. The response is signed and bounded exactly like every
+other operation: the MAC covers the exact body bytes, and the parsed `instanceId` must equal the
+authenticated header.
 
 ## Bounds (fixed, not configurable)
 

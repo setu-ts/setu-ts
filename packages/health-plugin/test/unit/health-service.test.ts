@@ -5,8 +5,16 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { attachHealthObservation, HealthService } from '../../src/services/health-service.ts';
-import { HealthObservationCollector } from '../../src/diagnostics/health-observation-collector.ts';
+import {
+  attachHealthObservation,
+  HealthService,
+  isIndicatorRegistered,
+  runIndicatorRaw,
+} from '../../src/services/health-service.ts';
+import {
+  compileHealthDiagnosticsPolicy,
+  HealthObservationCollector,
+} from '../../src/diagnostics/health-observation-collector.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 /**
@@ -586,7 +594,7 @@ describe('HealthService', () => {
   describe('observation seam (M98d)', () => {
     function buildCollector(runtime: ReturnType<typeof createFakeRuntime>) {
       return new HealthObservationCollector(
-        { enabled: true, indicators: { db: 'database' } },
+        compileHealthDiagnosticsPolicy({ enabled: true, indicators: { db: 'database' } }),
         runtime,
         { run: () => Promise.resolve({ status: 'up' }) },
       );
@@ -599,15 +607,54 @@ describe('HealthService', () => {
         'db',
         () => Promise.resolve({ status: 'up', data: { detail: 'x' } }),
       );
-      const result = await service.runIndicatorRaw('db');
-      expect(result.status).toBe('up');
-      expect(result.data).toEqual({ detail: 'x' });
+      const result = await runIndicatorRaw(service, 'db');
+      expect(result?.status).toBe('up');
+      expect(result?.data).toEqual({ detail: 'x' });
     });
 
-    it('runIndicatorRaw rejects for an unknown indicator', async () => {
+    it('runIndicatorRaw answers null for an unregistered name, running nothing', () => {
       const runtime = createFakeRuntime();
       const service = new HealthService(runtime);
-      await expect(service.runIndicatorRaw('nope')).rejects.toThrow('Unknown health indicator');
+      expect(runIndicatorRaw(service, 'nope')).toBeNull();
+    });
+
+    it('runIndicatorRaw turns a synchronously throwing indicator into a rejection', async () => {
+      const runtime = createFakeRuntime();
+      const service = new HealthService(runtime);
+      service.registerIndicator('db', () => {
+        throw new Error('sync');
+      });
+      await expect(runIndicatorRaw(service, 'db')!).rejects.toThrow('sync');
+    });
+
+    it('adds no public method to the exported class', () => {
+      const service = new HealthService(createFakeRuntime());
+      expect('runIndicatorRaw' in service).toBe(false);
+    });
+
+    it('isIndicatorRegistered reports registration without running the indicator', () => {
+      const service = new HealthService(createFakeRuntime());
+      let calls = 0;
+      service.registerIndicator('db', () => {
+        calls += 1;
+        return Promise.resolve({ status: 'up' });
+      });
+      expect(isIndicatorRegistered(service, 'db')).toBe(true);
+      expect(isIndicatorRegistered(service, 'nope')).toBe(false);
+      expect(calls).toBe(0);
+    });
+
+    it('observes an indicator returning a non-framework status as failed, dropping the value', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime);
+      const collector = buildCollector(manual.runtime);
+      attachHealthObservation(service, collector);
+      service.registerIndicator('db', () => Promise.resolve({ status: 'canary-status' } as never));
+
+      await service.check();
+      const snapshot = collector.snapshot('instance-1');
+      expect(snapshot.observations[0].state).toBe('failed');
+      expect(JSON.stringify(snapshot)).not.toContain('canary-status');
     });
 
     it('reports each settled indicator to the attached collector exactly once', async () => {
