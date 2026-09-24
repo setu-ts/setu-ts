@@ -1,7 +1,10 @@
 # Milestone 99e — Class-Based Style As Its Own Axis (`@setu-ts/cli`)
 
-> **Status:** Planning on `docs/m99e-class-based-style`. Implementation and every follow-up fix
-> belong on `feat/m99e-class-based-style`; `main` is protected. The branch merges through one PR.
+> **Status:** Opened on `docs/m99e-class-based-style`, which carries only this plan and the ROADMAP
+> section — CLAUDE.md assigns opening a milestone to a `docs/…` branch, because a `feat/…` branch
+> asserts the milestone is being built on it (the M37c/PR #124 precedent). The implementation, the
+> status flip, the plan archival and every follow-up fix all belong on ONE branch,
+> `feat/m99e-class-based-style`, which merges through one PR; `main` is protected.
 
 ## 0. Objective & scope
 
