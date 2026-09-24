@@ -225,6 +225,8 @@ package fits the plugin architecture.
 | `GrpcServiceDefinition`            | interface |
 | `HandlerResult`                    | interface |
 | `HealthCheckResult`                | interface |
+| `HealthDiagnosticsObservation`     | interface |
+| `HealthDiagnosticsSnapshot`        | interface |
 | `HealthReport`                     | interface |
 | `HttpStatusHint`                   | interface |
 | `IAdapterTransaction`              | interface |
@@ -257,6 +259,7 @@ package fits the plugin architecture.
 | `IGraphqlService`                  | interface |
 | `IGrpcService`                     | interface |
 | `IHealthApi`                       | interface |
+| `IHealthDiagnosticsSource`         | interface |
 | `IHealthIndicator`                 | interface |
 | `IHealthService`                   | interface |
 | `IHistogram`                       | interface |
@@ -408,6 +411,7 @@ package fits the plugin architecture.
 | `DiagnosticsEventOutcome`          | type      |
 | `DiagnosticsEventStage`            | type      |
 | `DiagnosticsFailureCode`           | type      |
+| `DiagnosticsInspectorState`        | type      |
 | `DiagnosticsNodeKind`              | type      |
 | `DiagnosticsSnapshotState`         | type      |
 | `EntityKey`                        | type      |
@@ -421,6 +425,7 @@ package fits the plugin architecture.
 | `GrpcServingStatus`                | type      |
 | `HardenedCall`                     | type      |
 | `HealthIndicatorFn`                | type      |
+| `HealthObservationState`           | type      |
 | `HealthStatus`                     | type      |
 | `HttpMethod`                       | type      |
 | `IngressKind`                      | type      |

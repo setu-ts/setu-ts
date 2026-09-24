@@ -13,7 +13,11 @@
  * @module
  */
 
-import type { DiagnosticsBatch, DiagnosticsSnapshot } from '@setu-ts/common';
+import type {
+  DiagnosticsBatch,
+  DiagnosticsSnapshot,
+  HealthDiagnosticsSnapshot,
+} from '@setu-ts/common';
 
 import {
   importSessionKey,
@@ -26,9 +30,12 @@ import {
 } from '../security/authentication.ts';
 import type { DiagnosticsClientOptions, IDiagnosticsClient } from '../interfaces/index.ts';
 import {
+  HEALTH_TARGET,
+  type InspectorsManifest,
   isBatchProjection,
+  isHealthSnapshotProjection,
   isSnapshotProjection,
-  isStatusBody,
+  parseStatusBody,
   SNAPSHOT_TARGET,
   STATUS_TARGET,
 } from '../protocol/protocol.ts';
@@ -189,6 +196,11 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
   let closed = false;
   let pairingFailed = false;
   let instanceId: string | null = null;
+  // The authenticated inspector support manifest, cached from the pairing
+  // exchange. `null` until paired. A legacy M98b server resolves this to the
+  // all-false manifest, so `health()` answers `unsupported` without sending
+  // an addon request.
+  let inspectors: InspectorsManifest | null = null;
   let nextSequence = 1;
   let keyPromise: Promise<CryptoKey> | null = null;
   const inFlight = new Set<AbortController>();
@@ -324,7 +336,10 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       throw error;
     }
     // The status body is parsed only AFTER its MAC verified, and the parsed
-    // instance must agree with the authenticated header.
+    // instance must agree with the authenticated header. Both the legacy
+    // M98b three-field body and the new four-field body (with the inspector
+    // manifest) are accepted; the legacy body resolves to the all-false
+    // manifest.
     let parsed: unknown;
     try {
       parsed = parseBody(result.bodyText);
@@ -332,11 +347,13 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       pairingFailed = true;
       throw error;
     }
-    if (!isStatusBody(parsed) || parsed.instanceId !== result.responseInstance) {
+    const status = parseStatusBody(parsed);
+    if (status === null || status.instanceId !== result.responseInstance) {
       pairingFailed = true;
       throw new Error(CLIENT_ERRORS.connection);
     }
-    instanceId = parsed.instanceId;
+    instanceId = status.instanceId;
+    inspectors = status.inspectors;
   };
 
   return {
@@ -377,6 +394,43 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         const result = await exchange(target);
         const parsed = parseBody(result.bodyText);
         if (!isBatchProjection(parsed)) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return parsed;
+      });
+    },
+
+    async health(): Promise<HealthDiagnosticsSnapshot> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        // exchangeAndBind sets the instance or throws; capture it locally so
+        // the typed unsupported DTO below is built from a non-null UUID.
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: when the authenticated manifest reports the
+        // health inspector as unsupported, return a frozen typed `unsupported`
+        // DTO WITHOUT sending an addon request. This is the release-skew path
+        // — a legacy server advertised no inspectors — and it never probes an
+        // unknown route or infers support from a generic protocol error.
+        if (inspectors !== null && inspectors.health === false) {
+          return Object.freeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            observations: Object.freeze([]),
+            truncated: false,
+            droppedObservations: 0,
+          });
+        }
+        const result = await exchange(HEALTH_TARGET);
+        const parsed = parseBody(result.bodyText);
+        if (!isHealthSnapshotProjection(parsed)) {
           throw new Error(CLIENT_ERRORS.connection);
         }
         return parsed;

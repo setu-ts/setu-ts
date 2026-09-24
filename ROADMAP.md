@@ -11909,11 +11909,11 @@ because one of them invalidated part of a previous run's claims:
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                  |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                      |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                        |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98c complete, 98d–98n planned with security audit gates)                              |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98c complete, 98d in implementation, 98e–98n planned with security audit gates)       |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347)) |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))             |
-| 98d       | ⬜     | health-plugin — minimized health observations; design security review and implementation audit required                                   |
+| 98d       | ⬜     | health-plugin — minimized health observations (implemented on feat/m98d-health-observations; implementation audit pending in PR)          |
 | 98e       | ⬜     | config-plugin — value-free configuration provenance; design security review and implementation audit required                             |
 | 98f       | ⬜     | queue-plugin — attempt, outcome and depth observations; design security review and implementation audit required                          |
 | 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                |

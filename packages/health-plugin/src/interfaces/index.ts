@@ -6,6 +6,88 @@
 import type { IHealthIndicator, RegistryFactory } from '@setu-ts/common';
 
 /**
+ * The bounded, separately-controlled scheduled health collection (M98d).
+ *
+ * Absent by default: an omitted `scheduled` performs no scheduled work. When
+ * present, it names a subset of the approved indicator names (the keys of
+ * {@linkcode HealthDiagnosticsOptions.indicators}) and supplies a cadence, a
+ * per-check reporting deadline, and a concurrency cap. A timeout here is a
+ * REPORTING bound, not a cancellation: a check that has not settled within
+ * `timeoutMs` is reported as `timed-out`, but its raw callback remains
+ * in-flight until it actually settles, and no replacement check for it starts
+ * before then.
+ *
+ * @since 0.8.0
+ */
+export interface HealthDiagnosticsScheduledOptions {
+  /**
+   * The approved indicator names to collect on a schedule. Each must be a key
+   * of {@linkcode HealthDiagnosticsOptions.indicators}. At most 16 entries.
+   */
+  readonly indicators: readonly string[];
+  /**
+   * The cadence between scheduled cycles, in milliseconds. `1,000`–`300,000`.
+   */
+  readonly intervalMs: number;
+  /**
+   * The per-check reporting deadline, in milliseconds. `1`–`30,000`. A check
+   * that has not settled within the deadline is reported as `timed-out`; the
+   * deadline does not cancel the underlying callback.
+   */
+  readonly timeoutMs: number;
+  /**
+   * The maximum number of checks running at once within a cycle. `1`–`4`.
+   */
+  readonly concurrency: number;
+}
+
+/**
+ * The opt-in health-observation policy (M98d).
+ *
+ * Present only when the developer explicitly opts in to minimized health
+ * observations. An omitted `diagnostics` option registers an inert, disabled
+ * source and performs no capture. When present, the health plugin retains the
+ * latest outcome per approved indicator alias (never a history) and, when
+ * `scheduled` is present, performs bounded scheduled checks.
+ *
+ * Indicator names and topology are treated as sensitive: only the explicitly
+ * allowlisted name-to-alias mapping is retained, aliases are unique and
+ * bounded, and no indicator `data`, error text, or absolute time is ever
+ * projected.
+ *
+ * @since 0.8.0
+ */
+export interface HealthDiagnosticsOptions {
+  /**
+   * The explicit opt-in, and deliberately the LITERAL `true` rather than a
+   * `boolean`: this is an acknowledgement, not a toggle. An absent option is
+   * the disabled path; `enabled: false` is refused at construction so a
+   * half-configured composition fails loudly.
+   */
+  readonly enabled: true;
+  /**
+   * The exact registered indicator name to display-alias allowlist. At most
+   * 64 entries. Each alias must be unique, `1`–`64` UTF-8 bytes, and contain
+   * no control characters. An indicator whose registered name is not a key
+   * here is never retained — its outcome is counted as dropped, not
+   * projected.
+   */
+  readonly indicators: Readonly<Record<string, string>>;
+  /**
+   * An observation older than this many milliseconds is reported as `stale`.
+   * Measured on the runtime's monotonic clock from capture.
+   *
+   * @default 30000
+   */
+  readonly staleAfterMs?: number;
+  /**
+   * Optional bounded scheduled collection. Absent by default; when present it
+   * must name a subset of the approved indicator names.
+   */
+  readonly scheduled?: HealthDiagnosticsScheduledOptions;
+}
+
+/**
  * Options for configuring the health plugin endpoints.
  *
  * @since 0.2.0
@@ -95,4 +177,16 @@ export interface HealthPluginOptions {
    * @since 0.5.0
    */
   readonly indicatorTimeoutMs?: number;
+
+  /**
+   * The opt-in health-observation policy (M98d). Absent by default: the
+   * plugin registers an inert, disabled source under
+   * `CAPABILITIES.HEALTH_DIAGNOSTICS` and performs no capture. When present,
+   * the plugin retains the latest minimized outcome per approved indicator
+   * alias and, when `scheduled` is present, performs bounded scheduled
+   * checks. This never changes the `/health`, `/live`, or `/ready` behavior.
+   *
+   * @since 0.8.0
+   */
+  readonly diagnostics?: HealthDiagnosticsOptions;
 }

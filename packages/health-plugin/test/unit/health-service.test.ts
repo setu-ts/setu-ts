@@ -5,8 +5,57 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { HealthService } from '../../src/services/health-service.ts';
+import { attachHealthObservation, HealthService } from '../../src/services/health-service.ts';
+import { HealthObservationCollector } from '../../src/diagnostics/health-observation-collector.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+
+/**
+ * A runtime whose clock and timers are MANUALLY driven: `tick(ms)`
+ * advances the monotonic clock and fires due timers. No real time
+ * passes, so a deadline test costs microseconds, not the deadline.
+ */
+function createManualRuntime(): {
+  runtime: ReturnType<typeof createFakeRuntime>;
+  tick: (ms: number) => void;
+  pendingTimers: () => number;
+} {
+  let clock = 0;
+  const timers = new Map<number, { at: number; fn: () => void }>();
+  let nextId = 1;
+  const base = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
+  const runtime = {
+    ...base,
+    hrtime: () => clock,
+    setTimeout: (fn: () => void, ms: number) => {
+      const id = nextId++;
+      timers.set(id, { at: clock + ms, fn });
+      return { id };
+    },
+    clearTimeout: (handle: unknown) => {
+      timers.delete((handle as { id: number }).id);
+    },
+  } as ReturnType<typeof createFakeRuntime>;
+  return {
+    runtime,
+    pendingTimers: () => timers.size,
+    tick: (ms: number) => {
+      const target = clock + ms;
+      for (;;) {
+        let due: { id: number; at: number; fn: () => void } | undefined;
+        for (const [id, entry] of timers) {
+          if (entry.at <= target && (due === undefined || entry.at < due.at)) {
+            due = { id, at: entry.at, fn: entry.fn };
+          }
+        }
+        if (due === undefined) break;
+        timers.delete(due.id);
+        clock = due.at;
+        due.fn();
+      }
+      clock = target;
+    },
+  };
+}
 
 describe('HealthService', () => {
   it('should register indicators', () => {
@@ -351,54 +400,6 @@ describe('HealthService', () => {
   });
 
   describe('concurrent, deadline-bounded aggregation (M90b)', () => {
-    /**
-     * A runtime whose clock and timers are MANUALLY driven: `tick(ms)`
-     * advances the monotonic clock and fires due timers. No real time
-     * passes, so a deadline test costs microseconds, not the deadline.
-     */
-    function createManualRuntime(): {
-      runtime: ReturnType<typeof createFakeRuntime>;
-      tick: (ms: number) => void;
-      pendingTimers: () => number;
-    } {
-      let clock = 0;
-      const timers = new Map<number, { at: number; fn: () => void }>();
-      let nextId = 1;
-      const base = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
-      const runtime = {
-        ...base,
-        hrtime: () => clock,
-        setTimeout: (fn: () => void, ms: number) => {
-          const id = nextId++;
-          timers.set(id, { at: clock + ms, fn });
-          return { id };
-        },
-        clearTimeout: (handle: unknown) => {
-          timers.delete((handle as { id: number }).id);
-        },
-      } as ReturnType<typeof createFakeRuntime>;
-      return {
-        runtime,
-        pendingTimers: () => timers.size,
-        tick: (ms: number) => {
-          const target = clock + ms;
-          for (;;) {
-            let due: { id: number; at: number; fn: () => void } | undefined;
-            for (const [id, entry] of timers) {
-              if (entry.at <= target && (due === undefined || entry.at < due.at)) {
-                due = { id, at: entry.at, fn: entry.fn };
-              }
-            }
-            if (due === undefined) break;
-            timers.delete(due.id);
-            clock = due.at;
-            due.fn();
-          }
-          clock = target;
-        },
-      };
-    }
-
     it('starts deferred indicators before earlier ones settle (concurrency)', async () => {
       const runtime = createFakeRuntime({ now: 1_000_000_000_000, hrtime: 0 });
       const service = new HealthService(runtime);
@@ -579,6 +580,116 @@ describe('HealthService', () => {
       // The concurrent run measures both against their own start.
       expect(report.checks['slow']?.latencyMs).toBeGreaterThanOrEqual(0);
       expect(report.checks['instant']?.latencyMs).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('observation seam (M98d)', () => {
+    function buildCollector(runtime: ReturnType<typeof createFakeRuntime>) {
+      return new HealthObservationCollector(
+        { enabled: true, indicators: { db: 'database' } },
+        runtime,
+        { run: () => Promise.resolve({ status: 'up' }) },
+      );
+    }
+
+    it('runIndicatorRaw resolves the raw result for a known indicator', async () => {
+      const runtime = createFakeRuntime();
+      const service = new HealthService(runtime);
+      service.registerIndicator(
+        'db',
+        () => Promise.resolve({ status: 'up', data: { detail: 'x' } }),
+      );
+      const result = await service.runIndicatorRaw('db');
+      expect(result.status).toBe('up');
+      expect(result.data).toEqual({ detail: 'x' });
+    });
+
+    it('runIndicatorRaw rejects for an unknown indicator', async () => {
+      const runtime = createFakeRuntime();
+      const service = new HealthService(runtime);
+      await expect(service.runIndicatorRaw('nope')).rejects.toThrow('Unknown health indicator');
+    });
+
+    it('reports each settled indicator to the attached collector exactly once', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime);
+      const collector = buildCollector(manual.runtime);
+      attachHealthObservation(service, collector);
+      service.registerIndicator('db', () => Promise.resolve({ status: 'up' }));
+
+      const report = await service.check();
+      expect(report.status).toBe('up');
+
+      const snapshot = collector.snapshot('instance-1');
+      expect(snapshot.state).toBe('ready');
+      const observation = snapshot.observations.find((o) => o.indicatorAlias === 'database')!;
+      expect(observation.state).toBe('reported');
+      expect(observation.status).toBe('up');
+      expect(observation.origin).toBe('application');
+    });
+
+    it('reports a failing indicator as failed without changing the public report', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime);
+      const collector = buildCollector(manual.runtime);
+      attachHealthObservation(service, collector);
+      service.registerIndicator('db', () => Promise.reject(new Error('secret-fault')));
+
+      const report = await service.check();
+      expect(report.status).toBe('down');
+      const observation = collector.snapshot('instance-1').observations[0];
+      expect(observation.state).toBe('failed');
+      expect(JSON.stringify(collector.snapshot('instance-1'))).not.toContain('secret-fault');
+    });
+
+    it('reports a timed-out indicator as timed-out without changing the public report', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime);
+      const collector = buildCollector(manual.runtime);
+      attachHealthObservation(service, collector);
+      let release: (() => void) | undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      service.registerIndicator('db', async () => {
+        await gate;
+        return { status: 'up' };
+      });
+
+      const pending = service.check();
+      manual.tick(5_000);
+      const report = await pending;
+      release!();
+      expect(report.status).toBe('down');
+      const observation = collector.snapshot('instance-1').observations[0];
+      expect(observation.state).toBe('timed-out');
+    });
+
+    it('drops a collector fault without changing the public report', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime);
+      const throwingCollector = {
+        report(): never {
+          throw new Error('collector exploded');
+        },
+        snapshot(): never {
+          throw new Error('collector exploded');
+        },
+      } as unknown as HealthObservationCollector;
+      attachHealthObservation(service, throwingCollector);
+      service.registerIndicator('db', () => Promise.resolve({ status: 'up' }));
+
+      const report = await service.check();
+      expect(report.status).toBe('up');
+    });
+
+    it('performs no capture when no collector is attached', async () => {
+      const manual = createManualRuntime();
+      const service = new HealthService(manual.runtime);
+      service.registerIndicator('db', () => Promise.resolve({ status: 'up' }));
+      // No attachment: the report works and nothing observes it.
+      const report = await service.check();
+      expect(report.status).toBe('up');
     });
   });
 });

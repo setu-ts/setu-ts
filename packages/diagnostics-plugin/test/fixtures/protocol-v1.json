@@ -15,10 +15,10 @@
     },
     "response": {
       "status": 200,
-      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000}",
-      "bodySha256": "c0ad490c67a860e524a272ce28d4b3fbf0f6e4230796cf4a930f41aa167cf3a6",
-      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\nc0ad490c67a860e524a272ce28d4b3fbf0f6e4230796cf4a930f41aa167cf3a6",
-      "mac": "6104cf8f27b6e900a527e4a78c017d47626a066589cc5bb79e577304a545cf82"
+      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000,\"inspectors\":{\"health\":true,\"configuration\":false,\"queues\":false,\"traces\":false,\"authorization\":false,\"cache\":false,\"events\":false,\"scheduler\":false,\"realtime\":false,\"storage\":false,\"outboundHttp\":false}}",
+      "bodySha256": "24a4329bcdf03ae45892185bb9fa960948ca950fb982b657a07b21db8c1dbc00",
+      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\n24a4329bcdf03ae45892185bb9fa960948ca950fb982b657a07b21db8c1dbc00",
+      "mac": "9b57afc703dde2aa78bf1396aae68447d1fbf614a1c9f65e4f50df366da63561"
     }
   },
   "rejectedTargets": [

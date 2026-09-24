@@ -317,3 +317,129 @@ export interface IDiagnosticsSource {
    */
   read(after: number, limit?: number): DiagnosticsBatch;
 }
+
+/**
+ * Coarse availability state of one inspector served by the diagnostics
+ * connector.
+ *
+ * `unsupported` is a connector-side answer: the connector implements the
+ * operation, but the owning application did not register the inspector's
+ * source. `disabled` is the owning plugin's answer: the source is registered
+ * but observation was not opted in. The two are distinct so a consumer can
+ * tell "not present" from "present but off".
+ *
+ * @since 0.8.0
+ */
+export type DiagnosticsInspectorState =
+  | 'unsupported'
+  | 'disabled'
+  | 'no-data'
+  | 'ready'
+  | 'stale'
+  | 'collection-failed';
+
+/**
+ * Outcome of one observed health check, as projected by the health
+ * diagnostics inspector.
+ *
+ * `reported` means the check settled within its deadline and the framework's
+ * own status is carried. `timed-out` and `failed` are the framework's fixed
+ * failure categories (deadline hit, indicator rejected) — the thrown value
+ * and the indicator's `data` are never projected. `never-observed` is an
+ * approved alias for which no check has settled yet.
+ *
+ * @since 0.8.0
+ */
+export type HealthObservationState = 'reported' | 'timed-out' | 'failed' | 'never-observed';
+
+/**
+ * One minimized health observation: the latest outcome for one approved
+ * indicator alias.
+ *
+ * `indicatorAlias` is the display alias the application explicitly
+ * allowlisted for the indicator's registered name — never the name itself.
+ * `status` is present only when {@linkcode state} is `reported`. `latencyMs`
+ * and `ageMs` are monotonic measurements relative to the runtime: `ageMs`
+ * is the elapsed time since the observation was captured, and is `null` for
+ * an observation that predates the runtime. No absolute time, no error text,
+ * and no indicator `data` is admitted.
+ *
+ * @since 0.8.0
+ */
+export interface HealthDiagnosticsObservation {
+  /** The approved display alias for the indicator. */
+  readonly indicatorAlias: string;
+  /** The framework's own health status, present only when reported. */
+  readonly status?: 'up' | 'degraded' | 'down';
+  /** How the observed check completed. */
+  readonly state: HealthObservationState;
+  /** Monotonic elapsed ms of the check; `null` when never observed. */
+  readonly latencyMs: number | null;
+  /** Monotonic ms since capture; `null` when never observed or pre-runtime. */
+  readonly ageMs: number | null;
+  /** Whether the observation came from a normal check or a scheduled one. */
+  readonly origin: 'application' | 'scheduled';
+}
+
+/**
+ * An immutable, minimized snapshot of health observations.
+ *
+ * The snapshot contains only {@linkcode version}, {@linkcode instanceId},
+ * {@linkcode state}, {@linkcode observations}, {@linkcode truncated}, and
+ * {@linkcode droppedObservations}. `observations` is a complete projection of
+ * the collector's retained latest-per-alias records at read time; when the
+ * serialized size exceeded the kernel's fixed bounds, later entries are
+ * omitted and {@linkcode truncated} is set. The exact UTF-8 byte length of
+ * the compact `JSON.stringify` of this object is bounded by the connector's
+ * response budget.
+ *
+ * @since 0.8.0
+ */
+export interface HealthDiagnosticsSnapshot {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the snapshot was read for; must equal the caller's. */
+  readonly instanceId: string;
+  /** Coarse inspector availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** Latest-per-alias observations, in stable alias order. */
+  readonly observations: readonly HealthDiagnosticsObservation[];
+  /** `true` when the bound caused entries to be omitted. */
+  readonly truncated: boolean;
+  /** Count of observations dropped before entering the retained set. */
+  readonly droppedObservations: number;
+}
+
+/**
+ * Read-only health diagnostics source — the surface the HealthPlugin
+ * registers under {@linkcode CAPABILITIES.HEALTH_DIAGNOSTICS} and the
+ * DiagnosticsPlugin consumes to serve `GET /v1/health`.
+ *
+ * Synchronous by contract: `snapshot(instanceId)` returns an already-built
+ * frozen DTO and never invokes an application indicator, resolves a lazy
+ * factory, or mutates state. The connector validates the returned DTO and
+ * applies the wire bounds; a source that throws is reported as a
+ * value-free `collection-failed` snapshot, never as a fault that changes the
+ * application's readiness.
+ *
+ * @example
+ * ```typescript
+ * const source = ctx.services.get<IHealthDiagnosticsSource>(
+ *   CAPABILITIES.HEALTH_DIAGNOSTICS,
+ * );
+ * const snapshot = source.snapshot(instanceId);
+ * ```
+ * @since 0.8.0
+ */
+export interface IHealthDiagnosticsSource {
+  /**
+   * Returns the current minimized health snapshot for the given instance.
+   *
+   * @param instanceId - The non-empty instance UUID to bind the snapshot to
+   * @returns A deeply frozen {@linkcode HealthDiagnosticsSnapshot} whose
+   * `instanceId` exactly equals the argument
+   * @throws {RangeError} When `instanceId` is not a non-empty string — with a
+   * fixed message that never echoes the value
+   */
+  snapshot(instanceId: string): HealthDiagnosticsSnapshot;
+}

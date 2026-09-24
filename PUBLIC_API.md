@@ -4039,6 +4039,22 @@ requires `endpoint` to be exactly `http://127.0.0.1:<port>`; the client performs
 pairing automatically, serializes calls with strictly increasing sequence numbers, verifies every
 response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal.
 
+**Health observations (M98d).** The status body now carries an `inspectors` manifest —
+`{ health: true, configuration: false, queues: false, traces: false, authorization: false,
+cache: false, events: false, scheduler: false, realtime: false, storage: false,
+outboundHttp: false }`
+— and the connector serves a first inspector operation, `GET /v1/health`. The client reads it
+through `client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector resolves the optional
+health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source
+answers a typed `unsupported` snapshot (no indicator runs, startup never fails), a
+registered-but-disabled source answers `disabled`, and a throwing source answers a value-free
+`collection-failed` snapshot — none of which changes the application's readiness. The snapshot is
+the health plugin's minimized DTO (approved alias, framework status, outcome state, monotonic timing
+only — no indicator `data`, no error text, no absolute time), projected field-by-field and bounded
+by the same 256 KiB response ceiling as every other operation. A client paired against a legacy M98b
+status body (no manifest) resolves all inspectors to `false` and its `health()` answers
+`unsupported` without sending the request. The full wire shape is in `docs/diagnostics-protocol.md`.
+
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
 (`LocalDiagnosticsListenerOptions { port, handler }` → `ILocalDiagnosticsListener.close()`), binding
@@ -6714,6 +6730,53 @@ GET /health
 - `/ready`: 200 when all contributed indicators are 'up', 503 when any is 'degraded' or 'down'
 - `/health`: 200 when no participating indicator is 'down' (degraded stays 200), 503 when any is
   'down'
+
+### Health observations (M98d)
+
+The plugin accepts an opt-in `diagnostics` option that exposes the health checks' outcomes as
+minimized observations through the M98b diagnostics connector — it never changes `/health`, `/live`,
+or `/ready`.
+
+```typescript
+import { HealthPlugin } from '@setu-ts/health-plugin';
+
+app.register(HealthPlugin({
+  indicators: [databaseIndicator],
+  diagnostics: {
+    enabled: true,
+    // Exact registered-name -> display-alias allowlist; unlisted indicators are never retained.
+    indicators: { 'database.check': 'database' },
+    staleAfterMs: 30000, // optional; default 30000
+    // Optional bounded scheduled collection; absent by default.
+    scheduled: {
+      indicators: ['database.check'],
+      intervalMs: 30000,
+      timeoutMs: 5000,
+      concurrency: 2,
+    },
+  },
+}));
+```
+
+`diagnostics.enabled` is the LITERAL `true`, not `boolean`: an absent option is the disabled path
+(an inert source is still registered under `CAPABILITIES.HEALTH_DIAGNOSTICS`, answering `disabled`),
+and `enabled: false` is refused at construction. `indicators` is the exact registered-name to
+display-alias allowlist — at most 64 entries, each alias unique, 1–64 UTF-8 bytes, no control
+characters; an indicator whose registered name is not a key is never retained. `staleAfterMs`
+(default `30000`) marks an observation `stale` once it is older than that many monotonic
+milliseconds from capture. `scheduled` — when present — must name a subset of the approved indicator
+names and supplies a cadence (`intervalMs`, 1,000–300,000), a per-check reporting deadline
+(`timeoutMs`, 1–30,000 — a reporting bound, not a cancellation), and a concurrency cap (1–4); at
+most 16 indicators are scheduled.
+
+The plugin retains only the latest outcome per approved alias (never a history). Each observation
+carries the approved alias, the framework's own status (present only when `reported`), the outcome
+state (`reported` / `timed-out` / `failed` / `never-observed`), and monotonic `latencyMs`/`ageMs`.
+No indicator `data`, no error text, and no absolute time is ever projected; the snapshot is deeply
+frozen and bounded by the connector's 256 KiB response ceiling (later entries omitted and
+`truncated` set when the bound is hit). The source is registered under
+`CAPABILITIES.HEALTH_DIAGNOSTICS` and consumed by the Diagnostics Connector's `GET /v1/health`; the
+wire shape and inspector manifest are in `docs/diagnostics-protocol.md`.
 
 ---
 

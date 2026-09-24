@@ -31,7 +31,12 @@
 
 // Plugin factory
 export { HealthPlugin } from './plugin/health-plugin.ts';
-export type { HealthIndicatorEntry, HealthPluginOptions } from './interfaces/index.ts';
+export type {
+  HealthDiagnosticsOptions,
+  HealthDiagnosticsScheduledOptions,
+  HealthIndicatorEntry,
+  HealthPluginOptions,
+} from './interfaces/index.ts';
 
 // Service
 export { HealthService } from './services/health-service.ts';
@@ -43,9 +48,13 @@ export type { HttpIndicatorOptions } from './indicators/http-indicator.ts';
 // Re-exports from @setu-ts/common
 export type {
   HealthCheckResult,
+  HealthDiagnosticsObservation,
+  HealthDiagnosticsSnapshot,
   HealthIndicatorFn,
+  HealthObservationState,
   HealthReport,
   HealthStatus,
+  IHealthDiagnosticsSource,
   IHealthIndicator,
   IHealthService,
 } from '@setu-ts/common';

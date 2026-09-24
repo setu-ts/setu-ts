@@ -8,8 +8,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IResponse } from '@setu-ts/common';
+import type { HealthDiagnosticsSnapshot, IResponse } from '@setu-ts/common';
 import { createConnectorHandler, refusalResponse } from '../../src/transport/connector-handler.ts';
+import { currentInspectorsManifest } from '../../src/protocol/protocol.ts';
 import { ConnectorLimits } from '../../src/transport/limits.ts';
 import { verifyFields } from '../../src/security/authentication.ts';
 import {
@@ -62,6 +63,7 @@ async function buildHarness(options?: {
     limits: new ConnectorLimits(clock),
     source,
     clock,
+    healthSource: null,
   });
   return { handler, clock, source, session, key };
 }
@@ -272,6 +274,7 @@ describe('Connector handler — authentication and binding', () => {
       version: 1,
       instanceId: TEST_INSTANCE_ID,
       expiresInMs: 900_000,
+      inspectors: currentInspectorsManifest(),
     });
     expect(session.hasInstance()).toBe(true);
     // The response MAC verifies against the authenticated instance header,
@@ -469,6 +472,7 @@ describe('Connector handler — authentication and binding', () => {
       limits: new ConnectorLimits(clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
+      healthSource: null,
     });
     expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
     clock.advance(1_000);
@@ -578,12 +582,163 @@ describe('Connector handler — projection hardening', () => {
       limits: new ConnectorLimits(clock),
       source: throwingSource,
       clock,
+      healthSource: null,
     });
     // The throwing path is BELOW the handler's try — the connector-handler
     // module catches nothing inside; the runtime listener owns the 503 arm.
     // Here the throw propagates, proving the handler does not swallow it:
     // the LISTENER maps it to the fixed anonymous refusal.
     await expect(handler(await statusRequest(key, 1))).rejects.toThrow();
+  });
+});
+
+describe('Connector handler — health operation (M98d)', () => {
+  const healthSnapshot: HealthDiagnosticsSnapshot = {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    observations: [
+      {
+        indicatorAlias: 'database',
+        status: 'up',
+        state: 'reported',
+        latencyMs: 3,
+        ageMs: 12,
+        origin: 'application',
+      },
+    ],
+    truncated: false,
+    droppedObservations: 0,
+  };
+
+  it('answers a typed unsupported snapshot when no source is registered', async () => {
+    const { handler, key } = await buildHarness();
+    // Bind the session to the instance via the status exchange first.
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
+    const response = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/health`,
+        headers: {
+          host: HOST,
+          'x-setu-session': 'a'.repeat(32),
+          'x-setu-sequence': '2',
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    const view = inspect(response);
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'unsupported',
+      observations: [],
+      truncated: false,
+      droppedObservations: 0,
+    });
+  });
+
+  it('projects a registered source snapshot field-by-field', async () => {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: { snapshot: () => healthSnapshot },
+    });
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/health`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': '2',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual(healthSnapshot);
+  });
+
+  it('answers a value-free collection-failed snapshot when the source throws', async () => {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: {
+        snapshot(): never {
+          throw new Error('boom');
+        },
+      },
+    });
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/health`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': '2',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'collection-failed',
+      observations: [],
+      truncated: false,
+      droppedObservations: 0,
+    });
+  });
+
+  it('refuses a cross-instance health read', async () => {
+    const { handler, key } = await buildHarness();
+    // Bind the session to TEST_INSTANCE_ID, then read for a DIFFERENT
+    // instance: the connector must refuse it as unauthorized.
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
+    const wrongId = '00000000-0000-4000-8000-000000000000';
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, wrongId);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/health`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': '2',
+            'x-setu-instance': wrongId,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    expect(view.status).toEqual(401);
   });
 });
 
@@ -711,6 +866,7 @@ describe('Connector handler — remaining structural arms', () => {
       limits,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
+      healthSource: null,
     });
     // Forty full-burst honest statuses without any elapsed time exhaust the
     // session's fixed burst budget. Sequence 1 binds (empty instance);
@@ -751,6 +907,7 @@ describe('Connector handler — remaining structural arms', () => {
       limits: new ConnectorLimits(clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
+      healthSource: null,
     });
     // The request CLAIMS port 5959 (its Host and URL match the handler) but
     // the MAC was signed for 4919: authentication must refuse it.

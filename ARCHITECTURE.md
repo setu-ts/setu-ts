@@ -2497,6 +2497,31 @@ same-process code, and it cannot isolate deliberately blocking synchronous appli
 authentication and transport for an external devtool are a separate milestone (M98b); this boundary
 is in-process only and registers no listener.
 
+### Health Observation Boundary (Milestone 98d)
+
+Health observations extend the M98a/M98b pattern to the health plugin.
+`HealthPlugin({
+diagnostics })` is OFF unless the option is passed, and an omitted option registers
+only an inert, disabled source under `CAPABILITIES.HEALTH_DIAGNOSTICS` — no capture, no timer. When
+enabled, the boundary is again STRUCTURAL, not a filter over captured data: the collector is handed
+the already-produced `HealthCheckResult` from the health service's single evaluation (one callback
+per normal check — the report and the observation are the same evaluation), and it retains only a
+fixed field set per explicitly allowlisted indicator alias. An indicator's `data`, the thrown value
+of a rejection, and any absolute time are never admitted; the projected observation carries the
+approved alias, the framework's own status (present only when `reported`), the outcome state, and
+monotonic `latencyMs`/`ageMs`. The source's `snapshot(instanceId)` is synchronous and frozen: it
+never invokes an indicator, resolves a lazy factory, or mutates state, so a slow or hostile consumer
+cannot backpressure the health endpoint.
+
+The optional `scheduled` block is the one part that performs work: a bounded scheduler (at most 16
+approved indicators, `concurrency` 1–4, a per-check reporting `timeoutMs` that is a bound — not a
+cancellation — so a hung check stays in-flight until it settles and no replacement starts for it) is
+started from the plugin's `onBootstrap` hook and torn down from `onClose`, including the
+failed-startup path. The M98b connector consumes the source to serve `GET /v1/health`, projecting
+the DTO field-by-field and bounding it by the same 256 KiB response ceiling; an absent source
+answers `unsupported`, a throwing source a value-free `collection-failed`, and neither changes the
+application's readiness.
+
 ---
 
 ## 15. Performance Philosophy

@@ -20,7 +20,11 @@ import {
   signFields,
   verifyFields,
 } from '../../src/security/authentication.ts';
-import { STATUS_BODY_KEYS } from '../../src/protocol/protocol.ts';
+import {
+  currentInspectorsManifest,
+  INSPECTOR_KEYS,
+  STATUS_BASE_KEYS,
+} from '../../src/protocol/protocol.ts';
 import {
   minimalBatch,
   minimalSnapshot,
@@ -74,6 +78,12 @@ function fakeServer(
     oversizedBody?: boolean;
     redirect?: boolean;
     malformedBody?: boolean;
+    /** Serve the legacy M98b three-field status body (no manifest). */
+    legacyStatus?: boolean;
+    /** The manifest to serve in the status body; defaults to the current one. */
+    statusInspectors?: Record<string, boolean>;
+    /** The body to serve for `/v1/health`; defaults to a ready snapshot. */
+    healthBody?: Record<string, unknown>;
   } = {},
 ): { fetch: typeof fetch; requests: RecordedRequest[] } {
   const requests: RecordedRequest[] = [];
@@ -117,9 +127,32 @@ function fakeServer(
           instanceId: TEST_INSTANCE_ID,
           expiresInMs: 899_000,
         };
+        if (!overrides.legacyStatus) {
+          body.inspectors = overrides.statusInspectors ?? currentInspectorsManifest();
+        }
         bodyText = JSON.stringify(body);
       } else if (target === '/v1/snapshot') {
         bodyText = JSON.stringify(minimalSnapshot());
+      } else if (target === '/v1/health') {
+        bodyText = JSON.stringify(
+          overrides.healthBody ?? {
+            version: 1,
+            instanceId: TEST_INSTANCE_ID,
+            state: 'ready',
+            observations: [
+              {
+                indicatorAlias: 'database',
+                status: 'up',
+                state: 'reported',
+                latencyMs: 3,
+                ageMs: 12,
+                origin: 'application',
+              },
+            ],
+            truncated: false,
+            droppedObservations: 0,
+          },
+        );
       } else {
         bodyText = JSON.stringify(minimalBatch());
       }
@@ -420,11 +453,69 @@ describe('Client — verification and bounds', () => {
     second.client.close();
   });
 
-  it('carries the status body version and keys exactly once', () => {
+  it('carries the status body base keys exactly once', () => {
     // The client's own validator: exact key set, so an envelope smuggled by
-    // a hostile server is refused. STATUS_BODY_KEYS is the exported
-    // allowlist the validator checks against.
-    expect(STATUS_BODY_KEYS.length).toEqual(3);
+    // a hostile server is refused. STATUS_BASE_KEYS is the exported allowlist
+    // the validator checks against; the new body adds exactly one more key,
+    // `inspectors`.
+    expect(STATUS_BASE_KEYS).toEqual(['version', 'instanceId', 'expiresInMs']);
+    expect(INSPECTOR_KEYS.length).toEqual(11);
+  });
+});
+
+describe('Client — health negotiation (M98d)', () => {
+  it('serves a health read through the signed exchange when the manifest is true', async () => {
+    const { client, requests } = buildClient();
+    const health = await client.health();
+    expect(health.version).toEqual(1);
+    expect(health.instanceId).toEqual(TEST_INSTANCE_ID);
+    expect(health.state).toEqual('ready');
+    expect(health.observations[0].indicatorAlias).toEqual('database');
+    expect(health.observations[0].status).toEqual('up');
+    // Status, then the canonical health target.
+    expect(requests.length).toEqual(2);
+    expect(requests[1].target).toEqual('/v1/health');
+    client.close();
+  });
+
+  it('answers unsupported WITHOUT an addon request when the manifest key is false', async () => {
+    const allFalse = Object.fromEntries(INSPECTOR_KEYS.map((key) => [key, false]));
+    const { client, requests } = buildClient({ server: { statusInspectors: allFalse } });
+    const health = await client.health();
+    expect(health.state).toEqual('unsupported');
+    expect(health.observations).toEqual([]);
+    // ONLY the status exchange went out — no `/v1/health` request.
+    expect(requests.length).toEqual(1);
+    expect(requests[0].target).toEqual('/v1/status');
+    client.close();
+  });
+
+  it('pairs against the legacy M98b three-field body and reports all keys false', async () => {
+    const { client, requests } = buildClient({ server: { legacyStatus: true } });
+    const health = await client.health();
+    // The legacy body resolved to the all-false manifest: unsupported, and no
+    // addon request was sent.
+    expect(health.state).toEqual('unsupported');
+    expect(requests.length).toEqual(1);
+    expect(requests[0].target).toEqual('/v1/status');
+    client.close();
+  });
+
+  it('refuses a health body that fails the exact DTO validator', async () => {
+    const { client } = buildClient({
+      server: {
+        healthBody: {
+          version: 1,
+          instanceId: TEST_INSTANCE_ID,
+          state: 'bogus',
+          observations: [],
+          truncated: false,
+          droppedObservations: 0,
+        },
+      },
+    });
+    await expect(client.health()).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
   });
 });
 

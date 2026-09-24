@@ -101,6 +101,9 @@ function fakeContext(
           }
           throw new Error(`not registered: ${token}`);
         },
+        has(token: string) {
+          return token === CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER;
+        },
       } as unknown as IPluginContext['services'],
       lifecycle: {
         onBootstrap: (fn: () => unknown) => hooks.bootstrap.push(fn),

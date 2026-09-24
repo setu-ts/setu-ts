@@ -14,7 +14,9 @@
 
 import type {
   HandlerResult,
+  HealthDiagnosticsSnapshot,
   IDiagnosticsSource,
+  IHealthDiagnosticsSource,
   IRequest,
   IResponse,
   ResponseSnapshot,
@@ -25,9 +27,11 @@ import type { DiagnosticsSessionState } from '../security/session.ts';
 import type { ConnectorLimits, LimitsClock } from './limits.ts';
 import { CONNECTOR_LIMITS } from './limits.ts';
 import {
+  currentInspectorsManifest,
   errorBody,
   parseTarget,
   projectBatch,
+  projectHealthSnapshot,
   projectSnapshot,
   PROTOCOL_ERRORS,
   PROTOCOL_RESPONSE_HEADERS,
@@ -164,6 +168,13 @@ export interface ConnectorHandlerDeps {
   readonly source: IDiagnosticsSource;
   /** The monotonic clock. */
   readonly clock: LimitsClock;
+  /**
+   * The optional health-diagnostics source (M98d), resolved from
+   * `CAPABILITIES.HEALTH_DIAGNOSTICS` during registration. `null` when the
+   * application did not register one: the connector then answers a typed
+   * `unsupported` snapshot for `GET /v1/health` and never runs an indicator.
+   */
+  readonly healthSource: IHealthDiagnosticsSource | null;
 }
 
 /**
@@ -235,6 +246,77 @@ export function validateProtocolHeaders(request: IRequest): {
     return null;
   }
   return { sessionId, sequence, instance: instanceRaw, mac };
+}
+
+/**
+ * A typed `unsupported` health snapshot: the connector implements the
+ * operation, but the application did not register a health-diagnostics
+ * source. Bound to the session's instance so the client's instance check
+ * passes; carries no observations.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @returns The unsupported snapshot
+ * @internal
+ */
+function unsupportedHealthSnapshot(instanceId: string): HealthDiagnosticsSnapshot {
+  return {
+    version: 1,
+    instanceId,
+    state: 'unsupported',
+    observations: [],
+    truncated: false,
+    droppedObservations: 0,
+  };
+}
+
+/**
+ * A value-free `collection-failed` health snapshot: the registered source
+ * threw (or was otherwise unreadable). Carries no error text, cause, or
+ * stack — a source failure must not change the application's readiness or
+ * disclose a fault.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @returns The collection-failed snapshot
+ * @internal
+ */
+function collectionFailedHealthSnapshot(instanceId: string): HealthDiagnosticsSnapshot {
+  return {
+    version: 1,
+    instanceId,
+    state: 'collection-failed',
+    observations: [],
+    truncated: false,
+    droppedObservations: 0,
+  };
+}
+
+/**
+ * Reads the health snapshot for the bound instance, isolating every failure
+ * mode to a typed, value-free answer:
+ *
+ * - no registered source → `unsupported`
+ * - a source that throws → `collection-failed`
+ *
+ * The source is synchronous and never runs an indicator; this helper only
+ * guards its call and binds the instance.
+ *
+ * @param deps - The handler dependencies
+ * @param instanceId - The session's bound instance UUID
+ * @returns The health snapshot to project
+ * @internal
+ */
+function readHealthSnapshot(
+  deps: ConnectorHandlerDeps,
+  instanceId: string,
+): HealthDiagnosticsSnapshot {
+  if (deps.healthSource === null) {
+    return unsupportedHealthSnapshot(instanceId);
+  }
+  try {
+    return deps.healthSource.snapshot(instanceId);
+  } catch {
+    return collectionFailedHealthSnapshot(instanceId);
+  }
 }
 
 /**
@@ -362,6 +444,7 @@ export function createConnectorHandler(
         projected = statusBody(
           snapshot.instanceId,
           deps.session.remainingMs(deps.clock),
+          currentInspectorsManifest(),
         );
       } else if (target.op === 'snapshot') {
         const snapshot = deps.source.snapshot();
@@ -372,7 +455,7 @@ export function createConnectorHandler(
           return refusalResponse('unauthorized');
         }
         projected = projectSnapshot(snapshot);
-      } else {
+      } else if (target.op === 'events') {
         const batch = deps.source.read(target.after, target.limit);
         if (batch.version !== 1) {
           return refusalResponse('unsupported-version');
@@ -381,6 +464,23 @@ export function createConnectorHandler(
           return refusalResponse('unauthorized');
         }
         projected = projectBatch(batch);
+      } else {
+        // The health operation (M98d). All session and request checks above
+        // ran before the source is called; the source itself is synchronous
+        // and never runs an indicator. The instance is bound by the auth path
+        // for every non-status target, so capture it non-null.
+        const boundInstance = deps.session.instanceId;
+        if (boundInstance === null) {
+          return refusalResponse('unauthorized');
+        }
+        const healthSnapshot = readHealthSnapshot(deps, boundInstance);
+        if (healthSnapshot.version !== 1) {
+          return refusalResponse('unsupported-version');
+        }
+        if (healthSnapshot.instanceId !== boundInstance) {
+          return refusalResponse('unauthorized');
+        }
+        projected = projectHealthSnapshot(healthSnapshot);
       }
 
       // --- Serialize, bound, re-check, sign --------------------------------
