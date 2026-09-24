@@ -408,12 +408,19 @@ describe('real-backend CI wiring', () => {
       expect(text).toContain('- 5672:5672');
       expect(text).toContain('RABBITMQ_URL: amqp://localhost:5672');
       // MinIO (storage S3 outage suite). A docker-run STEP, not a service:
-      // Docker Hub's `minio/minio` stopped serving anonymous pulls on
-      // 2026-09-11, and every quay.io tag needs the `server /data` argument a
-      // service block cannot pass. Pinning the argument matters as much as the
-      // image — without it the container prints usage and exits 0, so the
-      // suite would find nothing listening and skip.
-      expect(text).toContain('quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z server /data');
+      // the image's entrypoint is the bare `minio` binary, so it needs the
+      // `server /data` argument a service block cannot pass. Pinning the
+      // argument matters as much as the image — without it the container
+      // prints usage and exits 0, so the suite would find nothing listening
+      // and skip. The image is digest-pinned because its registry serves only
+      // `:latest`; Docker Hub (2026-09-11) and quay.io (2026-09-24) both
+      // stopped serving `minio/minio` anonymously, so neither may come back.
+      expect(text).toContain(
+        'cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data',
+      );
+      // A tag (`:`) or a digest (`@`) — either names an image from a registry
+      // that no longer serves it. A bare `minio/minio` in a comment is history.
+      expect(text).not.toMatch(/minio\/minio[:@]/);
       // The readiness loop is as load-bearing as the image, and asserting it
       // against the whole file would pass on the Bigtable/NATS/Kafka steps'
       // identical scaffolding — so scope to the MinIO step and assert the
