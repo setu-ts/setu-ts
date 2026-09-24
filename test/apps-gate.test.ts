@@ -418,7 +418,9 @@ describe('real-backend CI wiring', () => {
       expect(text).toContain(
         'cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 server /data',
       );
-      expect(text).not.toContain('minio/minio:');
+      // A tag (`:`) or a digest (`@`) — either names an image from a registry
+      // that no longer serves it. A bare `minio/minio` in a comment is history.
+      expect(text).not.toMatch(/minio\/minio[:@]/);
       // The readiness loop is as load-bearing as the image, and asserting it
       // against the whole file would pass on the Bigtable/NATS/Kafka steps'
       // identical scaffolding — so scope to the MinIO step and assert the

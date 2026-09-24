@@ -256,9 +256,10 @@ jobs:
       # anonymously, but only as `:latest` — so the image is pinned by DIGEST
       # (RELEASE.2026-09-22T19-25-18Z, verified against both storage-plugin
       # real-backend suites). If that digest ever stops pulling, repin to the
-      # current `cgr.dev/chainguard/minio:latest` digest
-      # (`docker inspect --format '{{index .RepoDigests 0}}'`) and re-run
-      # those suites against it.
+      # current digest and re-run those suites against it:
+      #   docker pull cgr.dev/chainguard/minio:latest
+      #   docker image inspect --format '{{index .RepoDigests 0}}' \
+      #     cgr.dev/chainguard/minio:latest
       - name: Start MinIO (S3 storage outage suite)
         run: |
           docker run -d --name m70c-minio -p 127.0.0.1:9000:9000 \
