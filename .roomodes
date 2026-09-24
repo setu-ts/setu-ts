@@ -65,7 +65,8 @@ customModes:
       Use to security-audit a milestone's `feat/…` branch whose plan names a committed-tree
       security audit, or whose diff crosses a trust boundary (network input, credentials,
       authorization, tenancy, diagnostics, data leaving the process) — run AFTER Code Review has
-      returned merge-ready and BEFORE the PR merges. Follows
+      returned merge-ready and BEFORE the PR merges. Always started as a fresh `new_task` subtask,
+      never by `switch_mode` from the implementing conversation. Follows
       `.roo/skills/security-audit/SKILL.md` end to end and returns a passed / passed with
       accepted risks / failed verdict plus the PR audit record, backed by pasted probe output.
     groups:
@@ -78,7 +79,8 @@ customModes:
             `.verify-<milestone>/`.
     customInstructions: >-
       Follow `.roo/rules-security-audit/`, `.roo/skills/security-audit/SKILL.md` and `CLAUDE.md`.
-      Audit the committed tree on the milestone's `feat/…` branch (never `main`); if
+      If this conversation implemented or fixed the milestone, stop and return failed as not
+      independent. Audit the committed tree on the milestone's `feat/…` branch (never `main`); if
       `git status --short` is non-empty at the start, STOP and return blocked rather than
       stashing. Probe only instances this run started locally. The one permitted change to a
       tracked file is a negative control reverted and restored within Step 5; nothing is ever

@@ -13,6 +13,12 @@ design security review as probes against a local instance of the committed code.
 
 ## Hard rules
 
+- **You run in a fresh subtask, never in the implementing conversation.** The orchestrator starts
+  this mode with `new_task` and hands over only the milestone, branch, commit, plan path, and
+  existing `.verify/` report paths (see `.roo/rules-orchestrator/01-switch-modes.md`, "The Security
+  Audit runs in a fresh subtask"). If this conversation implemented or fixed the milestone — you
+  were switched here rather than started fresh — stop and return `failed` with "not independent" as
+  the reason; do not run the probes.
 - **You audit; you never fix.** Your edit access is restricted by `fileRegex` to `.verify/` and
   `.verify-<milestone>/` — the report and the probe drivers. The `command` group can technically
   write anywhere, so the rule is behavioral: **do not change a tracked file by any means, shell

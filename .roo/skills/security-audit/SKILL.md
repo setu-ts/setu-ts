@@ -31,9 +31,11 @@ milestone is NOT audited.**
   flow, assets and attackers, approved budgets, a findings table, and the obligations the
   implementation audit must meet). The audit checks the code against that review. It does not write
   the threat model after the fact — a threat model reverse-engineered from the code only describes
-  what the code already does. If the plan has no design review and the diff crosses a trust
-  boundary, that absence is a **blocking finding**; run the Step 4 sweep anyway and say the audit
-  ran without one.
+  what the code already does. **Whenever this audit applies — the plan names one, or the diff
+  crosses a trust boundary — a missing design review is a blocking finding.** There is no exception:
+  a plan that asks for an audit without saying what it must hold against has not finished its own
+  design. Run the Step 4 sweep anyway, so the fix pass has the findings, and say the audit ran
+  without one.
 - **It is not a penetration test of anything but a local instance.** Every probe targets an
   application this run started on `127.0.0.1`, or an in-process `createApplication`. Never aim a
   probe at a remote host, a shared environment, or a real credential.
@@ -45,8 +47,16 @@ An audit by whoever wrote or fixed the code tends to confirm the author's assump
 get written against the design the author already believes, and the attack the author did not
 imagine is the one nobody drives. So:
 
-- **The auditor records who implemented and who audited** (agent and mode or session). If they are
-  the same context, the record says so plainly under "Support limits".
+- **The auditor runs in a context that did not implement or fix the milestone.** In Roo that is a
+  fresh `new_task` subtask in Security Audit mode, never a `switch_mode` from the implementing
+  conversation (`.roo/rules-orchestrator/01-switch-modes.md`, "The Security Audit runs in a fresh
+  subtask"); for Claude it is a freshly spawned agent. The handoff is the milestone, the branch, the
+  commit, the plan path, and the existing `.verify/` report paths — never a summary of the
+  implementation or an argument for why it is safe. **An audit run in the implementing context does
+  not satisfy the gate**: its verdict is `failed` with "not independent" as the reason, whatever its
+  probes found.
+- **The auditor records who implemented and who audited** (agent and mode or session), so a reader
+  can check the rule above.
 - **The auditor does not fix.** A finding is reported with its failure scenario and routed to a fix
   pass on the milestone's own `feat/…` branch; the audit then re-runs over the fix range (Step 7).
   An auditor who patches a finding and re-runs its own probe has proven only that its patch passes
@@ -60,8 +70,9 @@ imagine is the one nobody drives. So:
 git branch --show-current      # the milestone's feat/… branch, never main
 git status --short             # MUST be empty — a dirty tree voids the audit
 git rev-parse HEAD             # the revision audited; the record names it
-git log --oneline main..HEAD
-git diff --stat main..HEAD     # the audit scope
+git log --oneline main..HEAD   # the milestone's commits
+git diff --stat main...HEAD    # the audit scope: three dots diffs against the merge base, so
+                               # commits that reached main after the branch point are excluded
 ```
 
 "Committed-tree" means the exact commit the PR will merge. An audit of an earlier commit covers that
@@ -248,9 +259,12 @@ findings → support limits → verdict.
 
 Each finding carries: severity, file:line, the attacker and the concrete failure scenario (inputs →
 observed effect), the probe that demonstrates it, and a **disposition**: `fixed in <commit>`,
-`accepted by the maintainer` (with the reason, recorded), or `deferred to <milestone>`. A Critical
-or High finding cannot be accepted or deferred without an explicit maintainer decision named in the
-record.
+`accepted by the maintainer`, or `deferred to <milestone>`, each with its reason. A Critical or High
+finding cannot be accepted or deferred without an explicit maintainer decision, and the entry names
+who decided and when. That decision comes through the pipeline's one scoped handoff
+(`.roo/rules-orchestrator/01-switch-modes.md`, "Do not escalate to the human mid-pipeline"); the
+auditor never assumes it, and an audit that finds a Critical or High issue with no recorded decision
+reports it as open.
 
 Then write the **PR audit record** — the block the plan requires in the PR description:
 
@@ -263,8 +277,7 @@ Then write the **PR audit record** — the block the plan requires in the PR des
 - **Probes:** <n> obligation probes, 15 defect classes (<a> applied, <b> N/A)
 - **Negative controls:** <n> controls reverted, each observed failing, all restored
 - **Findings:** <none | one line per finding: severity — summary — disposition>
-- **Support limits:** <what was not verified, and why — e.g. no live backend, one runtime only,
-  auditor was the implementer>
+- **Support limits:** <what was not verified, and why — e.g. no live backend, one runtime only>
 - **Verdict:** passed | passed with accepted risks | failed
 ```
 
@@ -275,7 +288,7 @@ Then write the **PR audit record** — the block the plan requires in the PR des
 - **passed with accepted risks** — as above, except for findings a maintainer accepted or deferred
   to a named milestone, each listed with its reason.
 - **failed** — any open finding, any obligation without a probe, any probe without pasted output,
-  any class left unaddressed, or a missing design review on a diff that crosses a trust boundary.
+  any class left unaddressed, a missing design review, or an audit run in the implementing context.
 
 Before committing to a verdict, re-read your own evidence as the attacker would: does each probe's
 raw output actually show the attack refused AND the legitimate call served? A canary search over an
