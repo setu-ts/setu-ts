@@ -134,6 +134,31 @@ describe('HealthPlugin integration (through the real kernel)', () => {
     }
   });
 
+  // The defect this pins shipped with every gate green: an indicator
+  // returning a status outside the vocabulary made `/health` answer
+  // `200 degraded` while another contributor was `down`, so a readiness
+  // probe passed over a dead dependency. Both registration orders.
+  for (const order of ['invalid-first', 'down-first'] as const) {
+    it(`fails /health and /ready with 503 when an unrecognized status sits beside a down contributor (${order})`, async () => {
+      const odd = contributingPlugin('odd', 'canary-status' as HealthStatus);
+      const db = contributingPlugin('db', 'down');
+      const app = await boot(...(order === 'invalid-first' ? [odd, db] : [db, odd]));
+      try {
+        for (const url of ['http://localhost/health', 'http://localhost/ready']) {
+          const res = await app.inject({ method: 'GET', url });
+          expect(res.statusCode).toBe(503);
+          const body = res.json<HealthReport>();
+          expect(body.status).toBe('down');
+          expect(body.checks['odd']?.status).toBe('down');
+          expect(body.checks['odd']?.data).toEqual({ reason: 'invalid-result' });
+          expect(JSON.stringify(body)).not.toContain('canary');
+        }
+      } finally {
+        await app.stop();
+      }
+    });
+  }
+
   it('fails both /health and /ready with 503 on a down contributor', async () => {
     const app = await boot(contributingPlugin('db', 'down'));
     try {

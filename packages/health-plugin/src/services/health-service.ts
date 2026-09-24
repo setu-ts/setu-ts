@@ -13,6 +13,7 @@ import type {
   IRuntimeServices,
 } from '@setu-ts/common';
 import type { HealthObservationCollector } from '../diagnostics/health-observation-collector.ts';
+import { normalizeIndicatorResult } from './health-status.ts';
 
 /**
  * The observation-collector attachment seam (M98d). A service is mapped to
@@ -161,7 +162,11 @@ export function resolveIndicatorTimeout(raw: number | undefined): number {
  * and one never-settling indicator left the whole endpoint pending
  * forever. A timeout is recorded as `{ status: 'down', data: { reason:
  * 'timeout' } }`, a rejection as `{ status: 'down', data: { reason:
- * 'error' } }` with the thrown value never serialized into the report;
+ * 'error' } }` with the thrown value never serialized into the report,
+ * and a result that is not a framework result — not an object, or a
+ * `status` outside `up`/`degraded`/`down` — as `{ status: 'down', data: {
+ * reason: 'invalid-result' } }`, so an unrecognized status can never mask
+ * another indicator's `down`;
  * each indicator's latency is measured individually; and `checks` is
  * assembled in registration order so the report's shape is stable even
  * though execution is not.
@@ -253,8 +258,19 @@ export class HealthService implements IHealthService {
         try {
           const outcome = await this.#withDeadline(indicator.check);
           if (outcome.kind === 'reported') {
-            result = outcome.result;
-            observationState = 'reported';
+            // Read the result through the ONE trust rule the collector also
+            // uses, inside the `try` so a throwing getter is a failed check.
+            // A status outside the vocabulary fails closed: it has no rank,
+            // so aggregating it would mask another indicator's `down`, and
+            // publishing it would echo application data onto `/health`.
+            const normalized = normalizeIndicatorResult(outcome.result);
+            if (normalized === null) {
+              result = { status: 'down', data: { reason: 'invalid-result' } };
+              observationState = 'failed';
+            } else {
+              result = normalized;
+              observationState = 'reported';
+            }
           } else {
             result = { status: 'down', data: { reason: 'timeout' } };
             observationState = 'timed-out';

@@ -17,9 +17,13 @@
  * in-flight until it actually settles, so no replacement check for it starts
  * early and a hung callback cannot accumulate work. The in-flight callback
  * keeps its concurrency slot, and ONLY that slot: a cycle waits for each
- * check's reporting race, never for a raw callback, so the other scheduled
- * indicators keep refreshing. Each cycle covers every scheduled indicator
- * not still in flight, starting from a rotating cursor so none is starved.
+ * check's reporting race, never for a raw callback, so while fewer than
+ * `concurrency` callbacks are hung the other scheduled indicators keep
+ * refreshing. Once every slot is held by a hung callback, NO scheduled check
+ * starts until one settles: the work stays bounded, and the stalled aliases
+ * surface as `stale` or `never-observed` rather than as fresh data. Each
+ * cycle covers every scheduled indicator not still in flight, starting from
+ * a rotating cursor so none is starved.
  * Closing the collector marks it closed FIRST (so a late settlement is
  * discarded), then clears the interval, every armed deadline timer, and every
  * retained observation — M98a's own teardown order.
@@ -37,6 +41,7 @@ import type {
   TimerHandle,
 } from '@setu-ts/common';
 import type { HealthDiagnosticsOptions } from '../interfaces/index.ts';
+import { isHealthStatus } from '../services/health-status.ts';
 
 /**
  * The already-computed outcome of one settled indicator, as the runner
@@ -106,22 +111,6 @@ function deepFreeze<T>(value: T): T {
 /** Advances a monotonic counter with saturation at `Number.MAX_SAFE_INTEGER`. */
 function saturatingNext(current: number): number {
   return current >= Number.MAX_SAFE_INTEGER ? current : current + 1;
-}
-
-/** The framework's fixed health-status vocabulary. */
-const HEALTH_STATUSES: ReadonlySet<unknown> = new Set<unknown>(['up', 'degraded', 'down']);
-
-/**
- * Reports whether a value is one of the framework's own health statuses.
- * Anything else an indicator returned is untrusted application data and is
- * never retained.
- *
- * @param value - The candidate status
- * @returns `true` for `up`, `degraded`, or `down`
- * @internal
- */
-export function isHealthStatus(value: unknown): value is HealthStatus {
-  return HEALTH_STATUSES.has(value);
 }
 
 /**

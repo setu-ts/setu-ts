@@ -47,7 +47,9 @@ even when the lifecycle is bypassed.
 ## Statuses
 
 An indicator reports `'up'`, `'degraded'`, or `'down'`; the overall report takes the worst status
-among them.
+among them. A result that is not one of those — not an object, or a `status` outside the three — is
+reported as `{ status: 'down', data: { reason: 'invalid-result' } }` and its value is never
+published, so an unrecognized status can never hide another indicator's `down`.
 
 ## Health observations (M98d)
 
@@ -84,7 +86,10 @@ not `up`/`degraded`/`down` is observed as `failed`. `enabled` is the LITERAL `tr
 value is refused when `HealthPlugin(...)` is called, as is every other invalid option — and an
 omitted option registers an inert, disabled source and performs no capture. Scheduled cycles cover
 every scheduled indicator from a rotating start; a hung check keeps only its own concurrency slot,
-so the rest keep refreshing. The source is registered under `CAPABILITIES.HEALTH_DIAGNOSTICS`; see
+so while fewer than `concurrency` checks are hung the rest keep refreshing. Once every slot is held
+by a hung check, no scheduled check starts until one settles — the work stays bounded, and the
+stalled aliases surface as `stale` or `never-observed`. The source is registered under
+`CAPABILITIES.HEALTH_DIAGNOSTICS`; see
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#health-setu-tshealth-plugin)
 and `docs/diagnostics-protocol.md` for the wire shape.
 

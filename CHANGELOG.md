@@ -22,17 +22,19 @@ All notable changes to this project are documented here. The format follows
   at most 16; `intervalMs` 1,000–300,000; `timeoutMs` 1–30,000 as a reporting bound, not a
   cancellation; `concurrency` 1–4). Each cycle covers every scheduled indicator not still in flight,
   from a rotating start; a timed-out callback that has not settled keeps its one concurrency slot
-  and is never replaced early, so a hung indicator cannot accumulate work or stall the others. Every
-  option is validated when `HealthPlugin(...)` is called, with fixed messages that never echo a
-  value. An indicator result whose `status` is not `up`/`degraded`/`down` is observed as `failed`
-  and the value is never retained; an approved name no indicator carries stays `never-observed`,
-  with a count-only warning at bootstrap. The plugin registers a read-only source under the new
-  `CAPABILITIES.HEALTH_DIAGNOSTICS` token and, when scheduled, starts the bounded scheduler from
-  `onBootstrap` and tears it down from `onClose`. The `/health`, `/live`, and `/ready` endpoints are
-  unchanged: observation is a side channel over the already-produced result, with one callback per
-  normal check. New public surface on `@setu-ts/common`: `CAPABILITIES.HEALTH_DIAGNOSTICS`,
-  `IHealthDiagnosticsSource`, `HealthDiagnosticsSnapshot`, `HealthDiagnosticsObservation`,
-  `HealthObservationState`, and `DiagnosticsInspectorState`.
+  and is never replaced early, so a hung indicator cannot accumulate work; while fewer than
+  `concurrency` callbacks are hung the others keep refreshing, and once every slot is held by a hung
+  callback no scheduled check starts until one settles (the stalled aliases report `stale` or
+  `never-observed`). Every option is validated when `HealthPlugin(...)` is called, with fixed
+  messages that never echo a value. An indicator result whose `status` is not `up`/`degraded`/`down`
+  is observed as `failed` and the value is never retained; an approved name no indicator carries
+  stays `never-observed`, with a count-only warning at bootstrap. The plugin registers a read-only
+  source under the new `CAPABILITIES.HEALTH_DIAGNOSTICS` token and, when scheduled, starts the
+  bounded scheduler from `onBootstrap` and tears it down from `onClose`. The `/health`, `/live`, and
+  `/ready` endpoints are unchanged: observation is a side channel over the already-produced result,
+  with one callback per normal check. New public surface on `@setu-ts/common`:
+  `CAPABILITIES.HEALTH_DIAGNOSTICS`, `IHealthDiagnosticsSource`, `HealthDiagnosticsSnapshot`,
+  `HealthDiagnosticsObservation`, `HealthObservationState`, and `DiagnosticsInspectorState`.
 
 - **Diagnostics connector — `GET /v1/health` inspector and status-body inspector manifest (M98d).**
   The M98b connector now serves a first inspector operation, `GET /v1/health`, and the status body
@@ -228,6 +230,22 @@ All notable changes to this project are documented here. The format follows
   provider. Nothing changes for the five built-in providers, which all return promises.
 
 ### Fixed
+
+- **`health-plugin` — an unrecognized indicator status could hide another indicator's `down`, so
+  `/health` and `/ready` answered `200` over a failing dependency.** The aggregate took the worst
+  status through a rank table, and a status outside `up`/`degraded`/`down` has no rank, so every
+  comparison against it was false and the fold carried it forward: an indicator returning such a
+  value after a `down` one replaced the `down`, and a later `degraded` then won — measured,
+  `/health` answered **`200 degraded`** with a check `down`, so a readiness probe passed over a dead
+  dependency. The value was also published verbatim onto `/health`, and a `null` result made the
+  endpoint reject. An indicator result is now read through one rule, shared with the M98d
+  observation collector: a result that is not an object, or whose `status` is outside the three, is
+  reported as `{ status: 'down', data: { reason: 'invalid-result' } }` with its value dropped, and a
+  throwing getter is a failed check (`reason: 'error'`). A `data` value that is not an object is
+  omitted. **Behaviour change:** an indicator that returned an unrecognized status now fails
+  `/health` and `/ready` with `503`; return `'up'`, `'degraded'` or `'down'`. The defect predates
+  M98d — it was on `main` since M20 — and is fixed on the M98d branch at the maintainer's direction,
+  where the security audit found it.
 
 - **`cloudflare-plugin` — the R2 documentation said `getSignedUrl` "throws" where it rejects.** The
   behaviour was always correct (`R2Storage.getSignedUrl` returns `Promise.reject`), but four

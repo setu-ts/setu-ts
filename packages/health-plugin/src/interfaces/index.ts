@@ -41,7 +41,9 @@ export interface HealthDiagnosticsScheduledOptions {
    * The maximum number of scheduled callbacks running at once, `1`–`4`. A
    * timed-out callback that has not settled still occupies its slot, so a
    * hung indicator costs one slot and no more; the remaining slots keep
-   * refreshing the other indicators. Each cycle covers every scheduled
+   * refreshing the other indicators. With as many hung callbacks as slots, no
+   * scheduled check starts until one settles, and the stalled aliases report
+   * `stale` or `never-observed`. Each cycle covers every scheduled
    * indicator that is not still in flight, rotating its starting point so
    * no indicator is starved.
    */

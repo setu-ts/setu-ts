@@ -377,6 +377,84 @@ describe('HealthService', () => {
     });
   });
 
+  describe('untrusted indicator results', () => {
+    const invalid = (): Promise<never> =>
+      Promise.resolve({ status: 'canary-status', data: { secret: 'canary-data' } } as never);
+
+    // Before the trust rule, an unrecognized status had no rank and every
+    // comparison against it was false, so the fold carried it forward. After
+    // a `down` it replaced the `down` and then lost to a later `degraded`:
+    // `/health` said `degraded` with a check `down` (down-first). The reverse
+    // order happened to land on `down`, so it is the control, not the defect.
+    for (const order of ['invalid-first', 'down-first'] as const) {
+      it(`an unrecognized status cannot mask a down indicator (${order})`, async () => {
+        const service = new HealthService(createFakeRuntime({ now: 1, hrtime: 0 }));
+        const down = () => Promise.resolve({ status: 'down' as const });
+        if (order === 'invalid-first') {
+          service.registerIndicator('odd', invalid);
+          service.registerIndicator('db', down);
+        } else {
+          service.registerIndicator('db', down);
+          service.registerIndicator('odd', invalid);
+        }
+        service.registerIndicator('cache', () => Promise.resolve({ status: 'degraded' as const }));
+
+        const report = await service.check();
+        expect(report.status).toBe('down');
+        expect(report.checks['db']?.status).toBe('down');
+      });
+    }
+
+    it('reports an unrecognized status as down/invalid-result and publishes none of it', async () => {
+      const service = new HealthService(createFakeRuntime({ now: 1, hrtime: 0 }));
+      service.registerIndicator('odd', invalid);
+      service.registerIndicator('ok', () => Promise.resolve({ status: 'up' as const }));
+
+      const report = await service.check();
+      expect(report.status).toBe('down');
+      expect(report.checks['odd']).toEqual({
+        status: 'down',
+        data: { reason: 'invalid-result' },
+        latencyMs: report.checks['odd']?.latencyMs,
+      });
+      expect(JSON.stringify(report)).not.toContain('canary');
+    });
+
+    it('reports a null or non-object result as down/invalid-result instead of rejecting', async () => {
+      const service = new HealthService(createFakeRuntime({ now: 1, hrtime: 0 }));
+      service.registerIndicator('null', () => Promise.resolve(null as never));
+      service.registerIndicator('text', () => Promise.resolve('up' as never));
+
+      const report = await service.check();
+      expect(report.status).toBe('down');
+      expect(report.checks['null']?.data).toEqual({ reason: 'invalid-result' });
+      expect(report.checks['text']?.data).toEqual({ reason: 'invalid-result' });
+    });
+
+    it('reports a result whose status getter throws as down/error without the thrown text', async () => {
+      const service = new HealthService(createFakeRuntime({ now: 1, hrtime: 0 }));
+      const hostile = {
+        get status(): string {
+          throw new Error('canary-getter');
+        },
+      };
+      service.registerIndicator('hostile', () => Promise.resolve(hostile as never));
+
+      const report = await service.check();
+      expect(report.status).toBe('down');
+      expect(report.checks['hostile']?.data).toEqual({ reason: 'error' });
+      expect(JSON.stringify(report)).not.toContain('canary');
+    });
+
+    it('fails /ready the same way, since checkReady shares the runner', async () => {
+      const service = new HealthService(createFakeRuntime({ now: 1, hrtime: 0 }));
+      service.registerIndicator('odd', invalid);
+      service.registerIndicator('db', () => Promise.resolve({ status: 'up' as const }));
+
+      expect((await service.checkReady()).status).toBe('down');
+    });
+  });
+
   describe('timestamp', () => {
     it('should use runtime.now() for timestamp', async () => {
       const fixedTime = 1_609_459_200_000; // 2021-01-01T00:00:00.000Z

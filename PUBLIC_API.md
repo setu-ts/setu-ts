@@ -6635,8 +6635,12 @@ outage latency — a 2-second outage across six dependency indicators held `/hea
 and one never-settling indicator left the whole endpoint pending forever. A timeout is recorded as
 `{ status: 'down', data: { reason: 'timeout' } }` and a rejection as
 `{ status: 'down', data: { reason: 'error' } }` with the thrown value never serialized into the
-report; each indicator's `latencyMs` is measured individually; and `checks` keeps registration
-order, so the report's shape is stable even though execution is not.
+report. A result that is not a framework result — not an object, or a `status` outside
+`up`/`degraded`/`down` — is recorded as `{ status: 'down', data: { reason: 'invalid-result' } }` and
+its value is never published: such a status has no severity rank, so aggregating it used to let it
+hide another indicator's `down` (`/health` answered `200 degraded` with a check `down`). A `data`
+value that is not an object is omitted; each indicator's `latencyMs` is measured individually; and
+`checks` keeps registration order, so the report's shape is stable even though execution is not.
 
 ```typescript
 interface HealthCheckResult {
@@ -6774,10 +6778,12 @@ per-check reporting deadline (`timeoutMs`, 1–30,000 — a reporting bound, not
 concurrency cap (1–4); at most 16 indicators are scheduled. Each cycle covers every scheduled
 indicator not still in flight, starting from a rotating cursor so none is starved. A timed-out
 callback that has not settled keeps its concurrency slot — and only that slot — until it does, so it
-is never replaced early and the other indicators keep refreshing. An approved name no indicator is
-registered under stays `never-observed`, and the plugin logs one count-only warning at bootstrap. An
-indicator result whose `status` is not `up`/`degraded`/`down` is observed as `failed`; the value is
-never retained.
+is never replaced early, and while fewer than `concurrency` callbacks are hung the other indicators
+keep refreshing. Once every slot is held by a hung callback, no scheduled check starts until one
+settles; the work stays bounded and the stalled aliases report `stale` or `never-observed`. An
+approved name no indicator is registered under stays `never-observed`, and the plugin logs one
+count-only warning at bootstrap. An indicator result whose `status` is not `up`/`degraded`/`down` is
+observed as `failed`; the value is never retained.
 
 The plugin retains only the latest outcome per approved alias (never a history). Each observation
 carries the approved alias, the framework's own status (present only when `reported`), the outcome

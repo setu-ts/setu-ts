@@ -16,7 +16,6 @@ import {
   compileHealthDiagnosticsPolicy,
   type HealthIndicatorRunner,
   HealthObservationCollector,
-  isHealthStatus,
 } from '../../src/diagnostics/health-observation-collector.ts';
 import type { HealthDiagnosticsOptions } from '../../src/interfaces/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -230,11 +229,6 @@ describe('Collector — retention seam', () => {
 });
 
 describe('Collector — untrusted status', () => {
-  it('admits only the framework statuses', () => {
-    expect(['up', 'degraded', 'down'].every(isHealthStatus)).toBe(true);
-    expect(['UP', 'ok', '', null, undefined, 1].some(isHealthStatus)).toBe(false);
-  });
-
   it('retains a reported check with an unknown status as failed, dropping the value', () => {
     const clock = new MutableRuntime();
     const collector = collectorFor(options(), clock.runtime, makeRunner({}));
