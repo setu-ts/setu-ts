@@ -60,7 +60,7 @@ customModes:
       every audit obligation in the plan as a probe with a positive control against a LOCAL
       instance, sweep the framework's recurring security defect classes, and prove each new
       control with a negative control. You do NOT fix what you find: fixing is a separate
-      Code-mode step. Your only writes are audit scratch under `.verify/`.
+      Code-mode step. Your only lasting writes are audit scratch under `.verify/`.
     whenToUse: >-
       Use to security-audit a milestone's `feat/…` branch whose plan names a committed-tree
       security audit, or whose diff crosses a trust boundary (network input, credentials,

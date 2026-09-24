@@ -96,8 +96,9 @@ not the attack the author missed. Losing context is the point here.
 
 - **What the subtask receives — and nothing else:** the milestone number, the `feat/…` branch, the
   exact commit to audit (`git rev-parse HEAD`), the path of the plan, and the paths of the existing
-  `.verify/` reports — plus, on a re-audit, any maintainer decision recorded under the scoped
-  handoff in "Do not escalate to the human mid-pipeline". No summary of the implementation, no
+  `.verify/` reports — plus, on a re-audit, any disposition recorded since the last audit — a
+  maintainer decision from the scoped handoff in "Do not escalate to the human mid-pipeline", or a
+  Medium/Low acceptance or deferral with its reason. No summary of the implementation, no
   explanation of why a control is safe, no list of what to probe beyond what the plan itself says.
 - **What it returns:** the report path (`.verify/milestone-<N>-security-audit.md`), the verdict, and
   the open findings with severity and file path. The orchestrator reads the report file, not only
@@ -161,8 +162,10 @@ one decision and nothing else. Record the answer, who gave it, and the date in t
 in the audit report, then resume on the SAME commit: start a fresh Security Audit subtask with the
 recorded decision added to its handoff, and that subtask re-issues the verdict with the disposition
 in the PR audit record — the orchestrator never writes a gate's verdict itself. A Medium or Low
-finding needs no handoff; its disposition and reason are simply recorded. This exception covers only
-that decision — it does not license asking the human about anything else mid-pipeline.
+finding needs no handoff: the pipeline may accept it or defer it to a named milestone, records the
+disposition and reason, and hands them to the next audit subtask like a maintainer decision. This
+exception covers only that decision — it does not license asking the human about anything else
+mid-pipeline.
 
 ## Always
 

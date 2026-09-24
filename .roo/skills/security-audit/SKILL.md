@@ -27,15 +27,17 @@ milestone is NOT audited.**
 ## What this audit is not
 
 - **It is not the design review.** A plan that crosses a trust boundary carries a _design security
-  review_ written BEFORE implementation (the M98 plans carry it as a numbered section: reviewed
-  flow, assets and attackers, approved budgets, a findings table, and the obligations the
-  implementation audit must meet). The audit checks the code against that review. It does not write
-  the threat model after the fact — a threat model reverse-engineered from the code only describes
-  what the code already does. **Whenever this audit applies — the plan names one, or the diff
-  crosses a trust boundary — a missing design review is a blocking finding.** There is no exception:
-  a plan that asks for an audit without saying what it must hold against has not finished its own
-  design. Run the Step 4 sweep anyway, so the fix pass has the findings, and say the audit ran
-  without one.
+  review_ written BEFORE implementation. The audit checks the code against that review. A design
+  review is **present** only when the plan records, as a completed review, at least: the reviewed
+  flow, the assets and attackers, and the obligations the implementation audit must meet (the M98d
+  plan's §10 adds approved budgets and a findings table). A section that lists what a review must
+  still cover — as the M98i–M98n plans' §10 do today — is a requirement for one, not a review. The
+  audit does not write the threat model after the fact — a threat model reverse-engineered from the
+  code only describes what the code already does. **Whenever this audit applies — the plan names
+  one, or the diff crosses a trust boundary — a missing design review is a blocking finding.** There
+  is no exception: a plan that asks for an audit without saying what it must hold against has not
+  finished its own design. Run the Step 4 sweep anyway, so the fix pass has the findings, and say
+  the audit ran without one.
 - **It is not a penetration test of anything but a local instance.** Every probe targets an
   application this run started on `127.0.0.1`, or an in-process `createApplication`. Never aim a
   probe at a remote host, a shared environment, or a real credential.
@@ -129,8 +131,9 @@ file), at the real surface — a kernel application, the real connector, the rea
 
 **Run every probe sandboxed, never with `-A`.** The driver imports the code under audit, so whatever
 the probe is granted, that code is granted too — and `-A` gives an untrusted branch the host's
-files, environment, and network. Fetch dependencies first, then run with an emptied environment and
-grants scoped to the probe:
+files, environment, and network. Run from the repository (or worktree) root so `.` is the tree under
+audit. Fetch dependencies first, then run with an emptied environment and grants scoped to the
+probe:
 
 ```bash
 deno cache .verify-<N>/driver.ts
@@ -142,9 +145,12 @@ env -i PATH="$PATH" HOME="$HOME" deno run --no-prompt \
 `--allow-env` is safe only because `env -i` empties the environment first: `RuntimePlugin` reads the
 whole environment at `start()`, so a list of names is not enough, and the host's variables must not
 be what it reads. Pass the variables the probe needs explicitly after `env -i` (`REDIS_URL=…`). Add
-`--allow-run=docker` only for a probe that stops or starts a container. A `NotCapable` error is
-evidence, not an obstacle: when it is the code under audit asking for access the design review does
-not account for, record it as a finding rather than widening the grant.
+`--allow-run=docker` only for a probe that stops or starts a container. Framework code outside the
+diff may need more (the health plugin's self-indicator reads the hostname, so it needs
+`--allow-sys=hostname`): take those grants from the package's own `test.permissions` in its
+`deno.json`, which is the permission set its tests already justify. A `NotCapable` error is
+evidence, not an obstacle: when code in the audited diff asks for access that neither that baseline
+nor the design review accounts for, record it as a finding rather than widening the grant.
 
 Every probe has two halves, and both are mandatory:
 
@@ -208,11 +214,13 @@ arise in this diff). A class left unaddressed is an incomplete audit.
    "unknown" is a reporting state rather than an access decision.
 9. **Credentials and cryptography.** Web Crypto only (`runtime.subtle`); MACs verified over the
    exact received bytes BEFORE parsing; constant-time comparison where a secret is compared; replay
-   refused by a sequence or nonce; expiry on the monotonic clock, never `Date.now()`; revocation
-   that actually revokes (the whole refresh family and the paired access tokens — M90c); and no
-   token type confusion (a refresh token must not authenticate as an access token — M90c). Drive
-   wrong, replayed, expired, revoked, and cross-instance credentials, each with a valid credential
-   as the positive control.
+   refused by a sequence or nonce; in-process deadlines (a pairing window, a timeout, an in-memory
+   TTL) on the monotonic clock via `runtime.hrtime()`, while an expiry sealed inside a credential
+   and checked by another process uses the wall clock via `runtime.now()` (the session `maxAge`
+   stamp — M48), and never `Date.now()` directly; revocation that actually revokes (the whole
+   refresh family and the paired access tokens — M90c); and no token type confusion (a refresh token
+   must not authenticate as an access token — M90c). Drive wrong, replayed, expired, revoked, and
+   cross-instance credentials, each with a valid credential as the positive control.
 10. **Brands are not authorization.** A `Symbol.for` brand (status hints, security and validation
     metadata) is global by design: any code in the process can forge it. Confirm no brand is read as
     an access decision. Conversely, a locally created `Symbol()` misses entirely when two copies of
@@ -277,17 +285,20 @@ findings → support limits → verdict.
 
 - **Critical** — read or change another party's data, bypass authentication or authorization, or
   execute code.
-- **High** — leak a secret or credential, take the service down with requests the plan's attacker
-  can send, or disable a security control through a plausible configuration.
-- **Medium** — leak internal detail (topology, paths, versions, schema), or exhaust a resource that
-  recovers without restart.
+- **High** — leak a secret or credential; use requests the plan's attacker can send to make the
+  service unavailable until it is restarted; or disable a security control through a plausible
+  configuration.
+- **Medium** — leak internal detail (topology, paths, versions, schema), or degrade or exhaust a
+  resource that recovers on its own once the requests stop.
 - **Low** — defense in depth, or a documentation claim that overstates a guarantee.
 
 Each finding carries: severity, file:line, the attacker and the concrete failure scenario (inputs →
 observed effect), the probe that demonstrates it, and a **disposition**: `fixed in <commit>`,
-`accepted by the maintainer`, or `deferred to <milestone>`, each with its reason. A Critical or High
-finding cannot be accepted or deferred without an explicit maintainer decision, and the entry names
-who decided and when. That decision comes through the pipeline's one scoped handoff
+`accepted`, or `deferred to <milestone>`, each with its reason and who decided. The auditor records
+a disposition it is handed; it never chooses one. A Medium or Low finding may be accepted or
+deferred by the pipeline with its reason recorded. A Critical or High finding cannot be accepted or
+deferred without an explicit maintainer decision, and the entry names who decided and when. That
+decision comes through the pipeline's one scoped handoff
 (`.roo/rules-orchestrator/01-switch-modes.md`, "Do not escalate to the human mid-pipeline"); the
 auditor never assumes it, and an audit that finds a Critical or High issue with no recorded decision
 reports it as open.
@@ -311,8 +322,9 @@ Then write the **PR audit record** — the block the plan requires in the PR des
 
 - **passed** — every obligation probe ran with its positive control, every defect class is
   addressed, every new control has an observed negative control, and no finding is open.
-- **passed with accepted risks** — as above, except for findings a maintainer accepted or deferred
-  to a named milestone, each listed with its reason.
+- **passed with accepted risks** — as above, except for findings dispositioned as accepted or
+  deferred to a named milestone, each listed with its reason, and each Critical or High one with its
+  recorded maintainer decision.
 - **failed** — any open finding, any obligation without a probe, any probe without pasted output,
   any class left unaddressed, a missing design review, or an audit run in the implementing context.
 
@@ -322,8 +334,13 @@ empty response passes. If the evidence does not prove it, the verdict is `failed
 
 # Step 7 — Re-audit after fixes
 
-Fixes land on the milestone's `feat/…` branch, outside this audit. Afterwards, re-run from Step 1 on
-the new HEAD with the fix range as new code:
+Fixes land on the milestone's `feat/…` branch, outside this audit.
+
+**If the commit is unchanged** and the only new input is a recorded disposition, nothing the
+evidence covers has moved: keep the probes and negative controls, update each finding's disposition,
+re-issue the verdict, and say that is what happened.
+
+**If the commit moved**, re-run from Step 1 on the new HEAD with the fix range as new code:
 
 ```bash
 git log --oneline <revision audited>..HEAD

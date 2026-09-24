@@ -5494,8 +5494,8 @@ will merge, in a context that did not implement or fix the milestone — a fresh
 subtask or a freshly spawned Claude agent, handed only the milestone, branch, commit, plan and
 existing reports; an audit run in the implementing context does not satisfy the gate — and it
 produces the audit record the plan requires in the PR. The gates above cannot see what it checks:
-every M98 plan has required one, and M98b shipped with its review explicitly unclaimed because
-nothing defined what one was.
+every open M98 plan (98d–98n) requires one, and M98b shipped with its review explicitly unclaimed
+because nothing defined what one was.
 
 ## Common pitfalls (these fail the gates)
 
