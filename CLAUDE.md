@@ -5486,6 +5486,14 @@ committing — a "failure" that turns out to be uncommitted changes is not a res
 green `--dry-run` does NOT prove a real publish works: it skips the already-published check, which
 is what needs `--allow-net` (see the `alpha.2` entry above).
 
+**A milestone whose plan names a committed-tree security audit — or whose diff crosses a trust
+boundary — is ALSO security-audited before it merges**, following
+`.roo/skills/security-audit/SKILL.md` (Roo's `security-audit` mode runs it; Claude's local skill
+points at the same file). It runs after verification and code review, on the exact commit the PR
+will merge, by an agent that did not implement the milestone, and it produces the audit record the
+plan requires in the PR. The gates above cannot see what it checks: every M98 plan has required one,
+and M98b shipped with its review explicitly unclaimed because nothing defined what one was.
+
 ## Common pitfalls (these fail the gates)
 
 - `exactOptionalPropertyTypes` is on: never assign `undefined` to an optional property — omit it.

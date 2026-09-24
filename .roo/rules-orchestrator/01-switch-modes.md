@@ -39,6 +39,7 @@ Modes are not equally capable, and the restrictions are deliberate:
 | Code             | `src/`, `test/`, `deno.json`, docs — anything      | **yes**    |
 | Verify Milestone | `.verify/` and `.verify-<milestone>/` scratch only | no         |
 | Code Review      | nothing — read-only by design                      | no         |
+| Security Audit   | `.verify/` and `.verify-<milestone>/` scratch only | no         |
 
 **Switching modes is how you cross a boundary; it is not how you erase one.** The danger the subtask
 model handled structurally, and that `switch_mode` hands back to you, is this: a verifier or a
@@ -50,7 +51,9 @@ So the sequencing rule is absolute:
 
 - **A gate pass FINISHES and RECORDS its findings before any switch to Code.** Verify Milestone
   writes its report to `.verify/milestone-<N>-verification.md`; Code Review returns its ranked
-  findings with the reviewed commit hash. Only then do you switch to Code and fix.
+  findings with the reviewed commit hash; Security Audit writes
+  `.verify/milestone-<N>-security-audit.md` with the audited revision. Only then do you switch to
+  Code and fix.
 - **After fixing, switch back to the gate mode and re-run it** against the new commit. The fix diff
   is the least-reviewed code in the milestone (see `.roo/rules-code-review/01-review-only.md`), so
   it gets a real second pass, not a rubber stamp.
@@ -70,6 +73,9 @@ So the sequencing rule is absolute:
   `.roo/skills/verify-milestone/SKILL.md` end to end.
 - **Reviewing before merge** → **Code Review**, read-only, at high effort, over
   `git diff main...HEAD`.
+- **Security-auditing before merge** → **Security Audit**, following
+  `.roo/skills/security-audit/SKILL.md`, whenever the plan names a committed-tree security audit or
+  the diff crosses a trust boundary.
 
 **Route by the DELIVERABLE, not the topic.** Design-flavoured wording does not make it Architect
 work. If the deliverable is anything other than a markdown plan or doc — a scaffold, a `src/` or
@@ -81,23 +87,26 @@ and nothing else.
 Architect (plan, then stop) → _[human/Claude reviews the plan]_ → Code (implement, commit the plan
 with it) → Verify Milestone (report, then stop) → Code (fix findings, commit) → **Verify Milestone
 again** → Code Review (ranked findings, then stop) → Code (fix any correctness findings, commit) →
-re-verify and re-review until Code Review returns **merge-ready** → _[human pushes and opens the
-PR]_.
+re-verify and re-review until Code Review returns **merge-ready** → Security Audit (report, then
+stop — only when the plan names one or the diff crosses a trust boundary) → Code (fix findings,
+commit) → re-verify, re-review, and re-audit the fix range until the audit returns **passed** or
+**passed with accepted risks** → _[human pushes and opens the PR]_.
 
 **A gate's verdict covers the commit it read and nothing later**, which is why Verify runs again
 after its own findings are fixed rather than handing straight to Code Review. Skipping it sends Code
 Review a tree no verification has seen, and the fix commit is the least-exercised code in the
 milestone. Never skip a gate: a milestone is not merge-ready until Verify Milestone has returned
-**verified** on the current commit AND Code Review has returned **merge-ready** on it.
+**verified** on the current commit AND Code Review has returned **merge-ready** on it AND, where the
+audit applies, Security Audit has returned **passed** or **passed with accepted risks** on it.
 
 ## Committing between steps
 
 - **Every Code-mode pass commits its own work before switching out of Code** (see
   `.roo/rules-code/01-commit-before-done.md`). Check `git status --porcelain` before you switch.
-- **No gate mode may run over a dirty tree.** Verify Milestone and Code Review both refuse, and
-  refusing is correct — an uncommitted change can mask the exact defect they are hunting. So if the
-  tree is dirty when a Code pass ends, that pass is not finished: stay in (or switch back to) Code,
-  commit, and only then move to a gate.
+- **No gate mode may run over a dirty tree.** Verify Milestone, Code Review, and Security Audit all
+  refuse, and refusing is correct — an uncommitted change can mask the exact defect they are
+  hunting. So if the tree is dirty when a Code pass ends, that pass is not finished: stay in (or
+  switch back to) Code, commit, and only then move to a gate.
 - **The one transition that legitimately starts dirty is Architect → Code.** Architect writes the
   plan and cannot commit, so the approved plan is uncommitted by construction; Code's first
   implementation pass commits it along with the work, which is where it belongs anyway — CLAUDE.md
