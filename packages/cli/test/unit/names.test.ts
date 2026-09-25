@@ -289,6 +289,10 @@ describe('isPathSegmentSafe refuses names Windows cannot hold', () => {
     'con.app',
     'nul.txt',
     'my.',
+    'com¹',
+    'COM²',
+    'lpt³',
+    'lpt³.txt',
   ];
   for (const raw of REFUSED) {
     it(`refuses ${raw}`, () => {
@@ -296,7 +300,17 @@ describe('isPathSegmentSafe refuses names Windows cannot hold', () => {
     });
   }
 
-  const KEPT = ['console', 'connect', 'conx', 'com10', 'lpt', 'my.app', 'nullable', 'auxiliary'];
+  const KEPT = [
+    'console',
+    'connect',
+    'conx',
+    'com10',
+    'com⁴',
+    'lpt',
+    'my.app',
+    'nullable',
+    'auxiliary',
+  ];
   for (const raw of KEPT) {
     it(`keeps ${raw}`, () => {
       expect(isPathSegmentSafe(deriveNames(raw))).toBe(true);

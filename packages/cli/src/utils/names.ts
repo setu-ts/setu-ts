@@ -165,9 +165,10 @@ const PATH_SEGMENT = /^[\p{L}\p{N}][\p{L}\p{M}\p{N}.-]*$/u;
  * A Windows reserved device name, case-insensitive, with or without an
  * extension: Windows resolves `con`, `con.txt` and `CON.service.ts` alike to the
  * device, so a project or file named that cannot be created there, and a
- * repository holding one cannot be checked out.
+ * repository holding one cannot be checked out. The superscript digits `¹²³` are
+ * reserved alongside `0`–`9` for `COM` and `LPT`.
  */
-const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i;
+const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\.|$)/iu;
 
 /**
  * Returns the first path segment over {@linkcode MAX_COMPONENT_BYTES}, if any.
