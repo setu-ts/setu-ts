@@ -926,18 +926,22 @@ app.middleware.add(myMiddleware, { priority: 25 }); // Runs before default
 
 ## Microservices
 
-The `microservice` template adds messaging, queue, resilience and telemetry to the REST set. In a
-class-based microservice, every non-HTTP ingress artifact is registered through `DecoratorPlugin`'s
-`ingress` list, which is the one place each family has a registration site — a `@CommandHandler`,
-`@QueryHandler`, `@OnEvent` or `@Processor` class reaches its bus or queue from there.
+The `microservice` template adds messaging, queues, resilience, telemetry, service discovery, CQRS
+and events to the REST set. In a class-based microservice, every non-HTTP ingress artifact is
+registered through `DecoratorPlugin`'s `ingress` list, which is the one place each family has a
+registration site — a `@CommandHandler`, `@QueryHandler`, `@OnEvent`, `@Subscribe` or `@Processor`
+class reaches its bus, broker or queue from there. `@OnEvent` is the in-process events bus;
+`@Subscribe` is a broker topic, so it is the match for a NestJS `@EventPattern` that crosses
+services.
 
-| NestJS                                             | Setu-TS                                                                     |
-| -------------------------------------------------- | --------------------------------------------------------------------------- |
-| `@MessagePattern('user.lookup')` (RPC)             | `broker.respond('user.lookup', handler)` on the `IMessageBroker` capability |
-| `@EventPattern('user.created')` (pub/sub)          | `@OnEvent('user.created')` on a class in the ingress list                   |
-| `@nestjs/cqrs` `@CommandHandler` / `@QueryHandler` | `@CommandHandler(TYPE)` / `@QueryHandler(TYPE)` on ingress classes          |
-| `@nestjs/bull` `@Processor`                        | `@Processor('job-name')` on an ingress class                                |
-| `@nestjs/schedule` `@Cron` / `@Interval`           | `@Cron('0 0 * * *')` / `@Every(60_000)` on an ingress class                 |
+| NestJS                                             | Setu-TS                                                                      |
+| -------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `@MessagePattern('user.lookup')` (RPC)             | `broker.respond('user.lookup', handler)` on the `IMessageBroker` capability  |
+| `@EventPattern('user.created')` (broker pub/sub)   | `@Subscribe('user.created')` on a class in the ingress list (a broker topic) |
+| `@nestjs/event-emitter` `@OnEvent` (in-process)    | `@OnEvent('user.created')` on a class in the ingress list                    |
+| `@nestjs/cqrs` `@CommandHandler` / `@QueryHandler` | `@CommandHandler(TYPE)` / `@QueryHandler(TYPE)` on ingress classes           |
+| `@nestjs/bull` `@Processor`                        | `@Processor('job-name')` on an ingress class                                 |
+| `@nestjs/schedule` `@Cron` / `@Interval`           | `@Cron('0 0 * * *')` / `@Every(60_000)` on an ingress class                  |
 
 ```bash
 setu new my-service --template microservice --style class-based
