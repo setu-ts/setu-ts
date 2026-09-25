@@ -165,9 +165,10 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       );
       // The optional health-diagnostics source (M98d): resolved once, during
       // registration, through its declared optional capability. An absent
-      // source (no health plugin, or a health plugin without diagnostics)
-      // yields a typed `unsupported` answer from the connector — it never
-      // runs an indicator and never fails startup.
+      // source means no health plugin is registered, and the connector answers
+      // a typed `unsupported`. A health plugin without the `diagnostics`
+      // option still registers a source, which answers `disabled`. Neither
+      // runs an indicator or fails startup.
       const healthSource: IHealthDiagnosticsSource | null = ctx.services.has(
           CAPABILITIES.HEALTH_DIAGNOSTICS,
         )
