@@ -454,7 +454,9 @@ beside what review changed.
   `workspace/runtime-profile.ts` `denoEnvRead`/`nodeEnvRead`, so a quote in it injected code into
   every generated member (and was persisted in the manifest). The fallback is now rendered by
   `stringLiteral`, checked by importing the rendered expression as a real module for seven payloads
-  on all three runtimes; restoring the raw form fails 21 steps. Outside this milestone's diff, and
+  on all three runtimes; restoring the raw form fails 21 steps. The same sweep found a member name
+  from a hand-edited manifest written raw as a discovery-module object key; it goes through
+  `stringLiteral` too, proven by importing the rendered module. Outside this milestone's diff, and
   folded in rather than sent to a `fix/…` branch because the maintainer asked for it before the PR.
 - Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
   refactor left with no reader.

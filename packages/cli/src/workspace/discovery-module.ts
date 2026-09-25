@@ -19,7 +19,11 @@
 
 import { CONFIG_MODULE } from '../constants.ts';
 import type { WorkspaceMember } from './manifest.ts';
-import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
+import {
+  stringLiteral,
+  workspaceProfile,
+  type WorkspaceRuntimeProfile,
+} from './runtime-profile.ts';
 
 /** The module's path, relative to a member's own root. */
 export const DISCOVERY_MODULE = 'src/discovery/services.ts';
@@ -109,7 +113,9 @@ export function renderDiscoveryModule(
   const portOf = new Map(all.map((other) => [other.name, other.port]));
   const entries = siblings
     .map((name) =>
-      `  '${name}': [{\n` +
+      // A literal, not raw text: the name is read back from a manifest a
+      // developer may edit, so a quote in it must not close the key.
+      `  ${stringLiteral(name)}: [{\n` +
       // The profile's reader, not a literal `Deno.env.get`: this module is emitted
       // into Node and Bun members too, where that name does not exist. Its own
       // line breaks are for the deeper indentation of a plugin argument, so they

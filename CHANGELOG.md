@@ -271,8 +271,9 @@ All notable changes to this project are documented here. The format follows
   in `setu.workspace.json`, so every later `setu generate app` repeated it. It is now rendered as an
   escaped string literal that evaluates to exactly the value given, for both the flag and a
   hand-edited manifest; an ordinary URL renders byte-identically, so no existing generated file
-  changes. Present since the workspace transport arrived; found by the M99e security audit and fixed
-  there at the maintainer's direction.
+  changes. A member name read back from that manifest reached the generated discovery module the
+  same way, as a raw object key, and is rendered the same way now. Present since the workspace
+  transport arrived; found by the M99e security audit and fixed there at the maintainer's direction.
 
 - **`cli` — a name that is not safe to generate from is refused before anything is written (M99e).**
   Every name-taking verb (`new`, `generate app`, `generate <schematic>`, `generate library`,
