@@ -5226,7 +5226,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   microservice recipe with the decorator and DI pair, and its generated CQRS/event ingress classes
   register only through `DecoratorPlugin({ ingress })` — the functional `src/cqrs` and `src/events`
   barrels are not emitted, so nothing is registered twice. `docs/migration-nestjs.md` gains
-  Scaffolding and Microservices sections — complete (PR #364).
+  Scaffolding and Microservices sections. Four independent security-audit rounds found and closed
+  F1–F4 (argv and prompter output that could forge terminal lines) and surfaced a pre-existing
+  `--transport-url` code injection into generated `setu.config.ts` on `main` (OBS-1), fixed here at
+  the maintainer's direction. The F5 and OBS-1 fixes after round 4 were not re-audited: the
+  maintainer waived round 5 rather than hold the merge — complete (PR #364).
 - **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
   design security review and implementation audit required).
 
