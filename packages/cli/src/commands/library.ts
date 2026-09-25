@@ -13,7 +13,7 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
 import { EXIT_ERROR, EXIT_OK, EXIT_USAGE, LIBRARY_VERB, PROGRAM_NAME } from '../constants.ts';
-import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
+import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
   firstDuplicatePath,
@@ -100,9 +100,12 @@ export async function runLibraryCommand(
 
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
+    // Quoting the name back as typed, so through `escapeName`: a control
+    // character here would forge a standalone line in the rendered message.
     deps.error(
-      `Invalid name "${rawName}": it must contain a letter, must not start with a digit, and ` +
-        `must not contain a path separator (/).`,
+      `Invalid name "${escapeName(rawName)}": it must contain a letter, must not start with ` +
+        `a digit, and must be one legal filename component — no path separator (/), no ` +
+        `control character, and at most 255 bytes.`,
     );
     return EXIT_USAGE;
   }

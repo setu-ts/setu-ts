@@ -78,7 +78,7 @@ export function deriveNames(raw: string): DerivedNames {
  * uses break on the same inputs, so this is the single guard every one of them
  * runs before it writes anything.
  *
- * Three classes of input fail:
+ * Four classes of input fail:
  *
  * - one that normalizes to nothing (`___`), which would emit `class Service`
  *   at the hidden path `src/services/.service.ts`;
@@ -88,14 +88,20 @@ export function deriveNames(raw: string): DerivedNames {
  *   member name from a directory, so `--dir .` produced `apps/.` and failed
  *   part-way through the conversion with a bare `mkdir` errno. Requiring a letter
  *   is also what the refusals around this already claim it checks.
- *
- * and one that carries a path separator (`../sibling`, `a/b`). `deriveNames`
- * preserves `/` verbatim — it is not a separator it normalizes away — so
- * `deriveNames('../sibling').kebab` is `../sibling`, and joining it into
- * `joinPath(dir, kebab)` escapes the intended directory and writes the scaffold
- * into an ancestor. The check therefore looks at the derived kebab, not the raw
- * input: a raw `../sibling` and a raw `..sibling` both normalize differently,
- * and only the former carries the separator that makes it a traversal.
+ * - one that is not a legal filename component: a path separator (`../sibling`,
+ *   `a/b`), a control character (`a\u0000b`), or a kebab longer than
+ *   {@linkcode MAX_COMPONENT_BYTES}. `deriveNames` preserves `/` verbatim — it is
+ *   not a separator it normalizes away — so `deriveNames('../sibling').kebab` is
+ *   `../sibling`, and joining it into `joinPath(dir, kebab)` escapes the intended
+ *   directory and writes the scaffold into an ancestor. A NUL byte and an
+ *   over-long component pass every other rule here, and the filesystem rejects
+ *   them mid-flight (`TypeError: file name contained an unexpected NUL byte`,
+ *   `File name too long`) as an error nothing up to the CLI entry point catches —
+ *   an uncaught rejection, not a refusal. The check therefore looks at the
+ *   derived kebab, not the raw input: a raw `../sibling` and a raw `..sibling`
+ *   normalize differently, and only the former carries the separator that makes
+ *   it a traversal, while a raw `a\r\nb` normalizes the CR/LF away into `a-b`,
+ *   which is harmless.
  *
  * Reserved words (`class`, `new`) are NOT rejected: every schematic prefixes or
  * suffixes the derived form, so `class` yields the perfectly valid
@@ -108,6 +114,39 @@ export function isIdentifierSafe(names: DerivedNames): boolean {
   return (
     /[a-zA-Z]/.test(names.kebab) &&
     !/^[0-9]/.test(names.pascal) &&
-    !names.kebab.includes('/')
+    !names.kebab.includes('/') &&
+    !/[\u0000-\u001f\u007f]/.test(names.kebab) &&
+    utf8ByteLength(names.kebab) <= MAX_COMPONENT_BYTES
+  );
+}
+
+/** The portable per-component filename ceiling: NAME_MAX on Linux, and the
+ * same 255 on NTFS and APFS. A component over it is refused with a usage error
+ * instead of surfacing mid-write as `File name too long (os error 36)`. */
+const MAX_COMPONENT_BYTES = 255;
+
+const UTF8 = new TextEncoder();
+
+/** The kebab's length in UTF-8 bytes, the unit filesystems measure names in. */
+function utf8ByteLength(text: string): number {
+  return UTF8.encode(text).length;
+}
+
+/**
+ * Renders a raw name safely inside a refusal message.
+ *
+ * Refusals quote the name the user typed. A name carrying a newline or a
+ * carriage return would break out of the quoted line and forge a standalone
+ * line in the rendered message, so every control character is rendered as its
+ * `\uXXXX` escape instead — the quote stays one line and still shows exactly
+ * what was typed. Everything else passes through verbatim.
+ *
+ * @param raw - The raw name as the user typed it
+ * @returns The same name, safe to interpolate into a single-line message
+ */
+export function escapeName(raw: string): string {
+  return raw.replace(
+    /[\u0000-\u001f\u007f]/g,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
   );
 }

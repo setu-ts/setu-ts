@@ -947,6 +947,36 @@ describe('runNewCommand', () => {
       });
     }
 
+    // A NUL byte and an over-long component pass the letter/separator rules and
+    // reach the filesystem, which rejects them mid-flight as an error nothing
+    // caught — an uncaught rejection, not a refusal. Both are refused here,
+    // before any filesystem access.
+    it('returns 2 for a name carrying a NUL byte', async () => {
+      const h = harness();
+      expect(await h.run(['ok\u0000'])).toBe(2);
+      expect(h.err.text()).toContain('control character');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('returns 2 for a name longer than a filename component', async () => {
+      const h = harness();
+      expect(await h.run(['a'.repeat(300)])).toBe(2);
+      expect(h.err.text()).toContain('255 bytes');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    // The refusal quotes the name as typed, so a CRLF inside it must render as
+    // an escape: the message stays one line and cannot forge a standalone line
+    // into the rendered output.
+    it('renders a CRLF in a refused name as an escape, keeping it one line', async () => {
+      const h = harness();
+      expect(await h.run(['../sib\r\nINJECTED: scaffold complete'])).toBe(2);
+      expect(h.err.lines).toHaveLength(1);
+      expect(h.err.lines[0]).not.toContain('\r');
+      expect(h.err.lines[0]).not.toContain('\n');
+      expect(h.err.lines[0]).toContain('\\u000d\\u000aINJECTED');
+    });
+
     it('returns 0 for --help, never a usage error', async () => {
       const h = harness();
       expect(await h.run(['--help'])).toBe(0);

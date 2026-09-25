@@ -141,6 +141,16 @@ describe('runAppCommand', () => {
       });
     }
 
+    // The member refusal quotes the name as typed, so a CRLF inside it must
+    // render as an escape rather than forging a standalone output line.
+    it('renders a CRLF in a refused member name as an escape', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', '../sib\r\nINJECTED'])).toBe(2);
+      expect(h.err.lines).toHaveLength(1);
+      expect(h.err.lines[0]).not.toContain('\r');
+      expect(h.err.lines[0]).not.toContain('\n');
+    });
+
     // A member's runtime is the WORKSPACE's: they share one root manifest and one
     // lockfile, so a Node member inside a Deno workspace is not a member at all.
     // The flag is refused when it DISAGREES rather than whenever it is non-Deno,

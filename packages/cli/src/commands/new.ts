@@ -61,7 +61,7 @@ import {
 } from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
-import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
+import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
   firstDuplicatePath,
@@ -640,9 +640,13 @@ export async function runNewCommand(
   // letter (`___`) or a path separator (`../sibling`) would write the scaffold
   // outside the intended directory.
   if (!isIdentifierSafe(names)) {
+    // The name is quoted back as typed, so it goes through `escapeName`: a
+    // control character in the refusal would forge a standalone line in the
+    // rendered message.
     deps.error(
-      `Invalid project name: "${rawName}". It must contain a letter, must not start ` +
-        `with a digit, and must not contain a path separator (/).`,
+      `Invalid project name: "${escapeName(rawName)}". It must contain a letter, must not ` +
+        `start with a digit, and must be one legal filename component — no path separator ` +
+        `(/), no control character, and at most 255 bytes.`,
     );
     return EXIT_USAGE;
   }

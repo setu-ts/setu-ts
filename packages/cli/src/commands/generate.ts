@@ -21,7 +21,7 @@ import {
 import { runAppCommand } from './app.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
 import { runLibraryCommand } from './library.ts';
-import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
+import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import {
@@ -253,9 +253,12 @@ export async function runGenerateCommand(
   if (!isIdentifierSafe(names)) {
     // Schematics interpolate these forms into declarations, so a name that
     // cannot begin an identifier would emit source that does not parse.
+    // Quoting the name back as typed, so through `escapeName`: a control
+    // character here would forge a standalone line in the rendered message.
     deps.error(
-      `Invalid name "${name}": it must contain a letter, must not start with a digit, and ` +
-        `must not contain a path separator (/).`,
+      `Invalid name "${escapeName(name)}": it must contain a letter, must not start with ` +
+        `a digit, and must be one legal filename component — no path separator (/), no ` +
+        `control character, and at most 255 bytes.`,
     );
     return EXIT_USAGE;
   }

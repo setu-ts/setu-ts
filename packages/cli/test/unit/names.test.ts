@@ -1,6 +1,6 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { deriveNames, isIdentifierSafe } from '../../src/utils/names.ts';
+import { deriveNames, escapeName, isIdentifierSafe } from '../../src/utils/names.ts';
 
 describe('deriveNames', () => {
   const inputs = ['user-profile', 'UserProfile', 'userProfile', 'user_profile', 'user profile'];
@@ -117,5 +117,33 @@ describe('isIdentifierSafe', () => {
     for (const input of ['..', '.', '../sibling', '../../..', 'a/b']) {
       expect(isIdentifierSafe(deriveNames(input))).toBe(false);
     }
+  });
+
+  // A NUL byte and an over-long component pass every other rule and reach the
+  // filesystem, which rejects them mid-flight (`TypeError: ... NUL byte`,
+  // `File name too long`) as an error nothing caught — an uncaught rejection,
+  // not a refusal. Both are refused here, before any filesystem access.
+  it('rejects a name whose derived kebab carries a control character', () => {
+    for (const input of ['a\u0000b', 'ok\u0000', '\u007fx']) {
+      expect(isIdentifierSafe(deriveNames(input))).toBe(false);
+    }
+  });
+
+  it('rejects a name longer than a filesystem filename component', () => {
+    expect(isIdentifierSafe(deriveNames('a'.repeat(256)))).toBe(false);
+    expect(isIdentifierSafe(deriveNames('a'.repeat(255)))).toBe(true);
+  });
+});
+
+describe('escapeName', () => {
+  it('renders control characters as escapes so a refusal stays one line', () => {
+    expect(escapeName('../sib\r\nINJECTED: scaffold complete')).toBe(
+      '../sib\\u000d\\u000aINJECTED: scaffold complete',
+    );
+    expect(escapeName('a\u0000b')).toBe('a\\u0000b');
+  });
+
+  it('leaves an ordinary name verbatim', () => {
+    expect(escapeName('user-profile')).toBe('user-profile');
   });
 });

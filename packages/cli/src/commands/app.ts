@@ -35,7 +35,7 @@ import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { readEnvFilePath } from '../templates/env-file.ts';
-import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
+import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
   firstDuplicatePath,
@@ -396,9 +396,12 @@ export async function runAppCommand(
 
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
+    // Quoting the name back as typed, so through `escapeName`: a control
+    // character here would forge a standalone line in the rendered message.
     deps.error(
-      `Invalid name "${rawName}": it must contain a letter, must not start with a digit, and ` +
-        `must not contain a path separator (/).`,
+      `Invalid name "${escapeName(rawName)}": it must contain a letter, must not start with ` +
+        `a digit, and must be one legal filename component — no path separator (/), no ` +
+        `control character, and at most 255 bytes.`,
     );
     return EXIT_USAGE;
   }
