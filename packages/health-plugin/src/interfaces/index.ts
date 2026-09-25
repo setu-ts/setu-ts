@@ -42,10 +42,12 @@ export interface HealthDiagnosticsScheduledOptions {
    * timed-out callback that has not settled still occupies its slot, so a
    * hung indicator costs one slot and no more; the remaining slots keep
    * refreshing the other indicators. With as many hung callbacks as slots, no
-   * scheduled check starts until one settles, and the stalled aliases report
-   * `stale` or `never-observed`. Each cycle covers every scheduled
-   * indicator that is not still in flight, rotating its starting point so
-   * no indicator is starved.
+   * scheduled check starts until one settles: each stalled alias keeps its
+   * last observation with a growing `ageMs` (or stays `never-observed`), and
+   * the snapshot's `state` turns `stale` once any retained observation ages
+   * past `staleAfterMs`. Each cycle covers every scheduled indicator that is
+   * not still in flight, rotating its starting point so no indicator is
+   * starved.
    */
   readonly concurrency: number;
 }
@@ -85,8 +87,10 @@ export interface HealthDiagnosticsOptions {
    */
   readonly indicators: Readonly<Record<string, string>>;
   /**
-   * An observation older than this many milliseconds is reported as `stale`.
-   * Measured on the runtime's monotonic clock from capture.
+   * The snapshot's `state` is `stale` once any retained observation is older
+   * than this many milliseconds, measured on the runtime's monotonic clock
+   * from capture. An observation itself carries no `stale` state — only its
+   * growing `ageMs`.
    *
    * @default 30000
    */

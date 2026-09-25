@@ -6771,8 +6771,9 @@ and `enabled: false` (or any value other than `true`) is refused when `HealthPlu
 — every diagnostics option is validated there, with fixed messages that never echo a value.
 `indicators` is the exact registered-name to display-alias allowlist — at most 64 entries, each
 alias unique, 1–64 UTF-8 bytes, no control characters; an indicator whose registered name is not a
-key is never retained. `staleAfterMs` (default `30000`) marks an observation `stale` once it is
-older than that many monotonic milliseconds from capture. `scheduled` — when present — must name a
+key is never retained. `staleAfterMs` (default `30000`) turns the snapshot's `state` `stale` once
+any retained observation is older than that many monotonic milliseconds from capture; an observation
+itself has no `stale` state, only its growing `ageMs`. `scheduled` — when present — must name a
 subset of the approved indicator names and supplies a cadence (`intervalMs`, 1,000–300,000), a
 per-check reporting deadline (`timeoutMs`, 1–30,000 — a reporting bound, not a cancellation), and a
 concurrency cap (1–4); at most 16 indicators are scheduled. Each cycle covers every scheduled
@@ -6780,10 +6781,11 @@ indicator not still in flight, starting from a rotating cursor so none is starve
 callback that has not settled keeps its concurrency slot — and only that slot — until it does, so it
 is never replaced early, and while fewer than `concurrency` callbacks are hung the other indicators
 keep refreshing. Once every slot is held by a hung callback, no scheduled check starts until one
-settles; the work stays bounded and the stalled aliases report `stale` or `never-observed`. An
-approved name no indicator is registered under stays `never-observed`, and the plugin logs one
-count-only warning at bootstrap. An indicator result whose `status` is not `up`/`degraded`/`down` is
-observed as `failed`; the value is never retained.
+settles; the work stays bounded, each stalled alias keeps its last observation with a growing
+`ageMs` (or stays `never-observed`), and the snapshot's `state` turns `stale` once any retained
+observation ages past `staleAfterMs`. An approved name no indicator is registered under stays
+`never-observed`, and the plugin logs one count-only warning at bootstrap. An indicator result whose
+`status` is not `up`/`degraded`/`down` is observed as `failed`; the value is never retained.
 
 The plugin retains only the latest outcome per approved alias (never a history). Each observation
 carries the approved alias, the framework's own status (present only when `reported`), the outcome

@@ -87,9 +87,10 @@ value is refused when `HealthPlugin(...)` is called, as is every other invalid o
 omitted option registers an inert, disabled source and performs no capture. Scheduled cycles cover
 every scheduled indicator from a rotating start; a hung check keeps only its own concurrency slot,
 so while fewer than `concurrency` checks are hung the rest keep refreshing. Once every slot is held
-by a hung check, no scheduled check starts until one settles — the work stays bounded, and the
-stalled aliases surface as `stale` or `never-observed`. The source is registered under
-`CAPABILITIES.HEALTH_DIAGNOSTICS`; see
+by a hung check, no scheduled check starts until one settles — the work stays bounded, and each
+stalled alias keeps its last observation with a growing `ageMs` (or stays `never-observed`), while
+the snapshot's `state` turns `stale` once any retained observation ages past `staleAfterMs`. The
+source is registered under `CAPABILITIES.HEALTH_DIAGNOSTICS`; see
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#health-setu-tshealth-plugin)
 and `docs/diagnostics-protocol.md` for the wire shape.
 

@@ -12,7 +12,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { HealthReport, HealthStatus, IPlugin, IPluginContext } from '@setu-ts/common';
+import type {
+  HealthReport,
+  HealthStatus,
+  IHealthDiagnosticsSource,
+  IPlugin,
+  IPluginContext,
+} from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -158,6 +164,74 @@ describe('HealthPlugin integration (through the real kernel)', () => {
       }
     });
   }
+
+  // The scheduled observation and the `/health`-path observation read an
+  // indicator result through one trust rule, so they must agree on whether
+  // it is valid. They did not for a valid status beside a throwing `data`
+  // getter: `/ready` failed while the scheduled observation read `up`.
+  it('agrees between the scheduled and the /health-path observation for every result shape', async () => {
+    const throwing = (key: 'status' | 'data', base: object) =>
+      Object.defineProperty({ ...base }, key, {
+        get() {
+          throw new Error('canary-getter');
+        },
+      });
+    const shapes: Readonly<Record<string, () => unknown>> = {
+      valid: () => ({ status: 'up', data: { n: 1 } }),
+      'string-data': () => ({ status: 'up', data: 'text' }),
+      'unknown-status': () => ({ status: 'canary-status' }),
+      'null-result': () => null,
+      'throwing-status': () => throwing('status', {}),
+      'throwing-data': () => throwing('data', { status: 'up' }),
+    };
+    const expected: Readonly<Record<string, string>> = {
+      valid: 'reported:up',
+      'string-data': 'reported:up',
+      'unknown-status': 'failed',
+      'null-result': 'failed',
+      'throwing-status': 'failed',
+      'throwing-data': 'failed',
+    };
+    const names = Object.keys(shapes);
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HealthPlugin({
+          indicators: names.map((name) => ({
+            name,
+            check: () => Promise.resolve(shapes[name]!() as { status: HealthStatus }),
+          })),
+          diagnostics: {
+            enabled: true,
+            indicators: Object.fromEntries(names.map((name) => [name, name])),
+            scheduled: { indicators: names, intervalMs: 300_000, timeoutMs: 1_000, concurrency: 4 },
+          },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const source = app.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS);
+      const verdicts = () =>
+        Object.fromEntries(
+          source.snapshot('instance').observations.map((o) => [
+            o.indicatorAlias,
+            o.state === 'reported' ? `reported:${o.status}` : o.state,
+          ]),
+        );
+      // `onBootstrap` starts one scheduled cycle immediately.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const scheduled = verdicts();
+      expect(source.snapshot('instance').observations.every((o) => o.origin === 'scheduled'))
+        .toBe(true);
+      const ready = await app.inject({ method: 'GET', url: 'http://localhost/ready' });
+      expect(ready.statusCode).toBe(503);
+      expect(scheduled).toEqual(expected);
+      expect(verdicts()).toEqual(expected);
+    } finally {
+      await app.stop();
+    }
+  });
 
   it('fails both /health and /ready with 503 on a down contributor', async () => {
     const app = await boot(contributingPlugin('db', 'down'));

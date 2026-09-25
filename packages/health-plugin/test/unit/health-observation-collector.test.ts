@@ -299,6 +299,11 @@ describe('Collector — bounded scheduler', () => {
   });
 
   it('reports an unknown status, a null result, or a throwing getter as failed', async () => {
+    const throwingData = Object.defineProperty({ status: 'up' }, 'data', {
+      get() {
+        throw new Error('canary-data-getter');
+      },
+    });
     const clock = new MutableRuntime();
     const throwingGetter = {
       get status(): string {
@@ -308,20 +313,24 @@ describe('Collector — bounded scheduler', () => {
     };
     const collector = collectorFor(
       options({
-        indicators: { a: 'alpha', b: 'beta', c: 'gamma' },
-        scheduled: scheduled(['a', 'b', 'c']),
+        indicators: { a: 'alpha', b: 'beta', c: 'gamma', d: 'delta' },
+        scheduled: scheduled(['a', 'b', 'c', 'd'], { concurrency: 4 }),
       }),
       clock.runtime,
       makeRunner({
         a: () => Promise.resolve({ status: 'canary-status', data: {} } as never),
         b: () => Promise.resolve(null as never),
         c: () => Promise.resolve(throwingGetter as never),
+        // A valid status is not enough: the `/health` report reads `data`
+        // too, and the scheduled path must apply the same rule.
+        d: () => Promise.resolve(throwingData as never),
       }),
     );
     collector.startScheduled();
     await flush();
     const snapshot = collector.snapshot(INSTANCE);
     expect(snapshot.observations.map((o) => [o.state, 'status' in o])).toEqual([
+      ['failed', false],
       ['failed', false],
       ['failed', false],
       ['failed', false],

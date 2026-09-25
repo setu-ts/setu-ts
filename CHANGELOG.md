@@ -17,24 +17,26 @@ All notable changes to this project are documented here. The format follows
   when `HealthPlugin(...)` is called — checked at runtime, not only by the type);
   `diagnostics.indicators` is the exact registered-name to display-alias allowlist (at most 64
   entries, unique aliases, 1–64 UTF-8 bytes, no control characters); `diagnostics.staleAfterMs`
-  (default 30,000) marks an observation `stale` past its monotonic age; and the optional
+  (default 30,000) turns the snapshot's `state` `stale` once any retained observation is older than
+  that monotonic age — an observation itself carries only its `ageMs`; and the optional
   `diagnostics.scheduled` block performs bounded scheduled checks (a subset of the approved names,
   at most 16; `intervalMs` 1,000–300,000; `timeoutMs` 1–30,000 as a reporting bound, not a
   cancellation; `concurrency` 1–4). Each cycle covers every scheduled indicator not still in flight,
   from a rotating start; a timed-out callback that has not settled keeps its one concurrency slot
   and is never replaced early, so a hung indicator cannot accumulate work; while fewer than
   `concurrency` callbacks are hung the others keep refreshing, and once every slot is held by a hung
-  callback no scheduled check starts until one settles (the stalled aliases report `stale` or
-  `never-observed`). Every option is validated when `HealthPlugin(...)` is called, with fixed
-  messages that never echo a value. An indicator result whose `status` is not `up`/`degraded`/`down`
-  is observed as `failed` and the value is never retained; an approved name no indicator carries
-  stays `never-observed`, with a count-only warning at bootstrap. The plugin registers a read-only
-  source under the new `CAPABILITIES.HEALTH_DIAGNOSTICS` token and, when scheduled, starts the
-  bounded scheduler from `onBootstrap` and tears it down from `onClose`. The `/health`, `/live`, and
-  `/ready` endpoints are unchanged: observation is a side channel over the already-produced result,
-  with one callback per normal check. New public surface on `@setu-ts/common`:
-  `CAPABILITIES.HEALTH_DIAGNOSTICS`, `IHealthDiagnosticsSource`, `HealthDiagnosticsSnapshot`,
-  `HealthDiagnosticsObservation`, `HealthObservationState`, and `DiagnosticsInspectorState`.
+  callback no scheduled check starts until one settles (each stalled alias keeps its last
+  observation with a growing `ageMs`, or stays `never-observed`, and the snapshot turns `stale`).
+  Every option is validated when `HealthPlugin(...)` is called, with fixed messages that never echo
+  a value. An indicator result whose `status` is not `up`/`degraded`/`down` is observed as `failed`
+  and the value is never retained; an approved name no indicator carries stays `never-observed`,
+  with a count-only warning at bootstrap. The plugin registers a read-only source under the new
+  `CAPABILITIES.HEALTH_DIAGNOSTICS` token and, when scheduled, starts the bounded scheduler from
+  `onBootstrap` and tears it down from `onClose`. The `/health`, `/live`, and `/ready` endpoints are
+  unchanged: observation is a side channel over the already-produced result, with one callback per
+  normal check. New public surface on `@setu-ts/common`: `CAPABILITIES.HEALTH_DIAGNOSTICS`,
+  `IHealthDiagnosticsSource`, `HealthDiagnosticsSnapshot`, `HealthDiagnosticsObservation`,
+  `HealthObservationState`, and `DiagnosticsInspectorState`.
 
 - **Diagnostics connector — `GET /v1/health` inspector and status-body inspector manifest (M98d).**
   The M98b connector now serves a first inspector operation, `GET /v1/health`, and the status body

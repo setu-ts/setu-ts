@@ -20,10 +20,11 @@
  * check's reporting race, never for a raw callback, so while fewer than
  * `concurrency` callbacks are hung the other scheduled indicators keep
  * refreshing. Once every slot is held by a hung callback, NO scheduled check
- * starts until one settles: the work stays bounded, and the stalled aliases
- * surface as `stale` or `never-observed` rather than as fresh data. Each
- * cycle covers every scheduled indicator not still in flight, starting from
- * a rotating cursor so none is starved.
+ * starts until one settles. The work stays bounded; each stalled alias keeps
+ * its last observation with a growing `ageMs` (or stays `never-observed`),
+ * and the snapshot's `state` turns `stale` once any retained observation
+ * ages past `staleAfterMs`. Each cycle covers every scheduled indicator not
+ * still in flight, starting from a rotating cursor so none is starved.
  * Closing the collector marks it closed FIRST (so a late settlement is
  * discarded), then clears the interval, every armed deadline timer, and every
  * retained observation — M98a's own teardown order.
@@ -41,7 +42,7 @@ import type {
   TimerHandle,
 } from '@setu-ts/common';
 import type { HealthDiagnosticsOptions } from '../interfaces/index.ts';
-import { isHealthStatus } from '../services/health-status.ts';
+import { isHealthStatus, normalizeIndicatorResult } from '../services/health-status.ts';
 
 /**
  * The already-computed outcome of one settled indicator, as the runner
@@ -74,8 +75,8 @@ export interface HealthIndicatorRunner {
    * result promise, or `null` when no indicator is registered under the name.
    * The collector races the promise against the scheduled reporting deadline
    * and holds the name's in-flight slot until it settles. The collector reads
-   * only the framework-owned `status`; the `data` field is never read or
-   * retained.
+   * the result through the same trust rule as the `/health` report and
+   * retains only the framework-owned `status`; `data` is never retained.
    *
    * @param name - The registered indicator name
    * @returns The raw result promise, or `null` for an unregistered name
@@ -114,21 +115,24 @@ function saturatingNext(current: number): number {
 }
 
 /**
- * Reads the `status` of a settled indicator result without trusting its
- * shape: a `null` or non-object result, or a throwing getter, yields
- * `undefined` rather than an exception.
+ * Reads a settled indicator result through the ONE trust rule the `/health`
+ * report uses (`normalizeIndicatorResult`), so a scheduled observation and
+ * the report agree on what a valid result is. A result the rule rejects —
+ * not an object, a status outside the vocabulary, or a throwing `status` or
+ * `data` getter — is a failed check, never an exception. Only the normalized
+ * `status` leaves this function; `data` is read to validate it and discarded.
  *
  * @param result - The settled indicator result
- * @returns The raw `status` value, or `undefined`
+ * @returns The race outcome for a settled check
  */
-function readStatus(result: unknown): unknown {
-  if (result === null || typeof result !== 'object') {
-    return undefined;
-  }
+function readSettledResult(result: unknown): RaceOutcome {
   try {
-    return (result as { readonly status?: unknown }).status;
+    const normalized = normalizeIndicatorResult(result);
+    return normalized === null
+      ? { kind: 'failed' }
+      : { kind: 'reported', status: normalized.status };
   } catch {
-    return undefined;
+    return { kind: 'failed' };
   }
 }
 
@@ -327,7 +331,7 @@ interface RetainedObservation {
 
 /** The outcome of racing one raw indicator against the reporting deadline. */
 type RaceOutcome =
-  | { readonly kind: 'reported'; readonly status: unknown }
+  | { readonly kind: 'reported'; readonly status: HealthStatus }
   | { readonly kind: 'timed-out' }
   | { readonly kind: 'failed' };
 
@@ -416,8 +420,9 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
    * Builds the minimized snapshot for every approved alias: a retained record
    * when one exists, otherwise a `never-observed` entry. The inspector state
    * reflects data freshness across the full approved set — `no-data` when
-   * nothing has been reported, `stale` when any reported observation is older
-   * than `staleAfterMs`, else `ready`.
+   * nothing has been reported, `stale` when any retained observation (of any
+   * state) is older than `staleAfterMs`, else `ready`. No individual
+   * observation carries a `stale` state; its `ageMs` is the signal.
    */
   snapshot(instanceId: string): HealthDiagnosticsSnapshot {
     if (typeof instanceId !== 'string' || instanceId === '') {
@@ -609,7 +614,7 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
       const handle = this.#clock.setTimeout(() => finish({ kind: 'timed-out' }), timeoutMs);
       this.#deadlineTimers.add(handle);
       raw.then(
-        (result) => finish({ kind: 'reported', status: readStatus(result) }),
+        (result) => finish(readSettledResult(result)),
         () => finish({ kind: 'failed' }),
       );
     });
