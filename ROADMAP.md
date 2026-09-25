@@ -11668,7 +11668,7 @@ provider arm at a time.
 
 **Source:** a maintainer report on 2026-09-24, not the smoke register. It is filed under M99 because
 it has this block's shape: a composition the framework can run and the CLI will not produce. The
-plan is `plans/milestone-99e-class-based-style.md`.
+plan is `plans/archive/milestone-99e-class-based-style.md`.
 
 **Objective:** a NestJS team migrating a microservice can scaffold a class-based microservice with
 one command. Today it cannot. `setu new` takes one `--template`, and the style and the plugin set
@@ -11695,21 +11695,21 @@ decorators from DI, which produced two incoherent compositions. `--style` keeps 
 pair indivisible, and only chooses which plugin set the pair is added to — the same move
 `class-based` already makes on top of REST.
 
-- [ ] `--style functional|class-based` on `setu new` and `setu generate app`, resolved in the one
+- [x] `--style functional|class-based` on `setu new` and `setu generate app`, resolved in the one
       `resolveTemplateChoice`. Accepted on `rest` and `microservice`. Refused by name without
       `--template`, on `full-stack`, and on a workspace root.
-- [ ] `--template class-based` stays and produces a byte-identical project. It becomes an alias of
+- [x] `--template class-based` stays and produces a byte-identical project. It becomes an alias of
       `--template rest --style class-based`, marked as an alias in help and left out of the
       interactive template prompt. It is not removed (§9.2).
-- [ ] A class-based host does not scaffold the functional CQRS and events barrels. Decorated
+- [x] A class-based host does not scaffold the functional CQRS and events barrels. Decorated
       handlers register through `DecoratorPlugin({ ingress })`, and a second registration site would
       deliver each message twice (`packages/cli/src/seams/ingress.ts:4-6`).
-- [ ] `--broker` and `--queue` work under the class-based style. They already key on the plugin list
+- [x] `--broker` and `--queue` work under the class-based style. They already key on the plugin list
       rather than on the template name, so this is a test, not a code change.
-- [ ] The interactive prompt asks for a style after a styleable template.
-- [ ] A booted e2e drives every decorated ingress family on the new host. Compiling is not the bar
+- [x] The interactive prompt asks for a style after a styleable template.
+- [x] A booted e2e drives every decorated ingress family on the new host. Compiling is not the bar
       (M58).
-- [ ] `docs/migration-nestjs.md` gains a Microservices section and scaffolding commands. The CLI
+- [x] `docs/migration-nestjs.md` gains a Microservices section and scaffolding commands. The CLI
       docs, `PUBLIC_API.md` and `docs/decorators.md` stop describing the template as the only style
       choice.
 

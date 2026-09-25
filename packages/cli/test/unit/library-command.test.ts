@@ -82,6 +82,15 @@ describe('runLibraryCommand', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  // The library writes `test/<kebab>.test.ts`, so a name within the 255-byte
+  // kebab bound still plans an over-long file name — refused before any write.
+  it('refuses a name whose planned test file exceeds 255 bytes', async () => {
+    const h = harness();
+    expect(await h.run(['library', 'a'.repeat(250)])).toBe(2);
+    expect(h.err.text()).toContain('255 bytes');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   // A library is resolved BY THE WORKSPACE, so outside one the directory would be
   // unreachable by any name.
   it('refuses outside a workspace, naming how to make one', async () => {

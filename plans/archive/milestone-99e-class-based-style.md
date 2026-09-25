@@ -393,3 +393,33 @@ fresh independent subtask, and records the PR audit block:
 7. **Refusals stay one line (T6).** A refused name carrying a CRLF renders with the CR/LF escaped —
    no standalone forged line in the output. Positive control: an ordinary refused name renders as
    one line.
+
+## 11. Code-review corrections (2026-09-25)
+
+Recorded here rather than folded into the sections above, so the design as planned stays readable
+beside what review changed.
+
+- **T1 named only `/`.** `\` is a path separator on Windows and Deno honours it there, so
+  `setu new ..\sibling` escaped the target directory on that platform. The path rules now refuse
+  both, plus the exact segments `.` and `..`.
+- **T5 bounded the kebab, not the file name.** A schematic appends a suffix (`.controller.ts`), so a
+  245-byte name passed the guard and `setu g controller` then died on an uncaught
+  `File name too long (os error 36)` from the overwrite probe — the T5 defect, still live for the
+  verb that appends. `generate` and `generate library` now refuse a planned file name over 255 bytes
+  before `--dry-run` and before any filesystem access.
+- **`new` inherited the identifier rules.** Reusing `isIdentifierSafe` for the project name refused
+  `setu new 3d-shop` and `setu new 2048`, which scaffolded before this milestone, with no CHANGELOG
+  entry. A project directory is never an identifier, so `new` runs the path rules alone
+  (`isPathSegmentSafe`); every verb that generates source still runs both.
+- **The control-character rule failed `deno task lint`** (`no-control-regex`) and covered only C0
+  and DEL. It is now the Unicode `Cc` category, which adds C1 (`U+0085` is a line break to several
+  terminals), and `escapeName` also escapes `U+2028`/`U+2029`.
+- **§3.3's full-stack row was implemented for `class-based` only.**
+  `--template full-stack
+  --style functional` was accepted with no effect while the CHANGELOG said
+  `--style` is refused on `full-stack`; it is now refused for either value.
+- **§3.2's `generate app --help` annotation was not implemented** — that usage listed `class-based`
+  as a bare peer. It now annotates the alias from the registry, and both help renderers are
+  asserted.
+- Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
+  refactor left with no reader.

@@ -116,6 +116,16 @@ describe('runAppCommand', () => {
       expect(h.out.text()).toContain('--env-file');
     });
 
+    // Plan §3.2: BOTH help renderers annotate the alias — `generate app --help`
+    // listed `class-based` as a bare peer of `rest`.
+    it('annotates the class-based alias in its usage', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', '--help'])).toBe(0);
+      expect(h.out.text()).toContain(
+        'class-based is an alias of --template rest --style class-based',
+      );
+    });
+
     it('refuses a missing name with a usage error', async () => {
       const h = harness([]);
       expect(await h.run(['app'])).toBe(2);

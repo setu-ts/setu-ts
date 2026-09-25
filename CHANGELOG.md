@@ -252,6 +252,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`cli` — a name that is not one legal path segment is refused before anything is written
+  (M99e).** Every name-taking verb (`new`, `generate app`, `generate <schematic>`,
+  `generate
+  library`, `adopt`) joins the derived kebab into a path, and `setu new ../sibling`,
+  `setu new ..` and `setu generate app ../sibling` wrote the scaffold into an ancestor directory. A
+  name that derives to empty, `.` or `..`, or carries `/` or `\` (a separator on Windows), a control
+  character, or more than 255 bytes is now a usage error (exit `2`) with no writes; a name that
+  passes but whose planned file name (`<name>.controller.ts`, a library's `test/<name>.test.ts`)
+  exceeds 255 bytes is refused the same way, where it used to fail mid-write with an uncaught
+  `File name too long`. A refused name is echoed with its control characters escaped, so the message
+  stays one line. `setu new` keeps accepting a digit-leading or letterless project name (`3d-shop`,
+  `2048`): a project directory is never an identifier. The verbs that generate source still require
+  a letter and refuse a leading digit, as before.
+
 - **`health-plugin` — an unrecognized indicator status could hide another indicator's `down`, so
   `/health` and `/ready` answered `200` over a failing dependency.** The aggregate took the worst
   status through a rank table, and a status outside `up`/`degraded`/`down` has no rank, so every

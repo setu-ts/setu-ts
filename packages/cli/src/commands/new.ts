@@ -61,7 +61,7 @@ import {
 } from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
-import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
+import { deriveNames, escapeName, isPathSegmentSafe } from '../utils/names.ts';
 import {
   findExisting,
   firstDuplicatePath,
@@ -635,18 +635,19 @@ export async function runNewCommand(
   const runtime: TargetRuntime = runtimeFlag ?? 'deno';
 
   const names = deriveNames(rawName);
-  // The project name becomes a filesystem path (`joinPath(dir, kebab)`), so it
-  // must pass the same guard as every other name-taking verb: a name with no
-  // letter (`___`) or a path separator (`../sibling`) would write the scaffold
-  // outside the intended directory.
-  if (!isIdentifierSafe(names)) {
+  // The project name becomes a filesystem path (`joinPath(dir, kebab)`) and never
+  // an identifier, so it passes the PATH rules every name-taking verb shares — a
+  // separator (`../sibling`), `.`/`..`, a control character or an over-long name
+  // would write outside the intended directory or fail mid-write — and not the
+  // identifier rules: `setu new 3d-shop` scaffolded before M99e and still does.
+  if (!isPathSegmentSafe(names)) {
     // The name is quoted back as typed, so it goes through `escapeName`: a
     // control character in the refusal would forge a standalone line in the
     // rendered message.
     deps.error(
-      `Invalid project name: "${escapeName(rawName)}". It must contain a letter, must not ` +
-        `start with a digit, and must be one legal filename component — no path separator ` +
-        `(/), no control character, and at most 255 bytes.`,
+      `Invalid project name: "${escapeName(rawName)}". It must be one legal filename ` +
+        `component — not empty, not \`.\` or \`..\`, no path separator (/ or \\), no control ` +
+        `character, and at most 255 bytes.`,
     );
     return EXIT_USAGE;
   }

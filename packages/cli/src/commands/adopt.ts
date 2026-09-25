@@ -121,7 +121,7 @@ export async function runAdoptCommand(
     deps.error(
       `Cannot use "${escapeName(rawName)}" as a member name: it must contain a letter, must ` +
         `not start with a digit, and must be one legal filename component — no path separator ` +
-        `(/), no control character, and at most 255 bytes. Pass --name <member>.`,
+        `(/ or \\), no control character, and at most 255 bytes. Pass --name <member>.`,
     );
     return EXIT_USAGE;
   }

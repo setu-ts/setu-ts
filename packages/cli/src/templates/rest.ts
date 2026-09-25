@@ -9,7 +9,6 @@ import { REST_SHOWCASE, REST_SHOWCASE_FILES } from './rest-showcase.ts';
 import { CLASS_BASED_SHOWCASE_EXAMPLE } from './class-based-showcase.ts';
 import type { TemplateRecipe } from './style.ts';
 import { composeHost } from './style.ts';
-import { seamsFor } from './seam.ts';
 
 /**
  * Always first: the kernel makes the `runtime` capability mandatory at `start()`.
@@ -46,17 +45,6 @@ export const REST_PLUGINS: readonly Wiring[] = [
   { pkg: 'metrics-plugin', symbol: 'MetricsPlugin' },
   { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin' },
 ];
-
-/**
- * The `@setu-ts` packages the REST set registers, for seam selection.
- *
- * Derived from {@linkcode REST_PLUGINS} rather than listed again, so a plugin added
- * there cannot be missed here — which would silently omit the seam that plugin hosts.
- */
-const REST_PACKAGES: ReadonlySet<string> = new Set(REST_PLUGINS.map((p) => p.pkg));
-
-/** The generated-artifact seams a REST project can consume. */
-export const REST_SEAMS: ReturnType<typeof seamsFor> = seamsFor(REST_PACKAGES);
 
 /**
  * Middleware added with `app.middleware.add(...)`.

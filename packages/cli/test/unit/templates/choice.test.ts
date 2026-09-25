@@ -73,6 +73,16 @@ describe('resolveTemplateChoice', () => {
     expect(choice.message).toContain('cannot apply to --template full-stack');
   });
 
+  // The plan (§3.3) and the CHANGELOG both say `--style` is refused on
+  // `full-stack`. `functional` there used to be accepted silently — a flag with
+  // no effect, which the M72 rule refuses wherever it would be a no-op.
+  it('refuses functional on a template without a variant', () => {
+    const choice = choose(['--template', 'full-stack', '--style', 'functional']);
+    expect(choice.ok).toBe(false);
+    if (choice.ok) return;
+    expect(choice.message).toContain('cannot apply to --template full-stack');
+  });
+
   it('refuses functional on the class-based alias', () => {
     const choice = choose(['--template', 'class-based', '--style', 'functional']);
     expect(choice.ok).toBe(false);

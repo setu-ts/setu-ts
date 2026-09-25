@@ -10,7 +10,6 @@
  *
  * @module
  */
-import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { Showcase } from './style.ts';
 
 /** The artifact name the greeting controller and service are generated under. */
@@ -92,7 +91,3 @@ export const CLASS_BASED_SHOWCASE_EXAMPLE: Showcase = {
   // barrel imports.
   seeded: { controller: [CLASS_BASED_SHOWCASE], service: [CLASS_BASED_SHOWCASE] },
 };
-
-/** The two example source files this showcase emits. */
-export const CLASS_BASED_SHOWCASE_FILES: readonly GeneratedFile[] =
-  CLASS_BASED_SHOWCASE_EXAMPLE.files;

@@ -35,6 +35,7 @@ import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { readEnvFilePath } from '../templates/env-file.ts';
+import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
@@ -105,6 +106,13 @@ function printUsage(log: (message: string) => void): void {
   // an incomplete hand-written list while `full-stack` was refused, and would have
   // gone on saying it after the refusal was lifted.
   log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
+  // The alias is annotated here as it is in `new --help` (plan §3.2): read from
+  // the registry, so a later alias cannot be listed as a bare peer.
+  for (const template of listTemplates()) {
+    if (template.aliasOf !== undefined) {
+      log(`                      ${template.name} is an alias of ${template.aliasOf}`);
+    }
+  }
   log('  --style <name>      Code style for a styleable template: functional | class-based');
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
   log(
@@ -400,7 +408,7 @@ export async function runAppCommand(
     // character here would forge a standalone line in the rendered message.
     deps.error(
       `Invalid name "${escapeName(rawName)}": it must contain a letter, must not start with ` +
-        `a digit, and must be one legal filename component — no path separator (/), no ` +
+        `a digit, and must be one legal filename component — no path separator (/ or \\), no ` +
         `control character, and at most 255 bytes.`,
     );
     return EXIT_USAGE;

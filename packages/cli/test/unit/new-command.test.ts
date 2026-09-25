@@ -977,10 +977,28 @@ describe('runNewCommand', () => {
       expect(h.err.lines[0]).toContain('\\u000d\\u000aINJECTED');
     });
 
+    // The project name is a directory, never an identifier: before M99e a
+    // digit-leading or letterless project name scaffolded, and it must still.
+    for (const name of ['3d-shop', '2048']) {
+      it(`scaffolds the digit-leading project name ${JSON.stringify(name)}`, async () => {
+        const h = harness();
+        expect(await h.run([name])).toBe(0);
+        expect(h.fs.writes.some((path) => path.endsWith(`/${name}/deno.json`))).toBe(true);
+      });
+    }
+
+    it('returns 2 and writes nothing for a Windows traversal name', async () => {
+      const h = harness();
+      expect(await h.run(['..\\sibling'])).toBe(2);
+      expect(h.err.text()).toContain('path separator');
+      expect(h.fs.writes).toEqual([]);
+    });
+
     it('returns 0 for --help, never a usage error', async () => {
       const h = harness();
       expect(await h.run(['--help'])).toBe(0);
       expect(h.out.text()).toContain('new <project-name>');
+      expect(h.out.text()).toContain('(alias of --template rest --style class-based)');
       expect(h.fs.writes).toEqual([]);
     });
 

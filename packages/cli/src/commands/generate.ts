@@ -21,7 +21,7 @@ import {
 import { runAppCommand } from './app.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
 import { runLibraryCommand } from './library.ts';
-import { deriveNames, escapeName, isIdentifierSafe } from '../utils/names.ts';
+import { deriveNames, escapeName, isIdentifierSafe, overlongComponent } from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import {
@@ -257,7 +257,7 @@ export async function runGenerateCommand(
     // character here would forge a standalone line in the rendered message.
     deps.error(
       `Invalid name "${escapeName(name)}": it must contain a letter, must not start with ` +
-        `a digit, and must be one legal filename component — no path separator (/), no ` +
+        `a digit, and must be one legal filename component — no path separator (/ or \\), no ` +
         `control character, and at most 255 bytes.`,
     );
     return EXIT_USAGE;
@@ -415,6 +415,21 @@ export async function runGenerateCommand(
   if (files.length === 0) {
     deps.error(`Schematic "${schematicName}" produced no files.`);
     return EXIT_ERROR;
+  }
+
+  // The name guard bounds the kebab, but a schematic APPENDS to it
+  // (`<kebab>.controller.ts`), so a name within the bound can still plan a file
+  // name the filesystem refuses — an uncaught `File name too long` from the
+  // overwrite probe below. Checked against the schematic's own relative paths,
+  // so a long `--dir` is not mistaken for the name, and before `--dry-run`, so
+  // the dry run never prints a plan the real run could not carry out.
+  const overlong = overlongComponent(generated.map((file) => file.path));
+  if (overlong !== undefined) {
+    deps.error(
+      `Cannot generate "${escapeName(name)}": the file name ${overlong} is over 255 bytes, ` +
+        `the limit for one path component. Use a shorter name.`,
+    );
+    return EXIT_USAGE;
   }
 
   if (args.flags['dry-run'] === true) {

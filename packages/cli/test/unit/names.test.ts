@@ -1,6 +1,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { deriveNames, escapeName, isIdentifierSafe } from '../../src/utils/names.ts';
+import {
+  deriveNames,
+  escapeName,
+  isIdentifierSafe,
+  isPathSegmentSafe,
+} from '../../src/utils/names.ts';
 
 describe('deriveNames', () => {
   const inputs = ['user-profile', 'UserProfile', 'userProfile', 'user_profile', 'user profile'];
@@ -129,6 +134,17 @@ describe('isIdentifierSafe', () => {
     }
   });
 
+  // `\` is a path separator on Windows, and Deno honours it there, so
+  // `..\sibling` escapes the target directory exactly as `../sibling` does on
+  // every platform. A C1 control (U+0085, NEL) is a line break to several
+  // terminals, so the control-character rule covers the whole Cc category.
+  it('rejects a Windows path separator and a C1 control character', () => {
+    for (const input of ['..\\sibling', 'a\\b', 'a\u0085b', 'a\u009fb']) {
+      expect(isIdentifierSafe(deriveNames(input))).toBe(false);
+      expect(isPathSegmentSafe(deriveNames(input))).toBe(false);
+    }
+  });
+
   it('rejects a name longer than a filesystem filename component', () => {
     expect(isIdentifierSafe(deriveNames('a'.repeat(256)))).toBe(false);
     expect(isIdentifierSafe(deriveNames('a'.repeat(255)))).toBe(true);
@@ -145,5 +161,29 @@ describe('escapeName', () => {
 
   it('leaves an ordinary name verbatim', () => {
     expect(escapeName('user-profile')).toBe('user-profile');
+  });
+});
+
+// The project directory is a path segment and never an identifier, so `new`
+// takes only the path rules. On `main` before M99e, `setu new 3d-shop` and
+// `setu new 2048` scaffolded; the shared identifier guard silently refused both.
+describe('isPathSegmentSafe', () => {
+  it('accepts a digit-leading or letterless segment the identifier rule refuses', () => {
+    for (const input of ['3d-shop', '2048', 'oauth2-client', 'shop']) {
+      expect(isPathSegmentSafe(deriveNames(input))).toBe(true);
+    }
+  });
+
+  it('rejects the empty, current and parent segments', () => {
+    for (const input of ['', '___', '.', '..', './']) {
+      expect(isPathSegmentSafe(deriveNames(input))).toBe(false);
+    }
+  });
+
+  it('rejects separators, control characters and over-long segments', () => {
+    for (const input of ['../sibling', 'a/b', 'a\\b', 'a\u0000b', 'a'.repeat(256)]) {
+      expect(isPathSegmentSafe(deriveNames(input))).toBe(false);
+    }
+    expect(isPathSegmentSafe(deriveNames('a'.repeat(255)))).toBe(true);
   });
 });

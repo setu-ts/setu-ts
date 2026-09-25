@@ -152,33 +152,34 @@ export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
     };
   }
 
-  if (styleFlag === 'class-based') {
-    // class-based IS the class-based variant of rest: redundant, accepted, and
-    // it carries the alias notice like any selection of the alias.
-    if (template.name === 'class-based') {
-      return { ok: true, template, host: template, notice: aliasNotice(template) };
-    }
-    // A template with no class-based variant (full-stack) composes through a
-    // starter and has no controller or ingress seam for decorated classes.
-    if (template.classBased === undefined) {
-      return {
-        ok: false,
-        message:
-          `--style class-based cannot apply to --template ${template.name}: it composes through a ` +
-          `starter and has no controller or ingress seam for decorated classes to register through.`,
-      };
-    }
-    return { ok: true, template, host: template.classBased };
-  }
-
-  // `--style functional`: legal on a styleable template (it IS functional), but
-  // class-based has no functional form of its own — its functional spelling is
-  // simply `--template rest`.
-  if (template.name === 'class-based') {
+  // A template that is neither styleable nor an alias (full-stack) composes
+  // through a starter and has no controller or ingress seam for decorated
+  // classes. Either style is refused there — `functional` would be a flag with no
+  // effect, which is refused wherever it would be a no-op (M72).
+  if (template.classBased === undefined && template.aliasOf === undefined) {
     return {
       ok: false,
       message:
-        `--template class-based is --template rest --style class-based; for a functional project ` +
+        `--style ${styleFlag} cannot apply to --template ${template.name}: it composes through a ` +
+        `starter and has no controller or ingress seam for decorated classes to register through.`,
+    };
+  }
+
+  if (styleFlag === 'class-based') {
+    // The alias IS the class-based variant of rest: redundant, accepted, and it
+    // carries the alias notice like any selection of the alias.
+    return template.classBased === undefined
+      ? { ok: true, template, host: template, notice: aliasNotice(template) }
+      : { ok: true, template, host: template.classBased };
+  }
+
+  // `--style functional`: legal on a styleable template (it IS functional), but
+  // the alias has no functional form of its own — its functional spelling is
+  // simply `--template rest`.
+  if (template.aliasOf !== undefined) {
+    return {
+      ok: false,
+      message: `--template ${template.name} is ${template.aliasOf}; for a functional project ` +
         `use --template rest.`,
     };
   }
