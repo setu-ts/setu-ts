@@ -21,7 +21,7 @@ executable after the package, so you would be typing `cli new my-app`.
 ```bash
 setu new my-app                                # minimal: the runtime plugin alone
 setu new my-app --template rest                # a REST composition
-setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers
+setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers (see below)
 setu new my-app --template class-based         # decorators and a DI container
 setu new my-app --dry-run                      # print the plan, write nothing
 ```
@@ -92,6 +92,28 @@ provider on the container when one is present and never touches the kernel regis
 | `node`               | `main.ts` → `app.start()`     | `package.json` + `.npmrc` + `tsconfig.json`               | `npm start` (`tsx`) |
 | `bun`                | `main.ts` → `app.start()`     | `package.json` + `.npmrc` + `tsconfig.json`               | `bun run main.ts`   |
 | `cloudflare-workers` | `src/index.ts` `fetch` export | `deno.json` + `package.json` + `.npmrc` + `wrangler.toml` | `npx wrangler dev`  |
+
+**`--runtime` picks the packaging, not the code.** For `deno`, `node` and `bun`, the generated
+`main.ts`, `setu.config.ts` and `src/` are byte-identical: `main.ts` reaches no `Deno` or `process`
+API, only `createRuntimeServices()`, and `RuntimePlugin` detects the platform when the app starts.
+Only the manifest and the start command differ, so moving a project between those three is a
+manifest change:
+
+- **Node → Bun.** Keep `package.json`, set its scripts to `bun run main.ts` and `bun test`, and
+  replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. (Bun also runs an
+  unmodified Node project's `main.ts` directly.)
+- **Node or Bun → Deno.** _Replace_ `package.json`, `.npmrc`, `tsconfig.json` and the npm lockfile
+  with the `deno.json` that `setu new --runtime deno` emits. A `deno.json` added beside a kept
+  `package.json` still serves, but `setu generate` checks `package.json` first, so it keeps reading
+  the project as Node and emits the Node `node:test` harness rather than the Deno one.
+- **Deno → Node or Bun.** The reverse: remove `deno.json` and add the manifests the matching target
+  emits.
+
+`setu generate` reads the target from those manifests on every run, so after a move it emits for the
+new runtime without a `--runtime` flag. There is no switching command; the manifest is edited by
+hand. `cloudflare-workers` is the exception: its entry is a `fetch` export rather than `main.ts`,
+and its `setu.config.ts` passes the Worker's bindings to `RuntimePlugin({ env })`. Moving to or from
+Workers rewrites those two files. Your routes, middleware and plugins under `src/` stay the same.
 
 **The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
 support (`--experimental-strip-types`) erases types without transforming code, so it cannot run a

@@ -7424,7 +7424,7 @@ pins projects to its own version — so on release day the install fails without
 ```bash
 # Scaffold a project (creates ./my-app)
 setu new my-app
-setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers
+setu new my-app --runtime node                 # deno | node | bun | cloudflare-workers (manifest + start command; code is portable)
 setu new my-app --template rest                # rest | microservice | class-based | full-stack
 setu new my-app --template microservice --runtime bun
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)

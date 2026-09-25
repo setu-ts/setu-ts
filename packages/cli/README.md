@@ -16,11 +16,18 @@ a package called `cli` would install a binary named `cli`. All help text shows `
 
 ```bash
 setu new my-app                                  # Deno, minimal (runtime plugin only)
-setu new my-app --runtime node                   # deno | node | bun | cloudflare-workers
+setu new my-app --runtime node                   # deno | node | bun | cloudflare-workers — see below
 setu new my-app --template rest                  # rest | microservice | class-based | full-stack
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
 setu new my-app --template rest --env-file config/.env.local
 ```
+
+`--runtime` chooses the manifest and the start command, not the code. On `deno`, `node` and `bun`
+the generated `main.ts`, `setu.config.ts` and `src/` are byte-identical, and `RuntimePlugin` detects
+the platform at startup, so a project can move between those three by swapping its manifest.
+`cloudflare-workers` differs in its entry and factory. See
+[Runtime targets](https://github.com/setu-ts/setu-ts/blob/main/docs/cli.md#runtime-targets) for the
+steps.
 
 Every project gets a `setu.config.ts` exporting `createApp()` — the one place its plugin list lives.
 `main.ts` imports it to start the server, and `setu` imports it to find plugin commands, so the two
@@ -120,7 +127,7 @@ install, and `setu generate --help` lists only what is available here.
 | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--dry-run`           | Prints `would create <path>` per file and writes absolutely nothing.                                                                                                                                                                                                                                                                                                                                                        |
 | `--dir <path>`        | Operate on this directory instead of the working directory.                                                                                                                                                                                                                                                                                                                                                                 |
-| `--runtime <target>`  | On `new`, the entry shape and manifest; on `generate`, passed to the schematic. Default `deno`.                                                                                                                                                                                                                                                                                                                             |
+| `--runtime <target>`  | On `new`, the entry shape and manifest (default `deno`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                    |
 | `--template <name>`   | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.                                                                                                                                                                                                                                                                                                                                |
 | `--env-file <path>`   | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates.                                                                                                                                                                                                                                                                                                                        |
 | `--broker <name>`     | `new` only: the standalone project's message broker (`memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). Rewrites the template's `MessagingPlugin` wiring, adds the connection variable to the dotenv pair, and emits `docker/compose.yaml` starting the broker. Refused wherever it would be a silent no-op: Cloudflare Workers, starter-composed templates, and templates registering no messaging. |
