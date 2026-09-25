@@ -67,11 +67,18 @@ export function deriveNames(raw: string): DerivedNames {
 }
 
 /**
- * Reports whether these names can form valid TypeScript identifiers.
+ * Reports whether these names are safe to use as both a TypeScript identifier
+ * and a single filesystem path segment.
  *
- * Schematics interpolate the derived forms into declarations
- * (`class <Pascal>Service`, `const <SCREAMING>_JOB`), so a name that cannot
- * begin an identifier emits source that does not parse. Two inputs fail:
+ * Every name-taking verb uses the derived forms in two ways at once: schematics
+ * interpolate them into declarations (`class <Pascal>Service`,
+ * `const <SCREAMING>_JOB`), and the commands join the kebab into a filesystem
+ * path — the project directory (`new`), a workspace member (`generate app`,
+ * `adopt`), or an artifact file name (`src/controllers/<kebab>.routes.ts`). Both
+ * uses break on the same inputs, so this is the single guard every one of them
+ * runs before it writes anything.
+ *
+ * Three classes of input fail:
  *
  * - one that normalizes to nothing (`___`), which would emit `class Service`
  *   at the hidden path `src/services/.service.ts`;
@@ -82,13 +89,25 @@ export function deriveNames(raw: string): DerivedNames {
  *   part-way through the conversion with a bare `mkdir` errno. Requiring a letter
  *   is also what the refusals around this already claim it checks.
  *
+ * and one that carries a path separator (`../sibling`, `a/b`). `deriveNames`
+ * preserves `/` verbatim — it is not a separator it normalizes away — so
+ * `deriveNames('../sibling').kebab` is `../sibling`, and joining it into
+ * `joinPath(dir, kebab)` escapes the intended directory and writes the scaffold
+ * into an ancestor. The check therefore looks at the derived kebab, not the raw
+ * input: a raw `../sibling` and a raw `..sibling` both normalize differently,
+ * and only the former carries the separator that makes it a traversal.
+ *
  * Reserved words (`class`, `new`) are NOT rejected: every schematic prefixes or
  * suffixes the derived form, so `class` yields the perfectly valid
- * `ClassService`, and `/class` is a legitimate route path.
+ * `ClassService`, and the route schematic renders it as the path `/class`.
  *
  * @param names - The derived naming forms to test
- * @returns True when every schematic can safely interpolate these names
+ * @returns True when the names are safe as identifiers and as one path segment
  */
 export function isIdentifierSafe(names: DerivedNames): boolean {
-  return /[a-zA-Z]/.test(names.kebab) && !/^[0-9]/.test(names.pascal);
+  return (
+    /[a-zA-Z]/.test(names.kebab) &&
+    !/^[0-9]/.test(names.pascal) &&
+    !names.kebab.includes('/')
+  );
 }

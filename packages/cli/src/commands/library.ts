@@ -101,7 +101,8 @@ export async function runLibraryCommand(
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
     deps.error(
-      `Invalid name "${rawName}": it must contain a letter and must not start with a digit.`,
+      `Invalid name "${rawName}": it must contain a letter, must not start with a digit, and ` +
+        `must not contain a path separator (/).`,
     );
     return EXIT_USAGE;
   }

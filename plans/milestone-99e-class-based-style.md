@@ -323,3 +323,65 @@ rule).
   request/reply decorator are named in §0 with their reasons.
 - `setu add` inserting a provider above `RuntimePlugin()` (`add.ts:229-235`) is cosmetic, since the
   kernel orders by dependency. It is not changed here.
+
+## 10. Design security review (completed)
+
+This milestone crosses a trust boundary, so it carries a completed design review for the
+implementation audit to check the code against: the reviewed flow, the assets and attackers, the
+threat→resolution table, and the obligations the audit must meet. (A section that only lists what a
+review must still cover is a requirement for one, not a review; this section records the review.)
+
+### 10.1 Reviewed flow
+
+1. **Name → path write sink.** Every name-taking verb derives `deriveNames(raw).kebab` and joins it
+   into a filesystem path: the `new` project directory (`joinPath(dir, kebab)`), the `generate app`
+   and `adopt` member directory (`joinPath(MEMBERS_DIR, kebab)`), and the artifact file name
+   (`src/controllers/<kebab>.routes.ts`). The name is the only user-influenced input that reaches a
+   write in this CLI.
+2. **Class-based ingress host.** `composeHost(recipe, 'class-based')` adds
+   `DecoratorPlugin({
+   ingress })` and `DiPlugin`. Generated ingress artifacts
+   (command/query/event/job handlers) register as decorated classes and receive payloads from the
+   `CqrsPlugin` / `EventsPlugin` / `QueuePlugin` buses. In the scaffolded default those are
+   in-memory, process-local transports.
+3. **Style axis.** `--style` only selects between precomputed hosts and adds static refusal text. It
+   introduces no new external input, credential, or network path.
+
+### 10.2 Assets and attackers
+
+- **Assets:** the host filesystem around the intended project/member directory (the scaffold must
+  not write outside it); the scaffolded project's own correctness (no double-registered ingress, no
+  unresolvable barrel import); the developer's time (refusals must be accurate, not silent no-ops).
+- **Attackers:** this is a local CLI, not a network service. The realistic attackers are (a) a
+  developer copy-pasting a malformed or hostile name onto the command line, and (b) a CI job or
+  script on the same host that builds argv from untrusted data. There is no remote attacker, no
+  multi-tenant boundary, and no credential in scope.
+
+### 10.3 Threats and resolutions
+
+| #  | Threat                                                                                                                                                                                                                   | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1 | A name carrying a path separator (`../sibling`, `a/b`, `..`) joins into the path and writes the scaffold into an ancestor directory or the workspace root.                                                               | The shared guard `isIdentifierSafe` rejects any derived kebab that contains `/` (and, as before, any kebab with no letter or that starts with a digit). It is applied at the single `deriveNames` → guard site of **every** name-taking verb — `new`, `generate app`, `generate <schematic>`, `adopt`, `library` — so no verb can regress to a weaker check. The refusal is a usage error (exit 2) before anything is planned, and the existing overwrite preflight still refuses a clobber. |
+| T2 | The class-based microservice registers the same ingress artifact twice — through the functional `CqrsPlugin`/`EventsPlugin` barrels and through `DecoratorPlugin({ ingress })` — duplicating delivery.                   | `hostSeamSpecs` drops the `COMMAND_HANDLER`, `QUERY_HANDLER`, and `EVENTS` seams in class-based mode (the §3.4 filter), so the functional barrels are never scaffolded and the ingress barrel is the single registration site.                                                                                                                                                                                                                                                               |
+| T3 | A `--style` combination that is a silent no-op (unknown style; style with no template; `full-stack` + `class-based`; `class-based` + `functional`; `--workspace` + `--style`) is accepted and scaffolds the wrong thing. | `resolveTemplateChoice` refuses each with a message that names the fix (exit 2). The workspace root refuses `--style` in `planWorkspace` before any template resolution.                                                                                                                                                                                                                                                                                                                     |
+| T4 | The refactor silently changes an existing template's output (a published artifact).                                                                                                                                      | The §3.7 byte-identity baseline, captured before any template edit, asserts the file set and every hash for all four existing templates.                                                                                                                                                                                                                                                                                                                                                     |
+
+### 10.4 Obligations the implementation audit must meet
+
+The audit (`.roo/skills/security-audit/SKILL.md`) drives each of these with a positive control, in a
+fresh independent subtask, and records the PR audit block:
+
+1. **Name traversal is refused (T1).** `new ..`, `new .`, `new ../sibling`, `new ../../..`,
+   `new
+   a/b`, and `generate app ../sibling` exit 2 with **no writes**. Positive control:
+   `new shop` and `generate app orders` still scaffold (exit 0).
+2. **Single ingress registration (T2).** A booted `microservice --style class-based` host delivers
+   each generated ingress family (command, query, event, job) **exactly once**, and the functional
+   `src/cqrs` / `src/events` barrels are absent. Positive control: the root HTTP route still answers
+   200.
+3. **Style axis refuses every silent no-op (T3).** Each of the five combinations in T3 exits 2 with
+   the named fix. Positive control: a valid combination (`rest --style class-based`) scaffolds.
+4. **Negative controls.** Revert the §3.4 seam filter → obligation 2's double-delivery probe fails.
+   Revert the §3.3 style axis → obligation 3's refusal probe fails. Restore both; tree clean.
+5. **Defect-class sweep.** All fifteen recurring classes, each applied (with probe) or N/A (with
+   reason).

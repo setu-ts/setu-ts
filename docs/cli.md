@@ -99,14 +99,14 @@ API, only `createRuntimeServices()`, and `RuntimePlugin` detects the platform wh
 Only the manifest and the start command differ, so moving a project between those three is a
 manifest change:
 
-- **Node → Bun.** Keep `package.json`, set its scripts to `bun run main.ts` and `bun test`, and
+- **Node → Bun:** keep `package.json`, set its scripts to `bun run main.ts` and `bun test`, and
   replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. (Bun also runs an
   unmodified Node project's `main.ts` directly.)
-- **Node or Bun → Deno.** _Replace_ `package.json`, `.npmrc`, `tsconfig.json` and the npm lockfile
+- **Node or Bun → Deno:** _replace_ `package.json`, `.npmrc`, `tsconfig.json` and the npm lockfile
   with the `deno.json` that `setu new --runtime deno` emits. A `deno.json` added beside a kept
   `package.json` still serves, but `setu generate` checks `package.json` first, so it keeps reading
   the project as Node and emits the Node `node:test` harness rather than the Deno one.
-- **Deno → Node or Bun.** The reverse: remove `deno.json` and add the manifests the matching target
+- **Deno → Node or Bun:** the reverse — remove `deno.json` and add the manifests the matching target
   emits.
 
 `setu generate` reads the target from those manifests on every run, so after a move it emits for the

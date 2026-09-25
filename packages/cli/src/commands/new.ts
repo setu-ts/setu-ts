@@ -61,7 +61,7 @@ import {
 } from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
-import { deriveNames } from '../utils/names.ts';
+import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
   firstDuplicatePath,
@@ -634,11 +634,19 @@ export async function runNewCommand(
   }
   const runtime: TargetRuntime = runtimeFlag ?? 'deno';
 
-  const projectName = deriveNames(rawName).kebab;
-  if (projectName === '') {
-    deps.error(`Invalid project name: "${rawName}".`);
+  const names = deriveNames(rawName);
+  // The project name becomes a filesystem path (`joinPath(dir, kebab)`), so it
+  // must pass the same guard as every other name-taking verb: a name with no
+  // letter (`___`) or a path separator (`../sibling`) would write the scaffold
+  // outside the intended directory.
+  if (!isIdentifierSafe(names)) {
+    deps.error(
+      `Invalid project name: "${rawName}". It must contain a letter, must not start ` +
+        `with a digit, and must not contain a path separator (/).`,
+    );
     return EXIT_USAGE;
   }
+  const projectName = names.kebab;
 
   // The alias notice, logged once, before anything else — informational, never
   // an error: the alias is byte-identical and stays. Only the standalone plan

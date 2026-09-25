@@ -107,4 +107,15 @@ describe('isIdentifierSafe', () => {
       expect(isIdentifierSafe(deriveNames(raw))).toBe(false);
     }
   });
+
+  // The kebab is joined into a filesystem path by every name-taking verb — the
+  // `new` project dir, the `generate app`/`adopt` member dir, and the artifact
+  // file name — and `deriveNames` preserves `/` verbatim: it is not a separator
+  // it normalizes away. A name carrying one would write the scaffold outside the
+  // intended directory, so the guard rejects it at the shared mechanism.
+  it('rejects a name whose derived kebab carries a path separator', () => {
+    for (const input of ['..', '.', '../sibling', '../../..', 'a/b']) {
+      expect(isIdentifierSafe(deriveNames(input))).toBe(false);
+    }
+  });
 });

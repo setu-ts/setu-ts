@@ -933,6 +933,20 @@ describe('runNewCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
+    // The project name is joined into a filesystem path, so a name carrying a
+    // path separator would write the scaffold into an ancestor directory. The
+    // guard rejects it before anything is planned — these are the negative
+    // control for that refusal: each traversal name is refused with no writes.
+    for (const name of ['..', '.', '../sibling', '../../..', 'a/b']) {
+      it(`returns 2 and writes nothing for the traversal name ${JSON.stringify(name)}`, async () => {
+        const h = harness();
+        expect(await h.run([name])).toBe(2);
+        expect(h.err.text()).toContain('Invalid project name');
+        expect(h.err.text()).toContain('path separator');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
     it('returns 0 for --help, never a usage error', async () => {
       const h = harness();
       expect(await h.run(['--help'])).toBe(0);

@@ -254,7 +254,8 @@ export async function runGenerateCommand(
     // Schematics interpolate these forms into declarations, so a name that
     // cannot begin an identifier would emit source that does not parse.
     deps.error(
-      `Invalid name "${name}": it must contain a letter and must not start with a digit.`,
+      `Invalid name "${name}": it must contain a letter, must not start with a digit, and ` +
+        `must not contain a path separator (/).`,
     );
     return EXIT_USAGE;
   }

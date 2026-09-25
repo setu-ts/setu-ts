@@ -129,6 +129,18 @@ describe('runAppCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
+    // A member name is joined into `apps/<kebab>`, so a name carrying a path
+    // separator would scaffold outside the workspace's apps/ directory. The
+    // shared guard rejects it before anything is planned.
+    for (const name of ['..', '.', '../sibling', '../../..', 'a/b']) {
+      it(`refuses the traversal member name ${JSON.stringify(name)}`, async () => {
+        const h = harness([]);
+        expect(await h.run(['app', name])).toBe(2);
+        expect(h.err.text()).toContain('path separator');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
     // A member's runtime is the WORKSPACE's: they share one root manifest and one
     // lockfile, so a Node member inside a Deno workspace is not a member at all.
     // The flag is refused when it DISAGREES rather than whenever it is non-Deno,

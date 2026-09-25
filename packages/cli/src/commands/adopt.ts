@@ -119,8 +119,8 @@ export async function runAdoptCommand(
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
     deps.error(
-      `Cannot use "${rawName}" as a member name: it must contain a letter and must not start ` +
-        `with a digit. Pass --name <member>.`,
+      `Cannot use "${rawName}" as a member name: it must contain a letter, must not start ` +
+        `with a digit, and must not contain a path separator (/). Pass --name <member>.`,
     );
     return EXIT_USAGE;
   }
