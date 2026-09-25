@@ -459,7 +459,7 @@ export async function runAppCommand(
   const existingNames = new Set(read.manifest.members.map((member) => member.name));
   const missing = dependsOn.find((dependency) => !existingNames.has(dependency));
   if (missing !== undefined) {
-    deps.error(`--depends-on "${missing}" is not an existing workspace member.`);
+    deps.error(`--depends-on "${escapeName(missing)}" is not an existing workspace member.`);
     return EXIT_USAGE;
   }
 

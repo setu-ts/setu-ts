@@ -59,6 +59,25 @@ describe('resolveTemplateChoice', () => {
     expect(choice.message).toContain('--style applies to a styleable template');
   });
 
+  // Audit F1: an unknown value is quoted back, so a CR/LF or ESC in it would
+  // forge a line (or a fake success) in the rendered refusal.
+  for (
+    const argv of [
+      ['--template', 'rest', '--style', 'oop\r\nINJECTED: scaffold complete'],
+      ['--template', 'nope\r\nINJECTED: scaffold complete'],
+      ['--template', 'rest', '--style', '\u001b[2K\u001b[1GCreated x'],
+    ]
+  ) {
+    it(`escapes control characters in ${JSON.stringify(argv.at(-1))}`, () => {
+      const choice = choose(argv);
+      expect(choice.ok).toBe(false);
+      if (choice.ok) return;
+      expect(/[\r\n]/.test(choice.message) || choice.message.includes(String.fromCharCode(27)))
+        .toBe(false);
+      expect(choice.message).toMatch(/\\u00(0d|1b)/);
+    });
+  }
+
   it('refuses an unknown style', () => {
     const choice = choose(['--template', 'rest', '--style', 'imperative']);
     expect(choice.ok).toBe(false);

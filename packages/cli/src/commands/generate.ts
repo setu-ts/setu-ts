@@ -181,7 +181,9 @@ export async function runGenerateCommand(
   }
   if (typeof runtimeValue === 'string' && !isTargetRuntime(runtimeValue)) {
     deps.error(
-      `Unknown runtime "${runtimeValue}". Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
+      `Unknown runtime "${escapeName(runtimeValue)}". Expected one of: ${
+        TARGET_RUNTIMES.join(', ')
+      }.`,
     );
     return EXIT_USAGE;
   }
@@ -222,7 +224,7 @@ export async function runGenerateCommand(
   } else {
     const metadata = getSchematic(schematicName);
     if (metadata === undefined) {
-      deps.error(`Unknown schematic: ${schematicName}`);
+      deps.error(`Unknown schematic: ${escapeName(schematicName)}`);
       printSchematics(installed, deps.log);
       return EXIT_USAGE;
     }

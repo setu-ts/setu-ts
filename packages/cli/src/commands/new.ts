@@ -38,7 +38,7 @@ import {
   type TargetRuntime,
   TEMPLATES,
 } from '../constants.ts';
-import { listTemplates } from '../templates/registry.ts';
+import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
@@ -135,11 +135,15 @@ function planWorkspace(
 
   const templateFlag = stringFlag(args.flags, 'template');
   if (templateFlag !== undefined) {
+    // Echoed escaped, and into the suggested command only when it names a real
+    // template: a CI job building argv from untrusted data must not be able to
+    // put a payload into a command the developer is told to copy.
+    const suggested = getTemplate(templateFlag) === undefined ? '<name>' : templateFlag;
     return {
       ok: false,
-      message: `A workspace root registers no plugins, so --template ${templateFlag} has ` +
-        `nothing to configure. Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template ${templateFlag}\`.`,
+      message: `A workspace root registers no plugins, so --template ${escapeName(templateFlag)} ` +
+        `has nothing to configure. Create the workspace, then add a service with ` +
+        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template ${suggested}\`.`,
     };
   }
 
@@ -148,11 +152,16 @@ function planWorkspace(
   // that honours the flag, with the style it would have carried.
   const styleFlag = stringFlag(args.flags, 'style');
   if (styleFlag !== undefined) {
+    // The same rule as --template above: escaped when quoted, and suggested
+    // only when it is one of the two styles the axis has.
+    const suggested = styleFlag === 'functional' || styleFlag === 'class-based'
+      ? styleFlag
+      : '<functional|class-based>';
     return {
       ok: false,
-      message: `A workspace root registers no plugins, so --style ${styleFlag} has nothing to ` +
-        `configure. Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template rest --style ${styleFlag}\`.`,
+      message: `A workspace root registers no plugins, so --style ${escapeName(styleFlag)} has ` +
+        `nothing to configure. Create the workspace, then add a service with ` +
+        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template rest --style ${suggested}\`.`,
     };
   }
 
@@ -253,7 +262,7 @@ function readTransport(
     return {
       ok: false,
       message: alias === undefined
-        ? `Unknown transport "${named}". Expected one of: ${TRANSPORTS.join(', ')}.`
+        ? `Unknown transport "${escapeName(named)}". Expected one of: ${TRANSPORTS.join(', ')}.`
         : `There is no raw ${named} transport: every inter-service path here is HTTP over ` +
           `${named} or a broker client over ${named}. Use --transport ${alias} for direct calls ` +
           `through the discovery map, or a broker (${
@@ -342,7 +351,7 @@ function readArmFlag(
     // The two failures are told apart, because "no such transport" and "this
     // transport has no arm for this flag" are different mistakes.
     const prefix = spec === undefined
-      ? `Unknown ${flag} "${raw}".`
+      ? `Unknown ${flag} "${escapeName(raw)}".`
       : flag === 'broker'
       ? `"${raw}" declares no message-broker wiring.`
       : `"${raw}" declares no queue wiring.`;
@@ -628,7 +637,9 @@ export async function runNewCommand(
   const runtimeFlag = stringFlag(chosen.flags, 'runtime');
   if (runtimeFlag !== undefined && !isTargetRuntime(runtimeFlag)) {
     deps.error(
-      `Unknown runtime "${runtimeFlag}". Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
+      `Unknown runtime "${escapeName(runtimeFlag)}". Expected one of: ${
+        TARGET_RUNTIMES.join(', ')
+      }.`,
     );
     return EXIT_USAGE;
   }

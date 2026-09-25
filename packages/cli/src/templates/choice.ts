@@ -13,6 +13,7 @@
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import { TEMPLATES } from '../constants.ts';
+import { escapeName } from '../utils/names.ts';
 import { getTemplate, type TemplateDefinition, type TemplateHost } from './registry.ts';
 
 /**
@@ -127,7 +128,9 @@ export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
     return {
       ok: false,
       message: renamedTo === undefined
-        ? `Unknown template "${templateFlag}". Expected one of: ${TEMPLATES.join(', ')}.`
+        ? `Unknown template "${escapeName(templateFlag)}". Expected one of: ${
+          TEMPLATES.join(', ')
+        }.`
         : `The "${templateFlag}" template was renamed to "${renamedTo}". ` +
           `Run \`--template ${renamedTo}\` — the composition is unchanged.`,
     };
@@ -148,7 +151,9 @@ export function resolveTemplateChoice(args: ParsedArgs): TemplateChoice {
   if (styleFlag !== 'functional' && styleFlag !== 'class-based') {
     return {
       ok: false,
-      message: `Unknown style "${styleFlag}". Expected one of: functional, class-based.`,
+      message: `Unknown style "${
+        escapeName(styleFlag)
+      }". Expected one of: functional, class-based.`,
     };
   }
 
