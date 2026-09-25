@@ -429,9 +429,17 @@ beside what review changed.
 - **Audit F1 (Low): `--style` was quoted back raw** in the unknown-style refusal and copied into the
   command the workspace-root refusal suggests, so a CI job building argv from untrusted data could
   forge a line, emit terminal escapes, or plant a payload in a command the developer copies.
-  §10.1(3) was wrong that the style axis adds no external input. Every refusal quoting an argv value
-  back now renders it through `escapeName`, the sites are enumerated in
-  `test/unit/argv-echo-escaped.test.ts`, and an unknown value is never copied into a suggested
-  command.
+  §10.1(3) was wrong that the style axis adds no external input. The fix escaped thirteen named
+  sites and claimed every refusal.
+- **Audit round 2, F2 (Low): that claim was false.** `generate app --runtime` (in prose AND in its
+  suggested command), an unknown plugin command, a custom schematic name, and every `--dir` echo
+  still quoted argv raw. Per-site escaping cannot be complete by inspection, so the guarantee moved
+  to structure: a control character in any option value is refused before a command runs (the test
+  iterates `VALUE_FLAGS`), and `runCli` escapes every control character except LF and tab at both
+  output sinks. Positionals are still escaped where quoted, since the sink keeps LF. A suggested
+  command copies a value only when it is a known template, style or runtime.
+- **Audit round 2, F3 (Low):** the `tcp` alias lookup indexed a plain object with argv, so
+  `--transport constructor` suggested `--transport function Object() { [native code] }`. It is an
+  own-key read now.
 - Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
   refactor left with no reader.
