@@ -110,7 +110,7 @@ manifest change:
   build reads it, so do not delete it: add the `deno.json` a Deno full-stack scaffold emits, then
   remove the `start` and `test` scripts, the `@setu-ts/*` dependencies, and the `tsx` and
   `@types/node` dev dependencies from `package.json`, keeping `build`. Removing `start` is what
-  makes `setu generate` read the project as Deno. Delete `.npmrc` as well.
+  makes `setu generate` read the project as a Deno one. Delete `.npmrc` as well.
 - **Deno → Node or Bun:** the reverse — remove `deno.json` and add the manifests the matching target
   emits.
 
