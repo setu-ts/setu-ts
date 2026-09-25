@@ -449,5 +449,12 @@ beside what review changed.
   into one, and inserts one on Ctrl-V Ctrl-J — measured by the auditor, never by the implementer —
   so a pasted line feed forged a line. The answer is escaped where it is quoted again, and the test
   carries a line feed; the sink escape stays for the caller-supplied menu text.
+- **OBS-1, pre-existing on `main` (High if triaged), fixed here at the maintainer's direction:**
+  audit round 3 found `--transport-url` interpolated raw into a quoted literal by
+  `workspace/runtime-profile.ts` `denoEnvRead`/`nodeEnvRead`, so a quote in it injected code into
+  every generated member (and was persisted in the manifest). The fallback is now rendered by
+  `stringLiteral`, checked by importing the rendered expression as a real module for seven payloads
+  on all three runtimes; restoring the raw form fails 21 steps. Outside this milestone's diff, and
+  folded in rather than sent to a `fix/…` branch because the maintainer asked for it before the PR.
 - Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
   refactor left with no reader.

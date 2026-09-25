@@ -264,6 +264,16 @@ All notable changes to this project are documented here. The format follows
   `deno` on `setu generate`; it is detected from the project's manifests. Wording only; no
   behaviour, API or export changed.
 
+- **`cli` — `--transport-url` could inject code into a generated workspace member.** The broker URL
+  fallback was wrapped in quotes without escaping when rendered into each member's `setu.config.ts`,
+  so a value carrying a quote closed the string literal and the rest ran as code whenever the member
+  started — `redis://h:1'+(globalThis.PWNED='yes')+'` did exactly that. The value is also persisted
+  in `setu.workspace.json`, so every later `setu generate app` repeated it. It is now rendered as an
+  escaped string literal that evaluates to exactly the value given, for both the flag and a
+  hand-edited manifest; an ordinary URL renders byte-identically, so no existing generated file
+  changes. Present since the workspace transport arrived; found by the M99e security audit and fixed
+  there at the maintainer's direction.
+
 - **`cli` — a name that is not safe to generate from is refused before anything is written (M99e).**
   Every name-taking verb (`new`, `generate app`, `generate <schematic>`, `generate library`,
   `adopt`) joins the derived kebab into a path, and `setu new ../sibling`, `setu new ..` and

@@ -4,6 +4,7 @@ import { createFakeFs } from '../../fixtures/fake-fs.ts';
 import {
   detectProjectRuntime,
   isWorkspaceRuntime,
+  stringLiteral,
   WORKSPACE_RUNTIMES,
   workspaceProfile,
 } from '../../../src/workspace/runtime-profile.ts';
@@ -278,5 +279,59 @@ describe('what a Bun workspace renders differently', () => {
       expect(profile.runScript('start')).toContain('start');
       expect(profile.rootManifestFile.endsWith('.json')).toBe(true);
     }
+  });
+});
+
+// OBS-1 (M99e audit round 3): the connection fallback reaches generated source
+// from `--transport-url` and from an editable workspace manifest. It used to be
+// wrapped in quotes raw, so `redis://h:1'+(globalThis.PWNED='yes')+'` closed the
+// literal and ran as code in every member. Each case is rendered through the
+// REAL profile and IMPORTED as a module, so the assertion is what the literal
+// evaluates to, not what it looks like.
+describe('a connection fallback is rendered as a literal, never as code', () => {
+  const PAYLOADS: readonly string[] = [
+    "redis://h:1'+(globalThis.PWNED='yes')+'",
+    'redis://h:1"+(globalThis.PWNED="yes")+"',
+    'amqp://a\'b"c@h:5672',
+    'nats://h:4222\\',
+    "kafka\\'+(globalThis.PWNED='yes')+'",
+    '${globalThis.PWNED="yes"}',
+    'redis://h:1\n/*',
+  ];
+
+  async function evaluate(expression: string): Promise<unknown> {
+    const source = 'const Deno = { env: { get: (_: string) => undefined } };\n' +
+      'const process = { env: {} as Record<string, string | undefined> };\n' +
+      `export const value = ${expression};\n`;
+    const module = await import(`data:application/typescript,${encodeURIComponent(source)}`);
+    return module.value;
+  }
+
+  for (const runtime of WORKSPACE_RUNTIMES) {
+    for (const payload of PAYLOADS) {
+      it(`${runtime}: ${JSON.stringify(payload)} evaluates to itself`, async () => {
+        const expression = workspaceProfile(runtime).envRead('BROKER_URL', payload);
+        expect(await evaluate(expression)).toBe(payload);
+        expect(Reflect.get(globalThis, 'PWNED')).toBeUndefined();
+      });
+    }
+  }
+
+  // Byte-identical for an ordinary URL, so no existing generated project changes.
+  it('renders an ordinary value exactly as before', () => {
+    expect(workspaceProfile('deno').envRead('REDIS_URL', 'redis://127.0.0.1:6379'))
+      .toBe("Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'");
+    expect(workspaceProfile('node').envRead('REDIS_URL', 'redis://127.0.0.1:6379'))
+      .toBe("process.env.REDIS_URL ??\n          'redis://127.0.0.1:6379'");
+  });
+
+  // The quote choice deno fmt keeps under the generated projects' singleQuote
+  // setting (checked with `deno fmt --single-quote --check`), so a generated
+  // file still formats clean.
+  it('picks the quote style deno fmt keeps', () => {
+    expect(stringLiteral('plain')).toBe("'plain'");
+    expect(stringLiteral("it's")).toBe(`"it's"`);
+    expect(stringLiteral('say "hi"')).toBe(`'say "hi"'`);
+    expect(stringLiteral(`both ' and "`)).toBe(`'both \\' and "'`);
   });
 });

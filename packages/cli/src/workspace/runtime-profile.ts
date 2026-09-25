@@ -111,7 +111,7 @@ export interface WorkspaceRuntimeProfile {
  * @returns The expression, as source
  */
 function denoEnvRead(variable: string, fallback: string): string {
-  return `Deno.env.get('${variable}') ??\n          '${fallback}'`;
+  return `Deno.env.get('${variable}') ??\n          ${stringLiteral(fallback)}`;
 }
 
 /**
@@ -126,7 +126,36 @@ function denoEnvRead(variable: string, fallback: string): string {
  * @returns The expression, as source
  */
 function nodeEnvRead(variable: string, fallback: string): string {
-  return `process.env.${variable} ??\n          '${fallback}'`;
+  return `process.env.${variable} ??\n          ${stringLiteral(fallback)}`;
+}
+
+/**
+ * Renders a value as a TypeScript string literal that evaluates to exactly that
+ * value.
+ *
+ * The fallback reaches generated source from `--transport-url` and from a
+ * workspace manifest a developer may have edited, so it is never interpolated
+ * raw: a quote in it would close the literal and the rest would run as code in
+ * every member. Single-quoted as the generated files are, byte-identical for
+ * any value holding no quote, backslash or control character; a value holding
+ * a single quote and no double quote takes double quotes instead, which is the
+ * form `deno fmt` itself picks, so the generated file still formats clean.
+ *
+ * @param value - The value to render
+ * @returns A string literal evaluating to `value`
+ */
+export function stringLiteral(value: string): string {
+  // JSON.stringify escapes the backslash, the double quote and every C0
+  // control character, which is exactly what a double-quoted literal needs.
+  const doubleQuoted = JSON.stringify(value);
+  if (value.includes("'") && !value.includes('"')) return doubleQuoted;
+  // Each JSON escape pair is consumed whole, so a `\\` is never read as the
+  // start of a `\"` that follows it.
+  const body = doubleQuoted.slice(1, -1).replace(
+    /\\.|'/g,
+    (token) => token === '\\"' ? '"' : token === "'" ? "\\'" : token,
+  );
+  return `'${body}'`;
 }
 
 /**
