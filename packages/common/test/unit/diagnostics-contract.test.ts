@@ -1,10 +1,14 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   DiagnosticsBatch,
   DiagnosticsEvent,
+  HealthDiagnosticsObservation,
+  HealthDiagnosticsSnapshot,
   IDiagnosticsSource,
+  IHealthDiagnosticsSource,
   IPlugin,
   IPluginContext,
 } from '@setu-ts/common';
@@ -103,5 +107,64 @@ describe('diagnostics type contracts', () => {
     expect(plugin.provides).toEqual(['thing']);
     expect(plugin.consumes).toEqual(['other']);
     expect(Object.hasOwn(plugin, 'diagnostics')).toBe(false);
+  });
+});
+
+describe('health diagnostics type contracts (M98d)', () => {
+  it('exposes the HEALTH_DIAGNOSTICS capability token', () => {
+    expect(CAPABILITIES.HEALTH_DIAGNOSTICS).toBe('health-diagnostics');
+    // Distinct from the health token itself.
+    expect(CAPABILITIES.HEALTH_DIAGNOSTICS).not.toBe(CAPABILITIES.HEALTH);
+  });
+
+  it('a consumer compiles against the health source surface and the frozen DTO', () => {
+    const reported: HealthDiagnosticsObservation = {
+      indicatorAlias: 'database',
+      status: 'up',
+      state: 'reported',
+      latencyMs: 3,
+      ageMs: 12,
+      origin: 'application',
+    };
+    const neverObserved: HealthDiagnosticsObservation = {
+      indicatorAlias: 'cache',
+      state: 'never-observed',
+      latencyMs: null,
+      ageMs: null,
+      origin: 'scheduled',
+    };
+    const source: IHealthDiagnosticsSource = {
+      snapshot: (instanceId) => ({
+        version: 1,
+        instanceId,
+        state: 'ready',
+        observations: [reported, neverObserved],
+        truncated: false,
+        droppedObservations: 0,
+      }),
+    };
+    const snapshot: HealthDiagnosticsSnapshot = source.snapshot('instance-1');
+    expect(snapshot.version).toBe(1);
+    expect(snapshot.instanceId).toBe('instance-1');
+    expect(snapshot.observations).toHaveLength(2);
+    // The source surface carries only the synchronous read method.
+    expect(Object.keys(source).sort()).toEqual(['snapshot']);
+  });
+
+  it('the observation DTO admits no data, error text, or absolute time', () => {
+    // Compile-time: the exact member set is the minimization contract. Adding
+    // a `data`, `error`, or `timestamp` member here would be a type error.
+    const observation: HealthDiagnosticsObservation = {
+      indicatorAlias: 'database',
+      state: 'failed',
+      latencyMs: 5,
+      ageMs: 5,
+      origin: 'application',
+    };
+    expect(Object.keys(observation).sort()).toEqual(
+      ['ageMs', 'indicatorAlias', 'latencyMs', 'origin', 'state'],
+    );
+    // `status` is present only for a reported observation.
+    expect('status' in observation).toBe(false);
   });
 });

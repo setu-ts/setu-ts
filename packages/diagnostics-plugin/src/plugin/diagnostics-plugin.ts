@@ -14,6 +14,7 @@
  */
 
 import type {
+  IHealthDiagnosticsSource,
   ILocalDiagnosticsListener,
   ILocalDiagnosticsListenerFactory,
   IPluginContext,
@@ -151,6 +152,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
     name: 'diagnostics-plugin',
     version: denoJson.version,
     dependencies: [CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER],
+    optionalDependencies: [CAPABILITIES.HEALTH_DIAGNOSTICS],
 
     register(ctx: IPluginContext): void {
       const source = ctx.app.diagnostics;
@@ -161,6 +163,17 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       const factory = ctx.services.get<ILocalDiagnosticsListenerFactory>(
         CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER,
       );
+      // The optional health-diagnostics source (M98d): resolved once, during
+      // registration, through its declared optional capability. An absent
+      // source means no health plugin is registered, and the connector answers
+      // a typed `unsupported`. A health plugin without the `diagnostics`
+      // option still registers a source, which answers `disabled`. Neither
+      // runs an indicator or fails startup.
+      const healthSource: IHealthDiagnosticsSource | null = ctx.services.has(
+          CAPABILITIES.HEALTH_DIAGNOSTICS,
+        )
+        ? ctx.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS)
+        : null;
 
       // Parent cleanup hooks FIRST — before the bootstrap below opens the
       // listener — so a failed startup, a parent stop, or a close all meet
@@ -196,6 +209,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           limits,
           source,
           clock: ctx.runtime,
+          healthSource,
         });
         // The devtool's own startup line. Without it the runtime prints a
         // bare `Listening on http://127.0.0.1:<port>/`, which in an

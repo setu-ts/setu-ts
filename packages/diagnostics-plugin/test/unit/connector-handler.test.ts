@@ -8,8 +8,9 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IResponse } from '@setu-ts/common';
+import type { HealthDiagnosticsSnapshot, IResponse } from '@setu-ts/common';
 import { createConnectorHandler, refusalResponse } from '../../src/transport/connector-handler.ts';
+import { currentInspectorsManifest } from '../../src/protocol/protocol.ts';
 import { ConnectorLimits } from '../../src/transport/limits.ts';
 import { verifyFields } from '../../src/security/authentication.ts';
 import {
@@ -62,6 +63,7 @@ async function buildHarness(options?: {
     limits: new ConnectorLimits(clock),
     source,
     clock,
+    healthSource: null,
   });
   return { handler, clock, source, session, key };
 }
@@ -272,6 +274,7 @@ describe('Connector handler — authentication and binding', () => {
       version: 1,
       instanceId: TEST_INSTANCE_ID,
       expiresInMs: 900_000,
+      inspectors: currentInspectorsManifest(),
     });
     expect(session.hasInstance()).toBe(true);
     // The response MAC verifies against the authenticated instance header,
@@ -469,6 +472,7 @@ describe('Connector handler — authentication and binding', () => {
       limits: new ConnectorLimits(clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
+      healthSource: null,
     });
     expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
     clock.advance(1_000);
@@ -578,12 +582,294 @@ describe('Connector handler — projection hardening', () => {
       limits: new ConnectorLimits(clock),
       source: throwingSource,
       clock,
+      healthSource: null,
     });
     // The throwing path is BELOW the handler's try — the connector-handler
     // module catches nothing inside; the runtime listener owns the 503 arm.
     // Here the throw propagates, proving the handler does not swallow it:
     // the LISTENER maps it to the fixed anonymous refusal.
     await expect(handler(await statusRequest(key, 1))).rejects.toThrow();
+  });
+});
+
+describe('Connector handler — health operation (M98d)', () => {
+  const healthSnapshot: HealthDiagnosticsSnapshot = {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    observations: [
+      {
+        indicatorAlias: 'database',
+        status: 'up',
+        state: 'reported',
+        latencyMs: 3,
+        ageMs: 12,
+        origin: 'application',
+      },
+    ],
+    truncated: false,
+    droppedObservations: 0,
+  };
+
+  it('answers a typed unsupported snapshot when no source is registered', async () => {
+    const { handler, key } = await buildHarness();
+    // Bind the session to the instance via the status exchange first.
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
+    const response = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/health`,
+        headers: {
+          host: HOST,
+          'x-setu-session': 'a'.repeat(32),
+          'x-setu-sequence': '2',
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    const view = inspect(response);
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'unsupported',
+      observations: [],
+      truncated: false,
+      droppedObservations: 0,
+    });
+  });
+
+  it('projects a registered source snapshot field-by-field', async () => {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: { snapshot: () => healthSnapshot },
+    });
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/health`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': '2',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual(healthSnapshot);
+  });
+
+  it('answers a value-free collection-failed snapshot when the source throws', async () => {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: {
+        snapshot(): never {
+          throw new Error('boom');
+        },
+      },
+    });
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/health`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': '2',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'collection-failed',
+      observations: [],
+      truncated: false,
+      droppedObservations: 0,
+    });
+  });
+
+  /** Reads `/v1/health` through a fresh handler over the given source. */
+  async function readHealthWith(
+    healthSource: { snapshot: (instanceId: string) => unknown },
+  ): Promise<{ status: number; body: unknown }> {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
+    });
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/health`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': '2',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    return { status: view.status, body: view.body };
+  }
+
+  const COLLECTION_FAILED = {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'collection-failed',
+    observations: [],
+    truncated: false,
+    droppedObservations: 0,
+  };
+
+  const observation = healthSnapshot.observations[0];
+
+  // Each row is a DTO violation a third-party provider of the token could
+  // return. None may be signed: every one answers the value-free
+  // `collection-failed`, never a 503 and never the offending value.
+  const VIOLATIONS: ReadonlyArray<readonly [string, () => unknown]> = [
+    ['non-array observations', () => ({ ...healthSnapshot, observations: 'nope' })],
+    ['a non-framework status', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, status: 'canary-status' }],
+    })],
+    ['a status on a non-reported state', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, state: 'failed' }],
+    })],
+    ['a reported state with no status', () => ({
+      ...healthSnapshot,
+      observations: [{
+        indicatorAlias: 'database',
+        state: 'reported',
+        latencyMs: 1,
+        ageMs: 1,
+        origin: 'application',
+      }],
+    })],
+    ['an unknown inspector state', () => ({ ...healthSnapshot, state: 'canary-state' })],
+    ['an oversized alias', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, indicatorAlias: 'x'.repeat(65) }],
+    })],
+    ['a negative latency', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, latencyMs: -1 }],
+    })],
+    ['a non-finite age', () => ({
+      ...healthSnapshot,
+      observations: [{ ...observation, ageMs: Infinity }],
+    })],
+    ['a fractional drop count', () => ({ ...healthSnapshot, droppedObservations: 0.5 })],
+    ['more than 64 observations', () => ({
+      ...healthSnapshot,
+      observations: Array.from(
+        { length: 65 },
+        (_, i) => ({ ...observation, indicatorAlias: `a${i}` }),
+      ),
+    })],
+    ['a throwing getter', () => ({
+      ...healthSnapshot,
+      get observations(): never {
+        throw new Error('canary-getter');
+      },
+    })],
+  ];
+
+  for (const [label, build] of VIOLATIONS) {
+    it(`answers collection-failed for ${label}`, async () => {
+      const result = await readHealthWith({ snapshot: () => build() });
+      expect(result.status).toEqual(200);
+      expect(result.body).toEqual(COLLECTION_FAILED);
+      expect(JSON.stringify(result.body)).not.toContain('canary');
+    });
+  }
+
+  it('drops fields outside the DTO rather than signing them', async () => {
+    const result = await readHealthWith({
+      snapshot: () => ({
+        ...healthSnapshot,
+        secret: 'canary-extra',
+        observations: [{ ...observation, leak: 'canary-extra' }],
+      }),
+    });
+    expect(result.status).toEqual(200);
+    expect(result.body).toEqual(healthSnapshot);
+  });
+
+  it('refuses a DTO for another version or another instance', async () => {
+    const wrongVersion = await readHealthWith({
+      snapshot: () => ({ ...healthSnapshot, version: 2 }),
+    });
+    expect(wrongVersion.status).toEqual(400);
+    expect(wrongVersion.body).toEqual({ version: 1, error: 'unsupported-version' });
+    const wrongInstance = await readHealthWith({
+      snapshot: () => ({ ...healthSnapshot, instanceId: '00000000-0000-4000-8000-000000000000' }),
+    });
+    expect(wrongInstance.status).toEqual(401);
+  });
+
+  it('refuses a cross-instance health read', async () => {
+    const { handler, key } = await buildHarness();
+    // Bind the session to TEST_INSTANCE_ID, then read for a DIFFERENT
+    // instance: the connector must refuse it as unauthorized.
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
+    const wrongId = '00000000-0000-4000-8000-000000000000';
+    const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, wrongId);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/health`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': '2',
+            'x-setu-instance': wrongId,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    expect(view.status).toEqual(401);
   });
 });
 
@@ -711,6 +997,7 @@ describe('Connector handler — remaining structural arms', () => {
       limits,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
+      healthSource: null,
     });
     // Forty full-burst honest statuses without any elapsed time exhaust the
     // session's fixed burst budget. Sequence 1 binds (empty instance);
@@ -751,6 +1038,7 @@ describe('Connector handler — remaining structural arms', () => {
       limits: new ConnectorLimits(clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
+      healthSource: null,
     });
     // The request CLAIMS port 5959 (its Host and URL match the handler) but
     // the MAC was signed for 4919: authentication must refuse it.

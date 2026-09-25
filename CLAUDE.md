@@ -5202,9 +5202,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   port is refused by name, the docs say TLS-only, and a real-SDK test asserts the resolved address.
   Also tightened: the plugin-path absent-secret assertion now names its message rather than
   accepting any throw, and the package's test `net` grant is scoped to loopback instead of `true`.
-- **Next milestone** — **M98d** (`packages/health-plugin` — minimized health observations; design
-  security review and implementation audit required). The `v0.7.0` smoke closeout (M99) reopened
-  with **M99e** (`packages/cli` — `--style class-based` as its own axis, so a class-based
+- **Milestone 98d** (`packages/common` + `packages/health-plugin` + `packages/diagnostics-plugin` —
+  minimized health observations): `HealthPlugin({ diagnostics })` retains one frozen observation per
+  approved alias — status only when reported, latency, monotonic age, origin — and never an
+  indicator's `data`, error text or absolute time, served through `CAPABILITIES.HEALTH_DIAGNOSTICS`,
+  the M98b connector's first inspector operation `GET /v1/health`, and a status-body `inspectors`
+  manifest. An optional scheduler runs bounded cycles in which a hung callback keeps only its own
+  concurrency slot and is never replaced early. Verification found two High scheduler defects and
+  two Medium ones, all fixed. The committed-tree security audit, run by a fresh agent, found an
+  overstated hang-isolation claim and a pre-existing `/health` defect on `main` since M20 — an
+  indicator status outside `up`/`degraded`/`down` could mask another indicator's `down`, so
+  `/health` answered `200 degraded` over a dead dependency — fixed here at the maintainer's
+  direction by one trust rule shared by the `/health` and scheduled paths (a CHANGELOG'd behaviour
+  change). The re-audit's two Low findings are fixed too, and its final verdict on the audited
+  commit is **passed**; the closeout commit after it touches documentation only, and the maintainer
+  waived a further re-audit — complete (PR #363).
+- **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
+  design security review and implementation audit required). The `v0.7.0` smoke closeout (M99)
+  reopened with **M99e** (`packages/cli` — `--style class-based` as its own axis, so a class-based
   microservice is one command; planned in `plans/milestone-99e-class-based-style.md`, not started).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

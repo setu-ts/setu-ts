@@ -8,6 +8,53 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Health observations (M98d): an opt-in, minimized view of health-check outcomes through the M98b
+  diagnostics connector.** `HealthPlugin` accepts a `diagnostics` option (`HealthDiagnosticsOptions`
+  / `HealthDiagnosticsScheduledOptions`, exported from `@setu-ts/health-plugin`) that retains only
+  the LATEST minimized outcome per explicitly allowlisted indicator alias — never a history, and
+  never an indicator's `data`, error text, or absolute time. `diagnostics.enabled` is the LITERAL
+  `true` (an absent option is the disabled path; `enabled: false`, or any other value, is refused
+  when `HealthPlugin(...)` is called — checked at runtime, not only by the type);
+  `diagnostics.indicators` is the exact registered-name to display-alias allowlist (at most 64
+  entries, unique aliases, 1–64 UTF-8 bytes, no control characters); `diagnostics.staleAfterMs`
+  (default 30,000) turns the snapshot's `state` `stale` once any retained observation is older than
+  that monotonic age — an observation itself carries only its `ageMs`; and the optional
+  `diagnostics.scheduled` block performs bounded scheduled checks (a subset of the approved names,
+  at most 16; `intervalMs` 1,000–300,000; `timeoutMs` 1–30,000 as a reporting bound, not a
+  cancellation; `concurrency` 1–4). Each cycle covers every scheduled indicator not still in flight,
+  from a rotating start; a timed-out callback that has not settled keeps its one concurrency slot
+  and is never replaced early, so a hung indicator cannot accumulate work; while fewer than
+  `concurrency` callbacks are hung the others keep refreshing, and once every slot is held by a hung
+  callback no scheduled check starts until one settles (each stalled alias keeps its last
+  observation with a growing `ageMs`, or stays `never-observed`, and the snapshot turns `stale`).
+  Every option is validated when `HealthPlugin(...)` is called, with fixed messages that never echo
+  a value. An indicator result whose `status` is not `up`/`degraded`/`down` is observed as `failed`
+  and the value is never retained; an approved name no indicator carries stays `never-observed`,
+  with a count-only warning at bootstrap. The plugin registers a read-only source under the new
+  `CAPABILITIES.HEALTH_DIAGNOSTICS` token and, when scheduled, starts the bounded scheduler from
+  `onBootstrap` and tears it down from `onClose`. The `/health`, `/live`, and `/ready` endpoints are
+  unchanged: observation is a side channel over the already-produced result, with one callback per
+  normal check. New public surface on `@setu-ts/common`: `CAPABILITIES.HEALTH_DIAGNOSTICS`,
+  `IHealthDiagnosticsSource`, `HealthDiagnosticsSnapshot`, `HealthDiagnosticsObservation`,
+  `HealthObservationState`, and `DiagnosticsInspectorState`.
+
+- **Diagnostics connector — `GET /v1/health` inspector and status-body inspector manifest (M98d).**
+  The M98b connector now serves a first inspector operation, `GET /v1/health`, and the status body
+  gains an `inspectors` manifest (`health: true`; `configuration`, `queues`, `traces`,
+  `authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`, and `outboundHttp`
+  reserved and `false` until their own operations ship). The client reads the snapshot through
+  `IDiagnosticsClient.health(): Promise<HealthDiagnosticsSnapshot>`; a client paired against a
+  legacy M98b three-field status body resolves the manifest to all-`false` and answers a typed
+  `unsupported` without sending the request. The connector resolves the optional health source under
+  `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source answers `unsupported`, a
+  registered-but-disabled source answers `disabled`, and a source that throws answers a value-free
+  `collection-failed` snapshot — as does a source whose DTO fails the exact validator (unknown keys
+  are dropped by the field-by-field copy; an unknown enum, a non-finite or negative measurement, an
+  oversized alias or a malformed shape is never signed) — none of which runs an indicator or changes
+  the application's readiness. The answer is projected field-by-field, signed over the exact body
+  bytes, and bounded by the same 256 KiB response ceiling. `docs/diagnostics-protocol.md` documents
+  the operation and the manifest.
+
 - **`secrets-plugin` — `endpoint` on the AWS and GCP providers (M99d).**
   `AwsKmsProviderOptions.endpoint` and `GcpSecretManagerProviderOptions.endpoint` point the lazily
   loaded client at a non-default endpoint — LocalStack or a private endpoint for AWS, a private or
@@ -185,6 +232,22 @@ All notable changes to this project are documented here. The format follows
   provider. Nothing changes for the five built-in providers, which all return promises.
 
 ### Fixed
+
+- **`health-plugin` — an unrecognized indicator status could hide another indicator's `down`, so
+  `/health` and `/ready` answered `200` over a failing dependency.** The aggregate took the worst
+  status through a rank table, and a status outside `up`/`degraded`/`down` has no rank, so every
+  comparison against it was false and the fold carried it forward: an indicator returning such a
+  value after a `down` one replaced the `down`, and a later `degraded` then won — measured,
+  `/health` answered **`200 degraded`** with a check `down`, so a readiness probe passed over a dead
+  dependency. The value was also published verbatim onto `/health`, and a `null` result made the
+  endpoint reject. An indicator result is now read through one rule, shared with the M98d
+  observation collector: a result that is not an object, or whose `status` is outside the three, is
+  reported as `{ status: 'down', data: { reason: 'invalid-result' } }` with its value dropped, and a
+  throwing getter is a failed check (`reason: 'error'`). A `data` value that is not an object is
+  omitted. **Behaviour change:** an indicator that returned an unrecognized status now fails
+  `/health` and `/ready` with `503`; return `'up'`, `'degraded'` or `'down'`. The defect predates
+  M98d — it was on `main` since M20 — and is fixed on the M98d branch at the maintainer's direction,
+  where the security audit found it.
 
 - **`cloudflare-plugin` — the R2 documentation said `getSignedUrl` "throws" where it rejects.** The
   behaviour was always correct (`R2Storage.getSignedUrl` returns `Promise.reject`), but four

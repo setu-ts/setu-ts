@@ -1,7 +1,9 @@
 # Milestone 98d — Minimized Health Observations
 
-> **Status:** Planning on `docs/m98-capability-diagnostics`. Implementation and fixes belong on
-> `feat/m98d-health-observations`; `main` remains protected.
+> **Status:** Complete (PR #363). The committed-tree security audit (gate 2) passed and is recorded
+> in the implementation PR. One deviation from §0's out-of-scope list: the audit found a
+> pre-existing `/health` status-masking defect (on `main` since M20), fixed on this branch at the
+> maintainer's direction, so an unrecognized indicator status now fails `/health` and `/ready`.
 
 ## 0. Objective & scope
 
@@ -156,7 +158,13 @@ present and false in earlier implementations. No generic plugin-supplied keys ar
   so no replacement check starts until that callback actually settles. A closed collector accepts no
   write: an outcome from a callback that settles after `onClose` — the ordinary case, since a
   reporting deadline bounds a callback without cancelling it — is discarded and never retained,
-  logged, or projected. Work is capped at four callbacks and sixteen scheduled indicators.
+  logged, or projected. Work is capped at four callbacks and sixteen scheduled indicators. Each
+  cycle covers every scheduled indicator not still in flight, starting from a rotating cursor, and
+  waits only for each check's REPORTING race: an unsettled callback keeps its own concurrency slot
+  (so it counts toward the cap of four) but never blocks the cycle, and the remaining slots keep
+  refreshing the other indicators. (Verification found the first implementation took the same first
+  `concurrency` names every cycle and awaited raw settlement, so one hung check froze every
+  scheduled indicator; both are pinned by collector and real-socket e2e tests.)
 - **Why:** A timeout is a reporting bound, not cancellation; retaining the in-flight gate prevents a
   hung callback from accumulating work. Closing before clearing is M98a's own teardown order
   (`DiagnosticsCollector.markClosed` at `packages/kernel/src/diagnostics/collector.ts:321` closes

@@ -22,11 +22,12 @@ devtool has been verified.
 
 ## Operations
 
-| Target                           | Answer                                                                                                          |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/status`                 | `{ version: 1, instanceId, expiresInMs }` — binds the session to the application instance on the first exchange |
-| `GET /v1/snapshot`               | M98a's compact final snapshot JSON (not an envelope)                                                            |
-| `GET /v1/events?after=N&limit=N` | M98a's frozen event batch; `after` is a canonical non-negative decimal, `limit` is 1–128, in exactly this order |
+| Target                           | Answer                                                                                                                                                                           |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/status`                 | `{ version: 1, instanceId, expiresInMs, inspectors }` — binds the session to the application instance on the first exchange; `inspectors` is the M98d inspector manifest (below) |
+| `GET /v1/snapshot`               | M98a's compact final snapshot JSON (not an envelope)                                                                                                                             |
+| `GET /v1/events?after=N&limit=N` | M98a's frozen event batch; `after` is a canonical non-negative decimal, `limit` is 1–128, in exactly this order                                                                  |
+| `GET /v1/health`                 | M98d's minimized health-observation snapshot (below)                                                                                                                             |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
 duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
@@ -115,6 +116,49 @@ Unauthenticated refusals are not signed and use one fixed shape:
 | `rate-limited`        | 429    | refusal budget exhausted or session budget spent |
 
 No refusal ever echoes supplied input, error causes, or stacks.
+
+## Health observations (M98d)
+
+`GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
+every inspector the connector knows and whether it is implemented; M98d serves `health: true` and
+leaves the rest (`configuration`, `queues`, `traces`, `authorization`, `cache`, `events`,
+`scheduler`, `realtime`, `storage`, `outboundHttp`) reserved and `false`. A client that reads a
+legacy M98b three-field status body (no `inspectors`) resolves the manifest to all-`false`, so its
+`health()` answers a typed `unsupported` without sending the request.
+
+The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
+plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
+
+```json
+{
+  "version": 1,
+  "instanceId": "<bound instance UUID>",
+  "state": "ready",
+  "observations": [
+    {
+      "indicatorAlias": "database",
+      "status": "up",
+      "state": "reported",
+      "latencyMs": 3,
+      "ageMs": 12,
+      "origin": "application"
+    }
+  ],
+  "truncated": false,
+  "droppedObservations": 0
+}
+```
+
+`state` is the inspector's coarse availability: `unsupported` (no health plugin is registered — the
+connector's answer), `disabled` (a health plugin without the `diagnostics` option registers a source
+that answers this — the plugin's answer), `no-data` (opted in, nothing captured yet), `ready`,
+`stale`, or `collection-failed` (the source threw, or its DTO failed the exact validator the
+connector runs before signing; the answer is value-free, never a fault that changes the
+application's readiness). Each observation carries only the approved display alias, the framework's
+own status (present only when `reported`), the outcome state, and monotonic `latencyMs`/`ageMs`. No
+indicator `data`, no error text, and no absolute time is admitted. The response is signed and
+bounded exactly like every other operation: the MAC covers the exact body bytes, and the parsed
+`instanceId` must equal the authenticated header.
 
 ## Bounds (fixed, not configurable)
 

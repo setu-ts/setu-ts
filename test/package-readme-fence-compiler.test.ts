@@ -108,7 +108,8 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/di-plugin/README.md': 2,
   'packages/exceptions/README.md': 3,
   'packages/feature-flags-plugin/README.md': 2,
-  'packages/health-plugin/README.md': 2,
+  // M98d: +1 for the opt-in health-observations example.
+  'packages/health-plugin/README.md': 3,
   'packages/http-security-plugin/README.md': 2,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,

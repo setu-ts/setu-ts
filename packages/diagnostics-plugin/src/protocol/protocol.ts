@@ -10,7 +10,13 @@
  * @module
  */
 
-import type { DiagnosticsBatch, DiagnosticsEvent, DiagnosticsSnapshot } from '@setu-ts/common';
+import type {
+  DiagnosticsBatch,
+  DiagnosticsEvent,
+  DiagnosticsSnapshot,
+  HealthDiagnosticsObservation,
+  HealthDiagnosticsSnapshot,
+} from '@setu-ts/common';
 
 /**
  * The signed protocol error codes, and the HTTP status each answers with.
@@ -56,6 +62,7 @@ export const PROTOCOL_RESPONSE_HEADERS: Readonly<Record<string, string>> = {
  */
 export const STATUS_TARGET = '/v1/status';
 export const SNAPSHOT_TARGET = '/v1/snapshot';
+export const HEALTH_TARGET = '/v1/health';
 const EVENTS_PATH = '/v1/events';
 
 /**
@@ -80,7 +87,7 @@ const EVENTS_QUERY = /^after=([0-9]+)&limit=([0-9]+)$/;
  * @internal
  */
 export interface ParsedTarget {
-  readonly op: 'status' | 'snapshot' | 'events';
+  readonly op: 'status' | 'snapshot' | 'events' | 'health';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events only); `0` for the other ops. */
@@ -108,6 +115,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === SNAPSHOT_TARGET && search === '') {
     return { op: 'snapshot', canonicalTarget: SNAPSHOT_TARGET, after: 0, limit: 0 };
+  }
+  if (path === HEALTH_TARGET && search === '') {
+    return { op: 'health', canonicalTarget: HEALTH_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENTS_PATH) {
     const match = EVENTS_QUERY.exec(search);
@@ -259,19 +269,91 @@ export function projectBatch(batch: DiagnosticsBatch): Record<string, unknown> {
 }
 
 /**
- * The signed status body: protocol version, the bound instance UUID, and
- * the session's remaining lifetime.
+ * The signed status body: protocol version, the bound instance UUID, the
+ * session's remaining lifetime, and the fixed inspector support manifest.
  *
  * @param instanceId - The application's non-null instance UUID
  * @param expiresInMs - Remaining session lifetime in milliseconds
+ * @param inspectors - The fixed inspector support manifest
  * @returns The status record
  * @internal
  */
 export function statusBody(
   instanceId: string,
   expiresInMs: number,
+  inspectors: InspectorsManifest,
+): Record<string, unknown> {
+  return { version: 1, instanceId, expiresInMs, inspectors };
+}
+
+/**
+ * The legacy M98b status body: exactly the three fields, no inspector
+ * manifest. Used by the compatibility matrix to simulate an old server; the
+ * new client reads it as "all inspectors false".
+ *
+ * @param instanceId - The application's non-null instance UUID
+ * @param expiresInMs - Remaining session lifetime in milliseconds
+ * @returns The legacy status record
+ * @internal
+ */
+export function legacyStatusBody(
+  instanceId: string,
+  expiresInMs: number,
 ): Record<string, unknown> {
   return { version: 1, instanceId, expiresInMs };
+}
+
+/**
+ * The fixed inspector support manifest keys. The authenticated status body
+ * carries exactly these eleven boolean keys and no others; a key means the
+ * connector IMPLEMENTS and validates that operation, independent of whether
+ * the application registered its owning source. Inspectors beyond these
+ * eleven require a new protocol version.
+ *
+ * @internal
+ */
+export const INSPECTOR_KEYS = [
+  'health',
+  'configuration',
+  'queues',
+  'traces',
+  'authorization',
+  'cache',
+  'events',
+  'scheduler',
+  'realtime',
+  'storage',
+  'outboundHttp',
+] as const;
+
+/**
+ * The fixed inspector support manifest: one boolean per inspector key.
+ *
+ * @internal
+ */
+export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number], boolean>>;
+
+/**
+ * The inspector manifest M98d serves: `health` is implemented; the rest are
+ * reserved and false until their own connector operation ships (M98e–M98n).
+ *
+ * @returns The fixed manifest
+ * @internal
+ */
+export function currentInspectorsManifest(): InspectorsManifest {
+  return {
+    health: true,
+    configuration: false,
+    queues: false,
+    traces: false,
+    authorization: false,
+    cache: false,
+    events: false,
+    scheduler: false,
+    realtime: false,
+    storage: false,
+    outboundHttp: false,
+  };
 }
 
 /**
@@ -291,35 +373,111 @@ export function errorBody(code: ProtocolErrorCode): Record<string, unknown> {
  *
  * @internal
  */
-export const STATUS_BODY_KEYS: readonly string[] = ['version', 'instanceId', 'expiresInMs'];
-
 /**
- * Reports whether a parsed value is a well-formed status body: exactly the
- * three keys, version `1`, a non-empty instance string, and a finite
- * non-negative expiry.
+ * The base status body keys — always present, in both the legacy and the
+ * new body.
  *
- * @param value - The parsed JSON value
- * @returns `true` when the value is a well-formed status body
  * @internal
  */
-export function isStatusBody(value: unknown): value is {
-  version: 1;
-  instanceId: string;
-  expiresInMs: number;
-} {
+export const STATUS_BASE_KEYS: readonly string[] = ['version', 'instanceId', 'expiresInMs'];
+
+/**
+ * A well-formed parsed status body plus its resolved inspector manifest.
+ *
+ * @internal
+ */
+export interface ParsedStatusBody {
+  readonly instanceId: string;
+  readonly expiresInMs: number;
+  readonly inspectors: InspectorsManifest;
+}
+
+/**
+ * Builds the all-false inspector manifest — the resolution of the legacy
+ * M98b three-field status body, which advertised no inspectors.
+ *
+ * @returns The all-false manifest
+ * @internal
+ */
+export function allFalseInspectors(): InspectorsManifest {
+  return {
+    health: false,
+    configuration: false,
+    queues: false,
+    traces: false,
+    authorization: false,
+    cache: false,
+    events: false,
+    scheduler: false,
+    realtime: false,
+    storage: false,
+    outboundHttp: false,
+  };
+}
+
+/**
+ * Validates the inspector manifest: exactly the eleven fixed keys, all
+ * boolean. Unknown, missing, or extra keys and any non-boolean fail — the
+ * manifest is a fixed, authenticated contract, not an extensible record.
+ *
+ * @param value - The parsed `inspectors` value
+ * @returns `true` when the value is a well-formed manifest
+ * @internal
+ */
+export function isInspectorsManifest(value: unknown): value is InspectorsManifest {
   if (!isRecord(value)) {
     return false;
   }
   const keys = Object.keys(value);
-  if (keys.length !== STATUS_BODY_KEYS.length || STATUS_BODY_KEYS.some((k) => !(k in value))) {
+  if (keys.length !== INSPECTOR_KEYS.length || INSPECTOR_KEYS.some((k) => !(k in value))) {
     return false;
   }
-  return value.version === 1 &&
-    typeof value.instanceId === 'string' &&
-    value.instanceId.length > 0 &&
-    typeof value.expiresInMs === 'number' &&
-    Number.isFinite(value.expiresInMs) &&
-    value.expiresInMs >= 0;
+  return INSPECTOR_KEYS.every((k) => typeof value[k] === 'boolean');
+}
+
+/**
+ * Parses and validates a status body, accepting BOTH the legacy M98b
+ * three-field body and the new four-field body carrying the inspector
+ * manifest.
+ *
+ * The legacy body — exactly `version`, `instanceId`, `expiresInMs` —
+ * resolves to the all-false manifest, so a new client pairing against an old
+ * server sees every inspector as unsupported and never probes an unknown
+ * route. The new body — those three plus `inspectors` — must carry a
+ * well-formed manifest; any unknown, missing, or extra manifest key, or any
+ * non-boolean, fails. Any OTHER key count or shape fails outright.
+ *
+ * @param value - The parsed JSON value
+ * @returns The parsed status body, or `null` for any non-conforming shape
+ * @internal
+ */
+export function parseStatusBody(value: unknown): ParsedStatusBody | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const keys = Object.keys(value);
+  const hasInspectors = 'inspectors' in value;
+  const expectedCount = STATUS_BASE_KEYS.length + (hasInspectors ? 1 : 0);
+  if (keys.length !== expectedCount || STATUS_BASE_KEYS.some((k) => !(k in value))) {
+    return null;
+  }
+  if (
+    value.version !== 1 ||
+    typeof value.instanceId !== 'string' ||
+    value.instanceId.length === 0 ||
+    typeof value.expiresInMs !== 'number' ||
+    !Number.isFinite(value.expiresInMs) ||
+    value.expiresInMs < 0
+  ) {
+    return null;
+  }
+  const inspectors = hasInspectors
+    ? isInspectorsManifest(value.inspectors) ? value.inspectors : null
+    : allFalseInspectors();
+  if (inspectors === null) {
+    return null;
+  }
+  return { instanceId: value.instanceId, expiresInMs: value.expiresInMs, inspectors };
 }
 
 /**
@@ -374,4 +532,186 @@ export function isBatchProjection(value: unknown): value is DiagnosticsBatch {
     typeof value.next === 'number' &&
     typeof value.lost === 'number' &&
     typeof value.closed === 'boolean';
+}
+
+/**
+ * The fixed inspector-state vocabulary the health snapshot projects onto.
+ *
+ * @internal
+ */
+const INSPECTOR_STATES: ReadonlySet<string> = new Set([
+  'unsupported',
+  'disabled',
+  'no-data',
+  'ready',
+  'stale',
+  'collection-failed',
+]);
+
+/**
+ * The fixed observation-state vocabulary the health snapshot projects onto.
+ *
+ * @internal
+ */
+const OBSERVATION_STATES: ReadonlySet<string> = new Set([
+  'reported',
+  'timed-out',
+  'failed',
+  'never-observed',
+]);
+
+/**
+ * The fixed health status vocabulary the health snapshot projects onto.
+ *
+ * @internal
+ */
+const HEALTH_STATUSES: ReadonlySet<string> = new Set(['up', 'degraded', 'down']);
+
+/**
+ * The fixed origin vocabulary the health snapshot projects onto.
+ *
+ * @internal
+ */
+const ORIGINS: ReadonlySet<string> = new Set(['application', 'scheduled']);
+
+/**
+ * Re-projects one health observation against the exact M98d field allowlist.
+ * Copies field-by-field — never a spread of a provider result — so an
+ * unexpected field on an internal DTO cannot reach the wire.
+ *
+ * @param observation - The source observation
+ * @returns The projected record
+ * @internal
+ */
+export function projectHealthObservation(
+  observation: HealthDiagnosticsObservation,
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {
+    indicatorAlias: observation.indicatorAlias,
+    state: observation.state,
+    latencyMs: observation.latencyMs,
+    ageMs: observation.ageMs,
+    origin: observation.origin,
+  };
+  copyOptional(projected, 'status', observation.status);
+  return projected;
+}
+
+/**
+ * Re-projects a health snapshot against the exact M98d field allowlist. The
+ * body is the compact final health-snapshot JSON — not an envelope — so the
+ * projection produces exactly the DTO's fields and no others.
+ *
+ * @param snapshot - The source health snapshot
+ * @returns The projected, serialization-ready record
+ * @internal
+ */
+export function projectHealthSnapshot(
+  snapshot: HealthDiagnosticsSnapshot,
+): Record<string, unknown> {
+  return {
+    version: snapshot.version,
+    instanceId: snapshot.instanceId,
+    state: snapshot.state,
+    observations: snapshot.observations.map(projectHealthObservation),
+    truncated: snapshot.truncated,
+    droppedObservations: snapshot.droppedObservations,
+  };
+}
+
+/** The exact snapshot keys a health projection carries. */
+const HEALTH_SNAPSHOT_KEYS: readonly string[] = [
+  'version',
+  'instanceId',
+  'state',
+  'observations',
+  'truncated',
+  'droppedObservations',
+];
+
+/** The observation keys always present; `status` is added exactly when `reported`. */
+const HEALTH_OBSERVATION_KEYS: readonly string[] = [
+  'indicatorAlias',
+  'state',
+  'latencyMs',
+  'ageMs',
+  'origin',
+];
+
+/** The fixed upper bound on approved aliases, and so on projected observations. */
+const MAX_HEALTH_OBSERVATIONS = 64;
+
+/** The fixed upper bound on an alias's UTF-8 byte length. */
+const MAX_ALIAS_BYTES = 64;
+
+const ALIAS_ENCODER = new TextEncoder();
+
+/** Reports whether a record has exactly the given own keys. */
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const own = Object.keys(value);
+  return own.length === keys.length && keys.every((k) => Object.hasOwn(value, k));
+}
+
+/** A finite, non-negative millisecond measurement, or `null` where allowed. */
+function isMeasurement(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
+/** Validates one projected observation against the exact M98d DTO. */
+function isHealthObservationProjection(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const reported = value.state === 'reported';
+  const keys = reported ? [...HEALTH_OBSERVATION_KEYS, 'status'] : HEALTH_OBSERVATION_KEYS;
+  if (!hasExactKeys(value, keys)) {
+    return false;
+  }
+  const alias = value.indicatorAlias;
+  if (typeof alias !== 'string') {
+    return false;
+  }
+  const aliasBytes = ALIAS_ENCODER.encode(alias).length;
+  return aliasBytes >= 1 && aliasBytes <= MAX_ALIAS_BYTES &&
+    typeof value.state === 'string' && OBSERVATION_STATES.has(value.state) &&
+    (!reported || (typeof value.status === 'string' && HEALTH_STATUSES.has(value.status))) &&
+    isMeasurement(value.latencyMs) &&
+    isMeasurement(value.ageMs) &&
+    typeof value.origin === 'string' && ORIGINS.has(value.origin);
+}
+
+/**
+ * Reports whether a value is a well-formed M98d health-snapshot projection:
+ * EXACTLY the six snapshot keys, version `1`, a non-empty instance string, a
+ * fixed inspector state, at most 64 observations, a non-negative safe-integer
+ * drop count, and every observation carrying exactly its allowed keys —
+ * `status` present if and only if the state is `reported`, every enum from
+ * its fixed vocabulary, every measurement finite and non-negative or `null`,
+ * every alias 1–64 UTF-8 bytes.
+ *
+ * ONE validator for both sides of the wire: the connector runs it over its
+ * own field-by-field projection before signing (a source that violates the
+ * DTO is answered `collection-failed`, so nothing unvalidated is signed),
+ * and the native client runs it again before handing data to a consumer.
+ *
+ * @param value - The parsed JSON value, or a fresh projection
+ * @returns `true` when the value is a well-formed health snapshot
+ * @internal
+ */
+export function isHealthSnapshotProjection(value: unknown): value is HealthDiagnosticsSnapshot {
+  if (!isRecord(value) || !hasExactKeys(value, HEALTH_SNAPSHOT_KEYS)) {
+    return false;
+  }
+  return value.version === 1 &&
+    typeof value.instanceId === 'string' &&
+    value.instanceId.length > 0 &&
+    typeof value.state === 'string' &&
+    INSPECTOR_STATES.has(value.state) &&
+    Array.isArray(value.observations) &&
+    value.observations.length <= MAX_HEALTH_OBSERVATIONS &&
+    typeof value.truncated === 'boolean' &&
+    typeof value.droppedObservations === 'number' &&
+    Number.isSafeInteger(value.droppedObservations) &&
+    value.droppedObservations >= 0 &&
+    value.observations.every(isHealthObservationProjection);
 }
