@@ -5226,7 +5226,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   microservice recipe with the decorator and DI pair, and its generated CQRS/event ingress classes
   register only through `DecoratorPlugin({ ingress })` — the functional `src/cqrs` and `src/events`
   barrels are not emitted, so nothing is registered twice. `docs/migration-nestjs.md` gains
-  Scaffolding and Microservices sections — complete (PR pending).
+  Scaffolding and Microservices sections — complete (PR #364).
 - **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
   design security review and implementation audit required).
 
