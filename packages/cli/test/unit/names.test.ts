@@ -272,3 +272,73 @@ describe('hasControlCharacter', () => {
     expect([1, 2, 3].map(() => hasControlCharacter('a\nb'))).toEqual([true, true, true]);
   });
 });
+
+// CodeRabbit on PR #364: Windows resolves a reserved device name to the device
+// whatever its extension, and strips a trailing period, so either makes a
+// project or file that cannot be created or checked out there.
+describe('isPathSegmentSafe refuses names Windows cannot hold', () => {
+  const REFUSED = [
+    'con',
+    'CON',
+    'nul',
+    'prn',
+    'aux',
+    'com1',
+    'COM9',
+    'lpt1',
+    'con.app',
+    'nul.txt',
+    'my.',
+  ];
+  for (const raw of REFUSED) {
+    it(`refuses ${raw}`, () => {
+      expect(isPathSegmentSafe(deriveNames(raw))).toBe(false);
+    });
+  }
+
+  const KEPT = ['console', 'connect', 'conx', 'com10', 'lpt', 'my.app', 'nullable', 'auxiliary'];
+  for (const raw of KEPT) {
+    it(`keeps ${raw}`, () => {
+      expect(isPathSegmentSafe(deriveNames(raw))).toBe(true);
+    });
+  }
+
+  it('refuses a device name through the identifier guard too', () => {
+    expect(isIdentifierSafe(deriveNames('con'))).toBe(false);
+    expect(isIdentifierSafe(deriveNames('console'))).toBe(true);
+  });
+});
+
+// CodeRabbit on PR #364: a bidirectional format character can reorder a quoted
+// value as displayed, so both escapes treat it like a control character.
+describe('bidirectional format characters', () => {
+  const BIDI = [
+    0x061c,
+    0x200e,
+    0x200f,
+    0x202a,
+    0x202b,
+    0x202c,
+    0x202d,
+    0x202e,
+    0x2066,
+    0x2067,
+    0x2068,
+    0x2069,
+  ];
+  for (const code of BIDI) {
+    const char = String.fromCharCode(code);
+    const hex = code.toString(16).padStart(4, '0');
+    it(`escapes U+${hex.toUpperCase()}`, () => {
+      expect(escapeName(`a${char}b`)).toBe(`a\\u${hex}b`);
+      expect(escapeTerminalControls(`a${char}b`)).toBe(`a\\u${hex}b`);
+      expect(hasControlCharacter(`a${char}b`)).toBe(true);
+    });
+  }
+
+  it('leaves the zero-width joiner in an emoji alone', () => {
+    const family = '\u{1F468}\u200D\u{1F469}';
+    expect(escapeTerminalControls(family)).toBe(family);
+    expect(hasControlCharacter(family)).toBe(false);
+  });
+});

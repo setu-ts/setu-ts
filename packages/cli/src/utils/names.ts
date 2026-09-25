@@ -136,7 +136,8 @@ export function isIdentifierSafe(names: DerivedNames): boolean {
  * @returns True when the kebab is safe as one path segment
  */
 export function isPathSegmentSafe(names: DerivedNames): boolean {
-  return PATH_SEGMENT.test(names.kebab) && utf8ByteLength(names.kebab) <= MAX_COMPONENT_BYTES;
+  return PATH_SEGMENT.test(names.kebab) && !names.kebab.endsWith('.') &&
+    !WINDOWS_DEVICE.test(names.kebab) && utf8ByteLength(names.kebab) <= MAX_COMPONENT_BYTES;
 }
 
 /**
@@ -146,18 +147,27 @@ export function isPathSegmentSafe(names: DerivedNames): boolean {
 export const IDENTIFIER_NAME_RULE = 'it must contain a letter, must not start with a digit, and ' +
   'may hold only letters, digits and the separators `-`, `_` and space — no path separator, ' +
   'quote or other punctuation, since each form becomes a TypeScript identifier and a file ' +
-  'name — in at most 255 bytes.';
+  'name — and not a Windows device name (`con`, `nul`, `com1`, …), in at most 255 bytes.';
 
 /** The rule `setu new`'s project-name refusal states; see {@linkcode isPathSegmentSafe}. */
 export const PROJECT_NAME_RULE = 'It must start with a letter or digit and hold only letters, ' +
   'digits, `.` and `-` (a space or `_` becomes `-`) — no path separator, control character, ' +
-  'quote or other punctuation — in at most 255 bytes.';
+  'quote or other punctuation — not a Windows device name (`con`, `nul`, `com1`, …, with or ' +
+  'without an extension) and not ending in `.`, in at most 255 bytes.';
 
 /** One identifier: an ID_Start character, then ID_Continue characters. */
 const IDENTIFIER = /^\p{ID_Start}\p{ID_Continue}*$/u;
 
 /** A portable segment: letters, marks, digits, `.` and `-`, not dot-led. */
 const PATH_SEGMENT = /^[\p{L}\p{N}][\p{L}\p{M}\p{N}.-]*$/u;
+
+/**
+ * A Windows reserved device name, case-insensitive, with or without an
+ * extension: Windows resolves `con`, `con.txt` and `CON.service.ts` alike to the
+ * device, so a project or file named that cannot be created there, and a
+ * repository holding one cannot be checked out.
+ */
+const WINDOWS_DEVICE = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\.|$)/i;
 
 /**
  * Returns the first path segment over {@linkcode MAX_COMPONENT_BYTES}, if any.
@@ -196,7 +206,8 @@ function utf8ByteLength(text: string): number {
  * Refusals quote the name the user typed. A name carrying a newline or a
  * carriage return would break out of the quoted line and forge a standalone
  * line in the rendered message, so every control character — and the two
- * Unicode line and paragraph separators — is rendered as its
+ * Unicode line and paragraph separators, and the bidirectional format
+ * characters that could reorder the quote as displayed — is rendered as its
  * `\uXXXX` escape instead — the quote stays one line and still shows exactly
  * what was typed. Everything else passes through verbatim.
  *
@@ -237,8 +248,11 @@ export function hasControlCharacter(value: string): boolean {
   return CONTROL_TEST.test(value);
 }
 
-const CONTROL = /[\p{Cc}\u2028\u2029]/gu;
-const CONTROL_TEST = /[\p{Cc}\u2028\u2029]/u;
+// Control characters, the two Unicode line and paragraph separators, and the
+// bidirectional format characters (ALM, LRM/RLM, the embeddings and overrides,
+// and the isolates), which can reorder a line as it is displayed.
+const CONTROL = /[\p{Cc}\u2028\u2029\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu;
+const CONTROL_TEST = /[\p{Cc}\u2028\u2029\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;
 
 /** One character as its `\uXXXX` escape. */
 function escapeChar(char: string): string {

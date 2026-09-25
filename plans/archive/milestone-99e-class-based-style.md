@@ -458,5 +458,9 @@ beside what review changed.
   from a hand-edited manifest written raw as a discovery-module object key; it goes through
   `stringLiteral` too, proven by importing the rendered module. Outside this milestone's diff, and
   folded in rather than sent to a `fix/…` branch because the maintainer asked for it before the PR.
+- **CodeRabbit on PR #364:** the portable name rule still admitted Windows device names (`con`,
+  `nul.txt`, `com1`) and a trailing `.`, and the escape set left out the bidirectional format
+  characters (U+061C, U+200E/F, U+202A–202E, U+2066–2069), so a quoted value could be reordered as
+  displayed. Both are refused/escaped now, each with a negative control.
 - Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
   refactor left with no reader.

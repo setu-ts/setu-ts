@@ -115,6 +115,30 @@ describe('a flag value carrying a control character is refused before any comman
     expect(text).toContain('Option --dir has a control character');
   });
 
+  // CodeRabbit on PR #364: U+202E can reorder a quoted value as displayed.
+  it('refuses a value carrying a bidirectional override', async () => {
+    const rlo = String.fromCharCode(0x202e);
+    const { code, text, writes } = await run([], [
+      'new',
+      'a',
+      '--template',
+      `rest${rlo}desab-ssalc`,
+    ]);
+    expect(code).toBe(2);
+    expect(writes).toBe(0);
+    expect(text).toContain('Option --template has a control character');
+    expect(text.includes(rlo)).toBe(false);
+    expect(text).toContain('\\u202e');
+  });
+
+  it('refuses a Windows device name as a project name', async () => {
+    const { code, text, writes } = await run([], ['new', 'con']);
+    expect(code).toBe(2);
+    expect(writes).toBe(0);
+    expect(text).toContain('Invalid project name: "con"');
+    expect(text).toContain('Windows device name');
+  });
+
   // The gate reads values only: a flag NAME carrying a payload is quoted by
   // the unknown-option refusal, which escapes it.
   it('leaves an ordinary value alone', async () => {

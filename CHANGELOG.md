@@ -286,17 +286,20 @@ All notable changes to this project are documented here. The format follows
   identifier: letters (Unicode included, so `café` still works), digits after the first character,
   and the separators `-`, `_` and space. `setu new` takes a portable project name — it starts with a
   letter or digit and holds only letters, digits, `.` and `-` — so `3d-shop`, `2048` and `my.app`
-  keep working. Any name over 255 bytes, and a name whose planned file name (`<name>.controller.ts`,
-  a library's `test/<name>.test.ts`) exceeds 255 bytes, is refused too, where it used to fail
-  mid-write with an uncaught `File name too long`. Every refusal is a usage error (exit `2`) with no
-  writes, and echoes the name with its control characters escaped, so the message stays one line. No
-  argument can forge an output line any more: an option value carrying a control character is
-  refused before any command runs, every line the CLI writes has its control characters other than
-  the line feed and tab escaped, and a positional quoted back (a name, a schematic, an unknown
-  command, an `add` package, a `devtool enable` member) is escaped where it is quoted. A suggested
-  command copies a value only when it names a real template, style or runtime, so an unknown value
-  is never planted in a command you are told to run. `--transport constructor` is now an unknown
-  transport rather than an alias of a built-in.
+  keep working. A Windows device name (`con`, `nul`, `com1`, … with or without an extension) and a
+  name ending in `.` are refused everywhere, since Windows cannot create either. Any name over 255
+  bytes, and a name whose planned file name (`<name>.controller.ts`, a library's
+  `test/<name>.test.ts`) exceeds 255 bytes, is refused too, where it used to fail mid-write with an
+  uncaught `File name too long`. Every refusal is a usage error (exit `2`) with no writes, and
+  echoes the name with its control characters escaped, so the message stays one line. No argument
+  can forge an output line any more: an option value carrying a control character is refused before
+  any command runs, every line the CLI writes has its control characters other than the line feed
+  and tab escaped (bidirectional format characters included, so a quoted value cannot be reordered
+  as displayed), and a positional quoted back (a name, a schematic, an unknown command, an `add`
+  package, a `devtool enable` member) is escaped where it is quoted. A suggested command copies a
+  value only when it names a real template, style or runtime, so an unknown value is never planted
+  in a command you are told to run. `--transport constructor` is now an unknown transport rather
+  than an alias of a built-in.
 
 - **`health-plugin` — an unrecognized indicator status could hide another indicator's `down`, so
   `/health` and `/ready` answered `200` over a failing dependency.** The aggregate took the worst
