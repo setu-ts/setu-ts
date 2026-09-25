@@ -5216,7 +5216,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   direction by one trust rule shared by the `/health` and scheduled paths (a CHANGELOG'd behaviour
   change). The re-audit's two Low findings are fixed too, and its final verdict on the audited
   commit is **passed**; the closeout commit after it touches documentation only, and the maintainer
-  waived a further re-audit — complete (PR pending).
+  waived a further re-audit — complete (PR #363).
 - **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
   design security review and implementation audit required). The `v0.7.0` smoke closeout (M99)
   reopened with **M99e** (`packages/cli` — `--style class-based` as its own axis, so a class-based

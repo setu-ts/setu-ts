@@ -10650,7 +10650,8 @@ observation boundary and its shared contracts; 98b complete
 ([#347](https://github.com/setu-ts/setu-ts/pull/347)) — the runtime-owned loopback listener, its
 `common` contract/token, and `packages/diagnostics-plugin`; 98c complete
 ([#352](https://github.com/setu-ts/setu-ts/pull/352)) — `packages/cli` development-entry scaffolding
-and per-member credential handoff; 98d complete (PR pending) — minimized health observations, the
+and per-member credential handoff; 98d complete
+([#363](https://github.com/setu-ts/setu-ts/pull/363)) — minimized health observations, the
 `GET /v1/health` inspector and the status-body inspector manifest. These four are implemented and
 merged, awaiting publication in the next release cycle. **98e–98n are planned**, each with its own
 implementation plan and mandatory security audit. This umbrella records framework work for the
@@ -10880,10 +10881,10 @@ the loopback guarantee is the listener's, not a permission flag's).
 
 ### Milestone 98d: Minimized Health Observations
 
-**Status:** complete (PR pending); the committed-tree security audit passed and is recorded in the
-PR. **Owner:** `packages/health-plugin`, with only the necessary shared diagnostic contract
-(`packages/common`) and authenticated connector/client changes (`packages/diagnostics-plugin`).
-**Plan:** `plans/archive/milestone-98d-health-observations.md`.
+**Status:** complete ([#363](https://github.com/setu-ts/setu-ts/pull/363)); the committed-tree
+security audit passed and is recorded in the PR. **Owner:** `packages/health-plugin`, with only the
+necessary shared diagnostic contract (`packages/common`) and authenticated connector/client changes
+(`packages/diagnostics-plugin`). **Plan:** `plans/archive/milestone-98d-health-observations.md`.
 
 **Existing foundation:** `IHealthService.check`, `checkLive` and `checkReady` run application
 callbacks. Reports allow arbitrary per-indicator `data`. `HealthService` already runs selected
@@ -11931,7 +11932,7 @@ because one of them invalidated part of a previous run's claims:
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347)) |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))             |
-| 98d       | ✅     | common + health-plugin + diagnostics-plugin — minimized health observations (PR pending)                                                  |
+| 98d       | ✅     | common + health-plugin + diagnostics-plugin — minimized health observations ([#363](https://github.com/setu-ts/setu-ts/pull/363))         |
 | 98e       | ⬜     | config-plugin — value-free configuration provenance; design security review and implementation audit required                             |
 | 98f       | ⬜     | queue-plugin — attempt, outcome and depth observations; design security review and implementation audit required                          |
 | 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                |
