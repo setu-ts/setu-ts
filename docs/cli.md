@@ -106,6 +106,11 @@ manifest change:
   with the `deno.json` that `setu new --runtime deno` emits. A `deno.json` added beside a kept
   `package.json` still serves, but `setu generate` checks `package.json` first, so it keeps reading
   the project as Node and emits the Node `node:test` harness rather than the Deno one.
+- **`full-stack` → Deno is the exception.** Its Deno form keeps a `package.json`, because the Vite
+  build reads it, so do not delete it: add the `deno.json` a Deno full-stack scaffold emits, then
+  remove the `start` and `test` scripts, the `@setu-ts/*` dependencies, and the `tsx` and
+  `@types/node` dev dependencies from `package.json`, keeping `build`. Removing `start` is what
+  makes `setu generate` read the project as Deno. Delete `.npmrc` as well.
 - **Deno → Node or Bun:** the reverse — remove `deno.json` and add the manifests the matching target
   emits.
 

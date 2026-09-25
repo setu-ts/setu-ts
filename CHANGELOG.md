@@ -252,6 +252,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`cli` — the `--runtime` documentation read as a lock-in, and one of its claims was stale.** The
+  scaffolding example `setu new my-app --runtime node # deno | node | bun | cloudflare-workers`
+  suggested a project is tied to the runtime it was created for. It is not: on `deno`, `node` and
+  `bun` every template emits byte-identical `main.ts`, `setu.config.ts` and `src/`, and
+  `RuntimePlugin` detects the platform at startup, so only the manifest and start command differ.
+  `docs/cli.md` now says so and gives the verified steps for moving between runtimes — including
+  that a move to Deno must replace `package.json` rather than sit beside it (`setu generate` reads
+  `package.json` first), with `full-stack` as the one template that keeps it for the Vite build —
+  and the Workers exception. Separately, the CLI README's option table said `--runtime` defaults to
+  `deno` on `setu generate`; it is detected from the project's manifests. Wording only; no
+  behaviour, API or export changed.
+
 - **`cli` — a name that is not one legal path segment is refused before anything is written
   (M99e).** Every name-taking verb (`new`, `generate app`, `generate <schematic>`,
   `generate
