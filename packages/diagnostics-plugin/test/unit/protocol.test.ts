@@ -6,11 +6,14 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import type { ConfigDiagnosticsSnapshot } from '@setu-ts/common';
+
 import {
   currentInspectorsManifest,
   errorBody,
   INSPECTOR_KEYS,
   isBatchProjection,
+  isConfigSnapshotProjection,
   isHealthSnapshotProjection,
   isInspectorsManifest,
   isSnapshotProjection,
@@ -18,6 +21,7 @@ import {
   parseStatusBody,
   parseTarget,
   projectBatch,
+  projectConfigSnapshot,
   projectEvent,
   projectHealthSnapshot,
   projectSnapshot,
@@ -183,11 +187,12 @@ describe('Protocol — status body and fixed errors', () => {
     });
   });
 
-  it('serves the fixed inspector manifest with health true and the rest false', () => {
+  it('serves the fixed inspector manifest with the shipped operations true and the rest false', () => {
     const manifest = currentInspectorsManifest();
     expect(manifest.health).toBe(true);
+    expect(manifest.configuration).toBe(true);
     for (const key of INSPECTOR_KEYS) {
-      if (key !== 'health') {
+      if (key !== 'health' && key !== 'configuration') {
         expect(manifest[key]).toBe(false);
       }
     }
@@ -433,5 +438,151 @@ describe('Protocol — status-body release skew, BOTH directions (M98d gate)', (
     // carries no signal a server could branch on: the status body had to be
     // settled before the package's first publication.
     expect(m98bIsStatusBody(current)).toBe(false);
+  });
+});
+
+describe('Protocol — configuration target and projection (M98e)', () => {
+  /** A ready snapshot with one fully-populated entry, for projection tests. */
+  function readySnapshot(): ConfigDiagnosticsSnapshot {
+    return {
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'ready',
+      entries: [
+        {
+          keyAlias: 'database.url',
+          origin: 'file',
+          sourceAlias: 'dotenv-local',
+          overriddenSourceAliases: ['dotenv'],
+          expanded: true,
+          referenceAliases: ['host'],
+          schemaEffect: 'validated',
+        },
+      ],
+      truncated: false,
+      droppedEntries: 0,
+    };
+  }
+
+  it('parses the canonical /v1/config target and refuses every other form', () => {
+    const parsed = parseTarget('/v1/config', '');
+    expect(parsed).not.toBeNull();
+    expect(parsed!.op).toEqual('config');
+    expect(parsed!.canonicalTarget).toEqual('/v1/config');
+    // No query, no extra segment, no percent-encoding.
+    expect(parseTarget('/v1/config', 'x=1')).toBeNull();
+    expect(parseTarget('/v1/config/', '')).toBeNull();
+    expect(parseTarget('/%76%31/config', '')).toBeNull();
+  });
+
+  it('projects the snapshot field-by-field and drops every canary outside the DTO', () => {
+    const hostile = {
+      ...readySnapshot(),
+      password: 'canary-password-SYNTHETIC',
+      entries: [
+        {
+          ...readySnapshot().entries[0],
+          value: 'canary-value-SYNTHETIC',
+          path: '/etc/secrets-SYNTHETIC',
+        },
+      ],
+    } as unknown as ConfigDiagnosticsSnapshot;
+    const projected = projectConfigSnapshot(hostile);
+    const text = JSON.stringify(projected);
+    expect(text).not.toContain('canary-password-SYNTHETIC');
+    expect(text).not.toContain('canary-value-SYNTHETIC');
+    expect(text).not.toContain('/etc/secrets-SYNTHETIC');
+    // The allowed fields survive: aliases, origin, source alias, effect.
+    const entry = (projected.entries as Record<string, unknown>[])[0];
+    expect(entry).toEqual({
+      keyAlias: 'database.url',
+      origin: 'file',
+      sourceAlias: 'dotenv-local',
+      overriddenSourceAliases: ['dotenv'],
+      expanded: true,
+      referenceAliases: ['host'],
+      schemaEffect: 'validated',
+    });
+    expect(isConfigSnapshotProjection(projected)).toBe(true);
+  });
+
+  it('omits sourceAlias from the projection when the entry carries none', () => {
+    const snapshot = readySnapshot();
+    const [source] = snapshot.entries;
+    const withoutAlias = { ...source };
+    delete (withoutAlias as { sourceAlias?: string }).sourceAlias;
+    const projected = projectConfigSnapshot({
+      ...snapshot,
+      entries: [withoutAlias],
+    });
+    const projectedEntry = (projected.entries as Record<string, unknown>[])[0];
+    expect(Object.hasOwn(projectedEntry, 'sourceAlias')).toBe(false);
+    expect(isConfigSnapshotProjection(projected)).toBe(true);
+  });
+
+  it('rejects projections that violate the exact entry DTO', () => {
+    const base = projectConfigSnapshot(readySnapshot());
+    expect(isConfigSnapshotProjection(base)).toBe(true);
+
+    // A sourceAlias on a non-file origin — the DTO forbids it.
+    const envWithAlias = projectConfigSnapshot({
+      ...readySnapshot(),
+      entries: [
+        {
+          keyAlias: 'port',
+          origin: 'environment',
+          sourceAlias: 'not-allowed-here',
+          overriddenSourceAliases: [],
+          expanded: false,
+          referenceAliases: [],
+          schemaEffect: 'validated',
+        },
+      ],
+    });
+    expect(isConfigSnapshotProjection(envWithAlias)).toBe(false);
+
+    // An unknown schema effect — naming a mechanism presence cannot prove.
+    const [entry] = readySnapshot().entries;
+    const badEffect = projectConfigSnapshot({
+      ...readySnapshot(),
+      entries: [
+        {
+          ...entry,
+          schemaEffect: 'defaulted',
+        } as unknown as ConfigDiagnosticsSnapshot['entries'][number],
+      ],
+    });
+    expect(isConfigSnapshotProjection(badEffect)).toBe(false);
+
+    // A missing snapshot key.
+    const missingKey = JSON.parse(JSON.stringify(base)) as Record<string, unknown>;
+    delete missingKey['truncated'];
+    expect(isConfigSnapshotProjection(missingKey)).toBe(false);
+
+    // An over-budget reference array.
+    const tooManyRefs = projectConfigSnapshot({
+      ...readySnapshot(),
+      entries: [
+        {
+          ...readySnapshot().entries[0],
+          referenceAliases: Array.from({ length: 17 }, (_, i) => `ref${i}`),
+        },
+      ],
+    });
+    expect(isConfigSnapshotProjection(tooManyRefs)).toBe(false);
+
+    // An oversized alias.
+    const oversizedAlias = projectConfigSnapshot({
+      ...readySnapshot(),
+      entries: [{ ...readySnapshot().entries[0], keyAlias: 'x'.repeat(65) }],
+    });
+    expect(isConfigSnapshotProjection(oversizedAlias)).toBe(false);
+
+    // A negative drop count.
+    const negativeDropped = projectConfigSnapshot({
+      ...readySnapshot(),
+      droppedEntries: -1,
+    });
+    expect(isConfigSnapshotProjection(negativeDropped)).toBe(false);
   });
 });

@@ -14,6 +14,7 @@
  */
 
 import type {
+  IConfigDiagnosticsSource,
   IHealthDiagnosticsSource,
   ILocalDiagnosticsListener,
   ILocalDiagnosticsListenerFactory,
@@ -152,7 +153,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
     name: 'diagnostics-plugin',
     version: denoJson.version,
     dependencies: [CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER],
-    optionalDependencies: [CAPABILITIES.HEALTH_DIAGNOSTICS],
+    optionalDependencies: [CAPABILITIES.HEALTH_DIAGNOSTICS, CAPABILITIES.CONFIG_DIAGNOSTICS],
 
     register(ctx: IPluginContext): void {
       const source = ctx.app.diagnostics;
@@ -173,6 +174,18 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           CAPABILITIES.HEALTH_DIAGNOSTICS,
         )
         ? ctx.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS)
+        : null;
+
+      // The optional configuration provenance source (M98e): the same shape.
+      // An absent source means no ConfigPlugin is registered and the
+      // connector answers a typed `unsupported`; the ConfigPlugin ALWAYS
+      // registers one, so a configuration without the `diagnostics` option
+      // answers `disabled` rather than unsupported. A provenance read never
+      // touches a configuration value.
+      const configSource: IConfigDiagnosticsSource | null = ctx.services.has(
+          CAPABILITIES.CONFIG_DIAGNOSTICS,
+        )
+        ? ctx.services.get<IConfigDiagnosticsSource>(CAPABILITIES.CONFIG_DIAGNOSTICS)
         : null;
 
       // Parent cleanup hooks FIRST — before the bootstrap below opens the
@@ -210,6 +223,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           source,
           clock: ctx.runtime,
           healthSource,
+          configSource,
         });
         // The devtool's own startup line. Without it the runtime prints a
         // bare `Listening on http://127.0.0.1:<port>/`, which in an

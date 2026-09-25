@@ -197,6 +197,8 @@ package fits the plugin architecture.
 | `CachedProbeOptions`               | interface |
 | `CircuitBreakerPolicy`             | interface |
 | `ClassProvider`                    | interface |
+| `ConfigDiagnosticsSnapshot`        | interface |
+| `ConfigProvenanceEntry`            | interface |
 | `CookieAttributes`                 | interface |
 | `CqrsCommand`                      | interface |
 | `CqrsQuery`                        | interface |
@@ -241,6 +243,7 @@ package fits the plugin architecture.
 | `ICommandBus`                      | interface |
 | `ICommandHandler`                  | interface |
 | `IConfig`                          | interface |
+| `IConfigDiagnosticsSource`         | interface |
 | `IContainer`                       | interface |
 | `ICounter`                         | interface |
 | `ICqrsFacade`                      | interface |
@@ -402,6 +405,8 @@ package fits the plugin architecture.
 | `CircuitState`                     | type      |
 | `CliCommandHandler`                | type      |
 | `Component`                        | type      |
+| `ConfigProvenanceOrigin`           | type      |
+| `ConfigSchemaEffect`               | type      |
 | `Constructor`                      | type      |
 | `CursorValue`                      | type      |
 | `DataClassification`               | type      |

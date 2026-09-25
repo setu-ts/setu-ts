@@ -7,9 +7,19 @@
  *
  * @module
  */
-import type { IConfig, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import type {
+  IConfig,
+  IConfigDiagnosticsSource,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+} from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
+import {
+  compileConfigDiagnosticsPolicy,
+  createConfigDiagnosticsSource,
+} from '../diagnostics/provenance.ts';
 import type { ConfigPluginOptions } from '../options.ts';
 import { loadConfig } from '../services/load-config.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -49,11 +59,17 @@ const PLUGIN_NAME = 'config-plugin';
  * @since 0.1.0
  */
 export function ConfigPlugin(options?: ConfigPluginOptions): IPlugin {
+  // Compile once, at construction: an invalid diagnostics option refuses
+  // before any application exists, never mid-startup.
+  const diagnosticsPolicy = options?.diagnostics === undefined
+    ? null
+    : compileConfigDiagnosticsPolicy(options.diagnostics);
+
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
     dependencies: [CAPABILITIES.RUNTIME],
-    provides: [CAPABILITIES.CONFIG],
+    provides: [CAPABILITIES.CONFIG, CAPABILITIES.CONFIG_DIAGNOSTICS],
     consumes: [CAPABILITIES.RUNTIME],
     priority: PLUGIN_PRIORITY.HIGH,
 
@@ -65,6 +81,15 @@ export function ConfigPlugin(options?: ConfigPluginOptions): IPlugin {
       // before the application starts and one built here are the same code.
       const config = await loadConfig(runtime, options);
       ctx.services.register<IConfig>(CAPABILITIES.CONFIG, config);
+      // Always registers a provenance source under the eager token, so the
+      // connector can tell "no config plugin" from "present but off".
+      // Absent diagnostics is the inert disabled source; an adopted load
+      // record keeps each entry's real origin; an opaque injected instance
+      // is reported unknown without a single read of it.
+      ctx.services.register<IConfigDiagnosticsSource>(
+        CAPABILITIES.CONFIG_DIAGNOSTICS,
+        createConfigDiagnosticsSource(config, diagnosticsPolicy),
+      );
     },
   };
 }

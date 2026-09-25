@@ -97,10 +97,13 @@ describe('ConfigPlugin — metadata', () => {
     expect(plugin.version).toBe(manifest.version);
   });
 
-  it('depends on and provides correct capabilities', () => {
+  it('depends on and provides correct capabilities, including the eager provenance token', () => {
     const plugin = ConfigPlugin();
     expect(plugin.dependencies).toContain(CAPABILITIES.RUNTIME);
     expect(plugin.provides).toContain(CAPABILITIES.CONFIG);
+    // Eager: the connector can tell "no config plugin" from "present but
+    // off" only if the token is always claimed.
+    expect(plugin.provides).toContain(CAPABILITIES.CONFIG_DIAGNOSTICS);
     expect(plugin.consumes).toContain(CAPABILITIES.RUNTIME);
   });
 
@@ -367,5 +370,49 @@ describe('ConfigPlugin — validation', () => {
     const { ctx } = createFakeContext(createRuntime({}));
 
     await expect(plugin.register!(ctx)).rejects.toThrow(/must be an object/);
+  });
+});
+
+describe('ConfigPlugin | provenance source registration (M98e)', () => {
+  it('registers the source under the eager token, disabled without diagnostics', async () => {
+    const plugin = ConfigPlugin();
+    const { ctx, registeredServices } = createFakeContext(
+      createRuntime({ env: { PORT: '3000' } }),
+    );
+    await plugin.register!(ctx);
+    expect(registeredServices.has(CAPABILITIES.CONFIG_DIAGNOSTICS)).toBe(true);
+    const source = registeredServices.get(CAPABILITIES.CONFIG_DIAGNOSTICS) as {
+      snapshot(id: string): { state: string; entries: unknown[] };
+    };
+    expect(source.snapshot('i')).toMatchObject({ state: 'disabled', entries: [] });
+  });
+
+  it('serves the adopted record with real origins for a loaded snapshot', async () => {
+    const plugin = ConfigPlugin({
+      envFilePath: ['.env'],
+      diagnostics: {
+        enabled: true,
+        keys: { PORT: 'port' },
+        files: { '.env': 'dotenv' },
+      },
+    });
+    const { ctx, registeredServices } = createFakeContext(
+      createRuntime({ env: { PORT: '3000' }, fs: createFakeFileSystem({ '.env': 'X=1\n' }) }),
+    );
+    await plugin.register!(ctx);
+    const source = registeredServices.get(CAPABILITIES.CONFIG_DIAGNOSTICS) as {
+      snapshot(id: string): {
+        state: string;
+        entries: Array<{ keyAlias: string; origin: string } & Record<string, unknown>>;
+      };
+    };
+    const snapshot = source.snapshot('i');
+    expect(snapshot.state).toEqual('ready');
+    expect(snapshot.entries[0]).toMatchObject({
+      keyAlias: 'port',
+      origin: 'environment',
+    });
+    // An environment origin carries no source alias at all.
+    expect(Object.hasOwn(snapshot.entries[0], 'sourceAlias')).toBe(false);
   });
 });

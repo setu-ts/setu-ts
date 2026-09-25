@@ -693,6 +693,13 @@ interface ConfigPluginOptions {
   readonly sections?: readonly ConfigSection<unknown>[];
   readonly expandVariables?: boolean;
   readonly instance?: IConfig;
+  readonly diagnostics?: ConfigDiagnosticsOptions;
+}
+
+interface ConfigDiagnosticsOptions {
+  readonly enabled: true;
+  readonly keys: Readonly<Record<string, string>>;
+  readonly files?: Readonly<Record<string, string>>;
 }
 ```
 
@@ -717,6 +724,7 @@ interface ConfigPluginOptions {
   configuration loads normally. This exists so an application can resolve configuration before its
   plugins are constructed and then hand the plugin that same object, rather than letting it load a
   second snapshot a moment later that the composition never saw.
+- **`diagnostics`** — The opt-in value-free provenance policy (0.8.0), below.
 
 ### loadConfig()
 
@@ -818,6 +826,51 @@ so throws a clear startup error.
 ### Hot Reload
 
 **Deferred.** Configuration is an immutable application-startup snapshot.
+
+### Configuration Provenance (0.8.0)
+
+`ConfigDiagnosticsOptions` is the explicit opt-in: `enabled` is the LITERAL `true` (an absent option
+is the disabled path; any other value is refused, with fixed messages that never echo a value),
+`keys` is the exact configuration-key to display-alias allowlist (at most 128 entries, each alias
+unique, 1–64 UTF-8 bytes, no control characters), and `files` optionally allows exact configured
+`.env` paths as source aliases (at most eight, same alias rules). When present, the loader records —
+during the ONE load it already performs — where each approved key's final value was observed to come
+from: the source category and approved source aliases, the evidenced precedence displacement
+(`overriddenSourceAliases`, lowest first), the `${NAME}` expansion evidence (`expanded` plus the
+approved `referenceAliases`, at most 16 per key), and the schema effect derived only from
+input/output property presence (`validated` / `introduced` / `removed` / `not-configured`;
+`introduced` reports the appearance and never names a mechanism, since a schema default and a
+transform are indistinguishable by presence).
+
+No configuration value, value hash, value length, raw key name, or file path is ever retained or
+served. Unapproved keys are never observed — no entry, and no counter disclosing that they exist; an
+unapproved file path contributes only the category `file`. `loadConfig(runtime, { diagnostics })`
+builds the record with the snapshot; `ConfigPlugin({ instance, diagnostics })` adopts that exact
+instance's record (keeping each entry's real `environment`/`file` origin — injection is how the
+snapshot reached the application, not where its values came from) or, for an opaque injected
+instance, reports every approved alias with origin and schema effect `unknown` and NO presence flag,
+without a single read of it. Provenance adds no read to any configuration object: configured
+sections perform exactly the same `IConfig.get` calls with diagnostics disabled and enabled.
+
+The plugin ALWAYS registers the source under the eager `CAPABILITIES.CONFIG_DIAGNOSTICS` token:
+absent `diagnostics` answers `disabled`; enabled with no approved resolved entries answers
+`no-data`; otherwise `ready`. The Diagnostics Connector serves it at `GET /v1/config` (see
+[Diagnostics Connector](#diagnostics-connector-setu-tsdiagnostics-plugin) and
+`docs/diagnostics-protocol.md`); snapshots are deeply frozen and bounded by the connector's 256 KiB
+response ceiling.
+
+### Exports
+
+| Export                     | Kind      |
+| -------------------------- | --------- |
+| `ConfigPlugin`             | function  |
+| `ConfigPluginOptions`      | interface |
+| `loadConfig`               | function  |
+| `StructuralSchema`         | interface |
+| `defineConfigSection`      | function  |
+| `getConfigSection`         | function  |
+| `ConfigSection`            | interface |
+| `ConfigDiagnosticsOptions` | interface |
 
 ---
 
@@ -4040,13 +4093,13 @@ pairing automatically, serializes calls with strictly increasing sequence number
 response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
-`{ health: true, configuration: false, queues: false, traces: false, authorization: false,
+`{ health: true, configuration: true, queues: false, traces: false, authorization: false,
 cache: false, events: false, scheduler: false, realtime: false, storage: false,
 outboundHttp: false }`
-— and the connector serves a first inspector operation, `GET /v1/health`. The client reads it
-through `client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector resolves the optional
-health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source
-answers a typed `unsupported` snapshot (no indicator runs, startup never fails), a
+— and the connector serves two inspector operations so far, `GET /v1/health` and `GET /v1/config`.
+The client reads health through `client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector
+resolves the optional health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration:
+an absent source answers a typed `unsupported` snapshot (no indicator runs, startup never fails), a
 registered-but-disabled source answers `disabled`, and a throwing source answers a value-free
 `collection-failed` snapshot — as does a source whose projected DTO fails the exact validator (an
 unknown enum, a non-finite or negative measurement, an oversized alias, more than 64 observations, a
@@ -4057,6 +4110,20 @@ projected field-by-field and bounded by the same 256 KiB response ceiling as eve
 A client paired against a legacy M98b status body (no manifest) resolves all inspectors to `false`
 and its `health()` answers `unsupported` without sending the request. The full wire shape is in
 `docs/diagnostics-protocol.md`.
+
+**Configuration provenance (M98e).** The connector serves the config plugin's value-free provenance
+snapshot at `GET /v1/config`, read through
+`client.configuration(): Promise<ConfigDiagnosticsSnapshot>`. The source is resolved under
+`CAPABILITIES.CONFIG_DIAGNOSTICS` — the ConfigPlugin registers one EAGERLY, always, so "no config
+plugin" (typed `unsupported`) is distinguishable from "present but off" (the plugin's own `disabled`
+answer). A throwing source, or one whose projected DTO fails the exact validator (an unknown origin
+or schema effect, a `sourceAlias` on a non-`file` origin, an oversized alias, an over-budget alias
+array, a malformed shape), answers a value-free `collection-failed` snapshot, so nothing unvalidated
+is ever signed. Every string is an application-approved display alias: no configuration value, value
+hash, value length, raw key name, or file path is ever carried, and unapproved keys are never
+observed at all — no counter discloses that they exist. The negotiated manifest governs
+`configuration()` exactly as it governs `health()`: a legacy pairing answers `unsupported` without
+sending the request.
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
@@ -9890,6 +9957,21 @@ vocabularies `DiagnosticsNodeKind`, `DiagnosticsEdgeKind`, `DiagnosticsSnapshotS
 value and no capability token, because the reader is reached through the application, never resolved
 from the registry. Activation, label allowlists, and the projection bounds are the kernel's — see
 [Kernel diagnostics](#kernel-diagnostics-setu-tskernel--setu-tscommon).
+
+### Inspector contracts (0.8.0)
+
+The inspector-side contracts the optional addon packages register and the Diagnostics Connector
+consumes: `IHealthDiagnosticsSource` under `CAPABILITIES.HEALTH_DIAGNOSTICS` (M98d, served by the
+health plugin — see [Health](#health-setu-tshealth-plugin)) and `IConfigDiagnosticsSource` under
+`CAPABILITIES.CONFIG_DIAGNOSTICS` (M98e, served by the config plugin — see
+[ConfigPlugin](#configplugin-setu-tsconfig-plugin)). The shared vocabulary
+`DiagnosticsInspectorState` distinguishes `unsupported` (a connector-side answer: the operation is
+implemented but no source is registered) from `disabled` (the owning plugin's answer: present but
+not opted in). The M98e DTOs — `ConfigProvenanceOrigin` (`environment`/`file`/`unknown`),
+`ConfigSchemaEffect` (`not-configured`/`validated`/`introduced`/`removed`/`unknown`),
+`ConfigProvenanceEntry`, and `ConfigDiagnosticsSnapshot` — are type-only exports carrying
+application-approved aliases and evidence only; the privacy rules are the config plugin's and the
+wire shape is `docs/diagnostics-protocol.md`'s.
 
 ### Ingress behaviours
 

@@ -5231,8 +5231,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `--transport-url` code injection into generated `setu.config.ts` on `main` (OBS-1), fixed here at
   the maintainer's direction. The F5 and OBS-1 fixes after round 4 were not re-audited: the
   maintainer waived round 5 rather than hold the merge — complete (PR #364).
-- **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
-  design security review and implementation audit required).
+- **Milestone 98e** (`packages/config-plugin` + `packages/common` + `packages/diagnostics-plugin` —
+  value-free configuration provenance): `ConfigPlugin`/`loadConfig` accept a `diagnostics` option
+  (`ConfigDiagnosticsOptions`) that records, during the one load already performed, value-free
+  provenance for explicitly approved keys only — source category and approved aliases, evidenced
+  precedence displacement, `${NAME}` expansion references, and a presence-derived schema effect
+  (`introduced` reports appearance, never mechanism). No value, hash, length, raw key name, or file
+  path is ever retained; unapproved keys are never observed, and an opaque injected instance is
+  answered `unknown` with no presence flag and no read. The record travels with the exact `IConfig`
+  through a module-private WeakMap, so standalone `loadConfig` followed by
+  `ConfigPlugin({ instance })` stays one snapshot. `common` gains the eager
+  `CAPABILITIES.CONFIG_DIAGNOSTICS` token, `IConfigDiagnosticsSource`, and the DTOs; the plugin
+  always registers a source (`disabled` without the option); the connector serves `GET /v1/config`
+  and its status manifest reports `configuration: true`; the client reads it through
+  `configuration()`. Implementation security audit runs on the committed tree before the PR (record
+  in the PR) — complete (PR pending).
+- **Next milestone** — **M98f** (`packages/queue-plugin` — queue attempt, outcome and depth
+  observations; design security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

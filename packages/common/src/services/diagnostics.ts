@@ -445,3 +445,140 @@ export interface IHealthDiagnosticsSource {
    */
   snapshot(instanceId: string): HealthDiagnosticsSnapshot;
 }
+
+/**
+ * Where a configuration key's final value was observed to come from.
+ *
+ * `environment` and `file` are the two sources the loader itself reads; each
+ * value names its producer. `unknown` has exactly two producers: an opaque
+ * injected `IConfig` instance, whose internals no observation can reach, and
+ * a key present in the post-schema snapshot for which no environment or file
+ * source was observed — it appeared only after schema parsing. `unknown`
+ * never claims a mechanism, only the absence of an observed source.
+ *
+ * @since 0.8.0
+ */
+export type ConfigProvenanceOrigin = 'environment' | 'file' | 'unknown';
+
+/**
+ * The schema effect observed for one approved key, derived only from
+ * input/output property PRESENCE around the schema parse.
+ *
+ * `validated` means the key was present in the loaded input and in the
+ * parsed output. `introduced` means it was absent from the input and present
+ * in the output — a schema default and a transform deriving the key from
+ * other inputs produce the identical presence pattern, so `introduced`
+ * reports the appearance and NOT its cause. `removed` means present in the
+ * input and absent from the output. `not-configured` means no validation
+ * schema was configured. `unknown` means no observation can establish any
+ * effect — the opaque injected instance. Naming a mechanism the observation
+ * cannot establish (for example `defaulted`) would misstate the source for
+ * every transform-derived key, so the vocabulary stays at what presence can
+ * prove.
+ *
+ * @since 0.8.0
+ */
+export type ConfigSchemaEffect =
+  | 'not-configured'
+  | 'validated'
+  | 'introduced'
+  | 'removed'
+  | 'unknown';
+
+/**
+ * One minimized provenance record for one approved configuration key alias.
+ *
+ * Every string is an application-approved display alias — never a raw key
+ * name, never a file path, and never a value. `origin` names the producer of
+ * the final value; `sourceAlias` is present only when the origin is `file`
+ * AND the configured file path was explicitly approved. `expanded` reports
+ * that the key's already-loaded raw string contained the `${NAME}` expansion
+ * grammar; `referenceAliases` carries the approved aliases of the keys it
+ * referenced (references with unapproved endpoints are omitted, never
+ * named). `overriddenSourceAliases` carries the approved aliases of the
+ * sources this key's value displaced, in displacement order. No field ever
+ * carries a value, a value hash, a value length, or an absolute path.
+ *
+ * @since 0.8.0
+ */
+export interface ConfigProvenanceEntry {
+  /** The approved display alias for the configuration key. */
+  readonly keyAlias: string;
+  /** Where the final value was observed to come from. */
+  readonly origin: ConfigProvenanceOrigin;
+  /** The approved source alias for a `file` origin; absent otherwise. */
+  readonly sourceAlias?: string;
+  /** Approved aliases of the sources this value displaced, in displacement order. */
+  readonly overriddenSourceAliases: readonly string[];
+  /** Whether the key's loaded raw string contained the `${NAME}` grammar. */
+  readonly expanded: boolean;
+  /** Approved aliases of the keys this key's expansion referenced. */
+  readonly referenceAliases: readonly string[];
+  /** The schema effect observed for this key. */
+  readonly schemaEffect: ConfigSchemaEffect;
+}
+
+/**
+ * An immutable, minimized snapshot of configuration provenance.
+ *
+ * The snapshot contains only {@linkcode version}, {@linkcode instanceId},
+ * {@linkcode state}, {@linkcode entries}, {@linkcode truncated}, and
+ * {@linkcode droppedEntries}. `entries` is the projection of the approved
+ * keys in stable declaration order; when the serialized size would exceed
+ * the fixed 256 KiB snapshot budget, later entries are omitted and
+ * {@linkcode truncated} is set. `droppedEntries` counts entries omitted by
+ * that budget — unapproved keys are never observed at all, so no counter
+ * discloses how many exist. The exact UTF-8 byte length of the compact
+ * `JSON.stringify` of this object is bounded by the connector's response
+ * budget.
+ *
+ * @since 0.8.0
+ */
+export interface ConfigDiagnosticsSnapshot {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the snapshot was read for; must equal the caller's. */
+  readonly instanceId: string;
+  /** Coarse inspector availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** Latest provenance for the approved keys, in stable declaration order. */
+  readonly entries: readonly ConfigProvenanceEntry[];
+  /** `true` when the size budget caused entries to be omitted. */
+  readonly truncated: boolean;
+  /** Count of entries omitted by the size budget. */
+  readonly droppedEntries: number;
+}
+
+/**
+ * Read-only configuration provenance source — the surface the ConfigPlugin
+ * registers under {@linkcode CAPABILITIES.CONFIG_DIAGNOSTICS} and the
+ * DiagnosticsPlugin consumes to serve `GET /v1/config`.
+ *
+ * Synchronous by contract: `snapshot(instanceId)` returns an already-built
+ * frozen DTO and performs no environment, filesystem, schema, or lazy-service
+ * operation, adds no read to the underlying `IConfig`, and never enumerates
+ * it. A source that throws is reported by the connector as a value-free
+ * `collection-failed` snapshot, never as a fault that changes application
+ * behavior.
+ *
+ * @example
+ * ```typescript
+ * const source = ctx.services.get<IConfigDiagnosticsSource>(
+ *   CAPABILITIES.CONFIG_DIAGNOSTICS,
+ * );
+ * const snapshot = source.snapshot(instanceId);
+ * ```
+ * @since 0.8.0
+ */
+export interface IConfigDiagnosticsSource {
+  /**
+   * Returns the current minimized provenance snapshot for the given instance.
+   *
+   * @param instanceId - The non-empty instance UUID to bind the snapshot to
+   * @returns A deeply frozen {@linkcode ConfigDiagnosticsSnapshot} whose
+   * `instanceId` exactly equals the argument
+   * @throws {RangeError} When `instanceId` is not a non-empty string — with a
+   * fixed message that never echoes the value
+   */
+  snapshot(instanceId: string): ConfigDiagnosticsSnapshot;
+}

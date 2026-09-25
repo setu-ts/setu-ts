@@ -8,11 +8,16 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { HealthDiagnosticsSnapshot, IResponse } from '@setu-ts/common';
+import type {
+  ConfigDiagnosticsSnapshot,
+  HealthDiagnosticsSnapshot,
+  IConfigDiagnosticsSource,
+  IResponse,
+} from '@setu-ts/common';
 import { createConnectorHandler, refusalResponse } from '../../src/transport/connector-handler.ts';
-import { currentInspectorsManifest } from '../../src/protocol/protocol.ts';
+import { currentInspectorsManifest, projectConfigSnapshot } from '../../src/protocol/protocol.ts';
 import { ConnectorLimits } from '../../src/transport/limits.ts';
-import { verifyFields } from '../../src/security/authentication.ts';
+import { responseMacFields, sha256Hex, verifyFields } from '../../src/security/authentication.ts';
 import {
   createTestSession,
   fakeRequest,
@@ -24,6 +29,7 @@ import {
   signRequest,
   TEST_INSTANCE_ID,
   TEST_PORT,
+  TEST_SESSION_ID,
   utf8,
 } from '../fixtures/helpers.ts';
 import fixture from '../fixtures/protocol-v1.json' with { type: 'json' };
@@ -43,9 +49,57 @@ interface HandlerHarness {
  * @param options - Optional overrides
  * @returns The harness
  */
+/**
+ * A configurable fake `IConfigDiagnosticsSource`: serves the given snapshot
+ * (or throws), and counts the calls so tests can prove when the source was
+ * NOT read.
+ *
+ * @param snapshot - The snapshot to serve, or a thrown error
+ * @returns The fake source with its call counter
+ */
+function fakeConfigSource(
+  snapshot: ConfigDiagnosticsSnapshot | Error,
+): IConfigDiagnosticsSource & { calls: number } {
+  return {
+    calls: 0,
+    snapshot(instanceId: string): ConfigDiagnosticsSnapshot {
+      this.calls += 1;
+      void instanceId;
+      if (snapshot instanceof Error) {
+        throw snapshot;
+      }
+      // Served VERBATIM: a source bound to the wrong instance must reach the
+      // handler that way, or the cross-instance refusal could never fire.
+      return snapshot;
+    },
+  };
+}
+
+/** A minimal ready configuration snapshot for handler tests. */
+function minimalConfigSnapshot(): ConfigDiagnosticsSnapshot {
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    entries: [
+      {
+        keyAlias: 'port',
+        origin: 'environment',
+        overriddenSourceAliases: ['dotenv'],
+        expanded: false,
+        referenceAliases: [],
+        schemaEffect: 'validated',
+      },
+    ],
+    truncated: false,
+    droppedEntries: 0,
+  };
+}
+
 async function buildHarness(options?: {
   snapshot?: Record<string, unknown>;
   batch?: Record<string, unknown>;
+  configSource?: IConfigDiagnosticsSource | null;
 }): Promise<HandlerHarness> {
   const clock = new MutableClock();
   // The 15-minute default TTL: what the fixture's frozen-clock status body
@@ -64,6 +118,7 @@ async function buildHarness(options?: {
     source,
     clock,
     healthSource: null,
+    configSource: options?.configSource ?? null,
   });
   return { handler, clock, source, session, key };
 }
@@ -92,6 +147,41 @@ function inspect(response: IResponse): {
 }
 
 const HOST = `127.0.0.1:${TEST_PORT}`;
+
+/**
+ * The exact projection the handler must serve for a source snapshot — the
+ * field-by-field copy the wire carries, which is what body assertions
+ * compare against.
+ *
+ * @param snapshot - The source snapshot
+ * @returns The serialization-ready projection
+ */
+function projectOf(snapshot: ConfigDiagnosticsSnapshot): Record<string, unknown> {
+  return projectConfigSnapshot(snapshot);
+}
+
+/**
+ * Builds the canonical response MAC fields for the signed-body assertions.
+ *
+ * @param target - The canonical target
+ * @param sequence - The request sequence
+ * @param digest - The served body digest
+ * @returns The response MAC input fields
+ */
+function responseFieldsFor(
+  target: string,
+  sequence: string,
+  digest: string,
+): readonly string[] {
+  return responseMacFields(
+    TEST_SESSION_ID,
+    TEST_INSTANCE_ID,
+    sequence,
+    target,
+    '200',
+    digest,
+  );
+}
 
 describe('Connector handler — structural refusals', () => {
   it('refuses non-GET methods before spending an admission', async () => {
@@ -473,6 +563,7 @@ describe('Connector handler — authentication and binding', () => {
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
+      configSource: null,
     });
     expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
     clock.advance(1_000);
@@ -583,6 +674,7 @@ describe('Connector handler — projection hardening', () => {
       source: throwingSource,
       clock,
       healthSource: null,
+      configSource: null,
     });
     // The throwing path is BELOW the handler's try — the connector-handler
     // module catches nothing inside; the runtime listener owns the 503 arm.
@@ -653,6 +745,7 @@ describe('Connector handler — health operation (M98d)', () => {
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: { snapshot: () => healthSnapshot },
+      configSource: null,
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -690,6 +783,7 @@ describe('Connector handler — health operation (M98d)', () => {
           throw new Error('boom');
         },
       },
+      configSource: null,
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -733,6 +827,7 @@ describe('Connector handler — health operation (M98d)', () => {
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
+      configSource: null,
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -998,6 +1093,7 @@ describe('Connector handler — remaining structural arms', () => {
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
+      configSource: null,
     });
     // Forty full-burst honest statuses without any elapsed time exhaust the
     // session's fixed burst budget. Sequence 1 binds (empty instance);
@@ -1039,6 +1135,7 @@ describe('Connector handler — remaining structural arms', () => {
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
+      configSource: null,
     });
     // The request CLAIMS port 5959 (its Host and URL match the handler) but
     // the MAC was signed for 4919: authentication must refuse it.
@@ -1055,5 +1152,200 @@ describe('Connector handler — remaining structural arms', () => {
       }),
     );
     expect(inspect(response).status).toEqual(401);
+  });
+});
+
+describe('Connector handler — configuration provenance operation (M98e)', () => {
+  it('serves the source snapshot, projected exactly, signed, after authentication', async () => {
+    const configSource = fakeConfigSource(minimalConfigSnapshot());
+    const { handler, key, session } = await buildHarness({ configSource });
+    // Bind the session the way the status exchange would.
+    session.bindInstance(TEST_INSTANCE_ID);
+    const mac = await signRequest(crypto.subtle, key, '/v1/config', 1, TEST_INSTANCE_ID);
+    const response = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/config`,
+        headers: {
+          host: HOST,
+          'x-setu-session': TEST_SESSION_ID,
+          'x-setu-sequence': '1',
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    const view = inspect(response);
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual(projectOf(minimalConfigSnapshot()));
+    expect(view.headers.get('x-setu-instance')).toEqual(TEST_INSTANCE_ID);
+    // The response MAC verifies over the served bytes with the canonical
+    // response grammar — the same property the native client checks.
+    const digest = await sha256Hex(crypto.subtle, utf8(view.bodyText));
+    const verified = await verifyFields(
+      crypto.subtle,
+      key,
+      view.headers.get('x-setu-mac') ?? '',
+      responseFieldsFor('/v1/config', '1', digest),
+    );
+    expect(verified).toBe(true);
+    expect(configSource.calls).toEqual(1);
+  });
+
+  it('never reads the source when authentication fails', async () => {
+    const configSource = fakeConfigSource(minimalConfigSnapshot());
+    const { handler, key, session } = await buildHarness({ configSource });
+    // Bind the session the way the status exchange would.
+    session.bindInstance(TEST_INSTANCE_ID);
+    // An honest MAC signed for a DIFFERENT target: verification must refuse,
+    // and the refusal must precede any read of the source.
+    const mac = await signRequest(crypto.subtle, key, '/v1/status', 1, TEST_INSTANCE_ID);
+    const response = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/config`,
+        headers: {
+          host: HOST,
+          'x-setu-session': TEST_SESSION_ID,
+          'x-setu-sequence': '1',
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    expect(inspect(response).status).toEqual(401);
+    expect(configSource.calls).toEqual(0);
+  });
+
+  it('answers a typed unsupported snapshot without a registered source', async () => {
+    const { handler, key, session } = await buildHarness({ configSource: null });
+    // Bind the session the way the status exchange would.
+    session.bindInstance(TEST_INSTANCE_ID);
+    const mac = await signRequest(crypto.subtle, key, '/v1/config', 1, TEST_INSTANCE_ID);
+    const response = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/config`,
+        headers: {
+          host: HOST,
+          'x-setu-session': TEST_SESSION_ID,
+          'x-setu-sequence': '1',
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    const view = inspect(response);
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'unsupported',
+      entries: [],
+      truncated: false,
+      droppedEntries: 0,
+    });
+  });
+
+  it('answers a value-free collection-failed snapshot when the source throws', async () => {
+    const configSource = fakeConfigSource(
+      new Error('canary-source-failure-SYNTHETIC: secret/path/value'),
+    );
+    const { handler, key, session } = await buildHarness({ configSource });
+    // Bind the session the way the status exchange would.
+    session.bindInstance(TEST_INSTANCE_ID);
+    const mac = await signRequest(crypto.subtle, key, '/v1/config', 1, TEST_INSTANCE_ID);
+    const response = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/config`,
+        headers: {
+          host: HOST,
+          'x-setu-session': TEST_SESSION_ID,
+          'x-setu-sequence': '1',
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    const view = inspect(response);
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'collection-failed',
+      entries: [],
+      truncated: false,
+      droppedEntries: 0,
+    });
+    // Value-free: the thrown message never reaches the wire.
+    expect(view.bodyText).not.toContain('canary-source-failure-SYNTHETIC');
+  });
+
+  it('refuses a source DTO bound to a different instance', async () => {
+    const source = fakeConfigSource({
+      ...minimalConfigSnapshot(),
+      instanceId: '00000000-0000-4000-8000-000000000000',
+    });
+    const { handler, key, session } = await buildHarness({ configSource: source });
+    // Bind the session the way the status exchange would.
+    session.bindInstance(TEST_INSTANCE_ID);
+    const mac = await signRequest(crypto.subtle, key, '/v1/config', 1, TEST_INSTANCE_ID);
+    const response = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/config`,
+        headers: {
+          host: HOST,
+          'x-setu-session': TEST_SESSION_ID,
+          'x-setu-sequence': '1',
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    expect(inspect(response).status).toEqual(401);
+  });
+
+  it('answers collection-failed for a hostile DTO the validator rejects', async () => {
+    const source = fakeConfigSource({
+      ...minimalConfigSnapshot(),
+      entries: [
+        {
+          keyAlias: 'port',
+          origin: 'environment',
+          overriddenSourceAliases: ['dotenv'],
+          expanded: false,
+          referenceAliases: [],
+          // Copied by the field-by-field projection, then rejected by the
+          // exact DTO validator: a mechanism name presence cannot prove.
+          schemaEffect: 'defaulted',
+          // Outside the allowlist: dropped by the projection entirely.
+          value: 'canary-value-SYNTHETIC',
+        } as unknown as ConfigDiagnosticsSnapshot['entries'][number],
+      ],
+    });
+    const { handler, key, session } = await buildHarness({ configSource: source });
+    // Bind the session the way the status exchange would.
+    session.bindInstance(TEST_INSTANCE_ID);
+    const mac = await signRequest(crypto.subtle, key, '/v1/config', 1, TEST_INSTANCE_ID);
+    const response = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/config`,
+        headers: {
+          host: HOST,
+          'x-setu-session': TEST_SESSION_ID,
+          'x-setu-sequence': '1',
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    const view = inspect(response);
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'collection-failed',
+      entries: [],
+      truncated: false,
+      droppedEntries: 0,
+    });
+    expect(view.bodyText).not.toContain('canary-value-SYNTHETIC');
   });
 });

@@ -40,3 +40,45 @@ describe('expandVariables', () => {
     });
   });
 });
+
+describe('expandVariables | grammar observer (M98e provenance)', () => {
+  it('reports each grammatical key exactly once with distinct reference names', () => {
+    const seen = new Map<string, readonly string[]>();
+    expandVariables(
+      {
+        HOST: 'localhost',
+        ORIGIN: 'http://${HOST}',
+        URL: '${ORIGIN}/api/${HOST}',
+        PLAIN: 'no-grammar',
+      },
+      (key, references) => {
+        if (seen.has(key)) {
+          throw new Error(`observer fired twice for ${key}`);
+        }
+        seen.set(key, references);
+      },
+    );
+    // Every key reached as someone else's reference is expanded exactly once
+    // and reported — not only the keys the top-level loop starts from.
+    expect(seen.get('ORIGIN')).toEqual(['HOST']);
+    expect(seen.get('URL')).toEqual(['ORIGIN', 'HOST']);
+    expect(seen.has('HOST')).toBe(false); // its raw value has no grammar
+    expect(seen.has('PLAIN')).toBe(false);
+  });
+
+  it('reports nothing when expansion is a pure copy without the grammar', () => {
+    let fired = 0;
+    expandVariables({ A: 'plain', B: 'also-plain' }, () => {
+      fired += 1;
+    });
+    expect(fired).toEqual(0);
+  });
+
+  it('still throws for a missing reference before any record can matter', () => {
+    expect(() =>
+      expandVariables({ A: '${MISSING}' }, () => {
+        throw new Error('observer must not be consulted on a failed load');
+      })
+    ).toThrow(/is not defined/);
+  });
+});

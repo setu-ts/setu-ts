@@ -11,6 +11,8 @@
  */
 
 import type {
+  ConfigDiagnosticsSnapshot,
+  ConfigProvenanceEntry,
   DiagnosticsBatch,
   DiagnosticsEvent,
   DiagnosticsSnapshot,
@@ -63,6 +65,7 @@ export const PROTOCOL_RESPONSE_HEADERS: Readonly<Record<string, string>> = {
 export const STATUS_TARGET = '/v1/status';
 export const SNAPSHOT_TARGET = '/v1/snapshot';
 export const HEALTH_TARGET = '/v1/health';
+export const CONFIG_TARGET = '/v1/config';
 const EVENTS_PATH = '/v1/events';
 
 /**
@@ -87,7 +90,7 @@ const EVENTS_QUERY = /^after=([0-9]+)&limit=([0-9]+)$/;
  * @internal
  */
 export interface ParsedTarget {
-  readonly op: 'status' | 'snapshot' | 'events' | 'health';
+  readonly op: 'status' | 'snapshot' | 'events' | 'health' | 'config';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events only); `0` for the other ops. */
@@ -118,6 +121,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === HEALTH_TARGET && search === '') {
     return { op: 'health', canonicalTarget: HEALTH_TARGET, after: 0, limit: 0 };
+  }
+  if (path === CONFIG_TARGET && search === '') {
+    return { op: 'config', canonicalTarget: CONFIG_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENTS_PATH) {
     const match = EVENTS_QUERY.exec(search);
@@ -334,8 +340,9 @@ export const INSPECTOR_KEYS = [
 export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number], boolean>>;
 
 /**
- * The inspector manifest M98d serves: `health` is implemented; the rest are
- * reserved and false until their own connector operation ships (M98e–M98n).
+ * The inspector manifest the connector serves: `health` (M98d) and
+ * `configuration` (M98e) are implemented; the rest are reserved and false
+ * until their own connector operation ships (M98f–M98n).
  *
  * @returns The fixed manifest
  * @internal
@@ -343,7 +350,7 @@ export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number]
 export function currentInspectorsManifest(): InspectorsManifest {
   return {
     health: true,
-    configuration: false,
+    configuration: true,
     queues: false,
     traces: false,
     authorization: false,
@@ -714,4 +721,176 @@ export function isHealthSnapshotProjection(value: unknown): value is HealthDiagn
     Number.isSafeInteger(value.droppedObservations) &&
     value.droppedObservations >= 0 &&
     value.observations.every(isHealthObservationProjection);
+}
+
+/**
+ * The fixed origin vocabulary the configuration snapshot projects onto.
+ *
+ * @internal
+ */
+const CONFIG_ORIGINS: ReadonlySet<string> = new Set(['environment', 'file', 'unknown']);
+
+/**
+ * The fixed schema-effect vocabulary the configuration snapshot projects
+ * onto.
+ *
+ * @internal
+ */
+const CONFIG_SCHEMA_EFFECTS: ReadonlySet<string> = new Set([
+  'not-configured',
+  'validated',
+  'introduced',
+  'removed',
+  'unknown',
+]);
+
+/** The entry keys always present; `sourceAlias` is added only when carried. */
+const CONFIG_ENTRY_KEYS: readonly string[] = [
+  'keyAlias',
+  'origin',
+  'overriddenSourceAliases',
+  'expanded',
+  'referenceAliases',
+  'schemaEffect',
+];
+
+/** The exact snapshot keys a configuration projection carries. */
+const CONFIG_SNAPSHOT_KEYS: readonly string[] = [
+  'version',
+  'instanceId',
+  'state',
+  'entries',
+  'truncated',
+  'droppedEntries',
+];
+
+/** The fixed upper bounds, matching the approved budgets on both sides. */
+const MAX_CONFIG_ENTRIES = 128;
+const MAX_CONFIG_REFERENCES = 16;
+const MAX_CONFIG_OVERRIDDEN = 8;
+
+/** Validates one bounded alias array: strings of 1–64 UTF-8 bytes, at most `max`. */
+function isBoundedAliasArray(value: unknown, max: number): boolean {
+  return Array.isArray(value) && value.length <= max && value.every((alias) => {
+    if (typeof alias !== 'string') {
+      return false;
+    }
+    const bytes = ALIAS_ENCODER.encode(alias).length;
+    return bytes >= 1 && bytes <= MAX_ALIAS_BYTES;
+  });
+}
+
+/**
+ * Re-projects one provenance entry against the exact M98e field allowlist.
+ * Copies field-by-field — never a spread of a provider result — so an
+ * unexpected field on an internal DTO cannot reach the wire.
+ *
+ * @param entry - The source entry
+ * @returns The projected record
+ * @internal
+ */
+export function projectConfigEntry(entry: ConfigProvenanceEntry): Record<string, unknown> {
+  const projected: Record<string, unknown> = {
+    keyAlias: entry.keyAlias,
+    origin: entry.origin,
+    overriddenSourceAliases: entry.overriddenSourceAliases,
+    expanded: entry.expanded,
+    referenceAliases: entry.referenceAliases,
+    schemaEffect: entry.schemaEffect,
+  };
+  copyOptional(projected, 'sourceAlias', entry.sourceAlias);
+  return projected;
+}
+
+/**
+ * Re-projects a configuration snapshot against the exact M98e field
+ * allowlist. The body is the compact final configuration-snapshot JSON — not
+ * an envelope — so the projection produces exactly the DTO's fields and no
+ * others.
+ *
+ * @param snapshot - The source configuration snapshot
+ * @returns The projected, serialization-ready record
+ * @internal
+ */
+export function projectConfigSnapshot(
+  snapshot: ConfigDiagnosticsSnapshot,
+): Record<string, unknown> {
+  return {
+    version: snapshot.version,
+    instanceId: snapshot.instanceId,
+    state: snapshot.state,
+    entries: snapshot.entries.map(projectConfigEntry),
+    truncated: snapshot.truncated,
+    droppedEntries: snapshot.droppedEntries,
+  };
+}
+
+/** Validates one projected provenance entry against the exact M98e DTO. */
+function isConfigEntryProjection(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const carriesAlias = typeof value.origin === 'string' && value.origin === 'file' &&
+    Object.hasOwn(value, 'sourceAlias');
+  const keys = carriesAlias ? [...CONFIG_ENTRY_KEYS, 'sourceAlias'] : CONFIG_ENTRY_KEYS;
+  if (!hasExactKeys(value, keys)) {
+    return false;
+  }
+  const alias = value.keyAlias;
+  if (typeof alias !== 'string') {
+    return false;
+  }
+  const aliasBytes = ALIAS_ENCODER.encode(alias).length;
+  // `sourceAlias` may ride only a `file` origin — an environment or unknown
+  // origin carries no source alias at all, and a `file` origin may omit one
+  // when its path was not approved.
+  const sourceAliasOk = typeof value.origin !== 'string' || value.origin !== 'file'
+    ? !Object.hasOwn(value, 'sourceAlias')
+    : !Object.hasOwn(value, 'sourceAlias') ||
+      (typeof value.sourceAlias === 'string' &&
+        ALIAS_ENCODER.encode(value.sourceAlias).length >= 1 &&
+        ALIAS_ENCODER.encode(value.sourceAlias).length <= MAX_ALIAS_BYTES);
+  return aliasBytes >= 1 && aliasBytes <= MAX_ALIAS_BYTES &&
+    typeof value.origin === 'string' && CONFIG_ORIGINS.has(value.origin) &&
+    sourceAliasOk &&
+    isBoundedAliasArray(value.overriddenSourceAliases, MAX_CONFIG_OVERRIDDEN) &&
+    typeof value.expanded === 'boolean' &&
+    isBoundedAliasArray(value.referenceAliases, MAX_CONFIG_REFERENCES) &&
+    typeof value.schemaEffect === 'string' && CONFIG_SCHEMA_EFFECTS.has(value.schemaEffect);
+}
+
+/**
+ * Reports whether a value is a well-formed M98e configuration-snapshot
+ * projection: EXACTLY the six snapshot keys, version `1`, a non-empty
+ * instance string, a fixed inspector state, at most 128 entries, a
+ * non-negative safe-integer drop count, and every entry carrying exactly its
+ * allowed keys — `sourceAlias` present only on a `file` origin — every enum
+ * from its fixed vocabulary, every alias 1–64 UTF-8 bytes, and every alias
+ * array within its budget.
+ *
+ * ONE validator for both sides of the wire: the connector runs it over its
+ * own field-by-field projection before signing (a source that violates the
+ * DTO is answered `collection-failed`, so nothing unvalidated is signed),
+ * and the native client runs it again before handing data to a consumer.
+ *
+ * @param value - The parsed JSON value, or a fresh projection
+ * @returns `true` when the value is a well-formed configuration snapshot
+ * @internal
+ */
+export function isConfigSnapshotProjection(value: unknown): value is ConfigDiagnosticsSnapshot {
+  if (!isRecord(value) || !hasExactKeys(value, CONFIG_SNAPSHOT_KEYS)) {
+    return false;
+  }
+  return value.version === 1 &&
+    typeof value.instanceId === 'string' &&
+    value.instanceId.length > 0 &&
+    typeof value.state === 'string' &&
+    INSPECTOR_STATES.has(value.state) &&
+    Array.isArray(value.entries) &&
+    value.entries.length <= MAX_CONFIG_ENTRIES &&
+    typeof value.truncated === 'boolean' &&
+    typeof value.droppedEntries === 'number' &&
+    Number.isSafeInteger(value.droppedEntries) &&
+    value.droppedEntries >= 0 &&
+    value.entries.every(isConfigEntryProjection);
 }

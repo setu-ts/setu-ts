@@ -28,6 +28,7 @@ devtool has been verified.
 | `GET /v1/snapshot`               | M98a's compact final snapshot JSON (not an envelope)                                                                                                                             |
 | `GET /v1/events?after=N&limit=N` | M98a's frozen event batch; `after` is a canonical non-negative decimal, `limit` is 1–128, in exactly this order                                                                  |
 | `GET /v1/health`                 | M98d's minimized health-observation snapshot (below)                                                                                                                             |
+| `GET /v1/config`                 | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
 duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
@@ -120,11 +121,12 @@ No refusal ever echoes supplied input, error causes, or stacks.
 ## Health observations (M98d)
 
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
-every inspector the connector knows and whether it is implemented; M98d serves `health: true` and
-leaves the rest (`configuration`, `queues`, `traces`, `authorization`, `cache`, `events`,
-`scheduler`, `realtime`, `storage`, `outboundHttp`) reserved and `false`. A client that reads a
-legacy M98b three-field status body (no `inspectors`) resolves the manifest to all-`false`, so its
-`health()` answers a typed `unsupported` without sending the request.
+every inspector the connector knows and whether it is implemented; `health` (M98d) and
+`configuration` (M98e) are implemented, and the rest (`queues`, `traces`, `authorization`, `cache`,
+`events`, `scheduler`, `realtime`, `storage`, `outboundHttp`) are reserved and `false`. A client
+that reads a legacy M98b three-field status body (no `inspectors`) resolves the manifest to
+all-`false`, so its `health()` and `configuration()` answer a typed `unsupported` without sending
+the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -159,6 +161,44 @@ own status (present only when `reported`), the outcome state, and monotonic `lat
 indicator `data`, no error text, and no absolute time is admitted. The response is signed and
 bounded exactly like every other operation: the MAC covers the exact body bytes, and the parsed
 `instanceId` must equal the authenticated header.
+
+## Configuration provenance (M98e)
+
+`GET /v1/config` serves the config plugin's value-free provenance snapshot — the same frozen DTO the
+plugin registers under `CAPABILITIES.CONFIG_DIAGNOSTICS`, projected field-by-field:
+
+```json
+{
+  "version": 1,
+  "instanceId": "<bound instance UUID>",
+  "state": "ready",
+  "entries": [
+    {
+      "keyAlias": "port",
+      "origin": "environment",
+      "sourceAlias": "dotenv",
+      "overriddenSourceAliases": ["dotenv-local"],
+      "expanded": true,
+      "referenceAliases": ["host"],
+      "schemaEffect": "validated"
+    }
+  ],
+  "truncated": false,
+  "droppedEntries": 0
+}
+```
+
+`sourceAlias` may ride only a `file` origin, and only when the exact configured path was approved.
+`origin` is `environment`, `file`, or `unknown`; `unknown` has exactly two producers — an opaque
+injected `IConfig` instance (reported with schema effect `unknown`, honestly, with no presence flag
+and no read of the instance), and a key present only after schema parsing (effect `introduced`,
+which reports the appearance and never names a mechanism — a default and a transform are
+indistinguishable by presence). No configuration value, value hash, value length, raw key name, or
+file path is ever carried: only application-approved display aliases, the evidenced precedence and
+expansion relationships between them, and the presence-derived schema effect. `droppedEntries`
+counts only entries omitted by the 256 KiB budget — unapproved keys are never observed at all, so no
+counter discloses that they exist. The response is signed and bounded exactly like every other
+operation.
 
 ## Bounds (fixed, not configurable)
 

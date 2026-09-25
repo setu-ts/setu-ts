@@ -13,8 +13,10 @@
  */
 
 import type {
+  ConfigDiagnosticsSnapshot,
   HandlerResult,
   HealthDiagnosticsSnapshot,
+  IConfigDiagnosticsSource,
   IDiagnosticsSource,
   IHealthDiagnosticsSource,
   IRequest,
@@ -29,9 +31,11 @@ import { CONNECTOR_LIMITS } from './limits.ts';
 import {
   currentInspectorsManifest,
   errorBody,
+  isConfigSnapshotProjection,
   isHealthSnapshotProjection,
   parseTarget,
   projectBatch,
+  projectConfigSnapshot,
   projectHealthSnapshot,
   projectSnapshot,
   PROTOCOL_ERRORS,
@@ -176,6 +180,14 @@ export interface ConnectorHandlerDeps {
    * `unsupported` snapshot for `GET /v1/health` and never runs an indicator.
    */
   readonly healthSource: IHealthDiagnosticsSource | null;
+  /**
+   * The optional configuration provenance source (M98e), resolved from
+   * `CAPABILITIES.CONFIG_DIAGNOSTICS` during registration. `null` when the
+   * application did not register one: the connector then answers a typed
+   * `unsupported` snapshot for `GET /v1/config` and never reads a
+   * configuration value.
+   */
+  readonly configSource: IConfigDiagnosticsSource | null;
 }
 
 /**
@@ -351,6 +363,109 @@ function readHealthProjection(
 }
 
 /**
+ * A typed `unsupported` configuration snapshot: the connector implements the
+ * operation, but the application did not register a config-diagnostics
+ * source. Bound to the session's instance so the client's instance check
+ * passes; carries no entries.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @returns The unsupported snapshot
+ * @internal
+ */
+function unsupportedConfigSnapshot(instanceId: string): ConfigDiagnosticsSnapshot {
+  return {
+    version: 1,
+    instanceId,
+    state: 'unsupported',
+    entries: [],
+    truncated: false,
+    droppedEntries: 0,
+  };
+}
+
+/**
+ * A value-free `collection-failed` configuration snapshot: the registered
+ * source threw (or was otherwise unreadable). Carries no error text, cause,
+ * or stack — a source failure must not change application behavior or
+ * disclose a fault.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @returns The collection-failed snapshot
+ * @internal
+ */
+function collectionFailedConfigSnapshot(instanceId: string): ConfigDiagnosticsSnapshot {
+  return {
+    version: 1,
+    instanceId,
+    state: 'collection-failed',
+    entries: [],
+    truncated: false,
+    droppedEntries: 0,
+  };
+}
+
+/**
+ * The outcome of reading the configuration source: either a validated
+ * projection ready to sign, or a refusal code for a version or instance
+ * mismatch.
+ *
+ * @internal
+ */
+type ConfigReadOutcome =
+  | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
+  | { readonly kind: 'refused'; readonly code: 'unsupported-version' | 'unauthorized' };
+
+/**
+ * Reads, projects and VALIDATES the configuration snapshot for the bound
+ * instance, isolating every failure mode to a typed, value-free answer:
+ *
+ * - no registered source → `unsupported`
+ * - a source that throws, whose DTO cannot be projected (a throwing getter,
+ *   a non-array `entries`), or whose projection fails the exact DTO
+ *   validator (an unknown origin or schema effect, an oversized alias, an
+ *   over-budget alias array) → `collection-failed`
+ * - a DTO for another version or another instance → the matching refusal
+ *
+ * The projection copies each field once and the validator then runs over
+ * that COPY, so nothing the connector signs was read twice or left
+ * unchecked. The source is synchronous and never reads a configuration
+ * value, enumerates keys, or invokes the `IConfig` implementation.
+ *
+ * @param deps - The handler dependencies
+ * @param instanceId - The session's bound instance UUID
+ * @returns The projection to sign, or the refusal to answer
+ * @internal
+ */
+function readConfigProjection(
+  deps: ConnectorHandlerDeps,
+  instanceId: string,
+): ConfigReadOutcome {
+  const failed = (): ConfigReadOutcome => ({
+    kind: 'projected',
+    projected: projectConfigSnapshot(collectionFailedConfigSnapshot(instanceId)),
+  });
+  if (deps.configSource === null) {
+    return {
+      kind: 'projected',
+      projected: projectConfigSnapshot(unsupportedConfigSnapshot(instanceId)),
+    };
+  }
+  try {
+    const snapshot = deps.configSource.snapshot(instanceId);
+    if (snapshot.version !== 1) {
+      return { kind: 'refused', code: 'unsupported-version' };
+    }
+    if (snapshot.instanceId !== instanceId) {
+      return { kind: 'refused', code: 'unauthorized' };
+    }
+    const projected = projectConfigSnapshot(snapshot);
+    return isConfigSnapshotProjection(projected) ? { kind: 'projected', projected } : failed();
+  } catch {
+    return failed();
+  }
+}
+
+/**
  * Creates the protocol handler the connector hands to the runtime-owned
  * listener factory.
  *
@@ -495,6 +610,21 @@ export function createConnectorHandler(
           return refusalResponse('unauthorized');
         }
         projected = projectBatch(batch);
+      } else if (target.op === 'config') {
+        // The configuration provenance operation (M98e). All session and
+        // request checks above ran before the source is called; the source
+        // itself is synchronous and never reads a configuration value. The
+        // instance is bound by the auth path for every non-status target, so
+        // capture it non-null.
+        const boundInstance = deps.session.instanceId;
+        if (boundInstance === null) {
+          return refusalResponse('unauthorized');
+        }
+        const outcome = readConfigProjection(deps, boundInstance);
+        if (outcome.kind === 'refused') {
+          return refusalResponse(outcome.code);
+        }
+        projected = outcome.projected;
       } else {
         // The health operation (M98d). All session and request checks above
         // ran before the source is called; the source itself is synchronous

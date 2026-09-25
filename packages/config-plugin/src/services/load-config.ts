@@ -13,11 +13,16 @@
 
 import type { IConfig, IRuntimeServices } from '@setu-ts/common';
 
+import {
+  buildConfigProvenanceEntries,
+  compileConfigDiagnosticsPolicy,
+  storeConfigProvenance,
+} from '../diagnostics/provenance.ts';
 import type { ConfigPluginOptions } from '../options.ts';
 import { validateConfigSections } from '../sections/validate-sections.ts';
 import { ConfigService } from './config-service.ts';
 import type { EnvLoaderOptions } from './env-loader.ts';
-import { loadEnv } from './env-loader.ts';
+import { loadEnvWithProvenance } from './env-loader.ts';
 import { expandVariables as expandConfigVariables } from './variable-expander.ts';
 import { validateConfig } from '../validators/config-validator.ts';
 
@@ -64,15 +69,35 @@ export async function loadConfig(
     return instance;
   }
 
+  // Compile the provenance policy once, before anything is read: an invalid
+  // diagnostics option refuses before any source is touched.
+  const diagnosticsOptions = options?.diagnostics;
+  const policy = diagnosticsOptions === undefined
+    ? null
+    : compileConfigDiagnosticsPolicy(diagnosticsOptions);
+
   const envFilePath = options?.envFilePath;
   const loaderOptions: EnvLoaderOptions = envFilePath === undefined ? {} : {
     envFilePath,
     ...(options?.envFileOptional === undefined ? {} : { envFileOptional: options.envFileOptional }),
   };
 
-  // Load raw string values from environment and files.
-  const loaded = await loadEnv(runtime, loaderOptions);
-  const raw = (options?.expandVariables ?? true) ? expandConfigVariables(loaded) : loaded;
+  // Load raw string values from environment and files — the ONE pass, with
+  // provenance observed as each existing merge step wins when enabled.
+  const { values: loaded, sources } = await loadEnvWithProvenance(
+    runtime,
+    loaderOptions,
+    policy === null ? undefined : { aliasByPath: policy.aliasByPath },
+  );
+  const expansions = new Map<string, readonly string[]>();
+  const raw = (options?.expandVariables ?? true)
+    ? expandConfigVariables(
+      loaded,
+      policy === null ? undefined : (key, references) => {
+        expansions.set(key, references);
+      },
+    )
+    : loaded;
 
   // If a validation schema is provided, validate and coerce.
   const validationSchema = options?.validationSchema;
@@ -81,6 +106,20 @@ export async function loadConfig(
     : raw;
 
   const config = new ConfigService(data);
+  if (policy !== null) {
+    // Provenance is derived once, from the structures this pass already
+    // produced — never from a second pass over values.
+    storeConfigProvenance(
+      config,
+      buildConfigProvenanceEntries(
+        policy,
+        sources,
+        expansions,
+        data,
+        validationSchema !== undefined,
+      ),
+    );
+  }
   validateConfigSections(config, options?.sections ?? []);
   return config;
 }
