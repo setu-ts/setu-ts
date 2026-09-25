@@ -987,6 +987,19 @@ describe('runNewCommand', () => {
       });
     }
 
+    // `wrangler.toml` carries `name = "<kebab>"`, so a quote broke the TOML.
+    it('returns 2 and writes nothing for a project name carrying a quote', async () => {
+      const h = harness();
+      expect(await h.run(['x"y', '--runtime', 'cloudflare-workers'])).toBe(2);
+      expect(h.err.text()).toContain('Invalid project name');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('scaffolds a dotted project name', async () => {
+      const h = harness();
+      expect(await h.run(['my.app'])).toBe(0);
+    });
+
     it('returns 2 and writes nothing for a Windows traversal name', async () => {
       const h = harness();
       expect(await h.run(['..\\sibling'])).toBe(2);

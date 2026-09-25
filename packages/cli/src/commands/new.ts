@@ -61,7 +61,7 @@ import {
 } from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
-import { deriveNames, escapeName, isPathSegmentSafe } from '../utils/names.ts';
+import { deriveNames, escapeName, isPathSegmentSafe, PROJECT_NAME_RULE } from '../utils/names.ts';
 import {
   findExisting,
   firstDuplicatePath,
@@ -645,9 +645,7 @@ export async function runNewCommand(
     // control character in the refusal would forge a standalone line in the
     // rendered message.
     deps.error(
-      `Invalid project name: "${escapeName(rawName)}". It must be one legal filename ` +
-        `component — not empty, not \`.\` or \`..\`, no path separator (/ or \\), no control ` +
-        `character, and at most 255 bytes.`,
+      `Invalid project name: "${escapeName(rawName)}". ${PROJECT_NAME_RULE}`,
     );
     return EXIT_USAGE;
   }

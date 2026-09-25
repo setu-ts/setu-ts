@@ -264,19 +264,21 @@ All notable changes to this project are documented here. The format follows
   `deno` on `setu generate`; it is detected from the project's manifests. Wording only; no
   behaviour, API or export changed.
 
-- **`cli` — a name that is not one legal path segment is refused before anything is written
-  (M99e).** Every name-taking verb (`new`, `generate app`, `generate <schematic>`,
-  `generate
-  library`, `adopt`) joins the derived kebab into a path, and `setu new ../sibling`,
-  `setu new ..` and `setu generate app ../sibling` wrote the scaffold into an ancestor directory. A
-  name that derives to empty, `.` or `..`, or carries `/` or `\` (a separator on Windows), a control
-  character, or more than 255 bytes is now a usage error (exit `2`) with no writes; a name that
-  passes but whose planned file name (`<name>.controller.ts`, a library's `test/<name>.test.ts`)
-  exceeds 255 bytes is refused the same way, where it used to fail mid-write with an uncaught
-  `File name too long`. A refused name is echoed with its control characters escaped, so the message
-  stays one line. `setu new` keeps accepting a digit-leading or letterless project name (`3d-shop`,
-  `2048`): a project directory is never an identifier. The verbs that generate source still require
-  a letter and refuse a leading digit, as before.
+- **`cli` — a name that is not safe to generate from is refused before anything is written (M99e).**
+  Every name-taking verb (`new`, `generate app`, `generate <schematic>`, `generate library`,
+  `adopt`) joins the derived kebab into a path, and `setu new ../sibling`, `setu new ..` and
+  `setu generate app ../sibling` wrote the scaffold into an ancestor directory. Punctuation also
+  passed through into generated source: `setu g service a:b` emitted `class A:bService`, and a quote
+  (`x'y`) closed the `@Injectable` token literal early — source injection from the command line —
+  while `setu new 'x"y' --runtime cloudflare-workers` broke the emitted `wrangler.toml`. A verb that
+  generates source now requires every derived form (Pascal, camel, SCREAMING) to be a TypeScript
+  identifier: letters (Unicode included, so `café` still works), digits after the first character,
+  and the separators `-`, `_` and space. `setu new` takes a portable project name — it starts with a
+  letter or digit and holds only letters, digits, `.` and `-` — so `3d-shop`, `2048` and `my.app`
+  keep working. Any name over 255 bytes, and a name whose planned file name (`<name>.controller.ts`,
+  a library's `test/<name>.test.ts`) exceeds 255 bytes, is refused too, where it used to fail
+  mid-write with an uncaught `File name too long`. Every refusal is a usage error (exit `2`) with no
+  writes, and echoes the name with its control characters escaped, so the message stays one line.
 
 - **`health-plugin` — an unrecognized indicator status could hide another indicator's `down`, so
   `/health` and `/ready` answered `200` over a failing dependency.** The aggregate took the worst

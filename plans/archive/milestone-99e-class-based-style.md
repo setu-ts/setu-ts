@@ -421,5 +421,10 @@ beside what review changed.
 - **§3.2's `generate app --help` annotation was not implemented** — that usage listed `class-based`
   as a bare peer. It now annotates the alias from the registry, and both help renderers are
   asserted.
+- **Punctuation reached generated source.** `g service a:b` emitted `class A:bService`, and `x'y`
+  closed the `@Injectable` token literal early. A generating verb now requires every derived form to
+  match `\p{ID_Start}\p{ID_Continue}*`, and `new` requires the kebab to match the portable segment
+  `[\p{L}\p{N}][\p{L}\p{M}\p{N}.-]*` — both allowlists, which subsume the separator, dot-segment and
+  control-character refusals above.
 - Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
   refactor left with no reader.

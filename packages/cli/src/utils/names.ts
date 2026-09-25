@@ -72,20 +72,25 @@ export function deriveNames(raw: string): DerivedNames {
  *
  * Every name-taking verb that GENERATES source uses the derived forms in two
  * ways at once: schematics interpolate them into declarations
- * (`class <Pascal>Service`, `const <SCREAMING>_JOB`), and the commands join the
- * kebab into a filesystem path — a workspace member (`generate app`, `adopt`),
- * a library, or an artifact file name (`src/controllers/<kebab>.routes.ts`).
- * `setu new` joins the kebab into a path and never into an identifier, so it
- * runs {@linkcode isPathSegmentSafe} alone — a project may be called `3d-shop`.
+ * (`class <Pascal>Service`, `<camel>Middleware`, `<SCREAMING>_EVENT`) and into
+ * string literals (`@Injectable({ token: '<kebab>-service' })`), and the
+ * commands join the kebab into a filesystem path — a workspace member
+ * (`generate app`, `adopt`), a library, or an artifact file name
+ * (`src/controllers/<kebab>.routes.ts`). `setu new` joins the kebab into a path
+ * and a manifest and never into an identifier, so it runs
+ * {@linkcode isPathSegmentSafe} alone — a project may be called `3d-shop`.
  *
- * Beyond the path rules, two classes of input fail:
+ * Beyond the path rules:
  *
- * - one starting with a digit (`2fa`), which would emit `class 2faService`;
- * - one carrying no letter at all (`.`, `..`), which survives normalization
- *   intact and becomes a PATH rather than a name — `setu adopt` derives its
- *   member name from a directory, so `--dir .` produced `apps/.` and failed
- *   part-way through the conversion with a bare `mkdir` errno. Requiring a letter
- *   is also what the refusals around this already claim it checks.
+ * - every derived form — Pascal, camel and SCREAMING — must be an identifier,
+ *   `\p{ID_Start}\p{ID_Continue}*`. That refuses a leading digit (`2fa` would
+ *   emit `class 2faService`) and every punctuation character `deriveNames`
+ *   carries through: `a:b` emitted `class A:bService`, and `x'y` closed the
+ *   `@Injectable` token literal early, which is source injection from argv.
+ *   Unicode letters (`café`) are identifiers and pass;
+ * - the kebab must carry an ASCII letter — the refusals around this have always
+ *   said "must contain a letter", and `setu adopt` derives its member name from a
+ *   directory, where `--dir .` once produced `apps/.`.
  *
  * Reserved words (`class`, `new`) are NOT rejected: every schematic prefixes or
  * suffixes the derived form, so `class` yields the perfectly valid
@@ -95,46 +100,64 @@ export function deriveNames(raw: string): DerivedNames {
  * @returns True when the names are safe as identifiers and as one path segment
  */
 export function isIdentifierSafe(names: DerivedNames): boolean {
-  return /[a-zA-Z]/.test(names.kebab) && !/^[0-9]/.test(names.pascal) &&
+  return /[a-zA-Z]/.test(names.kebab) &&
+    [names.pascal, names.camel, names.screaming].every((form) => IDENTIFIER.test(form)) &&
     isPathSegmentSafe(names);
 }
 
 /**
- * Reports whether the derived kebab is one legal filesystem path segment.
+ * Reports whether the derived kebab is one portable path segment.
  *
- * The rules every name-taking verb shares, because every one of them joins the
- * kebab into a path. A segment fails when it is:
+ * The rule every name-taking verb shares, because every one of them joins the
+ * kebab into a path, and `setu new` also writes it into manifests as a string
+ * (`wrangler.toml`'s `name = "<kebab>"`). It is an allowlist rather than a list
+ * of refusals: the kebab starts with a letter or digit and holds only letters,
+ * combining marks, digits, `.` and `-`, in at most {@linkcode MAX_COMPONENT_BYTES}.
+ * That refuses, by construction:
  *
- * - empty (`___` normalizes to nothing), or the current or parent directory
- *   (`.`, `..`), either of which makes `joinPath(dir, kebab)` name a directory
- *   that is not a new one;
- * - carrying a path separator — `/` everywhere, and `\` too, since Deno honours
- *   it on Windows. `deriveNames` preserves both verbatim — neither is a
- *   separator it normalizes away — so `deriveNames('../sibling').kebab` is
- *   `../sibling`, and joining it escapes the intended directory and writes the
- *   scaffold into an ancestor;
- * - carrying a control character (the whole Unicode `Cc` category, so a C1
- *   `U+0085` a terminal renders as a line break is covered with the C0 set);
- * - longer than {@linkcode MAX_COMPONENT_BYTES}.
+ * - an empty segment (`___` normalizes to nothing) and `.`/`..` or any leading
+ *   dot, which make `joinPath(dir, kebab)` name a directory that is not a new one
+ *   (or a hidden one);
+ * - `/`, and `\` (a separator Deno honours on Windows) — `deriveNames` preserves
+ *   both verbatim, so `deriveNames('../sibling').kebab` is `../sibling`, and
+ *   joining it wrote the scaffold into an ancestor;
+ * - every control character, and every quote or other punctuation, which broke
+ *   the string it was written into;
+ * - an over-long name, which the filesystem refused mid-write
+ *   (`File name too long`) as an uncaught rejection rather than a refusal.
  *
- * A NUL byte and an over-long component reach the filesystem otherwise, which
- * rejects them mid-flight (`TypeError: file name contained an unexpected NUL
- * byte`, `File name too long`) as an error nothing up to the CLI entry point
- * catches — an uncaught rejection, not a refusal. The check looks at the
- * derived kebab, not the raw input: a raw `a\r\nb` normalizes the CR/LF away
- * into `a-b`, which is harmless. A verb that APPENDS to the kebab (an artifact
- * file name, a library's test file) checks the planned file names too, with
- * {@linkcode overlongComponent} — a kebab at this bound plus `.controller.ts`
- * is over it.
+ * The check looks at the derived kebab, not the raw input: a raw `a\r\nb`
+ * normalizes the CR/LF away into `a-b`, which is harmless. A verb that APPENDS
+ * to the kebab (an artifact file name, a library's test file) checks the
+ * planned file names too, with {@linkcode overlongComponent} — a kebab at this
+ * bound plus `.controller.ts` is over it.
  *
  * @param names - The derived naming forms to test
  * @returns True when the kebab is safe as one path segment
  */
 export function isPathSegmentSafe(names: DerivedNames): boolean {
-  const kebab = names.kebab;
-  return kebab !== '' && kebab !== '.' && kebab !== '..' && !/[/\\]/.test(kebab) &&
-    !CONTROL_CHARACTER.test(kebab) && utf8ByteLength(kebab) <= MAX_COMPONENT_BYTES;
+  return PATH_SEGMENT.test(names.kebab) && utf8ByteLength(names.kebab) <= MAX_COMPONENT_BYTES;
 }
+
+/**
+ * The rule a generating verb's name refusal states, shared so the five
+ * commands that print it cannot drift from {@linkcode isIdentifierSafe}.
+ */
+export const IDENTIFIER_NAME_RULE = 'it must contain a letter, must not start with a digit, and ' +
+  'may hold only letters, digits and the separators `-`, `_` and space — no path separator, ' +
+  'quote or other punctuation, since each form becomes a TypeScript identifier and a file ' +
+  'name — in at most 255 bytes.';
+
+/** The rule `setu new`'s project-name refusal states; see {@linkcode isPathSegmentSafe}. */
+export const PROJECT_NAME_RULE = 'It must start with a letter or digit and hold only letters, ' +
+  'digits, `.` and `-` (a space or `_` becomes `-`) — no path separator, control character, ' +
+  'quote or other punctuation — in at most 255 bytes.';
+
+/** One identifier: an ID_Start character, then ID_Continue characters. */
+const IDENTIFIER = /^\p{ID_Start}\p{ID_Continue}*$/u;
+
+/** A portable segment: letters, marks, digits, `.` and `-`, not dot-led. */
+const PATH_SEGMENT = /^[\p{L}\p{N}][\p{L}\p{M}\p{N}.-]*$/u;
 
 /**
  * Returns the first path segment over {@linkcode MAX_COMPONENT_BYTES}, if any.
@@ -159,9 +182,6 @@ export function overlongComponent(paths: readonly string[]): string | undefined 
  * same 255 on NTFS and APFS. A component over it is refused with a usage error
  * instead of surfacing mid-write as `File name too long (os error 36)`. */
 export const MAX_COMPONENT_BYTES = 255;
-
-/** Every Unicode control character (`Cc`: C0, DEL and C1). */
-const CONTROL_CHARACTER = /\p{Cc}/u;
 
 const UTF8 = new TextEncoder();
 

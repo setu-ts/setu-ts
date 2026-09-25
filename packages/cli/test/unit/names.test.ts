@@ -187,3 +187,38 @@ describe('isPathSegmentSafe', () => {
     expect(isPathSegmentSafe(deriveNames('a'.repeat(255)))).toBe(true);
   });
 });
+
+// Every derived form a generating verb interpolates is an identifier (`class
+// <Pascal>Service`, `<camel>Middleware`, `<SCREAMING>_EVENT`) and the kebab also
+// lands inside string literals (`@Injectable({ token: '<kebab>-service' })`). A
+// name carrying punctuation broke both: `a:b` emitted `class A:bService`, and
+// `x'y` closed the token literal early, which is source injection from argv.
+describe('isIdentifierSafe — every derived form is an identifier', () => {
+  it('rejects punctuation that survives normalization', () => {
+    for (const input of ['a:b', 'a.b', 'a@b', 'a+b', "x'y", 'a"b', 'a`b', 'a$b', 'a!b', 'a(b)']) {
+      expect(isIdentifierSafe(deriveNames(input))).toBe(false);
+    }
+  });
+
+  it('accepts Unicode letters, digits after the first, and the normalized separators', () => {
+    for (const input of ['café', 'order-item', 'order_item', 'order item', 'oauth2-client']) {
+      expect(isIdentifierSafe(deriveNames(input))).toBe(true);
+    }
+  });
+});
+
+// A project directory lands in manifests as a string (`wrangler.toml`'s
+// `name = "<kebab>"`), so a quote there broke the emitted TOML.
+describe('isPathSegmentSafe — a portable project-name charset', () => {
+  it('rejects quotes and punctuation, and a leading dot', () => {
+    for (const input of ["x'y", 'x"y', 'a:b', 'a@b', '.hidden', '..foo', 'a$b']) {
+      expect(isPathSegmentSafe(deriveNames(input))).toBe(false);
+    }
+  });
+
+  it('accepts letters, digits, dots and hyphens', () => {
+    for (const input of ['my.app', '3d-shop', 'café', 'v1.2-api']) {
+      expect(isPathSegmentSafe(deriveNames(input))).toBe(true);
+    }
+  });
+});

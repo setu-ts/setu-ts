@@ -529,6 +529,17 @@ describe('runGenerateCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
+    // `a:b` emitted `class A:bService`; `x'y` closed the `@Injectable` token
+    // literal early — source injection from the command line.
+    for (const name of ['a:b', 'a.b', "x'y"]) {
+      it(`rejects the non-identifier name ${JSON.stringify(name)}, writing nothing`, async () => {
+        const h = harness();
+        expect(await h.run(['service', name])).toBe(2);
+        expect(h.err.text()).toContain('Invalid name');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
     it('accepts a reserved word, which schematics always affix', async () => {
       const h = harness();
       expect(await h.run(['route', 'class'])).toBe(0);
