@@ -125,10 +125,13 @@ describe('HealthPlugin', () => {
     expect(plugin.version).toBe(manifest.version);
   });
 
-  it('should provide CAPABILITIES.HEALTH', () => {
+  it('should provide CAPABILITIES.HEALTH and CAPABILITIES.HEALTH_DIAGNOSTICS', () => {
     const plugin = HealthPlugin();
 
-    expect(plugin.provides).toEqual([CAPABILITIES.HEALTH]);
+    expect(plugin.provides).toEqual([
+      CAPABILITIES.HEALTH,
+      CAPABILITIES.HEALTH_DIAGNOSTICS,
+    ]);
   });
 
   it('should have priority 100', () => {
@@ -138,11 +141,11 @@ describe('HealthPlugin', () => {
   });
 
   it('should register HealthService under CAPABILITIES.HEALTH', () => {
-    let registeredToken: string | undefined;
+    const registeredTokens: string[] = [];
 
     const fakeRegistry = {
       register: (token: string) => {
-        registeredToken = token;
+        registeredTokens.push(token);
       },
       get: () => undefined,
       getAll: () => [],
@@ -204,7 +207,8 @@ describe('HealthPlugin', () => {
     const plugin = HealthPlugin();
     plugin.register(ctx);
 
-    expect(registeredToken).toBe(CAPABILITIES.HEALTH);
+    // The health service is registered first, under its own capability.
+    expect(registeredTokens[0]).toBe(CAPABILITIES.HEALTH);
   });
 
   it('should register self indicator', () => {
@@ -1592,6 +1596,165 @@ describe('HealthPlugin', () => {
       // The deadline fired at ~30ms — not immediately, and not the 5s default.
       expect(elapsed).toBeGreaterThanOrEqual(25);
       expect(elapsed).toBeLessThan(2_000);
+    });
+  });
+
+  describe('diagnostics wiring (M98d)', () => {
+    function buildContext() {
+      const registered = new Map<string, unknown>();
+      const bootstrapHooks: Array<() => void> = [];
+      const closeHooks: Array<() => void> = [];
+      // A recording no-op timer runtime: invoking the lifecycle hooks starts
+      // the bounded scheduler, which calls setInterval. Recording (not
+      // arming a real interval) keeps the test deterministic and leak-free.
+      const base = createFakeContext();
+      let intervalArmed = 0;
+      const runtime = {
+        ...base.runtime,
+        // Timers are recorded, never armed: a deadline that cannot fire keeps
+        // the report path deterministic, and the scheduler's interval cannot
+        // leak a real handle out of the test.
+        setTimeout: (_fn: () => void, _ms: number) => ({ id: 0 }),
+        clearTimeout: () => {},
+        setInterval: (_fn: () => void, _ms: number) => {
+          intervalArmed += 1;
+          return { id: intervalArmed };
+        },
+        clearInterval: () => {
+          intervalArmed = 0;
+        },
+      } as unknown as IRuntimeServices;
+      // A recording logger honouring the ILogger contract (the shared fake's
+      // `{}` has no methods, which would hide a real `warn` call).
+      const warnings: string[] = [];
+      const noop = () => {};
+      const logger = {
+        level: 'debug',
+        fatal: noop,
+        error: noop,
+        warn: (message: string) => {
+          warnings.push(message);
+        },
+        info: noop,
+        debug: noop,
+        trace: noop,
+        child: () => logger,
+      } as unknown as ILogger;
+      const ctx = {
+        ...base,
+        runtime,
+        logger,
+        services: {
+          register: (token: string, service: unknown) => {
+            registered.set(token, service);
+          },
+          get: (token: string) => registered.get(token),
+          has: (token: string) => registered.has(token),
+          getAll: () => [],
+          registerFactory: () => {},
+          unregister: () => false,
+        } as IServiceRegistry,
+        lifecycle: {
+          onInit: () => {},
+          onStopping: () => {},
+          onShutdown: () => {},
+          onRegister: () => {},
+          onBootstrap: (hook: () => void) => {
+            bootstrapHooks.push(hook);
+          },
+          onRequest: () => {},
+          onResponse: () => {},
+          onError: () => {},
+          onClose: (hook: () => void) => {
+            closeHooks.push(hook);
+          },
+        } as ILifecycleApi,
+      } as IPluginContext;
+      return { ctx, registered, bootstrapHooks, closeHooks, warnings };
+    }
+
+    it('provides HEALTH_DIAGNOSTICS alongside HEALTH', () => {
+      const plugin = HealthPlugin();
+      expect(plugin.provides).toContain(CAPABILITIES.HEALTH);
+      expect(plugin.provides).toContain(CAPABILITIES.HEALTH_DIAGNOSTICS);
+    });
+
+    it('registers an inert disabled source when diagnostics is absent', () => {
+      const plugin = HealthPlugin();
+      const { ctx, registered, bootstrapHooks, closeHooks } = buildContext();
+      plugin.register(ctx);
+      const source = registered.get(
+        CAPABILITIES.HEALTH_DIAGNOSTICS,
+      ) as { snapshot: (id: string) => { state: string } };
+      expect(source).toBeDefined();
+      expect(source.snapshot('instance-1').state).toBe('disabled');
+      // No bootstrap/close hooks: an absent option performs no capture.
+      expect(bootstrapHooks.length).toBe(0);
+      expect(closeHooks.length).toBe(0);
+    });
+
+    it('registers an active collector and wires lifecycle when diagnostics is present', async () => {
+      const plugin = HealthPlugin({
+        diagnostics: {
+          enabled: true,
+          indicators: { 'db.check': 'database' },
+          scheduled: { indicators: ['db.check'], intervalMs: 1000, timeoutMs: 50, concurrency: 1 },
+        },
+      });
+      const { ctx, registered, bootstrapHooks, closeHooks, warnings } = buildContext();
+      plugin.register(ctx);
+      const source = registered.get(
+        CAPABILITIES.HEALTH_DIAGNOSTICS,
+      ) as { snapshot: (id: string) => { state: string } };
+      expect(source).toBeDefined();
+      // An active collector with no captures yet reports no-data, not disabled.
+      expect(source.snapshot('instance-1').state).toBe('no-data');
+      // The lifecycle owns the bounded scheduler's start and teardown.
+      expect(bootstrapHooks.length).toBe(1);
+      expect(closeHooks.length).toBe(1);
+      // Invoking the hooks exercises the plugin's own start/teardown wiring:
+      // bootstrap starts the bounded scheduler (one guarded cycle), close tears
+      // it down. The recording timer runtime keeps this leak-free.
+      bootstrapHooks[0]();
+      // 'db.check' is approved but no indicator carries it: one count-only
+      // warning that never names the indicator.
+      expect(warnings).toEqual([
+        'Health diagnostics: 1 approved indicator name(s) match no registered indicator ' +
+        'and will stay never-observed.',
+      ]);
+      // The unregistered name is skipped by the first cycle, not run.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect((source.snapshot('instance-1') as { state: string }).state).toBe('no-data');
+      closeHooks[0]();
+    });
+
+    it('warns about nothing when every approved name is registered', () => {
+      const plugin = HealthPlugin({
+        indicators: [{ name: 'db.check', check: () => Promise.resolve({ status: 'up' }) }],
+        diagnostics: { enabled: true, indicators: { 'db.check': 'database', self: 'self' } },
+      });
+      const { ctx, bootstrapHooks, closeHooks, warnings } = buildContext();
+      plugin.register(ctx);
+      bootstrapHooks[0]();
+      expect(warnings).toEqual([]);
+      closeHooks[0]();
+    });
+
+    it('the active collector observes the service runner end to end', async () => {
+      const plugin = HealthPlugin({
+        diagnostics: { enabled: true, indicators: { 'db.check': 'database' } },
+      });
+      const { ctx, registered } = buildContext();
+      plugin.register(ctx);
+      const service = registered.get(CAPABILITIES.HEALTH) as HealthService;
+      const source = registered.get(
+        CAPABILITIES.HEALTH_DIAGNOSTICS,
+      ) as { snapshot: (id: string) => { state: string; observations: unknown[] } };
+      service.registerIndicator('db.check', () => Promise.resolve({ status: 'up' }));
+      await service.check();
+      const snapshot = source.snapshot('instance-1');
+      expect(snapshot.state).toBe('ready');
+      expect(snapshot.observations).toHaveLength(1);
     });
   });
 });

@@ -8,7 +8,12 @@
  * @module
  */
 
-import type { DiagnosticsBatch, DiagnosticsSnapshot, IPlugin } from '@setu-ts/common';
+import type {
+  DiagnosticsBatch,
+  DiagnosticsSnapshot,
+  HealthDiagnosticsSnapshot,
+  IPlugin,
+} from '@setu-ts/common';
 
 /**
  * Options for {@linkcode DiagnosticsPlugin} — all required, all explicit.
@@ -176,6 +181,22 @@ export interface IDiagnosticsClient {
    * @throws {Error} Under the same conditions as {@linkcode snapshot}
    */
   read(after: number, limit?: number): Promise<DiagnosticsBatch>;
+  /**
+   * Reads the minimized health observations through the signed protocol
+   * (M98d). Performs the `/v1/status` pairing exchange first if the session
+   * has not yet been bound.
+   *
+   * The inspector support manifest negotiated during pairing decides the
+   * answer: when it reports the health inspector as unsupported, a frozen
+   * typed `unsupported` snapshot is returned WITHOUT sending an addon
+   * request. When supported, the authenticated `/v1/health` exchange is
+   * performed and its exact DTO is validated before being returned.
+   *
+   * @returns The frozen health snapshot projection
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  health(): Promise<HealthDiagnosticsSnapshot>;
   /**
    * Closes the client: aborts pending fetches, drops key references, and
    * rejects subsequent calls with a fixed error. Idempotent.

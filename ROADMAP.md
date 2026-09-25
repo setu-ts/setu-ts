@@ -10650,15 +10650,17 @@ observation boundary and its shared contracts; 98b complete
 ([#347](https://github.com/setu-ts/setu-ts/pull/347)) — the runtime-owned loopback listener, its
 `common` contract/token, and `packages/diagnostics-plugin`; 98c complete
 ([#352](https://github.com/setu-ts/setu-ts/pull/352)) — `packages/cli` development-entry scaffolding
-and per-member credential handoff. These three are implemented and merged, awaiting publication in
-the next release cycle. **98d–98n are planned**, each with its own implementation plan and mandatory
-security audit. This umbrella records framework work for the separately maintained devtool; adding
-the later letters does not make them prerequisites for publishing 98a–98c or for the devtool's
-initial D01–D04 preview, with ONE exception recorded under the release requirements below — M98d's
-status-shape change must precede the first publication of `packages/diagnostics-plugin`, because the
-shipped client refuses a status body it does not expect and that body is otherwise frozen for the
-lifetime of every published client. A roadmap status is not evidence that a security audit has
-passed.
+and per-member credential handoff; 98d complete
+([#363](https://github.com/setu-ts/setu-ts/pull/363)) — minimized health observations, the
+`GET /v1/health` inspector and the status-body inspector manifest. These four are implemented and
+merged, awaiting publication in the next release cycle. **98e–98n are planned**, each with its own
+implementation plan and mandatory security audit. This umbrella records framework work for the
+separately maintained devtool; adding the later letters does not make them prerequisites for
+publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE exception recorded under
+the release requirements below — M98d's status-shape change must precede the first publication of
+`packages/diagnostics-plugin`, because the shipped client refuses a status body it does not expect
+and that body is otherwise frozen for the lifetime of every published client. A roadmap status is
+not evidence that a security audit has passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -10695,9 +10697,10 @@ speculative provider bus or extend protocol v1 silently.
 
 The completed M98a–M98c design records are archived at
 `plans/archive/milestone-98a-kernel-diagnostics.md`,
-`plans/archive/milestone-98b-local-diagnostics-connector.md` and
-`plans/archive/milestone-98c-devtool-scaffolding.md`; current code and public documentation govern
-their implemented contracts. The canonical M98d–M98n plans now live at the paths named in each
+`plans/archive/milestone-98b-local-diagnostics-connector.md`,
+`plans/archive/milestone-98c-devtool-scaffolding.md` and
+`plans/archive/milestone-98d-health-observations.md`; current code and public documentation govern
+their implemented contracts. The canonical M98e–M98n plans now live at the paths named in each
 section below. They verify contracts from source, name the consumer of every export, and record the
 pre-implementation security review requirements and status required by the gates below; they remain
 planning documents, not evidence that implementation or the committed-tree security audit is
@@ -10878,9 +10881,10 @@ the loopback guarantee is the listener's, not a permission flag's).
 
 ### Milestone 98d: Minimized Health Observations
 
-**Status:** planned; design security review and implementation security audit required. **Owner:**
-`packages/health-plugin`, with only the necessary shared diagnostic contract and authenticated
-connector/client changes. **Plan:** `plans/milestone-98d-health-observations.md`.
+**Status:** complete ([#363](https://github.com/setu-ts/setu-ts/pull/363)); the committed-tree
+security audit passed and is recorded in the PR. **Owner:** `packages/health-plugin`, with only the
+necessary shared diagnostic contract (`packages/common`) and authenticated connector/client changes
+(`packages/diagnostics-plugin`). **Plan:** `plans/archive/milestone-98d-health-observations.md`.
 
 **Existing foundation:** `IHealthService.check`, `checkLive` and `checkReady` run application
 callbacks. Reports allow arbitrary per-indicator `data`. `HealthService` already runs selected
@@ -10889,20 +10893,35 @@ deadline does not cancel the callback's underlying work. Successful `data` is no
 
 **Deliverables:**
 
-- [ ] An explicitly enabled, bounded snapshot of observations from normal application health
+- [x] An explicitly enabled, bounded snapshot of observations from normal application health
       collection. Diagnostic reads must not run indicators or poll `/health`, `/live` or `/ready`.
       Any additional scheduled collection is separately opted into by the application, with an
       indicator allowlist, cadence, concurrency and timeout policy fixed in the plan. Never
       accumulate replacement checks while timed-out callbacks remain pending.
-- [ ] A projection containing approved indicator identities, reported status, measured latency and
+- [x] A projection containing approved indicator identities, reported status, measured latency and
       observation age. Distinguish never-observed, stale and collection-failed states; absence is
       not healthy, and a reported `up` is not proof of backend reachability. Omit arbitrary `data`,
       exception text, connection details and absolute paths before diagnostic buffering.
-- [ ] A real consumer exercise proving reads add no indicator calls, slow/hung checks do not cause
+- [x] A real consumer exercise proving reads add no indicator calls, slow/hung checks do not cause
       unbounded work, useful status remains visible, and capture is cleared on teardown. Existing
       readiness behavior and M98c's launch probes remain unchanged.
-- [ ] Pass both security gates below, including canaries in successful result `data` and failures,
+- [x] Pass both security gates below, including canaries in successful result `data` and failures,
       callback-count evidence, freshness/timeout races and bounded collection under load.
+
+**Shipped.** `HealthPlugin({ diagnostics })` retains one frozen observation per approved alias —
+status only when reported, latency, monotonic age and origin — and never an indicator's `data`,
+error text or absolute time; an optional scheduler runs bounded cycles where a hung callback keeps
+only its own concurrency slot and is never replaced early. The connector serves `GET /v1/health` and
+a status-body `inspectors` manifest. Verification found two High scheduler defects (collection
+stopping after the first `concurrency` indicators, and one hung check stalling every scheduled
+check) and two Medium ones (a non-framework status signed onto the wire, `enabled` never read), all
+fixed. The security audit then found an overstated hang-isolation claim and a pre-existing `/health`
+defect on `main` since M20: an indicator status outside `up`/`degraded`/`down` could hide another
+indicator's `down`, so `/health` answered `200 degraded` over a dead dependency. It is fixed here at
+the maintainer's direction — one trust rule now reads every indicator result on both the `/health`
+and the scheduled path — a behaviour change recorded in CHANGELOG. The re-audit's two Low findings
+(docs naming a per-alias `stale` state that does not exist, and the scheduled path reading results
+by a different rule from `/health`) are fixed too.
 
 ### Milestone 98e: Value-Free Configuration Provenance
 
@@ -11909,11 +11928,11 @@ because one of them invalidated part of a previous run's claims:
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                  |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                      |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                        |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98c complete, 98d–98n planned with security audit gates)                              |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98d complete, 98e–98n planned with security audit gates)                              |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347)) |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))             |
-| 98d       | ⬜     | health-plugin — minimized health observations; design security review and implementation audit required                                   |
+| 98d       | ✅     | common + health-plugin + diagnostics-plugin — minimized health observations ([#363](https://github.com/setu-ts/setu-ts/pull/363))         |
 | 98e       | ⬜     | config-plugin — value-free configuration provenance; design security review and implementation audit required                             |
 | 98f       | ⬜     | queue-plugin — attempt, outcome and depth observations; design security review and implementation audit required                          |
 | 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                |

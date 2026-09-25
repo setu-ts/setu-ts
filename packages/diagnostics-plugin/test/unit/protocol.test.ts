@@ -7,21 +7,28 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import {
+  currentInspectorsManifest,
   errorBody,
+  INSPECTOR_KEYS,
   isBatchProjection,
+  isHealthSnapshotProjection,
+  isInspectorsManifest,
   isSnapshotProjection,
-  isStatusBody,
+  legacyStatusBody,
+  parseStatusBody,
   parseTarget,
   projectBatch,
   projectEvent,
+  projectHealthSnapshot,
   projectSnapshot,
   PROTOCOL_ERRORS,
   statusBody,
 } from '../../src/protocol/protocol.ts';
 import { minimalBatch, minimalSnapshot, TEST_INSTANCE_ID } from '../fixtures/helpers.ts';
+import { m98bIsStatusBody } from '../fixtures/m98b-status-validator.ts';
 
 describe('Protocol — canonical target parsing', () => {
-  it('accepts exactly the three canonical targets', () => {
+  it('accepts exactly the four canonical targets', () => {
     expect(parseTarget('/v1/status', '')).toEqual({
       op: 'status',
       canonicalTarget: '/v1/status',
@@ -31,6 +38,12 @@ describe('Protocol — canonical target parsing', () => {
     expect(parseTarget('/v1/snapshot', '')).toEqual({
       op: 'snapshot',
       canonicalTarget: '/v1/snapshot',
+      after: 0,
+      limit: 0,
+    });
+    expect(parseTarget('/v1/health', '')).toEqual({
+      op: 'health',
+      canonicalTarget: '/v1/health',
       after: 0,
       limit: 0,
     });
@@ -61,6 +74,9 @@ describe('Protocol — canonical target parsing', () => {
       // Query field violations on the fixed targets
       ['/v1/status', 'x=1'],
       ['/v1/snapshot', 'after=0'],
+      ['/v1/health', 'x=1'],
+      ['/v1/health/', ''],
+      ['/v1/health/extra', ''],
       // Events query: order, duplicates, unknown fields, missing fields
       ['/v1/events', 'limit=1&after=0'],
       ['/v1/events', 'after=0&limit=1&extra=2'],
@@ -150,12 +166,36 @@ describe('Protocol — projection', () => {
 });
 
 describe('Protocol — status body and fixed errors', () => {
-  it('builds the status body with the three allowed fields', () => {
-    expect(statusBody(TEST_INSTANCE_ID, 899_999)).toEqual({
+  it('builds the status body with the four allowed fields and the manifest', () => {
+    expect(statusBody(TEST_INSTANCE_ID, 899_999, currentInspectorsManifest())).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      expiresInMs: 899_999,
+      inspectors: currentInspectorsManifest(),
+    });
+  });
+
+  it('builds the legacy M98b status body with exactly the three fields', () => {
+    expect(legacyStatusBody(TEST_INSTANCE_ID, 899_999)).toEqual({
       version: 1,
       instanceId: TEST_INSTANCE_ID,
       expiresInMs: 899_999,
     });
+  });
+
+  it('serves the fixed inspector manifest with health true and the rest false', () => {
+    const manifest = currentInspectorsManifest();
+    expect(manifest.health).toBe(true);
+    for (const key of INSPECTOR_KEYS) {
+      if (key !== 'health') {
+        expect(manifest[key]).toBe(false);
+      }
+    }
+    expect(Object.keys(manifest).length).toBe(11);
+    expect(isInspectorsManifest(manifest)).toBe(true);
+    expect(isInspectorsManifest({ ...manifest, extra: true })).toBe(false);
+    expect(isInspectorsManifest({ ...manifest, health: 'yes' })).toBe(false);
+    expect(isInspectorsManifest(null)).toBe(false);
   });
 
   it('maps every fixed error code to its HTTP status', () => {
@@ -172,23 +212,72 @@ describe('Protocol — status body and fixed errors', () => {
 });
 
 describe('Protocol — client-side validators', () => {
-  it('accepts the well-formed status body and rejects key drift', () => {
-    expect(isStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: 5 })).toBe(
-      true,
-    );
-    expect(isStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID })).toBe(false);
-    expect(isStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: 5, x: 1 })).toBe(
+  it('accepts the legacy three-field status body and resolves the all-false manifest', () => {
+    const parsed = parseStatusBody({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      expiresInMs: 5,
+    });
+    expect(parsed).not.toBe(null);
+    expect(parsed?.instanceId).toBe(TEST_INSTANCE_ID);
+    expect(parsed?.expiresInMs).toBe(5);
+    expect(Object.values(parsed?.inspectors ?? {})).toEqual([
       false,
-    );
-    expect(isStatusBody({ version: 2, instanceId: TEST_INSTANCE_ID, expiresInMs: 5 })).toBe(
       false,
-    );
-    expect(isStatusBody({ version: 1, instanceId: '', expiresInMs: 5 })).toBe(false);
-    expect(isStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: -1 })).toBe(
       false,
-    );
-    expect(isStatusBody(null)).toBe(false);
-    expect(isStatusBody('status')).toBe(false);
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it('accepts the new four-field status body with a well-formed manifest', () => {
+    const parsed = parseStatusBody({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      expiresInMs: 5,
+      inspectors: currentInspectorsManifest(),
+    });
+    expect(parsed).not.toBe(null);
+    expect(parsed?.inspectors.health).toBe(true);
+  });
+
+  it('rejects status-body key drift, bad scalars, and malformed manifests', () => {
+    // Missing / extra keys
+    expect(
+      parseStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID }),
+    ).toBe(null);
+    expect(
+      parseStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: 5, x: 1 }),
+    ).toBe(null);
+    // Bad scalars
+    expect(
+      parseStatusBody({ version: 2, instanceId: TEST_INSTANCE_ID, expiresInMs: 5 }),
+    ).toBe(null);
+    expect(parseStatusBody({ version: 1, instanceId: '', expiresInMs: 5 })).toBe(null);
+    expect(
+      parseStatusBody({ version: 1, instanceId: TEST_INSTANCE_ID, expiresInMs: -1 }),
+    ).toBe(null);
+    // Non-objects
+    expect(parseStatusBody(null)).toBe(null);
+    expect(parseStatusBody('status')).toBe(null);
+    // Malformed manifests: unknown, missing, extra key, non-boolean
+    const bad = (inspectors: Record<string, unknown>): ReturnType<typeof parseStatusBody> =>
+      parseStatusBody({
+        version: 1,
+        instanceId: TEST_INSTANCE_ID,
+        expiresInMs: 5,
+        inspectors,
+      });
+    expect(bad({ ...currentInspectorsManifest(), extra: true })).toBe(null);
+    expect(bad({ ...currentInspectorsManifest(), health: 'yes' })).toBe(null);
+    const { health: _dropped, ...missingOne } = currentInspectorsManifest();
+    expect(bad(missingOne)).toBe(null);
   });
 
   it('accepts well-formed snapshots and rejects malformed ones', () => {
@@ -208,5 +297,141 @@ describe('Protocol — client-side validators', () => {
     expect(isBatchProjection({ ...minimalBatch(), events: [{}] })).toBe(false);
     expect(isBatchProjection({ ...minimalBatch(), next: 'x' })).toBe(false);
     expect(isBatchProjection({ ...minimalBatch(), closed: 1 })).toBe(false);
+  });
+});
+
+describe('Protocol — health projection and validator (M98d)', () => {
+  const reported = {
+    indicatorAlias: 'database',
+    status: 'up',
+    state: 'reported',
+    latencyMs: 3,
+    ageMs: 12,
+    origin: 'application',
+  };
+  const neverObserved = {
+    indicatorAlias: 'cache',
+    state: 'never-observed',
+    latencyMs: null,
+    ageMs: null,
+    origin: 'scheduled',
+  };
+  const snapshot = {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    observations: [reported, neverObserved],
+    truncated: false,
+    droppedObservations: 1,
+  };
+
+  it('projects a health snapshot field-by-field, optional status only when present', () => {
+    const projected = projectHealthSnapshot(snapshot as never);
+    expect(projected).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'ready',
+      observations: [
+        {
+          indicatorAlias: 'database',
+          state: 'reported',
+          latencyMs: 3,
+          ageMs: 12,
+          origin: 'application',
+          status: 'up',
+        },
+        {
+          indicatorAlias: 'cache',
+          state: 'never-observed',
+          latencyMs: null,
+          ageMs: null,
+          origin: 'scheduled',
+        },
+      ],
+      truncated: false,
+      droppedObservations: 1,
+    });
+    // The never-observed observation carries NO status key.
+    const obs = projected.observations as Record<string, unknown>[];
+    expect('status' in obs[1]).toBe(false);
+  });
+
+  it('accepts a well-formed health snapshot and rejects malformed ones', () => {
+    expect(isHealthSnapshotProjection(snapshot)).toBe(true);
+    expect(isHealthSnapshotProjection({ ...snapshot, version: 2 })).toBe(false);
+    expect(isHealthSnapshotProjection({ ...snapshot, instanceId: '' })).toBe(false);
+    expect(isHealthSnapshotProjection({ ...snapshot, state: 'bogus' })).toBe(false);
+    expect(isHealthSnapshotProjection({ ...snapshot, observations: 'many' })).toBe(false);
+    expect(isHealthSnapshotProjection({ ...snapshot, truncated: 'no' })).toBe(false);
+    expect(isHealthSnapshotProjection({ ...snapshot, droppedObservations: 'x' })).toBe(false);
+    expect(isHealthSnapshotProjection([])).toBe(false);
+  });
+
+  it('rejects an observation with a bad enum, missing alias, or bad nullability', () => {
+    const check = (obs: Record<string, unknown>): boolean =>
+      isHealthSnapshotProjection({ ...snapshot, observations: [obs] });
+    expect(check({ ...reported, state: 'bogus' })).toBe(false);
+    expect(check({ ...reported, status: 'bogus' })).toBe(false);
+    expect(check({ ...reported, origin: 'bogus' })).toBe(false);
+    expect(check({ ...reported, indicatorAlias: '' })).toBe(false);
+    expect(check({ ...neverObserved, latencyMs: 5 })).toBe(true);
+    expect(check({ ...reported, latencyMs: '3' })).toBe(false);
+    expect(check({ ...reported, ageMs: '12' })).toBe(false);
+  });
+
+  it('requires EXACT keys, with status present if and only if reported', () => {
+    const check = (obs: Record<string, unknown>): boolean =>
+      isHealthSnapshotProjection({ ...snapshot, observations: [obs] });
+    expect(isHealthSnapshotProjection({ ...snapshot, extra: 1 })).toBe(false);
+    const missingKey: Record<string, unknown> = { ...snapshot };
+    delete missingKey.truncated;
+    expect(isHealthSnapshotProjection(missingKey)).toBe(false);
+    expect(check({ ...reported, leak: 'x' })).toBe(false);
+    const reportedWithoutStatus: Record<string, unknown> = { ...reported };
+    delete reportedWithoutStatus.status;
+    expect(check(reportedWithoutStatus)).toBe(false);
+    expect(check({ ...neverObserved, status: 'up' })).toBe(false);
+  });
+
+  it('bounds aliases, measurements, the drop count, and the observation count', () => {
+    const check = (obs: Record<string, unknown>): boolean =>
+      isHealthSnapshotProjection({ ...snapshot, observations: [obs] });
+    expect(check({ ...reported, indicatorAlias: 'x'.repeat(64) })).toBe(true);
+    expect(check({ ...reported, indicatorAlias: 'x'.repeat(65) })).toBe(false);
+    // 22 three-byte characters are 66 UTF-8 bytes in 22 code units.
+    expect(check({ ...reported, indicatorAlias: '€'.repeat(22) })).toBe(false);
+    expect(check({ ...reported, latencyMs: -1 })).toBe(false);
+    expect(check({ ...reported, ageMs: Infinity })).toBe(false);
+    expect(check({ ...reported, ageMs: Number.NaN })).toBe(false);
+    expect(isHealthSnapshotProjection({ ...snapshot, droppedObservations: -1 })).toBe(false);
+    expect(isHealthSnapshotProjection({ ...snapshot, droppedObservations: 0.5 })).toBe(false);
+    const many = Array.from({ length: 65 }, (_, i) => ({ ...reported, indicatorAlias: `a${i}` }));
+    expect(isHealthSnapshotProjection({ ...snapshot, observations: many.slice(0, 64) })).toBe(
+      true,
+    );
+    expect(isHealthSnapshotProjection({ ...snapshot, observations: many })).toBe(false);
+  });
+});
+
+describe('Protocol — status-body release skew, BOTH directions (M98d gate)', () => {
+  const legacy = legacyStatusBody(TEST_INSTANCE_ID, 900_000);
+  const current = statusBody(TEST_INSTANCE_ID, 900_000, currentInspectorsManifest());
+
+  it('a NEW client pairs against an OLD server and reads every inspector as false', () => {
+    const parsed = parseStatusBody(legacy);
+    expect(parsed).not.toBeNull();
+    expect(Object.values(parsed!.inspectors).every((supported) => supported === false)).toBe(
+      true,
+    );
+  });
+
+  it('an OLD (shipped M98b) client REJECTS the new four-field body — why the gate exists', () => {
+    // The frozen M98b validator accepts the body it was written for...
+    expect(m98bIsStatusBody(legacy)).toBe(true);
+    // ...and refuses the M98d body outright. A published M98b client would
+    // therefore latch pairingFailed against any M98d server, and the request
+    // carries no signal a server could branch on: the status body had to be
+    // settled before the package's first publication.
+    expect(m98bIsStatusBody(current)).toBe(false);
   });
 });

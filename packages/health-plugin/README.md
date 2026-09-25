@@ -35,10 +35,11 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option       | Type                 | Default                                                 | Description                       |
-| ------------ | -------------------- | ------------------------------------------------------- | --------------------------------- |
-| `endpoints`  | `EndpointsOptions`   | `{ health: '/health', live: '/live', ready: '/ready' }` | Probe paths.                      |
-| `indicators` | `IHealthIndicator[]` | `[]`                                                    | Indicators registered at startup. |
+| Option        | Type                       | Default                                                 | Description                                  |
+| ------------- | -------------------------- | ------------------------------------------------------- | -------------------------------------------- |
+| `endpoints`   | `EndpointsOptions`         | `{ health: '/health', live: '/live', ready: '/ready' }` | Probe paths.                                 |
+| `indicators`  | `IHealthIndicator[]`       | `[]`                                                    | Indicators registered at startup.            |
+| `diagnostics` | `HealthDiagnosticsOptions` | _(absent — disabled)_                                   | Opt-in minimized health observations (M98d). |
 
 Indicators passed via `indicators` are registered **before** the `onInit` drain, so they are present
 even when the lifecycle is bypassed.
@@ -46,24 +47,75 @@ even when the lifecycle is bypassed.
 ## Statuses
 
 An indicator reports `'up'`, `'degraded'`, or `'down'`; the overall report takes the worst status
-among them.
+among them. A result that is not one of those — not an object, or a `status` outside the three — is
+reported as `{ status: 'down', data: { reason: 'invalid-result' } }` and its value is never
+published, so an unrecognized status can never hide another indicator's `down`.
+
+## Health observations (M98d)
+
+An opt-in `diagnostics` option exposes the health checks' outcomes as minimized observations through
+the M98b diagnostics connector (`GET /v1/health`). It never changes `/health`, `/live`, or `/ready`.
+
+```typescript
+import { HealthPlugin } from '@setu-ts/health-plugin';
+
+// Opt-in minimized health observations (M98d). The allowlist maps each
+// registered indicator name to a safe display alias; unlisted indicators are
+// never retained. This never changes /health, /live, or /ready.
+HealthPlugin({
+  diagnostics: {
+    enabled: true,
+    indicators: { 'database.check': 'database' },
+    staleAfterMs: 30000,
+    // Optional bounded scheduled collection (absent by default).
+    scheduled: {
+      indicators: ['database.check'],
+      intervalMs: 30000,
+      timeoutMs: 5000,
+      concurrency: 2,
+    },
+  },
+});
+```
+
+Only the latest outcome per approved alias is retained — never a history. Each observation carries
+the approved alias, the framework's own status (present only when `reported`), the outcome state
+(`reported` / `timed-out` / `failed` / `never-observed`), and monotonic `latencyMs`/`ageMs`. No
+indicator `data`, no error text, and no absolute time is ever projected; a result whose `status` is
+not `up`/`degraded`/`down` is observed as `failed`. `enabled` is the LITERAL `true` — any other
+value is refused when `HealthPlugin(...)` is called, as is every other invalid option — and an
+omitted option registers an inert, disabled source and performs no capture. Scheduled cycles cover
+every scheduled indicator from a rotating start; a hung check keeps only its own concurrency slot,
+so while fewer than `concurrency` checks are hung the rest keep refreshing. Once every slot is held
+by a hung check, no scheduled check starts until one settles — the work stays bounded, and each
+stalled alias keeps its last observation with a growing `ageMs` (or stays `never-observed`), while
+the snapshot's `state` turns `stale` once any retained observation ages past `staleAfterMs`. The
+source is registered under `CAPABILITIES.HEALTH_DIAGNOSTICS`; see
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#health-setu-tshealth-plugin)
+and `docs/diagnostics-protocol.md` for the wire shape.
 
 ## Exports
 
-| Export                 | Kind      |
-| ---------------------- | --------- |
-| `createHttpIndicator`  | function  |
-| `HealthPlugin`         | function  |
-| `HealthService`        | class     |
-| `HealthCheckResult`    | interface |
-| `HealthPluginOptions`  | interface |
-| `HealthReport`         | interface |
-| `HttpIndicatorOptions` | interface |
-| `IHealthIndicator`     | interface |
-| `IHealthService`       | interface |
-| `HealthIndicatorEntry` | type      |
-| `HealthIndicatorFn`    | type      |
-| `HealthStatus`         | type      |
+| Export                              | Kind      |
+| ----------------------------------- | --------- |
+| `createHttpIndicator`               | function  |
+| `HealthPlugin`                      | function  |
+| `HealthService`                     | class     |
+| `HealthCheckResult`                 | interface |
+| `HealthDiagnosticsObservation`      | interface |
+| `HealthDiagnosticsOptions`          | interface |
+| `HealthDiagnosticsScheduledOptions` | interface |
+| `HealthDiagnosticsSnapshot`         | interface |
+| `HealthPluginOptions`               | interface |
+| `HealthReport`                      | interface |
+| `HttpIndicatorOptions`              | interface |
+| `IHealthDiagnosticsSource`          | interface |
+| `IHealthIndicator`                  | interface |
+| `IHealthService`                    | interface |
+| `HealthIndicatorEntry`              | type      |
+| `HealthIndicatorFn`                 | type      |
+| `HealthObservationState`            | type      |
+| `HealthStatus`                      | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

@@ -5202,6 +5202,21 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   port is refused by name, the docs say TLS-only, and a real-SDK test asserts the resolved address.
   Also tightened: the plugin-path absent-secret assertion now names its message rather than
   accepting any throw, and the package's test `net` grant is scoped to loopback instead of `true`.
+- **Milestone 98d** (`packages/common` + `packages/health-plugin` + `packages/diagnostics-plugin` —
+  minimized health observations): `HealthPlugin({ diagnostics })` retains one frozen observation per
+  approved alias — status only when reported, latency, monotonic age, origin — and never an
+  indicator's `data`, error text or absolute time, served through `CAPABILITIES.HEALTH_DIAGNOSTICS`,
+  the M98b connector's first inspector operation `GET /v1/health`, and a status-body `inspectors`
+  manifest. An optional scheduler runs bounded cycles in which a hung callback keeps only its own
+  concurrency slot and is never replaced early. Verification found two High scheduler defects and
+  two Medium ones, all fixed. The committed-tree security audit, run by a fresh agent, found an
+  overstated hang-isolation claim and a pre-existing `/health` defect on `main` since M20 — an
+  indicator status outside `up`/`degraded`/`down` could mask another indicator's `down`, so
+  `/health` answered `200 degraded` over a dead dependency — fixed here at the maintainer's
+  direction by one trust rule shared by the `/health` and scheduled paths (a CHANGELOG'd behaviour
+  change). The re-audit's two Low findings are fixed too, and its final verdict on the audited
+  commit is **passed**; the closeout commit after it touches documentation only, and the maintainer
+  waived a further re-audit — complete (PR #363).
 - **Milestone 99e** (`packages/cli` + `docs` — a template axis that forces one style):
   `--style functional|class-based` is now an axis on `setu new` and `setu generate app`, separate
   from `--template` — `functional` (default) installs neither `DecoratorPlugin` nor `DiPlugin`,
@@ -5212,8 +5227,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   register only through `DecoratorPlugin({ ingress })` — the functional `src/cqrs` and `src/events`
   barrels are not emitted, so nothing is registered twice. `docs/migration-nestjs.md` gains
   Scaffolding and Microservices sections — complete (PR pending).
-- **Next milestone** — **M98d** (`packages/health-plugin` — minimized health observations; design
-  security review and implementation audit required).
+- **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
+  design security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
@@ -5493,6 +5508,17 @@ passed over, each of which would have stopped the package reaching JSR:
 committing — a "failure" that turns out to be uncommitted changes is not a result. Note also that a
 green `--dry-run` does NOT prove a real publish works: it skips the already-published check, which
 is what needs `--allow-net` (see the `alpha.2` entry above).
+
+**A milestone whose plan names a committed-tree security audit — or whose diff crosses a trust
+boundary — is ALSO security-audited before it merges**, following
+`.roo/skills/security-audit/SKILL.md` (Roo's `security-audit` mode runs it; Claude's local skill
+points at the same file). It runs after verification and code review, on the exact commit the PR
+will merge, in a context that did not implement or fix the milestone — a fresh Roo `new_task`
+subtask or a freshly spawned Claude agent, handed only the milestone, branch, commit, plan and
+existing reports; an audit run in the implementing context does not satisfy the gate — and it
+produces the audit record the plan requires in the PR. The gates above cannot see what it checks:
+every open M98 plan (98d–98n) requires one, and M98b shipped with its review explicitly unclaimed
+because nothing defined what one was.
 
 ## Common pitfalls (these fail the gates)
 

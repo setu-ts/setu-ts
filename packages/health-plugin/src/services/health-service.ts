@@ -6,11 +6,85 @@
 import type {
   HealthCheckResult,
   HealthIndicatorFn,
+  HealthObservationState,
   HealthReport,
   HealthStatus,
   IHealthService,
   IRuntimeServices,
 } from '@setu-ts/common';
+import type { HealthObservationCollector } from '../diagnostics/health-observation-collector.ts';
+import { normalizeIndicatorResult } from './health-status.ts';
+
+/**
+ * The observation-collector attachment seam (M98d). A service is mapped to
+ * the single collector that its runner reports to. Kept in a WeakMap so an
+ * unattached service retains nothing and a discarded service is collected.
+ * Not barrel-exported: the collector is internal to the package.
+ *
+ * @internal
+ */
+const OBSERVATION_COLLECTORS = new WeakMap<object, HealthObservationCollector>();
+
+/**
+ * Attaches the health-observation collector to a service so the service's
+ * runner reports each settled indicator to it. A no-op for the public report
+ * and route behavior: observation follows the authoritative evaluation and
+ * never re-invokes an indicator.
+ *
+ * @param service - The health service to attach to
+ * @param collector - The collector to report to
+ * @internal
+ */
+export function attachHealthObservation(
+  service: HealthService,
+  collector: HealthObservationCollector,
+): void {
+  OBSERVATION_COLLECTORS.set(service, collector);
+}
+
+/** Set by `HealthService`'s static block; see {@linkcode runIndicatorRaw}. */
+let rawRunner: (service: HealthService, name: string) => Promise<HealthCheckResult> | null;
+
+/**
+ * Runs one indicator by its registered name, returning the RAW result
+ * promise with no deadline applied, or `null` when no indicator is
+ * registered under the name (M98d). The health-observation scheduler
+ * consumes this: it races the returned promise against its own reporting
+ * deadline and holds the name's in-flight slot until the promise settles.
+ *
+ * Deliberately a module function rather than a method: the exported
+ * `HealthService` class gains no public surface, and the barrel does not
+ * export this. The scheduler reads only the framework-owned `status` of the
+ * result — never its `data`, never a thrown value.
+ *
+ * @param service - The health service owning the indicator
+ * @param name - The registered indicator name
+ * @returns The raw result promise, or `null` for an unregistered name
+ * @internal
+ */
+export function runIndicatorRaw(
+  service: HealthService,
+  name: string,
+): Promise<HealthCheckResult> | null {
+  return rawRunner(service, name);
+}
+
+/** Set by `HealthService`'s static block; see {@linkcode isIndicatorRegistered}. */
+let registeredProbe: (service: HealthService, name: string) => boolean;
+
+/**
+ * Reports whether an indicator is registered under the name, without running
+ * it (M98d). The plugin uses it at `onBootstrap` to warn about an approved
+ * diagnostics name that no indicator carries. Not barrel-exported.
+ *
+ * @param service - The health service
+ * @param name - The indicator name
+ * @returns `true` when an indicator is registered under `name`
+ * @internal
+ */
+export function isIndicatorRegistered(service: HealthService, name: string): boolean {
+  return registeredProbe(service, name);
+}
 
 /**
  * Internal representation of a registered indicator.
@@ -21,6 +95,17 @@ interface RegisteredIndicator {
   readonly name: string;
   readonly check: HealthIndicatorFn;
 }
+
+/**
+ * The tagged outcome of racing one indicator against the deadline (M98d).
+ * `reported` carries the indicator's own result; `timed-out` is the fixed
+ * deadline outcome. A rejection is still surfaced as a rejection, as before.
+ *
+ * @internal
+ */
+type DeadlineOutcome =
+  | { readonly kind: 'reported'; readonly result: HealthCheckResult }
+  | { readonly kind: 'timed-out' };
 
 /** Severity ranking used to compute the worst status. Lower is worse. */
 const STATUS_RANK: Readonly<Record<HealthStatus, number>> = {
@@ -77,7 +162,11 @@ export function resolveIndicatorTimeout(raw: number | undefined): number {
  * and one never-settling indicator left the whole endpoint pending
  * forever. A timeout is recorded as `{ status: 'down', data: { reason:
  * 'timeout' } }`, a rejection as `{ status: 'down', data: { reason:
- * 'error' } }` with the thrown value never serialized into the report;
+ * 'error' } }` with the thrown value never serialized into the report,
+ * and a result that is not a framework result — not an object, or a
+ * `status` outside `up`/`degraded`/`down` — as `{ status: 'down', data: {
+ * reason: 'invalid-result' } }`, so an unrecognized status can never mask
+ * another indicator's `down`;
  * each indicator's latency is measured individually; and `checks` is
  * assembled in registration order so the report's shape is stable even
  * though execution is not.
@@ -88,6 +177,17 @@ export class HealthService implements IHealthService {
   #indicators = new Map<string, RegisteredIndicator>();
   #runtime: IRuntimeServices;
   readonly #indicatorTimeoutMs: number;
+
+  static {
+    // The raw-runner seam (M98d), wired from inside the class body so it can
+    // read the private indicator map without exposing a public method on
+    // this barrel-exported class.
+    rawRunner = (service, name) => {
+      const indicator = service.#indicators.get(name);
+      return indicator === undefined ? null : Promise.resolve().then(indicator.check);
+    };
+    registeredProbe = (service, name) => service.#indicators.has(name);
+  }
 
   /**
    * Creates a new health service.
@@ -154,16 +254,40 @@ export class HealthService implements IHealthService {
       selected.map(async ([name, indicator]) => {
         const startTime = this.#runtime.hrtime();
         let result: HealthCheckResult;
+        let observationState: HealthObservationState;
         try {
-          result = await this.#withDeadline(indicator.check);
+          const outcome = await this.#withDeadline(indicator.check);
+          if (outcome.kind === 'reported') {
+            // Read the result through the ONE trust rule the collector also
+            // uses, inside the `try` so a throwing getter is a failed check.
+            // A status outside the vocabulary fails closed: it has no rank,
+            // so aggregating it would mask another indicator's `down`, and
+            // publishing it would echo application data onto `/health`.
+            const normalized = normalizeIndicatorResult(outcome.result);
+            if (normalized === null) {
+              result = { status: 'down', data: { reason: 'invalid-result' } };
+              observationState = 'failed';
+            } else {
+              result = normalized;
+              observationState = 'reported';
+            }
+          } else {
+            result = { status: 'down', data: { reason: 'timeout' } };
+            observationState = 'timed-out';
+          }
         } catch {
           // A rejecting indicator is a failing check, not a failed report.
           // The thrown value is deliberately NOT serialized — it may carry
           // driver diagnostics (X12-3 stays closed) — and the report must
           // not depend on what a third-party indicator threw.
           result = { status: 'down', data: { reason: 'error' } };
+          observationState = 'failed';
         }
-        return [name, result, this.#runtime.hrtime() - startTime] as const;
+        const latencyMs = this.#runtime.hrtime() - startTime;
+        // Observation follows the authoritative evaluation: report the
+        // already-computed outcome once, never re-invoking the indicator.
+        this.#observe(name, observationState, result, latencyMs);
+        return [name, result, latencyMs] as const;
       }),
     );
 
@@ -210,10 +334,10 @@ export class HealthService implements IHealthService {
    * @param check - The indicator to run
    * @returns The indicator's outcome, or the timeout outcome
    */
-  #withDeadline(check: HealthIndicatorFn): Promise<HealthCheckResult> {
-    return new Promise<HealthCheckResult>((resolve, reject) => {
+  #withDeadline(check: HealthIndicatorFn): Promise<DeadlineOutcome> {
+    return new Promise<DeadlineOutcome>((resolve, reject) => {
       const handle = this.#runtime.setTimeout(
-        () => resolve({ status: 'down', data: { reason: 'timeout' } }),
+        () => resolve({ kind: 'timed-out' }),
         this.#indicatorTimeoutMs,
       );
       Promise.resolve()
@@ -221,7 +345,7 @@ export class HealthService implements IHealthService {
         .then(
           (result) => {
             this.#runtime.clearTimeout(handle);
-            resolve(result);
+            resolve({ kind: 'reported', result });
           },
           (error: unknown) => {
             this.#runtime.clearTimeout(handle);
@@ -229,6 +353,39 @@ export class HealthService implements IHealthService {
           },
         );
     });
+  }
+
+  /**
+   * Reports one settled indicator to the attached observation collector, if
+   * any. Guarded: an observer failure must never change the report. The
+   * collector reads only the framework-owned status (only when reported), the
+   * fixed observation state, and the measured latency — never `result.data`
+   * or any thrown value.
+   */
+  #observe(
+    name: string,
+    state: HealthObservationState,
+    result: HealthCheckResult,
+    latencyMs: number,
+  ): void {
+    const collector = OBSERVATION_COLLECTORS.get(this);
+    if (collector === undefined) {
+      return;
+    }
+    try {
+      collector.report(
+        name,
+        {
+          state,
+          ...(state === 'reported' ? { status: result.status } : {}),
+          latencyMs,
+        },
+        'application',
+      );
+    } catch {
+      // A collector fault is dropped, not surfaced: observation must never
+      // change the public report or route behavior.
+    }
   }
 
   /**

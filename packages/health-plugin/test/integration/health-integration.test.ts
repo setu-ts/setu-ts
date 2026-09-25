@@ -12,7 +12,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { HealthReport, HealthStatus, IPlugin, IPluginContext } from '@setu-ts/common';
+import type {
+  HealthReport,
+  HealthStatus,
+  IHealthDiagnosticsSource,
+  IPlugin,
+  IPluginContext,
+} from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -129,6 +135,99 @@ describe('HealthPlugin integration (through the real kernel)', () => {
       // Readiness must pull the pod from rotation while degraded.
       expect(ready.statusCode).toBe(503);
       expect(ready.json<HealthReport>().status).toBe('degraded');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  // The defect this pins shipped with every gate green: an indicator
+  // returning a status outside the vocabulary made `/health` answer
+  // `200 degraded` while another contributor was `down`, so a readiness
+  // probe passed over a dead dependency. Both registration orders.
+  for (const order of ['invalid-first', 'down-first'] as const) {
+    it(`fails /health and /ready with 503 when an unrecognized status sits beside a down contributor (${order})`, async () => {
+      const odd = contributingPlugin('odd', 'canary-status' as HealthStatus);
+      const db = contributingPlugin('db', 'down');
+      const app = await boot(...(order === 'invalid-first' ? [odd, db] : [db, odd]));
+      try {
+        for (const url of ['http://localhost/health', 'http://localhost/ready']) {
+          const res = await app.inject({ method: 'GET', url });
+          expect(res.statusCode).toBe(503);
+          const body = res.json<HealthReport>();
+          expect(body.status).toBe('down');
+          expect(body.checks['odd']?.status).toBe('down');
+          expect(body.checks['odd']?.data).toEqual({ reason: 'invalid-result' });
+          expect(JSON.stringify(body)).not.toContain('canary');
+        }
+      } finally {
+        await app.stop();
+      }
+    });
+  }
+
+  // The scheduled observation and the `/health`-path observation read an
+  // indicator result through one trust rule, so they must agree on whether
+  // it is valid. They did not for a valid status beside a throwing `data`
+  // getter: `/ready` failed while the scheduled observation read `up`.
+  it('agrees between the scheduled and the /health-path observation for every result shape', async () => {
+    const throwing = (key: 'status' | 'data', base: object) =>
+      Object.defineProperty({ ...base }, key, {
+        get() {
+          throw new Error('canary-getter');
+        },
+      });
+    const shapes: Readonly<Record<string, () => unknown>> = {
+      valid: () => ({ status: 'up', data: { n: 1 } }),
+      'string-data': () => ({ status: 'up', data: 'text' }),
+      'unknown-status': () => ({ status: 'canary-status' }),
+      'null-result': () => null,
+      'throwing-status': () => throwing('status', {}),
+      'throwing-data': () => throwing('data', { status: 'up' }),
+    };
+    const expected: Readonly<Record<string, string>> = {
+      valid: 'reported:up',
+      'string-data': 'reported:up',
+      'unknown-status': 'failed',
+      'null-result': 'failed',
+      'throwing-status': 'failed',
+      'throwing-data': 'failed',
+    };
+    const names = Object.keys(shapes);
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HealthPlugin({
+          indicators: names.map((name) => ({
+            name,
+            check: () => Promise.resolve(shapes[name]!() as { status: HealthStatus }),
+          })),
+          diagnostics: {
+            enabled: true,
+            indicators: Object.fromEntries(names.map((name) => [name, name])),
+            scheduled: { indicators: names, intervalMs: 300_000, timeoutMs: 1_000, concurrency: 4 },
+          },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const source = app.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS);
+      const verdicts = () =>
+        Object.fromEntries(
+          source.snapshot('instance').observations.map((o) => [
+            o.indicatorAlias,
+            o.state === 'reported' ? `reported:${o.status}` : o.state,
+          ]),
+        );
+      // `onBootstrap` starts one scheduled cycle immediately.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const scheduled = verdicts();
+      expect(source.snapshot('instance').observations.every((o) => o.origin === 'scheduled'))
+        .toBe(true);
+      const ready = await app.inject({ method: 'GET', url: 'http://localhost/ready' });
+      expect(ready.statusCode).toBe(503);
+      expect(scheduled).toEqual(expected);
+      expect(verdicts()).toEqual(expected);
     } finally {
       await app.stop();
     }

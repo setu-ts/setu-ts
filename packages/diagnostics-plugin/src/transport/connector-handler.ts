@@ -14,7 +14,9 @@
 
 import type {
   HandlerResult,
+  HealthDiagnosticsSnapshot,
   IDiagnosticsSource,
+  IHealthDiagnosticsSource,
   IRequest,
   IResponse,
   ResponseSnapshot,
@@ -25,9 +27,12 @@ import type { DiagnosticsSessionState } from '../security/session.ts';
 import type { ConnectorLimits, LimitsClock } from './limits.ts';
 import { CONNECTOR_LIMITS } from './limits.ts';
 import {
+  currentInspectorsManifest,
   errorBody,
+  isHealthSnapshotProjection,
   parseTarget,
   projectBatch,
+  projectHealthSnapshot,
   projectSnapshot,
   PROTOCOL_ERRORS,
   PROTOCOL_RESPONSE_HEADERS,
@@ -164,6 +169,13 @@ export interface ConnectorHandlerDeps {
   readonly source: IDiagnosticsSource;
   /** The monotonic clock. */
   readonly clock: LimitsClock;
+  /**
+   * The optional health-diagnostics source (M98d), resolved from
+   * `CAPABILITIES.HEALTH_DIAGNOSTICS` during registration. `null` when the
+   * application did not register one: the connector then answers a typed
+   * `unsupported` snapshot for `GET /v1/health` and never runs an indicator.
+   */
+  readonly healthSource: IHealthDiagnosticsSource | null;
 }
 
 /**
@@ -235,6 +247,107 @@ export function validateProtocolHeaders(request: IRequest): {
     return null;
   }
   return { sessionId, sequence, instance: instanceRaw, mac };
+}
+
+/**
+ * A typed `unsupported` health snapshot: the connector implements the
+ * operation, but the application did not register a health-diagnostics
+ * source. Bound to the session's instance so the client's instance check
+ * passes; carries no observations.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @returns The unsupported snapshot
+ * @internal
+ */
+function unsupportedHealthSnapshot(instanceId: string): HealthDiagnosticsSnapshot {
+  return {
+    version: 1,
+    instanceId,
+    state: 'unsupported',
+    observations: [],
+    truncated: false,
+    droppedObservations: 0,
+  };
+}
+
+/**
+ * A value-free `collection-failed` health snapshot: the registered source
+ * threw (or was otherwise unreadable). Carries no error text, cause, or
+ * stack — a source failure must not change the application's readiness or
+ * disclose a fault.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @returns The collection-failed snapshot
+ * @internal
+ */
+function collectionFailedHealthSnapshot(instanceId: string): HealthDiagnosticsSnapshot {
+  return {
+    version: 1,
+    instanceId,
+    state: 'collection-failed',
+    observations: [],
+    truncated: false,
+    droppedObservations: 0,
+  };
+}
+
+/**
+ * The outcome of reading the health source: either a validated projection
+ * ready to sign, or a refusal code for a version or instance mismatch.
+ *
+ * @internal
+ */
+type HealthReadOutcome =
+  | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
+  | { readonly kind: 'refused'; readonly code: 'unsupported-version' | 'unauthorized' };
+
+/**
+ * Reads, projects and VALIDATES the health snapshot for the bound instance,
+ * isolating every failure mode to a typed, value-free answer:
+ *
+ * - no registered source → `unsupported`
+ * - a source that throws, whose DTO cannot be projected (a throwing getter,
+ *   a non-array `observations`), or whose projection fails the exact DTO
+ *   validator (an unknown enum such as a non-framework status, an oversized
+ *   alias, a non-finite measurement) → `collection-failed`
+ * - a DTO for another version or another instance → the matching refusal
+ *
+ * The projection copies each field once and the validator then runs over
+ * that COPY, so nothing the connector signs was read twice or left
+ * unchecked. The source is synchronous and never runs an indicator.
+ *
+ * @param deps - The handler dependencies
+ * @param instanceId - The session's bound instance UUID
+ * @returns The projection to sign, or the refusal to answer
+ * @internal
+ */
+function readHealthProjection(
+  deps: ConnectorHandlerDeps,
+  instanceId: string,
+): HealthReadOutcome {
+  const failed = (): HealthReadOutcome => ({
+    kind: 'projected',
+    projected: projectHealthSnapshot(collectionFailedHealthSnapshot(instanceId)),
+  });
+  if (deps.healthSource === null) {
+    return {
+      kind: 'projected',
+      projected: projectHealthSnapshot(unsupportedHealthSnapshot(instanceId)),
+    };
+  }
+  try {
+    const snapshot = deps.healthSource.snapshot(instanceId);
+    if (snapshot.version !== 1) {
+      return { kind: 'refused', code: 'unsupported-version' };
+    }
+    if (snapshot.instanceId !== instanceId) {
+      return { kind: 'refused', code: 'unauthorized' };
+    }
+    const projected = projectHealthSnapshot(snapshot);
+    return isHealthSnapshotProjection(projected) ? { kind: 'projected', projected } : failed();
+  } catch {
+    return failed();
+  }
 }
 
 /**
@@ -362,6 +475,7 @@ export function createConnectorHandler(
         projected = statusBody(
           snapshot.instanceId,
           deps.session.remainingMs(deps.clock),
+          currentInspectorsManifest(),
         );
       } else if (target.op === 'snapshot') {
         const snapshot = deps.source.snapshot();
@@ -372,7 +486,7 @@ export function createConnectorHandler(
           return refusalResponse('unauthorized');
         }
         projected = projectSnapshot(snapshot);
-      } else {
+      } else if (target.op === 'events') {
         const batch = deps.source.read(target.after, target.limit);
         if (batch.version !== 1) {
           return refusalResponse('unsupported-version');
@@ -381,6 +495,20 @@ export function createConnectorHandler(
           return refusalResponse('unauthorized');
         }
         projected = projectBatch(batch);
+      } else {
+        // The health operation (M98d). All session and request checks above
+        // ran before the source is called; the source itself is synchronous
+        // and never runs an indicator. The instance is bound by the auth path
+        // for every non-status target, so capture it non-null.
+        const boundInstance = deps.session.instanceId;
+        if (boundInstance === null) {
+          return refusalResponse('unauthorized');
+        }
+        const outcome = readHealthProjection(deps, boundInstance);
+        if (outcome.kind === 'refused') {
+          return refusalResponse(outcome.code);
+        }
+        projected = outcome.projected;
       }
 
       // --- Serialize, bound, re-check, sign --------------------------------

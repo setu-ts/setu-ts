@@ -117,6 +117,14 @@ export const CAPABILITIES = {
   SERVICE_DISCOVERY: 'service-discovery',
   /** Health indicator contributions (multi-provider). */
   HEALTH_INDICATOR: 'health-indicator',
+  /**
+   * Minimized health observations (M98d) — an `IHealthDiagnosticsSource` the
+   * HealthPlugin registers under this token and the DiagnosticsPlugin
+   * consumes optionally to serve `GET /v1/health`. Absent means the
+   * connector answers a typed `unsupported` snapshot; it never runs an
+   * indicator itself.
+   */
+  HEALTH_DIAGNOSTICS: 'health-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

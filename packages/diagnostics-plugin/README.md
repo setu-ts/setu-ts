@@ -153,14 +153,18 @@ non-loopback bind outright.
 
 ## Protocol
 
-Three signed GET operations — `/v1/status`, `/v1/snapshot`, and `/v1/events?after=<N>&limit=<N>` —
-over bounded polling. Requests authenticate with `X-Setu-Session`, `X-Setu-Sequence` (strictly
-monotonic), `X-Setu-Instance`, and `X-Setu-Mac` (HMAC-SHA-256 over canonical newline-joined fields,
-verified via `subtle.verify`). Responses are signed over their exact bytes; the client verifies
-BEFORE parsing anything. Bodies are bounded (256 KiB), events are capped at 128 per read, and a
-fixed set of value-free error codes (`invalid-request`, `unauthorized`, `expired`,
-`unsupported-version`, `unavailable`, `rate-limited`) never reflects input. See
-`docs/diagnostics-protocol.md` in the repository for the complete wire specification and fixtures.
+Four signed GET operations — `/v1/status`, `/v1/snapshot`, `/v1/events?after=<N>&limit=<N>`, and the
+M98d inspector operation `/v1/health` — over bounded polling. The status body carries an
+`inspectors` manifest (`health: true`; the rest reserved and `false` until their own operations
+ship); a client paired against a legacy three-field status body resolves it to all-`false` and its
+`health()` answers a typed `unsupported` without sending the request. Requests authenticate with
+`X-Setu-Session`, `X-Setu-Sequence` (strictly monotonic), `X-Setu-Instance`, and `X-Setu-Mac`
+(HMAC-SHA-256 over canonical newline-joined fields, verified via `subtle.verify`). Responses are
+signed over their exact bytes; the client verifies BEFORE parsing anything. Bodies are bounded (256
+KiB), events are capped at 128 per read, and a fixed set of value-free error codes
+(`invalid-request`, `unauthorized`, `expired`, `unsupported-version`, `unavailable`, `rate-limited`)
+never reflects input. See `docs/diagnostics-protocol.md` in the repository for the complete wire
+specification and fixtures.
 
 Bounds: at most 8 simultaneous handlers with one slot reserved against unpaired floods, an anonymous
 refusal budget of 5 requests/second (burst 10), a per-session budget of 20 requests/second (burst
@@ -173,6 +177,11 @@ maintained devtool. Every dependency is injected (`subtle`, `fetch`, a `timing` 
 serialized with strictly increasing sequence numbers; the initial pairing exchange is terminal on
 failure; response MACs verify over the exact bounded bytes before parsing.
 
+The M98d inspector operation is read through `client.health(): Promise<HealthDiagnosticsSnapshot>` —
+the minimized health-observation snapshot the health plugin registers under
+`CAPABILITIES.HEALTH_DIAGNOSTICS`. A connector without a health source answers a typed
+`unsupported`; the client surfaces the snapshot's `state` rather than failing the call.
+
 The full public surface is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#diagnostics-connector-setu-tsdiagnostics-plugin).
 
@@ -181,6 +190,13 @@ The full public surface is documented in
 The connector serves M98a's minimized projections only: allowlisted labels, opaque ids, bounded
 counts, value-free failure codes. No request bodies, headers, credentials, payloads, logs, or
 environment values ever cross the protocol. Diagnostic counters are in-process and value-free.
+
+The M98d health inspector carries the same discipline: each observation holds only the approved
+display alias, the framework's own status, the outcome state, and monotonic timing. An indicator's
+`data`, the thrown value of a failure, and any absolute time are never projected — the canary test
+plants both and asserts their absence at the source, in the raw signed bytes captured below the
+client, and in the client DTO. The connector validates the projected DTO before signing it; a source
+that violates it answers `collection-failed`.
 
 ## Exports
 
