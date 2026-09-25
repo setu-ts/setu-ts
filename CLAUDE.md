@@ -5217,10 +5217,22 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   change). The re-audit's two Low findings are fixed too, and its final verdict on the audited
   commit is **passed**; the closeout commit after it touches documentation only, and the maintainer
   waived a further re-audit — complete (PR #363).
+- **Milestone 99e** (`packages/cli` + `docs` — a template axis that forces one style):
+  `--style functional|class-based` is now an axis on `setu new` and `setu generate app`, separate
+  from `--template` — `functional` (default) installs neither `DecoratorPlugin` nor `DiPlugin`,
+  `class-based` installs both, and `--template class-based` is a byte-identical alias of
+  `--template rest --style class-based` (the canonical spelling is logged, the interactive prompt
+  omits the duplicate, and `--help` shows the alias). A class-based microservice host composes the
+  microservice recipe with the decorator and DI pair, and its generated CQRS/event ingress classes
+  register only through `DecoratorPlugin({ ingress })` — the functional `src/cqrs` and `src/events`
+  barrels are not emitted, so nothing is registered twice. `docs/migration-nestjs.md` gains
+  Scaffolding and Microservices sections. Four independent security-audit rounds found and closed
+  F1–F4 (argv and prompter output that could forge terminal lines) and surfaced a pre-existing
+  `--transport-url` code injection into generated `setu.config.ts` on `main` (OBS-1), fixed here at
+  the maintainer's direction. The F5 and OBS-1 fixes after round 4 were not re-audited: the
+  maintainer waived round 5 rather than hold the merge — complete (PR #364).
 - **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
-  design security review and implementation audit required). The `v0.7.0` smoke closeout (M99)
-  reopened with **M99e** (`packages/cli` — `--style class-based` as its own axis, so a class-based
-  microservice is one command; planned in `plans/milestone-99e-class-based-style.md`, not started).
+  design security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

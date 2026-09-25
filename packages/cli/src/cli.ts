@@ -6,6 +6,7 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 import { parseArgs } from './args.ts';
+import { escapeName, escapeTerminalControls, hasControlCharacter } from './utils/names.ts';
 import { builtInFlagRefusal, builtInPositionalRefusal } from './flags.ts';
 import {
   APP_VERB,
@@ -127,8 +128,18 @@ function printHelp(log: (message: string) => void): void {
  */
 export async function runCli(
   argv: readonly string[],
-  deps: CliDependencies,
+  rawDeps: CliDependencies,
 ): Promise<number> {
+  // Every line the CLI writes goes through one escape, so a value reaching
+  // output by a path no call site escaped still cannot redraw the terminal or
+  // hide text behind a carriage return. Plugin command handlers write their
+  // own output and never see these sinks; the interactive prompter prints
+  // through a sink of its own and escapes it the same way (`prompt.ts`).
+  const deps: CliDependencies = {
+    ...rawDeps,
+    log: (message) => rawDeps.log(escapeTerminalControls(message)),
+    error: (message) => rawDeps.error(escapeTerminalControls(message)),
+  };
   const args = parseArgs(argv);
   const command = args.positionals[0];
 
@@ -149,6 +160,25 @@ export async function runCli(
   // `version`/`v` never reach this — consumed above — and a plugin command's
   // flags are checked in its dispatcher, after the config module is confirmed
   // and before the application boots.
+  // No option takes a control character: every value is a name, a path, a
+  // port or a URL. The sink escape above keeps the line feed — the CLI's own
+  // output needs it — so a line feed in a value is refused here, once, rather
+  // than trusted to every message that might quote the value back.
+  const controlFlag = Object.entries(args.flags)
+    .flatMap(([flag, value]) =>
+      (typeof value === 'boolean' ? [] : typeof value === 'string' ? [value] : value)
+        .map((each) => [flag, each] as const)
+    )
+    .find(([, value]) => hasControlCharacter(value));
+  if (controlFlag !== undefined) {
+    const [flag, value] = controlFlag;
+    deps.error(
+      `Option --${escapeName(flag)} has a control character in its value ` +
+        `("${escapeName(value)}"); no ${PROGRAM_NAME} option takes one.`,
+    );
+    return EXIT_USAGE;
+  }
+
   const flagRefusal = builtInFlagRefusal(command, args.positionals[1], args.flags, deps.error);
   if (flagRefusal !== undefined) return flagRefusal;
 

@@ -33,6 +33,7 @@
  */
 
 import { EXIT_USAGE, PROGRAM_NAME } from './constants.ts';
+import { escapeName } from './utils/names.ts';
 
 /**
  * The flags every built-in command answers to, each handled inside the command
@@ -120,6 +121,7 @@ const NEW: ICommandFlagSpec = spec(
   'new',
   [
     'template',
+    'style',
     'runtime',
     'env-file',
     'workspace',
@@ -161,7 +163,17 @@ const GENERATE_CUSTOM: ICommandFlagSpec = spec(
 /** `setu generate app`: the workspace-member flags, plus the named refusals. */
 const GENERATE_APP: ICommandFlagSpec = spec(
   'generate app',
-  ['template', 'port', 'devtool', 'devtool-port', 'env-file', 'depends-on', 'dir', 'dry-run'],
+  [
+    'template',
+    'style',
+    'port',
+    'devtool',
+    'devtool-port',
+    'env-file',
+    'depends-on',
+    'dir',
+    'dry-run',
+  ],
   // Read ONLY to be refused with their own guidance: the four transport flags
   // name the workspace-wide alternative, `--runtime` names the workspace's own
   // toolchain when it disagrees, and `--di` goes through `resolveTemplateChoice`.
@@ -413,7 +425,7 @@ export function unknownOptionMessage(
   allowed: readonly string[],
 ): string {
   const suggestion = suggestFlag(flag, allowed);
-  return `Unknown option \`--${flag}\` for \`${PROGRAM_NAME} ${commandLabel}\`.` +
+  return `Unknown option \`--${escapeName(flag)}\` for \`${PROGRAM_NAME} ${commandLabel}\`.` +
     (suggestion === undefined ? '' : ` Did you mean \`--${suggestion}\`?`);
 }
 

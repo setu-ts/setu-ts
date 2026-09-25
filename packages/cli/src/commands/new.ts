@@ -38,7 +38,7 @@ import {
   type TargetRuntime,
   TEMPLATES,
 } from '../constants.ts';
-import { listTemplates } from '../templates/registry.ts';
+import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
@@ -61,7 +61,7 @@ import {
 } from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
-import { deriveNames } from '../utils/names.ts';
+import { deriveNames, escapeName, isPathSegmentSafe, PROJECT_NAME_RULE } from '../utils/names.ts';
 import {
   findExisting,
   firstDuplicatePath,
@@ -135,11 +135,33 @@ function planWorkspace(
 
   const templateFlag = stringFlag(args.flags, 'template');
   if (templateFlag !== undefined) {
+    // Echoed escaped, and into the suggested command only when it names a real
+    // template: a CI job building argv from untrusted data must not be able to
+    // put a payload into a command the developer is told to copy.
+    const suggested = getTemplate(templateFlag) === undefined ? '<name>' : templateFlag;
     return {
       ok: false,
-      message: `A workspace root registers no plugins, so --template ${templateFlag} has ` +
+      message: `A workspace root registers no plugins, so --template ${escapeName(templateFlag)} ` +
+        `has nothing to configure. Create the workspace, then add a service with ` +
+        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template ${suggested}\`.`,
+    };
+  }
+
+  // The style is the template's own axis, so it is refused beside --template:
+  // a root registers nothing for either to apply to. The fix names the command
+  // that honours the flag, with the style it would have carried.
+  const styleFlag = stringFlag(args.flags, 'style');
+  if (styleFlag !== undefined) {
+    // The same rule as --template above: escaped when quoted, and suggested
+    // only when it is one of the two styles the axis has.
+    const suggested = styleFlag === 'functional' || styleFlag === 'class-based'
+      ? styleFlag
+      : '<functional|class-based>';
+    return {
+      ok: false,
+      message: `A workspace root registers no plugins, so --style ${escapeName(styleFlag)} has ` +
         `nothing to configure. Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template ${templateFlag}\`.`,
+        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template rest --style ${suggested}\`.`,
     };
   }
 
@@ -149,7 +171,8 @@ function planWorkspace(
     return {
       ok: false,
       message:
-        '`--di` is no longer supported. Use `--template class-based` for decorators and DI together.',
+        '`--di` is no longer supported. Use `--style class-based` (with `--template rest` or ' +
+        '`--template microservice`) for decorators and DI together.',
     };
   }
 
@@ -235,11 +258,13 @@ function readTransport(
 
   const spec = getTransport(named);
   if (spec === undefined) {
-    const alias = TRANSPORT_ALIASES[named];
+    // An own-key read: the table is a plain object, so `constructor` or
+    // `toString` would otherwise take the alias branch and be suggested back.
+    const alias = Object.hasOwn(TRANSPORT_ALIASES, named) ? TRANSPORT_ALIASES[named] : undefined;
     return {
       ok: false,
       message: alias === undefined
-        ? `Unknown transport "${named}". Expected one of: ${TRANSPORTS.join(', ')}.`
+        ? `Unknown transport "${escapeName(named)}". Expected one of: ${TRANSPORTS.join(', ')}.`
         : `There is no raw ${named} transport: every inter-service path here is HTTP over ` +
           `${named} or a broker client over ${named}. Use --transport ${alias} for direct calls ` +
           `through the discovery map, or a broker (${
@@ -328,7 +353,7 @@ function readArmFlag(
     // The two failures are told apart, because "no such transport" and "this
     // transport has no arm for this flag" are different mistakes.
     const prefix = spec === undefined
-      ? `Unknown ${flag} "${raw}".`
+      ? `Unknown ${flag} "${escapeName(raw)}".`
       : flag === 'broker'
       ? `"${raw}" declares no message-broker wiring.`
       : `"${raw}" declares no queue wiring.`;
@@ -405,7 +430,7 @@ function planProject(
   name: string,
   runtime: TargetRuntime,
   args: ParsedArgs,
-): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
+): { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
   readonly ok: false;
   readonly message: string;
 } {
@@ -457,7 +482,10 @@ function planProject(
   // The runtime swap runs INSIDE resolveHost, before any overlay: on Workers it
   // has already removed the messaging and queue wirings, which is exactly why a
   // broker flag is refused there rather than silently rewriting nothing.
-  const host = resolveHost(choice.template ?? MINIMAL_HOST, runtime);
+  //
+  // The HOST, not the template: `--style class-based` resolves to the
+  // template's precomputed variant, and the alias resolves to itself.
+  const host = resolveHost(choice.host ?? MINIMAL_HOST, runtime);
   const configured = envFile.path === undefined ? host : withEnvFile(host, envFile.path);
   if (configured === undefined) {
     return {
@@ -505,13 +533,22 @@ function planProject(
     workspaceProfile(runtime),
   );
 
+  const notice = choice.notice;
   if (!devtoolRequested) {
-    return { ok: true, files: projectFiles(name, runtime, overlaid) };
+    return {
+      ok: true,
+      files: projectFiles(name, runtime, overlaid),
+      ...(notice === undefined ? {} : { notice }),
+    };
   }
   // Absent, the port is the documented standalone default, overridable with
   // --devtool-port and range-checked by the shared port-flag reader.
   const devHost = withDevtool(overlaid, devtoolPortFlag.port ?? DEFAULT_DEVTOOL_PORT);
-  return { ok: true, files: projectFiles(name, runtime, devHost) };
+  return {
+    ok: true,
+    files: projectFiles(name, runtime, devHost),
+    ...(notice === undefined ? {} : { notice }),
+  };
 }
 
 /**
@@ -539,11 +576,15 @@ export async function runNewCommand(
     deps.log('Templates:');
     deps.log('  (none)              Minimal — the runtime plugin alone');
     for (const template of listTemplates()) {
-      deps.log(`  ${template.name.padEnd(18)}${template.description}`);
+      // The alias is annotated, not hidden: it is public surface, but the
+      // canonical spelling is what the style axis names.
+      const suffix = template.aliasOf === undefined ? '' : ` (alias of ${template.aliasOf})`;
+      deps.log(`  ${template.name.padEnd(18)}${template.description}${suffix}`);
     }
     deps.log('');
     deps.log('Options:');
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
+    deps.log('  --style <name>      Code style for a styleable template: functional | class-based');
     deps.log('  --env-file <path>   Dotenv path for a ConfigPlugin-backed template (default .env)');
     deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
     deps.log(
@@ -598,25 +639,51 @@ export async function runNewCommand(
   const runtimeFlag = stringFlag(chosen.flags, 'runtime');
   if (runtimeFlag !== undefined && !isTargetRuntime(runtimeFlag)) {
     deps.error(
-      `Unknown runtime "${runtimeFlag}". Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
+      `Unknown runtime "${escapeName(runtimeFlag)}". Expected one of: ${
+        TARGET_RUNTIMES.join(', ')
+      }.`,
     );
     return EXIT_USAGE;
   }
   const runtime: TargetRuntime = runtimeFlag ?? 'deno';
 
-  const projectName = deriveNames(rawName).kebab;
-  if (projectName === '') {
-    deps.error(`Invalid project name: "${rawName}".`);
+  const names = deriveNames(rawName);
+  // The project name becomes a filesystem path (`joinPath(dir, kebab)`) and never
+  // an identifier, so it passes the PATH rules every name-taking verb shares — a
+  // separator (`../sibling`), `.`/`..`, a control character or an over-long name
+  // would write outside the intended directory or fail mid-write — and not the
+  // identifier rules: `setu new 3d-shop` scaffolded before M99e and still does.
+  if (!isPathSegmentSafe(names)) {
+    // The name is quoted back as typed, so it goes through `escapeName`: a
+    // control character in the refusal would forge a standalone line in the
+    // rendered message.
+    deps.error(
+      `Invalid project name: "${escapeName(rawName)}". ${PROJECT_NAME_RULE}`,
+    );
     return EXIT_USAGE;
   }
+  const projectName = names.kebab;
 
-  const plan = workspace
-    ? planWorkspace(projectName, runtime, chosen)
-    : planProject(projectName, runtime, chosen);
+  // The alias notice, logged once, before anything else — informational, never
+  // an error: the alias is byte-identical and stays. Only the standalone plan
+  // carries one: a workspace root refuses --template, so it can never be an alias.
+  let planNotice: string | undefined;
+  let plan: { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
+    readonly ok: false;
+    readonly message: string;
+  };
+  if (workspace) {
+    plan = planWorkspace(projectName, runtime, chosen);
+  } else {
+    const projectPlan = planProject(projectName, runtime, chosen);
+    if (projectPlan.ok) planNotice = projectPlan.notice;
+    plan = projectPlan;
+  }
   if (!plan.ok) {
     deps.error(plan.message);
     return EXIT_USAGE;
   }
+  if (planNotice !== undefined) deps.log(planNotice);
 
   if (workspace && deps.portAvailable !== undefined) {
     const requested = readPortFlag(args.flags);

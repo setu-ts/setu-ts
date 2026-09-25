@@ -78,4 +78,23 @@ describe('renderDiscoveryModule', () => {
   it('imports through the module own path', () => {
     expect(DISCOVERY_SPECIFIER).toBe(`./${DISCOVERY_MODULE}`);
   });
+
+  // OBS-1's second door: a member name read back from a hand-edited manifest
+  // becomes an object key here. Imported as a real module, the key must be the
+  // name exactly and nothing in it may run.
+  it('renders a hostile member name as a key, never as code', async () => {
+    const hostile: WorkspaceMember = {
+      name: "x':[],...(globalThis.PWNED='yes',{}),'y",
+      port: 3009,
+    };
+    const source = renderDiscoveryModule(ORDERS, [ORDERS, hostile]);
+    const body = source.slice(source.indexOf('export const'));
+    const module = await import(
+      `data:application/typescript,${
+        encodeURIComponent(`const Deno = { env: { get: (_: string) => undefined } };\n${body}`)
+      }`
+    );
+    expect(Object.keys(module[SERVICE_ENDPOINTS_EXPORT])).toEqual([hostile.name]);
+    expect(Reflect.get(globalThis, 'PWNED')).toBeUndefined();
+  });
 });

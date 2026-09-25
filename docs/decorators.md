@@ -66,11 +66,13 @@ class is constructed through the container and its `scope` is honored; without i
 constructed once and registered in the kernel's `ServiceRegistry`. The decorated source is identical
 either way — what changes is the lifecycle.
 
-`setu new app --template class-based` scaffolds both together, which is the only combination the CLI
-writes: the default templates install neither plugin, and the independent `--di` flag has been
-removed. An older project may hold `DecoratorPlugin` alone, and it keeps working — that is the
-container-less path described above. See the
-[CLI Guide](./cli.md#decorators-and-di-are-one-choice-and-functional-is-the-default).
+`setu new app --template rest --style class-based` scaffolds both together, which is the only
+combination the CLI writes: the default templates install neither plugin, and the independent `--di`
+flag has been removed. `--style` is its own axis on the styleable templates (`rest` and
+`microservice`), and `--template class-based` is a byte-identical alias of
+`--template rest --style class-based`. An older project may hold `DecoratorPlugin` alone, and it
+keeps working — that is the container-less path described above. See the
+[CLI Guide](./cli.md#style-is-its-own-axis-decorators-and-di-are-one-choice-and-functional-is-the-default).
 
 ## Non-HTTP ingress
 

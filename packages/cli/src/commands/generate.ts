@@ -21,7 +21,13 @@ import {
 import { runAppCommand } from './app.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
 import { runLibraryCommand } from './library.ts';
-import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
+import {
+  deriveNames,
+  escapeName,
+  IDENTIFIER_NAME_RULE,
+  isIdentifierSafe,
+  overlongComponent,
+} from '../utils/names.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import {
@@ -175,7 +181,9 @@ export async function runGenerateCommand(
   }
   if (typeof runtimeValue === 'string' && !isTargetRuntime(runtimeValue)) {
     deps.error(
-      `Unknown runtime "${runtimeValue}". Expected one of: ${TARGET_RUNTIMES.join(', ')}.`,
+      `Unknown runtime "${escapeName(runtimeValue)}". Expected one of: ${
+        TARGET_RUNTIMES.join(', ')
+      }.`,
     );
     return EXIT_USAGE;
   }
@@ -216,7 +224,7 @@ export async function runGenerateCommand(
   } else {
     const metadata = getSchematic(schematicName);
     if (metadata === undefined) {
-      deps.error(`Unknown schematic: ${schematicName}`);
+      deps.error(`Unknown schematic: ${escapeName(schematicName)}`);
       printSchematics(installed, deps.log);
       return EXIT_USAGE;
     }
@@ -253,8 +261,10 @@ export async function runGenerateCommand(
   if (!isIdentifierSafe(names)) {
     // Schematics interpolate these forms into declarations, so a name that
     // cannot begin an identifier would emit source that does not parse.
+    // Quoting the name back as typed, so through `escapeName`: a control
+    // character here would forge a standalone line in the rendered message.
     deps.error(
-      `Invalid name "${name}": it must contain a letter and must not start with a digit.`,
+      `Invalid name "${escapeName(name)}": ${IDENTIFIER_NAME_RULE}`,
     );
     return EXIT_USAGE;
   }
@@ -411,6 +421,21 @@ export async function runGenerateCommand(
   if (files.length === 0) {
     deps.error(`Schematic "${schematicName}" produced no files.`);
     return EXIT_ERROR;
+  }
+
+  // The name guard bounds the kebab, but a schematic APPENDS to it
+  // (`<kebab>.controller.ts`), so a name within the bound can still plan a file
+  // name the filesystem refuses — an uncaught `File name too long` from the
+  // overwrite probe below. Checked against the schematic's own relative paths,
+  // so a long `--dir` is not mistaken for the name, and before `--dry-run`, so
+  // the dry run never prints a plan the real run could not carry out.
+  const overlong = overlongComponent(generated.map((file) => file.path));
+  if (overlong !== undefined) {
+    deps.error(
+      `Cannot generate "${escapeName(name)}": the file name ${overlong} is over 255 bytes, ` +
+        `the limit for one path component. Use a shorter name.`,
+    );
+    return EXIT_USAGE;
   }
 
   if (args.flags['dry-run'] === true) {

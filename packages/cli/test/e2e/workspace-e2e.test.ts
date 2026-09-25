@@ -431,6 +431,70 @@ describe('workspace scaffolding — end to end', () => {
     expect(code).toBe(0);
   });
 
+  // The styled member: `generate app` honours `--style` in a workspace, and the
+  // member composes the microservice recipe with the decorator and DI pair while
+  // the workspace transport overlay rewrites its broker and queue wirings. The
+  // check runs from the root through the glob, so the composed config must
+  // resolve every `@setu-ts/*` pin from the member's own manifest.
+  it('type-checks a class-based member in a broker workspace, from the root', async () => {
+    expect(
+      await run(['new', 'acme', '--workspace', '--transport', 'rabbitmq', '--port', String(base)]),
+    )
+      .toBe(0);
+    const ws = `${root}/acme`;
+    expect(
+      await run([
+        'g',
+        'app',
+        'orders',
+        '--template',
+        'microservice',
+        '--style',
+        'class-based',
+        '--dir',
+        ws,
+      ]),
+    ).toBe(0);
+
+    const project = `${ws}/apps/orders`;
+    await useWorkspacePackages(project);
+
+    // The member is the styled host: it registers the decorator and DI pair.
+    const config = await Deno.readTextFile(`${project}/setu.config.ts`);
+    expect(config).toContain('DecoratorPlugin');
+    expect(config).toContain('DiPlugin');
+    // The transport overlay reached the styled member's wirings.
+    expect(config).toContain('rabbitmq');
+
+    const sources = [
+      `${project}/main.ts`,
+      `${project}/setu.config.ts`,
+      `${project}/${DISCOVERY_MODULE}`,
+    ];
+    const command = new Deno.Command(Deno.execPath(), {
+      args: ['check', '--node-modules-dir=none', ...sources],
+      cwd: ws,
+      stdout: 'piped',
+      stderr: 'piped',
+    });
+    const { code, stderr } = await command.output();
+    const text = new TextDecoder().decode(stderr);
+    expect(text).not.toContain('SyntaxError');
+    expect(code, text).toBe(0);
+
+    const formatted = await new Deno.Command(Deno.execPath(), {
+      args: ['fmt', '--check'],
+      cwd: ws,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    const decoder = new TextDecoder();
+    expect(
+      formatted.code,
+      decoder.decode(formatted.stdout) + decoder.decode(formatted.stderr),
+    ).toBe(0);
+  });
+
   // The FIRST member's map is `{}`, and an empty object literal reaching a
   // `Readonly<Record<string, readonly StaticServiceDefinition[]>>` parameter is
   // exactly the shape no unit test can check — the two-member case above never

@@ -12,6 +12,7 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
+import { escapeName } from '../utils/names.ts';
 
 import { isTargetRuntime, type TargetRuntime } from '../constants.ts';
 
@@ -109,8 +110,9 @@ export function readPortFlag(
   if (!isUsablePort(port)) {
     return {
       ok: false,
-      message:
-        `Invalid --${flag} "${raw}": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+      message: `Invalid --${flag} "${
+        escapeName(raw)
+      }": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
     };
   }
   return { ok: true, port };

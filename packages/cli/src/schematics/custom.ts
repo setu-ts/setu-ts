@@ -6,6 +6,7 @@
 
 import type { Schematic } from './registry.ts';
 import { joinPath, toFileUrl } from '../utils/file-writer.ts';
+import { escapeName } from '../utils/names.ts';
 
 /** Directory, relative to the project root, holding custom schematics. */
 export const CUSTOM_SCHEMATIC_DIR = '.setu-ts/schematics';
@@ -68,7 +69,7 @@ export async function loadCustomSchematic(
     module = await load(url);
   } catch (cause) {
     throw new Error(
-      `Cannot load custom schematic "${name}" from ${url}: ${
+      `Cannot load custom schematic "${escapeName(name)}" from ${url}: ${
         cause instanceof Error ? cause.message : String(cause)
       }`,
       { cause },
@@ -78,7 +79,7 @@ export async function loadCustomSchematic(
   const exported = module['schematic'] ?? module['default'];
   if (typeof exported !== 'function') {
     throw new Error(
-      `Custom schematic "${name}" (${url}) must export a 'schematic' function ` +
+      `Custom schematic "${escapeName(name)}" (${url}) must export a 'schematic' function ` +
         `of type (names, options) => GeneratedFile[]; found ${typeof exported}.`,
     );
   }

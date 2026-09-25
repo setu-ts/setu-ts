@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`cli` — `--style` is its own axis on `setu new` and `setu generate app` (M99e).**
+  `--style functional|class-based` selects the decorator-and-DI composition independently of
+  `--template`: `functional` (the default) installs neither `DecoratorPlugin` nor `DiPlugin`, and
+  `class-based` installs both together. It is accepted on the styleable templates `rest` and
+  `microservice` and refused with no template to apply to, with an unknown value, and on
+  `full-stack`, which composes through a starter and has no controller or ingress seam to register
+  decorated classes through. `--template class-based` becomes a byte-identical **alias** of
+  `--template rest --style class-based`: scaffolding it logs one line naming the canonical spelling,
+  the interactive template prompt omits the duplicate, and `--help` shows `(alias of …)`. The
+  class-based microservice host composes the microservice recipe with the decorator and DI pair, and
+  its generated CQRS and event ingress classes register through `DecoratorPlugin({ ingress })` — the
+  functional `src/cqrs` and `src/events` barrels are not emitted, so nothing is registered twice.
+  `docs/migration-nestjs.md` gains `Scaffolding` and `Microservices` sections naming the decorator
+  route for `@MessagePattern`, `@EventPattern`, `@nestjs/cqrs`, `@nestjs/bull` and
+  `@nestjs/schedule`.
 - **Health observations (M98d): an opt-in, minimized view of health-check outcomes through the M98b
   diagnostics connector.** `HealthPlugin` accepts a `diagnostics` option (`HealthDiagnosticsOptions`
   / `HealthDiagnosticsScheduledOptions`, exported from `@setu-ts/health-plugin`) that retains only
@@ -195,6 +210,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`cli` — the `--di` refusal names the `--style` axis (M99e).** The retired `--di` flag's message
+  now directs the caller to `--style class-based` (with `--template rest` or `microservice`) rather
+  than only to `--template class-based`, and the broker refusal's "use `--template microservice`"
+  advice gains "(add `--style class-based` for decorators)".
 - **`cli` — every newly scaffolded project declares `@setu-ts/kernel` and a two-parameter
   `createApp` (M98c).** The config factory's devtool parameter names `KernelDiagnosticsOptions`, so
   the kernel is now pinned on every target — including starter-composed templates, which referenced
@@ -232,6 +251,55 @@ All notable changes to this project are documented here. The format follows
   provider. Nothing changes for the five built-in providers, which all return promises.
 
 ### Fixed
+
+- **`cli` — the `--runtime` documentation read as a lock-in, and one of its claims was stale.** The
+  scaffolding example `setu new my-app --runtime node # deno | node | bun | cloudflare-workers`
+  suggested a project is tied to the runtime it was created for. It is not: on `deno`, `node` and
+  `bun` every template emits byte-identical `main.ts`, `setu.config.ts` and `src/`, and
+  `RuntimePlugin` detects the platform at startup, so only the manifest and start command differ.
+  `docs/cli.md` now says so and gives the verified steps for moving between runtimes — including
+  that a move to Deno must replace `package.json` rather than sit beside it (`setu generate` reads
+  `package.json` first), with `full-stack` as the one template that keeps it for the Vite build —
+  and the Workers exception. Separately, the CLI README's option table said `--runtime` defaults to
+  `deno` on `setu generate`; it is detected from the project's manifests. Wording only; no
+  behaviour, API or export changed.
+
+- **`cli` — `--transport-url` could inject code into a generated workspace member.** The broker URL
+  fallback was wrapped in quotes without escaping when rendered into each member's `setu.config.ts`,
+  so a value carrying a quote closed the string literal and the rest ran as code whenever the member
+  started — `redis://h:1'+(globalThis.PWNED='yes')+'` did exactly that. The value is also persisted
+  in `setu.workspace.json`, so every later `setu generate app` repeated it. It is now rendered as an
+  escaped string literal that evaluates to exactly the value given, for both the flag and a
+  hand-edited manifest; an ordinary URL renders byte-identically, so no existing generated file
+  changes. A member name read back from that manifest reached the generated discovery module the
+  same way, as a raw object key, and is rendered the same way now. Present since the workspace
+  transport arrived; found by the M99e security audit and fixed there at the maintainer's direction.
+
+- **`cli` — a name that is not safe to generate from is refused before anything is written (M99e).**
+  Every name-taking verb (`new`, `generate app`, `generate <schematic>`, `generate library`,
+  `adopt`) joins the derived kebab into a path, and `setu new ../sibling`, `setu new ..` and
+  `setu generate app ../sibling` wrote the scaffold into an ancestor directory. Punctuation also
+  passed through into generated source: `setu g service a:b` emitted `class A:bService`, and a quote
+  (`x'y`) closed the `@Injectable` token literal early — source injection from the command line —
+  while `setu new 'x"y' --runtime cloudflare-workers` broke the emitted `wrangler.toml`. A verb that
+  generates source now requires every derived form (Pascal, camel, SCREAMING) to be a TypeScript
+  identifier: letters (Unicode included, so `café` still works), digits after the first character,
+  and the separators `-`, `_` and space. `setu new` takes a portable project name — it starts with a
+  letter or digit and holds only letters, digits, `.` and `-` — so `3d-shop`, `2048` and `my.app`
+  keep working. A Windows device name (`con`, `nul`, `com1`, … with or without an extension) and a
+  name ending in `.` are refused everywhere, since Windows cannot create either. Any name over 255
+  bytes, and a name whose planned file name (`<name>.controller.ts`, a library's
+  `test/<name>.test.ts`) exceeds 255 bytes, is refused too, where it used to fail mid-write with an
+  uncaught `File name too long`. Every refusal is a usage error (exit `2`) with no writes, and
+  echoes the name with its control characters escaped, so the message stays one line. No argument
+  can forge an output line any more: an option value carrying a control character is refused before
+  any command runs, every line the CLI writes has its control characters other than the line feed
+  and tab escaped (bidirectional format characters included, so a quoted value cannot be reordered
+  as displayed), and a positional quoted back (a name, a schematic, an unknown command, an `add`
+  package, a `devtool enable` member) is escaped where it is quoted. A suggested command copies a
+  value only when it names a real template, style or runtime, so an unknown value is never planted
+  in a command you are told to run. `--transport constructor` is now an unknown transport rather
+  than an alias of a built-in.
 
 - **`health-plugin` — an unrecognized indicator status could hide another indicator's `down`, so
   `/health` and `/ready` answered `200` over a failing dependency.** The aggregate took the worst

@@ -81,4 +81,52 @@ describe('createTerminalPrompter', () => {
     // Deno's prompt() pre-fills an editable buffer and is deliberately unused.
     expect(question).toContain('Template? [rest]');
   });
+
+  // M99e audit F4: the prompter prints through its own sink, which `runCli`
+  // does not wrap, and a rejected answer is echoed back. A pasted answer
+  // carrying BS/BEL/ESC/U+2028 or a line feed must come back escaped, on one line.
+  it('echoes a rejected answer with its control characters escaped', async () => {
+    const answers = [
+      ['x', String.fromCharCode(27), '[31m', String.fromCharCode(7), String.fromCharCode(8), 'y']
+        .join(''),
+      `a${String.fromCharCode(0x2028)}INJECTED: done`,
+      'a\nINJECTED: scaffold complete',
+      'rest',
+    ];
+    const printed: string[] = [];
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => answers.shift() ?? null,
+      (message) => printed.push(message),
+    );
+    expect(await prompter.select('Template?', CHOICES)).toBe('rest');
+    const retries = printed.filter((line) => line.includes('is not one of'));
+    expect(retries).toEqual([
+      '"x\\u001b[31m\\u0007\\u0008y" is not one of: rest, microservice.',
+      '"a\\u2028INJECTED: done" is not one of: rest, microservice.',
+      '"a\\u000aINJECTED: scaffold complete" is not one of: rest, microservice.',
+    ]);
+    for (const code of [7, 8, 27, 0x2028]) {
+      expect(printed.join('\n').includes(String.fromCharCode(code))).toBe(false);
+    }
+    // A pasted line feed survives prompt() and the sink escape keeps it, so
+    // only the per-site escape stops it forging a line of its own.
+    expect(printed.flatMap((line) => line.split('\n')).filter((l) => l.startsWith('INJECTED')))
+      .toEqual([]);
+  });
+
+  // The menu is caller-supplied text printed through the same sink: a label
+  // carrying a control character is escaped by the sink escape, not per site.
+  it('escapes a control character in a choice label', async () => {
+    const printed: string[] = [];
+    const esc = String.fromCharCode(27);
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => '',
+      (message) => printed.push(message),
+    );
+    await prompter.select('Template?', [{ value: 'rest', label: `${esc}[2Kfake` }]);
+    expect(printed.join('\n').includes(esc)).toBe(false);
+    expect(printed.join('\n')).toContain('\\u001b[2Kfake');
+  });
 });

@@ -116,6 +116,16 @@ describe('runAppCommand', () => {
       expect(h.out.text()).toContain('--env-file');
     });
 
+    // Plan §3.2: BOTH help renderers annotate the alias — `generate app --help`
+    // listed `class-based` as a bare peer of `rest`.
+    it('annotates the class-based alias in its usage', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', '--help'])).toBe(0);
+      expect(h.out.text()).toContain(
+        'class-based is an alias of --template rest --style class-based',
+      );
+    });
+
     it('refuses a missing name with a usage error', async () => {
       const h = harness([]);
       expect(await h.run(['app'])).toBe(2);
@@ -127,6 +137,28 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', '2fa'])).toBe(2);
       expect(h.err.text()).toContain('must not start with a digit');
       expect(h.fs.writes).toEqual([]);
+    });
+
+    // A member name is joined into `apps/<kebab>`, so a name carrying a path
+    // separator would scaffold outside the workspace's apps/ directory. The
+    // shared guard rejects it before anything is planned.
+    for (const name of ['..', '.', '../sibling', '../../..', 'a/b']) {
+      it(`refuses the traversal member name ${JSON.stringify(name)}`, async () => {
+        const h = harness([]);
+        expect(await h.run(['app', name])).toBe(2);
+        expect(h.err.text()).toContain('path separator');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
+    // The member refusal quotes the name as typed, so a CRLF inside it must
+    // render as an escape rather than forging a standalone output line.
+    it('renders a CRLF in a refused member name as an escape', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', '../sib\r\nINJECTED'])).toBe(2);
+      expect(h.err.lines).toHaveLength(1);
+      expect(h.err.lines[0]).not.toContain('\r');
+      expect(h.err.lines[0]).not.toContain('\n');
     });
 
     // A member's runtime is the WORKSPACE's: they share one root manifest and one
@@ -206,7 +238,7 @@ describe('runAppCommand', () => {
     it('refuses the retired independent DI switch through the shared selector', async () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--di'])).toBe(2);
-      expect(h.err.text()).toContain('--template class-based');
+      expect(h.err.text()).toContain('--style class-based');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -710,7 +742,7 @@ describe('runAppCommand', () => {
     it('rejects the retired independent DI flag', async () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--di'])).toBe(2);
-      expect(h.err.text()).toContain('--template class-based');
+      expect(h.err.text()).toContain('--style class-based');
     });
   });
 

@@ -20,6 +20,8 @@
  * @module
  */
 
+import { escapeName, escapeTerminalControls } from './utils/names.ts';
+
 /** One selectable answer to a scaffold question. */
 export interface PromptChoice {
   /** The value written into the flag record when chosen. */
@@ -55,7 +57,12 @@ export interface Prompter {
  *
  * @param isTerminal - Whether stdin is an interactive terminal right now
  * @param promptFn - Reads one line, returning null when it cannot
- * @param log - Prints the choice list and retry hints
+ * @param log - Prints the choice list and retry hints; every line is passed
+ *   through `escapeTerminalControls` first, because this sink is not the one
+ *   `runCli` wraps. That escape keeps the line feed, and an answer CAN carry
+ *   one — Deno's `prompt()` keeps a newline inside a bracketed paste, turns a
+ *   pasted CR into one, and inserts one on Ctrl-V Ctrl-J (measured, Deno 2.9.6)
+ *   — so the echoed answer is also escaped where it is quoted
  * @returns The prompter
  */
 export function createTerminalPrompter(
@@ -63,6 +70,7 @@ export function createTerminalPrompter(
   promptFn: (message: string) => string | null,
   log: (message: string) => void,
 ): Prompter {
+  const print = (message: string): void => log(escapeTerminalControls(message));
   return {
     select(question: string, choices: readonly PromptChoice[]): Promise<string | undefined> {
       // The SECOND line of defense against blocking a non-interactive run: the
@@ -74,7 +82,7 @@ export function createTerminalPrompter(
       const menu = choices.map((choice) => `  ${choice.value} — ${choice.label}`).join('\n');
 
       for (;;) {
-        log(menu);
+        print(menu);
         const answer = promptFn(`${question} [${fallback.value}] `);
         // Both "stdin was never a terminal" and "the user pressed Ctrl-D"
         // arrive here; both mean stop asking, never "take the default".
@@ -82,8 +90,10 @@ export function createTerminalPrompter(
         if (answer === '') return Promise.resolve(fallback.value);
         const match = choices.find((choice) => choice.value === answer);
         if (match !== undefined) return Promise.resolve(match.value);
-        log(
-          `"${answer}" is not one of: ${choices.map((choice) => choice.value).join(', ')}.`,
+        print(
+          `"${escapeName(answer)}" is not one of: ${
+            choices.map((choice) => choice.value).join(', ')
+          }.`,
         );
       }
     },

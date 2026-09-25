@@ -21,6 +21,7 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
+import { escapeName } from '../utils/names.ts';
 
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
@@ -352,7 +353,7 @@ async function enableInWorkspace(
   const member = manifest.members.find((candidate) => candidate.name === memberName);
   if (member === undefined) {
     deps.error(
-      `Workspace member "${memberName}" is not in ${WORKSPACE_MANIFEST}.` +
+      `Workspace member "${escapeName(memberName)}" is not in ${WORKSPACE_MANIFEST}.` +
         ` Members: ${manifest.members.map((entry) => entry.name).join(', ') || 'none'}.`,
     );
     return EXIT_ERROR;

@@ -1223,8 +1223,11 @@ RuntimePlugin)
 **Commands:**
 
 - `setu new <name>` - Create a new project (`--template rest|microservice|class-based|full-stack`,
-  `--runtime deno|node|bun|cloudflare-workers`); `--template class-based` opts into decorators and
-  dependency injection together, and every other template is functional
+  `--style functional|class-based`, `--runtime deno|node|bun|cloudflare-workers`);
+  `--style
+  class-based` opts into decorators and dependency injection together on `rest` and
+  `microservice`, and `--template class-based` is a byte-identical alias of
+  `--template rest --style class-based`
 - `setu new <name> --workspace` - Create a monorepo root (`--port`, `--transport`)
 - `setu generate <type> <name>` - Generate code; 14 schematics, 11 of them wired into a registration
   site with no edit to a file you own

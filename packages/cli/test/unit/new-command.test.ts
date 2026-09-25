@@ -566,7 +566,7 @@ describe('runNewCommand', () => {
     it('refuses the retired independent DI switch', async () => {
       const h = harness();
       expect(await h.run(['app', '--template', 'rest', '--di'])).toBe(2);
-      expect(h.err.text()).toContain('--template class-based');
+      expect(h.err.text()).toContain('--style class-based');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -933,10 +933,85 @@ describe('runNewCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
+    // The project name is joined into a filesystem path, so a name carrying a
+    // path separator would write the scaffold into an ancestor directory. The
+    // guard rejects it before anything is planned — these are the negative
+    // control for that refusal: each traversal name is refused with no writes.
+    for (const name of ['..', '.', '../sibling', '../../..', 'a/b']) {
+      it(`returns 2 and writes nothing for the traversal name ${JSON.stringify(name)}`, async () => {
+        const h = harness();
+        expect(await h.run([name])).toBe(2);
+        expect(h.err.text()).toContain('Invalid project name');
+        expect(h.err.text()).toContain('path separator');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
+    // A NUL byte and an over-long component pass the letter/separator rules and
+    // reach the filesystem, which rejects them mid-flight as an error nothing
+    // caught — an uncaught rejection, not a refusal. Both are refused here,
+    // before any filesystem access.
+    it('returns 2 for a name carrying a NUL byte', async () => {
+      const h = harness();
+      expect(await h.run(['ok\u0000'])).toBe(2);
+      expect(h.err.text()).toContain('control character');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('returns 2 for a name longer than a filename component', async () => {
+      const h = harness();
+      expect(await h.run(['a'.repeat(300)])).toBe(2);
+      expect(h.err.text()).toContain('255 bytes');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    // The refusal quotes the name as typed, so a CRLF inside it must render as
+    // an escape: the message stays one line and cannot forge a standalone line
+    // into the rendered output.
+    it('renders a CRLF in a refused name as an escape, keeping it one line', async () => {
+      const h = harness();
+      expect(await h.run(['../sib\r\nINJECTED: scaffold complete'])).toBe(2);
+      expect(h.err.lines).toHaveLength(1);
+      expect(h.err.lines[0]).not.toContain('\r');
+      expect(h.err.lines[0]).not.toContain('\n');
+      expect(h.err.lines[0]).toContain('\\u000d\\u000aINJECTED');
+    });
+
+    // The project name is a directory, never an identifier: before M99e a
+    // digit-leading or letterless project name scaffolded, and it must still.
+    for (const name of ['3d-shop', '2048']) {
+      it(`scaffolds the digit-leading project name ${JSON.stringify(name)}`, async () => {
+        const h = harness();
+        expect(await h.run([name])).toBe(0);
+        expect(h.fs.writes.some((path) => path.endsWith(`/${name}/deno.json`))).toBe(true);
+      });
+    }
+
+    // `wrangler.toml` carries `name = "<kebab>"`, so a quote broke the TOML.
+    it('returns 2 and writes nothing for a project name carrying a quote', async () => {
+      const h = harness();
+      expect(await h.run(['x"y', '--runtime', 'cloudflare-workers'])).toBe(2);
+      expect(h.err.text()).toContain('Invalid project name');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    it('scaffolds a dotted project name', async () => {
+      const h = harness();
+      expect(await h.run(['my.app'])).toBe(0);
+    });
+
+    it('returns 2 and writes nothing for a Windows traversal name', async () => {
+      const h = harness();
+      expect(await h.run(['..\\sibling'])).toBe(2);
+      expect(h.err.text()).toContain('path separator');
+      expect(h.fs.writes).toEqual([]);
+    });
+
     it('returns 0 for --help, never a usage error', async () => {
       const h = harness();
       expect(await h.run(['--help'])).toBe(0);
       expect(h.out.text()).toContain('new <project-name>');
+      expect(h.out.text()).toContain('(alias of --template rest --style class-based)');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -1105,7 +1180,7 @@ describe('--workspace', () => {
     it('refuses the retired independent DI switch', async () => {
       const h = harness();
       expect(await h.run(['acme', '--workspace', '--di'])).toBe(2);
-      expect(h.err.text()).toContain('--template class-based');
+      expect(h.err.text()).toContain('--style class-based');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -1247,6 +1322,18 @@ describe('--workspace --transport', () => {
       expect(h.err.text()).toContain('no raw tcp transport');
       expect(h.err.text()).toContain('--transport http');
       expect(h.fs.writes).toEqual([]);
+    });
+
+    // The alias table is a plain object: an inherited key such as
+    // `constructor` must read as an unknown transport, not take the alias
+    // branch and suggest `--transport function Object() { [native code] }`.
+    it('treats an inherited key as an unknown transport, not an alias', async () => {
+      for (const named of ['constructor', 'toString', '__proto__']) {
+        const { h, code } = await workspaceWith(['--transport', named]);
+        expect(code).toBe(2);
+        expect(h.err.text()).toContain(`Unknown transport "${named}"`);
+        expect(h.err.text()).not.toContain('native code');
+      }
     });
 
     it('refuses --transport with no value', async () => {

@@ -13,7 +13,13 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
 import { EXIT_ERROR, EXIT_OK, EXIT_USAGE, LIBRARY_VERB, PROGRAM_NAME } from '../constants.ts';
-import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
+import {
+  deriveNames,
+  escapeName,
+  IDENTIFIER_NAME_RULE,
+  isIdentifierSafe,
+  overlongComponent,
+} from '../utils/names.ts';
 import {
   findExisting,
   firstDuplicatePath,
@@ -100,8 +106,10 @@ export async function runLibraryCommand(
 
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
+    // Quoting the name back as typed, so through `escapeName`: a control
+    // character here would forge a standalone line in the rendered message.
     deps.error(
-      `Invalid name "${rawName}": it must contain a letter and must not start with a digit.`,
+      `Invalid name "${escapeName(rawName)}": ${IDENTIFIER_NAME_RULE}`,
     );
     return EXIT_USAGE;
   }
@@ -159,6 +167,18 @@ export async function runLibraryCommand(
   if (duplicate !== undefined) {
     deps.error(`Refusing to plan ${duplicate} twice; it would be written and then overwritten.`);
     return EXIT_ERROR;
+  }
+
+  // The kebab is bounded by the name guard, but `test/<kebab>.test.ts` extends
+  // it: refused here, before `--dry-run` prints a plan the real run could not
+  // carry out and before the overwrite probe meets `File name too long`.
+  const overlong = overlongComponent(files.map((file) => file.path));
+  if (overlong !== undefined) {
+    deps.error(
+      `Cannot generate "${escapeName(rawName)}": the file name ${overlong} is over 255 bytes, ` +
+        `the limit for one path component. Use a shorter name.`,
+    );
+    return EXIT_USAGE;
   }
 
   const planned = files.map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));

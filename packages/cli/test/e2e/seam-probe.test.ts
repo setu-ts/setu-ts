@@ -210,6 +210,126 @@ out['eventSubscriptions'] =
 `;
 
 /**
+ * The four ingress families the class-based MICROSERVICE host wires, with FOUR
+ * DISTINCT names.
+ *
+ * In class-based mode every family writes `src/ingress/<name>.ingress.ts`, so
+ * reusing one name (as `MICROSERVICE_ONLY` does in functional mode) makes the
+ * second `setu g` refuse to overwrite — measured during plan verification
+ * (`g query-handler widget` exited `1` after `g command-handler widget`).
+ */
+const CLASS_MICROSERVICE_INGRESS: readonly (readonly [schematic: string, name: string])[] = [
+  ['command-handler', 'cmd'],
+  ['query-handler', 'qry'],
+  ['event-handler', 'evt'],
+  ['job', 'job'],
+];
+
+/**
+ * The generated event handler, rewritten to record deliveries.
+ *
+ * The generated `@OnEvent` class resolves without throwing, but a probe that
+ * only publishes cannot tell "delivered once" from "never delivered" — so, as
+ * the scratch probe did, the file is rewritten to push each delivery onto a
+ * module-level array the probe then reads. The export name is unchanged, so
+ * the ingress barrel still resolves.
+ */
+const RECORDING_EVENT = `import type { IDomainEvent } from '@setu-ts/common';
+import { OnEvent } from '@setu-ts/decorator-plugin';
+
+/** Event type name the bus routes on. */
+export const EVT_EVENT = 'evt';
+
+/** Payload carried by the evt event. */
+export interface EvtPayload {
+  readonly id: string;
+}
+
+/** Every delivery the generated handler received. */
+export const seen: string[] = [];
+
+/** Decorated event subscriber, registered through the ingress barrel. */
+export class EvtIngress {
+  @OnEvent(EVT_EVENT)
+  async handle(event: IDomainEvent<EvtPayload>): Promise<void> {
+    seen.push('event:' + event.data.id);
+  }
+}
+`;
+
+/**
+ * The generated job, rewritten to record deliveries — the same route the
+ * event handler takes, because an imperative `queue.process()` of the same
+ * name would shadow the `@Processor` class.
+ */
+const RECORDING_JOB = `import type { IJob } from '@setu-ts/common';
+import { Processor } from '@setu-ts/decorator-plugin';
+
+/** Name the queue address this job consumes. */
+export const JOB_JOB = 'job';
+
+/** Payload accepted by the job job. */
+export interface JobJobData {
+  readonly id: string;
+}
+
+/** Every delivery the generated processor received. */
+export const jobSeen: string[] = [];
+
+/** Decorated queue processor, registered through the ingress barrel. */
+export class JobIngress {
+  @Processor(JOB_JOB)
+  async process(job: IJob<JobJobData>): Promise<void> {
+    jobSeen.push(job.data.id);
+  }
+}
+`;
+
+/**
+ * The class-based microservice half of the probe.
+ *
+ * Every ingress family arrives through `DecoratorPlugin({ ingress })`, so the
+ * functional `src/cqrs` and `src/events` barrels are ABSENT — the §3.4
+ * correction — and the buses are driven through the same `ICqrsFacade` and
+ * `IEventBus` capabilities the functional arm uses.
+ */
+const CLASS_MICROSERVICE_PROBE = `
+const cqrs = services.get<import('@setu-ts/common').ICqrsFacade>(CAPABILITIES.CQRS);
+const { CMD_COMMAND } = await import('./src/ingress/cmd.ingress.ts');
+const { QRY_QUERY } = await import('./src/ingress/qry.ingress.ts');
+out['commandResult'] = await cqrs.commandBus.execute({ type: CMD_COMMAND, data: { id: 'c-1' } });
+out['queryResult'] = await cqrs.queryBus.execute({ type: QRY_QUERY, data: { id: 'q-1' } });
+
+const { EVT_EVENT, seen } = await import('./src/ingress/evt.ingress.ts');
+const bus = services.get<import('@setu-ts/common').IEventBus>(CAPABILITIES.EVENTS);
+await bus.publish({
+  type: EVT_EVENT,
+  data: { id: 'e-1' },
+  id: 'evt-1',
+  occurredAt: new Date().toISOString(),
+});
+// Wait for the delivery to land; the handler is registered through the
+// decorator ingress, not the events plugin's handler list.
+for (let i = 0; i < 50 && seen.length === 0; i++) {
+  await new Promise((r) => setTimeout(r, 20));
+}
+out['eventDelivered'] = seen.length === 1;
+out['eventDeliveredTo'] = seen;
+
+// job: the @Processor class consumes the enqueued job through the queue's
+// worker loop (default poll interval 1000ms). An imperative queue.process()
+// would shadow the decorated processor (last-wins), so the file is rewritten
+// to record, as the event handler was.
+const { JOB_JOB, jobSeen } = await import('./src/ingress/job.ingress.ts');
+const queue = services.get<import('@setu-ts/common').IQueue>(CAPABILITIES.QUEUE);
+await queue.add(JOB_JOB, { id: 'j-1' });
+for (let i = 0; i < 100 && jobSeen.length === 0; i++) {
+  await new Promise((r) => setTimeout(r, 20));
+}
+out['jobProcessed'] = jobSeen;
+`;
+
+/**
  * The three families a no-template project can host, and the probe that drives them.
  *
  * This is the milestone's own claim under test: a project with NO decorators and NO DI
@@ -372,6 +492,76 @@ describe('generated artifacts are wired — end to end', () => {
       }
     });
   }
+
+  // The class-based MICROSERVICE host: the one that installs the decorator and DI
+  // pair AND the CQRS and events plugins. Before §3.4 it would have scaffolded the
+  // functional `src/cqrs` and `src/events` barrels alongside `src/ingress`, so any
+  // handler placed there would be registered twice. This arm boots it once with
+  // every ingress family and asserts the single registration site.
+  it('serves every ingress artifact on microservice --style class-based', async () => {
+    expect(await run(['new', 'shop', '--template', 'microservice', '--style', 'class-based'])).toBe(
+      0,
+    );
+    const project = `${root}/shop`;
+
+    const wanted = [...ARTIFACTS, ...CLASS_BASED_ONLY, ...CLASS_MICROSERVICE_INGRESS];
+    for (const [schematic, name] of wanted) {
+      expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
+    }
+
+    // E3. The generated service is the DEVELOPER'S file, so editing it is exactly
+    // what a developer does next — and it is the only way to reach the case the
+    // template's own showcase cannot: an injected framework capability.
+    await Deno.writeTextFile(
+      `${project}/src/services/gadget-svc.service.ts`,
+      CAPABILITY_INJECTING_SERVICE,
+    );
+    // The event and job handlers are rewritten to record their deliveries, as the
+    // scratch probe did — a publish that reaches nothing would be indistinguishable
+    // from one that does.
+    await Deno.writeTextFile(`${project}/src/ingress/evt.ingress.ts`, RECORDING_EVENT);
+    await Deno.writeTextFile(`${project}/src/ingress/job.ingress.ts`, RECORDING_JOB);
+
+    await useWorkspacePackages(project);
+    const probe = PROBE
+      .replace('__CLASS__', CLASS_PROBE)
+      .replace('__CQRS__', CLASS_MICROSERVICE_PROBE);
+    const result = await bootAndProbe(project, probe);
+
+    // The HTTP and DI results the class-based arm already asserts.
+    expect(result['route']).toEqual({ status: 200, body: '{"items":[]}' });
+    expect(result['middlewareHeader']).toBe('true');
+    expect(result['module']).toEqual({ status: 200, body: '{"items":[]}' });
+    expect(result['pluginToken']).toBe('widget');
+    expect(result['healthChecks']).toContain('widget');
+    expect(result['metricDeclared']).toBe(true);
+    expect(result['controller']).toEqual({ status: 200, body: '{"items":[]}' });
+    expect(result['serviceToken']).toBe('widget-svc');
+    expect(result['capabilityInjected']).toBe('config:function');
+
+    // The command and query buses route to the decorated ingress classes.
+    expect(result['commandResult']).toEqual({ id: 'c-1' });
+    expect(result['queryResult']).toEqual({ id: 'q-1' });
+    // The published event reached the generated @OnEvent class exactly once.
+    expect(result['eventDelivered']).toBe(true);
+    expect(result['eventDeliveredTo']).toEqual(['event:e-1']);
+    // The enqueued job reached the @Processor class.
+    expect(result['jobProcessed']).toEqual(['j-1']);
+
+    // §3.4: the functional CQRS and events barrels are ABSENT — the handlers
+    // arrive only through DecoratorPlugin({ ingress }). Removing the filter
+    // makes this assertion fail, which is the negative control.
+    const dirGone = async (dir: string): Promise<boolean> => {
+      try {
+        await Deno.stat(dir);
+        return false;
+      } catch (error) {
+        return error instanceof Deno.errors.NotFound;
+      }
+    };
+    expect(await dirGone(`${project}/src/cqrs`)).toBe(true);
+    expect(await dirGone(`${project}/src/events`)).toBe(true);
+  });
 
   // A project that generated a middleware or a metric BEFORE that artifact gained its
   // second export has the right filename and the wrong exports. The barrel is

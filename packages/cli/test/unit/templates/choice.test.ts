@@ -33,7 +33,91 @@ describe('resolveTemplateChoice', () => {
     const choice = choose(['--di']);
     expect(choice.ok).toBe(false);
     if (choice.ok) return;
-    expect(choice.message).toContain('--template class-based');
+    expect(choice.message).toContain('--style class-based');
+  });
+
+  it('resolves --style class-based to the template precomputed variant', () => {
+    const choice = choose(['--template', 'rest', '--style', 'class-based']);
+    expect(choice.ok).toBe(true);
+    if (!choice.ok) return;
+    expect(choice.template?.name).toBe('rest');
+    // The host is the classBased variant, not the template itself.
+    expect(choice.host).toBe(choice.template?.classBased);
+  });
+
+  it('resolves --style functional to the template itself', () => {
+    const choice = choose(['--template', 'rest', '--style', 'functional']);
+    expect(choice.ok).toBe(true);
+    if (!choice.ok) return;
+    expect(choice.host).toBe(choice.template);
+  });
+
+  it('refuses a style with no template', () => {
+    const choice = choose(['--style', 'class-based']);
+    expect(choice.ok).toBe(false);
+    if (choice.ok) return;
+    expect(choice.message).toContain('--style applies to a styleable template');
+  });
+
+  // Audit F1: an unknown value is quoted back, so a CR/LF or ESC in it would
+  // forge a line (or a fake success) in the rendered refusal.
+  for (
+    const argv of [
+      ['--template', 'rest', '--style', 'oop\r\nINJECTED: scaffold complete'],
+      ['--template', 'nope\r\nINJECTED: scaffold complete'],
+      ['--template', 'rest', '--style', '\u001b[2K\u001b[1GCreated x'],
+    ]
+  ) {
+    it(`escapes control characters in ${JSON.stringify(argv.at(-1))}`, () => {
+      const choice = choose(argv);
+      expect(choice.ok).toBe(false);
+      if (choice.ok) return;
+      expect(/[\r\n]/.test(choice.message) || choice.message.includes(String.fromCharCode(27)))
+        .toBe(false);
+      expect(choice.message).toMatch(/\\u00(0d|1b)/);
+    });
+  }
+
+  it('refuses an unknown style', () => {
+    const choice = choose(['--template', 'rest', '--style', 'imperative']);
+    expect(choice.ok).toBe(false);
+    if (choice.ok) return;
+    expect(choice.message).toContain('Unknown style "imperative"');
+  });
+
+  it('refuses class-based on a template without a variant', () => {
+    const choice = choose(['--template', 'full-stack', '--style', 'class-based']);
+    expect(choice.ok).toBe(false);
+    if (choice.ok) return;
+    expect(choice.message).toContain('cannot apply to --template full-stack');
+  });
+
+  // The plan (§3.3) and the CHANGELOG both say `--style` is refused on
+  // `full-stack`. `functional` there used to be accepted silently — a flag with
+  // no effect, which the M72 rule refuses wherever it would be a no-op.
+  it('refuses functional on a template without a variant', () => {
+    const choice = choose(['--template', 'full-stack', '--style', 'functional']);
+    expect(choice.ok).toBe(false);
+    if (choice.ok) return;
+    expect(choice.message).toContain('cannot apply to --template full-stack');
+  });
+
+  it('refuses functional on the class-based alias', () => {
+    const choice = choose(['--template', 'class-based', '--style', 'functional']);
+    expect(choice.ok).toBe(false);
+    if (choice.ok) return;
+    expect(choice.message).toContain('use --template rest');
+  });
+
+  it('carries the alias notice for the class-based alias', () => {
+    const choice = choose(['--template', 'class-based']);
+    expect(choice.ok).toBe(true);
+    if (!choice.ok) return;
+    expect(choice.notice).toBe(
+      '--template class-based is an alias of --template rest --style class-based.',
+    );
+    // The alias resolves to itself.
+    expect(choice.host).toBe(choice.template);
   });
 
   it('refuses an unknown template, naming every real one', () => {

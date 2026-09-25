@@ -3,18 +3,11 @@
  *
  * @module
  */
-
 import type { RuntimeSwap, TemplateDefinition, Wiring } from './registry.ts';
 import { REST_MIDDLEWARE, REST_PLUGINS } from './rest.ts';
 import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
-import {
-  seamFiles,
-  seamLocalImports,
-  seamPluginSpreads,
-  seamSetupCalls,
-  seamsFor,
-  withPluginOptionSeams,
-} from './seam.ts';
+import type { TemplateRecipe } from './style.ts';
+import { composeHost } from './style.ts';
 
 /**
  * What `microservice` adds on top of the REST set.
@@ -112,6 +105,10 @@ export class ReplyInboxObject {
  * a tuning choice: the platform default is 5 seconds, which alone exhausts the
  * default reply budget, so every `request()` against a default queue would time
  * out.
+ *
+ * Shared by BOTH styles: the swap removes the messaging and queue wirings by
+ * package name, and the class-based variant installs the same two packages, so
+ * the same swap applies to it.
  */
 const WORKERS_SWAP = {
   removePackages: ['messaging-plugin', 'queue-plugin'],
@@ -189,16 +186,20 @@ new_classes = ["ReplyInboxObject"]
 `,
 } as const satisfies RuntimeSwap;
 
-/** The `@setu-ts` packages this template registers, for seam selection. */
-const MICROSERVICE_PACKAGES: ReadonlySet<string> = new Set(
-  MICROSERVICE_PLUGINS.map((p) => p.pkg),
-);
-
 /**
- * The seams a microservice project can consume — all ten, since this is the only
- * template registering the CQRS and events plugins.
+ * The microservice composition as data: the plugin set, middleware, manifest
+ * and the shared Workers swap.
+ *
+ * Both style hosts are built from this one recipe by {@linkcode composeHost}.
+ * The microservice tier has no showcase in either style — it emits only the
+ * seam barrels — so the recipe declares none.
  */
-const MICROSERVICE_SEAMS = seamsFor(MICROSERVICE_PACKAGES);
+export const MICROSERVICE_RECIPE: TemplateRecipe = {
+  plugins: MICROSERVICE_PLUGINS,
+  middleware: REST_MIDDLEWARE,
+  manifest: FUNCTIONAL_MODULE_MANIFEST,
+  runtimeSwaps: { 'cloudflare-workers': WORKERS_SWAP },
+};
 
 /**
  * `microservice` — `rest` plus the pieces a service needs to talk to others:
@@ -222,12 +223,6 @@ export const MICROSERVICE_TEMPLATE: TemplateDefinition = {
   name: 'microservice',
   description:
     'REST plus messaging, queues, resilience, telemetry, service discovery, CQRS, and events',
-  plugins: withPluginOptionSeams(MICROSERVICE_PLUGINS, MICROSERVICE_SEAMS),
-  middleware: REST_MIDDLEWARE,
-  localImports: seamLocalImports(MICROSERVICE_SEAMS),
-  files: seamFiles(MICROSERVICE_SEAMS),
-  pluginSpreads: seamPluginSpreads(MICROSERVICE_SEAMS),
-  setupCalls: seamSetupCalls(MICROSERVICE_SEAMS),
-  manifest: { ...FUNCTIONAL_MODULE_MANIFEST, envFilePath: '.env' },
-  runtimeSwaps: { 'cloudflare-workers': WORKERS_SWAP },
+  ...composeHost(MICROSERVICE_RECIPE, 'functional'),
+  classBased: composeHost(MICROSERVICE_RECIPE, 'class-based'),
 };

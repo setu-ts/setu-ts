@@ -267,7 +267,7 @@ describe('template scaffolding — end to end', () => {
 
   it('refuses the retired independent DI switch', async () => {
     expect(await run(['new', 'svc', '--template', 'rest', '--di'])).toBe(2);
-    expect(err.join('\n')).toContain('--template class-based');
+    expect(err.join('\n')).toContain('--style class-based');
   });
 
   // The microservice template was refused outright on Workers until its runtime

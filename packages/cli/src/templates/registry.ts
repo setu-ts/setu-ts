@@ -527,6 +527,27 @@ export interface TemplateDefinition extends TemplateHost {
   readonly name: TemplateName;
   /** One line describing the template, shown in `new --help`. */
   readonly description: string;
+  /**
+   * The precomputed class-based variant of this template, when one exists.
+   *
+   * Present only where the template is styleable — `rest` and `microservice`.
+   * Its absence is what drives the `--style class-based` refusal on
+   * `full-stack` and suppresses the style question in the interactive prompt.
+   *
+   * Precomputed rather than derived at resolution time: transforming a finished
+   * host would have to un-derive its already-baked seams and plugin `args`.
+   */
+  readonly classBased?: TemplateHost;
+  /**
+   * The canonical spelling this template is an alias of.
+   *
+   * Present on `class-based`, which is `--template rest --style class-based`.
+   * Three readers: the help renderers append `(alias of <aliasOf>)`, the
+   * interactive template prompt omits the entry, and `resolveTemplateChoice`
+   * returns a notice the command logs once. The alias is NOT deprecated — it is
+   * byte-identical and stays — so the notice never says it will be removed.
+   */
+  readonly aliasOf?: string;
 }
 
 const TEMPLATE_REGISTRY: ReadonlyMap<string, TemplateDefinition> = new Map([

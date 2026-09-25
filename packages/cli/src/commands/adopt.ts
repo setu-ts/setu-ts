@@ -16,7 +16,7 @@ import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import { APP_VERB, EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
-import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
+import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
   type GeneratedFile,
@@ -119,8 +119,8 @@ export async function runAdoptCommand(
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
     deps.error(
-      `Cannot use "${rawName}" as a member name: it must contain a letter and must not start ` +
-        `with a digit. Pass --name <member>.`,
+      `Cannot use "${escapeName(rawName)}" as a member name: ${IDENTIFIER_NAME_RULE} ` +
+        `Pass --name <member>.`,
     );
     return EXIT_USAGE;
   }

@@ -16,6 +16,7 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
+import { escapeName } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
 import { EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME, VERSION } from '../constants.ts';
 import { joinPath, resolveDir } from '../utils/file-writer.ts';
@@ -279,7 +280,7 @@ export async function runAddCommand(
 
   const bare = resolveAddablePackage(requested);
   if (bare === undefined) {
-    deps.error(`"${requested}" is not a Setu-TS package this command can add.`);
+    deps.error(`"${escapeName(requested)}" is not a Setu-TS package this command can add.`);
     deps.error(`  Available: ${addableNames().join(', ')}`);
     return EXIT_USAGE;
   }

@@ -17,12 +17,13 @@
  * @module
  */
 import type { ParsedArgs } from '../args.ts';
-import { isTargetRuntime, TARGET_RUNTIMES, type TargetRuntime } from '../constants.ts';
+import { isTargetRuntime, TARGET_RUNTIMES } from '../constants.ts';
 import { isWorkspaceRuntime } from '../workspace/runtime-profile.ts';
 import type { PromptChoice, Prompter } from '../prompt.ts';
 import { standaloneOverlayRefusal } from '../templates/broker.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
-import { type ResolvedHost, resolveHost } from '../templates/project-files.ts';
+import { resolveHost } from '../templates/project-files.ts';
+import { resolveTemplateChoice } from '../templates/choice.ts';
 import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { getTransport, listBrokers, listQueues, listTransports } from '../workspace/transport.ts';
 
@@ -39,22 +40,6 @@ import { getTransport, listBrokers, listQueues, listTransports } from '../worksp
  * which is why the arm is consumed here rather than written into the flag.
  */
 const TEMPLATE_PROMPT_DEFAULT = 'minimal';
-
-/**
- * The host a standalone project would render with, given the answers so far.
- *
- * Shared by the broker/queue eligibility checks: the predicate §3.4 refuses on
- * reads the RESOLVED host — post-runtime-swap — because that is where the
- * Workers swap has already removed the wiring a broker arm would rewrite.
- *
- * @param templateFlag - The collected `--template` value, when any
- * @param runtime - The collected `--runtime` value
- * @returns The resolved host, or undefined when the answers name no template
- */
-function standaloneHost(templateFlag: string, runtime: TargetRuntime): ResolvedHost | undefined {
-  const template = getTemplate(templateFlag);
-  return template === undefined ? undefined : resolveHost(template, runtime);
-}
 
 /**
  * Asks the questions whose answers the caller omitted, and returns the flags
@@ -128,17 +113,21 @@ export async function resolveNewChoices(
   // The template question does not go through `ask`: its default arm is NOT
   // the first registry entry. Enter must yield the same scaffold `--yes`
   // yields, which is an ABSENT flag resolved to MINIMAL_HOST downstream —
-  // see TEMPLATE_PROMPT_DEFAULT.
+  // see TEMPLATE_PROMPT_DEFAULT. The alias is omitted: offering two names for
+  // one project with nothing telling them apart is exactly what the alias
+  // annotation exists to prevent.
   if (flags['template'] === undefined) {
     const answer = await select.select('Template?', [
       {
         value: TEMPLATE_PROMPT_DEFAULT,
         label: 'Runtime plugin alone — the scaffold --yes produces',
       },
-      ...listTemplates().map((template) => ({
-        value: template.name,
-        label: template.description,
-      })),
+      ...listTemplates()
+        .filter((template) => template.aliasOf === undefined)
+        .map((template) => ({
+          value: template.name,
+          label: template.description,
+        })),
     ]);
     if (answer !== undefined) {
       // The default arm records NOTHING: an absent flag is exactly how the
@@ -146,6 +135,24 @@ export async function resolveNewChoices(
       if (answer !== TEMPLATE_PROMPT_DEFAULT) flags['template'] = answer;
       log(`Template? ${answer}`);
     }
+  }
+
+  // The style question fires only for a styleable template that has not been
+  // styled already. `--yes` skips it, as it skips every prompt, and the
+  // pipeline then applies the template's own (functional) style.
+  const rawTemplate = flags['template'];
+  const styleableTemplate = typeof rawTemplate === 'string'
+    ? (getTemplate(rawTemplate)?.classBased ?? undefined)
+    : undefined;
+  if (styleableTemplate !== undefined && flags['style'] === undefined) {
+    await ask(
+      'style',
+      'Code style?',
+      [
+        { value: 'functional', label: 'Functional — plain functions and factories' },
+        { value: 'class-based', label: 'Class-based — decorators and constructor injection' },
+      ],
+    );
   }
 
   // The broker and queue questions fire only when the collected answers make
@@ -156,9 +163,12 @@ export async function resolveNewChoices(
   const runtime = typeof rawRuntime === 'string' && isTargetRuntime(rawRuntime)
     ? rawRuntime
     : 'deno';
-  const rawTemplate = flags['template'];
-  const host = typeof rawTemplate === 'string'
-    ? standaloneHost(rawTemplate, runtime)
+  // Resolved through the SAME resolver the command uses, so the broker and
+  // queue questions run against the styled host — not a second lookup that
+  // could disagree with what the pipeline renders.
+  const choice = resolveTemplateChoice({ positionals: args.positionals, flags });
+  const host = choice.ok
+    ? resolveHost(choice.host ?? MINIMAL_HOST, runtime)
     : resolveHost(MINIMAL_HOST, runtime);
 
   if (host !== undefined) {

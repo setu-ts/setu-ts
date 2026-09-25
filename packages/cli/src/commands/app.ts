@@ -21,7 +21,9 @@ import {
   EXIT_ERROR,
   EXIT_OK,
   EXIT_USAGE,
+  isTargetRuntime,
   PROGRAM_NAME,
+  TARGET_RUNTIMES,
   TEMPLATES,
 } from '../constants.ts';
 import {
@@ -35,7 +37,8 @@ import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { readEnvFilePath } from '../templates/env-file.ts';
-import { deriveNames, isIdentifierSafe } from '../utils/names.ts';
+import { listTemplates } from '../templates/registry.ts';
+import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
   findExisting,
   firstDuplicatePath,
@@ -105,6 +108,14 @@ function printUsage(log: (message: string) => void): void {
   // an incomplete hand-written list while `full-stack` was refused, and would have
   // gone on saying it after the refusal was lifted.
   log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
+  // The alias is annotated here as it is in `new --help` (plan §3.2): read from
+  // the registry, so a later alias cannot be listed as a bare peer.
+  for (const template of listTemplates()) {
+    if (template.aliasOf !== undefined) {
+      log(`                      ${template.name} is an alias of ${template.aliasOf}`);
+    }
+  }
+  log('  --style <name>      Code style for a styleable template: functional | class-based');
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
   log(
     '  --devtool           Enable the local diagnostics connector for this member (Deno only)',
@@ -193,7 +204,7 @@ function planMember(
   profile: WorkspaceRuntimeProfile,
   rootManifest: string,
   devtoolPort?: number,
-): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
+): { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
   readonly ok: false;
   readonly message: string;
 } {
@@ -253,7 +264,10 @@ function planMember(
   // the root that installs it is not a member at all. A runtime swap can still
   // apply — the template data decides that, per target, exactly as it does for a
   // standalone project.
-  const resolved = resolveHost(choice.template ?? MINIMAL_HOST, profile.runtime);
+  // The HOST, not the template: `--style class-based` resolves to the
+  // template's precomputed variant, and the member inherits it exactly as a
+  // standalone project does.
+  const resolved = resolveHost(choice.host ?? MINIMAL_HOST, profile.runtime);
   const envHost = envFile.path === undefined ? resolved : withEnvFile(resolved, envFile.path);
   if (envHost === undefined) {
     return {
@@ -319,7 +333,7 @@ function planMember(
 
   for (const file of extra) files.push(file);
 
-  return { ok: true, files };
+  return { ok: true, files, ...(choice.notice === undefined ? {} : { notice: choice.notice }) };
 }
 
 /**
@@ -392,8 +406,10 @@ export async function runAppCommand(
 
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
+    // Quoting the name back as typed, so through `escapeName`: a control
+    // character here would forge a standalone line in the rendered message.
     deps.error(
-      `Invalid name "${rawName}": it must contain a letter and must not start with a digit.`,
+      `Invalid name "${escapeName(rawName)}": ${IDENTIFIER_NAME_RULE}`,
     );
     return EXIT_USAGE;
   }
@@ -407,14 +423,19 @@ export async function runAppCommand(
   // lockfile, so a Node member inside a Deno workspace is not a member at all.
   const runtimeFlag = stringFlag(args.flags, 'runtime');
   if (runtimeFlag !== undefined && runtimeFlag !== read.manifest.runtime) {
+    // The value is quoted through `escapeName` and suggested back only when it
+    // names a real runtime: an unvalidated value copied into a command the
+    // developer is told to run would carry whatever else the argument held.
     deps.error(
-      `This is a ${read.manifest.runtime} workspace, so --runtime ${runtimeFlag} cannot apply to ` +
-        `one of its members: they share a root manifest and a lockfile, and the root is what ` +
-        `installs them.`,
+      `This is a ${read.manifest.runtime} workspace, so --runtime ${
+        escapeName(runtimeFlag)
+      } cannot apply to one of its members: they share a root manifest and a lockfile, and ` +
+        `the root is what installs them.`,
     );
+    const suggested = isTargetRuntime(runtimeFlag) ? runtimeFlag : `<${TARGET_RUNTIMES.join('|')}>`;
     deps.error(
       `Create a separate workspace for it: ` +
-        `\`${PROGRAM_NAME} new <name> --workspace --runtime ${runtimeFlag}\`.`,
+        `\`${PROGRAM_NAME} new <name> --workspace --runtime ${suggested}\`.`,
     );
     return EXIT_USAGE;
   }
@@ -445,7 +466,7 @@ export async function runAppCommand(
   const existingNames = new Set(read.manifest.members.map((member) => member.name));
   const missing = dependsOn.find((dependency) => !existingNames.has(dependency));
   if (missing !== undefined) {
-    deps.error(`--depends-on "${missing}" is not an existing workspace member.`);
+    deps.error(`--depends-on "${escapeName(missing)}" is not an existing workspace member.`);
     return EXIT_USAGE;
   }
 
@@ -660,6 +681,9 @@ export async function runAppCommand(
     deps.error(plan.message);
     return EXIT_USAGE;
   }
+  // The alias notice, logged once, before the file list — informational, never
+  // an error: the alias is byte-identical and stays.
+  if (plan.notice !== undefined) deps.log(plan.notice);
 
   const duplicate = firstDuplicatePath(plan.files);
   if (duplicate !== undefined) {

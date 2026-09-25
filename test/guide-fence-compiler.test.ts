@@ -155,13 +155,15 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
   'docs/migration-nestjs.md': {
     // M92: +2 for the Views section — one external NestJS fence, one
     // compiling Setu-TS fence. M97c updates the configuration fence with
-    // typed sections without changing the number of fenced examples.
-    total: 37,
+    // typed sections without changing the number of fenced examples. M99e adds
+    // the Scaffolding and Microservices sections: two bash fences (skipped,
+    // not TypeScript), so total rises by 2 and skipped by 2.
+    total: 39,
     ts: 37,
     compile: 20,
     external: 17,
     pseudocode: 0,
-    skipped: 0,
+    skipped: 2,
   },
   'docs/runtime-deployment.md': {
     total: 30,
@@ -186,13 +188,14 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // compiling). M97c updates an existing migration fence rather than adding
   // one, so counts remain unchanged.
   // 272 in M95d: docs/mvc.md's URL-scheme demonstration and its Error pages
-  // worked example (+2, both compiling).
-  total: 272,
+  // worked example (+2, both compiling). 274 in M99e: migration-nestjs.md's
+  // Scaffolding and Microservices sections add two bash fences (+2, skipped).
+  total: 274,
   ts: 226,
   compile: 193,
   external: 33,
   pseudocode: 0,
-  skipped: 46,
+  skipped: 48,
 };
 
 describe('actual-fence compiler — all ten guides (shared engine)', () => {

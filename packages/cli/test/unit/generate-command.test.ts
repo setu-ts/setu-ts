@@ -498,6 +498,48 @@ describe('runGenerateCommand', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
+    // The name guard bounds the KEBAB at 255 bytes, but a schematic appends a
+    // suffix (`.controller.ts`), so a name that passes the guard can still plan a
+    // file name no filesystem accepts. On a real disk that surfaced as an
+    // UNCAUGHT `File name too long (os error 36)` from the overwrite probe — the
+    // T5 defect for the verb that appends. It is refused before any write, and
+    // before `--dry-run` prints a plan the real run could not carry out.
+    for (const dryRun of [false, true]) {
+      it(`refuses a planned file name over 255 bytes${dryRun ? ' (dry run)' : ''}`, async () => {
+        const h = harness();
+        const name = 'a'.repeat(245);
+        const args = ['controller', name, ...(dryRun ? ['--dry-run'] : [])];
+        expect(await h.run(args)).toBe(2);
+        expect(h.err.text()).toContain('255 bytes');
+        expect(h.err.text()).toContain(`${name}.controller.ts`);
+        expect(h.out.text()).toBe('');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
+    it('still accepts a long name whose file names fit', async () => {
+      const h = harness();
+      expect(await h.run(['controller', 'a'.repeat(200)])).toBe(0);
+    });
+
+    it('rejects a name carrying a Windows path separator, writing nothing', async () => {
+      const h = harness();
+      expect(await h.run(['service', 'a\\..\\evil'])).toBe(2);
+      expect(h.err.text()).toContain('path separator');
+      expect(h.fs.writes).toEqual([]);
+    });
+
+    // `a:b` emitted `class A:bService`; `x'y` closed the `@Injectable` token
+    // literal early — source injection from the command line.
+    for (const name of ['a:b', 'a.b', "x'y"]) {
+      it(`rejects the non-identifier name ${JSON.stringify(name)}, writing nothing`, async () => {
+        const h = harness();
+        expect(await h.run(['service', name])).toBe(2);
+        expect(h.err.text()).toContain('Invalid name');
+        expect(h.fs.writes).toEqual([]);
+      });
+    }
+
     it('accepts a reserved word, which schematics always affix', async () => {
       const h = harness();
       expect(await h.run(['route', 'class'])).toBe(0);

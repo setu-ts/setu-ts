@@ -323,3 +323,144 @@ rule).
   request/reply decorator are named in §0 with their reasons.
 - `setu add` inserting a provider above `RuntimePlugin()` (`add.ts:229-235`) is cosmetic, since the
   kernel orders by dependency. It is not changed here.
+
+## 10. Design security review (completed)
+
+This milestone crosses a trust boundary, so it carries a completed design review for the
+implementation audit to check the code against: the reviewed flow, the assets and attackers, the
+threat→resolution table, and the obligations the audit must meet. (A section that only lists what a
+review must still cover is a requirement for one, not a review; this section records the review.)
+
+### 10.1 Reviewed flow
+
+1. **Name → path write sink.** Every name-taking verb derives `deriveNames(raw).kebab` and joins it
+   into a filesystem path: the `new` project directory (`joinPath(dir, kebab)`), the `generate app`
+   and `adopt` member directory (`joinPath(MEMBERS_DIR, kebab)`), and the artifact file name
+   (`src/controllers/<kebab>.routes.ts`). The name is the only user-influenced input that reaches a
+   write in this CLI.
+2. **Class-based ingress host.** `composeHost(recipe, 'class-based')` adds
+   `DecoratorPlugin({
+   ingress })` and `DiPlugin`. Generated ingress artifacts
+   (command/query/event/job handlers) register as decorated classes and receive payloads from the
+   `CqrsPlugin` / `EventsPlugin` / `QueuePlugin` buses. In the scaffolded default those are
+   in-memory, process-local transports.
+3. **Style axis.** `--style` only selects between precomputed hosts and adds static refusal text. It
+   introduces no new external input, credential, or network path.
+
+### 10.2 Assets and attackers
+
+- **Assets:** the host filesystem around the intended project/member directory (the scaffold must
+  not write outside it); the scaffolded project's own correctness (no double-registered ingress, no
+  unresolvable barrel import); the developer's time (refusals must be accurate, not silent no-ops).
+- **Attackers:** this is a local CLI, not a network service. The realistic attackers are (a) a
+  developer copy-pasting a malformed or hostile name onto the command line, and (b) a CI job or
+  script on the same host that builds argv from untrusted data. There is no remote attacker, no
+  multi-tenant boundary, and no credential in scope.
+
+### 10.3 Threats and resolutions
+
+| #  | Threat                                                                                                                                                                                                                                                                                                                                                                                      | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1 | A name carrying a path separator (`../sibling`, `a/b`, `..`) joins into the path and writes the scaffold into an ancestor directory or the workspace root.                                                                                                                                                                                                                                  | The shared guard `isIdentifierSafe` rejects any derived kebab that contains `/` (and, as before, any kebab with no letter or that starts with a digit). It is applied at the single `deriveNames` → guard site of **every** name-taking verb — `new`, `generate app`, `generate <schematic>`, `adopt`, `library` — so no verb can regress to a weaker check. The refusal is a usage error (exit 2) before anything is planned, and the existing overwrite preflight still refuses a clobber. |
+| T2 | The class-based microservice registers the same ingress artifact twice — through the functional `CqrsPlugin`/`EventsPlugin` barrels and through `DecoratorPlugin({ ingress })` — duplicating delivery.                                                                                                                                                                                      | `hostSeamSpecs` drops the `COMMAND_HANDLER`, `QUERY_HANDLER`, and `EVENTS` seams in class-based mode (the §3.4 filter), so the functional barrels are never scaffolded and the ingress barrel is the single registration site.                                                                                                                                                                                                                                                               |
+| T3 | A `--style` combination that is a silent no-op (unknown style; style with no template; `full-stack` + `class-based`; `class-based` + `functional`; `--workspace` + `--style`) is accepted and scaffolds the wrong thing.                                                                                                                                                                    | `resolveTemplateChoice` refuses each with a message that names the fix (exit 2). The workspace root refuses `--style` in `planWorkspace` before any template resolution.                                                                                                                                                                                                                                                                                                                     |
+| T4 | The refactor silently changes an existing template's output (a published artifact).                                                                                                                                                                                                                                                                                                         | The §3.7 byte-identity baseline, captured before any template edit, asserts the file set and every hash for all four existing templates.                                                                                                                                                                                                                                                                                                                                                     |
+| T5 | A name that passes every rule above but is not a legal filename component — a NUL byte (`a·b`), or one over the 255-byte component ceiling — reaches the filesystem, which rejects it mid-flight (`TypeError: file name contained an unexpected NUL byte`, `File name too long (os error 36)`) as an error nothing up to the CLI entry point catches: an uncaught rejection, not a refusal. | The shared guard also refuses any derived kebab carrying a control character and any kebab over 255 UTF-8 bytes, before any filesystem access. Every name-taking verb inherits the check at the same single `deriveNames` → guard site.                                                                                                                                                                                                                                                      |
+| T6 | A refused name is quoted verbatim into the refusal message, so a name carrying a CRLF forges a standalone line in the rendered output (`INJECTED: scaffold complete`).                                                                                                                                                                                                                      | Every refusal renders the echoed name through `escapeName`, which turns control characters into their `\uXXXX` escapes: the message stays one line and still shows what was typed.                                                                                                                                                                                                                                                                                                           |
+
+### 10.4 Obligations the implementation audit must meet
+
+The audit (`.roo/skills/security-audit/SKILL.md`) drives each of these with a positive control, in a
+fresh independent subtask, and records the PR audit block:
+
+1. **Name traversal is refused (T1).** `new ..`, `new .`, `new ../sibling`, `new ../../..`,
+   `new
+   a/b`, and `generate app ../sibling` exit 2 with **no writes**. Positive control:
+   `new shop` and `generate app orders` still scaffold (exit 0).
+2. **Single ingress registration (T2).** A booted `microservice --style class-based` host delivers
+   each generated ingress family (command, query, event, job) **exactly once**, and the functional
+   `src/cqrs` / `src/events` barrels are absent. Positive control: the root HTTP route still answers
+   200.
+3. **Style axis refuses every silent no-op (T3).** Each of the five combinations in T3 exits 2 with
+   the named fix. Positive control: a valid combination (`rest --style class-based`) scaffolds.
+4. **Negative controls.** Revert the §3.4 seam filter → obligation 2's double-delivery probe fails.
+   Revert the §3.3 style axis → obligation 3's refusal probe fails. Restore both; tree clean.
+5. **Defect-class sweep.** All fifteen recurring classes, each applied (with probe) or N/A (with
+   reason).
+6. **Filesystem-illegal names are refused (T5).** `new` with a NUL-byte name and with an over-long
+   name each exit 2 with **no writes** — on a real filesystem the pre-fix behavior was an uncaught
+   rejection. Positive control: a 255-byte name still scaffolds (exit 0).
+7. **Refusals stay one line (T6).** A refused name carrying a CRLF renders with the CR/LF escaped —
+   no standalone forged line in the output. Positive control: an ordinary refused name renders as
+   one line.
+
+## 11. Code-review corrections (2026-09-25)
+
+Recorded here rather than folded into the sections above, so the design as planned stays readable
+beside what review changed.
+
+- **T1 named only `/`.** `\` is a path separator on Windows and Deno honours it there, so
+  `setu new ..\sibling` escaped the target directory on that platform. The path rules now refuse
+  both, plus the exact segments `.` and `..`.
+- **T5 bounded the kebab, not the file name.** A schematic appends a suffix (`.controller.ts`), so a
+  245-byte name passed the guard and `setu g controller` then died on an uncaught
+  `File name too long (os error 36)` from the overwrite probe — the T5 defect, still live for the
+  verb that appends. `generate` and `generate library` now refuse a planned file name over 255 bytes
+  before `--dry-run` and before any filesystem access.
+- **`new` inherited the identifier rules.** Reusing `isIdentifierSafe` for the project name refused
+  `setu new 3d-shop` and `setu new 2048`, which scaffolded before this milestone, with no CHANGELOG
+  entry. A project directory is never an identifier, so `new` runs the path rules alone
+  (`isPathSegmentSafe`); every verb that generates source still runs both.
+- **The control-character rule failed `deno task lint`** (`no-control-regex`) and covered only C0
+  and DEL. It is now the Unicode `Cc` category, which adds C1 (`U+0085` is a line break to several
+  terminals), and `escapeName` also escapes `U+2028`/`U+2029`.
+- **§3.3's full-stack row was implemented for `class-based` only.**
+  `--template full-stack
+  --style functional` was accepted with no effect while the CHANGELOG said
+  `--style` is refused on `full-stack`; it is now refused for either value.
+- **§3.2's `generate app --help` annotation was not implemented** — that usage listed `class-based`
+  as a bare peer. It now annotates the alias from the registry, and both help renderers are
+  asserted.
+- **Punctuation reached generated source.** `g service a:b` emitted `class A:bService`, and `x'y`
+  closed the `@Injectable` token literal early. A generating verb now requires every derived form to
+  match `\p{ID_Start}\p{ID_Continue}*`, and `new` requires the kebab to match the portable segment
+  `[\p{L}\p{N}][\p{L}\p{M}\p{N}.-]*` — both allowlists, which subsume the separator, dot-segment and
+  control-character refusals above.
+- **Audit F1 (Low): `--style` was quoted back raw** in the unknown-style refusal and copied into the
+  command the workspace-root refusal suggests, so a CI job building argv from untrusted data could
+  forge a line, emit terminal escapes, or plant a payload in a command the developer copies.
+  §10.1(3) was wrong that the style axis adds no external input. The fix escaped thirteen named
+  sites and claimed every refusal.
+- **Audit round 2, F2 (Low): that claim was false.** `generate app --runtime` (in prose AND in its
+  suggested command), an unknown plugin command, a custom schematic name, and every `--dir` echo
+  still quoted argv raw. Per-site escaping cannot be complete by inspection, so the guarantee moved
+  to structure: a control character in any option value is refused before a command runs (the test
+  iterates `VALUE_FLAGS`), and `runCli` escapes every control character except LF and tab at both
+  output sinks. Positionals are still escaped where quoted, since the sink keeps LF. A suggested
+  command copies a value only when it is a known template, style or runtime.
+- **Audit round 2, F3 (Low):** the `tcp` alias lookup indexed a plain object with argv, so
+  `--transport constructor` suggested `--transport function Object() { [native code] }`. It is an
+  own-key read now.
+- **Audit round 3, F4 (Low):** the interactive prompter prints through its own `log`, which `runCli`
+  does not wrap, and echoed a rejected answer raw — a pasted BS/BEL reached the terminal while the
+  CHANGELOG said every line was escaped. `createTerminalPrompter` now escapes every line it prints.
+- **Audit round 4, F5 (Low):** that fix dropped the per-site escape on the claim that `prompt()`
+  returns one line. Deno 2.9.6's `prompt()` keeps a newline in a bracketed paste, turns a pasted CR
+  into one, and inserts one on Ctrl-V Ctrl-J — measured by the auditor, never by the implementer —
+  so a pasted line feed forged a line. The answer is escaped where it is quoted again, and the test
+  carries a line feed; the sink escape stays for the caller-supplied menu text.
+- **OBS-1, pre-existing on `main` (High if triaged), fixed here at the maintainer's direction:**
+  audit round 3 found `--transport-url` interpolated raw into a quoted literal by
+  `workspace/runtime-profile.ts` `denoEnvRead`/`nodeEnvRead`, so a quote in it injected code into
+  every generated member (and was persisted in the manifest). The fallback is now rendered by
+  `stringLiteral`, checked by importing the rendered expression as a real module for seven payloads
+  on all three runtimes; restoring the raw form fails 21 steps. The same sweep found a member name
+  from a hand-edited manifest written raw as a discovery-module object key; it goes through
+  `stringLiteral` too, proven by importing the rendered module. Outside this milestone's diff, and
+  folded in rather than sent to a `fix/…` branch because the maintainer asked for it before the PR.
+- **CodeRabbit on PR #364:** the portable name rule still admitted Windows device names (`con`,
+  `nul.txt`, `com1`) and a trailing `.`, and the escape set left out the bidirectional format
+  characters (U+061C, U+200E/F, U+202A–202E, U+2066–2069), so a quoted value could be reordered as
+  displayed. Both are refused/escaped now, each with a negative control.
+- Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
+  refactor left with no reader.
