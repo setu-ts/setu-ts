@@ -5202,10 +5202,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   port is refused by name, the docs say TLS-only, and a real-SDK test asserts the resolved address.
   Also tightened: the plugin-path absent-secret assertion now names its message rather than
   accepting any throw, and the package's test `net` grant is scoped to loopback instead of `true`.
+- **Milestone 99e** (`packages/cli` + `docs` — a template axis that forces one style):
+  `--style functional|class-based` is now an axis on `setu new` and `setu generate app`, separate
+  from `--template` — `functional` (default) installs neither `DecoratorPlugin` nor `DiPlugin`,
+  `class-based` installs both, and `--template class-based` is a byte-identical alias of
+  `--template rest --style class-based` (the canonical spelling is logged, the interactive prompt
+  omits the duplicate, and `--help` shows the alias). A class-based microservice host composes the
+  microservice recipe with the decorator and DI pair, and its generated CQRS/event ingress classes
+  register only through `DecoratorPlugin({ ingress })` — the functional `src/cqrs` and `src/events`
+  barrels are not emitted, so nothing is registered twice. `docs/migration-nestjs.md` gains
+  Scaffolding and Microservices sections — complete (PR pending).
 - **Next milestone** — **M98d** (`packages/health-plugin` — minimized health observations; design
-  security review and implementation audit required). The `v0.7.0` smoke closeout (M99) reopened
-  with **M99e** (`packages/cli` — `--style class-based` as its own axis, so a class-based
-  microservice is one command; planned in `plans/milestone-99e-class-based-style.md`, not started).
+  security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
