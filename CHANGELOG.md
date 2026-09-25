@@ -279,6 +279,10 @@ All notable changes to this project are documented here. The format follows
   a library's `test/<name>.test.ts`) exceeds 255 bytes, is refused too, where it used to fail
   mid-write with an uncaught `File name too long`. Every refusal is a usage error (exit `2`) with no
   writes, and echoes the name with its control characters escaped, so the message stays one line.
+  The same escaping now applies to every other refusal that quotes an argument back (`--style`,
+  `--template`, `--runtime`, `--transport`, `--broker`, `--queue`, `--port`, `--depends-on`, an
+  unknown schematic, option or `add` package, and `devtool enable <member>`), and a workspace root's
+  `--style`/`--template` refusal no longer copies an unknown value into the command it suggests.
 
 - **`health-plugin` — an unrecognized indicator status could hide another indicator's `down`, so
   `/health` and `/ready` answered `200` over a failing dependency.** The aggregate took the worst

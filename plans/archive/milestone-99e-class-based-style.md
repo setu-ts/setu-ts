@@ -426,5 +426,12 @@ beside what review changed.
   match `\p{ID_Start}\p{ID_Continue}*`, and `new` requires the kebab to match the portable segment
   `[\p{L}\p{N}][\p{L}\p{M}\p{N}.-]*` — both allowlists, which subsume the separator, dot-segment and
   control-character refusals above.
+- **Audit F1 (Low): `--style` was quoted back raw** in the unknown-style refusal and copied into the
+  command the workspace-root refusal suggests, so a CI job building argv from untrusted data could
+  forge a line, emit terminal escapes, or plant a payload in a command the developer copies.
+  §10.1(3) was wrong that the style axis adds no external input. Every refusal quoting an argv value
+  back now renders it through `escapeName`, the sites are enumerated in
+  `test/unit/argv-echo-escaped.test.ts`, and an unknown value is never copied into a suggested
+  command.
 - Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
   refactor left with no reader.
