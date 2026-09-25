@@ -81,4 +81,31 @@ describe('createTerminalPrompter', () => {
     // Deno's prompt() pre-fills an editable buffer and is deliberately unused.
     expect(question).toContain('Template? [rest]');
   });
+
+  // M99e audit F4: the prompter prints through its own sink, which `runCli`
+  // does not wrap, and a rejected answer is echoed back. A pasted answer
+  // carrying BS/BEL/ESC/U+2028 must come back escaped, on one line.
+  it('echoes a rejected answer with its control characters escaped', async () => {
+    const answers = [
+      ['x', String.fromCharCode(27), '[31m', String.fromCharCode(7), String.fromCharCode(8), 'y']
+        .join(''),
+      `a${String.fromCharCode(0x2028)}INJECTED: done`,
+      'rest',
+    ];
+    const printed: string[] = [];
+    const prompter = createTerminalPrompter(
+      () => true,
+      () => answers.shift() ?? null,
+      (message) => printed.push(message),
+    );
+    expect(await prompter.select('Template?', CHOICES)).toBe('rest');
+    const retries = printed.filter((line) => line.includes('is not one of'));
+    expect(retries).toEqual([
+      '"x\\u001b[31m\\u0007\\u0008y" is not one of: rest, microservice.',
+      '"a\\u2028INJECTED: done" is not one of: rest, microservice.',
+    ]);
+    for (const code of [7, 8, 27, 0x2028]) {
+      expect(printed.join('\n').includes(String.fromCharCode(code))).toBe(false);
+    }
+  });
 });

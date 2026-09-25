@@ -441,5 +441,8 @@ beside what review changed.
 - **Audit round 2, F3 (Low):** the `tcp` alias lookup indexed a plain object with argv, so
   `--transport constructor` suggested `--transport function Object() { [native code] }`. It is an
   own-key read now.
+- **Audit round 3, F4 (Low):** the interactive prompter prints through its own `log`, which `runCli`
+  does not wrap, and echoed a rejected answer raw — a pasted BS/BEL reached the terminal while the
+  CHANGELOG said every line was escaped. `createTerminalPrompter` now escapes every line it prints.
 - Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
   refactor left with no reader.

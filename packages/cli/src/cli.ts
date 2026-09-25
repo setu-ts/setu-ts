@@ -133,7 +133,8 @@ export async function runCli(
   // Every line the CLI writes goes through one escape, so a value reaching
   // output by a path no call site escaped still cannot redraw the terminal or
   // hide text behind a carriage return. Plugin command handlers write their
-  // own output and never see these sinks.
+  // own output and never see these sinks; the interactive prompter prints
+  // through a sink of its own and escapes it the same way (`prompt.ts`).
   const deps: CliDependencies = {
     ...rawDeps,
     log: (message) => rawDeps.log(escapeTerminalControls(message)),
