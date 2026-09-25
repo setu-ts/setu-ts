@@ -444,5 +444,10 @@ beside what review changed.
 - **Audit round 3, F4 (Low):** the interactive prompter prints through its own `log`, which `runCli`
   does not wrap, and echoed a rejected answer raw — a pasted BS/BEL reached the terminal while the
   CHANGELOG said every line was escaped. `createTerminalPrompter` now escapes every line it prints.
+- **Audit round 4, F5 (Low):** that fix dropped the per-site escape on the claim that `prompt()`
+  returns one line. Deno 2.9.6's `prompt()` keeps a newline in a bracketed paste, turns a pasted CR
+  into one, and inserts one on Ctrl-V Ctrl-J — measured by the auditor, never by the implementer —
+  so a pasted line feed forged a line. The answer is escaped where it is quoted again, and the test
+  carries a line feed; the sink escape stays for the caller-supplied menu text.
 - Dead surface removed: `REST_SEAMS`/`REST_PACKAGES` and `CLASS_BASED_SHOWCASE_FILES`, which the
   refactor left with no reader.

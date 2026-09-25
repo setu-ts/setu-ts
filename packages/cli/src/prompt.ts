@@ -20,7 +20,7 @@
  * @module
  */
 
-import { escapeTerminalControls } from './utils/names.ts';
+import { escapeName, escapeTerminalControls } from './utils/names.ts';
 
 /** One selectable answer to a scaffold question. */
 export interface PromptChoice {
@@ -59,9 +59,10 @@ export interface Prompter {
  * @param promptFn - Reads one line, returning null when it cannot
  * @param log - Prints the choice list and retry hints; every line is passed
  *   through `escapeTerminalControls` first, because this sink is not the one
- *   `runCli` wraps and a pasted answer is echoed back through it. That escape
- *   is sufficient here: `prompt()` returns one line, so an answer never
- *   carries the line feed the escape keeps
+ *   `runCli` wraps. That escape keeps the line feed, and an answer CAN carry
+ *   one — Deno's `prompt()` keeps a newline inside a bracketed paste, turns a
+ *   pasted CR into one, and inserts one on Ctrl-V Ctrl-J (measured, Deno 2.9.6)
+ *   — so the echoed answer is also escaped where it is quoted
  * @returns The prompter
  */
 export function createTerminalPrompter(
@@ -90,7 +91,9 @@ export function createTerminalPrompter(
         const match = choices.find((choice) => choice.value === answer);
         if (match !== undefined) return Promise.resolve(match.value);
         print(
-          `"${answer}" is not one of: ${choices.map((choice) => choice.value).join(', ')}.`,
+          `"${escapeName(answer)}" is not one of: ${
+            choices.map((choice) => choice.value).join(', ')
+          }.`,
         );
       }
     },
