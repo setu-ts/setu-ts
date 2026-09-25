@@ -24,6 +24,7 @@ import {
   PROGRAM_NAME,
 } from '../constants.ts';
 import { resolveDir } from '../utils/file-writer.ts';
+import { escapeName } from '../utils/names.ts';
 import { type AppLoader, configModuleExists, configModulePath, loadApp } from '../app-loader.ts';
 
 /**
@@ -234,7 +235,7 @@ export async function dispatchPluginCommand(
   const config = stringFlag(args.flags, 'config');
 
   if (!await configModuleExists(deps.fs, dir, config)) {
-    deps.error(`Unknown command: ${name}`);
+    deps.error(`Unknown command: ${escapeName(name)}`);
     reportMissingConfig(dir, config, deps.error);
     return EXIT_USAGE;
   }
@@ -248,7 +249,7 @@ export async function dispatchPluginCommand(
   // module exists does the flag check run, so nothing is written either way.
   const unknown = firstUnknownFlag(args.flags, PLUGIN_COMMAND_FLAGS);
   if (unknown !== undefined) {
-    deps.error(unknownOptionMessage(name, unknown, PLUGIN_COMMAND_FLAGS));
+    deps.error(unknownOptionMessage(escapeName(name), unknown, PLUGIN_COMMAND_FLAGS));
     return EXIT_USAGE;
   }
 
@@ -256,7 +257,7 @@ export async function dispatchPluginCommand(
     return await withPluginCommands(deps, dir, config, async (commands) => {
       const match = commands.find((command) => command.name === name);
       if (match === undefined) {
-        deps.error(`Unknown command: ${name}`);
+        deps.error(`Unknown command: ${escapeName(name)}`);
         if (commands.length === 0) {
           deps.error('This application registers no plugin commands.');
         } else {

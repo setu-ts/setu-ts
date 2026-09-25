@@ -1324,6 +1324,18 @@ describe('--workspace --transport', () => {
       expect(h.fs.writes).toEqual([]);
     });
 
+    // The alias table is a plain object: an inherited key such as
+    // `constructor` must read as an unknown transport, not take the alias
+    // branch and suggest `--transport function Object() { [native code] }`.
+    it('treats an inherited key as an unknown transport, not an alias', async () => {
+      for (const named of ['constructor', 'toString', '__proto__']) {
+        const { h, code } = await workspaceWith(['--transport', named]);
+        expect(code).toBe(2);
+        expect(h.err.text()).toContain(`Unknown transport "${named}"`);
+        expect(h.err.text()).not.toContain('native code');
+      }
+    });
+
     it('refuses --transport with no value', async () => {
       const { h, code } = await workspaceWith(['--transport']);
       expect(code).toBe(2);

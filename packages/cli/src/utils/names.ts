@@ -204,8 +204,43 @@ function utf8ByteLength(text: string): number {
  * @returns The same name, safe to interpolate into a single-line message
  */
 export function escapeName(raw: string): string {
-  return raw.replace(
-    /[\p{Cc}\u2028\u2029]/gu,
-    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
-  );
+  return raw.replace(CONTROL, escapeChar);
+}
+
+/**
+ * Renders a whole output line safely for a terminal or a log.
+ *
+ * The backstop behind {@linkcode escapeName}: the CLI's `log` and `error`
+ * sinks pass every message through it, so a value that reaches output by a
+ * path no call site escaped still cannot move the cursor, redraw the line, or
+ * hide text behind a carriage return. It leaves the line feed and the tab
+ * alone, because the CLI's own multi-line and indented output uses both — which
+ * is why an argv value is still escaped where it is quoted, and why a flag
+ * value carrying a control character is refused before any command runs.
+ *
+ * @param text - A message about to be written
+ * @returns The message with every other control character, and the two
+ *   Unicode line and paragraph separators, rendered as `\uXXXX`
+ */
+export function escapeTerminalControls(text: string): string {
+  return text.replace(CONTROL, (char) => char === '\n' || char === '\t' ? char : escapeChar(char));
+}
+
+/**
+ * Whether a value carries a control character or a Unicode line or paragraph
+ * separator — the characters {@linkcode escapeName} escapes.
+ *
+ * @param value - The value to test
+ * @returns `true` when at least one such character is present
+ */
+export function hasControlCharacter(value: string): boolean {
+  return CONTROL_TEST.test(value);
+}
+
+const CONTROL = /[\p{Cc}\u2028\u2029]/gu;
+const CONTROL_TEST = /[\p{Cc}\u2028\u2029]/u;
+
+/** One character as its `\uXXXX` escape. */
+function escapeChar(char: string): string {
+  return `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`;
 }

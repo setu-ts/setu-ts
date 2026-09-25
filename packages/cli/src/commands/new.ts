@@ -258,7 +258,9 @@ function readTransport(
 
   const spec = getTransport(named);
   if (spec === undefined) {
-    const alias = TRANSPORT_ALIASES[named];
+    // An own-key read: the table is a plain object, so `constructor` or
+    // `toString` would otherwise take the alias branch and be suggested back.
+    const alias = Object.hasOwn(TRANSPORT_ALIASES, named) ? TRANSPORT_ALIASES[named] : undefined;
     return {
       ok: false,
       message: alias === undefined

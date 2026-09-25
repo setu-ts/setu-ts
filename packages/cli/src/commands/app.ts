@@ -21,7 +21,9 @@ import {
   EXIT_ERROR,
   EXIT_OK,
   EXIT_USAGE,
+  isTargetRuntime,
   PROGRAM_NAME,
+  TARGET_RUNTIMES,
   TEMPLATES,
 } from '../constants.ts';
 import {
@@ -421,14 +423,19 @@ export async function runAppCommand(
   // lockfile, so a Node member inside a Deno workspace is not a member at all.
   const runtimeFlag = stringFlag(args.flags, 'runtime');
   if (runtimeFlag !== undefined && runtimeFlag !== read.manifest.runtime) {
+    // The value is quoted through `escapeName` and suggested back only when it
+    // names a real runtime: an unvalidated value copied into a command the
+    // developer is told to run would carry whatever else the argument held.
     deps.error(
-      `This is a ${read.manifest.runtime} workspace, so --runtime ${runtimeFlag} cannot apply to ` +
-        `one of its members: they share a root manifest and a lockfile, and the root is what ` +
-        `installs them.`,
+      `This is a ${read.manifest.runtime} workspace, so --runtime ${
+        escapeName(runtimeFlag)
+      } cannot apply to one of its members: they share a root manifest and a lockfile, and ` +
+        `the root is what installs them.`,
     );
+    const suggested = isTargetRuntime(runtimeFlag) ? runtimeFlag : `<${TARGET_RUNTIMES.join('|')}>`;
     deps.error(
       `Create a separate workspace for it: ` +
-        `\`${PROGRAM_NAME} new <name> --workspace --runtime ${runtimeFlag}\`.`,
+        `\`${PROGRAM_NAME} new <name> --workspace --runtime ${suggested}\`.`,
     );
     return EXIT_USAGE;
   }
