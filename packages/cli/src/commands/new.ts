@@ -143,13 +143,27 @@ function planWorkspace(
     };
   }
 
+  // The style is the template's own axis, so it is refused beside --template:
+  // a root registers nothing for either to apply to. The fix names the command
+  // that honours the flag, with the style it would have carried.
+  const styleFlag = stringFlag(args.flags, 'style');
+  if (styleFlag !== undefined) {
+    return {
+      ok: false,
+      message: `A workspace root registers no plugins, so --style ${styleFlag} has nothing to ` +
+        `configure. Create the workspace, then add a service with ` +
+        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template rest --style ${styleFlag}\`.`,
+    };
+  }
+
   // The independent DI flag is no longer a valid composition choice. Refuse it
   // here too because a workspace root never reaches template resolution.
   if (args.flags['di'] === true) {
     return {
       ok: false,
       message:
-        '`--di` is no longer supported. Use `--template class-based` for decorators and DI together.',
+        '`--di` is no longer supported. Use `--style class-based` (with `--template rest` or ' +
+        '`--template microservice`) for decorators and DI together.',
     };
   }
 
@@ -405,7 +419,7 @@ function planProject(
   name: string,
   runtime: TargetRuntime,
   args: ParsedArgs,
-): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
+): { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
   readonly ok: false;
   readonly message: string;
 } {
@@ -457,7 +471,10 @@ function planProject(
   // The runtime swap runs INSIDE resolveHost, before any overlay: on Workers it
   // has already removed the messaging and queue wirings, which is exactly why a
   // broker flag is refused there rather than silently rewriting nothing.
-  const host = resolveHost(choice.template ?? MINIMAL_HOST, runtime);
+  //
+  // The HOST, not the template: `--style class-based` resolves to the
+  // template's precomputed variant, and the alias resolves to itself.
+  const host = resolveHost(choice.host ?? MINIMAL_HOST, runtime);
   const configured = envFile.path === undefined ? host : withEnvFile(host, envFile.path);
   if (configured === undefined) {
     return {
@@ -505,13 +522,22 @@ function planProject(
     workspaceProfile(runtime),
   );
 
+  const notice = choice.notice;
   if (!devtoolRequested) {
-    return { ok: true, files: projectFiles(name, runtime, overlaid) };
+    return {
+      ok: true,
+      files: projectFiles(name, runtime, overlaid),
+      ...(notice === undefined ? {} : { notice }),
+    };
   }
   // Absent, the port is the documented standalone default, overridable with
   // --devtool-port and range-checked by the shared port-flag reader.
   const devHost = withDevtool(overlaid, devtoolPortFlag.port ?? DEFAULT_DEVTOOL_PORT);
-  return { ok: true, files: projectFiles(name, runtime, devHost) };
+  return {
+    ok: true,
+    files: projectFiles(name, runtime, devHost),
+    ...(notice === undefined ? {} : { notice }),
+  };
 }
 
 /**
@@ -539,11 +565,15 @@ export async function runNewCommand(
     deps.log('Templates:');
     deps.log('  (none)              Minimal — the runtime plugin alone');
     for (const template of listTemplates()) {
-      deps.log(`  ${template.name.padEnd(18)}${template.description}`);
+      // The alias is annotated, not hidden: it is public surface, but the
+      // canonical spelling is what the style axis names.
+      const suffix = template.aliasOf === undefined ? '' : ` (alias of ${template.aliasOf})`;
+      deps.log(`  ${template.name.padEnd(18)}${template.description}${suffix}`);
     }
     deps.log('');
     deps.log('Options:');
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
+    deps.log('  --style <name>      Code style for a styleable template: functional | class-based');
     deps.log('  --env-file <path>   Dotenv path for a ConfigPlugin-backed template (default .env)');
     deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default deno)`);
     deps.log(
@@ -610,13 +640,26 @@ export async function runNewCommand(
     return EXIT_USAGE;
   }
 
-  const plan = workspace
-    ? planWorkspace(projectName, runtime, chosen)
-    : planProject(projectName, runtime, chosen);
+  // The alias notice, logged once, before anything else — informational, never
+  // an error: the alias is byte-identical and stays. Only the standalone plan
+  // carries one: a workspace root refuses --template, so it can never be an alias.
+  let planNotice: string | undefined;
+  let plan: { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
+    readonly ok: false;
+    readonly message: string;
+  };
+  if (workspace) {
+    plan = planWorkspace(projectName, runtime, chosen);
+  } else {
+    const projectPlan = planProject(projectName, runtime, chosen);
+    if (projectPlan.ok) planNotice = projectPlan.notice;
+    plan = projectPlan;
+  }
   if (!plan.ok) {
     deps.error(plan.message);
     return EXIT_USAGE;
   }
+  if (planNotice !== undefined) deps.log(planNotice);
 
   if (workspace && deps.portAvailable !== undefined) {
     const requested = readPortFlag(args.flags);

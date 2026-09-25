@@ -206,7 +206,7 @@ describe('runAppCommand', () => {
     it('refuses the retired independent DI switch through the shared selector', async () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--di'])).toBe(2);
-      expect(h.err.text()).toContain('--template class-based');
+      expect(h.err.text()).toContain('--style class-based');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -710,7 +710,7 @@ describe('runAppCommand', () => {
     it('rejects the retired independent DI flag', async () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--di'])).toBe(2);
-      expect(h.err.text()).toContain('--template class-based');
+      expect(h.err.text()).toContain('--style class-based');
     });
   });
 

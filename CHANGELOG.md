@@ -8,6 +8,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`cli` — `--style` is its own axis on `setu new` and `setu generate app` (M99e).**
+  `--style functional|class-based` selects the decorator-and-DI composition independently of
+  `--template`: `functional` (the default) installs neither `DecoratorPlugin` nor `DiPlugin`, and
+  `class-based` installs both together. It is accepted on the styleable templates `rest` and
+  `microservice` and refused with no template to apply to, with an unknown value, and on
+  `full-stack`, which composes through a starter and has no controller or ingress seam to register
+  decorated classes through. `--template class-based` becomes a byte-identical **alias** of
+  `--template rest --style class-based`: scaffolding it logs one line naming the canonical spelling,
+  the interactive template prompt omits the duplicate, and `--help` shows `(alias of …)`. The
+  class-based microservice host composes the microservice recipe with the decorator and DI pair, and
+  its generated CQRS and event ingress classes register through `DecoratorPlugin({ ingress })` — the
+  functional `src/cqrs` and `src/events` barrels are not emitted, so nothing is registered twice.
+  `docs/migration-nestjs.md` gains `Scaffolding` and `Microservices` sections naming the decorator
+  route for `@MessagePattern`, `@EventPattern`, `@nestjs/cqrs`, `@nestjs/bull` and
+  `@nestjs/schedule`.
 - **`secrets-plugin` — `endpoint` on the AWS and GCP providers (M99d).**
   `AwsKmsProviderOptions.endpoint` and `GcpSecretManagerProviderOptions.endpoint` point the lazily
   loaded client at a non-default endpoint — LocalStack or a private endpoint for AWS, a private or
@@ -148,6 +163,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`cli` — the `--di` refusal names the `--style` axis (M99e).** The retired `--di` flag's message
+  now directs the caller to `--style class-based` (with `--template rest` or `microservice`) rather
+  than only to `--template class-based`, and the broker refusal's "use `--template microservice`"
+  advice gains "(add `--style class-based` for decorators)".
 - **`cli` — every newly scaffolded project declares `@setu-ts/kernel` and a two-parameter
   `createApp` (M98c).** The config factory's devtool parameter names `KernelDiagnosticsOptions`, so
   the kernel is now pinned on every target — including starter-composed templates, which referenced

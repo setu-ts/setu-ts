@@ -566,7 +566,7 @@ describe('runNewCommand', () => {
     it('refuses the retired independent DI switch', async () => {
       const h = harness();
       expect(await h.run(['app', '--template', 'rest', '--di'])).toBe(2);
-      expect(h.err.text()).toContain('--template class-based');
+      expect(h.err.text()).toContain('--style class-based');
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -1105,7 +1105,7 @@ describe('--workspace', () => {
     it('refuses the retired independent DI switch', async () => {
       const h = harness();
       expect(await h.run(['acme', '--workspace', '--di'])).toBe(2);
-      expect(h.err.text()).toContain('--template class-based');
+      expect(h.err.text()).toContain('--style class-based');
       expect(h.fs.writes).toEqual([]);
     });
 

@@ -66,6 +66,17 @@ const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
     'microservice on workers',
     ['--template', 'microservice', '--runtime', 'cloudflare-workers'],
   ],
+  // The styled host: the same microservice recipe composed with the decorator
+  // and DI pair. A `HOSTS` entry alone only reaches `fmt` and `lint` — the boot
+  // gets its own case in `BOOTABLE_STYLED` below.
+  [
+    'microservice class-based',
+    ['--template', 'microservice', '--style', 'class-based'],
+  ],
+  [
+    'microservice class-based on workers',
+    ['--template', 'microservice', '--style', 'class-based', '--runtime', 'cloudflare-workers'],
+  ],
 ];
 
 let root = '';
@@ -307,6 +318,32 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
         expect(result.bodies['/greetings']).toContain('Hello, world!');
         expect(result.bodies['/greetings/Setu']).toContain('Hello, Setu!');
       }
+    });
+  }
+
+  // The styled host gets its OWN boot case rather than a `HOSTS` entry: `HOSTS`
+  // drives only `fmt --check` and `lint`, and the loop above iterates `BOOTABLE`
+  // — a `HOSTS` entry alone would never boot. `BOOTABLE` stays the four template
+  // names, so dropping the styled arm must fail here, not vanish.
+  const BOOTABLE_STYLED: readonly (readonly [label: string, args: readonly string[]])[] = [
+    ['microservice --style class-based', ['--template', 'microservice', '--style', 'class-based']],
+  ];
+
+  it('never quietly drops the styled host from the boot list', () => {
+    expect(BOOTABLE_STYLED.map(([label]) => label)).toEqual(['microservice --style class-based']);
+  });
+
+  for (const [label, args] of BOOTABLE_STYLED) {
+    it(`boots with generated permissions for ${label}`, async () => {
+      expect(await run(['new', 'shop', ...args])).toBe(0);
+      const project = `${root}/shop`;
+      await useWorkspacePackages(project);
+
+      const result = await bootWithGeneratedPermissions(project, ['/health', '/ready', '/metrics']);
+      expect(result.statuses['/health'], result.output).toBe(200);
+      expect(result.statuses['/ready'], result.output).toBe(200);
+      expect(result.statuses['/metrics'], result.output).toBe(200);
+      expect(result.bodies['/health']).toContain('"status":"up"');
     });
   }
 });

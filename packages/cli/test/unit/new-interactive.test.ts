@@ -51,11 +51,21 @@ describe('resolveNewChoices', () => {
     expect(await resolveNewChoices(args, undefined, () => {})).toBe(args);
   });
 
-  it('asks runtime, template, broker and queue for a bare standalone scaffold', async () => {
-    const { args, questions } = await resolve(['svc'], ['deno', 'microservice', 'redis', 'redis']);
-    expect(questions).toEqual(['Runtime?', 'Template?', 'Message broker?', 'Job queue?']);
+  it('asks runtime, template, style, broker and queue for a bare standalone scaffold', async () => {
+    const { args, questions } = await resolve(
+      ['svc'],
+      ['deno', 'microservice', 'functional', 'redis', 'redis'],
+    );
+    expect(questions).toEqual([
+      'Runtime?',
+      'Template?',
+      'Code style?',
+      'Message broker?',
+      'Job queue?',
+    ]);
     expect(args.flags['runtime']).toBe('deno');
     expect(args.flags['template']).toBe('microservice');
+    expect(args.flags['style']).toBe('functional');
     expect(args.flags['broker']).toBe('redis');
     expect(args.flags['queue']).toBe('redis');
   });
@@ -93,6 +103,8 @@ describe('resolveNewChoices', () => {
         'deno',
         '--template',
         'microservice',
+        '--style',
+        'functional',
         '--broker',
         'memory',
         '--queue',
@@ -104,8 +116,8 @@ describe('resolveNewChoices', () => {
   });
 
   it('skips the broker and queue questions for a template with no messaging wiring', async () => {
-    const { args, questions } = await resolve(['svc'], ['deno', 'rest']);
-    expect(questions).toEqual(['Runtime?', 'Template?']);
+    const { args, questions } = await resolve(['svc'], ['deno', 'rest', 'functional']);
+    expect(questions).toEqual(['Runtime?', 'Template?', 'Code style?']);
     expect(args.flags['broker']).toBeUndefined();
   });
 
@@ -114,17 +126,64 @@ describe('resolveNewChoices', () => {
     // rewrite — the same fact the command's refusal names.
     const { questions } = await resolve(
       ['svc', '--template', 'microservice'],
-      ['cloudflare-workers'],
+      ['cloudflare-workers', 'functional'],
     );
-    expect(questions).toEqual(['Runtime?']);
+    expect(questions).toEqual(['Runtime?', 'Code style?']);
   });
 
   it('leaves later flags absent but still asked when one answer is EOF', async () => {
-    const { args, questions } = await resolve(['svc'], [undefined, 'microservice', 'redis']);
-    expect(questions).toEqual(['Runtime?', 'Template?', 'Message broker?', 'Job queue?']);
+    const { args, questions } = await resolve(
+      ['svc'],
+      [undefined, 'microservice', 'functional', 'redis'],
+    );
+    expect(questions).toEqual([
+      'Runtime?',
+      'Template?',
+      'Code style?',
+      'Message broker?',
+      'Job queue?',
+    ]);
     expect(args.flags['runtime']).toBeUndefined();
     expect(args.flags['broker']).toBe('redis');
     expect(args.flags['queue']).toBeUndefined();
+  });
+
+  it('skips the style question for a template without a class-based variant', async () => {
+    // full-stack composes through a starter and has no controller or ingress
+    // seam, so it has no style axis at all.
+    const { questions } = await resolve(['svc'], ['deno', 'full-stack']);
+    expect(questions).toEqual(['Runtime?', 'Template?']);
+  });
+
+  it('skips the style question when --style was supplied on the command line', async () => {
+    const { args, questions } = await resolve(
+      ['svc', '--template', 'rest', '--style', 'class-based'],
+      ['deno'],
+    );
+    expect(questions).toEqual(['Runtime?']);
+    expect(args.flags['style']).toBe('class-based');
+  });
+
+  it('asks the style question for rest and microservice, with functional first', async () => {
+    const menus = await offered(['svc', '--template', 'rest'], ['deno', 'class-based']);
+    expect(menus.get('Code style?')).toEqual(['functional', 'class-based']);
+    const microservice = await offered(
+      ['svc', '--template', 'microservice'],
+      ['deno', 'class-based'],
+    );
+    expect(microservice.get('Code style?')).toEqual(['functional', 'class-based']);
+  });
+
+  it('asks the broker and queue questions for microservice in class-based style', async () => {
+    // The styled host still registers the messaging and queue wirings, so the
+    // same predicate that refuses them elsewhere lets them through here.
+    const { args, questions } = await resolve(
+      ['svc', '--template', 'microservice', '--style', 'class-based'],
+      ['deno', 'redis', 'redis'],
+    );
+    expect(questions).toEqual(['Runtime?', 'Message broker?', 'Job queue?']);
+    expect(args.flags['broker']).toBe('redis');
+    expect(args.flags['queue']).toBe('redis');
   });
 
   it('skips the broker and queue questions for an unknown template name', async () => {
@@ -166,11 +225,12 @@ describe('resolveNewChoices', () => {
       },
     };
     const args = await resolveNewChoices(parseArgs(['svc']), prompter, () => {});
+    // The class-based alias is omitted: two names for one project with nothing
+    // telling them apart is what the alias annotation exists to prevent.
     expect(seen['Template?']?.map((choice) => choice.value)).toEqual([
       'minimal',
       'rest',
       'microservice',
-      'class-based',
       'full-stack',
     ]);
     expect(args.flags['template']).toBeUndefined();

@@ -181,7 +181,7 @@ export function standaloneOverlayRefusal(
   if (!host.plugins.some((wiring) => wiring.pkg === pkg)) {
     return `--${flag} has nothing to configure: this template registers no ${pkg} wiring, so the ` +
       `flag would be accepted and silently do nothing. Use --template microservice to select ` +
-      `a ${flag}.`;
+      `a ${flag} (add --style class-based for decorators).`;
   }
   return undefined;
 }

@@ -120,6 +120,7 @@ const NEW: ICommandFlagSpec = spec(
   'new',
   [
     'template',
+    'style',
     'runtime',
     'env-file',
     'workspace',
@@ -161,7 +162,17 @@ const GENERATE_CUSTOM: ICommandFlagSpec = spec(
 /** `setu generate app`: the workspace-member flags, plus the named refusals. */
 const GENERATE_APP: ICommandFlagSpec = spec(
   'generate app',
-  ['template', 'port', 'devtool', 'devtool-port', 'env-file', 'depends-on', 'dir', 'dry-run'],
+  [
+    'template',
+    'style',
+    'port',
+    'devtool',
+    'devtool-port',
+    'env-file',
+    'depends-on',
+    'dir',
+    'dry-run',
+  ],
   // Read ONLY to be refused with their own guidance: the four transport flags
   // name the workspace-wide alternative, `--runtime` names the workspace's own
   // toolchain when it disagrees, and `--di` goes through `resolveTemplateChoice`.

@@ -15,6 +15,29 @@ flexible.
 | **Dependency Injection** | Automatic via reflection    | Explicit tokens (`@Inject('token')`)      |
 | **Decorators**           | Built-in                    | Optional, via `DecoratorPlugin`           |
 
+## Scaffolding
+
+The closest starting point to a NestJS app is the **class-based** style, which opts into decorators
+and dependency injection together. It is its own `--style` axis on the `rest` and `microservice`
+templates, and `--template class-based` is a byte-identical alias of
+`--template rest --style class-based`:
+
+```bash
+# REST service with decorators and DI
+setu new my-app --template rest --style class-based
+
+# Microservice (adds messaging, queue, resilience and telemetry) with decorators and DI
+setu new my-service --template microservice --style class-based
+
+# The alias: identical output to the first command
+setu new my-app --template class-based
+```
+
+A class-based project registers `DecoratorPlugin` and `DiPlugin` together, emits decorated
+`@Controller` and `@Injectable` classes, and wires every generated artifact through the seam barrels
+in `setu.config.ts`. The `--style` choice persists: `setu generate` reads the project's manifest, so
+a project holding `@setu-ts/decorator-plugin` keeps generating class-based output.
+
 ## Basic Application
 
 ### NestJS
@@ -901,9 +924,41 @@ app.middleware.add(loggerMiddleware); // Default priority: 500
 app.middleware.add(myMiddleware, { priority: 25 }); // Runs before default
 ```
 
+## Microservices
+
+The `microservice` template adds messaging, queue, resilience and telemetry to the REST set. In a
+class-based microservice, every non-HTTP ingress artifact is registered through `DecoratorPlugin`'s
+`ingress` list, which is the one place each family has a registration site — a `@CommandHandler`,
+`@QueryHandler`, `@OnEvent` or `@Processor` class reaches its bus or queue from there.
+
+| NestJS                                             | Setu-TS                                                                     |
+| -------------------------------------------------- | --------------------------------------------------------------------------- |
+| `@MessagePattern('user.lookup')` (RPC)             | `broker.respond('user.lookup', handler)` on the `IMessageBroker` capability |
+| `@EventPattern('user.created')` (pub/sub)          | `@OnEvent('user.created')` on a class in the ingress list                   |
+| `@nestjs/cqrs` `@CommandHandler` / `@QueryHandler` | `@CommandHandler(TYPE)` / `@QueryHandler(TYPE)` on ingress classes          |
+| `@nestjs/bull` `@Processor`                        | `@Processor('job-name')` on an ingress class                                |
+| `@nestjs/schedule` `@Cron` / `@Interval`           | `@Cron('0 0 * * *')` / `@Every(60_000)` on an ingress class                 |
+
+```bash
+setu new my-service --template microservice --style class-based
+cd my-service
+setu g command-handler place-order
+setu g query-handler get-order
+setu g event-handler order-placed
+setu g job send-receipt
+deno task start
+```
+
+The generated ingress classes land in `src/ingress/` and are listed in the managed
+`src/ingress/index.ts` barrel, which `setu.config.ts` passes to `DecoratorPlugin({ ingress })`.
+Broker request-reply is imperative — `broker.respond(...)` — because a responder answers a specific
+topic and returns a value, which the decorator ingress list does not model.
+
 ## Migration Checklist
 
 - [ ] Replace `@nestjs/*` imports with `@setu-ts/*`
+- [ ] Scaffold with `--style class-based` (or `--template class-based`) so decorators and DI are
+      present
 - [ ] Replace `@Injectable()` with `@Injectable()` from `@setu-ts/decorator-plugin`
 - [ ] Replace `@Controller()` with programmatic routes or `@Controller()` + `DecoratorPlugin`
 - [ ] Replace constructor injection with `@Inject('token')` from `@setu-ts/decorator-plugin`

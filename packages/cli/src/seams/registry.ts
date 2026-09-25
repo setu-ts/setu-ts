@@ -161,7 +161,18 @@ export function scanSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec
  * @returns The consumable seams, in registry order
  */
 export function hostSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec[] {
-  return withHostShapes(listSeamSpecs(), generatorMode(installed)).filter(
-    (spec) => spec.requiresPlugin === undefined || installed.has(spec.requiresPlugin),
-  );
+  const mode = generatorMode(installed);
+  const shaped = withHostShapes(listSeamSpecs(), mode);
+  // A class-based host receives command, query and event handlers through
+  // `DecoratorPlugin`'s ingress barrel, NOT through the Cqrs and Events plugin
+  // options. Scaffolding the functional barrels those options read would emit
+  // dead surface no class-based schematic writes — and any handler placed there
+  // would be registered twice (`seams/ingress.ts`). This is the mirror of
+  // `withHostShapes` dropping `INGRESS_SEAM` in functional mode.
+  const classBasedIngress = mode === 'class-based'
+    ? new Set([COMMAND_HANDLER_SEAM.schematic, QUERY_HANDLER_SEAM.schematic, EVENTS_SEAM.schematic])
+    : new Set<string>();
+  return shaped
+    .filter((spec) => !classBasedIngress.has(spec.schematic))
+    .filter((spec) => spec.requiresPlugin === undefined || installed.has(spec.requiresPlugin));
 }

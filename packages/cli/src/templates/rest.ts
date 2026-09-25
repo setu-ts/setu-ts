@@ -3,18 +3,13 @@
  *
  * @module
  */
-
 import type { MiddlewareWiring, TemplateDefinition, Wiring } from './registry.ts';
 import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
 import { REST_SHOWCASE, REST_SHOWCASE_FILES } from './rest-showcase.ts';
-import {
-  seamFiles,
-  seamLocalImports,
-  seamPluginSpreads,
-  seamSetupCalls,
-  seamsFor,
-  withPluginOptionSeams,
-} from './seam.ts';
+import { CLASS_BASED_SHOWCASE_EXAMPLE } from './class-based-showcase.ts';
+import type { TemplateRecipe } from './style.ts';
+import { composeHost } from './style.ts';
+import { seamsFor } from './seam.ts';
 
 /**
  * Always first: the kernel makes the `runtime` capability mandatory at `start()`.
@@ -88,6 +83,31 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
 ];
 
 /**
+ * The REST composition as data: the plugin set, middleware, manifest and the
+ * per-style showcase.
+ *
+ * Both style hosts are built from this one recipe by {@linkcode composeHost},
+ * so `rest` and `rest --style class-based` share every input and differ only
+ * in what the style adds.
+ */
+export const REST_RECIPE: TemplateRecipe = {
+  plugins: REST_PLUGINS,
+  middleware: REST_MIDDLEWARE,
+  manifest: FUNCTIONAL_MODULE_MANIFEST,
+  showcase: {
+    // The functional showcase reaches its plain service by a direct import,
+    // exactly as the functional generators do.
+    functional: {
+      files: REST_SHOWCASE_FILES,
+      seeded: { controller: [REST_SHOWCASE], service: [REST_SHOWCASE] },
+    },
+    // The class-based showcase is a decorated controller and an injected
+    // service, seeded into the controller and service barrels.
+    'class-based': CLASS_BASED_SHOWCASE_EXAMPLE,
+  },
+};
+
+/**
  * `rest` — an opinionated REST API: configuration, logging, validation,
  * security headers, health probes, metrics, OpenAPI, and structured errors.
  *
@@ -101,14 +121,6 @@ export const REST_MIDDLEWARE: readonly MiddlewareWiring[] = [
 export const REST_TEMPLATE: TemplateDefinition = {
   name: 'rest',
   description: 'REST API — config, logging, validation, security, health, metrics, OpenAPI',
-  plugins: withPluginOptionSeams(REST_PLUGINS, REST_SEAMS),
-  middleware: REST_MIDDLEWARE,
-  localImports: seamLocalImports(REST_SEAMS),
-  files: [
-    ...REST_SHOWCASE_FILES,
-    ...seamFiles(REST_SEAMS, { controller: [REST_SHOWCASE], service: [REST_SHOWCASE] }),
-  ],
-  pluginSpreads: seamPluginSpreads(REST_SEAMS),
-  setupCalls: seamSetupCalls(REST_SEAMS),
-  manifest: { ...FUNCTIONAL_MODULE_MANIFEST, envFilePath: '.env' },
+  ...composeHost(REST_RECIPE, 'functional'),
+  classBased: composeHost(REST_RECIPE, 'class-based'),
 };

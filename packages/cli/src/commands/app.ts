@@ -105,6 +105,7 @@ function printUsage(log: (message: string) => void): void {
   // an incomplete hand-written list while `full-stack` was refused, and would have
   // gone on saying it after the refusal was lifted.
   log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
+  log('  --style <name>      Code style for a styleable template: functional | class-based');
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
   log(
     '  --devtool           Enable the local diagnostics connector for this member (Deno only)',
@@ -193,7 +194,7 @@ function planMember(
   profile: WorkspaceRuntimeProfile,
   rootManifest: string,
   devtoolPort?: number,
-): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
+): { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
   readonly ok: false;
   readonly message: string;
 } {
@@ -253,7 +254,10 @@ function planMember(
   // the root that installs it is not a member at all. A runtime swap can still
   // apply — the template data decides that, per target, exactly as it does for a
   // standalone project.
-  const resolved = resolveHost(choice.template ?? MINIMAL_HOST, profile.runtime);
+  // The HOST, not the template: `--style class-based` resolves to the
+  // template's precomputed variant, and the member inherits it exactly as a
+  // standalone project does.
+  const resolved = resolveHost(choice.host ?? MINIMAL_HOST, profile.runtime);
   const envHost = envFile.path === undefined ? resolved : withEnvFile(resolved, envFile.path);
   if (envHost === undefined) {
     return {
@@ -319,7 +323,7 @@ function planMember(
 
   for (const file of extra) files.push(file);
 
-  return { ok: true, files };
+  return { ok: true, files, ...(choice.notice === undefined ? {} : { notice: choice.notice }) };
 }
 
 /**
@@ -660,6 +664,9 @@ export async function runAppCommand(
     deps.error(plan.message);
     return EXIT_USAGE;
   }
+  // The alias notice, logged once, before the file list — informational, never
+  // an error: the alias is byte-identical and stays.
+  if (plan.notice !== undefined) deps.log(plan.notice);
 
   const duplicate = firstDuplicatePath(plan.files);
   if (duplicate !== undefined) {

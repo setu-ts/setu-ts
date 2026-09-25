@@ -11929,4 +11929,4 @@ because one of them invalidated part of a previous run's claims:
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                      |
 | 99c       | ✅     | sdk + kernel — two first-party components that must agree, and do not                                                                     |
 | 99d       | ✅     | decorator-plugin + secrets-plugin — a composition the framework silently declines to give you                                             |
-| 99e       | ⬜     | cli + docs — a template axis that forces one style (class-based microservice)                                                             |
+| 99e       | ✅     | cli + docs — a template axis that forces one style (class-based microservice)                                                             |

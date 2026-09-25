@@ -413,14 +413,14 @@ describe('named refusals keep precedence over the generic check', () => {
   it('setu new --di keeps its specific M65 guidance', async () => {
     const h = harness();
     expect(await h.run(['new', 'app', '--di'])).toBe(2);
-    expect(h.err.text()).toContain('no longer supported. Use `--template class-based`');
+    expect(h.err.text()).toContain('no longer supported. Use `--style class-based`');
     expect(h.err.text()).not.toContain('Unknown option');
   });
 
   it('setu new --workspace --di keeps it on the workspace path too', async () => {
     const h = harness();
     expect(await h.run(['new', 'acme', '--workspace', '--di'])).toBe(2);
-    expect(h.err.text()).toContain('no longer supported. Use `--template class-based`');
+    expect(h.err.text()).toContain('no longer supported. Use `--style class-based`');
     expect(h.err.text()).not.toContain('Unknown option');
   });
 
@@ -449,7 +449,7 @@ describe('named refusals keep precedence over the generic check', () => {
   it('generate app --di keeps its specific M65 guidance', async () => {
     const h = harness(WORKSPACE_SEED);
     expect(await h.run(['generate', 'app', 'billing', '--di'])).toBe(2);
-    expect(h.err.text()).toContain('no longer supported. Use `--template class-based`');
+    expect(h.err.text()).toContain('no longer supported. Use `--style class-based`');
     expect(h.err.text()).not.toContain('Unknown option');
   });
 

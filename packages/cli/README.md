@@ -18,6 +18,7 @@ a package called `cli` would install a binary named `cli`. All help text shows `
 setu new my-app                                  # Deno, minimal (runtime plugin only)
 setu new my-app --runtime node                   # deno | node | bun | cloudflare-workers
 setu new my-app --template rest                  # rest | microservice | class-based | full-stack
+setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
 setu new my-app --template rest --env-file config/.env.local
 ```
 
@@ -32,13 +33,17 @@ file or filesystem configuration; `--env-file` is refused there. Values needed w
 plugin must come from this pre-construction environment source; `ConfigPlugin` cannot retroactively
 configure a plugin already built.
 
-| Template       | Plugin set                                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------------------------- |
-| _(none)_       | `RuntimePlugin` only.                                                                                         |
-| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi + `errorHandler()`.               |
-| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                          |
-| `class-based`  | `rest` plus decorators and DI, an `@Injectable` service, and a `@Controller` using parameter-level `@Inject`. |
-| `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton.    |
+| Template       | Plugin set                                                                                                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| _(none)_       | `RuntimePlugin` only.                                                                                                                                   |
+| `rest`         | Runtime, Config, Logger, Validation, HttpSecurity, Health, Metrics, OpenApi + `errorHandler()`.                                                         |
+| `microservice` | `rest` plus Messaging, Queue, Resilience, Telemetry.                                                                                                    |
+| `class-based`  | Alias of `rest --style class-based`: `rest` plus decorators and DI, an `@Injectable` service, and a `@Controller` with a class-position `@Inject` list. |
+| `full-stack`   | A React Router 8 SSR app: the full plugin set via `createFullStackAppFromConfig`, plus an `app/` skeleton.                                              |
+
+`--style class-based` is accepted on `rest` and `microservice` and opts into decorators and
+dependency injection together; `--template class-based` is the byte-identical alias of
+`--template rest --style class-based`.
 
 `--template microservice --runtime cloudflare-workers` is supported. The messaging and queue plugins
 reach brokers over raw sockets, which Workers does not provide, so on that target they are swapped

@@ -67,11 +67,55 @@ describe('seam selection', () => {
     expect(bare).toEqual(['controller', 'middleware', 'plugin', 'route']);
   });
 
-  it('selects every seam for a host installing every backing plugin', () => {
-    const all = new Set(
+  it('selects the functional seams, not the decorator-gated ones, for a functional host', () => {
+    // A FUNCTIONAL host installs every backing plugin except the decorator, so
+    // the mode is functional. The decorator-gated seams (the class-based
+    // `service` barrel and `ingress`) are dropped by the gate, while
+    // `controller` and `route` are swapped to their functional shapes, which
+    // are ungated and selected. No single host selects EVERY seam: a functional
+    // one lacks the decorator, and a class-based one routes command/query/event
+    // through ingress instead (§3.4).
+    const functional = new Set(
+      listSeamSpecs().map((s) => s.requiresPlugin).filter((p): p is string =>
+        p !== undefined && p !== 'decorator-plugin'
+      ),
+    );
+    const selected = seamsFor(functional).map((s) => s.schematic);
+    // The decorator-gated seams are absent.
+    expect(selected).not.toContain('ingress');
+    expect(selected).not.toContain('service');
+    // The functional shapes and the plugin-gated seams are present.
+    for (
+      const schematic of [
+        'controller',
+        'route',
+        'middleware',
+        'plugin',
+        'health-indicator',
+        'metric',
+        'command-handler',
+        'query-handler',
+        'event-handler',
+      ]
+    ) {
+      expect(selected).toContain(schematic);
+    }
+  });
+
+  it('excludes the functional CQRS and events seams on a class-based host (§3.4)', () => {
+    // A CLASS-BASED host installs the decorator, so mode is class-based: the
+    // command, query and event handlers arrive through DecoratorPlugin({ ingress }),
+    // and scaffolding the functional src/cqrs and src/events barrels would be dead
+    // surface that double-registers any handler placed there.
+    const classBased = new Set(
       listSeamSpecs().map((s) => s.requiresPlugin).filter((p): p is string => p !== undefined),
     );
-    expect(seamsFor(all)).toHaveLength(listSeamSpecs().length);
+    expect(classBased.has('decorator-plugin')).toBe(true);
+    const selected = seamsFor(classBased).map((s) => s.schematic);
+    expect(selected).toContain('ingress');
+    expect(selected).not.toContain('command-handler');
+    expect(selected).not.toContain('query-handler');
+    expect(selected).not.toContain('event-handler');
   });
 
   it('always selects the three ungated seams, whatever the host installs', () => {

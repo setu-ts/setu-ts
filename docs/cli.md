@@ -45,18 +45,26 @@ imports it to start the server and the CLI imports it to discover plugin-contrib
 the plugin list has exactly one home. The factory does not start the app: importing a module that
 binds a socket would make command discovery bind one too.
 
-### Decorators and DI are one choice, and functional is the default
+### Style is its own axis: decorators and DI are one choice, and functional is the default
 
 Decorators are optional and dependency injection is optional — and they are one axis with two
-complete positions rather than a spectrum. The default is **functional**: no `DecoratorPlugin`, no
-`DiPlugin`, `ctx`-first handlers, plain exported functions for services. `--template class-based` is
-the opt-in, and it always brings both plugins together.
+complete positions rather than a spectrum. That axis is `--style`, and it is separate from the
+`--template` that supplies the plugin set. The default is **functional**: no `DecoratorPlugin`, no
+`DiPlugin`, `ctx`-first handlers, plain exported functions for services. `--style class-based` is
+the opt-in, and it always brings both plugins together. `--template class-based` remains a
+byte-identical **alias** of `--template rest --style class-based`: scaffolding it logs one line
+naming the canonical spelling, and the output is identical.
 
-| You want    | Scaffold with                         | You get                                                                                                                      |
-| ----------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Neither     | `setu new app`                        | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service`, `g module` and `g job` all work.               |
-| Functional  | `setu new app --template rest`        | The REST plugin set. `g module` writes a plain service and a registered route with `GET` and `POST` handlers.                |
-| Class-based | `setu new app --template class-based` | `DecoratorPlugin` + `DiPlugin`, decorated controllers and ingress classes, `@Injectable` services, and class module barrels. |
+| You want    | Scaffold with                                      | You get                                                                                                                      |
+| ----------- | -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Neither     | `setu new app`                                     | The runtime plugin alone. `g route`, `g middleware`, `g plugin`, `g service`, `g module` and `g job` all work.               |
+| Functional  | `setu new app --template rest`                     | The REST plugin set. `g module` writes a plain service and a registered route with `GET` and `POST` handlers.                |
+| Class-based | `setu new app --template rest --style class-based` | `DecoratorPlugin` + `DiPlugin`, decorated controllers and ingress classes, `@Injectable` services, and class module barrels. |
+
+`--style` is accepted by `setu new` and `setu generate app`, on the styleable templates `rest` and
+`microservice`. It is refused with no template to apply to, with an unknown value, and with
+`full-stack`, which composes through a starter and has no controller or ingress seam to register
+decorated classes through.
 
 The choice **persists**. `setu generate` reads the target project's manifest, so a project holding
 `@setu-ts/decorator-plugin` gets class output and one without it gets functional output — a later
@@ -66,9 +74,9 @@ not resolve its own import. The refusal names `setu generate route`, which regis
 router API and needs no decorators.
 
 **The independent `--di` flag was removed.** It is refused with a message pointing at
-`--template class-based`; there is no longer a decorator-only or container-only composition, because
-those are the incoherent middle of the axis. A project scaffolded with the old flag keeps working —
-generation reads the packages it actually has.
+`--style class-based` (with `--template rest` or `microservice`); there is no longer a
+decorator-only or container-only composition, because those are the incoherent middle of the axis. A
+project scaffolded with the old flag keeps working — generation reads the packages it actually has.
 
 One consequence worth knowing before you reach for it: `DecoratorPlugin.registerService` registers a
 provider on the container when one is present and never touches the kernel registry, so
@@ -131,20 +139,22 @@ so nothing else would make the first boot succeed.
 Three refusals are worth knowing, because each names why silence would be a lie: on Cloudflare
 Workers (the runtime swap has already removed both wirings), on starter-composed templates like
 `full-stack` (the factory renders the whole plugin list, so a rewrite would be dropped), and on
-templates registering no messaging at all (`rest`, `class-based`, no template) — where the honest
-answer is "use `--template microservice`". `memory` is accepted everywhere the flags are and
-rewrites nothing, because stating the default is not a mistake.
+templates registering no messaging at all (`rest`, no template) — where the honest answer is "use
+`--template microservice`" (add `--style class-based` for decorators). `memory` is accepted
+everywhere the flags are and rewrites nothing, because stating the default is not a mistake.
 
 ## Interactive scaffolding
 
-At an interactive terminal, `setu new` asks for the choices it already accepts as flags — runtime
-and template on a standalone project, runtime and transport on a workspace. Broker and queue are
-asked only when the answers already given can take them, which is the same test the flags apply: a
-template registering no messaging (the minimal default, `rest`, `class-based`), the starter-composed
-`full-stack`, and Cloudflare Workers are all skipped, so a `microservice` answer gets four questions
-and the default gets two. It never invents a question whose answer no flag can express, and
-`--dry-run` stays exact because prompting only rewrites the flag record before the ordinary pipeline
-runs.
+At an interactive terminal, `setu new` asks for the choices it already accepts as flags — runtime,
+template and style on a standalone project, runtime and transport on a workspace. The style question
+is asked only for the styleable templates (`rest` and `microservice`), and the `class-based` alias
+is omitted from the template choices because two names for one project would tell a user nothing.
+Broker and queue are asked only when the answers already given can take them, which is the same test
+the flags apply: a template registering no messaging (the minimal default, `rest`), the
+starter-composed `full-stack`, and Cloudflare Workers are all skipped, so a `microservice` answer
+gets five questions and the default gets three. It never invents a question whose answer no flag can
+express, and `--dry-run` stays exact because prompting only rewrites the flag record before the
+ordinary pipeline runs.
 
 It fails closed in three layers, so scripts, CI and editors are never blocked: programmatic callers
 pass no prompter at all; the installed executable supplies one only when stdin is a terminal; and
