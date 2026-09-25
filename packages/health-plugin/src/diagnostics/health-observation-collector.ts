@@ -595,7 +595,8 @@ export class HealthObservationCollector implements IHealthDiagnosticsSource {
   /**
    * Races one raw indicator against the reporting deadline. A deadline hit
    * resolves `timed-out` without cancelling the raw callback; a normal
-   * settlement resolves `reported` with the (still untrusted) status; a
+   * settlement is read through `readSettledResult`, resolving `reported` with
+   * a validated status or `failed` for a result the trust rule rejects; a
    * rejection resolves `failed`. The timer is cleared on either settle path
    * and tracked so `close()` can clear it too — no handle outlives the
    * collector.

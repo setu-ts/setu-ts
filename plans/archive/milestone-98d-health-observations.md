@@ -1,7 +1,9 @@
 # Milestone 98d — Minimized Health Observations
 
-> **Status:** Implemented on `feat/m98d-health-observations`; the committed-tree security audit
-> (gate 2) is recorded in the implementation PR. `main` remains protected.
+> **Status:** Complete (PR pending). The committed-tree security audit (gate 2) passed and is
+> recorded in the implementation PR. One deviation from §0's out-of-scope list: the audit found a
+> pre-existing `/health` status-masking defect (on `main` since M20), fixed on this branch at the
+> maintainer's direction, so an unrecognized indicator status now fails `/health` and `/ready`.
 
 ## 0. Objective & scope
 
