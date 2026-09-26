@@ -968,6 +968,38 @@ describe('Connector handler — health operation (M98d)', () => {
     expect(reads).toBeGreaterThanOrEqual(2);
   });
 
+  it('never signs a control alias or extra field smuggled through a source-supplied map (audit re-audit HUNT-d)', async () => {
+    const [observation] = healthSnapshot.observations;
+    const crafted = { ...observation };
+    Object.defineProperty(crafted, 'toJSON', {
+      enumerable: false,
+      value: () => ({ ...observation, indicatorAlias: 'db\u001b[2JFORGED', injected: 'canary' }),
+    });
+    const result = await readHealthWith({
+      snapshot: () => ({ ...healthSnapshot, observations: { map: () => [crafted], length: 1 } }),
+    });
+    const text = JSON.stringify(result.body);
+    expect(result.status).toEqual(200);
+    expect(result.body).toMatchObject({ state: 'collection-failed', observations: [] });
+    expect(text).not.toContain('FORGED');
+    expect(text).not.toContain('canary');
+  });
+
+  it('signs a projected copy, never the source record, for a real observations array (audit re-audit HUNT-d)', async () => {
+    const [observation] = healthSnapshot.observations;
+    const crafted = { ...observation };
+    Object.defineProperty(crafted, 'toJSON', {
+      enumerable: false,
+      value: () => ({ ...observation, indicatorAlias: 'db\u001b[2JFORGED' }),
+    });
+    const result = await readHealthWith({
+      snapshot: () => ({ ...healthSnapshot, observations: [crafted] }),
+    });
+    expect(result.status).toEqual(200);
+    expect(result.body).toMatchObject({ state: 'ready' });
+    expect(JSON.stringify(result.body)).not.toContain('FORGED');
+  });
+
   it('refuses a cross-instance health read', async () => {
     const { handler, key } = await buildHarness();
     // Bind the session to TEST_INSTANCE_ID, then read for a DIFFERENT
@@ -1360,6 +1392,96 @@ describe('Connector handler — configuration provenance operation (M98e)', () =
     // Before the fix this was a 200 SIGNED body carrying the second read.
     expect(view.status).toEqual(401);
     expect(view.bodyText).not.toContain('other-canary-src');
+  });
+
+  describe('source-supplied structure cannot bypass the validator (audit re-audit HUNT-a/b/c)', () => {
+    async function readConfigWith(snapshot: unknown): Promise<ReturnType<typeof inspect>> {
+      const { handler, key, session } = await buildHarness({
+        configSource: fakeConfigSource(snapshot as ConfigDiagnosticsSnapshot),
+      });
+      session.bindInstance(TEST_INSTANCE_ID);
+      const mac = await signRequest(crypto.subtle, key, '/v1/config', 1, TEST_INSTANCE_ID);
+      return inspect(
+        await handler(
+          fakeRequest({
+            url: `http://${HOST}/v1/config`,
+            headers: {
+              host: HOST,
+              'x-setu-session': TEST_SESSION_ID,
+              'x-setu-sequence': '1',
+              'x-setu-instance': TEST_INSTANCE_ID,
+              'x-setu-mac': mac,
+            },
+          }),
+        ),
+      );
+    }
+
+    function withEntry(overrides: Record<string, unknown>): unknown {
+      const base = minimalConfigSnapshot();
+      const [entry] = base.entries;
+      return { ...base, entries: [{ ...entry, ...overrides }] };
+    }
+
+    it('an alias array whose toJSON substitutes a control alias (HUNT-a)', async () => {
+      const aliases: string[] = ['ok'];
+      Object.defineProperty(aliases, 'toJSON', {
+        enumerable: false,
+        value: () => ['r\u001b[2JFORGED'],
+      });
+      const view = await readConfigWith(withEntry({ referenceAliases: aliases }));
+      expect(view.status).toEqual(200);
+      expect(view.body).toMatchObject({ state: 'ready' });
+      expect(view.bodyText).not.toContain('FORGED');
+    });
+
+    it('an alias array whose index getter flips on a second read (HUNT-b)', async () => {
+      const aliases: string[] = [];
+      let reads = 0;
+      Object.defineProperty(aliases, '0', {
+        enumerable: true,
+        configurable: true,
+        get: () => (reads++ === 0 ? 'ok' : 'r\u001b[2JFORGED'),
+      });
+      const view = await readConfigWith(withEntry({ overriddenSourceAliases: aliases }));
+      expect(view.status).toEqual(200);
+      expect(view.bodyText).not.toContain('FORGED');
+      expect(reads).toEqual(1);
+    });
+
+    it('an entries object with its own map returning a crafted record (HUNT-c)', async () => {
+      const base = minimalConfigSnapshot();
+      const [entry] = base.entries;
+      const crafted = { ...entry };
+      Object.defineProperty(crafted, 'toJSON', {
+        enumerable: false,
+        value: () => ({ ...entry, keyAlias: 'x\u001b[2JFORGED', injected: 'canary' }),
+      });
+      const view = await readConfigWith({ ...base, entries: { map: () => [crafted], length: 1 } });
+      expect(view.status).toEqual(200);
+      expect(view.body).toMatchObject({ state: 'collection-failed', entries: [] });
+      expect(view.bodyText).not.toContain('FORGED');
+      expect(view.bodyText).not.toContain('canary');
+    });
+
+    it('an over-budget alias list is refused without walking its declared length', async () => {
+      let reads = 0;
+      const aliases = new Proxy([] as string[], {
+        get: (target, property, receiver) => {
+          if (property === 'length') {
+            return 1_000_000_000;
+          }
+          if (typeof property === 'string' && /^[0-9]+$/.test(property)) {
+            reads += 1;
+            return 'r';
+          }
+          return Reflect.get(target, property, receiver);
+        },
+      });
+      const view = await readConfigWith(withEntry({ referenceAliases: aliases }));
+      expect(view.body).toMatchObject({ state: 'collection-failed' });
+      expect(reads).toEqual(17);
+    });
   });
 
   it('answers collection-failed for a control-character alias from a replacement source (audit F1)', async () => {

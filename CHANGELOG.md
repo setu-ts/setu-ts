@@ -33,7 +33,9 @@ All notable changes to this project are documented here. The format follows
   control character in any alias, as the queue validator already did, so a replacement in-process
   source cannot forge a consumer's terminal output; and the connector re-checks the instance binding
   on the projected copy it signs, so a source whose `instanceId` reads differently twice is refused
-  rather than signed.
+  rather than signed. The projection copies every source-supplied list itself — reading each item
+  once, never through a source's own `map` or `toJSON`, and never past its budget — so the validator
+  checks exactly the bytes that are signed.
 - **Queue observations (M98f): opt-in, minimized attempt, outcome and depth observations through the
   diagnostics connector.** `QueuePlugin` accepts a `diagnostics` option (`QueueDiagnosticsOptions` /
   `QueueDepthDiagnosticsOptions`, exported from `@setu-ts/queue-plugin`) that observes each

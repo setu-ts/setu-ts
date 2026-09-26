@@ -4145,12 +4145,14 @@ or schema effect, a `sourceAlias` on a non-`file` origin, an oversized alias, an
 C0/C1 control character, an over-budget alias array, a malformed shape), answers a value-free
 `collection-failed` snapshot, so nothing unvalidated is ever signed; the native client runs the same
 validator. The connector also re-checks the instance binding on the projected copy it signs, so a
-source whose `instanceId` reads differently the second time is refused rather than signed. The same
-two rules apply to `GET /v1/health`. Every string from the first-party source is an
-application-approved display alias: no configuration value, value hash, value length, raw key name,
-or file path is ever carried, and unapproved keys are never observed at all — no counter discloses
-that they exist. The negotiated manifest governs `configuration()` exactly as it governs `health()`:
-a legacy pairing answers `unsupported` without sending the request.
+source whose `instanceId` reads differently the second time is refused rather than signed, and it
+copies every source-supplied list itself — each item read once, never through the source's own `map`
+or `toJSON` — so the validator checks exactly what is signed. The same rules apply to
+`GET /v1/health`. Every string from the first-party source is an application-approved display alias:
+no configuration value, value hash, value length, raw key name, or file path is ever carried, and
+unapproved keys are never observed at all — no counter discloses that they exist. The negotiated
+manifest governs `configuration()` exactly as it governs `health()`: a legacy pairing answers
+`unsupported` without sending the request.
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`

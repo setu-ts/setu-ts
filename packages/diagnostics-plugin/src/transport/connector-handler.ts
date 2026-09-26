@@ -393,8 +393,9 @@ interface InspectorProjectionSpec<S> {
  *
  * The version and instance are checked on the source DTO so the refusal
  * precedes any projection work; the projection then re-reads every field
- * once, so the instance binding is checked AGAIN on the projected copy, and
- * the exact validator runs over that same copy. What the connector signs is
+ * once and copies every list into connector-owned arrays (never through a
+ * source's own `map` or `toJSON`), so the instance binding is checked AGAIN
+ * on the projected copy, and the exact validator runs over that same copy. What the connector signs is
  * therefore exactly what was checked — a source whose getter answers
  * differently on a second read is refused, never signed. The source is
  * synchronous and never runs an indicator or reads a configuration value.

@@ -607,6 +607,48 @@ const HEALTH_STATUSES: ReadonlySet<string> = new Set(['up', 'degraded', 'down'])
 const ORIGINS: ReadonlySet<string> = new Set(['application', 'scheduled']);
 
 /**
+ * Copies a source-supplied list into a fresh array the connector owns. Reads
+ * `length` once and each index once, through the intrinsic array — never a
+ * source-supplied `map`, `toJSON` or iterator — and stops at `max + 1` items,
+ * so an over-budget list still fails its validator without the connector
+ * walking an attacker-chosen length. Validation then runs over this copy, so
+ * a getter or `toJSON` that answers differently on a second read never
+ * reaches the bytes that are signed.
+ *
+ * @param value - The source list
+ * @param max - The list's budget; one extra item is copied so the validator refuses it
+ * @param project - Copies one item into connector-owned data
+ * @returns The fresh copy
+ * @throws {TypeError} When `value` is not an array — the caller answers `collection-failed`
+ * @internal
+ */
+function copyList<T, R>(
+  value: readonly T[],
+  max: number,
+  project: (item: T) => R,
+): R[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError('Diagnostics projection: expected an array.');
+  }
+  const length = Math.min(value.length, max + 1);
+  const copy: R[] = [];
+  for (let index = 0; index < length; index++) {
+    copy.push(project(value[index] as T));
+  }
+  return copy;
+}
+
+/**
+ * Copies one list item unchanged — a primitive alias needs no projection.
+ *
+ * @param item - The item
+ * @returns The same item
+ */
+function identity<T>(item: T): T {
+  return item;
+}
+
+/**
  * Re-projects one health observation against the exact M98d field allowlist.
  * Copies field-by-field — never a spread of a provider result — so an
  * unexpected field on an internal DTO cannot reach the wire.
@@ -645,7 +687,11 @@ export function projectHealthSnapshot(
     version: snapshot.version,
     instanceId: snapshot.instanceId,
     state: snapshot.state,
-    observations: snapshot.observations.map(projectHealthObservation),
+    observations: copyList(
+      snapshot.observations,
+      MAX_HEALTH_OBSERVATIONS,
+      projectHealthObservation,
+    ),
     truncated: snapshot.truncated,
     droppedObservations: snapshot.droppedObservations,
   };
@@ -860,9 +906,13 @@ export function projectConfigEntry(entry: ConfigProvenanceEntry): Record<string,
   const projected: Record<string, unknown> = {
     keyAlias: entry.keyAlias,
     origin: entry.origin,
-    overriddenSourceAliases: entry.overriddenSourceAliases,
+    overriddenSourceAliases: copyList(
+      entry.overriddenSourceAliases,
+      MAX_CONFIG_OVERRIDDEN,
+      identity,
+    ),
     expanded: entry.expanded,
-    referenceAliases: entry.referenceAliases,
+    referenceAliases: copyList(entry.referenceAliases, MAX_CONFIG_REFERENCES, identity),
     schemaEffect: entry.schemaEffect,
   };
   copyOptional(projected, 'sourceAlias', entry.sourceAlias);
@@ -886,7 +936,7 @@ export function projectConfigSnapshot(
     version: snapshot.version,
     instanceId: snapshot.instanceId,
     state: snapshot.state,
-    entries: snapshot.entries.map(projectConfigEntry),
+    entries: copyList(snapshot.entries, MAX_CONFIG_ENTRIES, projectConfigEntry),
     truncated: snapshot.truncated,
     droppedEntries: snapshot.droppedEntries,
   };
