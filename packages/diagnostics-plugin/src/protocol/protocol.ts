@@ -15,11 +15,18 @@ import type {
   ConfigProvenanceEntry,
   DiagnosticsBatch,
   DiagnosticsEdge,
+  DiagnosticsEdgeKind,
   DiagnosticsEvent,
+  DiagnosticsEventKind,
+  DiagnosticsEventOutcome,
+  DiagnosticsEventStage,
+  DiagnosticsFailureCode,
   DiagnosticsNode,
   DiagnosticsSnapshot,
+  DiagnosticsSnapshotState,
   HealthDiagnosticsObservation,
   HealthDiagnosticsSnapshot,
+  HttpMethod,
 } from '@setu-ts/common';
 
 /**
@@ -573,79 +580,96 @@ const NODE_ID_PREFIX: Readonly<Record<string, string>> = {
   middleware: 'm',
 };
 
+/**
+ * Builds a vocabulary set from a record keyed by EVERY member of a `common`
+ * union, so adding a member to the union without adding it here is a compile
+ * error — not a client that refuses every body carrying the new value.
+ *
+ * @param members - One `true` entry per union member
+ * @returns The vocabulary as a set
+ */
+function vocabulary<T extends string>(members: Readonly<Record<T, true>>): ReadonlySet<string> {
+  return new Set(Object.keys(members));
+}
+
 /** The fixed snapshot-state vocabulary (`DiagnosticsSnapshotState`). */
-const SNAPSHOT_STATES: ReadonlySet<string> = new Set([
-  'created',
-  'starting',
-  'running',
-  'failed',
-  'stopping',
-  'closed',
-]);
+const SNAPSHOT_STATES: ReadonlySet<string> = vocabulary<DiagnosticsSnapshotState>({
+  'created': true,
+  'starting': true,
+  'running': true,
+  'failed': true,
+  'stopping': true,
+  'closed': true,
+});
 
 /** The fixed failure-code vocabulary (`DiagnosticsFailureCode`). */
-const FAILURE_CODES: ReadonlySet<string> = new Set(['startup-failed', 'shutdown-failed']);
+const FAILURE_CODES: ReadonlySet<string> = vocabulary<DiagnosticsFailureCode>({
+  'startup-failed': true,
+  'shutdown-failed': true,
+});
 
 /** The fixed edge-kind vocabulary (`DiagnosticsEdgeKind`). */
-const EDGE_KINDS: ReadonlySet<string> = new Set([
-  'provides',
-  'requires',
-  'optional',
-  'consumes',
-  'owns',
-]);
+const EDGE_KINDS: ReadonlySet<string> = vocabulary<DiagnosticsEdgeKind>({
+  'provides': true,
+  'requires': true,
+  'optional': true,
+  'consumes': true,
+  'owns': true,
+});
 
 /** The fixed event-kind vocabulary (`DiagnosticsEventKind`). */
-const EVENT_KINDS: ReadonlySet<string> = new Set(['lifecycle', 'request', 'middleware', 'handler']);
+const EVENT_KINDS: ReadonlySet<string> = vocabulary<DiagnosticsEventKind>({
+  'lifecycle': true,
+  'request': true,
+  'middleware': true,
+  'handler': true,
+});
 
 /** The fixed event-stage vocabulary (`DiagnosticsEventStage`). */
-const EVENT_STAGES: ReadonlySet<string> = new Set([
-  'resolve',
-  'register',
-  'register-hook',
-  'init',
-  'bootstrap',
-  'listen',
-  'stopping',
-  'shutdown',
-  'close',
-  'request',
-  'request-hook',
-  'response-hook',
-  'error-hook',
-  'global',
-  'route',
-  'handler',
-  'websocket-upgrade',
-  'grpc-dispatch',
-]);
+const EVENT_STAGES: ReadonlySet<string> = vocabulary<DiagnosticsEventStage>({
+  'resolve': true,
+  'register': true,
+  'register-hook': true,
+  'init': true,
+  'bootstrap': true,
+  'listen': true,
+  'stopping': true,
+  'shutdown': true,
+  'close': true,
+  'request': true,
+  'request-hook': true,
+  'response-hook': true,
+  'error-hook': true,
+  'global': true,
+  'route': true,
+  'handler': true,
+  'websocket-upgrade': true,
+  'grpc-dispatch': true,
+});
 
 /** The fixed event-outcome vocabulary (`DiagnosticsEventOutcome`). */
-const EVENT_OUTCOMES: ReadonlySet<string> = new Set([
-  'ok',
-  'error',
-  'short-circuit',
-  'downstream-skipped',
-]);
+const EVENT_OUTCOMES: ReadonlySet<string> = vocabulary<DiagnosticsEventOutcome>({
+  'ok': true,
+  'error': true,
+  'short-circuit': true,
+  'downstream-skipped': true,
+});
 
 /** The route-method vocabulary the kernel projects onto (`HttpMethod`). */
-const NODE_METHODS: ReadonlySet<string> = new Set([
-  'GET',
-  'HEAD',
-  'POST',
-  'PUT',
-  'PATCH',
-  'DELETE',
-  'OPTIONS',
-]);
+const NODE_METHODS: ReadonlySet<string> = vocabulary<HttpMethod>({
+  'GET': true,
+  'HEAD': true,
+  'POST': true,
+  'PUT': true,
+  'PATCH': true,
+  'DELETE': true,
+  'OPTIONS': true,
+});
 
 /** The kernel's fixed v1 topology limits and label bound. */
 const MAX_SNAPSHOT_NODES = 1024;
 const MAX_SNAPSHOT_EDGES = 4096;
 const MAX_LABEL_BYTES = 160;
-
-/** The kernel's fixed maximum events per read. */
-const MAX_BATCH_EVENTS = 128;
 
 /** An opaque node id: one kind prefix, then a canonical positive decimal. */
 const NODE_ID = /^[pcrm][1-9][0-9]{0,15}$/;
@@ -875,7 +899,7 @@ export function isBatchProjection(value: unknown): value is DiagnosticsBatch {
   if (
     value.version !== 1 ||
     !isInstanceField(value.instanceId) ||
-    !Array.isArray(events) || events.length > MAX_BATCH_EVENTS ||
+    !Array.isArray(events) || events.length > CONNECTOR_MAX_EVENT_LIMIT ||
     !isCount(value.next) ||
     !isCount(value.lost) ||
     typeof value.closed !== 'boolean'

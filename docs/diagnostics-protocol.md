@@ -115,13 +115,14 @@ exact DTO before returning it. For the core snapshot that means only the defined
 only its kind's fields under a unique id minted with its kind's prefix (`p`, `c`, `r`, `m`), labels
 of at most 160 UTF-8 bytes with no control character, and every edge joining two nodes in the same
 snapshot, once. For the event batch it means at most 128 events, each with only the defined keys,
-every enum from its vocabulary, canonical `op<N>` and node ids, finite non-negative timings, a
-finite numeric status code and validated W3C identifiers; consecutive sequences with `next` equal to
-the last; and the cursor the request sent honored — an empty page echoes `after` with `lost: 0`, and
-a returned page starts past `after` with `lost` counting exactly the evicted gap. Every returned
-result is deeply frozen. Two fields are deliberately left as the DTO types them — a plain, unranged
-`number`: a middleware `priority` and an event `statusCode`, which the application sets. Either may
-be any finite number (a status is not necessarily a valid HTTP status), so an application's unusual
+every enum from its vocabulary, canonical `op<N>` and node ids, finite non-negative (or `null`)
+timings, a finite numeric status code and validated W3C identifiers; consecutive sequences with
+`next` equal to the last; and the cursor the request sent honored — an empty page echoes `after`
+with `lost: 0`, and a returned page starts past `after` with `lost` counting exactly the unreadable
+gap — records evicted from the ring, or discarded when a start failed. Every returned result is
+deeply frozen. Two fields are deliberately left as the DTO types them — a plain, unranged `number`:
+a middleware `priority` and an event `statusCode`, which the application sets. Either may be any
+finite number (a status is not necessarily a valid HTTP status), so an application's unusual
 priority or status never turns its own diagnostics into a refusal; the kernel omits a non-finite
 value rather than letting it serialize to `null`, and the client refuses `null`.
 

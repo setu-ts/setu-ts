@@ -220,7 +220,7 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
   read(after: number, limit?: number): DiagnosticsBatch {
     // A closed ring has no "beyond the sequence" refusal: a reader that polled
     // up to sequence N before shutdown must still get its empty closed batch,
-    // not a throw, after teardown reset the counters.
+    // not a throw, whatever cursor it holds.
     const cursor = validateReadCursor(
       after,
       limit,

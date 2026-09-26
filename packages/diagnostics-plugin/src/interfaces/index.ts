@@ -195,7 +195,7 @@ export interface IDiagnosticsClient {
    * sequences and `next` equal to the last one, and must honor the cursor
    * this call sent: at most `limit` events, an empty page echoes `after` with
    * no loss, and a returned page starts past `after` with `lost` counting
-   * exactly the evicted gap. An event `statusCode` is left unranged, as the
+   * exactly the unreadable gap (evicted, or discarded by a failed start). An event `statusCode` is left unranged, as the
    * application set it: any finite number, not necessarily a valid HTTP
    * status (the kernel omits a non-finite one).
    *

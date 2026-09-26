@@ -41,8 +41,11 @@ export type DiagnosticsEdgeKind = 'provides' | 'requires' | 'optional' | 'consum
 /**
  * Coarse application state reported by {@linkcode DiagnosticsSnapshot.state}.
  *
- * `failed` is terminal: a startup failure clears the retained topology and
+ * `failed` reports a startup failure: it clears the retained topology and
  * event buffers and reports only this state, the failure code, and counters.
+ * It persists until the kernel-supported retry (`unregister` + `start()`)
+ * begins a new attempt, which moves the state back to `starting`; `closed` is
+ * the only state no later call leaves.
  *
  * @since 0.8.0
  */
@@ -263,8 +266,10 @@ export interface DiagnosticsEvent {
  * `events` are frozen records in completion order. `next` is the last returned
  * sequence, or the requested cursor when nothing was returned; pass it as the
  * next `after` to continue polling. `lost` is the count of sequence numbers
- * that were evicted between the requested cursor and the first returned record
- * — the cost of a bounded ring under load, reported rather than hidden.
+ * between the requested cursor and the first returned record that can no
+ * longer be read: records evicted from the bounded ring under load, and
+ * records discarded when a start failed (a retried start continues the
+ * numbering rather than reusing it). Reported rather than hidden.
  *
  * @since 0.8.0
  */
@@ -277,7 +282,10 @@ export interface DiagnosticsBatch {
   readonly events: readonly DiagnosticsEvent[];
   /** Last returned sequence, or the requested cursor when nothing was returned. */
   readonly next: number;
-  /** Evicted sequence numbers between the requested cursor and the first returned record. */
+  /**
+   * Unreadable sequence numbers between the requested cursor and the first
+   * returned record — evicted under load, or discarded by a failed start.
+   */
   readonly lost: number;
   /** `true` once the application has stopped and the ring will not receive further events. */
   readonly closed: boolean;

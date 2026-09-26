@@ -134,7 +134,9 @@ export function validateReadCursor(
 /**
  * Bounded event ring. Sequences are allocated ONLY on a successful store, so
  * the numbering is dense and a reader's `lost` count means exactly one thing:
- * records evicted between its cursor and the oldest retained record.
+ * records between its cursor and the oldest retained record that are gone —
+ * evicted when the ring is full, or discarded by {@linkcode clear}, which
+ * never reuses a sequence number.
  *
  * @since 0.8.0
  */
@@ -149,7 +151,10 @@ export class DiagnosticsEventRing {
     return this.#lastSequence;
   }
 
-  /** Oldest retained sequence number (1 when nothing has been evicted). */
+  /**
+   * Oldest retained sequence number: 1 while nothing has been evicted or
+   * cleared, and `lastSequence + 1` (nothing retained) right after a clear.
+   */
   get firstSequence(): number {
     return this.#firstSequence;
   }

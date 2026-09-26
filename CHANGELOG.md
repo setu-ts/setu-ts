@@ -381,13 +381,13 @@ All notable changes to this project are documented here. The format follows
   string passed as `state`, a node or edge record could carry any fields, and an event needed only a
   numeric `sequence` and string `operationId`/`stage`. They now enforce the M98a contract — only
   defined keys, fixed vocabularies, per-kind node fields, prefixed unique node ids, bounded
-  control-free labels, edges between present nodes, canonical operation ids, non-negative timings,
-  validated trace identifiers, consecutive sequences, and the 1,024/4,096/128 bounds — and `read()`
-  now checks the cursor contract it sent, as `queues()` and `traces()` already did. `snapshot()` and
-  `read()` also returned the parsed JSON unfrozen while their documentation promised frozen data;
-  both now deep-freeze it. An in-process `instanceId: null` remains valid; a middleware `priority`
-  and an event `statusCode` stay unranged finite numbers because the application sets both; a
-  refusal is the fixed connection error.
+  control-free labels, edges between present nodes, canonical operation ids, non-negative (or
+  `null`) timings, validated trace identifiers, consecutive sequences, and the 1,024/4,096/128
+  bounds — and `read()` now checks the cursor contract it sent, as `queues()` and `traces()` already
+  did. `snapshot()` and `read()` also returned the parsed JSON unfrozen while their documentation
+  promised frozen data; both now deep-freeze it. An in-process `instanceId: null` remains valid; a
+  middleware `priority` and an event `statusCode` stay unranged finite numbers because the
+  application sets both; a refusal is the fixed connection error.
 - **`kernel` — diagnostics omit a non-finite middleware priority or response status.** Both were
   recorded verbatim, so `priority: NaN` (what `Number(env.X)` yields for an unset variable) or
   `status(NaN)` put `NaN` in a field `common` types as `number`, and the connector serialized it as
@@ -396,9 +396,9 @@ All notable changes to this project are documented here. The format follows
 - **`kernel` — a retried start no longer reuses diagnostics event sequence numbers.** A failed start
   cleared the event ring and restarted numbering at 1, so after the kernel-supported correction
   (`unregister` + `start()`) a reader's cursor from the failed attempt was refused as "beyond the
-  current sequence" (a connection failure through the diagnostics client) or silently skipped the
-  retry's first events. The discarded records are now treated like an eviction: numbering continues,
-  and a reader's `lost` counts them.
+  current sequence" or silently skipped the retry's first events. The discarded records are now
+  treated like an eviction: numbering continues, and a reader's `lost` counts them; the
+  `DiagnosticsBatch.lost` JSDoc now says so.
 - **`telemetry-plugin` — exported spans now carry the span kind and status OpenTelemetry defines.**
   `TelemetryService` mapped the framework's `SpanKind` onto the OTLP WIRE numbering rather than the
   `@opentelemetry/api` enum a span holds in memory, so every `server` span was exported as `CLIENT`,
