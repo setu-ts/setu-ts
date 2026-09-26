@@ -118,6 +118,7 @@ export class QueueObservationMerger implements IQueueMerger {
   readonly #clock: QueueMergerClock;
   readonly #ring: MergedAttempt[] = [];
   #sequence = 0;
+  #closed = false;
 
   /**
    * Creates the merger over the registered sources. Only the first 16, in
@@ -146,10 +147,25 @@ export class QueueObservationMerger implements IQueueMerger {
     }));
   }
 
+  /**
+   * Discards everything retained — the merge ring, each source's latest
+   * depths — and stops draining. The plugin calls it when the session is
+   * revoked, so nothing captured for it outlives the revocation. Idempotent.
+   */
+  close(): void {
+    this.#closed = true;
+    this.#ring.length = 0;
+    for (const slot of this.#slots) {
+      slot.depths = [];
+    }
+  }
+
   /** {@inheritDoc IQueueMerger.read} */
   read(instanceId: string, after: number, limit: number): QueueDiagnosticsBatch | null {
     const now = this.#clock.hrtime();
-    this.#slots.forEach((slot, index) => this.#drain(slot, index, now));
+    if (!this.#closed) {
+      this.#slots.forEach((slot, index) => this.#drain(slot, index, now));
+    }
     if (after > this.#sequence) {
       return null;
     }

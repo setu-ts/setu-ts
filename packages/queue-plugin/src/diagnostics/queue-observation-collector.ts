@@ -44,33 +44,33 @@ import type {
 import type { QueueDepths } from '../adapters/queue-adapter.ts';
 import type { QueueDiagnosticsOptions } from '../interfaces/index.ts';
 
-/** Fixed bounds (not configurable). */
-const MAX_APPROVED_QUEUES = 64;
-const MAX_ALIAS_BYTES = 64;
-const MAX_RETAINED_ATTEMPTS = 1_024;
-const MAX_JOB_ALIASES = 4_096;
-const MAX_IN_FLIGHT_ATTEMPTS = 2_048;
-const MAX_READ_LIMIT = 128;
+/**
+ * The fixed collector bounds. Constants, not options — and the ONE place each
+ * bound is stated, read by the collector and by its tests alike.
+ *
+ * @internal
+ */
+export const QUEUE_COLLECTOR_LIMITS = {
+  approvedQueues: 64,
+  aliasBytes: 64,
+  retainedAttempts: 1_024,
+  jobAliases: 4_096,
+  inFlightAttempts: 2_048,
+  readLimit: 128,
+} as const;
+
+const MAX_APPROVED_QUEUES = QUEUE_COLLECTOR_LIMITS.approvedQueues;
+const MAX_ALIAS_BYTES = QUEUE_COLLECTOR_LIMITS.aliasBytes;
+const MAX_RETAINED_ATTEMPTS = QUEUE_COLLECTOR_LIMITS.retainedAttempts;
+const MAX_JOB_ALIASES = QUEUE_COLLECTOR_LIMITS.jobAliases;
+const MAX_IN_FLIGHT_ATTEMPTS = QUEUE_COLLECTOR_LIMITS.inFlightAttempts;
+const MAX_READ_LIMIT = QUEUE_COLLECTOR_LIMITS.readLimit;
 const MIN_INTERVAL_MS = 1_000;
 const MAX_INTERVAL_MS = 300_000;
 const MIN_TIMEOUT_MS = 1;
 const MAX_TIMEOUT_MS = 30_000;
 const MIN_CONCURRENCY = 1;
 const MAX_CONCURRENCY = 4;
-
-/**
- * The fixed collector bounds, exposed for tests and the connector's own
- * bounds. Not configurable.
- *
- * @internal
- */
-export const QUEUE_COLLECTOR_LIMITS = {
-  approvedQueues: MAX_APPROVED_QUEUES,
-  retainedAttempts: MAX_RETAINED_ATTEMPTS,
-  jobAliases: MAX_JOB_ALIASES,
-  inFlightAttempts: MAX_IN_FLIGHT_ATTEMPTS,
-  readLimit: MAX_READ_LIMIT,
-} as const;
 
 /**
  * Fixed construction and read errors. Each names the constraint it enforces
@@ -296,7 +296,10 @@ export interface QueueAttemptObserver {
    * @param name - The job name, used only for the exact allowlist lookup
    * @param jobId - The raw job identifier, used only for the alias lookup
    * @param attempt - The 1-based attempt number
-   * @returns A handle, or `null` when the attempt is not observed
+   * @returns A handle, or `null` when the attempt is not observed — an
+   * unapproved name (not counted), or the in-flight bound reached or an
+   * attempt number that is not a positive safe integer (both counted as
+   * dropped)
    */
   begin(name: string, jobId: string, attempt: number): QueueAttemptHandle | null;
 }
@@ -492,7 +495,14 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
     if (queueAlias === undefined) {
       return null;
     }
-    if (this.#attemptsInFlight >= MAX_IN_FLIGHT_ATTEMPTS) {
+    // The attempt number comes from a persisted job (a Redis or RabbitMQ
+    // payload), so it is validated HERE, before buffering: one malformed value
+    // retained in the ring would make every later batch fail the connector's
+    // exact validator until 1,024 more attempts rolled it out.
+    if (
+      this.#attemptsInFlight >= MAX_IN_FLIGHT_ATTEMPTS || !Number.isSafeInteger(attempt) ||
+      attempt < 1
+    ) {
       this.#droppedAttempts = saturatingNext(this.#droppedAttempts);
       return null;
     }

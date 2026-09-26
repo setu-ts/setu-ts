@@ -187,6 +187,21 @@ describe('QueueObservationMerger', () => {
     expect(endless.reads).toBeLessThanOrEqual(1_024 / 128 + 1);
   });
 
+  it('discards everything retained on close and stops draining', () => {
+    const source = new ScriptedQueueSource();
+    source.produce(3);
+    const { merger } = merge([source]);
+    expect(merger.read(TEST_INSTANCE_ID, 0, 128)!.events.length).toBe(3);
+    merger.close();
+    merger.close();
+    source.produce(2);
+    const reads = source.reads;
+    const after = merger.read(TEST_INSTANCE_ID, 0, 128)!;
+    expect(after.events).toEqual([]);
+    expect(after.depths).toEqual([]);
+    expect(source.reads).toBe(reads);
+  });
+
   it('reads at most 16 sources and counts the rest as truncated', () => {
     const all = Array.from({ length: 18 }, () => new ScriptedQueueSource());
     const batch = merge(all).merger.read(TEST_INSTANCE_ID, 0, 128)!;

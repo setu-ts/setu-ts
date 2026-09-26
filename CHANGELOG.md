@@ -16,19 +16,21 @@ All notable changes to this project are documented here. The format follows
   outcome (`completed` / `retryable-error` / `terminal-error`) and the settlement — recorded only
   AFTER the adapter's settlement call returned: `acknowledged` / `requeued` / `dead-lettered` on an
   adapter that confirms it, `failed` when the call rejected, `unknown` on RabbitMQ and SQS, whose
-  settlement calls cannot be confirmed. No payload, header, raw job id, claim token, credential or
-  error text is captured. Optional depth counting (`depths`) runs its own bounded, non-overlapping
-  cycles — never on a diagnostic read — and reports `unavailable` rather than zero on adapters that
-  cannot count; each depth carries its `scope` (`process-local` / `shared-backend`). Every
-  QueuePlugin instance registers one source under the new `CAPABILITIES.QUEUE_DIAGNOSTICS` token as
-  a MULTI provider (never in `provides`, so named instances cannot collide); an unconfigured
-  instance registers an inert `disabled` source and dispatch is unchanged. New public surface on
-  `@setu-ts/common`: `CAPABILITIES.QUEUE_DIAGNOSTICS`, `IQueueDiagnosticsSource`,
-  `QueueDiagnosticsSourceBatch`, `QueueSourceAttemptObservation`, `QueueSourceDepthObservation`,
-  `QueueDiagnosticsBatch`, `QueueDiagnosticsSourceStatus`, `QueueAttemptObservation`,
-  `QueueDepthObservation`, and the vocabularies `QueueProcessorOutcome`, `QueueSettlementState`,
-  `QueueDepthScope`, `QueueDepthCycleCoverage`, `QueueDepthCoverage`, `QueueSourceFailure`,
-  `QueueDiagnosticsFailure` and `QueueSourceState`.
+  settlement calls cannot be confirmed. The queue metrics keep their existing timing — recorded
+  BEFORE the settlement call is awaited — so a `queue_jobs_total` outcome names the settlement
+  requested, never one the backend confirmed. No payload, header, raw job id, claim token,
+  credential or error text is captured. Optional depth counting (`depths`) runs its own bounded,
+  non-overlapping cycles — never on a diagnostic read — and reports `unavailable` rather than zero
+  on adapters that cannot count; each depth carries its `scope` (`process-local` /
+  `shared-backend`). Every QueuePlugin instance registers one source under the new
+  `CAPABILITIES.QUEUE_DIAGNOSTICS` token as a MULTI provider (never in `provides`, so named
+  instances cannot collide); an unconfigured instance registers an inert `disabled` source and
+  dispatch is unchanged. New public surface on `@setu-ts/common`: `CAPABILITIES.QUEUE_DIAGNOSTICS`,
+  `IQueueDiagnosticsSource`, `QueueDiagnosticsSourceBatch`, `QueueSourceAttemptObservation`,
+  `QueueSourceDepthObservation`, `QueueDiagnosticsBatch`, `QueueDiagnosticsSourceStatus`,
+  `QueueAttemptObservation`, `QueueDepthObservation`, and the vocabularies `QueueProcessorOutcome`,
+  `QueueSettlementState`, `QueueDepthScope`, `QueueDepthCycleCoverage`, `QueueDepthCoverage`,
+  `QueueSourceFailure`, `QueueDiagnosticsFailure` and `QueueSourceState`.
 - **Diagnostics connector — `GET /v1/queues` inspector (M98f).** The connector serves
   `GET /v1/queues?after=<N>&limit=<N>` and its status manifest now reports `queues: true`; the
   client reads it through the new `IDiagnosticsClient.queues(after, limit?)`, which answers a frozen

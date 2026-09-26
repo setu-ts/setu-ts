@@ -204,6 +204,19 @@ describe('QueueObservationCollector — attempts', () => {
     expect(target.begin(NAME_CANARY, 'after', 1)).not.toBeNull();
   });
 
+  it('drops an attempt number that is not a positive safe integer, before buffering', () => {
+    const { collector: target } = collector();
+    for (const attempt of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(target.begin(NAME_CANARY, 'x', attempt)).toBeNull();
+    }
+    const batch = target.read(0);
+    expect(batch.droppedAttempts).toBe(5);
+    expect(batch.attempts).toEqual([]);
+    // A valid attempt after them is still observed.
+    target.begin(NAME_CANARY, 'y', 1)!.settled('completed', 'acknowledged');
+    expect(target.read(0).attempts.length).toBe(1);
+  });
+
   it('records a completed call on an unconfirming adapter as unknown, keeping failed', () => {
     const { collector: target } = collector({}, false);
     for (const settlement of ['acknowledged', 'requeued', 'dead-lettered', 'failed'] as const) {
