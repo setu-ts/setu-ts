@@ -197,8 +197,10 @@ git sha, a sentence, any string over 64 characters) is omitted rather than proje
 (`truncated` reports omission). Events are capped at 1,024 retained records and 1,024 bytes each;
 eviction is reported as `lost` sequence numbers, and drops as `droppedEvents`. Startup failure and
 final shutdown clear retained metadata while preserving the original application error — a reader
-then sees only the coarse `failed`/`closed` state, the failure code, and counters. Timing is
-monotonic from runtime registration; `atMs`/`durationMs` are `null` before that, never fabricated.
+then sees only the coarse `failed`/`closed` state, the failure code, and counters. A retried
+`start()` continues the event numbering, so a later read reports the discarded range as `lost`.
+Timing is monotonic from runtime registration; `atMs`/`durationMs` are `null` before that, never
+fabricated.
 
 The runnable consumer is `scripts/inspect-kernel.ts`; the paired throughput/latency harness is
 `scripts/benchmark-kernel-diagnostics.ts --mode=disabled|enabled`. Network authentication and

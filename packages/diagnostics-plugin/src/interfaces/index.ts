@@ -195,9 +195,10 @@ export interface IDiagnosticsClient {
    * sequences and `next` equal to the last one, and must honor the cursor
    * this call sent: at most `limit` events, an empty page echoes `after` with
    * no loss, and a returned page starts past `after` with `lost` counting
-   * exactly the unreadable gap (evicted, or discarded by a failed start). An event `statusCode` is left unranged, as the
-   * application set it: any finite number, not necessarily a valid HTTP
-   * status (the kernel omits a non-finite one).
+   * exactly the unreadable gap (evicted, or discarded by a failed start). An
+   * event `statusCode` is left unranged, as the application set it: any
+   * finite number, not necessarily a valid HTTP status (the kernel omits a
+   * non-finite one).
    *
    * @param after - Sequence cursor; `0` starts at the oldest retained record
    * @param limit - Maximum events, 1–128 (default 128)
