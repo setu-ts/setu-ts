@@ -56,4 +56,29 @@ describe('middleware schematic', () => {
   it('calls next()', () => {
     expect(file.contents).toContain('await next();');
   });
+
+  // The short-circuit advice used to sit AFTER `await next()`, where the handler has
+  // already run and returning early no longer stops anything.
+  it('explains short-circuiting before next(), where it can still apply', () => {
+    const body = file.contents.slice(file.contents.indexOf('return async (ctx, next) => {'));
+    expect(body.indexOf('short-circuit')).toBeGreaterThan(-1);
+    expect(body.indexOf('short-circuit')).toBeLessThan(body.indexOf('await next();'));
+  });
+
+  // A React Router project has a SECOND middleware layer — a route module's
+  // `middleware` export — and the generated kernel middleware is where a developer
+  // meets the choice, so it names the other layer. Only there: every other project's
+  // output is unchanged.
+  it('points a React Router project at route middleware, and no other project', () => {
+    const [withRouter] = generateMiddleware(
+      deriveNames('order-item'),
+      options(['react-router-plugin']),
+    );
+    // Compared as prose: where the comment wraps is not the property under test.
+    const prose = withRouter!.contents.replace(/\n \* /g, ' ');
+    expect(prose).toContain('export a `middleware` array from the route module');
+    expect(prose).toContain('app/middleware/');
+    expect(file.contents).not.toContain('route module');
+    expect(file.contents).not.toContain('app/middleware/');
+  });
 });

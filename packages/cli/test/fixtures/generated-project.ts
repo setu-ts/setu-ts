@@ -315,7 +315,7 @@ export interface ProbeOutcome {
 
 /**
  * Boots a scaffolded project with the permissions ITS OWN generated `start` task
- * declares, then requests each path.
+ * declares, then hands its origin to a caller that drives it.
  *
  * The permission set is the point. Every other fixture here boots with `-A`,
  * which grants what the generated task may have forgotten to ask for and so
@@ -327,14 +327,14 @@ export interface ProbeOutcome {
  * permission — the flags under test are exactly the ones the template declared.
  *
  * @param project - The project directory, already repointed at the workspace
- * @param paths - The paths to request once it is serving
- * @returns The status and body of each path
- * @throws {Error} If the entry has no literal port to rebind, or never serves
+ * @param drive - Called once the project is serving, with its origin
+ * @returns What `drive` returned, and everything the process wrote
+ * @throws {Error} If the project has no start task, or never serves
  */
-export async function bootWithGeneratedPermissions(
+export async function withGeneratedServer<T>(
   project: string,
-  paths: readonly string[],
-): Promise<ProbeOutcome> {
+  drive: (origin: string) => Promise<T>,
+): Promise<{ readonly result: T; readonly output: string }> {
   const manifest = JSON.parse(await Deno.readTextFile(`${project}/deno.json`)) as {
     tasks?: Record<string, string>;
   };
@@ -368,12 +368,11 @@ export async function bootWithGeneratedPermissions(
     stderr: 'piped',
   }).spawn();
 
-  const statuses: Record<string, number> = {};
-  const bodies: Record<string, string> = {};
+  const origin = `http://127.0.0.1:${port}`;
   let served = false;
   for (let attempt = 0; attempt < 150; attempt++) {
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/`);
+      const response = await fetch(`${origin}/`);
       await response.body?.cancel();
       served = true;
       break;
@@ -382,14 +381,12 @@ export async function bootWithGeneratedPermissions(
     }
   }
 
+  let result: T | undefined;
+  let failure: unknown;
   try {
-    if (served) {
-      for (const path of paths) {
-        const response = await fetch(`http://127.0.0.1:${port}${path}`);
-        statuses[path] = response.status;
-        bodies[path] = await response.text();
-      }
-    }
+    if (served) result = await drive(origin);
+  } catch (error) {
+    failure = error;
   } finally {
     // In a `finally`, because a probe that rejects — a connection reset, or the
     // server dying after it answered readiness — would otherwise leave a bound
@@ -407,5 +404,32 @@ export async function bootWithGeneratedPermissions(
   if (!served) {
     throw new Error(`The project never served a request (exit ${status.code}):\n${output}`);
   }
+  if (failure !== undefined) {
+    throw new Error(`Driving the project failed:\n${output}`, { cause: failure });
+  }
+  return { result: result as T, output };
+}
+
+/**
+ * Boots a scaffolded project under its own permissions, then requests each path.
+ *
+ * @param project - The project directory, already repointed at the workspace
+ * @param paths - The paths to request once it is serving
+ * @returns The status and body of each path
+ * @throws {Error} If the project has no start task, or never serves
+ */
+export async function bootWithGeneratedPermissions(
+  project: string,
+  paths: readonly string[],
+): Promise<ProbeOutcome> {
+  const statuses: Record<string, number> = {};
+  const bodies: Record<string, string> = {};
+  const { output } = await withGeneratedServer(project, async (origin) => {
+    for (const path of paths) {
+      const response = await fetch(`${origin}${path}`);
+      statuses[path] = response.status;
+      bodies[path] = await response.text();
+    }
+  });
   return { statuses, bodies, output };
 }
