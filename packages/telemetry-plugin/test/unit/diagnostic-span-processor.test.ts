@@ -39,7 +39,7 @@ function harness() {
 function readableSpan(overrides: Partial<ReadableSpanInput> = {}): ReadableSpanInput {
   return {
     name: 'POST /orders',
-    kind: 2,
+    kind: 1, // @opentelemetry/api SpanKind.SERVER
     spanContext: () => ({ traceId: TRACE, spanId: SPAN, traceFlags: 1, isRemote: false }),
     links: [],
     status: { code: 0 },
@@ -118,17 +118,29 @@ describe('DiagnosticSpanProcessor — minimization', () => {
     expect(collector.read('i', 0).droppedSpans).toBe(1);
   });
 
-  it('maps the MEASURED default kind 0 to internal, and drops an unmappable kind', () => {
+  it('maps every @opentelemetry/api SpanKind value, and drops an unmappable kind', () => {
+    // The API enum (span_kind.d.ts): INTERNAL=0 SERVER=1 CLIENT=2 PRODUCER=3
+    // CONSUMER=4. A default span arrives as 0 (measured against the locked
+    // SDK). 5 is the OTLP WIRE value for CONSUMER — never on a readable span —
+    // and must drop rather than be mapped.
+    const table: ReadonlyArray<readonly [number, string]> = [
+      [0, 'internal'],
+      [1, 'server'],
+      [2, 'client'],
+      [3, 'producer'],
+      [4, 'consumer'],
+    ];
     const { processor, collector } = harness();
-    // MEASURED against the locked real SDK: a default span arrives as kind 0.
-    processor.onEnd(readableSpan({ kind: 0 }));
-    expect(collector.read('i', 0).records[0]!.kind).toBe('internal');
-    processor.onEnd(readableSpan({ kind: 5 }));
-    expect(collector.read('i', 0).records[1]!.kind).toBe('consumer');
-    const { processor: p2, collector: c2 } = harness();
-    p2.onEnd(readableSpan({ kind: 9 }));
-    expect(c2.read('i', 0).records).toEqual([]);
-    expect(c2.read('i', 0).droppedSpans).toBe(1);
+    for (const [code] of table) {
+      processor.onEnd(readableSpan({ kind: code }));
+    }
+    expect(collector.read('i', 0).records.map((r) => r.kind)).toEqual(table.map(([, k]) => k));
+    for (const unmappable of [5, 9, -1]) {
+      const { processor: p2, collector: c2 } = harness();
+      p2.onEnd(readableSpan({ kind: unmappable }));
+      expect(c2.read('i', 0).records).toEqual([]);
+      expect(c2.read('i', 0).droppedSpans).toBe(1);
+    }
   });
 
   it('drops an unapproved span name before reading anything else', () => {

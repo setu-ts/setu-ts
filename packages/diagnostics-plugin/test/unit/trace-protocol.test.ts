@@ -296,3 +296,63 @@ describe('isTraceBatchProjection — sampler and instrumentation arms', () => {
     expect(isTraceBatchProjection(badDuration)).toBe(false);
   });
 });
+
+/**
+ * An array whose iterator yields FOREVER (or `extra` more items) while its
+ * `length` stays honest — the shape that let a replacement source smuggle
+ * data past a `for…of` copy in M98e.
+ */
+function hostileArray<T>(items: T[], next: () => T, extra = Infinity): T[] {
+  const array = [...items];
+  Object.defineProperty(array, Symbol.iterator, {
+    value: function* () {
+      yield* items;
+      for (let i = 0; i < extra; i++) yield next();
+    },
+  });
+  return array;
+}
+
+describe('readTraceSourceBatch — copies source lists by index, never by iterator', () => {
+  it('does not follow an infinite records iterator, and returns only indexed items', () => {
+    let sequence = 1;
+    const records = hostileArray([record(1)], () => record(++sequence));
+    const validated = readTraceSourceBatch(sourceBatch(0, { records }), INSTANCE, 0, 1);
+    // Terminates, and copies exactly the one indexed record — the iterator's
+    // unbounded tail never reaches the signed frame.
+    expect(validated).not.toBeNull();
+    expect(validated!.records.map((r) => r.sequence)).toEqual([1]);
+  });
+
+  it('does not follow an infinite links or instrumentation iterator', () => {
+    const links = hostileArray([], () => ({ traceId: TRACE, spanId: SPAN }));
+    const withLinks = sourceBatch(0, { records: [record(1, { links })] });
+    expect(readTraceSourceBatch(withLinks, INSTANCE, 0, 128)!.records[0]!.links).toEqual([]);
+    const instrumentation = hostileArray(['http'], () => 'fetch');
+    const withKinds = sourceBatch(0, { instrumentation });
+    expect(readTraceSourceBatch(withKinds, INSTANCE, 0, 128)!.instrumentation).toEqual(['http']);
+  });
+
+  it('refuses an over-budget indexed list instead of truncating it', () => {
+    const nine = Array.from({ length: 9 }, () => ({ traceId: TRACE, spanId: SPAN }));
+    const batch = sourceBatch(0, { records: [record(1, { links: nine })] });
+    expect(readTraceSourceBatch(batch, INSTANCE, 0, 128)).toBeNull();
+  });
+
+  it('reads each record field once: a flipping getter cannot reach the copy', () => {
+    let reads = 0;
+    const flipping = record(1);
+    Object.defineProperty(flipping, 'serviceAlias', {
+      enumerable: true,
+      get: () => (reads++ === 0 ? 'orders' : '\u001b[2Jforged'),
+    });
+    const validated = readTraceSourceBatch(
+      sourceBatch(0, { records: [flipping] }),
+      INSTANCE,
+      0,
+      128,
+    );
+    expect(reads).toBe(1);
+    expect(validated!.records[0]!.serviceAlias).toBe('orders');
+  });
+});

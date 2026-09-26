@@ -530,27 +530,45 @@ function collectionFailedTraceBatch(instanceId: string, after: number): TraceDia
 
 /**
  * The outcome of reading the trace source: either a validated projection
- * ready to sign, or a refusal code for a version or instance mismatch.
+ * ready to sign, or a refusal code.
  *
  * @internal
  */
 type TraceReadOutcome =
   | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
-  | { readonly kind: 'refused'; readonly code: 'unsupported-version' | 'unauthorized' };
+  | {
+    readonly kind: 'refused';
+    readonly code: 'unsupported-version' | 'unauthorized' | 'invalid-request';
+  };
+
+/**
+ * Projects one of the connector's OWN value-free batches (unsupported or
+ * collection-failed) onto the wire shape.
+ */
+function projectOwnTraceBatch(batch: TraceDiagnosticsBatch, after: number): TraceReadOutcome {
+  const validated = readTraceSourceBatch(batch, batch.instanceId, after, 1);
+  // The connector's own batches carry no records and always validate.
+  return { kind: 'projected', projected: projectTraceBatch(validated!, batch.instanceId) };
+}
 
 /**
  * Reads, projects and VALIDATES the trace batch for the bound instance,
  * isolating every failure mode to a typed, value-free answer:
  *
  * - no registered source → `unsupported` (coverage `unknown`)
- * - a source that throws, or whose DTO fails the exact validator →
+ * - a `RangeError` from the source → `invalid-request`: the source's
+ *   documented refusal for a cursor beyond its sequence (the connector's
+ *   parser has already bounded `after` and `limit`), the same answer the
+ *   queue operation gives a cursor beyond its merge sequence
+ * - any other throw, or a DTO failing the exact validator →
  *   `collection-failed`
  * - a DTO for another version or another instance → the matching refusal
  *
  * The source is synchronous and never creates, ends, exports or flushes a
- * span. The projection copies each field once and the wire validator runs
- * again over that COPY, so nothing the connector signs was read twice or
- * left unchecked.
+ * span. The validator copies every field once — every list by index, never
+ * through the source's own iterator — and the wire validator runs again over
+ * that COPY, so nothing the connector signs was read twice or left
+ * unchecked.
  *
  * @param deps - The handler dependencies
  * @param instanceId - The session's bound instance UUID
@@ -565,7 +583,11 @@ function readTraceProjection(
   after: number,
   limit: number,
 ): TraceReadOutcome {
-  const projected = (batch: TraceDiagnosticsBatch): TraceReadOutcome | null => {
+  if (deps.traces === null) {
+    return projectOwnTraceBatch(unsupportedTraceBatch(instanceId, after), after);
+  }
+  try {
+    const batch = deps.traces.read(instanceId, after, limit);
     if (batch.version !== 1) {
       return { kind: 'refused', code: 'unsupported-version' };
     }
@@ -575,46 +597,21 @@ function readTraceProjection(
     // The exact source validator: one malformed field refuses the whole
     // batch, so nothing unvalidated reaches the signed frame.
     const validated = readTraceSourceBatch(batch, instanceId, after, limit);
-    if (validated === null) {
-      return null;
+    if (validated !== null) {
+      const candidate = projectTraceBatch(validated, instanceId);
+      // The wire validator — the SAME one the client runs — over the
+      // projection, before anything is signed.
+      if (isTraceBatchProjection(candidate)) {
+        return { kind: 'projected', projected: candidate };
+      }
     }
-    const candidate = projectTraceBatch(validated, instanceId);
-    // The wire validator — the SAME one the client runs — over the
-    // projection, before anything is signed.
-    return isTraceBatchProjection(candidate) ? { kind: 'projected', projected: candidate } : null;
-  };
-  if (deps.traces === null) {
-    return projected(unsupportedTraceBatch(instanceId, after)) ?? {
-      kind: 'projected',
-      projected: projectTraceBatch(
-        readTraceSourceBatch(
-          collectionFailedTraceBatch(instanceId, after),
-          instanceId,
-          after,
-          limit,
-        )!,
-        instanceId,
-      ),
-    };
-  }
-  try {
-    const outcome = projected(deps.traces.read(instanceId, after, limit));
-    if (outcome !== null) {
-      return outcome;
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return { kind: 'refused', code: 'invalid-request' };
     }
-  } catch {
-    // fall through to the value-free collection-failed answer
+    // any other throw: the value-free collection-failed answer below
   }
-  const failed = readTraceSourceBatch(
-    collectionFailedTraceBatch(instanceId, after),
-    instanceId,
-    after,
-    limit,
-  );
-  return {
-    kind: 'projected',
-    projected: projectTraceBatch(failed!, instanceId),
-  };
+  return projectOwnTraceBatch(collectionFailedTraceBatch(instanceId, after), after);
 }
 
 /**

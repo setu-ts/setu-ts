@@ -1816,6 +1816,46 @@ describe('Connector handler — trace observations (M98g)', () => {
     expect(JSON.stringify(view.body).includes('hostile')).toBe(false);
   });
 
+  it('answers invalid-request for a cursor beyond the source sequence (the RangeError contract)', async () => {
+    // The trace source contract: a cursor beyond its current sequence throws
+    // the fixed value-free RangeError. The connector surfaces that as
+    // `invalid-request`, the answer the queue operation gives the same
+    // mistake — never a 200 that silently reads as an empty page.
+    const source: ITraceDiagnosticsSource = {
+      read: (_instance, after) => {
+        if (after > 3) {
+          throw new RangeError('Trace diagnostics: cursor beyond the current sequence.');
+        }
+        return traceBatch(TEST_INSTANCE_ID, after) as never;
+      },
+    };
+    const harness = await traceHarness(source);
+    const refused = await sendTraces(harness, 'after=9&limit=1');
+    expect(refused.status).toEqual(400);
+    expect(refused.body).toEqual({ version: 1, error: 'invalid-request' });
+    const served = await sendTraces(harness, 'after=0&limit=1', { sequence: 3 });
+    expect(served.status).toEqual(200);
+  });
+
+  it('answers collection-failed for a source whose records iterator never ends', async () => {
+    const records = [(traceBatch(TEST_INSTANCE_ID, 0).records as unknown[])[0]];
+    Object.defineProperty(records, Symbol.iterator, {
+      value: function* () {
+        while (true) yield records[0];
+      },
+    });
+    const source: ITraceDiagnosticsSource = {
+      // The indexed list has one record at sequence 1 but the iterator repeats
+      // it forever: a for-of copy would never return. Index-by-index copying
+      // reads the one record, and the batch then validates.
+      read: () => ({ ...traceBatch(TEST_INSTANCE_ID, 0), records }) as never,
+    };
+    const harness = await traceHarness(source);
+    const view = await sendTraces(harness, 'after=0&limit=128');
+    expect(view.status).toEqual(200);
+    expect((view.body.records as unknown[]).length).toEqual(1);
+  });
+
   it('refuses a source DTO for another instance as unauthorized', async () => {
     const foreign: ITraceDiagnosticsSource = {
       read: () => traceBatch('0'.repeat(32) + 'x', 0) as never,

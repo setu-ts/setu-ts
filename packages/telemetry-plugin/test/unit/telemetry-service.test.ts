@@ -194,9 +194,9 @@ describe('TelemetryService', () => {
     expect(fakeHost.recordedCalls).toHaveLength(1);
     expect(fakeHost.recordedCalls[0]!.type).toBe('startSpan');
     expect(fakeHost.recordedCalls[0]!.args[0]).toBe('kind-span');
-    // kind: 'server' maps to 2
+    // kind: 'server' maps to @opentelemetry/api SpanKind.SERVER = 1
     const callArgs = fakeHost.recordedCalls[0]!.args[1] as Record<string, unknown> | undefined;
-    expect(callArgs?.kind).toBe(2);
+    expect(callArgs?.kind).toBe(1);
   });
 
   it('should map all SpanKind values', async () => {
@@ -208,15 +208,15 @@ describe('TelemetryService', () => {
 
     fakeHost.recordedCalls.length = 0;
     await service.withSpan('client-span', () => Promise.resolve(), { kind: 'client' });
-    expect(fakeHost.recordedCalls[0]!.args[1]).toHaveProperty('kind', 3);
+    expect(fakeHost.recordedCalls[0]!.args[1]).toHaveProperty('kind', 2);
 
     fakeHost.recordedCalls.length = 0;
     await service.withSpan('producer-span', () => Promise.resolve(), { kind: 'producer' });
-    expect(fakeHost.recordedCalls[0]!.args[1]).toHaveProperty('kind', 4);
+    expect(fakeHost.recordedCalls[0]!.args[1]).toHaveProperty('kind', 3);
 
     fakeHost.recordedCalls.length = 0;
     await service.withSpan('consumer-span', () => Promise.resolve(), { kind: 'consumer' });
-    expect(fakeHost.recordedCalls[0]!.args[1]).toHaveProperty('kind', 5);
+    expect(fakeHost.recordedCalls[0]!.args[1]).toHaveProperty('kind', 4);
   });
 
   it('should pass attributes in SpanOptions', async () => {

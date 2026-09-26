@@ -95,6 +95,32 @@ function isMs(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
+/**
+ * Copies a source-supplied list INDEX BY INDEX, reading its `length` once
+ * and never more than `max + 1` items — never through the source's own
+ * iterator, `map` or `toJSON`. An `Array` subclass (or a `Proxy` over one)
+ * can report one `length` while its iterator yields any number of items,
+ * including infinitely many; iterating it would let a replacement source
+ * exceed the requested limit or hang the connector's event loop. Reading one
+ * item past the budget is what lets the caller refuse an over-budget list
+ * rather than silently truncate it (the M98e re-audit precedent).
+ *
+ * @param value - The candidate list
+ * @param max - The budget
+ * @returns The copied items (at most `max + 1`), or `null` for a non-array
+ */
+function copyBounded(value: unknown, max: number): unknown[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const length = Math.min(value.length, max + 1);
+  const copy: unknown[] = [];
+  for (let index = 0; index < length; index++) {
+    copy.push(value[index]);
+  }
+  return copy;
+}
+
 /** Membership in a fixed vocabulary. */
 function isOneOf(value: unknown, vocabulary: ReadonlySet<string>): value is string {
   return typeof value === 'string' && vocabulary.has(value);
@@ -170,12 +196,16 @@ function readLink(value: unknown): TraceLinkRelationship | null {
   if (!isRecord(value) || !hasExactKeys(value, LINK_KEYS)) {
     return null;
   }
-  return isTraceId(value.traceId) && isSpanId(value.spanId)
-    ? { traceId: value.traceId, spanId: value.spanId }
-    : null;
+  const { traceId, spanId } = value;
+  return isTraceId(traceId) && isSpanId(spanId) ? { traceId, spanId } : null;
 }
 
-/** Validates and copies one span observation. */
+/**
+ * Validates and copies one span observation. Every field is read EXACTLY
+ * once into a local, validated there, and the copy is built from those
+ * locals — a getter that answers differently on a second read never reaches
+ * the copy.
+ */
 function readRecord(value: unknown): ValidatedTraceObservation | null {
   if (!isRecord(value)) {
     return null;
@@ -199,39 +229,50 @@ function readRecord(value: unknown): ValidatedTraceObservation | null {
     }
     parentSpanId = raw;
   }
-  const links = value.links;
-  if (!Array.isArray(links) || links.length > MAX_TRACE_LINKS) {
+  const rawLinks = copyBounded(value.links, MAX_TRACE_LINKS);
+  if (rawLinks === null || rawLinks.length > MAX_TRACE_LINKS) {
     return null;
   }
-  const copiedLinks: TraceLinkRelationship[] = [];
-  for (const raw of links) {
+  const links: TraceLinkRelationship[] = [];
+  for (const raw of rawLinks) {
     const link = readLink(raw);
     if (link === null) {
       return null;
     }
-    copiedLinks.push(link);
+    links.push(link);
   }
+  const {
+    sequence,
+    serviceAlias,
+    operationAlias,
+    traceId,
+    spanId,
+    kind,
+    outcome,
+    durationMs,
+    ageMs,
+  } = value;
   if (
-    !isCount(value.sequence) || value.sequence < 1 ||
-    !isDisplayAlias(value.serviceAlias) || !isDisplayAlias(value.operationAlias) ||
-    !isTraceId(value.traceId) || !isSpanId(value.spanId) ||
-    !isOneOf(value.kind, SPAN_KINDS) || !isOneOf(value.outcome, OUTCOMES) ||
-    !isMs(value.durationMs) || !isMs(value.ageMs)
+    !isCount(sequence) || sequence < 1 ||
+    !isDisplayAlias(serviceAlias) || !isDisplayAlias(operationAlias) ||
+    !isTraceId(traceId) || !isSpanId(spanId) ||
+    !isOneOf(kind, SPAN_KINDS) || !isOneOf(outcome, OUTCOMES) ||
+    !isMs(durationMs) || !isMs(ageMs)
   ) {
     return null;
   }
   return {
-    sequence: value.sequence,
-    serviceAlias: value.serviceAlias,
-    operationAlias: value.operationAlias,
-    traceId: value.traceId,
-    spanId: value.spanId,
+    sequence,
+    serviceAlias,
+    operationAlias,
+    traceId,
+    spanId,
     parentSpanId,
-    links: copiedLinks,
-    kind: value.kind as TraceObservation['kind'],
-    outcome: value.outcome as TraceOutcome,
-    durationMs: value.durationMs,
-    ageMs: value.ageMs,
+    links,
+    kind: kind as TraceObservation['kind'],
+    outcome: outcome as TraceOutcome,
+    durationMs,
+    ageMs,
     parentVisibility: visibility as TraceParentVisibility,
   };
 }
@@ -305,8 +346,10 @@ export function readTraceSourceBatch(
     if (!isOneOf(coverage, COVERAGE)) {
       return null;
     }
-    const rawInstrumentation = value.instrumentation;
-    if (!Array.isArray(rawInstrumentation)) {
+    // Five families, each at most once: a sixth item is a duplicate by
+    // construction and refuses below.
+    const rawInstrumentation = copyBounded(value.instrumentation, INSTRUMENTATION.size);
+    if (rawInstrumentation === null) {
       return null;
     }
     const instrumentation: TraceInstrumentationKind[] = [];
@@ -322,15 +365,10 @@ export function readTraceSourceBatch(
     if (sampler === null) {
       return null;
     }
-    const {
-      records: rawRecords,
-      next,
-      lost,
-      closed,
-      droppedSpans,
-    } = value;
+    const { next, lost, closed, droppedSpans } = value;
+    const rawRecords = copyBounded(value.records, limit);
     if (
-      !Array.isArray(rawRecords) || rawRecords.length > limit ||
+      rawRecords === null || rawRecords.length > limit ||
       !isCount(next) || !isCount(lost) || typeof closed !== 'boolean' ||
       !isCount(droppedSpans)
     ) {

@@ -334,14 +334,15 @@ configured description, or `unknown`), `records` under M98a's cursor contract (e
 per-batch `lost` from ring eviction, an empty page echoes its cursor, a cursor beyond the source's
 sequence throws the fixed `RangeError` — surfaced as `invalid-request`), and a saturating
 `droppedSpans` counter for spans refused before the ring. Parent relationships are IDENTIFIER
-relationships only: `parentVisibility` names `observed` (the parent is retained in the same
-process), `remote-or-unobserved`, `root`, or `unknown` — no edge is fabricated, and capture order is
-arrival order at one process, never a global timeline. Cross-app correlation joins EQUAL trace ids
-across independently authenticated sessions; identifiers grant no discovery or connection authority.
-With no trace source registered the batch is `state:
-'unsupported'` with `coverage: 'unknown'`; a
-client whose negotiated manifest has `traces: false` answers that frozen batch, echoing its cursor,
-without sending the request.
+relationships only: `parentVisibility` names `observed` (the parent had already completed and been
+retained in the same process when the child completed), `remote-or-unobserved` (including a local
+parent that completes after its child, the ordinary nesting — join on `parentSpanId`), `root`, or
+`unknown` — no edge is fabricated, and capture order is arrival order at one process, never a global
+timeline. Cross-app correlation joins EQUAL trace ids across independently authenticated sessions;
+identifiers grant no discovery or connection authority. With no trace source registered the batch is
+`state:
+'unsupported'` with `coverage: 'unknown'`; a client whose negotiated manifest has
+`traces: false` answers that frozen batch, echoing its cursor, without sending the request.
 
 ## Bounds (fixed, not configurable)
 

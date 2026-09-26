@@ -20,9 +20,10 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { CAPABILITIES, TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
-import type { ITelemetryService, TelemetryContext } from '@setu-ts/common';
+import type { IQueue, ITelemetryService, TelemetryContext } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { QueuePlugin } from '@setu-ts/queue-plugin';
 import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
 
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
@@ -164,6 +165,107 @@ describe('Distributed tracing observations (M98g) — end to end', () => {
       second.client.close();
       await first.app.stop();
       await second.app.stop();
+    }
+  });
+
+  it('observes a real HTTP request and its queue hop with the right kinds and outcomes', async () => {
+    // The composition the milestone exists for: the telemetry MIDDLEWARE on,
+    // a real kernel request, and an enqueue/process hop. Every span here goes
+    // through TelemetryService, whose setStatus/kind mapping must reach the
+    // real OTel span in the shape OTel reads — otherwise the diagnostic
+    // processor drops every span that set a status (every HTTP server span).
+    const connectorPort = freePort();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DiagnosticsPlugin({
+          enabled: true,
+          port: connectorPort,
+          sessionId: TEST_SESSION_ID,
+          sessionKey: TEST_KEY_BYTES,
+        }),
+        QueuePlugin({}),
+        TelemetryPlugin({
+          serviceName: 'svc-http',
+          exporter: 'console',
+          diagnostics: {
+            enabled: true,
+            serviceAlias: 'svc-http',
+            operations: {
+              'GET /orders': 'list-orders',
+              'GET /broken': 'broken',
+              'enqueue emails': 'enqueue-email',
+              'process emails': 'process-email',
+            },
+          },
+        }),
+      ],
+      diagnostics: {},
+    });
+    await app.start();
+    const client = createDiagnosticsClient({
+      endpoint: `http://127.0.0.1:${connectorPort}`,
+      sessionId: TEST_SESSION_ID,
+      sessionKey: TEST_KEY_BYTES,
+      subtle: crypto.subtle,
+      fetch,
+      timing: { setTimeout, clearTimeout },
+    });
+    try {
+      const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
+      let processed = 0;
+      queue.process('emails', () => {
+        processed += 1;
+        return Promise.resolve();
+      });
+      app.router.get('/orders', async (ctx) => {
+        await queue.add('emails', { to: 'CANARY-PAYLOAD@example.com' });
+        return ctx.response.json({ ok: true });
+      });
+      app.router.get('/broken', (ctx) => ctx.response.status(503).json({ ok: false }));
+      app.router.get('/orders/:id', (ctx) => ctx.response.json({ id: ctx.params.id }));
+
+      expect((await app.inject({ method: 'GET', url: 'http://localhost/orders' })).statusCode)
+        .toBe(200);
+      expect((await app.inject({ method: 'GET', url: 'http://localhost/broken' })).statusCode)
+        .toBe(503);
+      await app.inject({ method: 'GET', url: 'http://localhost/orders/CANARY-ID-7' });
+      for (let i = 0; i < 200 && processed === 0; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(processed).toBe(1);
+
+      let batch = await client.traces(0);
+      for (let i = 0; i < 50 && batch.records.length < 4; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        batch = await client.traces(0);
+      }
+      const byAlias = new Map(batch.records.map((r) => [r.operationAlias, r]));
+      const request = byAlias.get('list-orders')!;
+      const enqueue = byAlias.get('enqueue-email')!;
+      const processRecord = byAlias.get('process-email')!;
+      const broken = byAlias.get('broken')!;
+      expect([request.kind, request.outcome]).toEqual(['server', 'ok']);
+      expect([broken.kind, broken.outcome]).toEqual(['server', 'error']);
+      expect(enqueue.kind).toBe('producer');
+      expect(processRecord.kind).toBe('consumer');
+      // One trace, an unbroken identifier chain: request → enqueue → process.
+      expect(enqueue.traceId).toBe(request.traceId);
+      expect(processRecord.traceId).toBe(request.traceId);
+      expect(enqueue.parentSpanId).toBe(request.spanId);
+      expect(processRecord.parentSpanId).toBe(enqueue.spanId);
+      // A child completes before its parent, so visibility is evaluated when
+      // the CHILD completes: the request span had not yet ended when the
+      // enqueue span did, while the enqueue span had ended long before the
+      // job was processed.
+      expect(enqueue.parentVisibility).toBe('remote-or-unobserved');
+      expect(processRecord.parentVisibility).toBe('observed');
+      // The dynamic-path span is unapproved: dropped, and never disclosed.
+      expect(batch.droppedSpans).toBeGreaterThanOrEqual(1);
+      expect(JSON.stringify(batch).includes('CANARY')).toBe(false);
+    } finally {
+      client.close();
+      await app.stop();
     }
   });
 

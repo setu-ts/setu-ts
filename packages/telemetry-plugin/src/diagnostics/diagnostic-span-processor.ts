@@ -74,24 +74,22 @@ export interface ReadableSpanContextInput {
 /**
  * Numeric OTel span kind → the framework's fixed vocabulary.
  *
- * MEASURED against the locked `@opentelemetry/sdk-trace` 2.x line (probed,
- * not assumed): a span created WITHOUT an explicit kind arrives at
- * `onEnd` as `kind: 0` — and the framework's own outbound mapping
- * (`telemetry-service.ts` `SPAN_KIND_MAP`) has always encoded `internal`
- * as 0, which is what queue and messaging spans have carried on the wire
- * since M75/M90i. Both spellings of internal (0 as shipped, 1 per the API
- * documentation) map to `internal`; an unmappable value still drops the
- * record rather than improvising.
+ * The readable span carries the `@opentelemetry/api` `SpanKind` enum —
+ * `INTERNAL = 0, SERVER = 1, CLIENT = 2, PRODUCER = 3, CONSUMER = 4`
+ * (`api/build/esm/trace/span_kind.d.ts`), the numbering auto-instrumentation
+ * and the framework's own `TelemetryService` both write. A span created
+ * without an explicit kind arrives as `0` (measured against the locked SDK).
+ * The OTLP WIRE enum is this plus one, and is never seen here. A value
+ * outside the table drops the record rather than being improvised.
  *
  * @internal
  */
 export const KIND_BY_OTEL_CODE: ReadonlyMap<number, RetainedSpanCandidate['kind']> = new Map([
   [0, 'internal'],
-  [1, 'internal'],
-  [2, 'server'],
-  [3, 'client'],
-  [4, 'producer'],
-  [5, 'consumer'],
+  [1, 'server'],
+  [2, 'client'],
+  [3, 'producer'],
+  [4, 'consumer'],
 ]);
 
 /**
@@ -279,7 +277,7 @@ export class DiagnosticSpanProcessor {
   }
 }
 
-/** Converts an OTel hrtime duration tuple to whole milliseconds. */
+/** Converts an OTel hrtime duration tuple to (fractional) milliseconds. */
 function spanDurationMs(duration: readonly [number, number] | undefined): number | null {
   if (duration === undefined || duration.length !== 2) {
     return null;

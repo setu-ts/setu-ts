@@ -1080,6 +1080,12 @@ export type TraceOutcome = 'ok' | 'error' | 'unset';
  * `unknown` — a parent context was present but its span id was not a valid
  * W3C identifier, so nothing can be said.
  *
+ * Visibility is decided when the CHILD completes. A child usually completes
+ * before its parent (a request span outlives the enqueue it performs), so a
+ * local parent that has not yet ended reports `remote-or-unobserved`, while a
+ * parent that ended first — an enqueue before its job is processed — reports
+ * `observed`. Join on `parentSpanId` across a batch, not on this value.
+ *
  * A parent is an IDENTIFIER relationship only: no edge is fabricated when
  * the referenced span is absent, and capture order is arrival order at this
  * process — never global start order.
