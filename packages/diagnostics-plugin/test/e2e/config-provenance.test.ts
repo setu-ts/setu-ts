@@ -27,12 +27,16 @@ import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
 
 const CANARY_FILE_VALUE = 'canary-file-value-SYNTHETIC';
 const CANARY_FILE_HOST = 'file-host-SYNTHETIC';
-const RAW_FILE_NAME = '.env.canary-SYNTHETIC';
+// The REAL fixture basename — a canary that names a file that does not exist
+// would pass vacuously. (`txt`, not `env`: the dependency-drift gate's
+// documented non-source extension list covers `txt`, so a tracked data
+// fixture introduces no new extension decision.)
+const RAW_FILE_NAME = 'canary.env.txt';
 const UNAPPROVED_KEY = 'DB_PASSWORD';
 const RAW_APPROVED_KEY = 'M98E_WS';
 
 /** The absolute fixture path — cwd-independent, unlike a relative one. */
-const CANARY_PATH = new URL('../fixtures/canary.env', import.meta.url).pathname;
+const CANARY_PATH = new URL('../fixtures/canary.env.txt', import.meta.url).pathname;
 
 /** The provenance key/alias map the load and the plugin share. */
 function diagnosticsKeys(): Record<string, string> {
