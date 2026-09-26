@@ -520,12 +520,9 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
           throw new Error(CLIENT_ERRORS.connection);
         }
         // The parsed value is a fresh object graph owned by nobody else;
-        // freezing it is what makes the documented "frozen" true.
-        for (const entry of parsed.entries) {
-          Object.freeze(entry);
-        }
-        Object.freeze(parsed.entries);
-        return Object.freeze(parsed);
+        // deep-freezing it (entries AND their alias arrays) is what makes the
+        // documented "deeply frozen" true.
+        return deepFreeze(parsed);
       });
     },
 

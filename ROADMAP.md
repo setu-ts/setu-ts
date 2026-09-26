@@ -10654,15 +10654,16 @@ and per-member credential handoff; 98d complete
 ([#363](https://github.com/setu-ts/setu-ts/pull/363)) — minimized health observations, the
 `GET /v1/health` inspector and the status-body inspector manifest; 98f complete
 ([#365](https://github.com/setu-ts/setu-ts/pull/365)) — queue attempt, outcome and depth
-observations and the `GET /v1/queues` inspector. These five are implemented, awaiting publication in
-the next release cycle. **98e is implemented on its feature branch (awaiting its PR); 98g–98n are
-planned**, each with its own implementation plan and mandatory security audit. This umbrella records
-framework work for the separately maintained devtool; adding the later letters does not make them
-prerequisites for publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE
-exception recorded under the release requirements below — M98d's status-shape change must precede
-the first publication of `packages/diagnostics-plugin`, because the shipped client refuses a status
-body it does not expect and that body is otherwise frozen for the lifetime of every published
-client. A roadmap status is not evidence that a security audit has passed.
+observations and the `GET /v1/queues` inspector; 98e complete
+([#366](https://github.com/setu-ts/setu-ts/pull/366)) — value-free configuration provenance and the
+`GET /v1/config` inspector. These six are implemented, awaiting publication in the next release
+cycle. **98g–98n are planned**, each with its own implementation plan and mandatory security audit.
+This umbrella records framework work for the separately maintained devtool; adding the later letters
+does not make them prerequisites for publishing 98a–98c or for the devtool's initial D01–D04
+preview, with ONE exception recorded under the release requirements below — M98d's status-shape
+change must precede the first publication of `packages/diagnostics-plugin`, because the shipped
+client refuses a status body it does not expect and that body is otherwise frozen for the lifetime
+of every published client. A roadmap status is not evidence that a security audit has passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and

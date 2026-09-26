@@ -736,6 +736,10 @@ describe('Client — configuration negotiation (M98e)', () => {
     expect(Object.isFrozen(config)).toBe(true);
     expect(Object.isFrozen(config.entries)).toBe(true);
     expect(Object.isFrozen(config.entries[0])).toBe(true);
+    // The alias arrays nested inside each entry are frozen too.
+    expect(config.entries[0].overriddenSourceAliases.length).toBeGreaterThan(0);
+    expect(Object.isFrozen(config.entries[0].overriddenSourceAliases)).toBe(true);
+    expect(Object.isFrozen(config.entries[0].referenceAliases)).toBe(true);
     client.close();
   });
 });
