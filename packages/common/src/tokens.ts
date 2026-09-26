@@ -133,6 +133,15 @@ export const CAPABILITIES = {
    * value, enumerates keys, or invokes a custom `IConfig` implementation.
    */
   CONFIG_DIAGNOSTICS: 'config-diagnostics',
+  /**
+   * Minimized queue observations (M98f) — an `IQueueDiagnosticsSource` every
+   * QueuePlugin instance registers under this token with `{ multi: true }`,
+   * without claiming it in `provides`, so named queue instances never collide.
+   * The DiagnosticsPlugin reads every source to serve `GET /v1/queues`; no
+   * registered source means the connector answers a typed `unsupported`
+   * batch. A read never reserves, settles or counts a job.
+   */
+  QUEUE_DIAGNOSTICS: 'queue-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

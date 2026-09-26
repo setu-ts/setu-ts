@@ -29,6 +29,41 @@ All notable changes to this project are documented here. The format follows
   native client reads it through `client.configuration(): Promise<ConfigDiagnosticsSnapshot>`, which
   — like `health()` — answers a typed `unsupported` without sending the request when the negotiated
   manifest (or a legacy M98b status body) reports the inspector unsupported.
+- **Queue observations (M98f): opt-in, minimized attempt, outcome and depth observations through the
+  diagnostics connector.** `QueuePlugin` accepts a `diagnostics` option (`QueueDiagnosticsOptions` /
+  `QueueDepthDiagnosticsOptions`, exported from `@setu-ts/queue-plugin`) that observes each
+  dispatched attempt of an exactly-allowlisted job name and retains only the approved queue alias, a
+  session-local `j<N>` job alias, the attempt number, monotonic duration and age, the processor
+  outcome (`completed` / `retryable-error` / `terminal-error`) and the settlement — recorded only
+  AFTER the adapter's settlement call returned: `acknowledged` / `requeued` / `dead-lettered` on an
+  adapter that confirms it, `failed` when the call rejected, `unknown` on RabbitMQ and SQS, whose
+  settlement calls cannot be confirmed. The queue metrics keep their existing timing — recorded
+  BEFORE the settlement call is awaited — so a `queue_jobs_total` outcome names the settlement
+  requested, never one the backend confirmed. No payload, header, raw job id, claim token,
+  credential or error text is captured. Optional depth counting (`depths`) runs its own bounded,
+  non-overlapping cycles — never on a diagnostic read — and reports `unavailable` rather than zero
+  on adapters that cannot count; each depth carries its `scope` (`process-local` /
+  `shared-backend`). Every QueuePlugin instance registers one source under the new
+  `CAPABILITIES.QUEUE_DIAGNOSTICS` token as a MULTI provider (never in `provides`, so named
+  instances cannot collide); an unconfigured instance registers an inert `disabled` source and
+  dispatch is unchanged. New public surface on `@setu-ts/common`: `CAPABILITIES.QUEUE_DIAGNOSTICS`,
+  `IQueueDiagnosticsSource`, `QueueDiagnosticsSourceBatch`, `QueueSourceAttemptObservation`,
+  `QueueSourceDepthObservation`, `QueueDiagnosticsBatch`, `QueueDiagnosticsSourceStatus`,
+  `QueueAttemptObservation`, `QueueDepthObservation`, and the vocabularies `QueueProcessorOutcome`,
+  `QueueSettlementState`, `QueueDepthScope`, `QueueDepthCycleCoverage`, `QueueDepthCoverage`,
+  `QueueSourceFailure`, `QueueDiagnosticsFailure` and `QueueSourceState`.
+- **Diagnostics connector — `GET /v1/queues` inspector (M98f).** The connector serves
+  `GET /v1/queues?after=<N>&limit=<N>` and its status manifest now reports `queues: true`; the
+  client reads it through the new `IDiagnosticsClient.queues(after, limit?)`, which answers a frozen
+  typed `unsupported` batch — without sending the request — when the negotiated manifest has
+  `queues: false`. The connector reads every queue source registered at bootstrap (at most 16),
+  keeps one cursor per source, drains new attempts into a bounded 1,024-event merge ring on each
+  authenticated read, and pages that ring under the M98a cursor contract. A source ring that wrapped
+  between two reads is reported on that source's status `lost`, never folded into the batch `lost`.
+  Each source's batch is validated key-by-key before merging (a failing source answers
+  `collection-failed`), the merged frame is validated before signing, and depths are trimmed to keep
+  it within 256 KiB (`truncatedDepths`). `IDiagnosticsClient.queues` is a new required member of an
+  interface in a package that has not yet been published.
 - **`cli` — `--style` is its own axis on `setu new` and `setu generate app` (M99e).**
   `--style functional|class-based` selects the decorator-and-DI composition independently of
   `--template`: `functional` (the default) installs neither `DecoratorPlugin` nor `DiPlugin`, and
@@ -273,6 +308,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`queue-plugin` — a job whose thrown value cannot be described is no longer left stuck.** With a
+  logger registered, `QueueService` converted a non-`Error` thrown by a processor with
+  `new Error(String(error))` outside its reporting guard, so a value whose string conversion throws
+  — a payload-derived `{ toString: 1 }`, a revoked `Proxy` — made the failure report itself throw.
+  That escaped the job runner before the requeue or dead-letter call, and the job stayed in its
+  processing state for the life of the process. Describing the value now happens inside the guard,
+  falling back to a fixed message, and the queue metrics collector's report path is guarded the same
+  way. Found by the M98f committed-tree security audit; no configuration change is needed.
 - **`cli` — the `--runtime` documentation read as a lock-in, and one of its claims was stale.** The
   scaffolding example `setu new my-app --runtime node # deno | node | bun | cloudflare-workers`
   suggested a project is tied to the runtime it was created for. It is not: on `deno`, `node` and

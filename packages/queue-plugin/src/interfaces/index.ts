@@ -296,6 +296,79 @@ export interface QueuePluginOptions {
    * @since 0.3.0
    */
   readonly behaviors?: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[];
+  /**
+   * Opt-in, minimized attempt and depth observations for the local
+   * diagnostics connector (M98f). Absent (the default) registers an inert
+   * `disabled` source under `CAPABILITIES.QUEUE_DIAGNOSTICS` and observes
+   * nothing: no ring, no alias map, no timer and no added hook on dispatch.
+   * Validated when `QueuePlugin(...)` is called, with fixed messages that
+   * never echo a supplied value.
+   *
+   * @since 0.8.0
+   */
+  readonly diagnostics?: QueueDiagnosticsOptions;
+}
+
+/**
+ * Bounded, explicitly scheduled depth collection for queue observations
+ * (M98f).
+ *
+ * Counting has backend cost, so it is its own opt-in: a diagnostic read never
+ * counts. One cycle runs at bootstrap and then one per `intervalMs`; cycles
+ * never overlap. A count that has not settled within `timeoutMs` is reported
+ * as timed out but keeps its concurrency slot until it actually settles, so a
+ * hung backend cannot accumulate count calls. Only approved job names this
+ * instance has registered a processor for are counted, and only on adapters
+ * that can count (memory, and redis with a counting client); RabbitMQ and SQS
+ * report depths as `unavailable`, never as zero.
+ *
+ * @since 0.8.0
+ */
+export interface QueueDepthDiagnosticsOptions {
+  /** Cadence between depth cycles, in milliseconds: `1,000`–`300,000`. */
+  readonly intervalMs: number;
+  /** Per-count reporting deadline, in milliseconds: `1`–`30,000`. */
+  readonly timeoutMs: number;
+  /** Maximum count calls in flight at once: `1`–`4`. */
+  readonly concurrency: number;
+}
+
+/**
+ * The opt-in queue-observation policy (M98f).
+ *
+ * Job names and topology are treated as sensitive: only the exact job names
+ * listed in {@linkcode queues} are observed, each under its approved display
+ * alias, and a job name outside the map is neither observed nor counted.
+ * Raw job identifiers are replaced by session-local `j<N>` aliases before
+ * anything is retained, and no payload, header, claim token, credential or
+ * thrown value is captured.
+ *
+ * "Safe" is a SHAPE, not secret detection: every alias is a string of `1`–`64`
+ * UTF-8 bytes containing no control character, and queue aliases are unique.
+ * Approving an exact alias IS authorizing its disclosure.
+ *
+ * @since 0.8.0
+ */
+export interface QueueDiagnosticsOptions {
+  /**
+   * The explicit opt-in, deliberately the LITERAL `true`: an acknowledgement,
+   * not a toggle. `enabled: false` (or any other value) is refused when
+   * `QueuePlugin(...)` is called; omit `diagnostics` instead.
+   */
+  readonly enabled: true;
+  /**
+   * The display alias for THIS queue plugin instance. It never derives from
+   * the plugin's `name`, which is registry topology, so a named instance is
+   * identified only by what the application approved.
+   */
+  readonly instanceAlias: string;
+  /**
+   * Exact job name → display alias allowlist. At most 64 entries; aliases
+   * must be unique.
+   */
+  readonly queues: Readonly<Record<string, string>>;
+  /** Optional, separately bounded depth collection. Absent by default. */
+  readonly depths?: QueueDepthDiagnosticsOptions;
 }
 
 /**

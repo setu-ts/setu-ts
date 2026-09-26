@@ -17,6 +17,9 @@ import type {
 import { createConnectorHandler, refusalResponse } from '../../src/transport/connector-handler.ts';
 import { currentInspectorsManifest, projectConfigSnapshot } from '../../src/protocol/protocol.ts';
 import { ConnectorLimits } from '../../src/transport/limits.ts';
+import { QueueObservationMerger } from '../../src/transport/queue-merger.ts';
+import type { IQueueMerger } from '../../src/transport/queue-merger.ts';
+import { isQueueBatchProjection } from '../../src/protocol/queue-protocol.ts';
 import { responseMacFields, sha256Hex, verifyFields } from '../../src/security/authentication.ts';
 import {
   createTestSession,
@@ -26,6 +29,7 @@ import {
   minimalBatch,
   minimalSnapshot,
   MutableClock,
+  ScriptedQueueSource,
   signRequest,
   TEST_INSTANCE_ID,
   TEST_PORT,
@@ -42,13 +46,6 @@ interface HandlerHarness {
   key: CryptoKey;
 }
 
-/**
- * Builds a handler harness on a fresh clock/limits with the standard test
- * source (and, optionally, a hostile source).
- *
- * @param options - Optional overrides
- * @returns The harness
- */
 /**
  * A configurable fake `IConfigDiagnosticsSource`: serves the given snapshot
  * (or throws), and counts the calls so tests can prove when the source was
@@ -96,6 +93,13 @@ function minimalConfigSnapshot(): ConfigDiagnosticsSnapshot {
   };
 }
 
+/**
+ * Builds a handler harness on a fresh clock/limits with the standard test
+ * source (and, optionally, a hostile source).
+ *
+ * @param options - Optional overrides
+ * @returns The harness
+ */
 async function buildHarness(options?: {
   snapshot?: Record<string, unknown>;
   batch?: Record<string, unknown>;
@@ -115,6 +119,7 @@ async function buildHarness(options?: {
     subtle: crypto.subtle,
     session,
     limits: new ConnectorLimits(clock),
+    queues: new QueueObservationMerger([], clock),
     source,
     clock,
     healthSource: null,
@@ -560,6 +565,7 @@ describe('Connector handler — authentication and binding', () => {
       subtle: crypto.subtle,
       session,
       limits: new ConnectorLimits(clock),
+      queues: new QueueObservationMerger([], clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -671,6 +677,7 @@ describe('Connector handler — projection hardening', () => {
       subtle: crypto.subtle,
       session,
       limits: new ConnectorLimits(clock),
+      queues: new QueueObservationMerger([], clock),
       source: throwingSource,
       clock,
       healthSource: null,
@@ -742,6 +749,7 @@ describe('Connector handler — health operation (M98d)', () => {
       subtle: crypto.subtle,
       session,
       limits: new ConnectorLimits(clock),
+      queues: new QueueObservationMerger([], clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: { snapshot: () => healthSnapshot },
@@ -776,6 +784,7 @@ describe('Connector handler — health operation (M98d)', () => {
       subtle: crypto.subtle,
       session,
       limits: new ConnectorLimits(clock),
+      queues: new QueueObservationMerger([], clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: {
@@ -824,6 +833,7 @@ describe('Connector handler — health operation (M98d)', () => {
       subtle: crypto.subtle,
       session,
       limits: new ConnectorLimits(clock),
+      queues: new QueueObservationMerger([], clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
@@ -1090,6 +1100,7 @@ describe('Connector handler — remaining structural arms', () => {
       subtle: crypto.subtle,
       session,
       limits,
+      queues: new QueueObservationMerger([], clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -1132,6 +1143,7 @@ describe('Connector handler — remaining structural arms', () => {
       subtle: crypto.subtle,
       session,
       limits: new ConnectorLimits(clock),
+      queues: new QueueObservationMerger([], clock),
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -1347,5 +1359,119 @@ describe('Connector handler — configuration provenance operation (M98e)', () =
       droppedEntries: 0,
     });
     expect(view.bodyText).not.toContain('canary-value-SYNTHETIC');
+  });
+});
+
+describe('Connector handler — queue observations (M98f)', () => {
+  /** Builds a bound handler over the given merger. */
+  async function queueHarness(queues: IQueueMerger) {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      queues,
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: null,
+      configSource: null,
+    });
+    return { handler, key, clock };
+  }
+
+  /** Signs and sends one queues request. */
+  async function sendQueues(
+    harness: Awaited<ReturnType<typeof queueHarness>>,
+    search: string,
+    options: { sequence?: number; mac?: string; instance?: string } = {},
+  ) {
+    const target = `/v1/queues?${search}`;
+    const sequence = options.sequence ?? 2;
+    const instance = options.instance ?? TEST_INSTANCE_ID;
+    const mac = options.mac ??
+      await signRequest(crypto.subtle, harness.key, target, sequence, instance);
+    return inspect(
+      await harness.handler(
+        fakeRequest({
+          url: `http://${HOST}${target}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': String(sequence),
+            'x-setu-instance': instance,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+  }
+
+  it('serves a signed, exactly-projected batch drained from the sources', async () => {
+    const source = new ScriptedQueueSource();
+    source.produce(2);
+    const harness = await queueHarness(new QueueObservationMerger([source], new MutableClock()));
+    const view = await sendQueues(harness, 'after=0&limit=128');
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('ready');
+    expect((view.body.events as unknown[]).length).toEqual(2);
+    expect(isQueueBatchProjection(view.body)).toBe(true);
+    const mac = view.headers.get('x-setu-mac')!;
+    const digest = await sha256Hex(crypto.subtle, utf8(view.bodyText));
+    expect(
+      await verifyFields(crypto.subtle, harness.key, mac, [
+        'setu-diagnostics-v1',
+        'response',
+        'a'.repeat(32),
+        TEST_INSTANCE_ID,
+        '2',
+        '/v1/queues?after=0&limit=128',
+        '200',
+        digest,
+      ]),
+    ).toBe(true);
+  });
+
+  it('reads no source before authentication succeeds', async () => {
+    const source = new ScriptedQueueSource();
+    const harness = await queueHarness(new QueueObservationMerger([source], new MutableClock()));
+    expect((await sendQueues(harness, 'after=0&limit=1', { mac: 'f'.repeat(64) })).status)
+      .toEqual(401);
+    expect(
+      (await sendQueues(harness, 'after=0&limit=1', {
+        instance: '0'.repeat(8) + TEST_INSTANCE_ID.slice(8),
+      })).status,
+    ).toEqual(401);
+    expect(source.reads).toEqual(0);
+  });
+
+  it('refuses a cursor beyond the merge sequence as invalid-request', async () => {
+    const harness = await queueHarness(new QueueObservationMerger([], new MutableClock()));
+    const view = await sendQueues(harness, 'after=5&limit=1');
+    expect(view.status).toEqual(400);
+    expect(view.body).toEqual({ version: 1, error: 'invalid-request' });
+  });
+
+  it('answers unavailable rather than signing a batch that fails the exact validator', async () => {
+    const broken: IQueueMerger = {
+      read: (instanceId) => ({
+        version: 1,
+        instanceId,
+        state: 'ready',
+        sources: [],
+        events: [],
+        depths: [],
+        next: 0,
+        lost: 0,
+        truncatedSources: 0,
+        truncatedDepths: 0,
+      }),
+    };
+    const view = await sendQueues(await queueHarness(broken), 'after=0&limit=1');
+    expect(view.status).toEqual(503);
+    expect(view.body).toEqual({ version: 1, error: 'unavailable' });
   });
 });

@@ -27,6 +27,8 @@ import type {
 import { requestMacFields, responseMacFields, sha256Hex } from '../security/authentication.ts';
 import type { DiagnosticsSessionState } from '../security/session.ts';
 import type { ConnectorLimits, LimitsClock } from './limits.ts';
+import type { IQueueMerger } from './queue-merger.ts';
+import { isQueueBatchProjection, projectQueueBatch } from '../protocol/queue-protocol.ts';
 import { CONNECTOR_LIMITS } from './limits.ts';
 import {
   currentInspectorsManifest,
@@ -188,6 +190,13 @@ export interface ConnectorHandlerDeps {
    * configuration value.
    */
   readonly configSource: IConfigDiagnosticsSource | null;
+  /**
+   * The queue-observation merger (M98f) over every queue-diagnostics source
+   * registered when the connector bootstrapped. With no source registered it
+   * answers a typed `unsupported` batch; it never reserves, settles or counts
+   * a job.
+   */
+  readonly queues: IQueueMerger;
 }
 
 /**
@@ -625,6 +634,23 @@ export function createConnectorHandler(
           return refusalResponse(outcome.code);
         }
         projected = outcome.projected;
+      } else if (target.op === 'queues') {
+        // The queue operation (M98f). Every session and request check above
+        // ran before any source is read: the merger drains the sources only
+        // here. A cursor beyond the merge sequence is a caller error. The
+        // cross-instance check above already proved the presented (non-null)
+        // instance IS the session's bound one.
+        const batch = deps.queues.read(parsed.instance as string, target.after, target.limit);
+        if (batch === null) {
+          return refusalResponse('invalid-request');
+        }
+        const candidate = projectQueueBatch(batch);
+        // The exact DTO validator runs over the projection, so nothing
+        // unvalidated is signed.
+        if (!isQueueBatchProjection(candidate)) {
+          return refusalResponse('unavailable');
+        }
+        projected = candidate;
       } else {
         // The health operation (M98d). All session and request checks above
         // ran before the source is called; the source itself is synchronous

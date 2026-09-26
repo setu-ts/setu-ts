@@ -268,3 +268,167 @@ describe('runJob', () => {
     });
   });
 });
+
+/**
+ * M98f — the processor outcome and the settlement are separate signals. The
+ * metric hook fires where it always did, BEFORE the settlement call; the
+ * diagnostics hook fires only AFTER the adapter's promise settled, with
+ * `failed` when it rejected — and the rejection is then rethrown unchanged.
+ */
+describe('runJob — outcome versus settlement (M98f)', () => {
+  const runtime = new FakeRuntime();
+
+  /** An adapter that logs call order and can be made to reject. */
+  function settlingAdapter(log: string[], reject: string | null = null) {
+    const settle = (kind: string) => () => {
+      log.push(`${kind}:called`);
+      return new Promise<void>((resolve, rejectPromise) => {
+        queueMicrotask(() => {
+          log.push(`${kind}:settled`);
+          if (reject === kind) {
+            rejectPromise(new Error(`${kind} refused`));
+          } else {
+            resolve();
+          }
+        });
+      });
+    };
+    return { ack: settle('ack'), requeue: settle('requeue'), deadLetter: settle('deadLetter') };
+  }
+
+  function job(attempts: number): StoredJob {
+    return {
+      id: 'raw-id',
+      name: 'n',
+      data: { secret: 'payload-canary' },
+      attempts,
+      maxAttempts: 3,
+      availableAtMs: 0,
+      headers: { traceparent: 'header-canary' },
+      claimToken: 'claim-canary',
+    };
+  }
+
+  const matrix = [
+    {
+      label: 'completed → acknowledged',
+      attempts: 1,
+      fail: false,
+      kind: 'ack',
+      metric: 'completed',
+      outcome: 'completed',
+      settlement: 'acknowledged',
+    },
+    {
+      label: 'retryable error → requeued',
+      attempts: 1,
+      fail: true,
+      kind: 'requeue',
+      metric: 'retried',
+      outcome: 'retryable-error',
+      settlement: 'requeued',
+    },
+    {
+      label: 'terminal error → dead-lettered',
+      attempts: 3,
+      fail: true,
+      kind: 'deadLetter',
+      metric: 'dead_lettered',
+      outcome: 'terminal-error',
+      settlement: 'dead-lettered',
+    },
+  ] as const;
+
+  for (const row of matrix) {
+    it(`reports ${row.label} after the settlement settled, metric before`, async () => {
+      const log: string[] = [];
+      const observed: unknown[][] = [];
+      await runJob(
+        runtime,
+        settlingAdapter(log),
+        job(row.attempts),
+        () => {
+          if (row.fail) {
+            throw new Error('processor canary');
+          }
+        },
+        undefined,
+        {
+          onProcessorOutcome: (_name, outcome) => log.push(`metric:${outcome}`),
+          onAttemptSettled: (...args) => {
+            log.push('observer');
+            observed.push(args);
+          },
+        },
+      );
+      expect(log).toEqual([
+        `metric:${row.metric}`,
+        `${row.kind}:called`,
+        `${row.kind}:settled`,
+        'observer',
+      ]);
+      expect(observed).toEqual([[row.outcome, row.settlement]]);
+      // The observer signature carries no payload, header, claim or error.
+      expect(JSON.stringify(observed)).not.toMatch(/canary|raw-id/);
+    });
+
+    it(`reports a rejected ${row.kind} as failed and rethrows it unchanged`, async () => {
+      const log: string[] = [];
+      const observed: unknown[][] = [];
+      const run = runJob(
+        runtime,
+        settlingAdapter(log, row.kind),
+        job(row.attempts),
+        () => {
+          if (row.fail) {
+            throw new Error('processor canary');
+          }
+        },
+        undefined,
+        { onAttemptSettled: (...args) => observed.push(args) },
+      );
+      await expect(run).rejects.toThrow(`${row.kind} refused`);
+      expect(observed).toEqual([[row.outcome, 'failed']]);
+    });
+  }
+
+  it('makes identical adapter calls with the observer absent, present or throwing', async () => {
+    const runs = async (hooks?: Parameters<typeof runJob>[5]) => {
+      const log: string[] = [];
+      await runJob(
+        runtime,
+        settlingAdapter(log),
+        job(1),
+        () => {
+          throw new Error('x');
+        },
+        () => {},
+        hooks,
+      );
+      return log;
+    };
+    const absent = await runs();
+    const present = await runs({ onAttemptSettled: () => {} });
+    const throwing = await runs({
+      onAttemptSettled: () => {
+        throw new Error('observer canary');
+      },
+    });
+    expect(present).toEqual(absent);
+    expect(throwing).toEqual(absent);
+  });
+
+  it('reports a throwing observer through the sink and still settles', async () => {
+    const reported: string[] = [];
+    const log: string[] = [];
+    await runJob(runtime, settlingAdapter(log), job(1), () => {}, (message) => {
+      reported.push(message);
+    }, {
+      onAttemptSettled: () => {
+        throw new Error('observer canary');
+      },
+    });
+    expect(log).toEqual(['ack:called', 'ack:settled']);
+    expect(reported).toEqual(['queue diagnostics observer threw']);
+  });
+});

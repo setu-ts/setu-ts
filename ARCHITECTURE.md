@@ -2527,8 +2527,7 @@ and neither changes the application's readiness.
 ### Configuration Provenance Boundary (Milestone 98e)
 
 Configuration provenance extends the same pattern to the config plugin.
-`ConfigPlugin({
-diagnostics })` / `loadConfig(runtime, { diagnostics })` is OFF unless the option is
+`ConfigPlugin({ diagnostics })` / `loadConfig(runtime, { diagnostics })` is OFF unless the option is
 passed; an omitted option registers only an inert, disabled source under the EAGER
 `CAPABILITIES.CONFIG_DIAGNOSTICS` token, so the connector can distinguish "no config plugin"
 (`unsupported`) from "present but off" (`disabled`). When enabled, the boundary is again STRUCTURAL:
@@ -2544,6 +2543,44 @@ lifetime. An opaque injected instance is answered with `unknown` entries — no 
 of it; configured sections perform exactly the same `IConfig.get` calls with diagnostics disabled
 and enabled. The connector consumes the source to serve `GET /v1/config` with the identical
 projection, validation, bounding, and failure isolation as `GET /v1/health`.
+
+### Queue Observation Boundary (Milestone 98f)
+
+Queue observations apply the same pattern to background work, with two structural differences. The
+first is multiplicity: a queue plugin can be registered several times under derived names, and the
+kernel refuses two plugins claiming one capability in `provides`, so a singleton inspector source is
+impossible. Every QueuePlugin instance therefore contributes one `IQueueDiagnosticsSource` under
+`CAPABILITIES.QUEUE_DIAGNOSTICS` with `{ multi: true }` and never claims the token — the
+contribution-token pattern `HEALTH_INDICATOR` already uses — and the connector reads every source it
+finds at bootstrap (at most 16), identifying each only by a `q<N>` position so registry names and
+tokens never reach the wire.
+
+The second is the settlement boundary. The queue's existing outcome notification (the metrics sink)
+fires BEFORE the adapter's settlement call is awaited, so it is not proof that a job was durably
+acknowledged, requeued or dead-lettered. The runner therefore has two hooks: the metrics hook keeps
+its timing, and the diagnostics hook fires only after the settlement promise settled — with the
+requested settlement on resolution, `failed` on rejection (which is then rethrown unchanged) — and
+the collector records `unknown` in place of a completed call on an adapter that cannot confirm its
+settlement calls (RabbitMQ's unconfirmed channel operations; SQS, which absorbs a lapsed claim or a
+failed dead-letter send). Minimization is again structural: the observer is handed a job name (for
+the exact allowlist lookup), a raw job id (for the bounded LRU alias lookup) and the attempt number
+at dispatch, and fixed outcome/settlement primitives afterwards — its signatures cannot accept a
+payload, a header, a claim token, the attempt limit or a thrown value. Everything retained is
+bounded (1,024 attempts, 4,096 aliases, 2,048 observed in flight, 64 latest depths).
+
+Depths are counted only by a separately opted-in scheduler (non-overlapping cycles, `concurrency`
+1–4, a reporting `timeoutMs` that never cancels — a hung count keeps its slot until it settles), and
+only on adapters that can count cheaply; an adapter that cannot reports `unavailable`, never zero,
+and each depth carries its `scope` (`process-local` or `shared-backend`) so a consumer never sums
+one backend's inventory across replicas. A diagnostic read never reserves, settles or counts a job.
+
+The connector keeps one internal cursor per source (M98b permits one session), drains each source's
+new attempts into a bounded merge ring on every authenticated read, and pages that ring under M98a's
+cursor contract. Two rings mean two losses, reported separately: merge-ring eviction in the batch's
+`lost`, and a source ring that wrapped between two reads on that source's status, so an unbroken
+merge sequence never reads as complete coverage. A source is untrusted input — any installed plugin
+can contribute one — so its batch is validated key-by-key before it is merged, and a failing source
+is isolated as `collection-failed` without breaking the read.
 
 ---
 

@@ -29,6 +29,7 @@ devtool has been verified.
 | `GET /v1/events?after=N&limit=N` | M98a's frozen event batch; `after` is a canonical non-negative decimal, `limit` is 1–128, in exactly this order                                                                  |
 | `GET /v1/health`                 | M98d's minimized health-observation snapshot (below)                                                                                                                             |
 | `GET /v1/config`                 | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
+| `GET /v1/queues?after=N&limit=N` | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
 duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
@@ -121,12 +122,12 @@ No refusal ever echoes supplied input, error causes, or stacks.
 ## Health observations (M98d)
 
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
-every inspector the connector knows and whether it is implemented; `health` (M98d) and
-`configuration` (M98e) are implemented, and the rest (`queues`, `traces`, `authorization`, `cache`,
-`events`, `scheduler`, `realtime`, `storage`, `outboundHttp`) are reserved and `false`. A client
-that reads a legacy M98b three-field status body (no `inspectors`) resolves the manifest to
-all-`false`, so its `health()` and `configuration()` answer a typed `unsupported` without sending
-the request.
+every inspector the connector knows and whether it is implemented; the connector serves
+`health: true` (M98d), `configuration: true` (M98e) and `queues: true` (M98f) and leaves the rest
+(`traces`, `authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`, `outboundHttp`)
+reserved and `false`. A client that reads a legacy M98b three-field status body (no `inspectors`)
+resolves the manifest to all-`false`, so its `health()`, `configuration()` and `queues()` answer a
+typed `unsupported` without sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -208,6 +209,104 @@ counts only entries omitted by the 256 KiB budget — unapproved keys are never 
 counter discloses that they exist. The response is signed and bounded exactly like every other
 operation.
 
+## Queue observations (M98f)
+
+`GET /v1/queues?after=N&limit=N` pages minimized queue attempt observations and returns every queue
+source's status and latest depths in the same body. Every QueuePlugin instance contributes one
+`IQueueDiagnosticsSource` under `CAPABILITIES.QUEUE_DIAGNOSTICS` as a MULTI provider (never claimed
+in `provides`, so named instances cannot collide); the connector reads every source registered when
+it bootstraps, in registration order, and reads at most 16 of them. A client whose negotiated
+manifest has `queues: false` — including one paired against a legacy three-field status body —
+answers a frozen typed `unsupported` batch echoing its cursor, without sending the request.
+
+```json
+{
+  "version": 1,
+  "instanceId": "<bound instance UUID>",
+  "state": "ready",
+  "sources": [
+    {
+      "sourceId": "q1",
+      "state": "ready",
+      "instanceAlias": "mailer",
+      "depthCoverage": "complete",
+      "failure": "none",
+      "lost": 0,
+      "droppedAttempts": 0,
+      "evictedJobAliases": 0
+    }
+  ],
+  "events": [
+    {
+      "sequence": 1,
+      "sourceId": "q1",
+      "instanceAlias": "mailer",
+      "queueAlias": "emails",
+      "jobAlias": "j1",
+      "attempt": 1,
+      "durationMs": 4,
+      "outcome": "completed",
+      "settlement": "acknowledged",
+      "ageMs": 10
+    }
+  ],
+  "depths": [
+    {
+      "sourceId": "q1",
+      "instanceAlias": "mailer",
+      "queueAlias": "emails",
+      "ready": 2,
+      "processing": 1,
+      "dead": 0,
+      "scope": "process-local",
+      "coverage": "complete",
+      "ageMs": 5
+    }
+  ],
+  "next": 1,
+  "lost": 0,
+  "truncatedSources": 0,
+  "truncatedDepths": 0
+}
+```
+
+**The cursor.** M98b permits one paired session, so the CONNECTOR keeps one internal cursor per
+source. Each authenticated queue read first drains every source's newly captured attempts into a
+connector-owned merge ring of 1,024 events, in source registration order, and then serves the
+requested page of that ring. `after`/`next`/`lost` follow M98a's cursor contract exactly: `after` is
+exclusive, `after: 0` is not special-cased, a cursor older than the oldest retained event returns
+the oldest retained events with the gap `first - after - 1` reported as `lost`, an empty page echoes
+its cursor, and a cursor beyond the merge sequence is refused `invalid-request`. The merge sequence
+orders drains, not wall-clock completion across sources.
+
+**Two rings, four counters.** A source's own 1,024-attempt ring can wrap between two connector reads
+— a busy queue outrunning the poller. That loss is accumulated onto THAT source's status `lost`,
+never folded into the batch's `lost`, which counts merge-ring eviction only; so an unbroken merge
+sequence never reads as complete coverage. `truncatedSources` counts sources beyond the 16-source
+bound, and `truncatedDepths` the depth observations omitted to keep the frame inside the 256 KiB
+budget (only depths are ever trimmed — events are pageable, and the frame with no depths is bounded
+far below the budget).
+
+**Fields.** `state` is `unsupported` when no queue source is registered, otherwise `ready`. A
+source's `state` is `disabled` (a QueuePlugin without the `diagnostics` option), `no-data`, `ready`,
+or `collection-failed` (the connector could not read or validate it — with the fixed failure
+`source-read-failed`). `outcome` is `completed`, `retryable-error` or `terminal-error`; `settlement`
+is reported only AFTER the adapter's settlement call returned — `acknowledged`, `requeued`,
+`dead-lettered`, `failed` (the call rejected), or `unknown` (the call completed on an adapter that
+cannot confirm it: RabbitMQ, SQS). An outcome is never presented as settlement proof. Depths come
+only from a separately opted-in, bounded, non-overlapping count cycle — a diagnostic read never
+counts, reserves or settles a job; `scope` is `process-local` (memory) or `shared-backend` (redis,
+never to be summed across sources or replicas), and a source whose adapter cannot count reports
+`depthCoverage: 'unavailable'`, never zero.
+
+**Minimization.** The queue source receives only a job name (allowlist lookup), a raw job id (alias
+lookup) and the attempt number at dispatch, and fixed outcome and settlement primitives afterwards.
+The wire therefore carries approved aliases, session-local `j<N>` job aliases and fixed-vocabulary
+values only — never a payload, header, raw id, claim token, credential, queue URL or error. A source
+is untrusted input to the connector: its batch is validated key-by-key (aliases 1–64 UTF-8 bytes
+with no control character) before anything is merged, and the merged frame runs the same exact
+validator the client runs before it is signed.
+
 ## Bounds (fixed, not configurable)
 
 | Bound                           | Value                                  |
@@ -220,6 +319,8 @@ operation.
 | Parsed header bytes             | 8 KiB                                  |
 | Response body                   | 256 KiB                                |
 | Events per read                 | 128                                    |
+| Queue sources read              | 16                                     |
+| Queue merge ring                | 1,024 events                           |
 | Client request deadline         | 5 seconds                              |
 
 ## Revocation

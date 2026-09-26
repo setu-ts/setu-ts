@@ -1,7 +1,8 @@
 # Milestone 98f — Queue Attempt, Outcome and Depth Observations
 
-> **Status:** Planning on `docs/m98-capability-diagnostics`. Implementation and fixes belong on
-> `feat/m98f-queue-observations`; `main` remains protected.
+> **Status:** Complete on `feat/m98f-queue-observations`; the committed-tree security audit passed
+> after two re-audits. §11 records where implementation had to decide what this plan left open or
+> corrected a claim that did not survive the source.
 
 ## 0. Objective & scope
 
@@ -291,3 +292,61 @@ attempts, hung depth calls, overflow and teardown. It plants canaries in payload
 claim tokens, credentials and exceptions at collector/frame/client/error/log layers, preserves
 positive outcomes/depths, and repeats every M98b authentication, replay, origin, version, instance
 and mutation refusal for `/v1/queues`.
+
+## 11. Implementation corrections (recorded, not silent)
+
+Each item below is a place where the reviewed design left a value undecided or stated something the
+source did not support. None widens the security boundary; each narrows or names a behaviour.
+
+1. **A batch-level `state`.** §3.2's `QueueDiagnosticsBatch` had no state, yet §3.1 requires the
+   client to return "a frozen typed unsupported batch" and a connector with no registered source has
+   no status to carry `unsupported`. The batch gains `state: 'unsupported' | 'ready'` —
+   `unsupported` exactly when no source is retained, mirroring M98d's connector-side answer — and
+   the validator enforces `unsupported` ⇔ zero sources.
+2. **`unknown` settlement is defined.** §3.2 listed `unknown` without saying when it occurs. It is
+   recorded when the settlement call COMPLETED on an adapter that cannot confirm it: RabbitMQ's
+   `channel.ack`/`publish` are fire-and-forget (no publisher confirms), and SQS resolves after
+   refusing a lapsed or stale claim or a failed dead-letter send, logging instead of rejecting. The
+   plugin passes the evidence flag from the adapter type it constructed (memory and redis confirm),
+   so no public adapter class changes. `failed` (a rejected call) is never downgraded.
+3. **Coverage vocabularies.** Per-observation `coverage` means whether the CYCLE that produced it
+   read every approved queue of the source (a per-name `partial` otherwise had no reachable
+   meaning); the source-level `depthCoverage` is `disabled` / `unavailable` / `pending` / `complete`
+   / `partial`. The fixed failure category is `none` / `depth-read-failed` / `depth-read-timed-out`,
+   plus the connector-only `source-read-failed`.
+4. **The §3.4 counters are two, and unapproved names count in neither.** `droppedAttempts`
+   (in-flight bound reached, a malformed persisted attempt number, or a runner that failed before
+   reporting a settlement — which releases its slot, a gap the committed-tree audit found) and
+   `evictedJobAliases` (LRU eviction) are separate saturating counters on the source batch and the
+   source status. An unapproved job name is neither observed nor counted: counting it would itself
+   observe the unapproved scope.
+5. **`truncatedDepths`.** §10 budgets a 256 KiB frame, and 16 sources × 64 queues of 64-byte aliases
+   exceed it. Depths — never events — are trimmed from the tail and counted in `truncatedDepths`:
+   events are pageable, and trimming them could starve the cursor behind a depth set that alone
+   fills the frame. The frame with no depths is bounded under 70 KiB, asserted by a test.
+6. **Depths count approved names that have a processor**, read at CYCLE time, in declared order with
+   a rotating start. A bootstrap cycle therefore sees declared processors but not an imperative
+   `process()` call made after `start()`, which the next interval picks up.
+7. **Hook signature.** `onAttemptSettled(outcome, settlement)` carries both primitives, so the
+   metric hook (renamed `onProcessorOutcome`, timing unchanged) is independent of the diagnostics
+   one.
+8. **A cursor beyond the merge sequence** answers `invalid-request` after authentication, and the
+   drain runs first so a cursor made valid by newly drained attempts is served.
+9. **Wire aliases refuse control characters.** A queue source is a multi-provider contribution any
+   installed plugin can register, so the connector's validator refuses a control character in any
+   alias, not only an oversized one.
+10. **Test placement.** The service, plugin and adapter-matrix rows of §6 are covered by
+    `packages/queue-plugin/test/integration/queue-diagnostics.test.ts` (a real kernel application)
+    rather than by edits to the four per-adapter unit files and `queue-service.test.ts`; the merge
+    and protocol rows by `queue-merger.test.ts` and `queue-protocol.test.ts` beside the
+    connector-handler additions.
+11. **A held depth slot is reported as timed out** (audit finding): a name skipped because its
+    earlier count has not settled, or left unread because every slot is held, reports
+    `depth-read-timed-out` on every cycle rather than `none` after the first.
+12. **A pre-existing reporting defect is fixed here, at the maintainer's direction.** The audit
+    traced the observation-slot leak to `QueueService.#report`, which described a non-`Error` thrown
+    value with `new Error(String(error))` outside its guard; a value whose string conversion throws
+    escaped the job runner before settlement and stranded the job. It predates M98f (it is on
+    `main`) and would ordinarily go to a `fix/…` branch; the maintainer chose to fix it on this
+    branch. `toReportableError` now describes the value inside the guard, with a fixed fallback
+    message, for the service and the metrics collector alike.

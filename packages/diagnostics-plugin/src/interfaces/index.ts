@@ -14,6 +14,7 @@ import type {
   DiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
   IPlugin,
+  QueueDiagnosticsBatch,
 } from '@setu-ts/common';
 
 /**
@@ -215,6 +216,26 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   configuration(): Promise<ConfigDiagnosticsSnapshot>;
+  /**
+   * Reads the next bounded page of queue attempt observations, plus every
+   * queue source's status and latest depths, through the signed protocol
+   * (M98f). Performs the `/v1/status` pairing exchange first if the session
+   * has not yet been bound.
+   *
+   * The cursor is the connector's merge cursor: `0` starts at the oldest
+   * retained attempt, and the returned `next` continues from there. When the
+   * negotiated inspector manifest reports the queue inspector as unsupported,
+   * a frozen typed `unsupported` batch echoing the cursor is returned WITHOUT
+   * sending an addon request.
+   *
+   * @param after - Merge cursor; `0` starts at the oldest retained attempt
+   * @param limit - Maximum attempts, 1–128 (default 128)
+   * @returns The frozen queue batch projection
+   * @throws {Error} For invalid arguments, and under the same conditions as
+   * {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  queues(after: number, limit?: number): Promise<QueueDiagnosticsBatch>;
   /**
    * Closes the client: aborts pending fetches, drops key references, and
    * rejects subsequent calls with a fixed error. Idempotent.

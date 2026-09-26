@@ -582,3 +582,381 @@ export interface IConfigDiagnosticsSource {
    */
   snapshot(instanceId: string): ConfigDiagnosticsSnapshot;
 }
+
+/**
+ * How the dispatched work for one queue attempt completed (M98f).
+ *
+ * `completed` means the dispatched chain — every configured ingress behaviour
+ * and the processor — returned normally, including a behaviour that
+ * short-circuited without calling `next()`. `retryable-error` means it threw
+ * while attempts remained, and `terminal-error` means it threw on the final
+ * attempt. The thrown value itself is never projected.
+ *
+ * An outcome is NOT proof that the job was durably settled: see
+ * {@linkcode QueueSettlementState}.
+ *
+ * @since 0.8.0
+ */
+export type QueueProcessorOutcome = 'completed' | 'retryable-error' | 'terminal-error';
+
+/**
+ * What the queue framework observed about settling one attempt (M98f),
+ * reported only AFTER the adapter's settlement call returned.
+ *
+ * `acknowledged`, `requeued` and `dead-lettered` mean the matching settlement
+ * call completed against an adapter that confirms its settlement calls.
+ * `failed` means the settlement call rejected. `unknown` means the call
+ * completed but the adapter cannot confirm the backend applied it — RabbitMQ's
+ * channel operations are unconfirmed, and SQS absorbs a lapsed claim or a
+ * failed dead-letter send without rejecting — so a completed call there is
+ * never presented as settlement proof.
+ *
+ * @since 0.8.0
+ */
+export type QueueSettlementState =
+  | 'acknowledged'
+  | 'requeued'
+  | 'dead-lettered'
+  | 'failed'
+  | 'unknown';
+
+/**
+ * What a queue depth observation counts (M98f).
+ *
+ * `process-local` counts only this process's in-memory queue; `shared-backend`
+ * counts a backend other replicas share. Shared-backend depths from several
+ * sources or replicas describe the SAME inventory and must never be summed.
+ *
+ * @since 0.8.0
+ */
+export type QueueDepthScope = 'process-local' | 'shared-backend';
+
+/**
+ * Whether the depth cycle that produced an observation read every approved
+ * queue of its source (M98f). `partial` means at least one approved queue of
+ * that cycle was left unread — failed, timed out, or skipped because its
+ * previous read had not settled — so the observation must not be combined with
+ * its siblings as a whole-source total.
+ *
+ * @since 0.8.0
+ */
+export type QueueDepthCycleCoverage = 'complete' | 'partial';
+
+/**
+ * A queue source's depth-collection coverage (M98f).
+ *
+ * `disabled` — the application configured no depth collection. `unavailable`
+ * — the adapter cannot count (RabbitMQ, SQS, or an injected client without the
+ * required primitive); it is never reported as zero. `pending` — collection is
+ * configured but no cycle has completed. `complete` / `partial` — the latest
+ * completed cycle read every approved queue, or left at least one unread.
+ *
+ * @since 0.8.0
+ */
+export type QueueDepthCoverage = 'disabled' | 'unavailable' | 'pending' | 'complete' | 'partial';
+
+/**
+ * The fixed failure category a queue source reports about its latest depth
+ * cycle (M98f): `none`, `depth-read-failed` (at least one count call rejected
+ * or answered an invalid shape), or `depth-read-timed-out` (at least one did
+ * not settle within its reporting deadline). A failure is never described by
+ * error text.
+ *
+ * @since 0.8.0
+ */
+export type QueueSourceFailure = 'none' | 'depth-read-failed' | 'depth-read-timed-out';
+
+/**
+ * The fixed failure category a {@linkcode QueueDiagnosticsSourceStatus}
+ * carries: a source's own {@linkcode QueueSourceFailure}, or the connector's
+ * `source-read-failed` when reading the source threw or answered a shape the
+ * connector could not validate.
+ *
+ * @since 0.8.0
+ */
+export type QueueDiagnosticsFailure = QueueSourceFailure | 'source-read-failed';
+
+/**
+ * A queue source's own inspector state (M98f): `disabled` when the queue plugin
+ * was not configured for observation, `no-data` when it is configured but has
+ * neither observed an attempt nor completed a depth read, `ready` otherwise.
+ *
+ * @since 0.8.0
+ */
+export type QueueSourceState = 'disabled' | 'no-data' | 'ready';
+
+/**
+ * One observed queue attempt as a queue source retains it (M98f).
+ *
+ * `sequence` is the source-local, dense cursor currency of
+ * {@linkcode IQueueDiagnosticsSource.read}. `queueAlias` is the display alias
+ * the application approved for the job name — never the name itself — and
+ * `jobAlias` a session-local `j<N>` alias for the raw job identifier, which
+ * never leaves the collector. `durationMs` is the monotonic elapsed time from
+ * dispatch until the settlement call returned; `ageMs` the monotonic elapsed
+ * time since then. No payload, header, claim token, attempt limit or thrown
+ * value is admitted.
+ *
+ * @since 0.8.0
+ */
+export interface QueueSourceAttemptObservation {
+  /** Dense, source-local sequence number. */
+  readonly sequence: number;
+  /** The approved display alias for the job name. */
+  readonly queueAlias: string;
+  /** Session-local `j<N>` alias for the raw job identifier. */
+  readonly jobAlias: string;
+  /** The 1-based attempt number of this delivery. */
+  readonly attempt: number;
+  /** Monotonic ms from dispatch until the settlement call returned. */
+  readonly durationMs: number;
+  /** How the dispatched work completed. */
+  readonly outcome: QueueProcessorOutcome;
+  /** What was observed about settling the attempt. */
+  readonly settlement: QueueSettlementState;
+  /** Monotonic ms since the attempt settled. */
+  readonly ageMs: number;
+}
+
+/**
+ * The latest depth of one approved queue, as a queue source retains it
+ * (M98f). Counts are non-negative integers read by an explicitly scheduled
+ * count cycle — never by a diagnostic read.
+ *
+ * @since 0.8.0
+ */
+export interface QueueSourceDepthObservation {
+  /** The approved display alias for the job name. */
+  readonly queueAlias: string;
+  /** Jobs available to be reserved now or later. */
+  readonly ready: number;
+  /** Jobs reserved and being processed. */
+  readonly processing: number;
+  /** Jobs that exhausted their attempts and were dead-lettered. */
+  readonly dead: number;
+  /** What the counts cover. */
+  readonly scope: QueueDepthScope;
+  /** Whether the producing cycle read every approved queue of the source. */
+  readonly coverage: QueueDepthCycleCoverage;
+  /** Monotonic ms since the counts were captured. */
+  readonly ageMs: number;
+}
+
+/**
+ * One page of a single queue source (M98f), read non-destructively.
+ *
+ * `after`/`next`/`lost` follow the M98a cursor contract of
+ * {@linkcode DiagnosticsBatch} exactly: `after` is exclusive, a cursor older
+ * than the oldest retained attempt returns the oldest retained attempts with
+ * the skipped sequences reported in `lost`, and `next` is the last returned
+ * sequence — or the requested cursor when nothing was returned. `depths` is a
+ * latest-only view, not a history. `droppedAttempts` counts attempts
+ * dropped from observation — the in-flight bound was reached, the persisted
+ * attempt number was malformed, or the runner failed before reporting a
+ * settlement — and `evictedJobAliases` the
+ * job aliases evicted from the bounded alias map (a later retry of an evicted
+ * job receives a new alias); both saturate.
+ *
+ * @since 0.8.0
+ */
+export interface QueueDiagnosticsSourceBatch {
+  /** Contract version. */
+  readonly version: 1;
+  /** The source's own inspector state. */
+  readonly state: QueueSourceState;
+  /** The configured display alias for this queue plugin instance; absent when disabled. */
+  readonly instanceAlias?: string;
+  /** Depth-collection coverage. */
+  readonly depthCoverage: QueueDepthCoverage;
+  /** Fixed failure category of the latest depth cycle. */
+  readonly failure: QueueSourceFailure;
+  /** Frozen attempts with sequence numbers greater than the requested cursor. */
+  readonly attempts: readonly QueueSourceAttemptObservation[];
+  /** Latest-only depth observations, in approved-queue order. */
+  readonly depths: readonly QueueSourceDepthObservation[];
+  /** Last returned sequence, or the requested cursor when nothing was returned. */
+  readonly next: number;
+  /** Evicted sequence numbers between the requested cursor and the first returned attempt. */
+  readonly lost: number;
+  /** `true` once the queue plugin has closed and the source retains nothing. */
+  readonly closed: boolean;
+  /**
+   * Attempts dropped from observation (saturating): the in-flight bound was
+   * reached, the persisted attempt number was not a positive safe integer, or
+   * the runner failed before reporting a settlement.
+   */
+  readonly droppedAttempts: number;
+  /** Job aliases evicted from the bounded alias map (saturating). */
+  readonly evictedJobAliases: number;
+}
+
+/**
+ * Read-only queue diagnostics source — the surface every QueuePlugin
+ * instance registers under {@linkcode CAPABILITIES.QUEUE_DIAGNOSTICS} as a
+ * MULTI provider, so named queue instances stay independently observable.
+ * The DiagnosticsPlugin consumes every registered source to serve
+ * `GET /v1/queues`.
+ *
+ * Synchronous by contract: `read` returns already-captured, frozen data and
+ * never reserves, acknowledges, retries, dead-letters, enumerates or counts a
+ * job. A source whose queue plugin was not configured for observation answers
+ * `disabled`.
+ *
+ * @example
+ * ```typescript
+ * const sources = ctx.services.getAll<IQueueDiagnosticsSource>(
+ *   CAPABILITIES.QUEUE_DIAGNOSTICS,
+ * );
+ * const batch = sources[0].read(0, 128);
+ * ```
+ * @since 0.8.0
+ */
+export interface IQueueDiagnosticsSource {
+  /**
+   * Returns the source's attempts after `after`, oldest first, plus its
+   * latest depth observations.
+   *
+   * @param after - Source-local sequence cursor; `0` starts at the oldest retained attempt
+   * @param limit - Maximum attempts to return, 1–128 (default 128)
+   * @returns A deeply frozen {@linkcode QueueDiagnosticsSourceBatch}
+   * @throws {RangeError} When `after` is not a non-negative safe integer, when
+   * `limit` is not an integer from 1 to 128, or when `after` is beyond the
+   * source's current sequence — with a fixed message that never echoes the
+   * value
+   */
+  read(after: number, limit?: number): QueueDiagnosticsSourceBatch;
+}
+
+/**
+ * The status of one queue source as the diagnostics connector reports it
+ * (M98f).
+ *
+ * `sourceId` is a connector-assigned opaque `q<N>` identifier in registration
+ * order — never a plugin name or capability token. `state` is the source's own
+ * state, or `collection-failed` when the connector could not read it. `lost`
+ * accumulates (saturating) the attempts that source's OWN bounded ring evicted
+ * before the connector drained them — a busy queue outrunning the poller —
+ * which the batch-level `lost` of {@linkcode QueueDiagnosticsBatch} never
+ * includes.
+ *
+ * @since 0.8.0
+ */
+export interface QueueDiagnosticsSourceStatus {
+  /** Connector-assigned opaque `q<N>` source identifier. */
+  readonly sourceId: string;
+  /** The source's state, or `collection-failed` when it could not be read. */
+  readonly state: QueueSourceState | 'collection-failed';
+  /** The configured display alias for the queue plugin instance, when enabled. */
+  readonly instanceAlias?: string;
+  /** Depth-collection coverage. */
+  readonly depthCoverage: QueueDepthCoverage;
+  /** Fixed failure category. */
+  readonly failure: QueueDiagnosticsFailure;
+  /** Attempts this source's own ring evicted before they were drained (saturating). */
+  readonly lost: number;
+  /**
+   * Attempts dropped from observation (saturating): the in-flight bound was
+   * reached, the persisted attempt number was not a positive safe integer, or
+   * the runner failed before reporting a settlement.
+   */
+  readonly droppedAttempts: number;
+  /** Job aliases evicted from the bounded alias map (saturating). */
+  readonly evictedJobAliases: number;
+}
+
+/**
+ * One observed queue attempt as the diagnostics connector serves it (M98f).
+ * `sequence` is the connector's merge sequence — the cursor currency of the
+ * queue read — assigned in source registration order as sources are drained,
+ * so it orders drains rather than wall-clock completion across sources.
+ *
+ * @since 0.8.0
+ */
+export interface QueueAttemptObservation {
+  /** Dense connector merge sequence number. */
+  readonly sequence: number;
+  /** The `q<N>` identifier of the source that observed the attempt. */
+  readonly sourceId: string;
+  /** The configured display alias for the queue plugin instance. */
+  readonly instanceAlias: string;
+  /** The approved display alias for the job name. */
+  readonly queueAlias: string;
+  /** Session-local `j<N>` job alias, unique within its source. */
+  readonly jobAlias: string;
+  /** The 1-based attempt number of this delivery. */
+  readonly attempt: number;
+  /** Monotonic ms from dispatch until the settlement call returned. */
+  readonly durationMs: number;
+  /** How the dispatched work completed. */
+  readonly outcome: QueueProcessorOutcome;
+  /** What was observed about settling the attempt. */
+  readonly settlement: QueueSettlementState;
+  /** Monotonic ms since the attempt settled. */
+  readonly ageMs: number;
+}
+
+/**
+ * The latest depth of one approved queue as the diagnostics connector serves
+ * it (M98f).
+ *
+ * @since 0.8.0
+ */
+export interface QueueDepthObservation {
+  /** The `q<N>` identifier of the source that counted the queue. */
+  readonly sourceId: string;
+  /** The configured display alias for the queue plugin instance. */
+  readonly instanceAlias: string;
+  /** The approved display alias for the job name. */
+  readonly queueAlias: string;
+  /** Jobs available to be reserved now or later. */
+  readonly ready: number;
+  /** Jobs reserved and being processed. */
+  readonly processing: number;
+  /** Jobs that exhausted their attempts and were dead-lettered. */
+  readonly dead: number;
+  /** What the counts cover; `shared-backend` counts are never summed across sources. */
+  readonly scope: QueueDepthScope;
+  /** Whether the producing cycle read every approved queue of the source. */
+  readonly coverage: QueueDepthCycleCoverage;
+  /** Monotonic ms since the counts were captured. */
+  readonly ageMs: number;
+}
+
+/**
+ * One page of queue observations across every registered queue source
+ * (M98f), as the diagnostics connector serves `GET /v1/queues`.
+ *
+ * `state` is `unsupported` when no queue source is registered (or the client
+ * negotiated no queue inspector), otherwise `ready` — per-source states are in
+ * `sources`. `after`/`next`/`lost` follow the M98a cursor contract over the
+ * connector's merge ring; `lost` counts only MERGE-ring eviction, while each
+ * source's own eviction is reported in its status. `truncatedSources` counts
+ * registered sources beyond the fixed 16-source bound that are never read, and
+ * `truncatedDepths` the depth observations omitted to keep the frame within its
+ * fixed 256 KiB budget. With those four counters a consumer can always say what
+ * it did not see.
+ *
+ * @since 0.8.0
+ */
+export interface QueueDiagnosticsBatch {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the batch was read for. */
+  readonly instanceId: string;
+  /** `unsupported` when no queue source is registered; `ready` otherwise. */
+  readonly state: 'unsupported' | 'ready';
+  /** One status per retained source, in registration order. */
+  readonly sources: readonly QueueDiagnosticsSourceStatus[];
+  /** Attempts with merge sequence numbers greater than the requested cursor. */
+  readonly events: readonly QueueAttemptObservation[];
+  /** Latest-only depth observations across the retained sources. */
+  readonly depths: readonly QueueDepthObservation[];
+  /** Last returned merge sequence, or the requested cursor when nothing was returned. */
+  readonly next: number;
+  /** Merge-ring sequences evicted between the requested cursor and the first returned event. */
+  readonly lost: number;
+  /** Registered sources beyond the 16-source bound, never read. */
+  readonly truncatedSources: number;
+  /** Depth observations omitted to fit the frame budget. */
+  readonly truncatedDepths: number;
+}

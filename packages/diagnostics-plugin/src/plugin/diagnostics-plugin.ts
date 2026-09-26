@@ -19,6 +19,7 @@ import type {
   ILocalDiagnosticsListener,
   ILocalDiagnosticsListenerFactory,
   IPluginContext,
+  IQueueDiagnosticsSource,
   TimerHandle,
 } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -27,6 +28,7 @@ import type { DiagnosticsPluginOptions, IDiagnosticsPlugin } from '../interfaces
 import { DiagnosticsSessionState } from '../security/session.ts';
 import { createConnectorHandler } from '../transport/connector-handler.ts';
 import { ConnectorLimits } from '../transport/limits.ts';
+import { QueueObservationMerger } from '../transport/queue-merger.ts';
 
 /**
  * The default session lifetime: 15 minutes.
@@ -123,6 +125,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
   let listener: ILocalDiagnosticsListener | null = null;
   let session: DiagnosticsSessionState | null = null;
   let expiryTimer: TimerHandle | null = null;
+  let queueMerger: QueueObservationMerger | null = null;
 
   const revoke = (): Promise<void> => {
     if (cleanupPromise !== null) {
@@ -138,6 +141,10 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       generation += 1;
       session?.revoke();
       session = null;
+      // The merged queue observations are discarded with the session, so
+      // nothing captured for it outlives the revocation.
+      queueMerger?.close();
+      queueMerger = null;
       if (expiryTimer !== null) {
         runtime?.clearTimeout(expiryTimer);
         expiryTimer = null;
@@ -153,7 +160,11 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
     name: 'diagnostics-plugin',
     version: denoJson.version,
     dependencies: [CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER],
-    optionalDependencies: [CAPABILITIES.HEALTH_DIAGNOSTICS, CAPABILITIES.CONFIG_DIAGNOSTICS],
+    optionalDependencies: [
+      CAPABILITIES.HEALTH_DIAGNOSTICS,
+      CAPABILITIES.CONFIG_DIAGNOSTICS,
+      CAPABILITIES.QUEUE_DIAGNOSTICS,
+    ],
 
     register(ctx: IPluginContext): void {
       const source = ctx.app.diagnostics;
@@ -215,6 +226,16 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
         }
         session = active;
         const limits = new ConnectorLimits(ctx.runtime);
+        // The queue-diagnostics sources (M98f), read ONCE here: every plugin
+        // has registered by bootstrap, so a queue plugin ordered after this
+        // one is still included. Each named queue instance contributes its own
+        // multi-provider source; none means the connector answers a typed
+        // `unsupported` batch. Only the first 16 are ever read.
+        const queueSources = ctx.services.has(CAPABILITIES.QUEUE_DIAGNOSTICS)
+          ? ctx.services.getAll<IQueueDiagnosticsSource>(CAPABILITIES.QUEUE_DIAGNOSTICS)
+          : [];
+        const merger = new QueueObservationMerger(queueSources, ctx.runtime);
+        queueMerger = merger;
         const handler = createConnectorHandler({
           port: options.port,
           subtle: ctx.runtime.subtle,
@@ -224,6 +245,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           clock: ctx.runtime,
           healthSource,
           configSource,
+          queues: merger,
         });
         // The devtool's own startup line. Without it the runtime prints a
         // bare `Listening on http://127.0.0.1:<port>/`, which in an

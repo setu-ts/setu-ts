@@ -17,6 +17,7 @@
  */
 
 import type { ICounter, IMetricsService } from '@setu-ts/common';
+import { toReportableError } from '../services/reportable-error.ts';
 import type { JobOutcome } from '../processors/job-processor.ts';
 import { COUNTER_OPTIONS, JOB_NAME_LABEL, OUTCOME_LABEL, QUEUE_METRICS } from './metric-names.ts';
 
@@ -63,7 +64,14 @@ export class QueueCollector {
     try {
       this.#jobs.inc(1, { [JOB_NAME_LABEL]: name, [OUTCOME_LABEL]: outcome });
     } catch (error) {
-      this.#report(error instanceof Error ? error : new Error(String(error)));
+      // The reporter is guarded too: a refusal whose value cannot be described,
+      // or a reporter that throws, must not escape into the job runner and
+      // leave the job unsettled.
+      try {
+        this.#report(toReportableError(error));
+      } catch {
+        // The metric write already failed; losing its report is the lesser loss.
+      }
     }
   }
 }
