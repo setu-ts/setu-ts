@@ -10654,8 +10654,10 @@ and per-member credential handoff; 98d complete
 ([#363](https://github.com/setu-ts/setu-ts/pull/363)) — minimized health observations, the
 `GET /v1/health` inspector and the status-body inspector manifest; 98f complete
 ([#365](https://github.com/setu-ts/setu-ts/pull/365)) — queue attempt, outcome and depth
-observations and the `GET /v1/queues` inspector. These five are implemented, awaiting publication in
-the next release cycle. **98e and 98g–98n are planned**, each with its own implementation plan and
+observations and the `GET /v1/queues` inspector; 98g complete (PR pending) — minimized completed
+-span trace observations and the `GET /v1/traces` inspector. These six are implemented, awaiting
+publication in the next release cycle. **98e and 98h–98n are planned**, each with its own
+implementation plan and
 mandatory security audit. This umbrella records framework work for the separately maintained
 devtool; adding the later letters does not make them prerequisites for publishing 98a–98c or for the
 devtool's initial D01–D04 preview, with ONE exception recorded under the release requirements below
@@ -11006,9 +11008,9 @@ authorization; `reserve` followed by requeue is not a read-only inspection techn
 
 ### Milestone 98g: Minimized Distributed Tracing and Correlation
 
-**Status:** planned; design security review and implementation security audit required. **Owner:**
-`packages/telemetry-plugin`, with necessary shared diagnostic and connector/client changes.
-**Plan:** `plans/milestone-98g-distributed-tracing.md`.
+**Status:** complete (PR pending); the committed-tree security audit is required before merge.
+**Owner:** `packages/telemetry-plugin`, with necessary shared diagnostic and connector/client changes.
+**Plan:** `plans/archive/milestone-98g-distributed-tracing.md`.
 
 **Existing foundation:** `ITelemetryService` creates spans and may expose active identifiers; it is
 not a completed-span feed. Telemetry already exports spans and queue/messaging code propagates
@@ -11034,6 +11036,28 @@ attributes may contain dynamic request paths even when query strings are omitted
       context activation, sampling, loss and out-of-order arrivals. Prove exporter behavior is
       preserved, sensitive paths/attributes never enter diagnostic capture, and no automatic
       cross-service access or fabricated causal edge occurs.
+
+**Shipped.** `TelemetryPlugin({ diagnostics })` appends an internal OTel span processor AFTER the
+exporter processor in the same `BasicTracerProvider` constructor — the exporter path is unchanged
+(measured: the exporter still receives every span), the processor never exports, `forceFlush`
+resolves without touching the exporter, `shutdown` closes the collector only with the provider's
+own shutdown (after the connector's `onStopping` revocation), and every failure in `onEnd` is one
+saturating drop — never a throw into OTel. Only exact raw span names listed in
+`TraceDiagnosticsOptions.operations` are observed, replaced by approved aliases before retention;
+identifiers are validated W3C lowercase-hex with all-zero rejected; at most eight validated link
+pairs; kind/status map through fixed exhaustive tables, and the mapping is MEASURED against the
+locked sdk-trace 2.x — a default span arrives as `kind: 0`, matching the framework's own outbound
+`internal: 0`, so both 0 and the documented 1 map to `internal` and an unmappable value drops the
+record. The plugin always registers one `ITraceDiagnosticsSource` under the eager
+`CAPABILITIES.TRACE_DIAGNOSTICS` token: `disabled` without the option, `unsupported` with the
+fixed coverage reason (`custom-provider` / `noop-no-provider`) when the stack cannot supply
+completed spans. The connector serves `GET /v1/traces?after=N&limit=N` under M98a's cursor
+contract over a 1,024-record ring with exact per-batch `lost`; `collection-failed` and
+`unsupported` are typed 200 batches, never error text; the client's `traces()` answers a frozen
+`unsupported` batch without a request when the negotiated manifest lacks the inspector. The e2e
+correlates two independently paired applications by EQUAL trace ids with no fabricated edge, and
+canaries in a hostile span name and attribute are asserted absent at the source, in the raw signed
+bytes and in the client DTO.
 
 ### Milestone 98h: Authorization Decision Explanations
 
@@ -11946,14 +11970,14 @@ because one of them invalidated part of a previous run's claims:
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                         |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                             |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                               |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98d and 98f complete, 98e and 98g–98n planned with security audit gates)                     |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98d, 98f and 98g complete, 98e and 98h–98n planned with security audit gates)                |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                       |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))        |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                    |
 | 98d       | ✅     | common + health-plugin + diagnostics-plugin — minimized health observations ([#363](https://github.com/setu-ts/setu-ts/pull/363))                |
 | 98e       | ⬜     | config-plugin — value-free configuration provenance; design security review and implementation audit required                                    |
 | 98f       | ✅     | common + queue-plugin + diagnostics-plugin — queue attempt, outcome and depth observations ([#365](https://github.com/setu-ts/setu-ts/pull/365)) |
-| 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                       |
+| 98g       | ✅     | telemetry-plugin — minimized distributed tracing and correlation (PR pending; committed-tree security audit required before merge)                |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                              |
 | 98i       | ⬜     | cache observations — design security review and implementation audit required                                                                    |
 | 98j       | ⬜     | event dispatch observations — design security review and implementation audit required                                                           |

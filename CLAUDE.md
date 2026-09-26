@@ -5244,6 +5244,22 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   first to a pre-existing `QueueService.#report` defect on `main` (a thrown value whose string
   conversion throws stranded its job), fixed here at the maintainer's direction. Two re-audits
   passed with no finding open — complete (PR #365).
+- **Milestone 98g** (`packages/telemetry-plugin` + `packages/common` + `packages/diagnostics-plugin`
+  — minimized distributed tracing and correlation): `TelemetryPlugin({ diagnostics })` appends an
+  internal OTel span processor AFTER the exporter processor in the same provider constructor —
+  exporter behavior unchanged (measured: the exporter still receives every span), never exports,
+  never throws into OTel, closed only by the provider's own shutdown. Only exact approved raw span
+  names are retained, as aliases, with W3C-validated ids, bounded links, kind/outcome/duration/age
+  and parent VISIBILITY (never a fabricated edge); the default kind the real locked SDK ships was
+  MEASURED as `0` and maps to `internal`, matching the framework's own outbound mapping. The plugin
+  always registers `ITraceDiagnosticsSource` under the eager `CAPABILITIES.TRACE_DIAGNOSTICS`
+  (`disabled` / `unsupported`-with-coverage-reason when observation cannot capture); the connector
+  serves `GET /v1/traces?after=N&limit=N` and the client `traces()`; two independently paired apps
+  correlate by equal trace ids with no fabricated edge and no cross-instance authority. One
+  verification-era correction: the plan's fixed kind vocabulary shipped 0 as UNSPECIFIED-drop;
+  measurement against the locked SDK reversed that before merge. Plan
+  `plans/archive/milestone-98g-distributed-tracing.md`; committed-tree security audit required
+  before merge.
 - **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
   design security review and implementation audit required).
 
