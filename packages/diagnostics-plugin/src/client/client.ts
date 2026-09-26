@@ -358,6 +358,16 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       if (!verified) {
         throw new Error(CLIENT_ERRORS.connection);
       }
+      // Paired-instance binding, at the ONE boundary every operation shares.
+      // The MAC proves the peer holds the session key; it does not prove the
+      // peer answered as the instance this session paired with, because the
+      // header identity is an input to the MAC rather than a constant of it.
+      // Once paired, the request presented `instance`, and a signed response
+      // naming any other identity is refused. The unpaired status exchange
+      // presents '' and is bound against its own body in `exchangeAndBind`.
+      if (instance !== '' && responseInstance !== instance) {
+        throw new Error(CLIENT_ERRORS.connection);
+      }
       return {
         status: response.status,
         bodyBytes,
@@ -416,7 +426,11 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         }
         const result = await exchange(SNAPSHOT_TARGET);
         const parsed = parseBody(result.bodyText);
-        if (!isSnapshotProjection(parsed)) {
+        // The body's own identity must be the paired one. The DTO type admits
+        // `null` for an in-process reader before the runtime assigns an
+        // identity; a paired network session always has one, so `null` (and
+        // an absent field, which the validator already refuses) is refused.
+        if (!isSnapshotProjection(parsed) || parsed.instanceId !== instanceId) {
           throw new Error(CLIENT_ERRORS.connection);
         }
         return parsed;
@@ -434,7 +448,9 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         const target = `/v1/events?after=${after}&limit=${effectiveLimit}`;
         const result = await exchange(target);
         const parsed = parseBody(result.bodyText);
-        if (!isBatchProjection(parsed)) {
+        // The same body binding as `snapshot()`: a paired batch carries the
+        // paired identity, never `null` and never another instance's.
+        if (!isBatchProjection(parsed) || parsed.instanceId !== instanceId) {
           throw new Error(CLIENT_ERRORS.connection);
         }
         return parsed;

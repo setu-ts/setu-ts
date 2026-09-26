@@ -364,6 +364,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`diagnostics-plugin` — the native client binds every post-pairing response to the paired
+  instance.** Pairing compared the status body's `instanceId` with its authenticated header, but
+  later exchanges only verified the MAC — and the `x-setu-instance` header is an INPUT to that MAC,
+  so a peer holding the session key could sign a snapshot under a different identity (header B /
+  body A, header A / body B, or both) and `snapshot()` and `read()` accepted all three. The shared
+  exchange now refuses any signed response whose header differs from the instance the request
+  presented, which covers every operation including the four inspector reads, and `snapshot()` /
+  `read()` require the body `instanceId` to equal the paired instance (a `null` body identity, valid
+  for the in-process reader before the runtime assigns one, is refused on a paired network session).
+  A refusal is the existing fixed connection error and, like any post-pairing verification failure,
+  not terminal. Legacy/current status negotiation and terminal initial pairing are unchanged. The
+  client has not yet been published, so no released version carries the defect.
 - **`telemetry-plugin` — exported spans now carry the span kind and status OpenTelemetry defines.**
   `TelemetryService` mapped the framework's `SpanKind` onto the OTLP WIRE numbering rather than the
   `@opentelemetry/api` enum a span holds in memory, so every `server` span was exported as `CLIENT`,

@@ -4093,7 +4093,9 @@ reactivates. `createDiagnosticsClient({ endpoint, sessionId, sessionKey, subtle,
 fetch, timing })`
 requires `endpoint` to be exactly `http://127.0.0.1:<port>`; the client performs the signed status
 pairing automatically, serializes calls with strictly increasing sequence numbers, verifies every
-response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal.
+response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal. After
+pairing, every response's signed `x-setu-instance` header and every body `instanceId` (core snapshot
+and event batch included) must equal the paired instance; a mismatch is the fixed connection error.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
 `{ health: true, configuration: true, queues: true, traces: true, authorization: false,

@@ -161,6 +161,9 @@ export interface DiagnosticsClientOptions {
  * numbers; a number is never reused, including after a network failure.
  * Failed initial pairing is terminal: discard the client (and the session)
  * and relaunch rather than accepting another server under the same identity.
+ * Once paired, every response is bound to the paired instance: its signed
+ * `x-setu-instance` header and any body `instanceId` must both equal it, so
+ * a peer holding the session key cannot answer as a different instance.
  *
  * @since 0.8.0
  */

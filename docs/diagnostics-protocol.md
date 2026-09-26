@@ -101,7 +101,13 @@ All responses (signed or refusals) carry `Cache-Control: no-store`,
 `Content-Type: application/json`, and `X-Content-Type-Options: nosniff`. Signed responses add
 `X-Setu-Mac` and `X-Setu-Instance`. The client verifies the response MAC over the exact bounded body
 bytes (256 KiB hard ceiling on the STREAM, not `Content-Length`) BEFORE parsing anything, and checks
-the parsed status body's `instanceId` against the authenticated header.
+the parsed status body's `instanceId` against the authenticated header. Once paired, the client
+binds EVERY later response to that identity: a signed response whose `X-Setu-Instance` differs from
+the instance the request presented is refused, and every body that carries an `instanceId` — the
+core snapshot and event batch included — must equal it (a paired network body never carries `null`).
+The MAC alone does not establish this, because the header identity is an input to the MAC: a peer
+holding the session key could otherwise sign a response under any identity. Such a refusal is the
+fixed connection failure, and — like any post-pairing verification failure — it is not terminal.
 
 Unauthenticated refusals are not signed and use one fixed shape:
 
