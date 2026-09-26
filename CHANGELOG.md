@@ -364,6 +364,41 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`diagnostics-plugin` — the native client binds every post-pairing response to the paired
+  instance.** Pairing compared the status body's `instanceId` with its authenticated header, but
+  later exchanges only verified the MAC — and the `x-setu-instance` header is an INPUT to that MAC,
+  so a peer holding the session key could sign a snapshot under a different identity (header B /
+  body A, header A / body B, or both) and `snapshot()` and `read()` accepted all three. The shared
+  exchange now refuses any signed response whose header differs from the instance the request
+  presented, which covers every operation including the four inspector reads, and `snapshot()` /
+  `read()` require the body `instanceId` to equal the paired instance (a `null` body identity, valid
+  for the in-process reader before the runtime assigns one, is refused on a paired network session).
+  A refusal is the existing fixed connection error and, like any post-pairing verification failure,
+  not terminal. Legacy/current status negotiation and terminal initial pairing are unchanged. The
+  client has not yet been published, so no released version carries the defect.
+- **`diagnostics-plugin` — the native client validates the full core DTO and freezes what it
+  returns.** The core snapshot and batch validators checked little more than primitive types: any
+  string passed as `state`, a node or edge record could carry any fields, and an event needed only a
+  numeric `sequence` and string `operationId`/`stage`. They now enforce the M98a contract — only
+  defined keys, fixed vocabularies, per-kind node fields, prefixed unique node ids, bounded
+  control-free labels, edges between present nodes, canonical operation ids, non-negative (or
+  `null`) timings, validated trace identifiers, consecutive sequences, and the 1,024/4,096/128
+  bounds — and `read()` now checks the cursor contract it sent, as `queues()` and `traces()` already
+  did. `snapshot()` and `read()` also returned the parsed JSON unfrozen while their documentation
+  promised frozen data; both now deep-freeze it. An in-process `instanceId: null` remains valid; a
+  middleware `priority` and an event `statusCode` stay unranged finite numbers because the
+  application sets both; a refusal is the fixed connection error.
+- **`kernel` — diagnostics omit a non-finite middleware priority or response status.** Both were
+  recorded verbatim, so `priority: NaN` (what `Number(env.X)` yields for an unset variable) or
+  `status(NaN)` put `NaN` in a field `common` types as `number`, and the connector serialized it as
+  `null`. A non-finite value is now omitted from the node or event; every finite value is still
+  recorded as the application set it.
+- **`kernel` — a retried start no longer reuses diagnostics event sequence numbers.** A failed start
+  cleared the event ring and restarted numbering at 1, so after the kernel-supported correction
+  (`unregister` + `start()`) a reader's cursor from the failed attempt was refused as "beyond the
+  current sequence" or silently skipped the retry's first events. The discarded records are now
+  treated like an eviction: numbering continues, and a reader's `lost` counts them; the
+  `DiagnosticsBatch.lost` JSDoc now says so.
 - **`telemetry-plugin` — exported spans now carry the span kind and status OpenTelemetry defines.**
   `TelemetryService` mapped the framework's `SpanKind` onto the OTLP WIRE numbering rather than the
   `@opentelemetry/api` enum a span holds in memory, so every `server` span was exported as `CLIENT`,

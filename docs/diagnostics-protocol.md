@@ -101,7 +101,30 @@ All responses (signed or refusals) carry `Cache-Control: no-store`,
 `Content-Type: application/json`, and `X-Content-Type-Options: nosniff`. Signed responses add
 `X-Setu-Mac` and `X-Setu-Instance`. The client verifies the response MAC over the exact bounded body
 bytes (256 KiB hard ceiling on the STREAM, not `Content-Length`) BEFORE parsing anything, and checks
-the parsed status body's `instanceId` against the authenticated header.
+the parsed status body's `instanceId` against the authenticated header. Once paired, the client
+binds EVERY later response to that identity: a signed response whose `X-Setu-Instance` differs from
+the instance the request presented is refused, and every body that carries an `instanceId` — the
+core snapshot and event batch included — must equal it (a paired network body never carries `null`).
+The MAC alone does not establish this, because the header identity is an input to the MAC: a peer
+holding the session key could otherwise sign a response under any identity. Such a refusal is the
+fixed connection failure, and — like any post-pairing verification failure — it is not terminal.
+
+A verified body is authentic, not necessarily well-formed, so the client then checks it against its
+exact DTO before returning it. For the core snapshot that means only the defined keys, `state` and
+`failureCode` from their fixed vocabularies, at most 1,024 nodes and 4,096 edges, each node carrying
+only its kind's fields under a unique id minted with its kind's prefix (`p`, `c`, `r`, `m`), labels
+of at most 160 UTF-8 bytes with no control character, and every edge joining two nodes in the same
+snapshot, once. For the event batch it means at most 128 events, each with only the defined keys,
+every enum from its vocabulary, canonical `op<N>` and node ids, finite non-negative (or `null`)
+timings, a finite numeric status code and validated W3C identifiers; consecutive sequences with
+`next` equal to the last; and the cursor the request sent honored — an empty page echoes `after`
+with `lost: 0`, and a returned page starts past `after` with `lost` counting exactly the unreadable
+gap — records evicted from the ring, or discarded when a start failed. Every returned result is
+deeply frozen. Two fields are deliberately left as the DTO types them — a plain, unranged `number`:
+a middleware `priority` and an event `statusCode`, which the application sets. Either may be any
+finite number (a status is not necessarily a valid HTTP status), so an application's unusual
+priority or status never turns its own diagnostics into a refusal; the kernel omits a non-finite
+value rather than letting it serialize to `null`, and the client refuses `null`.
 
 Unauthenticated refusals are not signed and use one fixed shape:
 

@@ -82,6 +82,12 @@ describe('diagnostics lifecycle integration', () => {
     expect(snapshot.nodes.length).toBeGreaterThan(0);
     const batch = app.diagnostics!.read(0);
     expect(batch.events.some((event) => event.stage === 'request')).toBe(true);
+    // The failed attempt's resolve record was discarded, but its sequence
+    // number was NOT reused: the retry continues the numbering, and a reader
+    // starting at 0 sees the discarded record as lost rather than getting a
+    // renumbered sequence 1 it cannot tell apart from the old one.
+    expect(batch.lost).toBeGreaterThan(0);
+    expect(batch.events[0].sequence).toBe(batch.lost + 1);
     await app.stop();
   });
 

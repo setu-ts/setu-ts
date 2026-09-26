@@ -197,8 +197,10 @@ git sha, a sentence, any string over 64 characters) is omitted rather than proje
 (`truncated` reports omission). Events are capped at 1,024 retained records and 1,024 bytes each;
 eviction is reported as `lost` sequence numbers, and drops as `droppedEvents`. Startup failure and
 final shutdown clear retained metadata while preserving the original application error — a reader
-then sees only the coarse `failed`/`closed` state, the failure code, and counters. Timing is
-monotonic from runtime registration; `atMs`/`durationMs` are `null` before that, never fabricated.
+then sees only the coarse `failed`/`closed` state, the failure code, and counters. A retried
+`start()` continues the event numbering, so a later read reports the discarded range as `lost`.
+Timing is monotonic from runtime registration; `atMs`/`durationMs` are `null` before that, never
+fabricated.
 
 The runnable consumer is `scripts/inspect-kernel.ts`; the paired throughput/latency harness is
 `scripts/benchmark-kernel-diagnostics.ts --mode=disabled|enabled`. Network authentication and
@@ -4093,7 +4095,15 @@ reactivates. `createDiagnosticsClient({ endpoint, sessionId, sessionKey, subtle,
 fetch, timing })`
 requires `endpoint` to be exactly `http://127.0.0.1:<port>`; the client performs the signed status
 pairing automatically, serializes calls with strictly increasing sequence numbers, verifies every
-response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal.
+response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal. After
+pairing, every response's signed `x-setu-instance` header and every body `instanceId` (core snapshot
+and event batch included) must equal the paired instance; a mismatch is the fixed connection error.
+Every body is checked against its exact DTO before it is returned — the core snapshot's node and
+edge records and the event batch's events and cursor included (see
+[`docs/diagnostics-protocol.md`](docs/diagnostics-protocol.md)) — and every result is deeply frozen.
+A middleware node's `priority` and an event's `statusCode` are left unranged because the application
+sets both: either may be any finite number (a status is not necessarily a valid HTTP status), and
+the kernel omits a non-finite value rather than letting it serialize to `null`.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
 `{ health: true, configuration: true, queues: true, traces: true, authorization: false,

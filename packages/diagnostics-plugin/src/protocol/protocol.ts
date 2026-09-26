@@ -14,10 +14,19 @@ import type {
   ConfigDiagnosticsSnapshot,
   ConfigProvenanceEntry,
   DiagnosticsBatch,
+  DiagnosticsEdge,
+  DiagnosticsEdgeKind,
   DiagnosticsEvent,
+  DiagnosticsEventKind,
+  DiagnosticsEventOutcome,
+  DiagnosticsEventStage,
+  DiagnosticsFailureCode,
+  DiagnosticsNode,
   DiagnosticsSnapshot,
+  DiagnosticsSnapshotState,
   HealthDiagnosticsObservation,
   HealthDiagnosticsSnapshot,
+  HttpMethod,
 } from '@setu-ts/common';
 
 /**
@@ -522,58 +531,389 @@ export function parseStatusBody(value: unknown): ParsedStatusBody | null {
   return { instanceId: value.instanceId, expiresInMs: value.expiresInMs, inspectors };
 }
 
+/** The exact snapshot keys a core M98a snapshot carries. */
+const SNAPSHOT_KEYS: readonly string[] = [
+  'version',
+  'instanceId',
+  'state',
+  'failureCode',
+  'nodes',
+  'edges',
+  'truncated',
+  'droppedEvents',
+];
+
+/** The exact batch keys a core M98a event batch carries. */
+const BATCH_KEYS: readonly string[] = ['version', 'instanceId', 'events', 'next', 'lost', 'closed'];
+
+/** The event keys always present; the three optional ones follow. */
+const EVENT_REQUIRED_KEYS: readonly string[] = [
+  'sequence',
+  'operationId',
+  'parentOperationId',
+  'kind',
+  'stage',
+  'nodeId',
+  'outcome',
+  'atMs',
+  'durationMs',
+];
+const EVENT_OPTIONAL_KEYS: readonly string[] = ['statusCode', 'traceId', 'spanId'];
+
+/**
+ * The optional keys each node kind may carry beyond `id` and `kind` — the
+ * kernel emits a field only when it is meaningful for the kind, so a field
+ * outside its kind's set is a contract violation, not extra information.
+ */
+const NODE_OPTIONAL_KEYS: Readonly<Record<string, readonly string[]>> = {
+  plugin: ['label', 'version'],
+  capability: ['label', 'registered'],
+  route: ['label', 'method'],
+  middleware: ['label', 'priority', 'position'],
+};
+
+/** The opaque node-id prefix each node kind is minted with (`p1`, `c1`, `r1`, `m1`). */
+const NODE_ID_PREFIX: Readonly<Record<string, string>> = {
+  plugin: 'p',
+  capability: 'c',
+  route: 'r',
+  middleware: 'm',
+};
+
+/**
+ * Builds a vocabulary set from a record keyed by EVERY member of a `common`
+ * union, so adding a member to the union without adding it here is a compile
+ * error — not a client that refuses every body carrying the new value.
+ *
+ * @param members - One `true` entry per union member
+ * @returns The vocabulary as a set
+ */
+function vocabulary<T extends string>(members: Readonly<Record<T, true>>): ReadonlySet<string> {
+  return new Set(Object.keys(members));
+}
+
+/** The fixed snapshot-state vocabulary (`DiagnosticsSnapshotState`). */
+const SNAPSHOT_STATES: ReadonlySet<string> = vocabulary<DiagnosticsSnapshotState>({
+  'created': true,
+  'starting': true,
+  'running': true,
+  'failed': true,
+  'stopping': true,
+  'closed': true,
+});
+
+/** The fixed failure-code vocabulary (`DiagnosticsFailureCode`). */
+const FAILURE_CODES: ReadonlySet<string> = vocabulary<DiagnosticsFailureCode>({
+  'startup-failed': true,
+  'shutdown-failed': true,
+});
+
+/** The fixed edge-kind vocabulary (`DiagnosticsEdgeKind`). */
+const EDGE_KINDS: ReadonlySet<string> = vocabulary<DiagnosticsEdgeKind>({
+  'provides': true,
+  'requires': true,
+  'optional': true,
+  'consumes': true,
+  'owns': true,
+});
+
+/** The fixed event-kind vocabulary (`DiagnosticsEventKind`). */
+const EVENT_KINDS: ReadonlySet<string> = vocabulary<DiagnosticsEventKind>({
+  'lifecycle': true,
+  'request': true,
+  'middleware': true,
+  'handler': true,
+});
+
+/** The fixed event-stage vocabulary (`DiagnosticsEventStage`). */
+const EVENT_STAGES: ReadonlySet<string> = vocabulary<DiagnosticsEventStage>({
+  'resolve': true,
+  'register': true,
+  'register-hook': true,
+  'init': true,
+  'bootstrap': true,
+  'listen': true,
+  'stopping': true,
+  'shutdown': true,
+  'close': true,
+  'request': true,
+  'request-hook': true,
+  'response-hook': true,
+  'error-hook': true,
+  'global': true,
+  'route': true,
+  'handler': true,
+  'websocket-upgrade': true,
+  'grpc-dispatch': true,
+});
+
+/** The fixed event-outcome vocabulary (`DiagnosticsEventOutcome`). */
+const EVENT_OUTCOMES: ReadonlySet<string> = vocabulary<DiagnosticsEventOutcome>({
+  'ok': true,
+  'error': true,
+  'short-circuit': true,
+  'downstream-skipped': true,
+});
+
+/** The route-method vocabulary the kernel projects onto (`HttpMethod`). */
+const NODE_METHODS: ReadonlySet<string> = vocabulary<HttpMethod>({
+  'GET': true,
+  'HEAD': true,
+  'POST': true,
+  'PUT': true,
+  'PATCH': true,
+  'DELETE': true,
+  'OPTIONS': true,
+});
+
+/** The kernel's fixed v1 topology limits and label bound. */
+const MAX_SNAPSHOT_NODES = 1024;
+const MAX_SNAPSHOT_EDGES = 4096;
+const MAX_LABEL_BYTES = 160;
+
+/** An opaque node id: one kind prefix, then a canonical positive decimal. */
+const NODE_ID = /^[pcrm][1-9][0-9]{0,15}$/;
+
+/** An operation id: `op` plus a canonical decimal (`op0` is the saturation id). */
+const OPERATION_ID = /^op(?:0|[1-9][0-9]{0,15})$/;
+
+/** The kernel's bounded plugin-version grammar, within 64 characters. */
+const PLUGIN_VERSION =
+  /^\d{1,5}\.\d{1,5}\.\d{1,5}(?:-[0-9A-Za-z.-]{1,64})?(?:\+[0-9A-Za-z.-]{1,64})?$/;
+
+/** Validated W3C trace and span identifiers: lowercase hex, never all-zero. */
+const TRACE_ID = /^[0-9a-f]{32}$/;
+const SPAN_ID = /^[0-9a-f]{16}$/;
+const NON_ZERO_HEX = /[1-9a-f]/;
+
+/**
+ * Reports whether a record carries every required key and no key outside the
+ * required and optional sets.
+ *
+ * @param value - The record
+ * @param required - Keys that must be present
+ * @param optional - Keys that may be present
+ * @returns `true` when the key set is within the allowlist
+ */
+function hasAllowedKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+): boolean {
+  if (!required.every((key) => Object.hasOwn(value, key))) {
+    return false;
+  }
+  return Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
+}
+
+/** A non-negative safe integer. */
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** A process-instance identity field: a non-empty string, or `null` in-process. */
+function isInstanceField(value: unknown): boolean {
+  return value === null || (typeof value === 'string' && value.length > 0);
+}
+
+/** An approved label: at most 160 UTF-8 bytes, with no control character. */
+function isNodeLabel(value: unknown): boolean {
+  return typeof value === 'string' &&
+    ALIAS_ENCODER.encode(value).length <= MAX_LABEL_BYTES &&
+    !hasControlCharacter(value);
+}
+
+/**
+ * A field the DTO types as a plain, unranged `number` that the kernel records
+ * as the application set it (a middleware priority, a response status): any
+ * finite number. Ranging it further would refuse honest output the kernel can
+ * produce and stall every read; the kernel omits a non-finite value rather
+ * than letting it serialize to `null`, so `null` is refused.
+ */
+function isRecordedNumber(value: unknown): boolean {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/** A monotonic offset or elapsed time: finite and non-negative, or `null`. */
+function isTiming(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
+/**
+ * Validates one projected node against the exact M98a DTO: the kind's own
+ * field allowlist, an id minted with the kind's prefix, and every optional
+ * field in its kernel-bounded shape.
+ *
+ * @param value - The candidate node
+ * @returns `true` for a well-formed node
+ */
+function isNodeProjection(value: unknown): value is DiagnosticsNode {
+  if (!isRecord(value) || typeof value.kind !== 'string' || typeof value.id !== 'string') {
+    return false;
+  }
+  const optional = Object.hasOwn(NODE_OPTIONAL_KEYS, value.kind)
+    ? NODE_OPTIONAL_KEYS[value.kind]
+    : undefined;
+  if (optional === undefined || !hasAllowedKeys(value, ['id', 'kind'], optional)) {
+    return false;
+  }
+  if (!NODE_ID.test(value.id) || value.id[0] !== NODE_ID_PREFIX[value.kind]) {
+    return false;
+  }
+  return (!Object.hasOwn(value, 'label') || isNodeLabel(value.label)) &&
+    (!Object.hasOwn(value, 'version') ||
+      (typeof value.version === 'string' && value.version.length <= 64 &&
+        PLUGIN_VERSION.test(value.version))) &&
+    (!Object.hasOwn(value, 'method') ||
+      (typeof value.method === 'string' && NODE_METHODS.has(value.method))) &&
+    (!Object.hasOwn(value, 'priority') || isRecordedNumber(value.priority)) &&
+    (!Object.hasOwn(value, 'position') ||
+      (isCount(value.position) && value.position >= 1)) &&
+    (!Object.hasOwn(value, 'registered') || typeof value.registered === 'boolean');
+}
+
+/**
+ * Validates one projected edge: exactly `from`/`to`/`kind`, both endpoints
+ * well-formed node ids, and a kind from the fixed vocabulary.
+ *
+ * @param value - The candidate edge
+ * @returns `true` for a well-formed edge
+ */
+function isEdgeProjection(value: unknown): value is DiagnosticsEdge {
+  return isRecord(value) && hasExactKeys(value, ['from', 'to', 'kind']) &&
+    typeof value.from === 'string' && NODE_ID.test(value.from) &&
+    typeof value.to === 'string' && NODE_ID.test(value.to) &&
+    typeof value.kind === 'string' && EDGE_KINDS.has(value.kind);
+}
+
 /**
  * Reports whether a parsed value is a well-formed M98a snapshot projection:
- * version `1` and every projected field present with the right primitive
- * type. Used by the native client before it hands data to a consumer.
+ * EXACTLY the eight snapshot keys, version `1`, a non-empty instance string
+ * or `null`, the state and failure code from their fixed vocabularies, at most
+ * 1,024 nodes and 4,096 edges, a non-negative safe-integer drop count, every
+ * node carrying only its kind's allowlisted fields under a unique id minted
+ * with its kind's prefix, and every edge joining two nodes present in the
+ * same snapshot, once.
+ *
+ * `instanceId: null` stays valid — an in-process reader sees it before the
+ * runtime assigns an identity. A paired network session refuses it separately,
+ * by binding the body to the paired instance.
  *
  * @param value - The parsed JSON value
  * @returns `true` when the value is a well-formed snapshot
  * @internal
  */
 export function isSnapshotProjection(value: unknown): value is DiagnosticsSnapshot {
-  if (!isRecord(value)) {
+  if (!isRecord(value) || !hasExactKeys(value, SNAPSHOT_KEYS)) {
     return false;
   }
-  return value.version === 1 &&
-    (typeof value.instanceId === 'string' || value.instanceId === null) &&
-    typeof value.state === 'string' &&
-    (value.failureCode === null || typeof value.failureCode === 'string') &&
-    Array.isArray(value.nodes) &&
-    value.nodes.every((node) =>
-      isRecord(node) && typeof node.id === 'string' &&
-      typeof node.kind === 'string'
-    ) &&
-    Array.isArray(value.edges) &&
-    value.edges.every((edge) =>
-      isRecord(edge) && typeof edge.from === 'string' &&
-      typeof edge.to === 'string' && typeof edge.kind === 'string'
-    ) &&
-    typeof value.truncated === 'boolean' &&
-    typeof value.droppedEvents === 'number';
+  const { nodes, edges } = value;
+  if (
+    value.version !== 1 ||
+    !isInstanceField(value.instanceId) ||
+    typeof value.state !== 'string' || !SNAPSHOT_STATES.has(value.state) ||
+    (value.failureCode !== null &&
+      (typeof value.failureCode !== 'string' || !FAILURE_CODES.has(value.failureCode))) ||
+    typeof value.truncated !== 'boolean' ||
+    !isCount(value.droppedEvents) ||
+    !Array.isArray(nodes) || nodes.length > MAX_SNAPSHOT_NODES ||
+    !Array.isArray(edges) || edges.length > MAX_SNAPSHOT_EDGES
+  ) {
+    return false;
+  }
+  const nodeIds = new Set<string>();
+  for (const node of nodes) {
+    if (!isNodeProjection(node) || nodeIds.has(node.id)) {
+      return false;
+    }
+    nodeIds.add(node.id);
+  }
+  const edgeKeys = new Set<string>();
+  for (const edge of edges) {
+    if (!isEdgeProjection(edge) || !nodeIds.has(edge.from) || !nodeIds.has(edge.to)) {
+      return false;
+    }
+    const key = `${edge.from}|${edge.to}|${edge.kind}`;
+    if (edgeKeys.has(key)) {
+      return false;
+    }
+    edgeKeys.add(key);
+  }
+  return true;
 }
 
 /**
- * Reports whether a parsed value is a well-formed M98a batch projection.
+ * Validates one projected event against the exact M98a DTO: the nine required
+ * keys plus only the three optional ones, every enum from its fixed
+ * vocabulary, canonical operation and node ids, finite non-negative timings,
+ * a finite numeric status code, and validated non-zero W3C identifiers.
+ *
+ * @param value - The candidate event
+ * @returns `true` for a well-formed event
+ */
+function isEventProjection(value: unknown): value is DiagnosticsEvent {
+  if (!isRecord(value) || !hasAllowedKeys(value, EVENT_REQUIRED_KEYS, EVENT_OPTIONAL_KEYS)) {
+    return false;
+  }
+  return isCount(value.sequence) && value.sequence >= 1 &&
+    typeof value.operationId === 'string' && OPERATION_ID.test(value.operationId) &&
+    (value.parentOperationId === null ||
+      (typeof value.parentOperationId === 'string' &&
+        OPERATION_ID.test(value.parentOperationId))) &&
+    typeof value.kind === 'string' && EVENT_KINDS.has(value.kind) &&
+    typeof value.stage === 'string' && EVENT_STAGES.has(value.stage) &&
+    (value.nodeId === null || (typeof value.nodeId === 'string' && NODE_ID.test(value.nodeId))) &&
+    typeof value.outcome === 'string' && EVENT_OUTCOMES.has(value.outcome) &&
+    isTiming(value.atMs) &&
+    isTiming(value.durationMs) &&
+    (!Object.hasOwn(value, 'statusCode') || isRecordedNumber(value.statusCode)) &&
+    (!Object.hasOwn(value, 'traceId') ||
+      (typeof value.traceId === 'string' && TRACE_ID.test(value.traceId) &&
+        NON_ZERO_HEX.test(value.traceId))) &&
+    (!Object.hasOwn(value, 'spanId') ||
+      (typeof value.spanId === 'string' && SPAN_ID.test(value.spanId) &&
+        NON_ZERO_HEX.test(value.spanId)));
+}
+
+/**
+ * Reports whether a parsed value is a well-formed M98a batch projection:
+ * EXACTLY the six batch keys, version `1`, a non-empty instance string or
+ * `null`, at most 128 well-formed events whose sequences are CONSECUTIVE (the
+ * kernel's ring numbers events densely and returns a contiguous window),
+ * non-negative safe-integer `next` and `lost`, `next` equal to the last
+ * returned sequence when the page is non-empty, and a boolean `closed`.
+ *
+ * This is the request-INDEPENDENT half of the cursor contract; the client
+ * checks the half that depends on the cursor it sent (an empty page echoes
+ * it, a returned page starts past it, and `lost` counts the gap).
  *
  * @param value - The parsed JSON value
  * @returns `true` when the value is a well-formed batch
  * @internal
  */
 export function isBatchProjection(value: unknown): value is DiagnosticsBatch {
-  if (!isRecord(value)) {
+  if (!isRecord(value) || !hasExactKeys(value, BATCH_KEYS)) {
     return false;
   }
-  return value.version === 1 &&
-    (typeof value.instanceId === 'string' || value.instanceId === null) &&
-    Array.isArray(value.events) &&
-    value.events.every((event) =>
-      isRecord(event) && typeof event.sequence === 'number' &&
-      typeof event.operationId === 'string' && typeof event.stage === 'string'
-    ) &&
-    typeof value.next === 'number' &&
-    typeof value.lost === 'number' &&
-    typeof value.closed === 'boolean';
+  const { events } = value;
+  if (
+    value.version !== 1 ||
+    !isInstanceField(value.instanceId) ||
+    !Array.isArray(events) || events.length > CONNECTOR_MAX_EVENT_LIMIT ||
+    !isCount(value.next) ||
+    !isCount(value.lost) ||
+    typeof value.closed !== 'boolean'
+  ) {
+    return false;
+  }
+  let expected: number | undefined;
+  for (const event of events) {
+    if (!isEventProjection(event) || (expected !== undefined && event.sequence !== expected)) {
+      return false;
+    }
+    expected = event.sequence + 1;
+  }
+  return expected === undefined || value.next === expected - 1;
 }
 
 /**
