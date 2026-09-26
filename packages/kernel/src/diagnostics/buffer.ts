@@ -216,13 +216,21 @@ export class DiagnosticsEventRing {
   }
 
   /**
-   * Discards every retained event and resets the sequence bookkeeping. Used
-   * only by the teardown path: a failed startup or a final shutdown must not
-   * leave collected metadata recoverable through a read.
+   * Discards every retained event. Used only by the teardown path: a failed
+   * startup or a final shutdown must not leave collected metadata recoverable
+   * through a read.
+   *
+   * The sequence counter is deliberately NOT reset: the discarded range is
+   * treated exactly like an eviction. A failed start can be corrected and
+   * retried on the same instance, and restarting at 1 would REUSE sequence
+   * numbers a reader already holds — a cursor past the new last sequence would
+   * then be refused as "beyond the current sequence", and one inside the new
+   * range would silently skip the retry's first events. Keeping the numbering
+   * monotonic means the retry's first event is `lastSequence + 1`, and a
+   * reader's `lost` counts the discarded records honestly.
    */
   clear(): void {
     this.#slots.fill(undefined);
-    this.#firstSequence = 1;
-    this.#lastSequence = 0;
+    this.#firstSequence = this.#lastSequence + 1;
   }
 }

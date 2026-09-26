@@ -202,7 +202,7 @@ describe('Strict core validators — the real kernel output conforms (F02)', () 
     }
   });
 
-  it('accepts non-finite priorities and out-of-range statuses the kernel records verbatim (audit F-A)', async () => {
+  it('serves unusual priorities and statuses without refusal, never as null (audits F-A, F-B)', async () => {
     const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
     const port = (probe.addr as Deno.NetAddr).port;
     probe.close();
@@ -236,7 +236,7 @@ describe('Strict core validators — the real kernel output conforms (F02)', () 
       diagnostics: {},
     });
     await app.start();
-    for (const code of ['1000', '99', '200.5']) {
+    for (const code of ['1000', '99', '200.5', 'nan']) {
       await app.inject({ method: 'GET', url: `/odd/${code}` });
     }
     const client = createDiagnosticsClient({
@@ -249,14 +249,15 @@ describe('Strict core validators — the real kernel output conforms (F02)', () 
     });
     try {
       const snapshot = await client.snapshot();
-      expect(
-        snapshot.nodes.filter((node) => node.kind === 'middleware' && node.priority === null)
-          .length,
-      ).toBe(2);
+      // A non-finite priority is omitted, never carried as `null`.
+      const middleware = snapshot.nodes.filter((node) => node.kind === 'middleware');
+      expect(middleware.length).toBe(2);
+      expect(middleware.every((node) => !Object.hasOwn(node, 'priority'))).toBe(true);
       const batch = await client.read(0, 128);
-      const statuses = batch.events.filter((event) => event.stage === 'request')
-        .map((event) => event.statusCode);
-      expect(statuses).toEqual([1000, 99, 200.5]);
+      const requests = batch.events.filter((event) => event.stage === 'request');
+      expect(requests.map((event) => event.statusCode)).toEqual([1000, 99, 200.5, undefined]);
+      // The NaN status is omitted from the event, not carried as `null`.
+      expect(Object.hasOwn(requests[3], 'statusCode')).toBe(false);
     } finally {
       client.close();
       await app.stop();

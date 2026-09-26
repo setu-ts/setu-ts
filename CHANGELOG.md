@@ -386,8 +386,19 @@ All notable changes to this project are documented here. The format follows
   now checks the cursor contract it sent, as `queues()` and `traces()` already did. `snapshot()` and
   `read()` also returned the parsed JSON unfrozen while their documentation promised frozen data;
   both now deep-freeze it. An in-process `instanceId: null` remains valid; a middleware `priority`
-  and an event `statusCode` stay unranged numbers (or `null`, for a non-finite value) because the
-  kernel records both verbatim; a refusal is the fixed connection error.
+  and an event `statusCode` stay unranged finite numbers because the application sets both; a
+  refusal is the fixed connection error.
+- **`kernel` — diagnostics omit a non-finite middleware priority or response status.** Both were
+  recorded verbatim, so `priority: NaN` (what `Number(env.X)` yields for an unset variable) or
+  `status(NaN)` put `NaN` in a field `common` types as `number`, and the connector serialized it as
+  `null`. A non-finite value is now omitted from the node or event; every finite value is still
+  recorded as the application set it.
+- **`kernel` — a retried start no longer reuses diagnostics event sequence numbers.** A failed start
+  cleared the event ring and restarted numbering at 1, so after the kernel-supported correction
+  (`unregister` + `start()`) a reader's cursor from the failed attempt was refused as "beyond the
+  current sequence" (a connection failure through the diagnostics client) or silently skipped the
+  retry's first events. The discarded records are now treated like an eviction: numbering continues,
+  and a reader's `lost` counts them.
 - **`telemetry-plugin` — exported spans now carry the span kind and status OpenTelemetry defines.**
   `TelemetryService` mapped the framework's `SpanKind` onto the OTLP WIRE numbering rather than the
   `@opentelemetry/api` enum a span holds in memory, so every `server` span was exported as `CLIENT`,

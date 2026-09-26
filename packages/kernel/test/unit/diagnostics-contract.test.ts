@@ -531,3 +531,77 @@ describe('DiagnosticsCollector — topology', () => {
     expect(Object.isFrozen(event)).toBe(true);
   });
 });
+
+describe('DiagnosticsCollector — sequence numbering across a retried start', () => {
+  /** Emits one handler record. */
+  function emit(collector: DiagnosticsCollector): void {
+    collector.observeHandlerStage({
+      parentOperationId: 'op1',
+      stage: 'handler',
+      nodeId: null,
+      outcome: 'ok',
+      startedAtMs: null,
+      durationMs: null,
+    });
+  }
+
+  it('never reuses a sequence number, so a cursor from the failed attempt stays valid', () => {
+    const collector = collectorWith();
+    collector.markStarting();
+    for (let i = 0; i < 3; i++) emit(collector);
+    // A reader polled the failed attempt and holds cursor 3.
+    const held = collector.read(0).next;
+    expect(held).toBe(3);
+
+    collector.markStartupFailed();
+    // The failed attempt's records are discarded, not readable.
+    expect(collector.read(0).events).toEqual([]);
+    collector.markStarting();
+    emit(collector);
+    emit(collector);
+
+    // The held cursor is not "beyond the current sequence", and the retry's
+    // records are neither renumbered from 1 nor silently skipped.
+    const resumed = collector.read(held);
+    expect(resumed.events.map((event) => event.sequence)).toEqual([4, 5]);
+    expect(resumed.lost).toBe(0);
+    // A reader starting fresh sees the discarded range as lost.
+    const fresh = collector.read(0);
+    expect(fresh.events[0].sequence).toBe(4);
+    expect(fresh.lost).toBe(3);
+  });
+});
+
+describe('DiagnosticsCollector — non-finite application numbers are omitted', () => {
+  it('omits a non-finite middleware priority and keeps every finite one', () => {
+    const collector = collectorWith();
+    collector.middlewareCompiled([
+      { name: 'a', priority: Number.NaN, position: 1 },
+      { name: 'b', priority: Number.POSITIVE_INFINITY, position: 2 },
+      { name: 'c', priority: -2.5, position: 3 },
+    ]);
+    const nodes = collector.snapshot().nodes;
+    expect(nodes.map((node) => Object.hasOwn(node, 'priority'))).toEqual([false, false, true]);
+    expect(nodes[2].priority).toBe(-2.5);
+    // JSON would otherwise carry `null` in a `number` field.
+    expect(JSON.stringify(collector.snapshot())).not.toContain('null,"position"');
+  });
+
+  it('omits a non-finite status code and keeps an out-of-range finite one', () => {
+    const collector = collectorWith();
+    for (const statusCode of [Number.NaN, 1000]) {
+      collector.observeHandlerStage({
+        parentOperationId: 'op1',
+        stage: 'handler',
+        nodeId: null,
+        outcome: 'ok',
+        startedAtMs: null,
+        durationMs: null,
+        statusCode,
+      });
+    }
+    const events = collector.read(0).events;
+    expect(Object.hasOwn(events[0], 'statusCode')).toBe(false);
+    expect(events[1].statusCode).toBe(1000);
+  });
+});

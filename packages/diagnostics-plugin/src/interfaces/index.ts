@@ -181,9 +181,7 @@ export interface IDiagnosticsClient {
    * fields under a unique id minted with its kind's prefix, labels bounded
    * and free of control characters, and every edge joining two nodes in the
    * same snapshot, once. A middleware `priority` is left unranged, as the
-   * DTO types it and the kernel records it: it may be any number, or `null`
-   * when the kernel recorded `NaN` or `Infinity` (JSON has no non-finite
-   * number), so check for `null` before doing arithmetic on it.
+   * DTO types it: any finite number (the kernel omits a non-finite one).
    *
    * @returns The deeply frozen M98a snapshot projection (nodes and edges included)
    * @throws {Error} When the client is closed, pairing failed terminally,
@@ -198,8 +196,8 @@ export interface IDiagnosticsClient {
    * this call sent: at most `limit` events, an empty page echoes `after` with
    * no loss, and a returned page starts past `after` with `lost` counting
    * exactly the evicted gap. An event `statusCode` is left unranged, as the
-   * kernel records it verbatim: it may be any number, or `null` for a
-   * non-finite value — check for `null` before treating it as an integer.
+   * application set it: any finite number, not necessarily a valid HTTP
+   * status (the kernel omits a non-finite one).
    *
    * @param after - Sequence cursor; `0` starts at the oldest retained record
    * @param limit - Maximum events, 1–128 (default 128)

@@ -701,12 +701,13 @@ function isNodeLabel(value: unknown): boolean {
 
 /**
  * A field the DTO types as a plain, unranged `number` that the kernel records
- * verbatim (a middleware priority, a response status): any JSON number, or
- * `null` — the serialization of a non-finite value. Constraining it further
- * would refuse honest output the kernel can produce and stall every read.
+ * as the application set it (a middleware priority, a response status): any
+ * finite number. Ranging it further would refuse honest output the kernel can
+ * produce and stall every read; the kernel omits a non-finite value rather
+ * than letting it serialize to `null`, so `null` is refused.
  */
 function isRecordedNumber(value: unknown): boolean {
-  return value === null || typeof value === 'number';
+  return typeof value === 'number' && Number.isFinite(value);
 }
 
 /** A monotonic offset or elapsed time: finite and non-negative, or `null`. */
@@ -821,7 +822,7 @@ export function isSnapshotProjection(value: unknown): value is DiagnosticsSnapsh
  * Validates one projected event against the exact M98a DTO: the nine required
  * keys plus only the three optional ones, every enum from its fixed
  * vocabulary, canonical operation and node ids, finite non-negative timings,
- * a numeric (or `null`) status code, and validated non-zero W3C identifiers.
+ * a finite numeric status code, and validated non-zero W3C identifiers.
  *
  * @param value - The candidate event
  * @returns `true` for a well-formed event

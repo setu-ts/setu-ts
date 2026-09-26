@@ -181,6 +181,9 @@ const HOSTILE_SNAPSHOTS: ReadonlyArray<readonly [string, (value: Json) => void]>
   ['a non-numeric priority', (v) => {
     nodesOf(v)[3].priority = '1';
   }],
+  ['a null priority (the kernel omits a non-finite one; audit F-B)', (v) => {
+    nodesOf(v)[3].priority = null;
+  }],
   ['a zero position', (v) => {
     nodesOf(v)[4].position = 0;
   }],
@@ -268,6 +271,9 @@ const HOSTILE_BATCHES: ReadonlyArray<readonly [string, (value: Json) => void]> =
   ['a negative start offset', (v) => {
     eventsOf(v)[0].atMs = -1;
   }],
+  ['a null status code (the kernel omits a non-finite one; audit F-B)', (v) => {
+    eventsOf(v)[0].statusCode = null;
+  }],
   ['a string status code', (v) => {
     eventsOf(v)[0].statusCode = '200';
   }],
@@ -303,9 +309,8 @@ describe('Core snapshot validator — the full M98a contract (F02)', () => {
       v.truncated = true;
       v.droppedEvents = Number.MAX_SAFE_INTEGER;
     }))).toBe(true);
-    // A middleware priority is recorded verbatim; NaN/Infinity serialize to
-    // `null` (audit F-A).
-    for (const priority of [null, 1e300, -0.5]) {
+    // A middleware priority is recorded as the application set it (audit F-A).
+    for (const priority of [1e300, -0.5]) {
       expect(isSnapshotProjection(mutated(fullSnapshot, (v) => {
         nodesOf(v)[3].priority = priority;
       }))).toBe(true);
@@ -358,9 +363,9 @@ describe('Core batch validator — the full M98a event contract (F02)', () => {
       v.next = 1;
       v.lost = 0;
     }))).toBe(true);
-    // The kernel records a response status verbatim, so any JSON number is
-    // honest — and a non-finite status serializes to `null` (audit F-A).
-    for (const statusCode of [99, 1000, 200.5, null]) {
+    // The kernel records a response status as the application set it, so any
+    // finite number is honest, ranged or not (audit F-A).
+    for (const statusCode of [99, 1000, 200.5, -1]) {
       expect(isBatchProjection(mutated(fullBatch, (v) => {
         eventsOf(v)[0].statusCode = statusCode;
       }))).toBe(true);

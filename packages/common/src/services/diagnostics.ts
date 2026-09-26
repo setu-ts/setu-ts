@@ -147,7 +147,10 @@ export interface DiagnosticsNode {
   readonly version?: string;
   /** Route HTTP method, projected onto the supported verb vocabulary. */
   readonly method?: HttpMethod;
-  /** Global-middleware priority; execution positions use the stable priority sort. */
+  /**
+   * Global-middleware priority; execution positions use the stable priority
+   * sort. Always finite: a non-finite priority is omitted.
+   */
   readonly priority?: number;
   /** Execution position (1-based); distinct from registration order. */
   readonly position?: number;
@@ -242,7 +245,11 @@ export interface DiagnosticsEvent {
   readonly atMs: number | null;
   /** Inclusive monotonic elapsed ms; `null` before the runtime existed. */
   readonly durationMs: number | null;
-  /** Response status, when the boundary produced one. */
+  /**
+   * Response status, when the boundary produced one — recorded as the
+   * application set it, so not necessarily a valid HTTP status, but always
+   * finite: a non-finite status is omitted.
+   */
   readonly statusCode?: number;
   /** Validated 32-character lowercase-hex trace id, when an active span reported one. */
   readonly traceId?: string;

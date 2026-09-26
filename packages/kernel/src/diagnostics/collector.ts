@@ -537,11 +537,16 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
           break;
         }
         const label = approvedLabel(this.#labels.middleware, descriptor.name);
+        // A priority is the application's own number, recorded as given —
+        // except a non-finite one (`Number(env.X)` of an unset variable is
+        // NaN), which is omitted: JSON has no NaN/Infinity, so it would reach
+        // the wire as `null` in a field the DTO types as `number`.
+        const priority = Number.isFinite(descriptor.priority) ? descriptor.priority : undefined;
         const node: NodeRecord = {
           id,
           kind: 'middleware',
           ...(label !== undefined ? { label } : {}),
-          priority: descriptor.priority,
+          ...(priority !== undefined ? { priority } : {}),
           position: descriptor.position,
         };
         this.#nodes.push(node);
@@ -961,6 +966,12 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
     // an oversized event is dropped WHOLE without ever building it.
     const traceId = identifiers.traceId;
     const spanId = identifiers.spanId;
+    // A status is recorded as the application set it — any finite number,
+    // ranged or not — but a non-finite one is omitted, for the same reason a
+    // non-finite priority is: it would serialize to `null` in a `number` field.
+    const statusCode = parts.statusCode !== undefined && Number.isFinite(parts.statusCode)
+      ? parts.statusCode
+      : undefined;
     const parentLength = parts.parentOperationId?.length ?? 0;
     const withinCap = eventWithinByteCap({
       operationId: parts.operationId.length,
@@ -968,7 +979,7 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
       nodeId: parts.nodeId?.length ?? 0,
       traceId: traceId?.length ?? 0,
       spanId: spanId?.length ?? 0,
-      statusCode: parts.statusCode !== undefined,
+      statusCode: statusCode !== undefined,
     });
     if (
       parts.operationId.length > MAX_EVENT_FIELD_LENGTH ||
@@ -996,7 +1007,7 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
       outcome: parts.outcome,
       atMs: parts.startedAtMs,
       durationMs: parts.durationMs,
-      ...(parts.statusCode !== undefined ? { statusCode: parts.statusCode } : {}),
+      ...(statusCode !== undefined ? { statusCode } : {}),
       ...(traceId !== undefined ? { traceId } : {}),
       ...(spanId !== undefined ? { spanId } : {}),
     });
