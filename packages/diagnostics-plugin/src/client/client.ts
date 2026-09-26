@@ -75,7 +75,7 @@ export const CLIENT_ERRORS = {
   sessionId: 'Diagnostics client: sessionId must be exactly 32 lowercase hex characters.',
   sessionKey: 'Diagnostics client: sessionKey must be exactly 32 bytes.',
   arguments:
-    'Diagnostics client: read() and queues() require a non-negative safe-integer cursor and a limit from 1 to 128.',
+    'Diagnostics client: read(), queues() and traces() require a non-negative safe-integer cursor and a limit from 1 to 128.',
   closed: 'Diagnostics client: the client is closed.',
   pairingFailed:
     'Diagnostics client: pairing failed terminally; relaunch the application and create a new session.',

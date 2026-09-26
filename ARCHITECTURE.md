@@ -2598,17 +2598,18 @@ resources, tracestate, baggage, exceptions and status messages are structurally 
 failure — a hostile getter, an unmappable kind or status, an invalid identifier — is one saturating
 drop; the processor never throws into OTel.
 
-The kind mapping is MEASURED, not inherited from the API's documented enum: on the locked sdk-trace
-2.x a default span arrives as `kind: 0`, which is the value the framework's own outbound
-`SPAN_KIND_MAP` has always used for `internal` — so 0 (and the documented spelling 1) map to
-`internal`, and an unmappable value drops the record rather than improvising. The collector is the
-single source under `CAPABILITIES.TRACE_DIAGNOSTICS` (one telemetry plugin per application, so no
-merge ring is needed), always registered: `disabled` without the option, `unsupported` with the
-fixed coverage reason under a custom provider factory or in noop mode. Parent and link relationships
-are identifier relationships only — `parentVisibility` names whether the parent is locally observed,
-unobserved, a root, or unknown — and no global clock is implied: `ageMs` is arrival age at one
-process. Sampling stays authoritative: unsampled spans never complete through a processor, and the
-batch reports the configured sampler so partial traces stay visible as partial.
+Kinds follow the `@opentelemetry/api` `SpanKind` enum a readable span carries — `INTERNAL = 0`,
+`SERVER = 1`, `CLIENT = 2`, `PRODUCER = 3`, `CONSUMER = 4` — the numbering both auto-instrumentation
+and the framework's `TelemetryService` write (a default span arrives as `0`, measured on the locked
+SDK); the OTLP wire enum is this plus one and never reaches the processor. An unmappable value drops
+the record rather than improvising. The collector is the single source under
+`CAPABILITIES.TRACE_DIAGNOSTICS` (one telemetry plugin per application, so no merge ring is needed),
+always registered: `disabled` without the option, `unsupported` with the fixed coverage reason under
+a custom provider factory or in noop mode. Parent and link relationships are identifier
+relationships only — `parentVisibility` names whether the parent is locally observed, unobserved, a
+root, or unknown — and no global clock is implied: `ageMs` is arrival age at one process. Sampling
+stays authoritative: unsampled spans never complete through a processor, and the batch reports the
+configured sampler so partial traces stay visible as partial.
 
 ---
 

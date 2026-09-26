@@ -11009,9 +11009,10 @@ authorization; `reserve` followed by requeue is not a read-only inspection techn
 
 ### Milestone 98g: Minimized Distributed Tracing and Correlation
 
-**Status:** complete (PR pending); the committed-tree security audit is required before merge.
-**Owner:** `packages/telemetry-plugin`, with necessary shared diagnostic and connector/client
-changes. **Plan:** `plans/archive/milestone-98g-distributed-tracing.md`.
+**Status:** complete ([#369](https://github.com/setu-ts/setu-ts/pull/369)); the committed-tree
+security audit passed on the independent re-audit of `2fbac039`. **Owner:**
+`packages/telemetry-plugin`, with necessary shared diagnostic and connector/client changes.
+**Plan:** `plans/archive/milestone-98g-distributed-tracing.md`.
 
 **Existing foundation:** `ITelemetryService` creates spans and may expose active identifiers; it is
 not a completed-span feed. Telemetry already exports spans and queue/messaging code propagates
@@ -11046,18 +11047,18 @@ shutdown (after the connector's `onStopping` revocation), and every failure in `
 saturating drop — never a throw into OTel. Only exact raw span names listed in
 `TraceDiagnosticsOptions.operations` are observed, replaced by approved aliases before retention;
 identifiers are validated W3C lowercase-hex with all-zero rejected; at most eight validated link
-pairs; kind/status map through fixed exhaustive tables, and the mapping is MEASURED against the
-locked sdk-trace 2.x — a default span arrives as `kind: 0`, matching the framework's own outbound
-`internal: 0`, so both 0 and the documented 1 map to `internal` and an unmappable value drops the
-record. The plugin always registers one `ITraceDiagnosticsSource` under the eager
-`CAPABILITIES.TRACE_DIAGNOSTICS` token: `disabled` without the option, `unsupported` with the fixed
-coverage reason (`custom-provider` / `noop-no-provider`) when the stack cannot supply completed
-spans. The connector serves `GET /v1/traces?after=N&limit=N` under M98a's cursor contract over a
-1,024-record ring with exact per-batch `lost`; `collection-failed` and `unsupported` are typed 200
-batches, never error text; the client's `traces()` answers a frozen `unsupported` batch without a
-request when the negotiated manifest lacks the inspector. The e2e correlates two independently
-paired applications by EQUAL trace ids with no fabricated edge, and canaries in a hostile span name
-and attribute are asserted absent at the source, in the raw signed bytes and in the client DTO.
+pairs; kind/status map through fixed exhaustive tables — kinds follow the `@opentelemetry/api`
+`SpanKind` enum (`INTERNAL = 0` … `CONSUMER = 4`; a default span arrives as `0`, measured against
+the locked SDK), and an unmappable value drops the record. The plugin always registers one
+`ITraceDiagnosticsSource` under the eager `CAPABILITIES.TRACE_DIAGNOSTICS` token: `disabled` without
+the option, `unsupported` with the fixed coverage reason (`custom-provider` / `noop-no-provider`)
+when the stack cannot supply completed spans. The connector serves `GET /v1/traces?after=N&limit=N`
+under M98a's cursor contract over a 1,024-record ring with exact per-batch `lost`;
+`collection-failed` and `unsupported` are typed 200 batches, never error text; the client's
+`traces()` answers a frozen `unsupported` batch without a request when the negotiated manifest lacks
+the inspector. The e2e correlates two independently paired applications by EQUAL trace ids with no
+fabricated edge, and canaries in a hostile span name and attribute are asserted absent at the
+source, in the raw signed bytes and in the client DTO.
 
 ### Milestone 98h: Authorization Decision Explanations
 
