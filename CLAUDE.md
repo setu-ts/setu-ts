@@ -5257,8 +5257,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `CAPABILITIES.CONFIG_DIAGNOSTICS` token, `IConfigDiagnosticsSource`, and the DTOs; the plugin
   always registers a source (`disabled` without the option); the connector serves `GET /v1/config`
   and its status manifest reports `configuration: true`; the client reads it through
-  `configuration()`. Implementation security audit runs on the committed tree before the PR (record
-  in the PR) — complete (PR pending).
+  `configuration()`. The first committed-tree audit failed on three Lows (control characters in
+  aliases, a double `instanceId` read, a builder that received the values record), all fixed; the
+  re-audit of that fix then found four bypasses — a replacement source smuggled a control alias into
+  a signed body through an array `toJSON`, a flipping index getter, or its own `map` — closed by
+  copying every source list index by index, bounded at budget+1. The independent re-audit of
+  `87c3a588` passed with no finding open (9 negative controls) — complete (PR #366).
 - **Next milestone** — **M98g** (`packages/telemetry-plugin` — minimized distributed tracing and
   correlation; design security review and implementation audit required).
 

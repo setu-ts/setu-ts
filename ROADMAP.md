@@ -11951,7 +11951,7 @@ because one of them invalidated part of a previous run's claims:
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))        |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                    |
 | 98d       | ✅     | common + health-plugin + diagnostics-plugin — minimized health observations ([#363](https://github.com/setu-ts/setu-ts/pull/363))                |
-| 98e       | ✅     | common + config-plugin + diagnostics-plugin — value-free configuration provenance (PR pending)                                                   |
+| 98e       | ✅     | common + config-plugin + diagnostics-plugin — value-free configuration provenance (PR #366)                                                      |
 | 98f       | ✅     | common + queue-plugin + diagnostics-plugin — queue attempt, outcome and depth observations ([#365](https://github.com/setu-ts/setu-ts/pull/365)) |
 | 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                       |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                              |
