@@ -19,6 +19,7 @@ import type {
   ILocalDiagnosticsListenerFactory,
   IPluginContext,
   IQueueDiagnosticsSource,
+  ITraceDiagnosticsSource,
   TimerHandle,
 } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -125,6 +126,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
   let session: DiagnosticsSessionState | null = null;
   let expiryTimer: TimerHandle | null = null;
   let queueMerger: QueueObservationMerger | null = null;
+  let traceSource: ITraceDiagnosticsSource | null = null;
 
   const revoke = (): Promise<void> => {
     if (cleanupPromise !== null) {
@@ -159,7 +161,11 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
     name: 'diagnostics-plugin',
     version: denoJson.version,
     dependencies: [CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER],
-    optionalDependencies: [CAPABILITIES.HEALTH_DIAGNOSTICS, CAPABILITIES.QUEUE_DIAGNOSTICS],
+    optionalDependencies: [
+      CAPABILITIES.HEALTH_DIAGNOSTICS,
+      CAPABILITIES.QUEUE_DIAGNOSTICS,
+      CAPABILITIES.TRACE_DIAGNOSTICS,
+    ],
 
     register(ctx: IPluginContext): void {
       const source = ctx.app.diagnostics;
@@ -180,6 +186,17 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           CAPABILITIES.HEALTH_DIAGNOSTICS,
         )
         ? ctx.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS)
+        : null;
+      // The optional trace-diagnostics source (M98g): resolved once, during
+      // registration, through its declared optional capability. A single
+      // source — every TelemetryPlugin instance registers exactly one, and
+      // the kernel admits one provider of the token. Absent means no
+      // telemetry plugin at all, and the connector answers a typed
+      // `unsupported`. A telemetry plugin whose observation was not opted
+      // into still registers a source, which answers `disabled`. Neither
+      // creates, ends, exports or flushes a span, and neither fails startup.
+      traceSource = ctx.services.has(CAPABILITIES.TRACE_DIAGNOSTICS)
+        ? ctx.services.get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS)
         : null;
 
       // Parent cleanup hooks FIRST — before the bootstrap below opens the
@@ -228,6 +245,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           clock: ctx.runtime,
           healthSource,
           queues: merger,
+          traces: traceSource,
         });
         // The devtool's own startup line. Without it the runtime prints a
         // bare `Listening on http://127.0.0.1:<port>/`, which in an

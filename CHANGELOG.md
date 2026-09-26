@@ -8,6 +8,40 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Distributed tracing observations (M98g): opt-in, minimized completed-span observations through
+  the diagnostics connector.** `TelemetryPlugin` accepts a `diagnostics` option
+  (`TraceDiagnosticsOptions`) that appends an internal span processor AFTER the exporter processor
+  in the same provider constructor — the exporter path is unchanged (measured: the exporter still
+  receives every span), the processor never exports, never throws into OTel, and observes only
+  finished SAMPLED spans whose exact raw name appears in the configured `operations` map, each
+  replaced by its approved alias before anything is retained. A record carries the service and
+  operation aliases, W3C-validated trace/span/parent identifiers (all-zero rejected; `parentSpanId`
+  present exactly when the parent is locally meaningful), at most eight validated link identifier
+  pairs, kind, outcome (`ok`/`error`/`unset`), monotonic `durationMs`/`ageMs` and `parentVisibility`
+  (`observed` / `remote-or-unobserved` / `root` / `unknown` — an identifier relationship only, never
+  a fabricated edge). Span names, attributes, events, resource labels, tracestate, baggage,
+  exceptions and status messages never reach collector state, and kind/status values outside the
+  fixed mapping drop the record — the default kind REAL OTel ships (measured as `0` on the locked
+  sdk-trace 2.x) maps to `internal`, matching the framework's own outbound mapping. The plugin
+  ALWAYS registers one `ITraceDiagnosticsSource` under the new `CAPABILITIES.TRACE_DIAGNOSTICS`
+  token (claimed in `provides`): `disabled` without the option, `unsupported` with the coverage
+  reason (`custom-provider` / `noop-no-provider`) when the stack cannot supply completed spans,
+  `no-data`/`ready` when it can, and a `collection-failed` answer when the connector's exact
+  validator refuses a source DTO. The batch reports coverage, instrumentation coverage (only
+  families whose registry outcome said enabled), the configured sampler description, M98a's cursor
+  contract over a 1,024-record ring with exact per-batch `lost`, and a saturating `droppedSpans`
+  counter. New public surface on `@setu-ts/common`: `CAPABILITIES.TRACE_DIAGNOSTICS`,
+  `ITraceDiagnosticsSource`, `TraceDiagnosticsBatch`, `TraceObservation`, `TraceLinkRelationship`,
+  `TraceSamplerDescription`, `TraceSourceState`, `TraceCoverage`, `TraceInstrumentationKind`,
+  `TraceOutcome`, `TraceParentVisibility`. New connector surface: `GET /v1/traces?after=N&limit=N`
+  (authenticated like every operation; `collection-failed`/`unsupported` answered as typed 200
+  batches, never error text), the status manifest's `traces` key now `true`, and
+  `IDiagnosticsClient.traces(after, limit?)` as a required member that answers a frozen typed
+  `unsupported` batch without a request when the negotiated manifest lacks the inspector.
+  Cross-application correlation joins EQUAL trace ids across independently authenticated sessions
+  only; identifiers grant no discovery or connection authority, and no global timeline is implied —
+  `ageMs` is arrival age at one process.
+
 - **Queue observations (M98f): opt-in, minimized attempt, outcome and depth observations through the
   diagnostics connector.** `QueuePlugin` accepts a `diagnostics` option (`QueueDiagnosticsOptions` /
   `QueueDepthDiagnosticsOptions`, exported from `@setu-ts/queue-plugin`) that observes each

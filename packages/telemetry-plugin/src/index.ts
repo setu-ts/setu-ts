@@ -18,6 +18,7 @@ export type {
   SpanExporterKind,
   SpanProcessorKind,
   TelemetryPluginOptions,
+  TraceDiagnosticsOptions,
   TracerHost,
 } from './interfaces/index.ts';
 export { TELEMETRY_SPAN_KEY, telemetryMiddleware } from './plugin/telemetry-plugin.ts';

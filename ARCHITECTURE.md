@@ -2562,6 +2562,34 @@ merge sequence never reads as complete coverage. A source is untrusted input —
 can contribute one — so its batch is validated key-by-key before it is merged, and a failing source
 is isolated as `collection-failed` without breaking the read.
 
+### Trace Observation Boundary (Milestone 98g)
+
+Trace observations apply the pattern to the telemetry plugin, whose structural difference is the
+observation SEAM: spans are produced by OpenTelemetry, and the framework does not own a completed
+-span feed. Rather than a competing tracer or a wrapper around the exporter, the plugin appends one
+internal `SpanProcessor` AFTER the exporter processor in the SAME `BasicTracerProvider` constructor
+— the exporter path is untouched (measured: it still receives every span), the diagnostic processor
+never exports, `forceFlush` resolves without touching the exporter, and `shutdown` closes the
+collector only when the provider shuts down, after the connector session's `onStopping` revocation.
+Minimization happens IN the processor, before retention: `onEnd` reads only name, kind, span
+context, parent context, link contexts, status code and duration; the exact raw-name allowlist
+replaces the name with its approved alias before anything is buffered; attributes, events,
+resources, tracestate, baggage, exceptions and status messages are structurally unreachable. Any
+failure — a hostile getter, an unmappable kind or status, an invalid identifier — is one saturating
+drop; the processor never throws into OTel.
+
+The kind mapping is MEASURED, not inherited from the API's documented enum: on the locked sdk-trace
+2.x a default span arrives as `kind: 0`, which is the value the framework's own outbound
+`SPAN_KIND_MAP` has always used for `internal` — so 0 (and the documented spelling 1) map to
+`internal`, and an unmappable value drops the record rather than improvising. The collector is the
+single source under `CAPABILITIES.TRACE_DIAGNOSTICS` (one telemetry plugin per application, so no
+merge ring is needed), always registered: `disabled` without the option, `unsupported` with the
+fixed coverage reason under a custom provider factory or in noop mode. Parent and link relationships
+are identifier relationships only — `parentVisibility` names whether the parent is locally observed,
+unobserved, a root, or unknown — and no global clock is implied: `ageMs` is arrival age at one
+process. Sampling stays authoritative: unsampled spans never complete through a processor, and the
+batch reports the configured sampler so partial traces stay visible as partial.
+
 ---
 
 ## 15. Performance Philosophy

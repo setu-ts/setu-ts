@@ -19,7 +19,9 @@ import type {
   IHealthDiagnosticsSource,
   IRequest,
   IResponse,
+  ITraceDiagnosticsSource,
   ResponseSnapshot,
+  TraceDiagnosticsBatch,
 } from '@setu-ts/common';
 
 import { requestMacFields, responseMacFields, sha256Hex } from '../security/authentication.ts';
@@ -27,6 +29,11 @@ import type { DiagnosticsSessionState } from '../security/session.ts';
 import type { ConnectorLimits, LimitsClock } from './limits.ts';
 import type { IQueueMerger } from './queue-merger.ts';
 import { isQueueBatchProjection, projectQueueBatch } from '../protocol/queue-protocol.ts';
+import {
+  isTraceBatchProjection,
+  projectTraceBatch,
+  readTraceSourceBatch,
+} from '../protocol/trace-protocol.ts';
 import { CONNECTOR_LIMITS } from './limits.ts';
 import {
   currentInspectorsManifest,
@@ -185,6 +192,14 @@ export interface ConnectorHandlerDeps {
    * a job.
    */
   readonly queues: IQueueMerger;
+  /**
+   * The trace-diagnostics source (M98g), resolved from
+   * `CAPABILITIES.TRACE_DIAGNOSTICS` during registration. `null` when the
+   * application did not register the TelemetryPlugin at all: the connector
+   * then answers a typed `unsupported` batch for `GET /v1/traces` and never
+   * creates, ends, exports or flushes a span.
+   */
+  readonly traces: ITraceDiagnosticsSource | null;
 }
 
 /**
@@ -360,6 +375,150 @@ function readHealthProjection(
 }
 
 /**
+ * A typed `unsupported` trace batch: the connector implements the operation,
+ * but the application registered no TelemetryPlugin and so no trace source.
+ * Coverage and sampler are `unknown` — the responder cannot describe a
+ * tracing stack that does not exist — and the cursor is echoed so an empty
+ * page continues a poll.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @param after - The exclusive cursor of the request
+ * @returns The unsupported batch
+ * @internal
+ */
+function unsupportedTraceBatch(instanceId: string, after: number): TraceDiagnosticsBatch {
+  return {
+    version: 1,
+    instanceId,
+    state: 'unsupported',
+    coverage: 'unknown',
+    instrumentation: [],
+    sampler: { kind: 'unknown' },
+    records: [],
+    next: after,
+    lost: 0,
+    closed: false,
+    droppedSpans: 0,
+  };
+}
+
+/**
+ * A value-free `collection-failed` trace batch: the registered source threw
+ * (or answered a shape the exact validator refused). Carries no error text,
+ * cause, or stack — a source failure must not change the application's
+ * behavior or disclose a fault.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @param after - The exclusive cursor of the request
+ * @returns The collection-failed batch
+ * @internal
+ */
+function collectionFailedTraceBatch(instanceId: string, after: number): TraceDiagnosticsBatch {
+  return {
+    version: 1,
+    instanceId,
+    state: 'collection-failed',
+    coverage: 'unknown',
+    instrumentation: [],
+    sampler: { kind: 'unknown' },
+    records: [],
+    next: after,
+    lost: 0,
+    closed: false,
+    droppedSpans: 0,
+  };
+}
+
+/**
+ * The outcome of reading the trace source: either a validated projection
+ * ready to sign, or a refusal code for a version or instance mismatch.
+ *
+ * @internal
+ */
+type TraceReadOutcome =
+  | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
+  | { readonly kind: 'refused'; readonly code: 'unsupported-version' | 'unauthorized' };
+
+/**
+ * Reads, projects and VALIDATES the trace batch for the bound instance,
+ * isolating every failure mode to a typed, value-free answer:
+ *
+ * - no registered source → `unsupported` (coverage `unknown`)
+ * - a source that throws, or whose DTO fails the exact validator →
+ *   `collection-failed`
+ * - a DTO for another version or another instance → the matching refusal
+ *
+ * The source is synchronous and never creates, ends, exports or flushes a
+ * span. The projection copies each field once and the wire validator runs
+ * again over that COPY, so nothing the connector signs was read twice or
+ * left unchecked.
+ *
+ * @param deps - The handler dependencies
+ * @param instanceId - The session's bound instance UUID
+ * @param after - The exclusive cursor of the request
+ * @param limit - The record bound of the request
+ * @returns The projection to sign, or the refusal to answer
+ * @internal
+ */
+function readTraceProjection(
+  deps: ConnectorHandlerDeps,
+  instanceId: string,
+  after: number,
+  limit: number,
+): TraceReadOutcome {
+  const projected = (batch: TraceDiagnosticsBatch): TraceReadOutcome | null => {
+    if (batch.version !== 1) {
+      return { kind: 'refused', code: 'unsupported-version' };
+    }
+    if (batch.instanceId !== instanceId) {
+      return { kind: 'refused', code: 'unauthorized' };
+    }
+    // The exact source validator: one malformed field refuses the whole
+    // batch, so nothing unvalidated reaches the signed frame.
+    const validated = readTraceSourceBatch(batch, instanceId, after, limit);
+    if (validated === null) {
+      return null;
+    }
+    const candidate = projectTraceBatch(validated, instanceId);
+    // The wire validator — the SAME one the client runs — over the
+    // projection, before anything is signed.
+    return isTraceBatchProjection(candidate) ? { kind: 'projected', projected: candidate } : null;
+  };
+  if (deps.traces === null) {
+    return projected(unsupportedTraceBatch(instanceId, after)) ?? {
+      kind: 'projected',
+      projected: projectTraceBatch(
+        readTraceSourceBatch(
+          collectionFailedTraceBatch(instanceId, after),
+          instanceId,
+          after,
+          limit,
+        )!,
+        instanceId,
+      ),
+    };
+  }
+  try {
+    const outcome = projected(deps.traces.read(instanceId, after, limit));
+    if (outcome !== null) {
+      return outcome;
+    }
+  } catch {
+    // fall through to the value-free collection-failed answer
+  }
+  const failed = readTraceSourceBatch(
+    collectionFailedTraceBatch(instanceId, after),
+    instanceId,
+    after,
+    limit,
+  );
+  return {
+    kind: 'projected',
+    projected: projectTraceBatch(failed!, instanceId),
+  };
+}
+
+/**
  * Creates the protocol handler the connector hands to the runtime-owned
  * listener factory.
  *
@@ -521,6 +680,20 @@ export function createConnectorHandler(
           return refusalResponse('unavailable');
         }
         projected = candidate;
+      } else if (target.op === 'traces') {
+        // The trace operation (M98g). Every session and request check above
+        // ran before the source is called; the source is synchronous and
+        // never creates, ends, exports or flushes a span. The instance is
+        // bound by the auth path for every non-status target.
+        const boundInstance = deps.session.instanceId;
+        if (boundInstance === null) {
+          return refusalResponse('unauthorized');
+        }
+        const outcome = readTraceProjection(deps, boundInstance, target.after, target.limit);
+        if (outcome.kind === 'refused') {
+          return refusalResponse(outcome.code);
+        }
+        projected = outcome.projected;
       } else {
         // The health operation (M98d). All session and request checks above
         // ran before the source is called; the source itself is synchronous

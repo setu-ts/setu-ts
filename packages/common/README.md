@@ -317,6 +317,7 @@ package fits the plugin architecture.
 | `ITelemetryService`                | interface |
 | `ITenant`                          | interface |
 | `ITenantRepository`                | interface |
+| `ITraceDiagnosticsSource`          | interface |
 | `ITenantResolver`                  | interface |
 | `ITransaction`                     | interface |
 | `ITransactionIsolationSupport`     | interface |
@@ -387,6 +388,10 @@ package fits the plugin architecture.
 | `SubscribeOptions`                 | interface |
 | `TaskPoolStats`                    | interface |
 | `TelemetryContext`                 | interface |
+| `TraceDiagnosticsBatch`            | interface |
+| `TraceLinkRelationship`            | interface |
+| `TraceObservation`                 | interface |
+| `TraceSamplerDescription`          | interface |
 | `TransactionOptions`               | interface |
 | `ValidationIssue`                  | interface |
 | `ValueProvider`                    | interface |
@@ -487,6 +492,11 @@ package fits the plugin architecture.
 | `SpanStatus`                       | type      |
 | `StandardCapability`               | type      |
 | `TimerHandle`                      | type      |
+| `TraceCoverage`                    | type      |
+| `TraceInstrumentationKind`         | type      |
+| `TraceOutcome`                     | type      |
+| `TraceParentVisibility`            | type      |
+| `TraceSourceState`                 | type      |
 | `TransactionIsolationLevel`        | type      |
 | `Unsubscribe`                      | type      |
 | `ValidationTarget`                 | type      |

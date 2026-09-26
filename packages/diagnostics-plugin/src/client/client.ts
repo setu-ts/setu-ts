@@ -18,6 +18,7 @@ import type {
   DiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
   QueueDiagnosticsBatch,
+  TraceDiagnosticsBatch,
 } from '@setu-ts/common';
 
 import {
@@ -40,8 +41,10 @@ import {
   QUEUES_PATH,
   SNAPSHOT_TARGET,
   STATUS_TARGET,
+  TRACES_PATH,
 } from '../protocol/protocol.ts';
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
+import { isTraceBatchProjection } from '../protocol/trace-protocol.ts';
 
 /**
  * The fixed request deadline, in milliseconds.
@@ -521,6 +524,56 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
           (parsed.events.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
             parsed.events[0].sequence <= after ||
             parsed.lost !== parsed.events[0].sequence - after - 1
+          ))
+        ) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return deepFreeze(parsed);
+      });
+    },
+
+    async traces(after: number, limit?: number): Promise<TraceDiagnosticsBatch> {
+      return await enqueue(async () => {
+        checkUsable();
+        const effectiveLimit = validatePagedArgs(after, limit);
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the trace inspector — a
+        // legacy or older server — is answered locally with a frozen typed
+        // `unsupported` batch echoing the cursor, and no addon request is
+        // sent. Support is never inferred from a generic protocol error.
+        if (inspectors !== null && inspectors.traces === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            coverage: 'unknown',
+            instrumentation: [],
+            sampler: { kind: 'unknown' },
+            records: [],
+            next: after,
+            lost: 0,
+            closed: false,
+            droppedSpans: 0,
+          });
+        }
+        const result = await exchange(`${TRACES_PATH}?after=${after}&limit=${effectiveLimit}`);
+        const parsed = parseBody(result.bodyText);
+        // The exact DTO validator, the body's own instance binding, and the
+        // cursor contract relative to THIS request: an empty page echoes the
+        // cursor, and a returned page starts past it.
+        if (
+          !isTraceBatchProjection(parsed) || parsed.instanceId !== bound ||
+          parsed.records.length > effectiveLimit ||
+          (parsed.records.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
+            parsed.records[0].sequence <= after ||
+            parsed.lost !== parsed.records[0].sequence - after - 1
           ))
         ) {
           throw new Error(CLIENT_ERRORS.connection);

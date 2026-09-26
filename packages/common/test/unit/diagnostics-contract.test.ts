@@ -12,10 +12,14 @@ import type {
   IPlugin,
   IPluginContext,
   IQueueDiagnosticsSource,
+  ITraceDiagnosticsSource,
   QueueAttemptObservation,
   QueueDiagnosticsBatch,
   QueueDiagnosticsSourceBatch,
   QueueSourceAttemptObservation,
+  TraceCoverage,
+  TraceDiagnosticsBatch,
+  TraceSourceState,
 } from '@setu-ts/common';
 import type { IApplication } from '@setu-ts/common';
 
@@ -254,5 +258,76 @@ describe('queue diagnostics type contracts (M98f)', () => {
       truncatedDepths: 0,
     };
     expect(batch.state).toBe('unsupported');
+  });
+});
+
+describe('M98g trace contracts', () => {
+  const INSTANCE = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+  const TRACE = 'a'.repeat(32);
+  const SPAN = 'b'.repeat(16);
+
+  it('a consumer compiles against the trace source surface and the exact DTO', () => {
+    const source: ITraceDiagnosticsSource = {
+      read(instanceId: string, after: number, limit?: number): TraceDiagnosticsBatch {
+        return {
+          version: 1,
+          instanceId,
+          state: 'ready',
+          coverage: 'completed-sampled-spans',
+          instrumentation: ['http'],
+          sampler: { kind: 'traceidratio', ratio: 0.5 },
+          records: [
+            {
+              sequence: after + 1,
+              serviceAlias: 'orders',
+              operationAlias: 'create-order',
+              traceId: TRACE,
+              spanId: SPAN,
+              ...(limit === undefined ? {} : { parentSpanId: SPAN }),
+              links: [{ traceId: TRACE, spanId: SPAN }],
+              kind: 'server',
+              outcome: 'ok',
+              durationMs: 5,
+              ageMs: 1,
+              parentVisibility: limit === undefined ? 'root' : 'observed',
+            },
+          ],
+          next: after + 1,
+          lost: 0,
+          closed: false,
+          droppedSpans: 0,
+        };
+      },
+    };
+    const batch = source.read(INSTANCE, 0, 128);
+    expect(batch.version).toBe(1);
+    expect(batch.instanceId).toBe(INSTANCE);
+    expect(batch.state).toBe('ready');
+    expect(batch.coverage).toBe('completed-sampled-spans');
+    expect(batch.records[0]!.operationAlias).toBe('create-order');
+    expect(batch.records[0]!.parentVisibility).toBe('observed');
+    // The root-parent form: no parentSpanId, no fabricated edge.
+    const root = source.read(INSTANCE, 0).records[0]!;
+    expect(root.parentSpanId).toBeUndefined();
+    expect(root.parentVisibility).toBe('root');
+    expect(root.links).toEqual([{ traceId: TRACE, spanId: SPAN }]);
+  });
+
+  it('coverage vocabulary names every unavailability reason', () => {
+    const coverage: TraceCoverage[] = [
+      'completed-sampled-spans',
+      'custom-provider',
+      'noop-no-provider',
+      'unknown',
+    ];
+    const states: TraceSourceState[] = [
+      'disabled',
+      'unsupported',
+      'no-data',
+      'ready',
+      'collection-failed',
+    ];
+    expect(coverage).toHaveLength(4);
+    expect(states).toHaveLength(5);
   });
 });

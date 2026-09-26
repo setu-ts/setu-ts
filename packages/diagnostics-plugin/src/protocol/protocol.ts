@@ -71,6 +71,13 @@ const EVENTS_PATH = '/v1/events';
  * @internal
  */
 export const QUEUES_PATH = '/v1/queues';
+/**
+ * The trace observations path (M98g); its target carries the same canonical
+ * `?after=<N>&limit=<N>` query as the events and queues targets.
+ *
+ * @internal
+ */
+export const TRACES_PATH = '/v1/traces';
 
 /**
  * The maximum events per read — the same fixed 128 the kernel's reader
@@ -94,7 +101,7 @@ const EVENTS_QUERY = /^after=([0-9]+)&limit=([0-9]+)$/;
  * @internal
  */
 export interface ParsedTarget {
-  readonly op: 'status' | 'snapshot' | 'events' | 'health' | 'queues';
+  readonly op: 'status' | 'snapshot' | 'events' | 'health' | 'queues' | 'traces';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events and queues); `0` for the other ops. */
@@ -132,6 +139,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   if (path === QUEUES_PATH) {
     return parsePagedTarget('queues', path, search);
   }
+  if (path === TRACES_PATH) {
+    return parsePagedTarget('traces', path, search);
+  }
   return null;
 }
 
@@ -146,7 +156,7 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
  * @returns The parsed target, or `null` for any non-canonical form
  */
 function parsePagedTarget(
-  op: 'events' | 'queues',
+  op: 'events' | 'queues' | 'traces',
   path: string,
   search: string,
 ): ParsedTarget | null {
@@ -370,7 +380,7 @@ export function currentInspectorsManifest(): InspectorsManifest {
     health: true,
     configuration: false,
     queues: true,
-    traces: false,
+    traces: true,
     authorization: false,
     cache: false,
     events: false,
@@ -696,6 +706,25 @@ export function isAliasShape(value: unknown): value is string {
   }
   const bytes = ALIAS_ENCODER.encode(value).length;
   return bytes >= 1 && bytes <= MAX_ALIAS_BYTES;
+}
+
+/**
+ * Reports whether a string carries a C0/C1 control code point. Shared by
+ * every display-alias check on the wire — a control character in a displayed
+ * alias could forge a consumer's output.
+ *
+ * @param value - The candidate string
+ * @returns `true` when a control code point is present
+ * @internal
+ */
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0)!;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** A finite, non-negative millisecond measurement, or `null` where allowed. */

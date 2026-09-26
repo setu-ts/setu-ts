@@ -19,6 +19,11 @@ import { loadConsoleExporter } from '../exporters/console-exporter.ts';
 import { createSpanProcessor } from '../services/span-processor-factory.ts';
 import { loadAsyncLocalStorageContextManager, registerContextManager } from './context-manager.ts';
 import type { ContextManagerOutcome } from './context-manager.ts';
+import type {
+  CompiledTraceDiagnosticsPolicy,
+  SpanObservationCollector,
+} from '../diagnostics/span-observation-collector.ts';
+import { DiagnosticSpanProcessor } from '../diagnostics/diagnostic-span-processor.ts';
 
 // OTel API handle — populated by loadOtelTracerProvider when the SDK is loaded.
 let _otelApi: OtelApi | null = null;
@@ -156,6 +161,18 @@ export interface BuildTracerHostOptions {
    */
   validated?: boolean;
   contextActivation?: boolean;
+  /**
+   * The compiled M98g trace-observation policy and its collector. When set,
+   * a `DiagnosticSpanProcessor` is appended AFTER the configured exporter
+   * processor in the SAME `BasicTracerProvider` constructor — the exporter
+   * path is untouched and the diagnostic processor never wraps it.
+   *
+   * @internal
+   */
+  diagnostics?: {
+    readonly policy: CompiledTraceDiagnosticsPolicy;
+    readonly collector: SpanObservationCollector;
+  };
 }
 
 /**
@@ -256,10 +273,21 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
     { SimpleSpanProcessor, BatchSpanProcessor } as never,
   );
 
+  // The exporter processor stays FIRST and untouched; the M98g diagnostic
+  // processor is appended after it, in the same constructor config, so it
+  // observes every completed sampled span the exporter sees without ever
+  // wrapping it.
+  const spanProcessors: unknown[] = [processor as never];
+  if (opts.diagnostics !== undefined) {
+    spanProcessors.push(
+      new DiagnosticSpanProcessor(opts.diagnostics.policy, opts.diagnostics.collector),
+    );
+  }
+
   // Build provider via constructor config (2.x API)
   const provider = new BasicTracerProvider({
     resource,
-    spanProcessors: [processor as never],
+    spanProcessors,
     sampler: sampler as never,
   });
 
@@ -394,6 +422,7 @@ export function buildTracerHost(opts: BuildTracerHostOptions): TracerHost {
 export async function loadOtelTracerProvider(
   options: TelemetryPluginOptions,
   reportActivation?: ContextActivationReporter,
+  diagnostics?: BuildTracerHostOptions['diagnostics'],
 ): Promise<TracerHost> {
   // Validate options BEFORE lazy-loading (fail fast, avoid unnecessary imports)
   if (options.exporter === 'otlp' && !options.endpoint) {
@@ -448,6 +477,7 @@ export async function loadOtelTracerProvider(
     pluginOptions: options,
     validated: true, // loadOtelTracerProvider already validated above
     contextActivation,
+    ...(diagnostics === undefined ? {} : { diagnostics }),
   };
   if (otlpExporterCtor) {
     buildOpts.otlpExporterCtor = otlpExporterCtor;

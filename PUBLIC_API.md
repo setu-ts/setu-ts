@@ -4040,23 +4040,23 @@ pairing automatically, serializes calls with strictly increasing sequence number
 response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
-`{ health: true, configuration: false, queues: true, traces: false, authorization: false,
+`{ health: true, configuration: false, queues: true, traces: true, authorization: false,
 cache: false, events: false, scheduler: false, realtime: false, storage: false,
 outboundHttp: false }`
-(`queues` is `true` since M98f, below) — and the connector serves a first inspector operation,
-`GET /v1/health`. The client reads it through `client.health(): Promise<HealthDiagnosticsSnapshot>`.
-The connector resolves the optional health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at
-registration: an absent source answers a typed `unsupported` snapshot (no indicator runs, startup
-never fails), a registered-but-disabled source answers `disabled`, and a throwing source answers a
-value-free `collection-failed` snapshot — as does a source whose projected DTO fails the exact
-validator (an unknown enum, a non-finite or negative measurement, an oversized alias, more than 64
-observations, a malformed shape), so nothing unvalidated is ever signed — none of which changes the
-application's readiness. The snapshot is the health plugin's minimized DTO (approved alias,
-framework status, outcome state, monotonic timing only — no indicator `data`, no error text, no
-absolute time), projected field-by-field and bounded by the same 256 KiB response ceiling as every
-other operation. A client paired against a legacy M98b status body (no manifest) resolves all
-inspectors to `false` and its `health()` answers `unsupported` without sending the request. The full
-wire shape is in `docs/diagnostics-protocol.md`.
+(`queues` is `true` since M98f, `traces` since M98g, below) — and the connector serves a first
+inspector operation, `GET /v1/health`. The client reads it through
+`client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector resolves the optional health
+source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source answers a
+typed `unsupported` snapshot (no indicator runs, startup never fails), a registered-but-disabled
+source answers `disabled`, and a throwing source answers a value-free `collection-failed` snapshot —
+as does a source whose projected DTO fails the exact validator (an unknown enum, a non-finite or
+negative measurement, an oversized alias, more than 64 observations, a malformed shape), so nothing
+unvalidated is ever signed — none of which changes the application's readiness. The snapshot is the
+health plugin's minimized DTO (approved alias, framework status, outcome state, monotonic timing
+only — no indicator `data`, no error text, no absolute time), projected field-by-field and bounded
+by the same 256 KiB response ceiling as every other operation. A client paired against a legacy M98b
+status body (no manifest) resolves all inspectors to `false` and its `health()` answers
+`unsupported` without sending the request. The full wire shape is in `docs/diagnostics-protocol.md`.
 
 **Queue observations (M98f).** The connector serves `GET /v1/queues?after=<N>&limit=<N>` (the same
 canonical query grammar as `/v1/events`), read through
@@ -4078,6 +4078,36 @@ registered the batch is `state: 'unsupported'`; a client whose negotiated manife
 `queues: false` answers that frozen batch, echoing its cursor, without sending the request.
 `IDiagnosticsClient.queues` is a new REQUIRED member — additive for callers; a structural
 implementation of `IDiagnosticsClient` must add it (the package has not yet been published).
+
+**Trace observations (M98g).** The connector serves `GET /v1/traces?after=<N>&limit=<N>` (the same
+canonical query grammar as `/v1/events`), read through
+`client.traces(after: number, limit?: number): Promise<TraceDiagnosticsBatch>` — same argument
+bounds as `read()`. The TelemetryPlugin ALWAYS registers one `ITraceDiagnosticsSource` under
+`CAPABILITIES.TRACE_DIAGNOSTICS`: without its `diagnostics` option it answers `disabled`; with the
+option but a custom `tracerProviderFactory` or no exporter it answers `unsupported` with the fixed
+coverage reason (`custom-provider` / `noop-no-provider`); with the option on the built-in OTel
+provider an additional span processor — appended AFTER the exporter processor in the same provider
+constructor, never wrapping it, never exporting, never throwing into OTel, and closed only by the
+provider's own shutdown — minimizes every finished SAMPLED span to the approved field set before
+retention. Only exact raw span names listed in `TraceDiagnosticsOptions.operations` are observed,
+each replaced by its approved alias (the M98d alias shape: 1–64 UTF-8 bytes, no control characters,
+unique; at most 128 operations, `serviceAlias` never derived from the OTel resource). Records carry
+sequence, the two aliases, W3C-validated trace/span/parent identifiers (all-zero rejected;
+`parentSpanId` present exactly when `parentVisibility` is `observed` or `remote-or-unobserved`), at
+most eight validated link identifier pairs, kind, outcome (`ok`/`error`/`unset`), `durationMs`,
+`ageMs` and `parentVisibility` — never the span name, attributes, events, resource labels,
+tracestate, baggage, exceptions or a status message. The batch reports `state`, `coverage`,
+`instrumentation` (the Node-only families whose registry outcome said enabled), `sampler` (the
+configured description or `unknown`), M98a's cursor contract over a 1,024-record ring (`lost` is per
+batch and exact), and a saturating `droppedSpans` counter. A parent is an identifier relationship
+only — no edge is fabricated — and `ageMs` describes arrival at ONE process, never a global
+timeline; correlation joins equal trace ids across independently authenticated sessions and grants
+no discovery authority. A source that throws or fails the exact validator is answered
+`collection-failed`; with no source the batch is `unsupported` with `coverage: 'unknown'`; a client
+whose negotiated manifest has `traces: false` answers that frozen batch, echoing its cursor, without
+sending the request. `IDiagnosticsClient.traces` is a new REQUIRED member — additive for callers; a
+structural implementation of `IDiagnosticsClient` must add it (the package has not yet been
+published).
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
@@ -7039,6 +7069,25 @@ bypass the lazy import entirely.
 | `instrumentations`      | `InstrumentationsConfig`                                   | No              | Auto-instrumentation config (runtime-gated no-op)                                                                                                                                                       |
 | `contextPropagation`    | `boolean`                                                  | No              | Activate real OTel spans (default: `true`)                                                                                                                                                              |
 | `contextManagerFactory` | `() => Promise<{ enable(): unknown; disable(): unknown }>` | No              | Injectable context-manager **factory** — it returns a promise of a manager, not a manager. The return type is structural, so it can resolve to an OTel context manager with no import from this package |
+| `diagnostics`           | `TraceDiagnosticsOptions`                                  | No              | Opt-in minimized completed-span observations for the local diagnostics connector (M98g, below)                                                                                                          |
+
+### Trace diagnostics (M98g)
+
+`TraceDiagnosticsOptions` is the opt-in observation policy for the local diagnostics connector's
+`GET /v1/traces` operation (documented in the Diagnostics Connector section). It requires the
+LITERAL `enabled: true`, a `serviceAlias`, and an `operations` map of exact raw span name → approved
+alias (at most 128; each alias 1–64 UTF-8 bytes, no control character, unique — approving an exact
+alias IS authorizing its disclosure; `serviceAlias` is never derived from the OTel resource). Every
+option is validated at `TelemetryPlugin(...)` construction with a fixed, value-free `RangeError`.
+When present with the built-in OTel provider, the plugin appends an internal span processor AFTER
+the exporter processor in the same provider constructor: the exporter path is byte-identical
+(measured — the exporter still receives every span), the processor never exports, never throws into
+OTel, and unapproved spans are counted and dropped before anything is read. The plugin ALWAYS
+registers an `ITraceDiagnosticsSource` under `CAPABILITIES.TRACE_DIAGNOSTICS` (`provides` names it):
+without the option it answers `disabled`, with the option under a custom `tracerProviderFactory` or
+without an exporter it answers `unsupported` with the fixed coverage reason. Sampling, activation
+and export behavior are unchanged. See
+[Diagnostics Connector](#diagnostics-connector-setu-tsdiagnostics-plugin) for the served contract.
 
 ### Span nesting and broker propagation
 
@@ -9976,6 +10025,19 @@ vocabularies `DiagnosticsNodeKind`, `DiagnosticsEdgeKind`, `DiagnosticsSnapshotS
 value and no capability token, because the reader is reached through the application, never resolved
 from the registry. Activation, label allowlists, and the projection bounds are the kernel's — see
 [Kernel diagnostics](#kernel-diagnostics-setu-tskernel--setu-tscommon).
+
+**Trace observation contracts (M98g).** `CAPABILITIES.TRACE_DIAGNOSTICS` (`'trace-diagnostics'`) is
+a SINGLE-provider token: the TelemetryPlugin always registers one `ITraceDiagnosticsSource`
+(`read(instanceId, after, limit?): TraceDiagnosticsBatch` — synchronous, requires a non-empty
+instance id the batch must match, M98a cursor contract over a 1,024-record ring, `limit` 1–128,
+throws the fixed value-free `RangeError` for a bad instance, a bad cursor, or a cursor beyond the
+source's sequence). The DTOs are `TraceDiagnosticsBatch` and `TraceObservation`; the closed
+vocabularies are `TraceSourceState`, `TraceCoverage`, `TraceInstrumentationKind`, `TraceOutcome`,
+`TraceParentVisibility` and the `TraceSamplerDescription` shape. Minimization precedes retention:
+only exact approved operation aliases, validated W3C identifiers, at most eight validated link
+pairs, kind, outcome, duration and monotonic age are retained; span names, attributes, events,
+resources, tracestate, baggage, exceptions and status messages never reach collector state
+(canary-asserted). See the diagnostics-connector section for the wire operation.
 
 **Queue observation contracts (M98f).** `CAPABILITIES.QUEUE_DIAGNOSTICS` (`'queue-diagnostics'`) is
 a MULTI-provider token: every QueuePlugin instance registers one `IQueueDiagnosticsSource`

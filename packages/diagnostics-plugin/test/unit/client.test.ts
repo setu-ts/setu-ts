@@ -86,6 +86,8 @@ function fakeServer(
     healthBody?: Record<string, unknown>;
     /** The body to serve for `/v1/queues`; defaults to a one-event batch. */
     queuesBody?: (after: number) => Record<string, unknown>;
+    /** The body to serve for `/v1/traces`; defaults to a one-record batch. */
+    tracesBody?: (after: number) => Record<string, unknown>;
   } = {},
 ): { fetch: typeof fetch; requests: RecordedRequest[] } {
   const requests: RecordedRequest[] = [];
@@ -158,6 +160,9 @@ function fakeServer(
       } else if (url.pathname === '/v1/queues') {
         const after = Number(url.searchParams.get('after'));
         bodyText = JSON.stringify((overrides.queuesBody ?? queueBatchBody)(after));
+      } else if (url.pathname === '/v1/traces') {
+        const after = Number(url.searchParams.get('after'));
+        bodyText = JSON.stringify((overrides.tracesBody ?? traceBatchBody)(after));
       } else {
         bodyText = JSON.stringify(minimalBatch());
       }
@@ -250,6 +255,40 @@ function queueBatchBody(after: number): Record<string, unknown> {
     lost: 0,
     truncatedSources: 0,
     truncatedDepths: 0,
+  };
+}
+
+/**
+ * A well-formed trace batch with one record just past `after`.
+ *
+ * @param after - The requested sequence cursor
+ * @returns The batch body
+ */
+function traceBatchBody(after: number): Record<string, unknown> {
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    coverage: 'completed-sampled-spans',
+    instrumentation: ['http'],
+    sampler: { kind: 'always-on' },
+    records: [{
+      sequence: after + 1,
+      serviceAlias: 'orders',
+      operationAlias: 'create-order',
+      traceId: 'a'.repeat(32),
+      spanId: 'b'.repeat(16),
+      links: [],
+      kind: 'server',
+      outcome: 'ok',
+      durationMs: 4,
+      ageMs: 6,
+      parentVisibility: 'root',
+    }],
+    next: after + 1,
+    lost: 0,
+    closed: false,
+    droppedSpans: 0,
   };
 }
 
@@ -827,4 +866,79 @@ describe('Client — queue observations (M98f)', () => {
       client.close();
     });
   }
+});
+
+describe('Client — trace observations (M98g)', () => {
+  it('pairs, sends the signed traces request, and returns the validated frozen batch', async () => {
+    const { client, requests } = buildClient();
+    const batch = await client.traces(0);
+    expect(requests.some((request) => request.target === '/v1/traces?after=0&limit=128')).toBe(
+      true,
+    );
+    expect(requests.some((request) => request.instance === TEST_INSTANCE_ID)).toBe(true);
+    expect(batch.state).toBe('ready');
+    expect(batch.records[0]!.operationAlias).toBe('create-order');
+    expect(Object.isFrozen(batch)).toBe(true);
+    expect(Object.isFrozen(batch.records)).toBe(true);
+    client.close();
+  });
+
+  it('echoes the cursor and limit on the wire for a paged read', async () => {
+    const { client, requests } = buildClient();
+    const batch = await client.traces(41, 7);
+    expect(requests.some((request) => request.target === '/v1/traces?after=41&limit=7')).toBe(
+      true,
+    );
+    expect(batch.records[0]!.sequence).toBe(42);
+    client.close();
+  });
+
+  it('answers a manifest without the trace inspector locally, without probing the route', async () => {
+    const inspectors: Record<string, boolean> = {
+      health: true,
+      configuration: false,
+      queues: true,
+      traces: false,
+      authorization: false,
+      cache: false,
+      events: false,
+      scheduler: false,
+      realtime: false,
+      storage: false,
+      outboundHttp: false,
+    };
+    const { client, requests } = buildClient({
+      server: { statusInspectors: inspectors },
+    });
+    const batch = await client.traces(9);
+    expect(batch.state).toBe('unsupported');
+    expect(batch.coverage).toBe('unknown');
+    expect(batch.next).toBe(9);
+    expect(requests.some((request) => request.target.startsWith('/v1/traces'))).toBe(false);
+    client.close();
+  });
+
+  it('refuses a served body that fails the exact trace validator', async () => {
+    const bad = traceBatchBody(0);
+    (bad.records as Record<string, unknown>[])[0]!.spanId = 'not-a-span-id';
+    const { client } = buildClient({ server: { tracesBody: () => bad } });
+    await expect(client.traces(0)).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('refuses a served body whose cursor contract disagrees with the request', async () => {
+    const bad = traceBatchBody(5);
+    bad.lost = 3; // first sequence is 6: the gap must be 0, not 3
+    const { client } = buildClient({ server: { tracesBody: () => bad } });
+    await expect(client.traces(5)).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('refuses invalid arguments before any request', async () => {
+    const { client, requests } = buildClient();
+    await expect(client.traces(-1)).rejects.toThrow(CLIENT_ERRORS.arguments);
+    await expect(client.traces(0, 0)).rejects.toThrow(CLIENT_ERRORS.arguments);
+    expect(requests.every((request) => !request.target.startsWith('/v1/traces'))).toBe(true);
+    client.close();
+  });
 });
