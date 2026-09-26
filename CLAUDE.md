@@ -5294,7 +5294,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   in `2fbac039` with a counted `traceId-spanId` index, pinned through the real middleware; the
   independent re-audit of `2fbac039` passed with no finding open (5 new negative controls; all 13
   round-1 controls and 10 probes re-run green). Plan
-  `plans/archive/milestone-98g-distributed-tracing.md` — complete (PR pending).
+  `plans/archive/milestone-98g-distributed-tracing.md` — complete (PR #369).
 - **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
   security review and implementation audit required).
 
