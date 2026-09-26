@@ -1,8 +1,8 @@
 # Milestone 98f — Queue Attempt, Outcome and Depth Observations
 
-> **Status:** Implemented on `feat/m98f-queue-observations`; the committed-tree security audit is
-> pending. §11 records where implementation had to decide what this plan left open or corrected a
-> claim that did not survive the source.
+> **Status:** Complete on `feat/m98f-queue-observations`; the committed-tree security audit passed
+> after two re-audits. §11 records where implementation had to decide what this plan left open or
+> corrected a claim that did not survive the source.
 
 ## 0. Objective & scope
 

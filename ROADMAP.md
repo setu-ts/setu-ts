@@ -10652,10 +10652,11 @@ observation boundary and its shared contracts; 98b complete
 ([#352](https://github.com/setu-ts/setu-ts/pull/352)) — `packages/cli` development-entry scaffolding
 and per-member credential handoff; 98d complete
 ([#363](https://github.com/setu-ts/setu-ts/pull/363)) — minimized health observations, the
-`GET /v1/health` inspector and the status-body inspector manifest. These four are implemented and
-merged, awaiting publication in the next release cycle. **98e–98n are planned**, each with its own
-implementation plan and mandatory security audit. This umbrella records framework work for the
-separately maintained devtool; adding the later letters does not make them prerequisites for
+`GET /v1/health` inspector and the status-body inspector manifest; 98f complete (PR pending) — queue
+attempt, outcome and depth observations and the `GET /v1/queues` inspector. These five are
+implemented, awaiting publication in the next release cycle. **98e and 98g–98n are planned**, each
+with its own implementation plan and mandatory security audit. This umbrella records framework work
+for the separately maintained devtool; adding the later letters does not make them prerequisites for
 publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE exception recorded under
 the release requirements below — M98d's status-shape change must precede the first publication of
 `packages/diagnostics-plugin`, because the shipped client refuses a status body it does not expect
@@ -10954,10 +10955,10 @@ origin.
 
 ### Milestone 98f: Queue Attempt, Outcome and Depth Observations
 
-**Status:** implemented on `feat/m98f-queue-observations`; the committed-tree security audit is
-pending, and until it passes this letter is not complete. **Owner:** `packages/queue-plugin`, with
-necessary shared diagnostic (`packages/common`) and connector/client (`packages/diagnostics-plugin`)
-changes. **Plan:** `plans/milestone-98f-queue-observations.md`.
+**Status:** complete (PR pending); the committed-tree security audit passed and is recorded in the
+PR. **Owner:** `packages/queue-plugin`, with necessary shared diagnostic (`packages/common`) and
+connector/client (`packages/diagnostics-plugin`) changes. **Plan:**
+`plans/archive/milestone-98f-queue-observations.md`.
 
 **Existing foundation:** `IQueue` has no job enumeration or dead-letter reader. Final-attempt
 `onFailed` callbacks, outcome counters and some depth reporting already exist. Memory supports
@@ -10979,9 +10980,24 @@ success.
 - [x] Exclude job payloads, headers, raw job IDs, receipt/claim tokens, credentials and raw
       exceptions before capture. Bound alias maps and restrict observed queue/tenant scope. The
       extension receives neither broker credentials nor access to private adapter state.
-- [ ] Pass both security gates below with an adapter support matrix, failed-settlement cases,
+- [x] Pass both security gates below with an adapter support matrix, failed-settlement cases,
       canaries, bounded sustained attempts and proof that observation adds no reserve/ack/retry
       calls.
+
+**Shipped.** `QueuePlugin({ diagnostics })` records each dispatched attempt of an exactly
+allowlisted job name — approved queue alias, session-local `j<N>` job alias, attempt number,
+monotonic duration and age, processor outcome, and a settlement recorded only AFTER the adapter's
+settlement call returned (`unknown` on RabbitMQ and SQS, whose calls cannot be confirmed) — plus
+separately scheduled, bounded depth counts that report `unavailable` rather than zero. Every
+instance contributes a multi-provider source under `CAPABILITIES.QUEUE_DIAGNOSTICS`, and the
+connector serves `GET /v1/queues` through a bounded merge ring that reports merge-ring and
+per-source loss separately. Code review found and fixed a malformed persisted attempt number
+poisoning every later batch and a merge ring that outlived revocation. The committed-tree security
+audit found an observation slot that leaked when the job runner failed before settling, a hung depth
+backend reported healthy after its first cycle, and an incomplete `droppedAttempts` description —
+all fixed — and traced the first to a pre-existing `QueueService` defect on `main`: a thrown value
+whose string conversion throws escaped the failure report and left the job stuck. That defect is
+fixed here at the maintainer's direction, and two re-audits passed with no finding open.
 
 **Outside M98f:** durable job/dead-letter enumeration, retry, purge, moving jobs and replay. A
 future browser needs a separately reviewed non-consuming read contract and resource/tenant
@@ -11929,13 +11945,13 @@ because one of them invalidated part of a previous run's claims:
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                  |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                      |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                        |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98d complete, 98e–98n planned with security audit gates)                              |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98d and 98f complete, 98e and 98g–98n planned with security audit gates)              |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347)) |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))             |
 | 98d       | ✅     | common + health-plugin + diagnostics-plugin — minimized health observations ([#363](https://github.com/setu-ts/setu-ts/pull/363))         |
 | 98e       | ⬜     | config-plugin — value-free configuration provenance; design security review and implementation audit required                             |
-| 98f       | ⬜     | queue-plugin — attempt, outcome and depth observations; implemented, committed-tree security audit pending                                |
+| 98f       | ✅     | common + queue-plugin + diagnostics-plugin — queue attempt, outcome and depth observations (PR pending)                                   |
 | 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                       |
 | 98i       | ⬜     | cache observations — design security review and implementation audit required                                                             |
