@@ -271,8 +271,9 @@ function readSourceDepth(value: unknown): ValidatedSourceDepth | null {
  *
  * Refused: any unknown, missing or extra key; a value outside its fixed
  * vocabulary or bound; an alias outside the display shape; `instanceAlias`
- * present exactly when the state is not `disabled` violated; more attempts
- * or depths than the source bounds allow; sequences not strictly increasing
+ * present exactly when the state is not `disabled` violated; a `disabled`
+ * batch carrying any attempt or depth; more attempts or depths than the
+ * source bounds allow; sequences not strictly increasing
  * past the cursor; and a `next`/`lost` pair disagreeing with the returned
  * attempts. Any throw while reading — a hostile getter — is a refusal too.
  *
@@ -320,6 +321,12 @@ export function readQueueSourceBatch(
       !isCount(next) || !isCount(lost) || typeof closed !== 'boolean' ||
       !isCount(droppedAttempts) || !isCount(evictedJobAliases)
     ) {
+      return null;
+    }
+    // A disabled source observes nothing. It carries no instance alias, so an
+    // attempt it returned would enter the merge ring alias-less and fail the
+    // exact projection validator on every later read of every source.
+    if (state === 'disabled' && (rawAttempts.length > 0 || rawDepths.length > 0)) {
       return null;
     }
     const attempts: ValidatedSourceAttempt[] = [];

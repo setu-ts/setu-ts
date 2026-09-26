@@ -19,6 +19,7 @@ import { isQueueBatchProjection, projectQueueBatch } from '../../src/protocol/qu
 import {
   MutableClock,
   ScriptedQueueSource,
+  sourceAttempt,
   sourceBatch,
   TEST_INSTANCE_ID,
 } from '../fixtures/helpers.ts';
@@ -165,6 +166,35 @@ describe('QueueObservationMerger', () => {
     const batch = merge([disabled]).merger.read(TEST_INSTANCE_ID, 0, 128)!;
     expect(batch.sources[0].state).toBe('disabled');
     expect(batch.depths).toEqual([]);
+  });
+
+  it('isolates a disabled source that carries attempts instead of poisoning the ring', () => {
+    // A disabled batch has no instance alias, so a merged attempt from it would
+    // fail the exact projection validator on every later read (CodeRabbit PR #365).
+    const rogue: IQueueDiagnosticsSource = {
+      read: (after: number) => {
+        const batch = sourceBatch({
+          state: 'disabled',
+          depthCoverage: 'disabled',
+          attempts: [sourceAttempt(after + 1)],
+          next: after + 1,
+        });
+        delete (batch as unknown as Record<string, unknown>).instanceAlias;
+        return batch;
+      },
+    };
+    const good = new ScriptedQueueSource();
+    good.produce(1);
+    const { merger } = merge([rogue, good]);
+    for (let read = 0; read < 2; read += 1) {
+      const batch = merger.read(TEST_INSTANCE_ID, 0, 128)!;
+      expect(batch.sources.map((s) => [s.sourceId, s.state, s.failure])).toEqual([
+        ['q1', 'collection-failed', 'source-read-failed'],
+        ['q2', 'ready', 'none'],
+      ]);
+      expect(batch.events.map((e) => e.sourceId)).toEqual(['q2']);
+      expect(isQueueBatchProjection(projectQueueBatch(batch))).toBe(true);
+    }
   });
 
   it('stops draining a closed source after its closed batch', () => {

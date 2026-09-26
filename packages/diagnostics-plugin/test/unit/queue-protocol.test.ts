@@ -83,6 +83,27 @@ describe('readQueueSourceBatch', () => {
       return batch;
     }],
     ['a disabled batch with an alias', () => sourceBatch({ state: 'disabled' })],
+    ['a disabled batch with attempts', () => {
+      const batch = sourceBatch({ state: 'disabled', attempts: [sourceAttempt(1)], next: 1 });
+      delete (batch as unknown as Record<string, unknown>).instanceAlias;
+      return batch;
+    }],
+    ['a disabled batch with depths', () => {
+      const batch = sourceBatch({
+        state: 'disabled',
+        depths: [{
+          queueAlias: 'emails',
+          ready: 1,
+          processing: 0,
+          dead: 0,
+          scope: 'process-local',
+          coverage: 'complete',
+          ageMs: 0,
+        }],
+      });
+      delete (batch as unknown as Record<string, unknown>).instanceAlias;
+      return batch;
+    }],
     ['an oversized alias', () => sourceBatch({ instanceAlias: 'x'.repeat(65) })],
     ['a control character in an alias', () => sourceBatch({ instanceAlias: 'a\u001b[2Jb' })],
     ['an unknown coverage', () => sourceBatch({ depthCoverage: 'full' as 'complete' })],
