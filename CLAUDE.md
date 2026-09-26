@@ -5231,6 +5231,19 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `--transport-url` code injection into generated `setu.config.ts` on `main` (OBS-1), fixed here at
   the maintainer's direction. The F5 and OBS-1 fixes after round 4 were not re-audited: the
   maintainer waived round 5 rather than hold the merge — complete (PR #364).
+- **Milestone 98f** (`packages/common` + `packages/queue-plugin` + `packages/diagnostics-plugin` —
+  queue attempt, outcome and depth observations): `QueuePlugin({ diagnostics })` records each
+  dispatched attempt of an allowlisted job name — queue alias, session-local `j<N>` job alias,
+  attempt, monotonic timing, outcome, and a settlement recorded only after the adapter's settlement
+  call returned (`unknown` on RabbitMQ and SQS) — plus separately scheduled depth counts that report
+  `unavailable`, never zero. Every instance registers a multi-provider source under the new
+  `CAPABILITIES.QUEUE_DIAGNOSTICS`; the connector serves `GET /v1/queues` through a bounded merge
+  ring reporting merge-ring and per-source loss separately, and the client gains `queues()`. The
+  independent committed-tree audit found a leaked observation slot, a hung depth backend reported
+  healthy after its first cycle, and an incomplete counter description, all fixed; it traced the
+  first to a pre-existing `QueueService.#report` defect on `main` (a thrown value whose string
+  conversion throws stranded its job), fixed here at the maintainer's direction. Two re-audits
+  passed with no finding open — complete (PR #365).
 - **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
   design security review and implementation audit required).
 

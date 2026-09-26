@@ -53,8 +53,8 @@ export const PROTOCOL_RESPONSE_HEADERS: Readonly<Record<string, string>> = {
 };
 
 /**
- * The three protocol operations' canonical targets. The events target is
- * the only one carrying a query, and only in the canonical
+ * The protocol operations' canonical targets. The events and queues targets
+ * are the only ones carrying a query, and only in the canonical
  * `?after=<N>&limit=<N>` form — exactly this order, both parameters, no
  * others.
  *
@@ -64,6 +64,13 @@ export const STATUS_TARGET = '/v1/status';
 export const SNAPSHOT_TARGET = '/v1/snapshot';
 export const HEALTH_TARGET = '/v1/health';
 const EVENTS_PATH = '/v1/events';
+/**
+ * The queue observations path (M98f); its target carries the same canonical
+ * `?after=<N>&limit=<N>` query as the events target.
+ *
+ * @internal
+ */
+export const QUEUES_PATH = '/v1/queues';
 
 /**
  * The maximum events per read — the same fixed 128 the kernel's reader
@@ -87,12 +94,12 @@ const EVENTS_QUERY = /^after=([0-9]+)&limit=([0-9]+)$/;
  * @internal
  */
 export interface ParsedTarget {
-  readonly op: 'status' | 'snapshot' | 'events' | 'health';
+  readonly op: 'status' | 'snapshot' | 'events' | 'health' | 'queues';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
-  /** The parsed `after` cursor (events only); `0` for the other ops. */
+  /** The parsed `after` cursor (events and queues); `0` for the other ops. */
   readonly after: number;
-  /** The parsed event limit (events only); `0` for the other ops. */
+  /** The parsed limit (events and queues); `0` for the other ops. */
   readonly limit: number;
 }
 
@@ -120,26 +127,42 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
     return { op: 'health', canonicalTarget: HEALTH_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENTS_PATH) {
-    const match = EVENTS_QUERY.exec(search);
-    if (match === null) {
-      return null;
-    }
-    const after = parseCanonical(match[1]);
-    const limit = parseCanonical(match[2]);
-    if (after === null || limit === null) {
-      return null;
-    }
-    if (after > Number.MAX_SAFE_INTEGER || limit < 1 || limit > CONNECTOR_MAX_EVENT_LIMIT) {
-      return null;
-    }
-    return {
-      op: 'events',
-      canonicalTarget: `${EVENTS_PATH}?${search}`,
-      after,
-      limit,
-    };
+    return parsePagedTarget('events', path, search);
+  }
+  if (path === QUEUES_PATH) {
+    return parsePagedTarget('queues', path, search);
   }
   return null;
+}
+
+/**
+ * Parses the canonical `after=<N>&limit=<N>` query of a paged target — the
+ * ONE grammar the events and queues operations share, so the two cannot drift
+ * about what a canonical cursor is.
+ *
+ * @param op - The paged operation
+ * @param path - The exact operation path
+ * @param search - The raw query string without the leading `?`
+ * @returns The parsed target, or `null` for any non-canonical form
+ */
+function parsePagedTarget(
+  op: 'events' | 'queues',
+  path: string,
+  search: string,
+): ParsedTarget | null {
+  const match = EVENTS_QUERY.exec(search);
+  if (match === null) {
+    return null;
+  }
+  const after = parseCanonical(match[1]);
+  const limit = parseCanonical(match[2]);
+  if (after === null || limit === null) {
+    return null;
+  }
+  if (after > Number.MAX_SAFE_INTEGER || limit < 1 || limit > CONNECTOR_MAX_EVENT_LIMIT) {
+    return null;
+  }
+  return { op, canonicalTarget: `${path}?${search}`, after, limit };
 }
 
 /**
@@ -164,8 +187,9 @@ function parseCanonical(digits: string): number | null {
  *
  * @param value - The value to check
  * @returns `true` when the value is a non-null, non-array object
+ * @internal
  */
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
@@ -334,8 +358,9 @@ export const INSPECTOR_KEYS = [
 export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number], boolean>>;
 
 /**
- * The inspector manifest M98d serves: `health` is implemented; the rest are
- * reserved and false until their own connector operation ships (M98e–M98n).
+ * The inspector manifest this connector serves: `health` (M98d) and `queues`
+ * (M98f) are implemented; the rest are reserved and false until their own
+ * connector operation ships.
  *
  * @returns The fixed manifest
  * @internal
@@ -344,7 +369,7 @@ export function currentInspectorsManifest(): InspectorsManifest {
   return {
     health: true,
     configuration: false,
-    queues: false,
+    queues: true,
     traces: false,
     authorization: false,
     cache: false,
@@ -646,10 +671,31 @@ const MAX_ALIAS_BYTES = 64;
 
 const ALIAS_ENCODER = new TextEncoder();
 
-/** Reports whether a record has exactly the given own keys. */
-function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+/**
+ * Reports whether a record has exactly the given own keys.
+ *
+ * @internal
+ */
+export function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   const own = Object.keys(value);
   return own.length === keys.length && keys.every((k) => Object.hasOwn(value, k));
+}
+
+/**
+ * Reports whether a value is an approved-alias SHAPE: a string of 1–64
+ * UTF-8 bytes. (Control characters are refused where the alias is approved;
+ * the wire bound is the byte length.)
+ *
+ * @param value - The candidate alias
+ * @returns `true` for a well-shaped alias
+ * @internal
+ */
+export function isAliasShape(value: unknown): value is string {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const bytes = ALIAS_ENCODER.encode(value).length;
+  return bytes >= 1 && bytes <= MAX_ALIAS_BYTES;
 }
 
 /** A finite, non-negative millisecond measurement, or `null` where allowed. */
@@ -667,12 +713,7 @@ function isHealthObservationProjection(value: unknown): boolean {
   if (!hasExactKeys(value, keys)) {
     return false;
   }
-  const alias = value.indicatorAlias;
-  if (typeof alias !== 'string') {
-    return false;
-  }
-  const aliasBytes = ALIAS_ENCODER.encode(alias).length;
-  return aliasBytes >= 1 && aliasBytes <= MAX_ALIAS_BYTES &&
+  return isAliasShape(value.indicatorAlias) &&
     typeof value.state === 'string' && OBSERVATION_STATES.has(value.state) &&
     (!reported || (typeof value.status === 'string' && HEALTH_STATUSES.has(value.status))) &&
     isMeasurement(value.latencyMs) &&

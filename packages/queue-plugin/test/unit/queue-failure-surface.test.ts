@@ -200,7 +200,7 @@ describe('job outcome sink (X8-4)', () => {
   it('should report exactly one outcome per settled job', async () => {
     const outcomes: { name: string; outcome: JobOutcome }[] = [];
     const sink = {
-      onOutcome: (name: string, outcome: JobOutcome) => outcomes.push({ name, outcome }),
+      onProcessorOutcome: (name: string, outcome: JobOutcome) => outcomes.push({ name, outcome }),
     };
 
     await runJob(runtime, makeAdapter(), job(1), () => {}, undefined, sink);
@@ -240,7 +240,7 @@ describe('job outcome sink (X8-4)', () => {
     const reported: string[] = [];
 
     await runJob(runtime, adapter, job(1), () => {}, (message) => reported.push(message), {
-      onOutcome: () => {
+      onProcessorOutcome: () => {
         throw new Error('metrics backend refused');
       },
     });

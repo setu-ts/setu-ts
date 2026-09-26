@@ -4040,23 +4040,44 @@ pairing automatically, serializes calls with strictly increasing sequence number
 response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
-`{ health: true, configuration: false, queues: false, traces: false, authorization: false,
+`{ health: true, configuration: false, queues: true, traces: false, authorization: false,
 cache: false, events: false, scheduler: false, realtime: false, storage: false,
 outboundHttp: false }`
-— and the connector serves a first inspector operation, `GET /v1/health`. The client reads it
-through `client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector resolves the optional
-health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source
-answers a typed `unsupported` snapshot (no indicator runs, startup never fails), a
-registered-but-disabled source answers `disabled`, and a throwing source answers a value-free
-`collection-failed` snapshot — as does a source whose projected DTO fails the exact validator (an
-unknown enum, a non-finite or negative measurement, an oversized alias, more than 64 observations, a
-malformed shape), so nothing unvalidated is ever signed — none of which changes the application's
-readiness. The snapshot is the health plugin's minimized DTO (approved alias, framework status,
-outcome state, monotonic timing only — no indicator `data`, no error text, no absolute time),
-projected field-by-field and bounded by the same 256 KiB response ceiling as every other operation.
-A client paired against a legacy M98b status body (no manifest) resolves all inspectors to `false`
-and its `health()` answers `unsupported` without sending the request. The full wire shape is in
-`docs/diagnostics-protocol.md`.
+(`queues` is `true` since M98f, below) — and the connector serves a first inspector operation,
+`GET /v1/health`. The client reads it through `client.health(): Promise<HealthDiagnosticsSnapshot>`.
+The connector resolves the optional health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at
+registration: an absent source answers a typed `unsupported` snapshot (no indicator runs, startup
+never fails), a registered-but-disabled source answers `disabled`, and a throwing source answers a
+value-free `collection-failed` snapshot — as does a source whose projected DTO fails the exact
+validator (an unknown enum, a non-finite or negative measurement, an oversized alias, more than 64
+observations, a malformed shape), so nothing unvalidated is ever signed — none of which changes the
+application's readiness. The snapshot is the health plugin's minimized DTO (approved alias,
+framework status, outcome state, monotonic timing only — no indicator `data`, no error text, no
+absolute time), projected field-by-field and bounded by the same 256 KiB response ceiling as every
+other operation. A client paired against a legacy M98b status body (no manifest) resolves all
+inspectors to `false` and its `health()` answers `unsupported` without sending the request. The full
+wire shape is in `docs/diagnostics-protocol.md`.
+
+**Queue observations (M98f).** The connector serves `GET /v1/queues?after=<N>&limit=<N>` (the same
+canonical query grammar as `/v1/events`), read through
+`client.queues(after: number, limit?: number): Promise<QueueDiagnosticsBatch>` — same argument
+bounds as `read()` (non-negative safe-integer cursor, limit 1–128, default 128). At bootstrap the
+connector reads every `IQueueDiagnosticsSource` registered under `CAPABILITIES.QUEUE_DIAGNOSTICS`
+(every QueuePlugin instance contributes one as a multi provider; at most 16 are read, the rest
+counted in `truncatedSources`). Because one session is permitted, the CONNECTOR keeps one cursor per
+source: each authenticated queue read drains every source's new attempts, in registration order,
+into a bounded 1,024-event merge ring, then serves the requested page of that ring under M98a's
+cursor contract (exclusive `after`, exact `lost` for merge-ring eviction, an empty page echoes its
+cursor, a cursor beyond the merge sequence is refused `invalid-request`). A source ring that wrapped
+between two reads is reported on THAT source's status `lost`, never in the batch `lost`. A source
+that throws or answers a batch failing the connector's exact validator is reported
+`collection-failed` with `failure: 'source-read-failed'` and nothing it returned is merged; the
+merged frame runs the exact `QueueDiagnosticsBatch` validator before it is signed, and depths —
+never events — are trimmed to keep it within 256 KiB (`truncatedDepths`). With no queue source
+registered the batch is `state: 'unsupported'`; a client whose negotiated manifest has
+`queues: false` answers that frozen batch, echoing its cursor, without sending the request.
+`IDiagnosticsClient.queues` is a new REQUIRED member — additive for callers; a structural
+implementation of `IDiagnosticsClient` must add it (the package has not yet been published).
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
@@ -5252,6 +5273,10 @@ Provides background job queue with Memory and Redis adapters.
 - **`RecurringOptions`** — Options for `queue.addRecurring()` (re-exported)
 - **`QueueLogger`** — Minimal `error`/`warn` logger surface the service reports background failures
   through (structurally compatible with `ILogger`)
+- **`QueueDiagnosticsOptions`** — Opt-in minimized attempt/depth observations for the diagnostics
+  connector (M98f): `{ enabled: true, instanceAlias, queues, depths? }`
+- **`QueueDepthDiagnosticsOptions`** — Separately bounded depth collection:
+  `{ intervalMs, timeoutMs, concurrency }`
 
 ### Registration
 
@@ -5316,6 +5341,67 @@ app.register(QueuePlugin({
 
 Both arms coexist with imperative `queue.process()` calls. With no behaviours, a processor receives
 the original job directly and no chain is allocated.
+
+### Queue observations (M98f)
+
+The plugin accepts an opt-in `diagnostics` option that exposes actual attempts and supported depths
+as minimized observations through the diagnostics connector's `GET /v1/queues`. It never changes a
+processor, a retry, a failure callback, or a settlement.
+
+```typescript
+app.register(QueuePlugin({
+  adapter: 'redis',
+  url: config.get('REDIS_URL'),
+  diagnostics: {
+    enabled: true,
+    instanceAlias: 'mailer',
+    // Exact job-name -> display-alias allowlist; unlisted names are neither observed nor counted.
+    queues: { 'send-welcome-email': 'welcome-emails' },
+    // Optional, separately bounded depth counting; absent by default.
+    depths: { intervalMs: 30000, timeoutMs: 2000, concurrency: 2 },
+  },
+}));
+```
+
+Every QueuePlugin instance — named or not, observed or not — registers one `IQueueDiagnosticsSource`
+under `CAPABILITIES.QUEUE_DIAGNOSTICS` with `{ multi: true }` and WITHOUT claiming the token in
+`provides`, so named instances never collide in the resolver. An absent `diagnostics` option
+registers an inert source answering `disabled` and adds nothing to dispatch: no ring, no alias map,
+no timer, no hook. `enabled` is the LITERAL `true`, refused otherwise when `QueuePlugin(...)` is
+called; every option is validated there with fixed messages that never echo a value. `instanceAlias`
+and each `queues` alias are a SHAPE — 1–64 UTF-8 bytes with no control character, queue aliases
+unique, at most 64 queues — and approving an exact alias IS authorizing its disclosure. The instance
+alias never derives from the plugin `name`.
+
+An observed attempt is recorded from dispatch until the adapter's settlement call RETURNED: the
+approved queue alias, a session-local `j<N>` alias for the raw job id (a bounded 4,096-entry LRU
+map; an eviction is counted and gives a later retry a new alias), the attempt number, monotonic
+`durationMs`/`ageMs`, the processor `outcome` (`completed` / `retryable-error` / `terminal-error`),
+and the `settlement`: `acknowledged` / `requeued` / `dead-lettered` when the call completed on an
+adapter that confirms it, `failed` when it rejected (the rejection is rethrown exactly as before),
+and `unknown` when it completed on an adapter that cannot confirm it. The queue metrics keep their
+timing — they are recorded before the settlement call — so an outcome is never presented as
+settlement proof. At most 1,024 attempts are retained and 2,048 observed in flight;
+`droppedAttempts` counts an attempt dropped because that bound was reached, because its persisted
+attempt number was not a positive safe integer, or because its runner failed before reporting a
+settlement (which releases the slot). No payload, header, raw id, claim token, credential, attempt
+limit or thrown value is captured: the observer signatures cannot accept them.
+
+| Adapter    | Settlement evidence                                                          | Depths                                     |
+| ---------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
+| `memory`   | confirmed (in-process)                                                       | `process-local`                            |
+| `redis`    | confirmed (awaited server commands)                                          | `shared-backend` when the client can count |
+| `rabbitmq` | `unknown` — channel `ack`/`publish` are unconfirmed                          | `unavailable`                              |
+| `sqs`      | `unknown` — a lapsed claim or failed dead-letter send is absorbed and logged | `unavailable`                              |
+
+`depths` is its own opt-in because counting costs backend work: one cycle at bootstrap and one per
+`intervalMs` (1,000–300,000), never overlapping, at most `concurrency` (1–4) count calls in flight,
+each reported `timed-out` after `timeoutMs` (1–30,000) while it keeps its slot until it actually
+settles. Only approved job names this instance has a processor for are counted. A diagnostic read
+never counts, reserves, acknowledges, retries or dead-letters anything. `unavailable` is never
+reported as zero, and `shared-backend` counts from several sources or replicas describe the same
+inventory and must never be summed. The collector closes first on shutdown, clearing its timers and
+everything it retained.
 
 ### Trace propagation across the queue hop
 
@@ -9890,6 +9976,19 @@ vocabularies `DiagnosticsNodeKind`, `DiagnosticsEdgeKind`, `DiagnosticsSnapshotS
 value and no capability token, because the reader is reached through the application, never resolved
 from the registry. Activation, label allowlists, and the projection bounds are the kernel's — see
 [Kernel diagnostics](#kernel-diagnostics-setu-tskernel--setu-tscommon).
+
+**Queue observation contracts (M98f).** `CAPABILITIES.QUEUE_DIAGNOSTICS` (`'queue-diagnostics'`) is
+a MULTI-provider token: every QueuePlugin instance registers one `IQueueDiagnosticsSource`
+(`read(after, limit?): QueueDiagnosticsSourceBatch` — synchronous, M98a cursor contract, `limit`
+1–128) under it with `{ multi: true }`, never in `provides`. The source-side DTOs are
+`QueueDiagnosticsSourceBatch`, `QueueSourceAttemptObservation` and `QueueSourceDepthObservation`;
+the connector's merged DTOs are `QueueDiagnosticsBatch`, `QueueDiagnosticsSourceStatus`,
+`QueueAttemptObservation` and `QueueDepthObservation`; the closed vocabularies are
+`QueueProcessorOutcome`, `QueueSettlementState`, `QueueDepthScope`, `QueueDepthCycleCoverage`,
+`QueueDepthCoverage`, `QueueSourceFailure`, `QueueDiagnosticsFailure` and `QueueSourceState`. Every
+member is a bounded primitive or an approved alias: no payload, header, raw job id, claim token,
+credential or error text is expressible. See [Queue observations](#queue-observations-m98f) and
+`docs/diagnostics-protocol.md`.
 
 ### Ingress behaviours
 

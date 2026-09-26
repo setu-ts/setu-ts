@@ -84,6 +84,8 @@ function fakeServer(
     statusInspectors?: Record<string, boolean>;
     /** The body to serve for `/v1/health`; defaults to a ready snapshot. */
     healthBody?: Record<string, unknown>;
+    /** The body to serve for `/v1/queues`; defaults to a one-event batch. */
+    queuesBody?: (after: number) => Record<string, unknown>;
   } = {},
 ): { fetch: typeof fetch; requests: RecordedRequest[] } {
   const requests: RecordedRequest[] = [];
@@ -153,6 +155,9 @@ function fakeServer(
             droppedObservations: 0,
           },
         );
+      } else if (url.pathname === '/v1/queues') {
+        const after = Number(url.searchParams.get('after'));
+        bodyText = JSON.stringify((overrides.queuesBody ?? queueBatchBody)(after));
       } else {
         bodyText = JSON.stringify(minimalBatch());
       }
@@ -205,6 +210,47 @@ function fakeServer(
     });
   };
   return { fetch: fetchImpl as unknown as typeof fetch, requests };
+}
+
+/**
+ * A well-formed queue batch with one event just past `after`.
+ *
+ * @param after - The requested merge cursor
+ * @returns The batch body
+ */
+function queueBatchBody(after: number): Record<string, unknown> {
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    sources: [{
+      sourceId: 'q1',
+      state: 'ready',
+      instanceAlias: 'mailer',
+      depthCoverage: 'complete',
+      failure: 'none',
+      lost: 0,
+      droppedAttempts: 0,
+      evictedJobAliases: 0,
+    }],
+    events: [{
+      sequence: after + 1,
+      sourceId: 'q1',
+      instanceAlias: 'mailer',
+      queueAlias: 'emails',
+      jobAlias: 'j1',
+      attempt: 1,
+      durationMs: 2,
+      outcome: 'completed',
+      settlement: 'acknowledged',
+      ageMs: 3,
+    }],
+    depths: [],
+    next: after + 1,
+    lost: 0,
+    truncatedSources: 0,
+    truncatedDepths: 0,
+  };
 }
 
 /**
@@ -680,4 +726,105 @@ describe('Client — the deadline and close() govern the body read', () => {
     );
     await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.closed);
   });
+});
+
+describe('Client — queue observations (M98f)', () => {
+  it('reads queues through the signed exchange and returns a deeply frozen batch', async () => {
+    const { client, requests } = buildClient();
+    const batch = await client.queues(4, 10);
+    expect(batch.state).toEqual('ready');
+    expect(batch.events[0].sequence).toEqual(5);
+    expect(requests.map((r) => r.target)).toEqual([
+      '/v1/status',
+      '/v1/queues?after=4&limit=10',
+    ]);
+    expect(Object.isFrozen(batch)).toBe(true);
+    expect(Object.isFrozen(batch.events[0])).toBe(true);
+    expect(Object.isFrozen(batch.sources[0])).toBe(true);
+    const defaulted = await client.queues(0);
+    expect(defaulted.next).toEqual(1);
+    expect(requests[2].target).toEqual('/v1/queues?after=0&limit=128');
+    client.close();
+  });
+
+  it('answers unsupported WITHOUT an addon request when the manifest key is false', async () => {
+    const noQueues = { ...currentInspectorsManifest(), queues: false };
+    const { client, requests } = buildClient({ server: { statusInspectors: noQueues } });
+    const batch = await client.queues(9);
+    expect(batch).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'unsupported',
+      sources: [],
+      events: [],
+      depths: [],
+      next: 9,
+      lost: 0,
+      truncatedSources: 0,
+      truncatedDepths: 0,
+    });
+    expect(Object.isFrozen(batch.sources)).toBe(true);
+    expect(requests.map((r) => r.target)).toEqual(['/v1/status']);
+    client.close();
+  });
+
+  it('treats the legacy M98b status body as no queue inspector', async () => {
+    const { client, requests } = buildClient({ server: { legacyStatus: true } });
+    expect((await client.queues(0)).state).toEqual('unsupported');
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  it('refuses bad arguments before sending anything', async () => {
+    const { client, requests } = buildClient();
+    for (const [after, limit] of [[-1, 1], [1.5, 1], [0, 0], [0, 129]] as const) {
+      await expect(client.queues(after, limit)).rejects.toThrow(CLIENT_ERRORS.arguments);
+    }
+    expect(requests.length).toEqual(0);
+    client.close();
+  });
+
+  const violations: [string, (after: number) => Record<string, unknown>][] = [
+    ['fails the exact DTO validator', (after) => ({ ...queueBatchBody(after), extra: 1 })],
+    ['is bound to another instance', (after) => ({
+      ...queueBatchBody(after),
+      instanceId: '0'.repeat(8) + TEST_INSTANCE_ID.slice(8),
+    })],
+    ['starts at or before the cursor', (after) => {
+      const body = queueBatchBody(after);
+      const events = body.events as Record<string, unknown>[];
+      events[0].sequence = after;
+      body.next = after;
+      return body;
+    }],
+    ['reports a lost that disagrees with the page', (after) => ({
+      ...queueBatchBody(after),
+      lost: 3,
+    })],
+    ['moves the cursor on an empty page', (after) => ({
+      ...queueBatchBody(after),
+      events: [],
+      next: after + 2,
+    })],
+    ['reports loss on an empty page', (after) => ({
+      ...queueBatchBody(after),
+      events: [],
+      next: after,
+      lost: 1,
+    })],
+    ['returns more events than the limit', (after) => {
+      const body = queueBatchBody(after);
+      const first = (body.events as Record<string, unknown>[])[0];
+      body.events = [first, { ...first, sequence: after + 2 }];
+      body.next = after + 2;
+      return body;
+    }],
+  ];
+  for (const [label, body] of violations) {
+    it(`refuses a body that ${label}`, async () => {
+      const { client } = buildClient({ server: { queuesBody: body } });
+      await expect(client.queues(4, 1)).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
 });

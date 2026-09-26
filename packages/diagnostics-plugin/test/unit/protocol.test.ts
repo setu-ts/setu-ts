@@ -183,13 +183,11 @@ describe('Protocol — status body and fixed errors', () => {
     });
   });
 
-  it('serves the fixed inspector manifest with health true and the rest false', () => {
+  it('serves the fixed inspector manifest with health and queues true and the rest false', () => {
     const manifest = currentInspectorsManifest();
-    expect(manifest.health).toBe(true);
+    const implemented: readonly string[] = ['health', 'queues'];
     for (const key of INSPECTOR_KEYS) {
-      if (key !== 'health') {
-        expect(manifest[key]).toBe(false);
-      }
+      expect(manifest[key]).toBe(implemented.includes(key));
     }
     expect(Object.keys(manifest).length).toBe(11);
     expect(isInspectorsManifest(manifest)).toBe(true);

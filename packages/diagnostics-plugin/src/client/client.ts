@@ -17,6 +17,7 @@ import type {
   DiagnosticsBatch,
   DiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
+  QueueDiagnosticsBatch,
 } from '@setu-ts/common';
 
 import {
@@ -36,9 +37,11 @@ import {
   isHealthSnapshotProjection,
   isSnapshotProjection,
   parseStatusBody,
+  QUEUES_PATH,
   SNAPSHOT_TARGET,
   STATUS_TARGET,
 } from '../protocol/protocol.ts';
+import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
 
 /**
  * The fixed request deadline, in milliseconds.
@@ -66,7 +69,7 @@ export const CLIENT_ERRORS = {
   sessionId: 'Diagnostics client: sessionId must be exactly 32 lowercase hex characters.',
   sessionKey: 'Diagnostics client: sessionKey must be exactly 32 bytes.',
   arguments:
-    'Diagnostics client: read() requires a non-negative safe-integer cursor and a limit from 1 to 128.',
+    'Diagnostics client: read() and queues() require a non-negative safe-integer cursor and a limit from 1 to 128.',
   closed: 'Diagnostics client: the client is closed.',
   pairingFailed:
     'Diagnostics client: pairing failed terminally; relaunch the application and create a new session.',
@@ -161,6 +164,47 @@ export function parseBody(bodyText: string): unknown {
   } catch {
     throw new Error(CLIENT_ERRORS.connection);
   }
+}
+
+/**
+ * Validates a paged read's cursor and limit — the ONE argument rule `read()`
+ * and `queues()` share.
+ *
+ * @param after - The exclusive cursor
+ * @param limit - The requested limit, or `undefined` for the default 128
+ * @returns The effective limit
+ * @throws {Error} The fixed argument error
+ * @internal
+ */
+export function validatePagedArgs(after: number, limit: number | undefined): number {
+  const effectiveLimit = limit ?? 128;
+  if (
+    !Number.isSafeInteger(after) ||
+    after < 0 ||
+    !Number.isSafeInteger(effectiveLimit) ||
+    effectiveLimit < 1 ||
+    effectiveLimit > 128
+  ) {
+    throw new Error(CLIENT_ERRORS.arguments);
+  }
+  return effectiveLimit;
+}
+
+/**
+ * Recursively freezes a freshly parsed value, so the documented "frozen" is
+ * true of every nested record the client returns.
+ *
+ * @param value - The parsed value, owned by nobody else
+ * @returns The same value, frozen
+ */
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === 'object') {
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+    Object.freeze(value);
+  }
+  return value;
 }
 
 /**
@@ -376,16 +420,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
     async read(after: number, limit?: number): Promise<DiagnosticsBatch> {
       return await enqueue(async () => {
         checkUsable();
-        const effectiveLimit = limit ?? 128;
-        if (
-          !Number.isSafeInteger(after) ||
-          after < 0 ||
-          !Number.isSafeInteger(effectiveLimit) ||
-          effectiveLimit < 1 ||
-          effectiveLimit > 128
-        ) {
-          throw new Error(CLIENT_ERRORS.arguments);
-        }
+        const effectiveLimit = validatePagedArgs(after, limit);
         if (instanceId === null) {
           await exchangeAndBind(STATUS_TARGET);
           checkUsable();
@@ -442,6 +477,55 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         }
         Object.freeze(parsed.observations);
         return Object.freeze(parsed);
+      });
+    },
+
+    async queues(after: number, limit?: number): Promise<QueueDiagnosticsBatch> {
+      return await enqueue(async () => {
+        checkUsable();
+        const effectiveLimit = validatePagedArgs(after, limit);
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the queue inspector — a
+        // legacy or older server — is answered locally with a frozen typed
+        // `unsupported` batch echoing the cursor, and no addon request is
+        // sent. Support is never inferred from a generic protocol error.
+        if (inspectors !== null && inspectors.queues === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            sources: [],
+            events: [],
+            depths: [],
+            next: after,
+            lost: 0,
+            truncatedSources: 0,
+            truncatedDepths: 0,
+          });
+        }
+        const result = await exchange(`${QUEUES_PATH}?after=${after}&limit=${effectiveLimit}`);
+        const parsed = parseBody(result.bodyText);
+        // The exact DTO validator, the body's own instance binding, and the
+        // cursor contract relative to THIS request: an empty page echoes the
+        // cursor, and a returned page starts past it.
+        if (
+          !isQueueBatchProjection(parsed) || parsed.instanceId !== bound ||
+          parsed.events.length > effectiveLimit ||
+          (parsed.events.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
+            parsed.events[0].sequence <= after ||
+            parsed.lost !== parsed.events[0].sequence - after - 1
+          ))
+        ) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return deepFreeze(parsed);
       });
     },
 

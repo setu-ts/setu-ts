@@ -291,6 +291,7 @@ package fits the plugin architecture.
 | `IQueryBus`                        | interface |
 | `IQueryHandler`                    | interface |
 | `IQueue`                           | interface |
+| `IQueueDiagnosticsSource`          | interface |
 | `IRealtimeBackplane`               | interface |
 | `IRedactionService`                | interface |
 | `IRequest`                         | interface |
@@ -345,6 +346,13 @@ package fits the plugin architecture.
 | `ProcessOptions`                   | interface |
 | `ProviderOptions`                  | interface |
 | `PutObjectOptions`                 | interface |
+| `QueueAttemptObservation`          | interface |
+| `QueueDepthObservation`            | interface |
+| `QueueDiagnosticsBatch`            | interface |
+| `QueueDiagnosticsSourceBatch`      | interface |
+| `QueueDiagnosticsSourceStatus`     | interface |
+| `QueueSourceAttemptObservation`    | interface |
+| `QueueSourceDepthObservation`      | interface |
 | `RbacConfig`                       | interface |
 | `RealtimeFrame`                    | interface |
 | `RecurringOptions`                 | interface |
@@ -444,6 +452,14 @@ package fits the plugin architecture.
 | `PathPattern`                      | type      |
 | `PluginPriority`                   | type      |
 | `Provider`                         | type      |
+| `QueueDepthCoverage`               | type      |
+| `QueueDepthCycleCoverage`          | type      |
+| `QueueDepthScope`                  | type      |
+| `QueueDiagnosticsFailure`          | type      |
+| `QueueProcessorOutcome`            | type      |
+| `QueueSettlementState`             | type      |
+| `QueueSourceFailure`               | type      |
+| `QueueSourceState`                 | type      |
 | `RealtimeFrameHandler`             | type      |
 | `RealtimeFrameKind`                | type      |
 | `Redactor`                         | type      |
