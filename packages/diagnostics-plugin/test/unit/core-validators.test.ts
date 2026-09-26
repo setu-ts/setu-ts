@@ -151,14 +151,16 @@ const HOSTILE_SNAPSHOTS: ReadonlyArray<readonly [string, (value: Json) => void]>
   ['a node kind outside the vocabulary', (v) => {
     nodesOf(v)[5] = { id: 'p2', kind: 'service' };
   }],
+  // The three id cases mutate `m2` (index 4), which no edge references, so the
+  // dangling-edge check cannot refuse them in place of the check under test.
   ['a node id prefix that disagrees with its kind', (v) => {
-    nodesOf(v)[0].id = 'c9';
+    nodesOf(v)[4].id = 'p9';
   }],
   ['a non-canonical node id', (v) => {
-    nodesOf(v)[5].id = 'p02';
+    nodesOf(v)[4].id = 'm02';
   }],
   ['a duplicate node id', (v) => {
-    nodesOf(v)[5].id = 'p1';
+    nodesOf(v)[4].id = 'm1';
   }],
   ['a field outside the node kind (method on a plugin)', (v) => {
     nodesOf(v)[0].method = 'GET';
