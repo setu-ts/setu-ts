@@ -315,9 +315,11 @@ source did not support. None widens the security boundary; each narrows or names
    / `partial`. The fixed failure category is `none` / `depth-read-failed` / `depth-read-timed-out`,
    plus the connector-only `source-read-failed`.
 4. **The §3.4 counters are two, and unapproved names count in neither.** `droppedAttempts`
-   (in-flight bound reached) and `evictedJobAliases` (LRU eviction) are separate saturating counters
-   on the source batch and the source status. An unapproved job name is neither observed nor
-   counted: counting it would itself observe the unapproved scope.
+   (in-flight bound reached, a malformed persisted attempt number, or a runner that failed before
+   reporting a settlement — which releases its slot, a gap the committed-tree audit found) and
+   `evictedJobAliases` (LRU eviction) are separate saturating counters on the source batch and the
+   source status. An unapproved job name is neither observed nor counted: counting it would itself
+   observe the unapproved scope.
 5. **`truncatedDepths`.** §10 budgets a 256 KiB frame, and 16 sources × 64 queues of 64-byte aliases
    exceed it. Depths — never events — are trimmed from the tail and counted in `truncatedDepths`:
    events are pageable, and trimming them could starve the cursor behind a depth set that alone
@@ -338,3 +340,6 @@ source did not support. None widens the security boundary; each narrows or names
     rather than by edits to the four per-adapter unit files and `queue-service.test.ts`; the merge
     and protocol rows by `queue-merger.test.ts` and `queue-protocol.test.ts` beside the
     connector-handler additions.
+11. **A held depth slot is reported as timed out** (audit finding): a name skipped because its
+    earlier count has not settled, or left unread because every slot is held, reports
+    `depth-read-timed-out` on every cycle rather than `none` after the first.

@@ -5381,9 +5381,11 @@ and the `settlement`: `acknowledged` / `requeued` / `dead-lettered` when the cal
 adapter that confirms it, `failed` when it rejected (the rejection is rethrown exactly as before),
 and `unknown` when it completed on an adapter that cannot confirm it. The queue metrics keep their
 timing — they are recorded before the settlement call — so an outcome is never presented as
-settlement proof. At most 1,024 attempts are retained and 2,048 observed in flight (a drop is
-counted). No payload, header, raw id, claim token, credential, attempt limit or thrown value is
-captured: the observer signatures cannot accept them.
+settlement proof. At most 1,024 attempts are retained and 2,048 observed in flight;
+`droppedAttempts` counts an attempt dropped because that bound was reached, because its persisted
+attempt number was not a positive safe integer, or because its runner failed before reporting a
+settlement (which releases the slot). No payload, header, raw id, claim token, credential, attempt
+limit or thrown value is captured: the observer signatures cannot accept them.
 
 | Adapter    | Settlement evidence                                                          | Depths                                     |
 | ---------- | ---------------------------------------------------------------------------- | ------------------------------------------ |

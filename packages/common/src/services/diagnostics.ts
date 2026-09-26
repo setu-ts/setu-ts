@@ -613,8 +613,10 @@ export interface QueueSourceDepthObservation {
  * than the oldest retained attempt returns the oldest retained attempts with
  * the skipped sequences reported in `lost`, and `next` is the last returned
  * sequence — or the requested cursor when nothing was returned. `depths` is a
- * latest-only view, not a history. `droppedAttempts` counts attempts not
- * observed because the in-flight bound was reached, `evictedJobAliases` the
+ * latest-only view, not a history. `droppedAttempts` counts attempts
+ * dropped from observation — the in-flight bound was reached, the persisted
+ * attempt number was malformed, or the runner failed before reporting a
+ * settlement — and `evictedJobAliases` the
  * job aliases evicted from the bounded alias map (a later retry of an evicted
  * job receives a new alias); both saturate.
  *
@@ -641,7 +643,11 @@ export interface QueueDiagnosticsSourceBatch {
   readonly lost: number;
   /** `true` once the queue plugin has closed and the source retains nothing. */
   readonly closed: boolean;
-  /** Attempts not observed because the in-flight bound was reached (saturating). */
+  /**
+   * Attempts dropped from observation (saturating): the in-flight bound was
+   * reached, the persisted attempt number was not a positive safe integer, or
+   * the runner failed before reporting a settlement.
+   */
   readonly droppedAttempts: number;
   /** Job aliases evicted from the bounded alias map (saturating). */
   readonly evictedJobAliases: number;
@@ -711,7 +717,11 @@ export interface QueueDiagnosticsSourceStatus {
   readonly failure: QueueDiagnosticsFailure;
   /** Attempts this source's own ring evicted before they were drained (saturating). */
   readonly lost: number;
-  /** Attempts not observed because the in-flight bound was reached (saturating). */
+  /**
+   * Attempts dropped from observation (saturating): the in-flight bound was
+   * reached, the persisted attempt number was not a positive safe integer, or
+   * the runner failed before reporting a settlement.
+   */
   readonly droppedAttempts: number;
   /** Job aliases evicted from the bounded alias map (saturating). */
   readonly evictedJobAliases: number;

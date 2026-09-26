@@ -230,6 +230,31 @@ describe('QueueObservationCollector — attempts', () => {
     ]);
   });
 
+  it('releases the slot of an abandoned attempt, counting it dropped, and only once', () => {
+    const { collector: target } = collector();
+    const handles = [];
+    for (let index = 0; index < QUEUE_COLLECTOR_LIMITS.inFlightAttempts; index++) {
+      handles.push(target.begin(NAME_CANARY, `id-${index}`, 1)!);
+    }
+    expect(target.begin(NAME_CANARY, 'full', 1)).toBeNull();
+    handles[0].abandon();
+    handles[0].abandon();
+    handles[1].settled('completed', 'acknowledged');
+    handles[1].abandon();
+    const batch = target.read(0);
+    // One drop for the full bound, one for the abandoned attempt; the settled
+    // attempt is retained and its later abandon() changes nothing.
+    expect(batch.droppedAttempts).toBe(2);
+    expect(batch.attempts.length).toBe(1);
+    expect(target.begin(NAME_CANARY, 'freed-1', 1)).not.toBeNull();
+    expect(target.begin(NAME_CANARY, 'freed-2', 1)).not.toBeNull();
+    expect(target.begin(NAME_CANARY, 'full-again', 1)).toBeNull();
+    // After close, an abandon is a no-op.
+    target.close();
+    handles[2].abandon();
+    expect(target.read(0).droppedAttempts).toBe(3);
+  });
+
   it('ignores a second settlement and a settlement after close', () => {
     const { collector: target } = collector();
     const handle = target.begin(NAME_CANARY, 'a', 1)!;
@@ -468,10 +493,13 @@ describe('QueueObservationCollector — depth scheduler', () => {
     target.startDepths(counting);
     await runtime.advanceMs(200);
     expect(target.read(0).failure).toBe('depth-read-timed-out');
-    // Three more intervals: the hung raw promise still holds the only slot.
+    // Three more intervals: the hung raw promise still holds the only slot,
+    // and every one of those cycles still reports the timeout — a hung
+    // backend is never reported healthy after its first cycle.
     await runtime.advanceMs(3_000);
     expect(started).toBe(1);
     expect(target.read(0).depthCoverage).toBe('partial');
+    expect(target.read(0).failure).toBe('depth-read-timed-out');
     // Once it settles, the next cycle counts again.
     release({ ready: 1, processing: 0, dead: 0 });
     await runtime.advanceMs(1_000);
@@ -490,6 +518,8 @@ describe('QueueObservationCollector — depth scheduler', () => {
     await runtime.advanceMs(1_000);
     const aliases = target.read(0).depths.map((d) => d.queueAlias).sort();
     expect(aliases).toEqual(['images', 'pdfs']);
+    // The skipped, still-held queue keeps the cycle's report at timed out.
+    expect(target.read(0).failure).toBe('depth-read-timed-out');
     expect(counting.calls.filter((c) => c === NAME_CANARY).length).toBe(1);
   });
 

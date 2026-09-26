@@ -281,6 +281,13 @@ export interface QueueAttemptHandle {
    * @param settlement - What the runner observed about the settlement call
    */
   settled(outcome: QueueProcessorOutcome, settlement: QueueSettlementState): void;
+  /**
+   * Ends an attempt whose runner failed before any settlement was reported:
+   * releases its in-flight slot and counts it as dropped, so a runner that
+   * rejects early cannot hold a slot forever. A no-op after `settled`, and
+   * idempotent.
+   */
+  abandon(): void;
 }
 
 /**
@@ -511,16 +518,28 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
     const generation = this.#generation;
     const startedAtMs = this.#clock.hrtime();
     let done = false;
+    /** Claims the handle's single ending; `false` when it no longer owns a slot. */
+    const end = (): boolean => {
+      if (done) {
+        return false;
+      }
+      done = true;
+      if (this.#closed || generation !== this.#generation) {
+        return false;
+      }
+      this.#attemptsInFlight -= 1;
+      return true;
+    };
     return {
+      abandon: () => {
+        if (end()) {
+          this.#droppedAttempts = saturatingNext(this.#droppedAttempts);
+        }
+      },
       settled: (outcome, settlement) => {
-        if (done) {
+        if (!end()) {
           return;
         }
-        done = true;
-        if (this.#closed || generation !== this.#generation) {
-          return;
-        }
-        this.#attemptsInFlight -= 1;
         const settledAtMs = this.#clock.hrtime();
         this.#sequence += 1;
         this.#attempts.push({
@@ -731,6 +750,10 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
           const name = order[next];
           next += 1;
           if (this.#countsInFlight.has(name)) {
+            // Still held by an earlier count that has not settled: that count
+            // is past its deadline, so this cycle's report says so rather
+            // than calling a hung backend healthy.
+            timedOut = true;
             continue;
           }
           const outcome = await this.#countOne(reader, name, policy.timeoutMs);
@@ -747,6 +770,11 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
       await Promise.all(Array.from({ length: workers }, worker));
       if (this.#closed) {
         return;
+      }
+      // Names the cycle never reached were left unread because every slot was
+      // held by a count past its deadline — the same timed-out condition.
+      if (next < order.length) {
+        timedOut = true;
       }
       if (names.length > 0) {
         this.#cursor = (this.#cursor + next) % names.length;

@@ -469,6 +469,10 @@ export class QueueService implements IQueue {
       } finally {
         // Decrement in-flight when the job settles
         reg.inFlight--;
+        // M98f: a runner that rejected before reporting a settlement must not
+        // hold its observation slot for the life of the process. A no-op when
+        // the settlement was reported.
+        observed?.abandon();
       }
     };
 

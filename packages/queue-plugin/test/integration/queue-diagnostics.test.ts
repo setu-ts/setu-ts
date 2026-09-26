@@ -13,6 +13,7 @@ import { expect } from '@std/expect';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { LoggerPlugin } from '@setu-ts/logger-plugin';
 import type { IQueue, IQueueDiagnosticsSource, QueueDiagnosticsSourceBatch } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
@@ -266,6 +267,40 @@ describe('queue diagnostics — observation adds no backend work', () => {
     expect(zcards.length % 3).toBe(0);
     expect(scheduled.addedByReads).toBe(0);
     expect(settlements(scheduled.calls)).toEqual(settlements(withoutObservation.calls));
+  });
+
+  it('releases the observation slot when the runner rejects before settling', async () => {
+    // Today's trigger: with a logger, a processor that throws a value whose
+    // toString throws makes the failure REPORT throw before any settlement
+    // (a pre-existing defect in QueueService's reporting, outside M98f). The
+    // observation must not keep that attempt's slot for the process's life.
+    const hostile = { toString: 1 } as unknown as Error;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        LoggerPlugin({ level: 'fatal' }),
+        QueuePlugin({
+          adapter: 'memory',
+          pollIntervalMs: POLL_MS,
+          processors: [{
+            name: JOB_NAME,
+            processor: () => {
+              throw hostile;
+            },
+          }],
+          diagnostics: DIAGNOSTICS,
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const source = sources(app)[0];
+      await app.services.get<IQueue>('queue').add(JOB_NAME, { secret: PAYLOAD_CANARY });
+      await until(() => source.read(0).droppedAttempts === 1, 'the abandoned attempt');
+      expect(source.read(0).attempts).toEqual([]);
+    } finally {
+      await app.stop();
+    }
   });
 
   it('reports a rejected settlement as failed, and the job path is unchanged', async () => {
