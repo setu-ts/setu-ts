@@ -14,10 +14,12 @@ import type {
   IPlugin,
   IPluginContext,
   IQueue,
+  IQueueDiagnosticsSource,
   IRuntimeServices,
   ITelemetryService,
   JobProcessor,
   ProcessOptions,
+  QueueDepthScope,
   RegistryFactory,
 } from '@setu-ts/common';
 import { CAPABILITIES, createCapabilityToken, resolveRegistryEntry } from '@setu-ts/common';
@@ -40,6 +42,11 @@ import { withIngressBehaviors } from '../processors/job-processor.ts';
 import { QueueCollector } from '../metrics/queue-collector.ts';
 import { TracedQueue } from '../tracing/traced-queue.ts';
 import type { QueueLogger } from '../services/queue-service.ts';
+import {
+  compileQueueDiagnosticsPolicy,
+  createDisabledQueueSource,
+  QueueObservationCollector,
+} from '../diagnostics/queue-observation-collector.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -65,6 +72,13 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
   const name = options?.name;
   const defaultMaxAttempts = options?.defaultMaxAttempts ?? 3;
   const pollIntervalMs = options?.pollIntervalMs ?? 1000;
+  // The queue-observation policy (M98f) is validated at CONSTRUCTION: an
+  // invalid option — including `enabled: false` from a caller the literal
+  // type cannot reach — refuses before any application exists, with a fixed,
+  // value-free message.
+  const diagnosticsPolicy = options?.diagnostics === undefined
+    ? null
+    : compileQueueDiagnosticsPolicy(options.diagnostics);
 
   // The registration arms are split ONCE, here at plugin construction, so
   // `register` and the `onInit` hook each read a single list (the M70d arm
@@ -198,11 +212,22 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
           },
         )
         : undefined;
+      // M98f: a collector exists only when observation was opted in. Its
+      // settlement evidence is the adapter's own property, known here because
+      // this plugin constructed the adapter: RabbitMQ's channel operations
+      // are unconfirmed and SQS absorbs a lapsed claim or a failed
+      // dead-letter send, so a completed call there is recorded `unknown`.
+      const observation = diagnosticsPolicy === null ? null : new QueueObservationCollector(
+        diagnosticsPolicy,
+        runtime,
+        adapterType === 'memory' || adapterType === 'redis',
+      );
       const serviceOptions = {
         defaultMaxAttempts,
         pollIntervalMs,
         ...(logger !== undefined && { logger }),
         ...(collector === undefined ? {} : { collector }),
+        ...(observation === null ? {} : { observer: observation }),
       };
       // With no behaviours declared the service is constructed exactly as
       // before the arms existed — no chain sits in front of any processor
@@ -271,8 +296,32 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
       const healthIndicator: HealthIndicatorFn = service.createHealthIndicator();
       ctx.health.register(token, healthIndicator);
 
-      // Register lifecycle hook for cleanup
+      // M98f: EVERY instance contributes one queue-diagnostics source as a
+      // MULTI provider — never claimed in `provides`, so two named instances
+      // cannot collide in the resolver. An unconfigured instance contributes
+      // the inert `disabled` source, which observes nothing.
+      ctx.services.register<IQueueDiagnosticsSource>(
+        CAPABILITIES.QUEUE_DIAGNOSTICS,
+        observation ?? createDisabledQueueSource(),
+        { multi: true },
+      );
+      if (observation !== null) {
+        const scope: QueueDepthScope = adapterType === 'memory'
+          ? 'process-local'
+          : 'shared-backend';
+        // Bootstrap, not register: every processor — instance, factory, or a
+        // later plugin's imperative registration — exists by now, and the
+        // depth cycle counts only approved names that have one.
+        ctx.lifecycle.onBootstrap(() => {
+          observation.startDepths(service.createDepthReader(scope));
+        });
+      }
+
+      // Register lifecycle hook for cleanup. The collector closes FIRST, so a
+      // settlement or count completing during the disconnect is discarded
+      // rather than retained.
       ctx.lifecycle.onClose(async () => {
+        observation?.close();
         await service.disconnect();
       });
 

@@ -18,13 +18,18 @@ import {
   type ProcessOptions,
   type RecurringOptions,
 } from '@setu-ts/common';
-import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
+import type { IRuntimeServices, QueueDepthScope, TimerHandle } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from '../adapters/queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import { runJob } from '../processors/job-processor.ts';
 import type { JobOutcome } from '../processors/job-processor.ts';
 import type { QueueCollector } from '../metrics/queue-collector.ts';
 import { cronNextMs } from '../scheduler/cron-calculator.ts';
+import type {
+  QueueAttemptHandle,
+  QueueAttemptObserver,
+  QueueDepthReader,
+} from '../diagnostics/queue-observation-collector.ts';
 
 /** Reachability outcome cache lifetime for the health probe (M90b), in ms. */
 const PROBE_TTL_MS = 5000;
@@ -90,6 +95,11 @@ export class QueueService implements IQueue {
    * runs exactly the code that shipped before X8-4.
    */
   #collector: QueueCollector | undefined;
+  /**
+   * Present only when the plugin's `diagnostics` option is configured (M98f).
+   * Absent, dispatch threads no diagnostics hook and calls nothing extra.
+   */
+  #observer: QueueAttemptObserver | undefined;
 
   constructor(
     adapter: QueueAdapter,
@@ -101,6 +111,8 @@ export class QueueService implements IQueue {
       logger?: QueueLogger | undefined;
       /** Optional metrics collector; absent when the metrics capability is not registered. */
       collector?: QueueCollector | undefined;
+      /** Optional diagnostics observer (M98f); absent when observation is not configured. */
+      observer?: QueueAttemptObserver | undefined;
     },
   ) {
     this.#adapter = adapter;
@@ -110,6 +122,7 @@ export class QueueService implements IQueue {
     this.#processors = new Map();
     this.#logger = options?.logger;
     this.#collector = options?.collector;
+    this.#observer = options?.observer;
   }
 
   /**
@@ -277,6 +290,32 @@ export class QueueService implements IQueue {
   }
 
   /**
+   * The depth-count seam for the diagnostics scheduler (M98f). Counts go
+   * through the adapter's optional `depths`, looked up at CALL time because an
+   * adapter can install or remove it as its client changes, and are called
+   * through their OWNER. The names are this instance's registered processors.
+   * Internal: the service is not barrel-exported.
+   *
+   * @param scope - What this adapter's counts cover
+   * @returns The reader the observation collector's scheduler consumes
+   */
+  createDepthReader(scope: QueueDepthScope): QueueDepthReader {
+    const adapter = this.#adapter;
+    return {
+      scope,
+      supported: () => typeof adapter.depths === 'function',
+      names: () => [...this.#processors.keys()],
+      read: (name: string) => {
+        const depths = adapter.depths;
+        if (typeof depths !== 'function') {
+          return Promise.reject(new Error('Queue depths are unavailable for this adapter.'));
+        }
+        return depths.call(adapter, name);
+      },
+    };
+  }
+
+  /**
    * Builds the cached, bounded reachability probe over the adapter's
    * optional `isHealthy` (M90b). `undefined` when the adapter cannot probe —
    * the indicator then reports `reachable: 'unknown'`.
@@ -406,6 +445,10 @@ export class QueueService implements IQueue {
     storedJob: StoredJob<T>,
     reg: ProcessorRegistration<T>,
   ): void {
+    // M98f: the attempt is observed from dispatch. The observer receives the
+    // name (allowlist lookup), the raw id (alias lookup) and the attempt —
+    // nothing else — and a throwing observer only costs the observation.
+    const observed = this.#beginObservation(storedJob);
     const processor = async () => {
       try {
         await runJob<T>(
@@ -416,8 +459,11 @@ export class QueueService implements IQueue {
           (message, error, meta) => this.#report(message, error, meta),
           {
             ...(reg.onFailed === undefined ? {} : { onFailed: reg.onFailed }),
-            onOutcome: (name: string, outcome: JobOutcome) =>
+            onProcessorOutcome: (name: string, outcome: JobOutcome) =>
               this.#collector?.jobSettled(name, outcome),
+            ...(observed === null ? {} : {
+              onAttemptSettled: (outcome, settlement) => observed.settled(outcome, settlement),
+            }),
           },
         );
       } finally {
@@ -436,6 +482,25 @@ export class QueueService implements IQueue {
         name: storedJob.name,
       });
     });
+  }
+
+  /**
+   * Begins observing one dispatched attempt, guarded: an observer that throws
+   * is reported and the attempt runs unobserved, never differently.
+   *
+   * @param storedJob - The dispatched job
+   * @returns The observation handle, or `null` when not observed
+   */
+  #beginObservation<T>(storedJob: StoredJob<T>): QueueAttemptHandle | null {
+    if (this.#observer === undefined) {
+      return null;
+    }
+    try {
+      return this.#observer.begin(storedJob.name, storedJob.id, storedJob.attempts);
+    } catch (error) {
+      this.#report('queue diagnostics observer threw', error, { name: storedJob.name });
+      return null;
+    }
   }
 
   async #processRecurring(): Promise<void> {

@@ -64,7 +64,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/multi-tenancy-plugin/README.md': 3,
   'packages/scheduler-plugin/README.md': 3,
   // M90i: +1 for the trace-propagation example.
-  'packages/queue-plugin/README.md': 9,
+  'packages/queue-plugin/README.md': 10,
   'packages/worker-pool-plugin/README.md': 3,
   // M98b: +1 for the development-only composition example, which must
   // really compile — it is the answer to "how do I keep this out of

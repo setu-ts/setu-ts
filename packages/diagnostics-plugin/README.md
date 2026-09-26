@@ -153,18 +153,19 @@ non-loopback bind outright.
 
 ## Protocol
 
-Four signed GET operations — `/v1/status`, `/v1/snapshot`, `/v1/events?after=<N>&limit=<N>`, and the
-M98d inspector operation `/v1/health` — over bounded polling. The status body carries an
-`inspectors` manifest (`health: true`; the rest reserved and `false` until their own operations
-ship); a client paired against a legacy three-field status body resolves it to all-`false` and its
-`health()` answers a typed `unsupported` without sending the request. Requests authenticate with
-`X-Setu-Session`, `X-Setu-Sequence` (strictly monotonic), `X-Setu-Instance`, and `X-Setu-Mac`
-(HMAC-SHA-256 over canonical newline-joined fields, verified via `subtle.verify`). Responses are
-signed over their exact bytes; the client verifies BEFORE parsing anything. Bodies are bounded (256
-KiB), events are capped at 128 per read, and a fixed set of value-free error codes
-(`invalid-request`, `unauthorized`, `expired`, `unsupported-version`, `unavailable`, `rate-limited`)
-never reflects input. See `docs/diagnostics-protocol.md` in the repository for the complete wire
-specification and fixtures.
+Five signed GET operations — `/v1/status`, `/v1/snapshot`, `/v1/events?after=<N>&limit=<N>`, and the
+inspector operations `/v1/health` (M98d) and `/v1/queues?after=<N>&limit=<N>` (M98f) — over bounded
+polling. The status body carries an `inspectors` manifest (`health: true`, `queues: true`; the rest
+reserved and `false` until their own operations ship); a client paired against a legacy three-field
+status body resolves it to all-`false`, and its `health()` and `queues()` answer a typed
+`unsupported` without sending the request. Requests authenticate with `X-Setu-Session`,
+`X-Setu-Sequence` (strictly monotonic), `X-Setu-Instance`, and `X-Setu-Mac` (HMAC-SHA-256 over
+canonical newline-joined fields, verified via `subtle.verify`). Responses are signed over their
+exact bytes; the client verifies BEFORE parsing anything. Bodies are bounded (256 KiB), events are
+capped at 128 per read, and a fixed set of value-free error codes (`invalid-request`,
+`unauthorized`, `expired`, `unsupported-version`, `unavailable`, `rate-limited`) never reflects
+input. See `docs/diagnostics-protocol.md` in the repository for the complete wire specification and
+fixtures.
 
 Bounds: at most 8 simultaneous handlers with one slot reserved against unpaired floods, an anonymous
 refusal budget of 5 requests/second (burst 10), a per-session budget of 20 requests/second (burst
@@ -181,6 +182,15 @@ The M98d inspector operation is read through `client.health(): Promise<HealthDia
 the minimized health-observation snapshot the health plugin registers under
 `CAPABILITIES.HEALTH_DIAGNOSTICS`. A connector without a health source answers a typed
 `unsupported`; the client surfaces the snapshot's `state` rather than failing the call.
+
+The M98f queue inspector is read through
+`client.queues(after, limit?): Promise<QueueDiagnosticsBatch>`. The cursor is the CONNECTOR's merge
+cursor: every QueuePlugin instance contributes its own queue-diagnostics source, and each queue read
+drains every source's new attempts into one bounded merge ring before serving the page. The batch
+carries one status per source (a `q<N>` id, the approved instance alias, a per-source `lost` for
+attempts that source's own ring evicted before the connector drained them), the page of attempts,
+and every source's latest depths. With no queue plugin registered the connector answers
+`state: 'unsupported'`.
 
 The full public surface is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#diagnostics-connector-setu-tsdiagnostics-plugin).

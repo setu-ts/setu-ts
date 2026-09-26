@@ -11,6 +11,11 @@ import type {
   IHealthDiagnosticsSource,
   IPlugin,
   IPluginContext,
+  IQueueDiagnosticsSource,
+  QueueAttemptObservation,
+  QueueDiagnosticsBatch,
+  QueueDiagnosticsSourceBatch,
+  QueueSourceAttemptObservation,
 } from '@setu-ts/common';
 import type { IApplication } from '@setu-ts/common';
 
@@ -166,5 +171,88 @@ describe('health diagnostics type contracts (M98d)', () => {
     );
     // `status` is present only for a reported observation.
     expect('status' in observation).toBe(false);
+  });
+});
+
+describe('queue diagnostics type contracts (M98f)', () => {
+  it('exposes the QUEUE_DIAGNOSTICS capability token, distinct from the queue token', () => {
+    expect(CAPABILITIES.QUEUE_DIAGNOSTICS).toBe('queue-diagnostics');
+    expect(CAPABILITIES.QUEUE_DIAGNOSTICS).not.toBe(CAPABILITIES.QUEUE);
+  });
+
+  it('a source compiles against the synchronous paged read and the source batch', () => {
+    const attempt: QueueSourceAttemptObservation = {
+      sequence: 1,
+      queueAlias: 'emails',
+      jobAlias: 'j1',
+      attempt: 1,
+      durationMs: 3,
+      outcome: 'completed',
+      settlement: 'acknowledged',
+      ageMs: 4,
+    };
+    const source: IQueueDiagnosticsSource = {
+      read: (after) => ({
+        version: 1,
+        state: 'ready',
+        instanceAlias: 'mailer',
+        depthCoverage: 'unavailable',
+        failure: 'none',
+        attempts: [attempt],
+        depths: [],
+        next: after + 1,
+        lost: 0,
+        closed: false,
+        droppedAttempts: 0,
+        evictedJobAliases: 0,
+      }),
+    };
+    const batch: QueueDiagnosticsSourceBatch = source.read(0, 128);
+    expect(batch.next).toBe(1);
+    expect(Object.keys(source)).toEqual(['read']);
+  });
+
+  it('an attempt admits no payload, header, raw id, claim token or error', () => {
+    // Compile-time: the exact member set IS the minimization contract.
+    const event: QueueAttemptObservation = {
+      sequence: 1,
+      sourceId: 'q1',
+      instanceAlias: 'mailer',
+      queueAlias: 'emails',
+      jobAlias: 'j1',
+      attempt: 2,
+      durationMs: 5,
+      outcome: 'retryable-error',
+      settlement: 'requeued',
+      ageMs: 1,
+    };
+    expect(Object.keys(event).sort()).toEqual([
+      'ageMs',
+      'attempt',
+      'durationMs',
+      'instanceAlias',
+      'jobAlias',
+      'outcome',
+      'queueAlias',
+      'sequence',
+      'settlement',
+      'sourceId',
+    ]);
+  });
+
+  it('the merged batch reports unsupported with the four loss counters', () => {
+    const batch: QueueDiagnosticsBatch = {
+      version: 1,
+      instanceId: 'instance-1',
+      state: 'unsupported',
+      sources: [],
+      events: [],
+      depths: [],
+      next: 0,
+      lost: 0,
+      truncatedSources: 0,
+      truncatedDepths: 0,
+    };
+    expect(batch.state).toBe('unsupported');
   });
 });

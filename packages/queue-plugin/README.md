@@ -141,6 +141,7 @@ await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midn
 | `deadLetterTtlMs`    | `number`                                                             | — (retained forever)       | Retention for a dead-lettered payload (Redis only)                                                                                     |
 | `processors`         | `readonly QueueProcessorEntry[]`                                     | —                          | Declarative `process()` registrations. A `QueueProcessorDefinition` is `{ name, processor, options? }`; factories resolve at `onInit`. |
 | `behaviors`          | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —                          | Chain around every processor. It sees `kind: 'queue'`, job name, the delivered job, and its attempt count.                             |
+| `diagnostics`        | `QueueDiagnosticsOptions`                                            | — (disabled)               | Opt-in minimized attempt and depth observations for the diagnostics connector (M98f) — see below.                                      |
 
 Two options this table used to list do not exist and never did: `region` (SQS configuration lives
 under `sqs`) and `queues` (RabbitMQ derives its queue names from `prefix`).
@@ -149,6 +150,51 @@ Declarative processors coexist with imperative `queue.process()` calls. Behaviou
 order; a short circuit acknowledges the job, while a throw follows the existing retry, final
 `onFailed`, and dead-letter path. With no behaviours, the processor receives the original job
 directly and no chain is allocated.
+
+## Queue observations (M98f)
+
+`diagnostics` exposes actual attempts and supported depths as minimized observations through the
+local diagnostics connector's `GET /v1/queues` (`@setu-ts/diagnostics-plugin`). It never changes a
+processor, a retry, `onFailed`, or a settlement.
+
+```typescript
+import { QueuePlugin } from '@setu-ts/queue-plugin';
+
+app.register(QueuePlugin({
+  adapter: 'memory',
+  diagnostics: {
+    enabled: true,
+    instanceAlias: 'mailer',
+    // Exact job-name -> display-alias allowlist; unlisted names are neither observed nor counted.
+    queues: { 'send-welcome-email': 'welcome-emails' },
+    // Optional, separately bounded depth counting; absent by default.
+    depths: { intervalMs: 30000, timeoutMs: 2000, concurrency: 2 },
+  },
+}));
+```
+
+Every instance — named or not, observed or not — registers one source under
+`CAPABILITIES.QUEUE_DIAGNOSTICS` as a multi provider, so named instances stay independently
+observable. Without `diagnostics` that source answers `disabled` and dispatch is untouched.
+`enabled` must be the literal `true`; aliases are 1–64 UTF-8 bytes with no control character (queue
+aliases unique, at most 64 queues), and approving an alias is authorizing its disclosure.
+
+Each observed attempt carries the approved queue alias, a session-local `j<N>` job alias, the
+attempt number, monotonic timing, the processor `outcome` and the `settlement` — recorded only after
+the adapter's settlement call returned, never inferred from the outcome. No payload, header, raw job
+id, claim token, credential or error text is captured.
+
+| Adapter    | Settlement evidence                                                            | Depths                                     |
+| ---------- | ------------------------------------------------------------------------------ | ------------------------------------------ |
+| `memory`   | confirmed (in-process)                                                         | `process-local`                            |
+| `redis`    | confirmed (awaited server commands)                                            | `shared-backend` when the client can count |
+| `rabbitmq` | `unknown` — channel `ack`/`publish` are unconfirmed                            | `unavailable` (never zero)                 |
+| `sqs`      | `unknown` — a lapsed claim or a failed dead-letter send is absorbed and logged | `unavailable` (never zero)                 |
+
+Depth counting runs one non-overlapping cycle at bootstrap and one per `intervalMs`, over approved
+job names this instance has a processor for; a count still pending after `timeoutMs` is reported as
+timed out but keeps its slot until it settles. `shared-backend` counts from several instances or
+replicas are the same inventory — never sum them.
 
 ## Seeing a job that failed for the last time
 
@@ -330,7 +376,9 @@ the adapter has no liveness check.
 | `ISnsTransport`                | interface |
 | `ISqsTransport`                | interface |
 | `ProcessOptions`               | interface |
+| `QueueDepthDiagnosticsOptions` | interface |
 | `QueueDepths`                  | interface |
+| `QueueDiagnosticsOptions`      | interface |
 | `QueueLogger`                  | interface |
 | `QueuePluginOptions`           | interface |
 | `QueueProcessorDefinition`     | interface |

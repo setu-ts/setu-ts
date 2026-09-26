@@ -15,10 +15,10 @@
     },
     "response": {
       "status": 200,
-      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000,\"inspectors\":{\"health\":true,\"configuration\":false,\"queues\":false,\"traces\":false,\"authorization\":false,\"cache\":false,\"events\":false,\"scheduler\":false,\"realtime\":false,\"storage\":false,\"outboundHttp\":false}}",
-      "bodySha256": "24a4329bcdf03ae45892185bb9fa960948ca950fb982b657a07b21db8c1dbc00",
-      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\n24a4329bcdf03ae45892185bb9fa960948ca950fb982b657a07b21db8c1dbc00",
-      "mac": "9b57afc703dde2aa78bf1396aae68447d1fbf614a1c9f65e4f50df366da63561"
+      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000,\"inspectors\":{\"health\":true,\"configuration\":false,\"queues\":true,\"traces\":false,\"authorization\":false,\"cache\":false,\"events\":false,\"scheduler\":false,\"realtime\":false,\"storage\":false,\"outboundHttp\":false}}",
+      "bodySha256": "a2edad614f0566a015683b709c8c00c6a1d6a88a5ca087a3a95af50a7e871065",
+      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\na2edad614f0566a015683b709c8c00c6a1d6a88a5ca087a3a95af50a7e871065",
+      "mac": "b6e02107dcd9eba4dc25f244990325238a607e5681158fae4a9edc73609fddda"
     }
   },
   "rejectedTargets": [
@@ -33,7 +33,14 @@
     "/v1/events?after=007&limit=1",
     "/v1/events?after=0&limit=129",
     "/v1/events?after=-1&limit=1",
-    "/v1/events"
+    "/v1/events",
+    "/v1/queues",
+    "/v1/queues?limit=1&after=0",
+    "/v1/queues?after=0&limit=1&extra=2",
+    "/v1/queues?after=007&limit=1",
+    "/v1/queues?after=0&limit=129",
+    "/v1/queues?after=0&limit=0",
+    "/v1/queues/"
   ],
   "hostileSnapshotDto": {
     "comment": "A hostile/buggy provider result: carries synthetic secrets in fields OUTSIDE the M98a allowlist. The projection must drop every one of them while keeping the allowed metadata, so suppressing everything cannot make the canary test pass vacuously.",
@@ -53,13 +60,28 @@
         "label": "catalog",
         "version": "1.0.0",
         "password": "canary-node-password-SYNTHETIC",
-        "options": { "secret": "canary-options-SYNTHETIC" }
+        "options": {
+          "secret": "canary-options-SYNTHETIC"
+        }
       },
-      { "id": "c1", "kind": "capability", "label": "catalog-items", "registered": true }
+      {
+        "id": "c1",
+        "kind": "capability",
+        "label": "catalog-items",
+        "registered": true
+      }
     ],
-    "edges": [{ "from": "p1", "kind": "owns", "to": "c1" }],
+    "edges": [
+      {
+        "from": "p1",
+        "kind": "owns",
+        "to": "c1"
+      }
+    ],
     "truncated": false,
     "droppedEvents": 0,
-    "env": { "API_KEY": "canary-env-SYNTHETIC" }
+    "env": {
+      "API_KEY": "canary-env-SYNTHETIC"
+    }
   }
 }

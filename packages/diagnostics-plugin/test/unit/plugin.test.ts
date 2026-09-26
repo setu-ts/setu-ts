@@ -351,3 +351,35 @@ describe('DiagnosticsPlugin — enabled is an acknowledgement, not a toggle', ()
     expect(right.enabled).toBe(true);
   });
 });
+
+describe('DiagnosticsPlugin — queue sources (M98f)', () => {
+  it('declares the queue source optionally and resolves every source at BOOTSTRAP', async () => {
+    const plugin = DiagnosticsPlugin(OPTIONS);
+    expect(plugin.optionalDependencies).toContain(CAPABILITIES.QUEUE_DIAGNOSTICS);
+    const listener = fakeListener();
+    const base = fakeContext(listener, { snapshot: () => undefined });
+    const queueSources: unknown[] = [];
+    const services = base.ctx.services;
+    let getAllCalls = 0;
+    const ctx = {
+      ...base.ctx,
+      services: {
+        get: services.get.bind(services),
+        has: (token: string) =>
+          token === CAPABILITIES.QUEUE_DIAGNOSTICS ? queueSources.length > 0 : services.has(token),
+        getAll: (token: string) => {
+          getAllCalls += 1;
+          expect(token).toEqual(CAPABILITIES.QUEUE_DIAGNOSTICS);
+          return queueSources;
+        },
+      },
+    } as unknown as IPluginContext;
+    plugin.register(ctx);
+    // A queue plugin registering AFTER this one is still visible at bootstrap.
+    queueSources.push({ read: () => ({}) });
+    expect(getAllCalls).toEqual(0);
+    await base.hooks.bootstrap[0]();
+    expect(getAllCalls).toEqual(1);
+    await plugin.revoke();
+  });
+});

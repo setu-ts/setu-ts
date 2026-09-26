@@ -14,7 +14,10 @@ import type {
   DiagnosticsSnapshot,
   HttpMethod,
   IDiagnosticsSource,
+  IQueueDiagnosticsSource,
   IRequest,
+  QueueDiagnosticsSourceBatch,
+  QueueSourceAttemptObservation,
 } from '@setu-ts/common';
 import {
   canonicalBytes,
@@ -267,4 +270,111 @@ export function toHex(bytes: Uint8Array): string {
  */
 export function canonicalFixtureBytes(fields: readonly string[]): Uint8Array {
   return canonicalBytes(fields);
+}
+
+/**
+ * A well-formed, validated-shape queue SOURCE batch (M98f) with the given
+ * attempts, overridable per field.
+ *
+ * @param overrides - Fields to replace
+ * @returns The source batch
+ */
+export function sourceBatch(
+  overrides: Partial<QueueDiagnosticsSourceBatch> & Record<string, unknown> = {},
+): QueueDiagnosticsSourceBatch {
+  return {
+    version: 1,
+    state: 'ready',
+    instanceAlias: 'mailer',
+    depthCoverage: 'complete',
+    failure: 'none',
+    attempts: [],
+    depths: [],
+    next: 0,
+    lost: 0,
+    closed: false,
+    droppedAttempts: 0,
+    evictedJobAliases: 0,
+    ...overrides,
+  } as QueueDiagnosticsSourceBatch;
+}
+
+/**
+ * One well-formed source attempt at the given source sequence.
+ *
+ * @param sequence - The source-local sequence
+ * @returns The attempt
+ */
+export function sourceAttempt(sequence: number): QueueSourceAttemptObservation {
+  return {
+    sequence,
+    queueAlias: 'emails',
+    jobAlias: `j${sequence}`,
+    attempt: 1,
+    durationMs: 4,
+    outcome: 'completed',
+    settlement: 'acknowledged',
+    ageMs: 10,
+  };
+}
+
+/**
+ * A scripted queue source: an in-memory ring that honours the M98a cursor
+ * contract over `produce(count)` attempts, retaining at most `capacity`.
+ */
+export class ScriptedQueueSource implements IQueueDiagnosticsSource {
+  #attempts: QueueSourceAttemptObservation[] = [];
+  #sequence = 0;
+  readonly #capacity: number;
+  readonly #alias: string;
+  reads = 0;
+
+  /**
+   * @param capacity - The ring capacity
+   * @param alias - The instance alias the batches carry
+   */
+  constructor(capacity = 1_024, alias = 'mailer') {
+    this.#capacity = capacity;
+    this.#alias = alias;
+  }
+
+  /**
+   * Records `count` more attempts.
+   *
+   * @param count - How many
+   */
+  produce(count: number): void {
+    for (let index = 0; index < count; index++) {
+      this.#sequence += 1;
+      this.#attempts.push(sourceAttempt(this.#sequence));
+      if (this.#attempts.length > this.#capacity) {
+        this.#attempts.shift();
+      }
+    }
+  }
+
+  read(after: number, limit = 128): QueueDiagnosticsSourceBatch {
+    this.reads += 1;
+    if (after > this.#sequence) {
+      throw new RangeError('beyond');
+    }
+    const first = this.#attempts.length > 0 ? this.#attempts[0].sequence : this.#sequence + 1;
+    const start = Math.max(after + 1, first);
+    const attempts = this.#attempts.filter((a) => a.sequence >= start).slice(0, limit);
+    return sourceBatch({
+      instanceAlias: this.#alias,
+      attempts,
+      depths: [{
+        queueAlias: 'emails',
+        ready: 2,
+        processing: 1,
+        dead: 0,
+        scope: 'shared-backend',
+        coverage: 'complete',
+        ageMs: 5,
+      }],
+      next: attempts.length > 0 ? attempts[attempts.length - 1].sequence : after,
+      lost: attempts.length > 0 ? start - after - 1 : 0,
+    });
+  }
 }

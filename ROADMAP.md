@@ -10954,9 +10954,10 @@ origin.
 
 ### Milestone 98f: Queue Attempt, Outcome and Depth Observations
 
-**Status:** planned; design security review and implementation security audit required. **Owner:**
-`packages/queue-plugin`, with necessary shared diagnostic and connector/client changes. **Plan:**
-`plans/milestone-98f-queue-observations.md`.
+**Status:** implemented on `feat/m98f-queue-observations`; the committed-tree security audit is
+pending, and until it passes this letter is not complete. **Owner:** `packages/queue-plugin`, with
+necessary shared diagnostic (`packages/common`) and connector/client (`packages/diagnostics-plugin`)
+changes. **Plan:** `plans/milestone-98f-queue-observations.md`.
 
 **Existing foundation:** `IQueue` has no job enumeration or dead-letter reader. Final-attempt
 `onFailed` callbacks, outcome counters and some depth reporting already exist. Memory supports
@@ -10967,15 +10968,15 @@ success.
 
 **Deliverables:**
 
-- [ ] Bounded, opt-in live observations with session-local job aliases, approved queue labels,
+- [x] Bounded, opt-in live observations with session-local job aliases, approved queue labels,
       attempt number, duration, outcome and explicit settlement state when known. Preserve
       processors, failure callbacks, retries and settlement behavior; a failed diagnostic sink
       cannot change them.
-- [ ] Minimized depth observations only where supported, with collection scope, freshness and
+- [x] Minimized depth observations only where supported, with collection scope, freshness and
       partial coverage. Distinguish unavailable from zero and per-process counters from backend
       inventory. Do not sum shared backend depths across replicas or infer confirmed settlement from
       an outcome notification. Define the count collection policy separately from diagnostic reads.
-- [ ] Exclude job payloads, headers, raw job IDs, receipt/claim tokens, credentials and raw
+- [x] Exclude job payloads, headers, raw job IDs, receipt/claim tokens, credentials and raw
       exceptions before capture. Bound alias maps and restrict observed queue/tenant scope. The
       extension receives neither broker credentials nor access to private adapter state.
 - [ ] Pass both security gates below with an adapter support matrix, failed-settlement cases,
@@ -11934,7 +11935,7 @@ because one of them invalidated part of a previous run's claims:
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))             |
 | 98d       | ✅     | common + health-plugin + diagnostics-plugin — minimized health observations ([#363](https://github.com/setu-ts/setu-ts/pull/363))         |
 | 98e       | ⬜     | config-plugin — value-free configuration provenance; design security review and implementation audit required                             |
-| 98f       | ⬜     | queue-plugin — attempt, outcome and depth observations; design security review and implementation audit required                          |
+| 98f       | ⬜     | queue-plugin — attempt, outcome and depth observations; implemented, committed-tree security audit pending                                |
 | 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                       |
 | 98i       | ⬜     | cache observations — design security review and implementation audit required                                                             |
