@@ -273,6 +273,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`cli` — `setu new --template full-stack` now demonstrates React Router route middleware, and
+  explains both middleware layers.** A generated full-stack project has two: kernel middleware
+  (`setu generate middleware`), which runs for every request, and React Router's route `middleware`
+  export, which runs only for the SSR routes it is attached to. The scaffold carried no example of
+  the second, so where a route middleware goes and how it hands a loader a value had to be learned
+  from React Router's documentation. It now emits `app/middleware/require-user.server.ts` and
+  `app/models/user.ts`, a `currentUserContext` key and `getCurrentUser` accessor, and a README
+  section comparing the two layers. **Generated behaviour changes:** `/products` in a newly
+  scaffolded project now redirects a visitor who is not signed in to `/login` (existing projects are
+  unaffected). A kernel middleware generated into a project that installs `react-router-plugin`
+  names the route-level alternative in its JSDoc, and every generated middleware's priority comment
+  now lists tenant resolution (40) and request logging (100), which it omitted, and explains
+  short-circuiting before `await next()` rather than after it, where returning early no longer stops
+  anything.
 - **`cli` — the `--di` refusal names the `--style` axis (M99e).** The retired `--di` flag's message
   now directs the caller to `--style class-based` (with `--template rest` or `microservice`) rather
   than only to `--template class-based`, and the broker refusal's "use `--template microservice`"

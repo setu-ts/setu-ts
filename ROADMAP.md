@@ -4937,8 +4937,14 @@ the plugin composition** the generated `setu.config.ts` calls.
 | `lib/http/xior.server.ts`             | `@setu-ts/sdk` (M35)                                      |
 | `lib/appinsights-bootstrap.server.ts` | `CAPABILITIES.TELEMETRY` (M24)                            |
 | `lib/service-logger.server.ts`        | `CAPABILITIES.LOGGER`                                     |
-| `lib/route-guards.server.ts`          | `auth-plugin` guard factories + `userContext`             |
+| `lib/route-guards.server.ts`          | `auth-plugin` guard factories + `userContext`¹            |
 | `config/services.server.ts`           | the kernel registry — its module-level caches disappear   |
+
+¹ For kernel routes. A kernel guard cannot target one SSR page — every page is served by the one
+catch-all route — and answers `401` rather than redirecting, so page-level gating uses React
+Router's route `middleware` export, reading the session through its context key rather than
+reimplementing it. The scaffold ships that as `app/middleware/require-user.server.ts` (added after
+M36c, when a reader had no example of the second middleware layer).
 
 Session reaches loaders through an **app-declared** `RouterContextKey`, never a plugin-to-plugin
 import: `getSession` takes an `IRequestContext`, which a loader never sees, while

@@ -181,6 +181,13 @@ export interface TemplateManifest {
    * blank file rather than an answer to where configuration goes.
    */
   readonly envVariables?: readonly EnvVariable[];
+  /**
+   * Markdown appended to the generated `README.md`, for what only this template has.
+   *
+   * Must already be formatted exactly as `deno fmt` would format it, since the
+   * scaffold is gated on passing its own `fmt --check`.
+   */
+  readonly readmeSection?: string;
   /** npm packages the running application needs, merged into `dependencies`. */
   readonly npmDependencies?: Readonly<Record<string, string>>;
   /** npm packages the build or tests need, merged into `devDependencies`. */

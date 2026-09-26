@@ -90,6 +90,57 @@ describe('full-stack template | the layering it emits', () => {
   });
 });
 
+describe('full-stack template | the React Router middleware example', () => {
+  // A generated project has two middleware layers — kernel middleware from
+  // `setu generate middleware`, and React Router's own route `middleware` export —
+  // and the scaffold used to demonstrate only the first. These pin the worked
+  // example of the second, so a reader can see where one goes and how it hands a
+  // loader a value.
+  it('emits the route middleware and the model it hands to loaders', () => {
+    expect(paths).toContain('app/middleware/require-user.server.ts');
+    expect(paths).toContain('app/models/user.ts');
+  });
+
+  it('attaches it to /products through the route module export', () => {
+    const route = contentsOf('app/routes/_app/products._index.tsx');
+    expect(route).toContain("import { requireUser } from '~/middleware/require-user.server.ts';");
+    expect(route).toContain('export const middleware = [requireUser];');
+    // The loader reads what the middleware set — the reason to use this layer at all.
+    expect(route).toContain('getCurrentUser(context)');
+  });
+
+  it('reads the session through its context key and sets the user through another', () => {
+    const middleware = contentsOf('app/middleware/require-user.server.ts');
+    expect(middleware).toContain('context.get(sessionContext)');
+    expect(middleware).toContain('context.set(currentUserContext, { email })');
+    expect(middleware).toContain("throw redirect('/login')");
+    expect(middleware).toContain('return next();');
+    // A route middleware reusing the session plugin, not a second session: it never
+    // reads the cookie itself.
+    expect(middleware).not.toContain('request.headers');
+    expect(contentsOf('app/lib/context-keys.server.ts')).toContain(
+      "contextKeyFor<CurrentUser | null>('app.current-user', null)",
+    );
+  });
+
+  it('leaves the landing page unguarded', () => {
+    // `/` shares AppLayout with `/products`, which is why the example is attached to
+    // the route rather than the layout: guarding the layout would guard `/` too.
+    expect(contentsOf('app/routes/_app/_index.tsx')).not.toContain('export const middleware');
+    expect(contentsOf('app/components/layouts/AppLayout.tsx')).not.toContain(
+      'export const middleware',
+    );
+  });
+
+  it('explains both layers in the README section it contributes', () => {
+    const section = FULL_STACK_TEMPLATE.manifest?.readmeSection ?? '';
+    expect(section.startsWith('## Middleware\n')).toBe(true);
+    expect(section).toContain('`setu generate middleware <name>`');
+    expect(section).toContain('`export const middleware = [...]`');
+    expect(section).toContain('`app/middleware/require-user.server.ts`');
+  });
+});
+
 describe('full-stack template | what the plugins own is NOT reimplemented', () => {
   // Each entry names the module a conventional React Router app grows and the
   // capability that replaces it. If one reappears here, the skeleton has

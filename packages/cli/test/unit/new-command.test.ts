@@ -206,6 +206,20 @@ describe('runNewCommand', () => {
     }
   });
 
+  // A template's README section is appended to the generic README, and only its own.
+  it('appends the full-stack README section to that template alone', async () => {
+    const h = harness();
+    expect(await h.run(['shop', '--template', 'full-stack'])).toBe(0);
+    expect(await h.run(['api', '--template', 'rest'])).toBe(0);
+    const fullStack = h.fs.read('/work/shop/README.md');
+    expect(fullStack).toContain('## Generate code');
+    expect(fullStack).toContain('\n## Middleware\n');
+    expect(fullStack.indexOf('## Middleware')).toBeGreaterThan(
+      fullStack.indexOf('## Generate code'),
+    );
+    expect(h.fs.read('/work/api/README.md')).not.toContain('## Middleware');
+  });
+
   describe('the setu.config.ts seam', () => {
     it('is emitted even without --template', async () => {
       // Plugin-command discovery needs one seam that always exists.
