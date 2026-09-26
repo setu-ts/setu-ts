@@ -28,6 +28,7 @@ describe('loadEnvWithProvenance | precedence evidence', () => {
     const { values, sources } = await loadEnvWithProvenance(runtime(), {
       envFilePath: ['.env.local', '.env'],
     }, {
+      approvedKeys: new Set(['PORT', 'ONLY_FILE']),
       aliasByPath: new Map([['.env.local', 'dotenv-local'], ['.env', 'dotenv']]),
     });
     expect(values['PORT']).toEqual('3000');
@@ -43,6 +44,7 @@ describe('loadEnvWithProvenance | precedence evidence', () => {
     const { values, sources } = await loadEnvWithProvenance(runtime({}), {
       envFilePath: ['.env.local', '.env'],
     }, {
+      approvedKeys: new Set(['PORT', 'ONLY_FILE']),
       aliasByPath: new Map([['.env.local', 'dotenv-local'], ['.env', 'dotenv']]),
     });
     expect(values['PORT']).toEqual('2000');
@@ -64,6 +66,7 @@ describe('loadEnvWithProvenance | precedence evidence', () => {
       envFilePath: ['.env.local'],
     }, {
       // `.env.local` was NOT approved.
+      approvedKeys: new Set(['PORT']),
       aliasByPath: new Map(),
     });
     expect(sources.get('PORT')).toEqual({
@@ -73,11 +76,28 @@ describe('loadEnvWithProvenance | precedence evidence', () => {
     expect(JSON.stringify([...sources.values()])).not.toContain('.env.local');
   });
 
-  it('produces no observation for a key only the environment provides', async () => {
+  it('records an environment-only key with no displacement', async () => {
     const { sources } = await loadEnvWithProvenance(runtime({ FRESH: 'yes' }), {}, {
+      approvedKeys: new Set(['FRESH']),
       aliasByPath: new Map(),
     });
     expect(sources.get('FRESH')).toEqual({ origin: 'environment', overriddenSourceAliases: [] });
+  });
+
+  it('observes ONLY approved keys — unapproved env and file keys are never recorded', async () => {
+    const { values, sources } = await loadEnvWithProvenance(
+      runtime({ PORT: '3000', UNAPPROVED_ENV: 'x' }),
+      { envFilePath: ['.env.local', '.env'] },
+      {
+        approvedKeys: new Set(['PORT']),
+        aliasByPath: new Map([['.env.local', 'dotenv-local'], ['.env', 'dotenv']]),
+      },
+    );
+    // The merge itself is unchanged: every key still loads.
+    expect(values['UNAPPROVED_ENV']).toEqual('x');
+    expect(values['ONLY_FILE']).toBeDefined();
+    // But only the approved key was observed, even transiently.
+    expect([...sources.keys()]).toEqual(['PORT']);
   });
 });
 

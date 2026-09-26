@@ -10928,7 +10928,7 @@ by a different rule from `/health`) are fixed too.
 
 **Status:** complete (PR pending); the implementation security audit record ships in the PR.
 **Owner:** `packages/config-plugin`, with necessary shared diagnostic and connector/client changes.
-**Plan:** `plans/milestone-98e-configuration-provenance.md`.
+**Plan:** `plans/archive/milestone-98e-configuration-provenance.md`.
 
 **Existing foundation:** `IConfig` exposes named reads and presence checks, not provenance or key
 enumeration. `loadConfig` and `loadEnv` know merge precedence before expansion and schema
@@ -11934,7 +11934,7 @@ because one of them invalidated part of a previous run's claims:
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347)) |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))             |
 | 98d       | ✅     | common + health-plugin + diagnostics-plugin — minimized health observations ([#363](https://github.com/setu-ts/setu-ts/pull/363))         |
-| 98e       | ⬜     | config-plugin — value-free configuration provenance; design security review and implementation audit required                             |
+| 98e       | ✅     | config-plugin — value-free configuration provenance (PR pending)                                                                          |
 | 98f       | ⬜     | queue-plugin — attempt, outcome and depth observations; design security review and implementation audit required                          |
 | 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                       |

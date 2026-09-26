@@ -87,14 +87,19 @@ export async function loadConfig(
   const { values: loaded, sources } = await loadEnvWithProvenance(
     runtime,
     loaderOptions,
-    policy === null ? undefined : { aliasByPath: policy.aliasByPath },
+    policy === null
+      ? undefined
+      : { approvedKeys: policy.aliasByKey, aliasByPath: policy.aliasByPath },
   );
   const expansions = new Map<string, readonly string[]>();
   const raw = (options?.expandVariables ?? true)
     ? expandConfigVariables(
       loaded,
-      policy === null ? undefined : (key, references) => {
-        expansions.set(key, references);
+      policy === null ? undefined : {
+        keys: policy.aliasByKey,
+        onExpanded: (key, references) => {
+          expansions.set(key, references);
+        },
       },
     )
     : loaded;

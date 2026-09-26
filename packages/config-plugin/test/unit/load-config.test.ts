@@ -491,6 +491,54 @@ describe('loadConfig | configuration provenance (M98e)', () => {
     ]);
   });
 
+  it('performs ONE pass: file reads and schema parses are identical with diagnostics on or off', async () => {
+    /** Loads once and reports how many file reads and schema parses it cost. */
+    async function countedLoad(diagnostics?: ConfigDiagnosticsOptions) {
+      const fs = createFakeFileSystem({ '.env': 'HOST=h\nPORT=1\n' });
+      let reads = 0;
+      const countingFs: IFileSystem = {
+        ...fs,
+        readFile: (path: string) => {
+          reads += 1;
+          return fs.readFile(path);
+        },
+      };
+      let parses = 0;
+      const schema: StructuralSchema<unknown> = {
+        parse(input: unknown): Record<string, unknown> {
+          parses += 1;
+          return input as Record<string, unknown>;
+        },
+      };
+      await loadConfig(createRuntime({ env: { PORT: '2' }, fs: countingFs }), {
+        envFilePath: '.env',
+        validationSchema: schema,
+        ...(diagnostics === undefined ? {} : { diagnostics }),
+      });
+      return { reads, parses };
+    }
+    const off = await countedLoad();
+    const on = await countedLoad({ enabled: true, keys: { HOST: 'host', PORT: 'port' } });
+    expect(off).toEqual({ reads: 1, parses: 1 });
+    expect(on).toEqual(off);
+  });
+
+  it('serves an adopted record under the LOADER policy, not the plugin one', async () => {
+    // The plugin's keys decide nothing for an adopted record: the loader
+    // approved HOST and PORT, the plugin HOST alone, and both are served.
+    // Pinned so a later change to either policy's reach is deliberate.
+    const loaded = await loadConfig(
+      createRuntime({ env: { HOST: 'h', PORT: '1' }, fs: createFakeFileSystem({}) }),
+      { diagnostics: { enabled: true, keys: { HOST: 'host', PORT: 'port' } } },
+    );
+    const registry = await registerFullPlugin(createRuntime({}), {
+      instance: loaded,
+      diagnostics: { enabled: true, keys: { HOST: 'host' } },
+    });
+    const source = registry.get(CAPABILITIES.CONFIG_DIAGNOSTICS) as IConfigDiagnosticsSource;
+    expect(source.snapshot('i').entries.map((e) => e.keyAlias)).toEqual(['host', 'port']);
+  });
+
   it('registers the disabled inert source when the diagnostics option is absent', async () => {
     const registry = await registerFullPlugin(
       createRuntime({ env: { PORT: '3000' }, fs: createFakeFileSystem({}) }),

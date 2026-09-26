@@ -176,8 +176,16 @@ plugin registers under `CAPABILITIES.CONFIG_DIAGNOSTICS`, projected field-by-fie
     {
       "keyAlias": "port",
       "origin": "environment",
-      "sourceAlias": "dotenv",
-      "overriddenSourceAliases": ["dotenv-local"],
+      "overriddenSourceAliases": ["dotenv", "dotenv-local"],
+      "expanded": false,
+      "referenceAliases": [],
+      "schemaEffect": "validated"
+    },
+    {
+      "keyAlias": "api-url",
+      "origin": "file",
+      "sourceAlias": "dotenv-local",
+      "overriddenSourceAliases": ["dotenv"],
       "expanded": true,
       "referenceAliases": ["host"],
       "schemaEffect": "validated"

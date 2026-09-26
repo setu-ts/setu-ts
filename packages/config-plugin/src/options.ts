@@ -120,6 +120,10 @@ export interface ConfigPluginOptions {
    * snapshot; `ConfigPlugin({ instance, diagnostics })` adopts the record
    * when its exact instance was produced by this loader, and otherwise
    * reports every approved alias with an `unknown` origin and schema effect.
+   * An adopted record is served exactly as the loader built it, under the
+   * `loadConfig` call's own approvals: the plugin's `keys` and `files` then
+   * decide nothing beyond enabling the source, and govern only the opaque
+   * case. Pass the same policy to both calls.
    *
    * @since 0.8.0
    */

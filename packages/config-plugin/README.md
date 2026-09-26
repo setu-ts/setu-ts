@@ -166,10 +166,13 @@ observed at all.
 
 `loadConfig(runtime, { diagnostics })` builds the record with the snapshot;
 `ConfigPlugin({ instance, diagnostics })` adopts that exact instance's record — keeping real origins
-— or reports an opaque injected instance as `unknown` with no presence flag and no read of it.
-Provenance adds no read to any configuration object. The plugin always registers the source under
-`CAPABILITIES.CONFIG_DIAGNOSTICS`: absent `diagnostics` answers `disabled`. The Diagnostics
-Connector serves it at `GET /v1/config` — see `docs/diagnostics-protocol.md`.
+— or reports an opaque injected instance as `unknown` with no presence flag and no read of it. An
+adopted record is served as the loader built it, under the `loadConfig` call's approvals; the
+plugin's own `keys` and `files` then only enable the source and govern the opaque case, so pass the
+same policy to both calls. Provenance adds no read to any configuration object. The plugin always
+registers the source under `CAPABILITIES.CONFIG_DIAGNOSTICS`: absent `diagnostics` answers
+`disabled`. The Diagnostics Connector serves it at `GET /v1/config` — see
+`docs/diagnostics-protocol.md`.
 
 ## Hot Reload
 

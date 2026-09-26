@@ -849,8 +849,11 @@ builds the record with the snapshot; `ConfigPlugin({ instance, diagnostics })` a
 instance's record (keeping each entry's real `environment`/`file` origin — injection is how the
 snapshot reached the application, not where its values came from) or, for an opaque injected
 instance, reports every approved alias with origin and schema effect `unknown` and NO presence flag,
-without a single read of it. Provenance adds no read to any configuration object: configured
-sections perform exactly the same `IConfig.get` calls with diagnostics disabled and enabled.
+without a single read of it. An adopted record is served exactly as the loader built it, under the
+`loadConfig` call's approvals — the plugin's own `keys` and `files` only enable the source and
+govern the opaque case, so the same policy belongs on both calls. Provenance adds no read to any
+configuration object: configured sections perform exactly the same `IConfig.get` calls with
+diagnostics disabled and enabled.
 
 The plugin ALWAYS registers the source under the eager `CAPABILITIES.CONFIG_DIAGNOSTICS` token:
 absent `diagnostics` answers `disabled`; enabled with no approved resolved entries answers

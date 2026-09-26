@@ -8,28 +8,35 @@
 const REFERENCE_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 
 /**
- * The optional expansion observer: called exactly once per key whose
- * already-loaded raw string contained the `${NAME}` grammar, with the
- * DISTINCT reference names in first-occurrence order. It observes grammar
- * only — never a value — and a reference that fails to resolve throws before
- * the observer's result can matter, because a failed load stores no
- * provenance at all.
+ * The optional expansion observation: `onExpanded` is called exactly once per
+ * OBSERVED key whose already-loaded raw string contained the `${NAME}`
+ * grammar, with the DISTINCT reference names in first-occurrence order. Only
+ * a key in `keys` (the approved set) is ever scanned — an unapproved key's
+ * string is expanded exactly as before and never inspected for provenance.
+ * It observes grammar only — never a value — and a reference that fails to
+ * resolve throws before the observer's result can matter, because a failed
+ * load stores no provenance at all.
  *
  * @internal
  */
-export type ExpansionObserver = (key: string, references: readonly string[]) => void;
+export interface ExpansionObserver {
+  /** The exact approved keys; no other key is scanned or reported. */
+  readonly keys: Pick<ReadonlySet<string>, 'has'>;
+  /** Receives one observed key's distinct reference names. */
+  readonly onExpanded: (key: string, references: readonly string[]) => void;
+}
 
 /**
  * Expands recursive `${NAME}` references against the final merged values.
  *
  * @param values - Final unexpanded configuration values
- * @param onExpanded - Optional grammar observer (provenance evidence)
+ * @param observer - Optional grammar observer (provenance evidence)
  * @returns A new record containing expanded values
  * @throws {Error} If a reference is missing or cyclic
  */
 export function expandVariables(
   values: Readonly<Record<string, string>>,
-  onExpanded?: ExpansionObserver,
+  observer?: ExpansionObserver,
 ): Record<string, string> {
   const expanded: Record<string, string> = {};
   const resolving: string[] = [];
@@ -57,7 +64,7 @@ export function expandVariables(
     );
     resolving.pop();
     expanded[key] = value;
-    if (onExpanded !== undefined) {
+    if (observer !== undefined && observer.keys.has(key)) {
       // Distinct names in first-occurrence order — the memoized `resolve`
       // computes each key's expansion exactly once, so the observer fires
       // exactly once per grammatical key, including keys first reached as
@@ -70,7 +77,7 @@ export function expandVariables(
         }
       }
       if (references.length > 0) {
-        onExpanded(key, references);
+        observer.onExpanded(key, references);
       }
     }
     return value;

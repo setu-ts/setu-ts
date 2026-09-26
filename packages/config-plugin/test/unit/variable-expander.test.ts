@@ -51,11 +51,14 @@ describe('expandVariables | grammar observer (M98e provenance)', () => {
         URL: '${ORIGIN}/api/${HOST}',
         PLAIN: 'no-grammar',
       },
-      (key, references) => {
-        if (seen.has(key)) {
-          throw new Error(`observer fired twice for ${key}`);
-        }
-        seen.set(key, references);
+      {
+        keys: new Set(['HOST', 'ORIGIN', 'URL', 'PLAIN']),
+        onExpanded: (key, references) => {
+          if (seen.has(key)) {
+            throw new Error(`observer fired twice for ${key}`);
+          }
+          seen.set(key, references);
+        },
       },
     );
     // Every key reached as someone else's reference is expanded exactly once
@@ -68,17 +71,33 @@ describe('expandVariables | grammar observer (M98e provenance)', () => {
 
   it('reports nothing when expansion is a pure copy without the grammar', () => {
     let fired = 0;
-    expandVariables({ A: 'plain', B: 'also-plain' }, () => {
-      fired += 1;
+    expandVariables({ A: 'plain', B: 'also-plain' }, {
+      keys: new Set(['A', 'B']),
+      onExpanded: () => {
+        fired += 1;
+      },
     });
     expect(fired).toEqual(0);
   });
 
   it('still throws for a missing reference before any record can matter', () => {
     expect(() =>
-      expandVariables({ A: '${MISSING}' }, () => {
-        throw new Error('observer must not be consulted on a failed load');
+      expandVariables({ A: '${MISSING}' }, {
+        keys: new Set(['A']),
+        onExpanded: () => {
+          throw new Error('observer must not be consulted on a failed load');
+        },
       })
     ).toThrow(/is not defined/);
+  });
+
+  it('never scans or reports an unapproved key, while still expanding it', () => {
+    const seen: string[] = [];
+    const expanded = expandVariables(
+      { HOST: 'h', APPROVED: '${HOST}', UNAPPROVED: 'x-${HOST}' },
+      { keys: new Set(['APPROVED']), onExpanded: (key) => seen.push(key) },
+    );
+    expect(expanded['UNAPPROVED']).toEqual('x-h');
+    expect(seen).toEqual(['APPROVED']);
   });
 });

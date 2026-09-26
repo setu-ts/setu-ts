@@ -18,12 +18,16 @@ export interface EnvLoaderOptions {
 }
 
 /**
- * The exact configured path to approved source-alias map provenance merges
- * through. Absent means no aliasing: every file origin stays category-only.
+ * The provenance policy the merge observes through: the exact approved
+ * configuration keys (the ONLY keys ever observed — an unapproved key is
+ * merged exactly as before and never recorded, not even transiently), and
+ * the exact configured path to approved source-alias map (an unapproved path
+ * stays category-only).
  *
  * @internal
  */
 export interface EnvProvenanceOptions {
+  readonly approvedKeys: Pick<ReadonlySet<string>, 'has'>;
   readonly aliasByPath: ReadonlyMap<string, string>;
 }
 
@@ -67,11 +71,13 @@ export async function loadEnv(
  * {@linkcode loadEnv} in both cases: the same loop order, the same
  * assignments, the same errors.
  *
- * As each existing merge step wins, the winning source displaces the
- * previous one: the displaced source's approved alias is appended to the
- * key's displacement list (lowest-precedence first, capped at the approved
- * budget) and the record is replaced by the winner. An unapproved file path
- * contributes only its category — never the path, its name, or a count.
+ * As each existing merge step wins for an APPROVED key, the winning source
+ * displaces the previous one: the displaced source's approved alias is
+ * appended to the key's displacement list (lowest-precedence first, capped
+ * at the approved budget) and the record is replaced by the winner. An
+ * unapproved key is merged exactly as before and never observed — not even
+ * transiently — and an unapproved file path contributes only its category,
+ * never the path, its name, or a count.
  *
  * @param runtime - Runtime services providing environment and optional files
  * @param options - Source-loading options
@@ -100,7 +106,7 @@ export async function loadEnvWithProvenance(
     : await loadFiles(fileSystem, paths, options.envFileOptional ?? false, diagnostics, sources);
   for (const [key, value] of Object.entries(runtime.env)) {
     if (value !== undefined) {
-      if (diagnostics !== undefined) {
+      if (diagnostics !== undefined && diagnostics.approvedKeys.has(key)) {
         recordDisplacement(sources, key, { origin: 'environment' });
       }
       merged[key] = value;
@@ -164,6 +170,9 @@ async function loadFiles(
     if (diagnostics !== undefined) {
       const sourceAlias = diagnostics.aliasByPath.get(path);
       for (const key of Object.keys(parsed)) {
+        if (!diagnostics.approvedKeys.has(key)) {
+          continue;
+        }
         recordDisplacement(sources, key, {
           origin: 'file',
           ...(sourceAlias === undefined ? {} : { sourceAlias }),
