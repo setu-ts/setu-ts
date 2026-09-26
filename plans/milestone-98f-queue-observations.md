@@ -343,3 +343,10 @@ source did not support. None widens the security boundary; each narrows or names
 11. **A held depth slot is reported as timed out** (audit finding): a name skipped because its
     earlier count has not settled, or left unread because every slot is held, reports
     `depth-read-timed-out` on every cycle rather than `none` after the first.
+12. **A pre-existing reporting defect is fixed here, at the maintainer's direction.** The audit
+    traced the observation-slot leak to `QueueService.#report`, which described a non-`Error` thrown
+    value with `new Error(String(error))` outside its guard; a value whose string conversion throws
+    escaped the job runner before settlement and stranded the job. It predates M98f (it is on
+    `main`) and would ordinarily go to a `fix/…` branch; the maintainer chose to fix it on this
+    branch. `toReportableError` now describes the value inside the guard, with a fixed fallback
+    message, for the service and the metrics collector alike.

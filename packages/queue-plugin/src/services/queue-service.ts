@@ -22,6 +22,7 @@ import type { IRuntimeServices, QueueDepthScope, TimerHandle } from '@setu-ts/co
 import type { QueueAdapter, QueueDepths } from '../adapters/queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import { runJob } from '../processors/job-processor.ts';
+import { toReportableError } from './reportable-error.ts';
 import type { JobOutcome } from '../processors/job-processor.ts';
 import type { QueueCollector } from '../metrics/queue-collector.ts';
 import { cronNextMs } from '../scheduler/cron-calculator.ts';
@@ -131,8 +132,10 @@ export class QueueService implements IQueue {
    * The poll loop, the recurring loop, and the job runner all used to discard
    * their errors into an empty `catch` — an adapter outage or a failing job
    * produced NO signal anywhere, and the code comments said "in production,
-   * consider injecting a logger". This is that logger. Reporting itself is
-   * guarded so a broken logger cannot take the loop down.
+   * consider injecting a logger". This is that logger. Reporting itself —
+   * including describing the thrown value — is guarded, so neither a broken
+   * logger nor an undescribable thrown value can take the loop down or leave
+   * a job unsettled.
    *
    * @param message - What failed
    * @param error - The thrown value
@@ -142,15 +145,20 @@ export class QueueService implements IQueue {
     if (this.#logger === undefined) {
       return;
     }
-    const err = error instanceof Error ? error : new Error(String(error));
+    // Everything — describing the thrown value included — sits inside the
+    // guard: a caller-controlled value that cannot be stringified used to throw
+    // HERE, before the logger was reached, which escaped the job runner and
+    // stranded the job unsettled.
     try {
+      const err = toReportableError(error);
       this.#logger.error(message, {
         error: err.message,
         ...(err.stack !== undefined && { stack: err.stack }),
         ...meta,
       });
     } catch {
-      // A broken logger must not escalate into a dead worker loop.
+      // A broken logger, or an Error whose `message`/`stack` getter throws,
+      // must not escalate into a dead worker loop or a stranded job.
     }
   }
 

@@ -287,6 +287,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`queue-plugin` — a job whose thrown value cannot be described is no longer left stuck.** With a
+  logger registered, `QueueService` converted a non-`Error` thrown by a processor with
+  `new Error(String(error))` outside its reporting guard, so a value whose string conversion throws
+  — a payload-derived `{ toString: 1 }`, a revoked `Proxy` — made the failure report itself throw.
+  That escaped the job runner before the requeue or dead-letter call, and the job stayed in its
+  processing state for the life of the process. Describing the value now happens inside the guard,
+  falling back to a fixed message, and the queue metrics collector's report path is guarded the same
+  way. Found by the M98f committed-tree security audit; no configuration change is needed.
 - **`cli` — the `--runtime` documentation read as a lock-in, and one of its claims was stale.** The
   scaffolding example `setu new my-app --runtime node # deno | node | bun | cloudflare-workers`
   suggested a project is tied to the runtime it was created for. It is not: on `deno`, `node` and

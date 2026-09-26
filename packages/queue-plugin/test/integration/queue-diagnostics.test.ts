@@ -269,11 +269,11 @@ describe('queue diagnostics — observation adds no backend work', () => {
     expect(settlements(scheduled.calls)).toEqual(settlements(withoutObservation.calls));
   });
 
-  it('releases the observation slot when the runner rejects before settling', async () => {
-    // Today's trigger: with a logger, a processor that throws a value whose
-    // toString throws makes the failure REPORT throw before any settlement
-    // (a pre-existing defect in QueueService's reporting, outside M98f). The
-    // observation must not keep that attempt's slot for the process's life.
+  it('settles and observes a job whose thrown value cannot be stringified', async () => {
+    // With a logger registered, a processor rethrowing a value whose toString
+    // is not a function used to make the failure REPORT throw before the
+    // dead-letter call: the job stayed stuck in processing and its attempt was
+    // never observed. It is now dead-lettered and observed like any other.
     const hostile = { toString: 1 } as unknown as Error;
     const app = createApplication({
       plugins: [
@@ -282,13 +282,17 @@ describe('queue diagnostics — observation adds no backend work', () => {
         QueuePlugin({
           adapter: 'memory',
           pollIntervalMs: POLL_MS,
+          defaultMaxAttempts: 1,
           processors: [{
             name: JOB_NAME,
             processor: () => {
               throw hostile;
             },
           }],
-          diagnostics: DIAGNOSTICS,
+          diagnostics: {
+            ...DIAGNOSTICS,
+            depths: { intervalMs: 1_000, timeoutMs: 1_000, concurrency: 1 },
+          },
         }),
       ],
     });
@@ -296,8 +300,11 @@ describe('queue diagnostics — observation adds no backend work', () => {
     try {
       const source = sources(app)[0];
       await app.services.get<IQueue>('queue').add(JOB_NAME, { secret: PAYLOAD_CANARY });
-      await until(() => source.read(0).droppedAttempts === 1, 'the abandoned attempt');
-      expect(source.read(0).attempts).toEqual([]);
+      await until(() => source.read(0).attempts.length === 1, 'the observed attempt');
+      const batch = source.read(0);
+      expect(batch.attempts[0].outcome).toBe('terminal-error');
+      expect(batch.attempts[0].settlement).toBe('dead-lettered');
+      expect(batch.droppedAttempts).toBe(0);
     } finally {
       await app.stop();
     }
