@@ -84,6 +84,8 @@ function fakeServer(
     statusInspectors?: Record<string, boolean>;
     /** The body to serve for `/v1/health`; defaults to a ready snapshot. */
     healthBody?: Record<string, unknown>;
+    /** The body to serve for `/v1/config`; defaults to a ready snapshot. */
+    configBody?: Record<string, unknown>;
     /** The body to serve for `/v1/queues`; defaults to a one-event batch. */
     queuesBody?: (after: number) => Record<string, unknown>;
   } = {},
@@ -153,6 +155,26 @@ function fakeServer(
             ],
             truncated: false,
             droppedObservations: 0,
+          },
+        );
+      } else if (target === '/v1/config') {
+        bodyText = JSON.stringify(
+          overrides.configBody ?? {
+            version: 1,
+            instanceId: TEST_INSTANCE_ID,
+            state: 'ready',
+            entries: [
+              {
+                keyAlias: 'port',
+                origin: 'environment',
+                overriddenSourceAliases: ['dotenv'],
+                expanded: false,
+                referenceAliases: [],
+                schemaEffect: 'validated',
+              },
+            ],
+            truncated: false,
+            droppedEntries: 0,
           },
         );
       } else if (url.pathname === '/v1/queues') {
@@ -605,6 +627,119 @@ describe('Client — health negotiation (M98d)', () => {
     expect(Object.isFrozen(health)).toBe(true);
     expect(Object.isFrozen(health.observations)).toBe(true);
     expect(Object.isFrozen(health.observations[0])).toBe(true);
+    client.close();
+  });
+});
+
+describe('Client — configuration negotiation (M98e)', () => {
+  it('serves a provenance read through the signed exchange when the manifest is true', async () => {
+    const { client, requests } = buildClient();
+    const config = await client.configuration();
+    expect(config.version).toEqual(1);
+    expect(config.instanceId).toEqual(TEST_INSTANCE_ID);
+    expect(config.state).toEqual('ready');
+    expect(config.entries[0].keyAlias).toEqual('port');
+    expect(config.entries[0].origin).toEqual('environment');
+    // Status, then the canonical configuration target.
+    expect(requests.length).toEqual(2);
+    expect(requests[1].target).toEqual('/v1/config');
+    client.close();
+  });
+
+  it('answers unsupported WITHOUT an addon request when the manifest key is false', async () => {
+    const allFalse = Object.fromEntries(INSPECTOR_KEYS.map((key) => [key, false]));
+    const { client, requests } = buildClient({ server: { statusInspectors: allFalse } });
+    const config = await client.configuration();
+    expect(config.state).toEqual('unsupported');
+    expect(config.entries).toEqual([]);
+    // ONLY the status exchange went out — no `/v1/config` request.
+    expect(requests.length).toEqual(1);
+    expect(requests[0].target).toEqual('/v1/status');
+    client.close();
+  });
+
+  it('pairs against the legacy M98b three-field body and never probes the route', async () => {
+    const { client, requests } = buildClient({ server: { legacyStatus: true } });
+    const config = await client.configuration();
+    // The legacy body resolved to the all-false manifest: unsupported, and no
+    // addon request was sent.
+    expect(config.state).toEqual('unsupported');
+    expect(requests.length).toEqual(1);
+    expect(requests[0].target).toEqual('/v1/status');
+    client.close();
+  });
+
+  it('refuses a config body that fails the exact DTO validator', async () => {
+    const { client } = buildClient({
+      server: {
+        configBody: {
+          version: 1,
+          instanceId: TEST_INSTANCE_ID,
+          state: 'bogus',
+          entries: [],
+          truncated: false,
+          droppedEntries: 0,
+        },
+      },
+    });
+    await expect(client.configuration()).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('refuses a config body bound to a different instance than the pairing', async () => {
+    const { client } = buildClient({
+      server: {
+        configBody: {
+          version: 1,
+          instanceId: '00000000-0000-4000-8000-000000000000',
+          state: 'no-data',
+          entries: [],
+          truncated: false,
+          droppedEntries: 0,
+        },
+      },
+    });
+    await expect(client.configuration()).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('refuses a config entry carrying a value-shaped canary outside the DTO', async () => {
+    const { client } = buildClient({
+      server: {
+        configBody: {
+          version: 1,
+          instanceId: TEST_INSTANCE_ID,
+          state: 'ready',
+          entries: [
+            {
+              keyAlias: 'port',
+              origin: 'environment',
+              overriddenSourceAliases: [],
+              expanded: false,
+              referenceAliases: [],
+              schemaEffect: 'validated',
+              value: 'canary-value-SYNTHETIC',
+            },
+          ],
+          truncated: false,
+          droppedEntries: 0,
+        },
+      },
+    });
+    await expect(client.configuration()).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('returns a deeply frozen snapshot, as documented', async () => {
+    const { client } = buildClient();
+    const config = await client.configuration();
+    expect(Object.isFrozen(config)).toBe(true);
+    expect(Object.isFrozen(config.entries)).toBe(true);
+    expect(Object.isFrozen(config.entries[0])).toBe(true);
+    // The alias arrays nested inside each entry are frozen too.
+    expect(config.entries[0].overriddenSourceAliases.length).toBeGreaterThan(0);
+    expect(Object.isFrozen(config.entries[0].overriddenSourceAliases)).toBe(true);
+    expect(Object.isFrozen(config.entries[0].referenceAliases)).toBe(true);
     client.close();
   });
 });

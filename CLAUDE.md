@@ -5244,8 +5244,27 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   first to a pre-existing `QueueService.#report` defect on `main` (a thrown value whose string
   conversion throws stranded its job), fixed here at the maintainer's direction. Two re-audits
   passed with no finding open — complete (PR #365).
-- **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
-  design security review and implementation audit required).
+- **Milestone 98e** (`packages/config-plugin` + `packages/common` + `packages/diagnostics-plugin` —
+  value-free configuration provenance): `ConfigPlugin`/`loadConfig` accept a `diagnostics` option
+  (`ConfigDiagnosticsOptions`) that records, during the one load already performed, value-free
+  provenance for explicitly approved keys only — source category and approved aliases, evidenced
+  precedence displacement, `${NAME}` expansion references, and a presence-derived schema effect
+  (`introduced` reports appearance, never mechanism). No value, hash, length, raw key name, or file
+  path is ever retained; unapproved keys are never observed, and an opaque injected instance is
+  answered `unknown` with no presence flag and no read. The record travels with the exact `IConfig`
+  through a module-private WeakMap, so standalone `loadConfig` followed by
+  `ConfigPlugin({ instance })` stays one snapshot. `common` gains the eager
+  `CAPABILITIES.CONFIG_DIAGNOSTICS` token, `IConfigDiagnosticsSource`, and the DTOs; the plugin
+  always registers a source (`disabled` without the option); the connector serves `GET /v1/config`
+  and its status manifest reports `configuration: true`; the client reads it through
+  `configuration()`. The first committed-tree audit failed on three Lows (control characters in
+  aliases, a double `instanceId` read, a builder that received the values record), all fixed; the
+  re-audit of that fix then found four bypasses — a replacement source smuggled a control alias into
+  a signed body through an array `toJSON`, a flipping index getter, or its own `map` — closed by
+  copying every source list index by index, bounded at budget+1. The independent re-audit of
+  `87c3a588` passed with no finding open (9 negative controls) — complete (PR #366).
+- **Next milestone** — **M98g** (`packages/telemetry-plugin` — minimized distributed tracing and
+  correlation; design security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

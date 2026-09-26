@@ -36,12 +36,15 @@ const port = config.get('PORT', { default: '3000' });
 
 ## Options
 
-| Option             | Type                                | Default     | Description                                                    |
-| ------------------ | ----------------------------------- | ----------- | -------------------------------------------------------------- |
-| `envFilePath`      | `string \| readonly string[]`       | `undefined` | Path(s) to `.env` files. No file loading when absent.          |
-| `validationSchema` | `StructuralSchema<T>`               | `undefined` | Zod-compatible whole-snapshot schema for startup validation.   |
-| `sections`         | `readonly ConfigSection<unknown>[]` | `undefined` | Typed, declared-key sections to validate and cache at startup. |
-| `expandVariables`  | `boolean`                           | `true`      | Expand `${NAME}` references in values.                         |
+| Option             | Type                                | Default     | Description                                                                   |
+| ------------------ | ----------------------------------- | ----------- | ----------------------------------------------------------------------------- |
+| `envFilePath`      | `string \| readonly string[]`       | `undefined` | Path(s) to `.env` files. No file loading when absent.                         |
+| `envFileOptional`  | `boolean`                           | `false`     | Skip an ABSENT configured path instead of throwing (unreadable still throws). |
+| `validationSchema` | `StructuralSchema<T>`               | `undefined` | Zod-compatible whole-snapshot schema for startup validation.                  |
+| `sections`         | `readonly ConfigSection<unknown>[]` | `undefined` | Typed, declared-key sections to validate and cache at startup.                |
+| `expandVariables`  | `boolean`                           | `true`      | Expand `${NAME}` references in values.                                        |
+| `instance`         | `IConfig`                           | `undefined` | An already-loaded snapshot to register verbatim; nothing is read.             |
+| `diagnostics`      | `ConfigDiagnosticsOptions`          | `undefined` | Opt-in value-free provenance; absent registers a `disabled` source.           |
 
 ## Configuration Precedence
 
@@ -137,6 +140,40 @@ validate an arbitrary `instance` snapshot. A missing key is omitted, so the sche
 it is optional. A section schema is not interchangeable with `validationSchema`: the latter receives
 the whole flat snapshot, while the former receives only its declared, prefix-stripped keys.
 
+## Configuration Provenance
+
+`diagnostics` is the explicit opt-in (0.8.0) to value-free provenance for the approved keys only:
+
+```typescript
+app.register(ConfigPlugin({
+  envFilePath: ['.env.local', '.env'],
+  diagnostics: {
+    enabled: true, // the literal true: an acknowledgement, not a toggle
+    keys: { PORT: 'port', DATABASE_URL: 'database' },
+    files: { '.env.local': 'dotenv-local', '.env': 'dotenv' },
+  },
+}));
+```
+
+During the ONE load already performed — never a second pass — the loader records where each approved
+key's final value was observed to come from: the source category and approved source aliases,
+evidenced precedence displacement (`overriddenSourceAliases`, lowest first), `${NAME}` expansion
+references (`expanded` + approved `referenceAliases`), and a schema effect derived only from
+input/output property presence. `introduced` reports that a key appeared only after schema parsing;
+it never names a mechanism, because a default and a transform are indistinguishable by presence. No
+value, hash, length, raw key name, or file path is ever retained, and unapproved keys are never
+observed at all.
+
+`loadConfig(runtime, { diagnostics })` builds the record with the snapshot;
+`ConfigPlugin({ instance, diagnostics })` adopts that exact instance's record — keeping real origins
+— or reports an opaque injected instance as `unknown` with no presence flag and no read of it. An
+adopted record is served as the loader built it, under the `loadConfig` call's approvals; the
+plugin's own `keys` and `files` then only enable the source and govern the opaque case, so pass the
+same policy to both calls. Provenance adds no read to any configuration object. The plugin always
+registers the source under `CAPABILITIES.CONFIG_DIAGNOSTICS`: absent `diagnostics` answers
+`disabled`. The Diagnostics Connector serves it at `GET /v1/config` — see
+`docs/diagnostics-protocol.md`.
+
 ## Hot Reload
 
 **Deferred.** The current runtime contract has no file-watching abstraction. Configuration is an
@@ -204,15 +241,16 @@ When `validationSchema` is not provided, all values remain as strings from the e
 
 ## Exports
 
-| Export                | Kind      |
-| --------------------- | --------- |
-| `ConfigPlugin`        | function  |
-| `defineConfigSection` | function  |
-| `getConfigSection`    | function  |
-| `loadConfig`          | function  |
-| `ConfigPluginOptions` | interface |
-| `ConfigSection`       | interface |
-| `StructuralSchema`    | interface |
+| Export                     | Kind      |
+| -------------------------- | --------- |
+| `ConfigPlugin`             | function  |
+| `defineConfigSection`      | function  |
+| `getConfigSection`         | function  |
+| `loadConfig`               | function  |
+| `ConfigDiagnosticsOptions` | interface |
+| `ConfigPluginOptions`      | interface |
+| `ConfigSection`            | interface |
+| `StructuralSchema`         | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

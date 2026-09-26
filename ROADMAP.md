@@ -10654,15 +10654,16 @@ and per-member credential handoff; 98d complete
 ([#363](https://github.com/setu-ts/setu-ts/pull/363)) — minimized health observations, the
 `GET /v1/health` inspector and the status-body inspector manifest; 98f complete
 ([#365](https://github.com/setu-ts/setu-ts/pull/365)) — queue attempt, outcome and depth
-observations and the `GET /v1/queues` inspector. These five are implemented, awaiting publication in
-the next release cycle. **98e and 98g–98n are planned**, each with its own implementation plan and
-mandatory security audit. This umbrella records framework work for the separately maintained
-devtool; adding the later letters does not make them prerequisites for publishing 98a–98c or for the
-devtool's initial D01–D04 preview, with ONE exception recorded under the release requirements below
-— M98d's status-shape change must precede the first publication of `packages/diagnostics-plugin`,
-because the shipped client refuses a status body it does not expect and that body is otherwise
-frozen for the lifetime of every published client. A roadmap status is not evidence that a security
-audit has passed.
+observations and the `GET /v1/queues` inspector; 98e complete
+([#366](https://github.com/setu-ts/setu-ts/pull/366)) — value-free configuration provenance and the
+`GET /v1/config` inspector. These six are implemented, awaiting publication in the next release
+cycle. **98g–98n are planned**, each with its own implementation plan and mandatory security audit.
+This umbrella records framework work for the separately maintained devtool; adding the later letters
+does not make them prerequisites for publishing 98a–98c or for the devtool's initial D01–D04
+preview, with ONE exception recorded under the release requirements below — M98d's status-shape
+change must precede the first publication of `packages/diagnostics-plugin`, because the shipped
+client refuses a status body it does not expect and that body is otherwise frozen for the lifetime
+of every published client. A roadmap status is not evidence that a security audit has passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -10927,9 +10928,9 @@ by a different rule from `/health`) are fixed too.
 
 ### Milestone 98e: Value-Free Configuration Provenance
 
-**Status:** planned; design security review and implementation security audit required. **Owner:**
-`packages/config-plugin`, with necessary shared diagnostic and connector/client changes. **Plan:**
-`plans/milestone-98e-configuration-provenance.md`.
+**Status:** complete (PR #366); the implementation security audit passed on `87c3a588` and its
+record is in the PR. **Owner:** `packages/config-plugin`, with necessary shared diagnostic and
+connector/client changes. **Plan:** `plans/archive/milestone-98e-configuration-provenance.md`.
 
 **Existing foundation:** `IConfig` exposes named reads and presence checks, not provenance or key
 enumeration. `loadConfig` and `loadEnv` know merge precedence before expansion and schema
@@ -10939,18 +10940,18 @@ origin.
 
 **Deliverables:**
 
-- [ ] Explicitly opted-in metadata recorded at the existing configuration-resolution steps, covering
+- [x] Explicitly opted-in metadata recorded at the existing configuration-resolution steps, covering
       both pre-composition `loadConfig` and plugin-driven loading. Define activation and lifetime
       for metadata collected before an application exists. Do not reread env files, rerun schemas or
       enumerate a custom `IConfig` to populate the inspector.
-- [ ] Approved key aliases, source categories and evidenced precedence/transform steps, with
+- [x] Approved key aliases, source categories and evidenced precedence/transform steps, with
       explicit unknown/unsupported origins for injected instances or opaque transformations. File
       sources use approved aliases, not absolute paths. Do not invent a dependency graph for
       arbitrary schemas.
-- [ ] No values, value hashes, lengths, full environment inventories, file contents or validation
+- [x] No values, value hashes, lengths, full environment inventories, file contents or validation
       error payloads in capture. Treat key names, presence and override relationships as sensitive
       metadata requiring approval; this is not an extension endpoint for `IConfig.get`.
-- [ ] Pass both security gates below. Exercise source precedence, expansion, schema defaults and
+- [x] Pass both security gates below. Exercise source precedence, expansion, schema defaults and
       transforms, injected snapshots and call-site fallbacks; prove useful approved origins without
       canary values/paths escaping or an extra load/validation pass.
 
@@ -11946,12 +11947,12 @@ because one of them invalidated part of a previous run's claims:
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                         |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                             |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                               |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98d and 98f complete, 98e and 98g–98n planned with security audit gates)                     |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98f complete, 98g–98n planned with security audit gates)                                     |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                       |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))        |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                    |
 | 98d       | ✅     | common + health-plugin + diagnostics-plugin — minimized health observations ([#363](https://github.com/setu-ts/setu-ts/pull/363))                |
-| 98e       | ⬜     | config-plugin — value-free configuration provenance; design security review and implementation audit required                                    |
+| 98e       | ✅     | common + config-plugin + diagnostics-plugin — value-free configuration provenance (PR #366)                                                      |
 | 98f       | ✅     | common + queue-plugin + diagnostics-plugin — queue attempt, outcome and depth observations ([#365](https://github.com/setu-ts/setu-ts/pull/365)) |
 | 98g       | ⬜     | telemetry-plugin — minimized distributed tracing and correlation; design security review and implementation audit required                       |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                              |

@@ -2524,6 +2524,26 @@ bounding it by the same 256 KiB response ceiling; an absent source answers `unsu
 source — or one whose projected DTO fails the exact validator — a value-free `collection-failed`,
 and neither changes the application's readiness.
 
+### Configuration Provenance Boundary (Milestone 98e)
+
+Configuration provenance extends the same pattern to the config plugin.
+`ConfigPlugin({ diagnostics })` / `loadConfig(runtime, { diagnostics })` is OFF unless the option is
+passed; an omitted option registers only an inert, disabled source under the EAGER
+`CAPABILITIES.CONFIG_DIAGNOSTICS` token, so the connector can distinguish "no config plugin"
+(`unsupported`) from "present but off" (`disabled`). When enabled, the boundary is again STRUCTURAL:
+the provenance builder observes only framework-owned structure at the resolution steps the loader
+already performs — the merge displacement chain, the existing `${NAME}` grammar on an already-loaded
+string, and schema input/output property PRESENCE — and it never compares, hashes, serializes,
+measures, or retains a value. Only explicitly approved key aliases and file-path aliases are
+retained; unapproved keys are dropped without a count (a count would disclose that they exist), and
+an unapproved file path contributes only its category. The record travels with the exact
+configuration object through a module-private `WeakMap`, so the standalone `loadConfig` →
+`ConfigPlugin({ instance })` composition stays ONE snapshot with ONE metadata pass, and GC owns the
+lifetime. An opaque injected instance is answered with `unknown` entries — no presence flag, no read
+of it; configured sections perform exactly the same `IConfig.get` calls with diagnostics disabled
+and enabled. The connector consumes the source to serve `GET /v1/config` with the identical
+projection, validation, bounding, and failure isolation as `GET /v1/health`.
+
 ### Queue Observation Boundary (Milestone 98f)
 
 Queue observations apply the same pattern to background work, with two structural differences. The

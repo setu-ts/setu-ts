@@ -126,6 +126,14 @@ export const CAPABILITIES = {
    */
   HEALTH_DIAGNOSTICS: 'health-diagnostics',
   /**
+   * Value-free configuration provenance (M98e) — an `IConfigDiagnosticsSource`
+   * the ConfigPlugin registers under this token and the DiagnosticsPlugin
+   * consumes optionally to serve `GET /v1/config`. Absent means the connector
+   * answers a typed `unsupported` snapshot; it never reads a configuration
+   * value, enumerates keys, or invokes a custom `IConfig` implementation.
+   */
+  CONFIG_DIAGNOSTICS: 'config-diagnostics',
+  /**
    * Minimized queue observations (M98f) — an `IQueueDiagnosticsSource` every
    * QueuePlugin instance registers under this token with `{ multi: true }`,
    * without claiming it in `provides`, so named queue instances never collide.

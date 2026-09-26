@@ -153,19 +153,19 @@ non-loopback bind outright.
 
 ## Protocol
 
-Five signed GET operations — `/v1/status`, `/v1/snapshot`, `/v1/events?after=<N>&limit=<N>`, and the
-inspector operations `/v1/health` (M98d) and `/v1/queues?after=<N>&limit=<N>` (M98f) — over bounded
-polling. The status body carries an `inspectors` manifest (`health: true`, `queues: true`; the rest
-reserved and `false` until their own operations ship); a client paired against a legacy three-field
-status body resolves it to all-`false`, and its `health()` and `queues()` answer a typed
-`unsupported` without sending the request. Requests authenticate with `X-Setu-Session`,
-`X-Setu-Sequence` (strictly monotonic), `X-Setu-Instance`, and `X-Setu-Mac` (HMAC-SHA-256 over
-canonical newline-joined fields, verified via `subtle.verify`). Responses are signed over their
-exact bytes; the client verifies BEFORE parsing anything. Bodies are bounded (256 KiB), events are
-capped at 128 per read, and a fixed set of value-free error codes (`invalid-request`,
-`unauthorized`, `expired`, `unsupported-version`, `unavailable`, `rate-limited`) never reflects
-input. See `docs/diagnostics-protocol.md` in the repository for the complete wire specification and
-fixtures.
+Six signed GET operations — `/v1/status`, `/v1/snapshot`, `/v1/events?after=<N>&limit=<N>`, and the
+inspector operations `/v1/health` (M98d), `/v1/config` (M98e) and `/v1/queues?after=<N>&limit=<N>`
+(M98f) — over bounded polling. The status body carries an `inspectors` manifest (`health`,
+`configuration` and `queues` implemented; the rest reserved and `false` until their own operations
+ship); a client paired against a legacy three-field status body resolves it to all-`false`, and its
+`health()`, `configuration()` and `queues()` answer a typed `unsupported` without sending the
+request. Requests authenticate with `X-Setu-Session`, `X-Setu-Sequence` (strictly monotonic),
+`X-Setu-Instance`, and `X-Setu-Mac` (HMAC-SHA-256 over canonical newline-joined fields, verified via
+`subtle.verify`). Responses are signed over their exact bytes; the client verifies BEFORE parsing
+anything. Bodies are bounded (256 KiB), events are capped at 128 per read, and a fixed set of
+value-free error codes (`invalid-request`, `unauthorized`, `expired`, `unsupported-version`,
+`unavailable`, `rate-limited`) never reflects input. See `docs/diagnostics-protocol.md` in the
+repository for the complete wire specification and fixtures.
 
 Bounds: at most 8 simultaneous handlers with one slot reserved against unpaired floods, an anonymous
 refusal budget of 5 requests/second (burst 10), a per-session budget of 20 requests/second (burst
@@ -182,6 +182,14 @@ The M98d inspector operation is read through `client.health(): Promise<HealthDia
 the minimized health-observation snapshot the health plugin registers under
 `CAPABILITIES.HEALTH_DIAGNOSTICS`. A connector without a health source answers a typed
 `unsupported`; the client surfaces the snapshot's `state` rather than failing the call.
+
+The M98e inspector operation is read through
+`client.configuration(): Promise<ConfigDiagnosticsSnapshot>` — the value-free provenance snapshot
+the config plugin registers under `CAPABILITIES.CONFIG_DIAGNOSTICS` (always registered, so "no
+config plugin" answers `unsupported` where "present but off" answers `disabled`). Every string from
+the config plugin is an application-approved display alias, and the connector and client both refuse
+an alias carrying a control character, whoever registered the source: no configuration value, hash,
+length, raw key name, or file path is ever carried, and unapproved keys are never observed at all.
 
 The M98f queue inspector is read through
 `client.queues(after, limit?): Promise<QueueDiagnosticsBatch>`. The cursor is the CONNECTOR's merge
@@ -207,6 +215,11 @@ display alias, the framework's own status, the outcome state, and monotonic timi
 plants both and asserts their absence at the source, in the raw signed bytes captured below the
 client, and in the client DTO. The connector validates the projected DTO before signing it; a source
 that violates it answers `collection-failed`.
+
+The M98e configuration inspector holds it too: canary values planted in an unapproved key, inside
+the approved file, and inside an expanded reference's resolution are asserted absent at all three
+layers, as are the raw key names and the configured path. `droppedEntries` counts only budget
+omissions — a count of unapproved keys would disclose that they exist, so there is none.
 
 ## Exports
 

@@ -6,11 +6,14 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
+import type { ConfigDiagnosticsSnapshot } from '@setu-ts/common';
+
 import {
   currentInspectorsManifest,
   errorBody,
   INSPECTOR_KEYS,
   isBatchProjection,
+  isConfigSnapshotProjection,
   isHealthSnapshotProjection,
   isInspectorsManifest,
   isSnapshotProjection,
@@ -18,6 +21,7 @@ import {
   parseStatusBody,
   parseTarget,
   projectBatch,
+  projectConfigSnapshot,
   projectEvent,
   projectHealthSnapshot,
   projectSnapshot,
@@ -183,9 +187,9 @@ describe('Protocol — status body and fixed errors', () => {
     });
   });
 
-  it('serves the fixed inspector manifest with health and queues true and the rest false', () => {
+  it('serves the fixed inspector manifest with health, configuration and queues true and the rest false', () => {
     const manifest = currentInspectorsManifest();
-    const implemented: readonly string[] = ['health', 'queues'];
+    const implemented: readonly string[] = ['health', 'configuration', 'queues'];
     for (const key of INSPECTOR_KEYS) {
       expect(manifest[key]).toBe(implemented.includes(key));
     }
@@ -354,6 +358,11 @@ describe('Protocol — health projection and validator (M98d)', () => {
     expect('status' in obs[1]).toBe(false);
   });
 
+  it('refuses a control character in an indicator alias (audit F1)', () => {
+    const forged = { ...reported, indicatorAlias: 'db\u001b[2J' };
+    expect(isHealthSnapshotProjection({ ...snapshot, observations: [forged] })).toBe(false);
+  });
+
   it('accepts a well-formed health snapshot and rejects malformed ones', () => {
     expect(isHealthSnapshotProjection(snapshot)).toBe(true);
     expect(isHealthSnapshotProjection({ ...snapshot, version: 2 })).toBe(false);
@@ -431,5 +440,179 @@ describe('Protocol — status-body release skew, BOTH directions (M98d gate)', (
     // carries no signal a server could branch on: the status body had to be
     // settled before the package's first publication.
     expect(m98bIsStatusBody(current)).toBe(false);
+  });
+});
+
+describe('Protocol — configuration target and projection (M98e)', () => {
+  /** A ready snapshot with one fully-populated entry, for projection tests. */
+  function readySnapshot(): ConfigDiagnosticsSnapshot {
+    return {
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'ready',
+      entries: [
+        {
+          keyAlias: 'database.url',
+          origin: 'file',
+          sourceAlias: 'dotenv-local',
+          overriddenSourceAliases: ['dotenv'],
+          expanded: true,
+          referenceAliases: ['host'],
+          schemaEffect: 'validated',
+        },
+      ],
+      truncated: false,
+      droppedEntries: 0,
+    };
+  }
+
+  it('parses the canonical /v1/config target and refuses every other form', () => {
+    const parsed = parseTarget('/v1/config', '');
+    expect(parsed).not.toBeNull();
+    expect(parsed!.op).toEqual('config');
+    expect(parsed!.canonicalTarget).toEqual('/v1/config');
+    // No query, no extra segment, no percent-encoding.
+    expect(parseTarget('/v1/config', 'x=1')).toBeNull();
+    expect(parseTarget('/v1/config/', '')).toBeNull();
+    expect(parseTarget('/%76%31/config', '')).toBeNull();
+  });
+
+  it('projects the snapshot field-by-field and drops every canary outside the DTO', () => {
+    const hostile = {
+      ...readySnapshot(),
+      password: 'canary-password-SYNTHETIC',
+      entries: [
+        {
+          ...readySnapshot().entries[0],
+          value: 'canary-value-SYNTHETIC',
+          path: '/etc/secrets-SYNTHETIC',
+        },
+      ],
+    } as unknown as ConfigDiagnosticsSnapshot;
+    const projected = projectConfigSnapshot(hostile);
+    const text = JSON.stringify(projected);
+    expect(text).not.toContain('canary-password-SYNTHETIC');
+    expect(text).not.toContain('canary-value-SYNTHETIC');
+    expect(text).not.toContain('/etc/secrets-SYNTHETIC');
+    // The allowed fields survive: aliases, origin, source alias, effect.
+    const entry = (projected.entries as Record<string, unknown>[])[0];
+    expect(entry).toEqual({
+      keyAlias: 'database.url',
+      origin: 'file',
+      sourceAlias: 'dotenv-local',
+      overriddenSourceAliases: ['dotenv'],
+      expanded: true,
+      referenceAliases: ['host'],
+      schemaEffect: 'validated',
+    });
+    expect(isConfigSnapshotProjection(projected)).toBe(true);
+  });
+
+  it('omits sourceAlias from the projection when the entry carries none', () => {
+    const snapshot = readySnapshot();
+    const [source] = snapshot.entries;
+    const withoutAlias = { ...source };
+    delete (withoutAlias as { sourceAlias?: string }).sourceAlias;
+    const projected = projectConfigSnapshot({
+      ...snapshot,
+      entries: [withoutAlias],
+    });
+    const projectedEntry = (projected.entries as Record<string, unknown>[])[0];
+    expect(Object.hasOwn(projectedEntry, 'sourceAlias')).toBe(false);
+    expect(isConfigSnapshotProjection(projected)).toBe(true);
+  });
+
+  it('rejects projections that violate the exact entry DTO', () => {
+    const base = projectConfigSnapshot(readySnapshot());
+    expect(isConfigSnapshotProjection(base)).toBe(true);
+
+    // A sourceAlias on a non-file origin — the DTO forbids it.
+    const envWithAlias = projectConfigSnapshot({
+      ...readySnapshot(),
+      entries: [
+        {
+          keyAlias: 'port',
+          origin: 'environment',
+          sourceAlias: 'not-allowed-here',
+          overriddenSourceAliases: [],
+          expanded: false,
+          referenceAliases: [],
+          schemaEffect: 'validated',
+        },
+      ],
+    });
+    expect(isConfigSnapshotProjection(envWithAlias)).toBe(false);
+
+    // An unknown schema effect — naming a mechanism presence cannot prove.
+    const [entry] = readySnapshot().entries;
+    const badEffect = projectConfigSnapshot({
+      ...readySnapshot(),
+      entries: [
+        {
+          ...entry,
+          schemaEffect: 'defaulted',
+        } as unknown as ConfigDiagnosticsSnapshot['entries'][number],
+      ],
+    });
+    expect(isConfigSnapshotProjection(badEffect)).toBe(false);
+
+    // A missing snapshot key.
+    const missingKey = JSON.parse(JSON.stringify(base)) as Record<string, unknown>;
+    delete missingKey['truncated'];
+    expect(isConfigSnapshotProjection(missingKey)).toBe(false);
+
+    // An over-budget reference array.
+    const tooManyRefs = projectConfigSnapshot({
+      ...readySnapshot(),
+      entries: [
+        {
+          ...readySnapshot().entries[0],
+          referenceAliases: Array.from({ length: 17 }, (_, i) => `ref${i}`),
+        },
+      ],
+    });
+    expect(isConfigSnapshotProjection(tooManyRefs)).toBe(false);
+
+    // An oversized alias.
+    const oversizedAlias = projectConfigSnapshot({
+      ...readySnapshot(),
+      entries: [{ ...readySnapshot().entries[0], keyAlias: 'x'.repeat(65) }],
+    });
+    expect(isConfigSnapshotProjection(oversizedAlias)).toBe(false);
+
+    // A negative drop count.
+    const negativeDropped = projectConfigSnapshot({
+      ...readySnapshot(),
+      droppedEntries: -1,
+    });
+    expect(isConfigSnapshotProjection(negativeDropped)).toBe(false);
+  });
+
+  it('refuses a control character in EVERY alias position (audit F1)', () => {
+    // The first-party config plugin cannot produce these — its compiler
+    // refuses them — but a replacement in-process source can, and the wire
+    // validator is what the connector and the native client both run.
+    const forged = 'x\u001b[2J\u001b[31mFORGED\n';
+    const [entry] = readySnapshot().entries;
+    const positions: Record<string, ConfigDiagnosticsSnapshot['entries'][number]> = {
+      keyAlias: { ...entry, keyAlias: forged },
+      sourceAlias: { ...entry, sourceAlias: forged },
+      overriddenSourceAliases: { ...entry, overriddenSourceAliases: [forged] },
+      referenceAliases: { ...entry, referenceAliases: ['host', forged] },
+    };
+    for (const [position, bad] of Object.entries(positions)) {
+      const projected = projectConfigSnapshot({ ...readySnapshot(), entries: [bad] });
+      expect([position, isConfigSnapshotProjection(projected)]).toEqual([position, false]);
+    }
+    // C1 (U+0085) and DEL are refused too; a non-control code point is not.
+    for (
+      const [alias, accepted] of [['a\u0085b', false], ['a\u007fb', false], ['a\u00a0b', true]]
+    ) {
+      const projected = projectConfigSnapshot({
+        ...readySnapshot(),
+        entries: [{ ...entry, keyAlias: alias as string }],
+      });
+      expect([alias, isConfigSnapshotProjection(projected)]).toEqual([alias, accepted]);
+    }
   });
 });

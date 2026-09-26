@@ -3,10 +3,13 @@ import { expect } from '@std/expect';
 
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
+  ConfigDiagnosticsSnapshot,
+  ConfigProvenanceEntry,
   DiagnosticsBatch,
   DiagnosticsEvent,
   HealthDiagnosticsObservation,
   HealthDiagnosticsSnapshot,
+  IConfigDiagnosticsSource,
   IDiagnosticsSource,
   IHealthDiagnosticsSource,
   IPlugin,
@@ -171,6 +174,78 @@ describe('health diagnostics type contracts (M98d)', () => {
     );
     // `status` is present only for a reported observation.
     expect('status' in observation).toBe(false);
+  });
+});
+
+describe('configuration provenance contracts (M98e)', () => {
+  it('the token is a valid eager capability and the source is synchronous with one method', () => {
+    expect(CAPABILITIES.CONFIG_DIAGNOSTICS).toEqual('config-diagnostics');
+    const source: IConfigDiagnosticsSource = {
+      snapshot(instanceId: string): ConfigDiagnosticsSnapshot {
+        return {
+          version: 1,
+          instanceId,
+          state: 'ready',
+          entries: [],
+          truncated: false,
+          droppedEntries: 0,
+        };
+      },
+    };
+    expect(Object.keys(source).sort()).toEqual(['snapshot']);
+  });
+
+  it('the provenance entry admits no value, hash, length, or path field', () => {
+    // Compile-time: the exact member set is the minimization contract. A
+    // `value`, `valueHash`, `valueLength`, or `path` member here would be a
+    // type error.
+    const entry: ConfigProvenanceEntry = {
+      keyAlias: 'port',
+      origin: 'environment',
+      overriddenSourceAliases: ['dotenv'],
+      expanded: false,
+      referenceAliases: [],
+      schemaEffect: 'validated',
+    };
+    expect(Object.keys(entry).sort()).toEqual([
+      'expanded',
+      'keyAlias',
+      'origin',
+      'overriddenSourceAliases',
+      'referenceAliases',
+      'schemaEffect',
+    ]);
+    // `sourceAlias` is optional and file-only by contract.
+    expect('sourceAlias' in entry).toBe(false);
+    const fileEntry: ConfigProvenanceEntry = {
+      keyAlias: 'host',
+      origin: 'file',
+      sourceAlias: 'dotenv',
+      overriddenSourceAliases: [],
+      expanded: true,
+      referenceAliases: ['port'],
+      schemaEffect: 'not-configured',
+    };
+    expect(fileEntry.sourceAlias).toEqual('dotenv');
+  });
+
+  it('the snapshot carries exactly the fixed members', () => {
+    const snapshot: ConfigDiagnosticsSnapshot = {
+      version: 1,
+      instanceId: 'i',
+      state: 'no-data',
+      entries: [],
+      truncated: false,
+      droppedEntries: 0,
+    };
+    expect(Object.keys(snapshot).sort()).toEqual([
+      'droppedEntries',
+      'entries',
+      'instanceId',
+      'state',
+      'truncated',
+      'version',
+    ]);
   });
 });
 
