@@ -5243,7 +5243,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   healthy after its first cycle, and an incomplete counter description, all fixed; it traced the
   first to a pre-existing `QueueService.#report` defect on `main` (a thrown value whose string
   conversion throws stranded its job), fixed here at the maintainer's direction. Two re-audits
-  passed with no finding open — complete (PR pending).
+  passed with no finding open — complete (PR #365).
 - **Next milestone** — **M98e** (`packages/config-plugin` — value-free configuration provenance;
   design security review and implementation audit required).
 
