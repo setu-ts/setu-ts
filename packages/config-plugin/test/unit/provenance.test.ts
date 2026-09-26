@@ -440,4 +440,28 @@ describe('config snapshot budget', () => {
     expect(new TextEncoder().encode(JSON.stringify(snapshot)).length)
       .toBeLessThanOrEqual(MAX_CONFIG_SNAPSHOT_BYTES);
   });
+
+  it('is reachable with LEGAL aliases, because aliases are bounded in UTF-8 bytes, not JSON bytes', () => {
+    // Every alias below passes the policy compiler (64 UTF-8 bytes, no
+    // control character), yet `"` and `\\` double under JSON encoding. So a
+    // fully-populated legal policy exceeds the budget on a real load.
+    const quoted = (i: number) => '"'.repeat(60) + String(i).padStart(4, '0');
+    const fileAliases = Array.from({ length: 8 }, (_, f) => '\\'.repeat(60) + `f${f}__`);
+    const entries = Array.from({ length: 128 }, (_, i) => ({
+      keyAlias: quoted(i),
+      origin: 'environment' as const,
+      overriddenSourceAliases: fileAliases,
+      expanded: true,
+      referenceAliases: Array.from({ length: 16 }, (_, j) => quoted(j)),
+      schemaEffect: 'not-configured' as const,
+    }));
+    for (const entry of entries) {
+      expect(new TextEncoder().encode(entry.keyAlias).length).toBe(64);
+    }
+    const snapshot = applyConfigSnapshotBudget({ instanceId: 'i', state: 'ready' }, entries);
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.entries.length + snapshot.droppedEntries).toBe(128);
+    expect(new TextEncoder().encode(JSON.stringify(snapshot)).length)
+      .toBeLessThanOrEqual(MAX_CONFIG_SNAPSHOT_BYTES);
+  });
 });

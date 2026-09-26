@@ -323,9 +323,11 @@ export function adoptConfigProvenance(config: IConfig): readonly ConfigProvenanc
  * shape — omitting later entries, setting `truncated`, and counting every
  * omitted entry in `droppedEntries` until it fits.
  *
- * The retained set is bounded to 128 approved keys of bounded size, so the
- * budget is unreachable through real captures; the decidable trim is still
- * carried and tested directly rather than left behind an uncoverable branch.
+ * The budget IS reachable through a real load: aliases are bounded in UTF-8
+ * bytes, not in JSON bytes, so 128 approved keys whose aliases carry
+ * characters JSON escapes (`"`, `\`) and full reference and displacement
+ * lists encode past 256 KiB — measured, 39 of 128 such entries were trimmed.
+ * The trim therefore runs on the live path, not only in tests.
  *
  * @param scalar - The snapshot's scalar members
  * @param entries - The projected entries, in stable declaration order
