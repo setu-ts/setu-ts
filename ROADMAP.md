@@ -10927,9 +10927,9 @@ by a different rule from `/health`) are fixed too.
 
 ### Milestone 98e: Value-Free Configuration Provenance
 
-**Status:** complete (PR pending); the implementation security audit record ships in the PR.
-**Owner:** `packages/config-plugin`, with necessary shared diagnostic and connector/client changes.
-**Plan:** `plans/archive/milestone-98e-configuration-provenance.md`.
+**Status:** complete (PR #366); the implementation security audit passed on `87c3a588` and its
+record is in the PR. **Owner:** `packages/config-plugin`, with necessary shared diagnostic and
+connector/client changes. **Plan:** `plans/archive/milestone-98e-configuration-provenance.md`.
 
 **Existing foundation:** `IConfig` exposes named reads and presence checks, not provenance or key
 enumeration. `loadConfig` and `loadEnv` know merge precedence before expansion and schema
