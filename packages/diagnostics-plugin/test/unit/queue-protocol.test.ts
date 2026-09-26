@@ -72,6 +72,23 @@ describe('readQueueSourceBatch', () => {
     expect(readQueueSourceBatch(disabled, 0)!.instanceAlias).toBeNull();
   });
 
+  it('stores the alias value it validated, reading the accessor once', () => {
+    // A source is untrusted: an accessor that answers a valid alias and then
+    // `null` must not validate one value and store another (CodeRabbit PR #365).
+    const batch = sourceBatch({ attempts: [sourceAttempt(1)], next: 1 });
+    let reads = 0;
+    Object.defineProperty(batch, 'instanceAlias', {
+      enumerable: true,
+      get() {
+        reads += 1;
+        return reads === 1 ? 'mailer' : null;
+      },
+    });
+    const validated = readQueueSourceBatch(batch, 0)!;
+    expect(validated.instanceAlias).toBe('mailer');
+    expect(reads).toBe(1);
+  });
+
   const refusals: [string, (cursor: number) => unknown][] = [
     ['a non-object', () => 'batch'],
     ['an extra key', () => ({ ...sourceBatch(), [CANARY]: 1 })],

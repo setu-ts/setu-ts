@@ -299,12 +299,14 @@ export function readQueueSourceBatch(
     if (!isOneOf(state, SOURCE_STATES) || hasAlias !== (state !== 'disabled')) {
       return null;
     }
-    // Keyed on key presence, never on the value: `null` is this function's own
-    // "no alias" sentinel, so a present `null` must be refused, not read as absent.
-    if (hasAlias && !isDisplayAlias(value.instanceAlias)) {
+    // Read once, then validate and store that same value: a hostile accessor
+    // could otherwise answer differently on a second read. The check keys on key
+    // presence, never on the value — `null` is this function's own "no alias"
+    // sentinel, so a present `null` must be refused, not read as absent.
+    const instanceAlias = hasAlias ? value.instanceAlias : null;
+    if (hasAlias && !isDisplayAlias(instanceAlias)) {
       return null;
     }
-    const instanceAlias = hasAlias ? value.instanceAlias : null;
     const {
       depthCoverage,
       failure,
