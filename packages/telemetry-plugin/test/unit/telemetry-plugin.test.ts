@@ -9,7 +9,7 @@ import { expect } from '@std/expect';
 import type { MiddlewareFunction } from '@setu-ts/common';
 import { createNoopTracerHost, TelemetryPlugin } from '../../src/plugin/telemetry-plugin.ts';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IPluginContext, ITelemetryService } from '@setu-ts/common';
+import type { IPluginContext, ITelemetryService, ITraceDiagnosticsSource } from '@setu-ts/common';
 import manifest from '../../deno.json' with { type: 'json' };
 
 /** Whether `npm:` imports are available in this environment. */
@@ -26,7 +26,7 @@ describe('TelemetryPlugin', () => {
     const plugin = TelemetryPlugin();
     expect(plugin.name).toBe('telemetry-plugin');
     expect(plugin.version).toBe(manifest.version);
-    expect(plugin.provides).toEqual([CAPABILITIES.TELEMETRY]);
+    expect(plugin.provides).toEqual([CAPABILITIES.TELEMETRY, CAPABILITIES.TRACE_DIAGNOSTICS]);
     expect(plugin.priority).toBe(30);
   });
 
@@ -1088,3 +1088,109 @@ function createMockContextWithMiddlewareCapture(): MockResultWithMiddlewareCaptu
     },
   };
 }
+
+describe('TelemetryPlugin — M98g trace diagnostics availability matrix', () => {
+  it('always registers a trace source; disabled without the option even in noop mode', async () => {
+    const mock = createMockContext();
+    await TelemetryPlugin({ serviceName: 'test' }).register(mock.ctx);
+    expect(mock.registeredTokens).toContain(CAPABILITIES.TRACE_DIAGNOSTICS);
+    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(
+      CAPABILITIES.TRACE_DIAGNOSTICS,
+    );
+    const batch = source.read('instance-1', 0);
+    expect(batch.state).toBe('disabled');
+    expect(batch.coverage).toBe('noop-no-provider');
+    expect(batch.records).toEqual([]);
+    expect(batch.sampler).toEqual({ kind: 'unknown' });
+  });
+
+  it('answers unsupported with coverage noop-no-provider when opted in without an exporter', async () => {
+    const mock = createMockContext();
+    await TelemetryPlugin({
+      serviceName: 'test',
+      diagnostics: { enabled: true, serviceAlias: 'orders', operations: { span: 'op' } },
+    }).register(mock.ctx);
+    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(
+      CAPABILITIES.TRACE_DIAGNOSTICS,
+    );
+    const batch = source.read('instance-1', 0);
+    expect(batch.state).toBe('unsupported');
+    expect(batch.coverage).toBe('noop-no-provider');
+  });
+
+  it('answers unsupported with coverage custom-provider for a custom tracerProviderFactory', async () => {
+    const mock = createMockContext();
+    await TelemetryPlugin({
+      serviceName: 'test',
+      exporter: 'console',
+      tracerProviderFactory: async () => createFakeTracerHost(),
+      diagnostics: { enabled: true, serviceAlias: 'orders', operations: { span: 'op' } },
+    }).register(mock.ctx);
+    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(
+      CAPABILITIES.TRACE_DIAGNOSTICS,
+    );
+    const batch = source.read('instance-1', 0);
+    expect(batch.state).toBe('unsupported');
+    expect(batch.coverage).toBe('custom-provider');
+  });
+
+  it('refuses an invalid diagnostics option at CONSTRUCTION, before any application', () => {
+    expect(() =>
+      TelemetryPlugin({
+        serviceName: 'test',
+        diagnostics: { enabled: false as never, serviceAlias: 'orders', operations: {} },
+      })
+    ).toThrow();
+    expect(() =>
+      TelemetryPlugin({
+        serviceName: 'test',
+        diagnostics: { enabled: true, serviceAlias: '', operations: {} },
+      })
+    ).toThrow();
+  });
+
+  it({
+    name: 'drives the ACTIVE collector through the real built-in provider (guarded)',
+    ignore: !canImportNpm(),
+  }, async () => {
+    // Guarded (not swallowed): with imports available this drives the real
+    // lazy-load path with the diagnostics option and must register a source
+    // that retains completed spans of an approved operation.
+    const mock = createMockContext();
+    await TelemetryPlugin({
+      serviceName: 'test',
+      exporter: 'console',
+      middleware: false,
+      diagnostics: {
+        enabled: true,
+        serviceAlias: 'orders',
+        operations: { 'approved-op': 'approved-alias' },
+      },
+    }).register(mock.ctx);
+    const source = mock.ctx.services.get<ITraceDiagnosticsSource>(
+      CAPABILITIES.TRACE_DIAGNOSTICS,
+    );
+    const telemetry = mock.ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY);
+    // An approved span completes through the framework service and is retained.
+    await telemetry.withSpan('approved-op', async () => {});
+    const batch = source.read('instance-1', 0);
+    expect(batch.state).toBe('ready');
+    expect(batch.coverage).toBe('completed-sampled-spans');
+    expect(batch.records.length).toBe(1);
+    expect(batch.records[0]!.operationAlias).toBe('approved-alias');
+    // An unapproved span is counted and dropped, never retained.
+    await telemetry.withSpan('unapproved-op', async () => {});
+    const after = source.read('instance-1', 0);
+    expect(after.records.length).toBe(1);
+    expect(after.droppedSpans).toBe(1);
+  });
+});
+
+describe('TelemetryPlugin — M98g registration metadata', () => {
+  it('declares the trace-diagnostics capability as eager, provided surface', () => {
+    const plugin = TelemetryPlugin();
+    expect(plugin.provides).toContain(CAPABILITIES.TRACE_DIAGNOSTICS);
+    // The optional edge on the logger capability is unchanged.
+    expect(plugin.optionalDependencies).toEqual([CAPABILITIES.LOGGER]);
+  });
+});

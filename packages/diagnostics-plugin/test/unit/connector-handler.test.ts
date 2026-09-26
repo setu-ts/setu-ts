@@ -13,9 +13,11 @@ import type {
   HealthDiagnosticsSnapshot,
   IConfigDiagnosticsSource,
   IResponse,
+  ITraceDiagnosticsSource,
 } from '@setu-ts/common';
 import { createConnectorHandler, refusalResponse } from '../../src/transport/connector-handler.ts';
 import { currentInspectorsManifest, projectConfigSnapshot } from '../../src/protocol/protocol.ts';
+import { isTraceBatchProjection } from '../../src/protocol/trace-protocol.ts';
 import { ConnectorLimits } from '../../src/transport/limits.ts';
 import { QueueObservationMerger } from '../../src/transport/queue-merger.ts';
 import type { IQueueMerger } from '../../src/transport/queue-merger.ts';
@@ -120,6 +122,7 @@ async function buildHarness(options?: {
     session,
     limits: new ConnectorLimits(clock),
     queues: new QueueObservationMerger([], clock),
+    traces: null,
     source,
     clock,
     healthSource: null,
@@ -566,6 +569,7 @@ describe('Connector handler — authentication and binding', () => {
       session,
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
+      traces: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -678,6 +682,7 @@ describe('Connector handler — projection hardening', () => {
       session,
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
+      traces: null,
       source: throwingSource,
       clock,
       healthSource: null,
@@ -750,6 +755,7 @@ describe('Connector handler — health operation (M98d)', () => {
       session,
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
+      traces: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: { snapshot: () => healthSnapshot },
@@ -785,6 +791,7 @@ describe('Connector handler — health operation (M98d)', () => {
       session,
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
+      traces: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: {
@@ -834,6 +841,7 @@ describe('Connector handler — health operation (M98d)', () => {
       session,
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
+      traces: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
@@ -1148,6 +1156,7 @@ describe('Connector handler — remaining structural arms', () => {
       session,
       limits,
       queues: new QueueObservationMerger([], clock),
+      traces: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -1191,6 +1200,7 @@ describe('Connector handler — remaining structural arms', () => {
       session,
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
+      traces: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -1574,6 +1584,7 @@ describe('Connector handler — queue observations (M98f)', () => {
       session,
       limits: new ConnectorLimits(clock),
       queues,
+      traces: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -1672,5 +1683,184 @@ describe('Connector handler — queue observations (M98f)', () => {
     const view = await sendQueues(await queueHarness(broken), 'after=0&limit=1');
     expect(view.status).toEqual(503);
     expect(view.body).toEqual({ version: 1, error: 'unavailable' });
+  });
+});
+
+describe('Connector handler — trace observations (M98g)', () => {
+  /** A well-formed trace source batch at the requested cursor. */
+  function traceBatch(instanceId: string, after: number): Record<string, unknown> {
+    return {
+      version: 1,
+      instanceId,
+      state: 'ready',
+      coverage: 'completed-sampled-spans',
+      instrumentation: ['http'],
+      sampler: { kind: 'traceidratio', ratio: 0.5 },
+      records: [{
+        sequence: after + 1,
+        serviceAlias: 'orders',
+        operationAlias: 'create-order',
+        traceId: 'a'.repeat(32),
+        spanId: 'b'.repeat(16),
+        links: [],
+        kind: 'server',
+        outcome: 'ok',
+        durationMs: 4,
+        ageMs: 6,
+        parentVisibility: 'root',
+      }],
+      next: after + 1,
+      lost: 0,
+      closed: false,
+      droppedSpans: 0,
+    };
+  }
+
+  async function traceHarness(traces: ITraceDiagnosticsSource | null) {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      queues: new QueueObservationMerger([], clock),
+      traces,
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: null,
+      configSource: null,
+    });
+    return { handler, key, clock };
+  }
+
+  async function sendTraces(
+    harness: Awaited<ReturnType<typeof traceHarness>>,
+    search: string,
+    options: { sequence?: number; mac?: string; instance?: string } = {},
+  ) {
+    const target = `/v1/traces?${search}`;
+    const sequence = options.sequence ?? 2;
+    const instance = options.instance ?? TEST_INSTANCE_ID;
+    const mac = options.mac ??
+      await signRequest(crypto.subtle, harness.key, target, sequence, instance);
+    return inspect(
+      await harness.handler(
+        fakeRequest({
+          url: `http://${HOST}${target}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': String(sequence),
+            'x-setu-instance': instance,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+  }
+
+  it('serves a signed, exactly-projected trace batch from the source', async () => {
+    const source: ITraceDiagnosticsSource = {
+      read: (instanceId, after) => traceBatch(instanceId, after) as never,
+    };
+    const harness = await traceHarness(source);
+    const view = await sendTraces(harness, 'after=0&limit=128');
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('ready');
+    expect(isTraceBatchProjection(view.body)).toBe(true);
+    const mac = view.headers.get('x-setu-mac')!;
+    const digest = await sha256Hex(crypto.subtle, utf8(view.bodyText));
+    expect(
+      await verifyFields(crypto.subtle, harness.key, mac, [
+        'setu-diagnostics-v1',
+        'response',
+        'a'.repeat(32),
+        TEST_INSTANCE_ID,
+        '2',
+        '/v1/traces?after=0&limit=128',
+        '200',
+        digest,
+      ]),
+    ).toBe(true);
+  });
+
+  it('answers a typed unsupported batch when no trace source is registered', async () => {
+    const harness = await traceHarness(null);
+    const view = await sendTraces(harness, 'after=7&limit=16');
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('unsupported');
+    expect(view.body.coverage).toEqual('unknown');
+    expect(view.body.next).toEqual(7);
+    expect(isTraceBatchProjection(view.body)).toBe(true);
+  });
+
+  it('answers collection-failed when the source throws, and reads it only after authentication', async () => {
+    let reads = 0;
+    const source: ITraceDiagnosticsSource = {
+      read: () => {
+        reads += 1;
+        throw new Error('hostile source');
+      },
+    };
+    const harness = await traceHarness(source);
+    // Bad MAC: refused before the source is ever read.
+    expect((await sendTraces(harness, 'after=0&limit=1', { mac: 'f'.repeat(64) })).status)
+      .toEqual(401);
+    expect(reads).toEqual(0);
+    const view = await sendTraces(harness, 'after=0&limit=1');
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('collection-failed');
+    expect(JSON.stringify(view.body).includes('hostile')).toBe(false);
+  });
+
+  it('answers invalid-request for a cursor beyond the source sequence (the RangeError contract)', async () => {
+    // The trace source contract: a cursor beyond its current sequence throws
+    // the fixed value-free RangeError. The connector surfaces that as
+    // `invalid-request`, the answer the queue operation gives the same
+    // mistake — never a 200 that silently reads as an empty page.
+    const source: ITraceDiagnosticsSource = {
+      read: (_instance, after) => {
+        if (after > 3) {
+          throw new RangeError('Trace diagnostics: cursor beyond the current sequence.');
+        }
+        return traceBatch(TEST_INSTANCE_ID, after) as never;
+      },
+    };
+    const harness = await traceHarness(source);
+    const refused = await sendTraces(harness, 'after=9&limit=1');
+    expect(refused.status).toEqual(400);
+    expect(refused.body).toEqual({ version: 1, error: 'invalid-request' });
+    const served = await sendTraces(harness, 'after=0&limit=1', { sequence: 3 });
+    expect(served.status).toEqual(200);
+  });
+
+  it('answers collection-failed for a source whose records iterator never ends', async () => {
+    const records = [(traceBatch(TEST_INSTANCE_ID, 0).records as unknown[])[0]];
+    Object.defineProperty(records, Symbol.iterator, {
+      value: function* () {
+        while (true) yield records[0];
+      },
+    });
+    const source: ITraceDiagnosticsSource = {
+      // The indexed list has one record at sequence 1 but the iterator repeats
+      // it forever: a for-of copy would never return. Index-by-index copying
+      // reads the one record, and the batch then validates.
+      read: () => ({ ...traceBatch(TEST_INSTANCE_ID, 0), records }) as never,
+    };
+    const harness = await traceHarness(source);
+    const view = await sendTraces(harness, 'after=0&limit=128');
+    expect(view.status).toEqual(200);
+    expect((view.body.records as unknown[]).length).toEqual(1);
+  });
+
+  it('refuses a source DTO for another instance as unauthorized', async () => {
+    const foreign: ITraceDiagnosticsSource = {
+      read: () => traceBatch('0'.repeat(32) + 'x', 0) as never,
+    };
+    const harness = await traceHarness(foreign);
+    expect((await sendTraces(harness, 'after=0&limit=1')).status).toEqual(401);
   });
 });

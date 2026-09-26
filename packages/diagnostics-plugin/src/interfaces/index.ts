@@ -15,6 +15,7 @@ import type {
   HealthDiagnosticsSnapshot,
   IPlugin,
   QueueDiagnosticsBatch,
+  TraceDiagnosticsBatch,
 } from '@setu-ts/common';
 
 /**
@@ -236,6 +237,25 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   queues(after: number, limit?: number): Promise<QueueDiagnosticsBatch>;
+  /**
+   * Reads the next bounded page of completed, sampled span observations
+   * through the signed protocol (M98g). Performs the `/v1/status` pairing
+   * exchange first if the session has not yet been bound.
+   *
+   * The cursor follows the M98a contract: `0` starts at the oldest retained
+   * span, `lost` is per batch, and an empty page echoes the cursor. When the
+   * negotiated inspector manifest reports the trace inspector as unsupported,
+   * a frozen typed `unsupported` batch echoing the cursor is returned WITHOUT
+   * sending an addon request.
+   *
+   * @param after - Sequence cursor; `0` starts at the oldest retained span
+   * @param limit - Maximum spans, 1–128 (default 128)
+   * @returns The frozen trace batch projection
+   * @throws {Error} For invalid arguments, and under the same conditions as
+   * {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  traces(after: number, limit?: number): Promise<TraceDiagnosticsBatch>;
   /**
    * Closes the client: aborts pending fetches, drops key references, and
    * rejects subsequent calls with a fixed error. Idempotent.

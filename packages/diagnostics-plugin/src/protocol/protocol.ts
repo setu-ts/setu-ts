@@ -75,6 +75,13 @@ const EVENTS_PATH = '/v1/events';
  * @internal
  */
 export const QUEUES_PATH = '/v1/queues';
+/**
+ * The trace observations path (M98g); its target carries the same canonical
+ * `?after=<N>&limit=<N>` query as the events and queues targets.
+ *
+ * @internal
+ */
+export const TRACES_PATH = '/v1/traces';
 
 /**
  * The maximum events per read — the same fixed 128 the kernel's reader
@@ -98,7 +105,7 @@ const EVENTS_QUERY = /^after=([0-9]+)&limit=([0-9]+)$/;
  * @internal
  */
 export interface ParsedTarget {
-  readonly op: 'status' | 'snapshot' | 'events' | 'health' | 'config' | 'queues';
+  readonly op: 'status' | 'snapshot' | 'events' | 'health' | 'config' | 'queues' | 'traces';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events and queues); `0` for the other ops. */
@@ -139,6 +146,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   if (path === QUEUES_PATH) {
     return parsePagedTarget('queues', path, search);
   }
+  if (path === TRACES_PATH) {
+    return parsePagedTarget('traces', path, search);
+  }
   return null;
 }
 
@@ -153,7 +163,7 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
  * @returns The parsed target, or `null` for any non-canonical form
  */
 function parsePagedTarget(
-  op: 'events' | 'queues',
+  op: 'events' | 'queues' | 'traces',
   path: string,
   search: string,
 ): ParsedTarget | null {
@@ -377,7 +387,7 @@ export function currentInspectorsManifest(): InspectorsManifest {
     health: true,
     configuration: true,
     queues: true,
-    traces: false,
+    traces: true,
     authorization: false,
     cache: false,
     events: false,

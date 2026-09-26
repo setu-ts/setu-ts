@@ -960,3 +960,258 @@ export interface QueueDiagnosticsBatch {
   /** Depth observations omitted to fit the frame budget. */
   readonly truncatedDepths: number;
 }
+
+/**
+ * Availability of the tracing-diagnostics inspector (M98g), from the
+ * TelemetryPlugin's own source.
+ *
+ * `disabled` — the TelemetryPlugin is registered but the application did not
+ * pass the `diagnostics` option: no span processor or ring exists. This is
+ * the owning plugin's answer, distinct from `unsupported`.
+ * `unsupported` — observation cannot capture completed spans at all: the
+ * application supplied a custom `tracerProviderFactory` (the plugin cannot
+ * read a custom host's spans) or the plugin is in noop/no-exporter mode
+ * (there is no provider to observe). {@linkcode TraceDiagnosticsBatch.coverage}
+ * names which.
+ * `no-data` — observation is active and nothing has been retained yet.
+ * `ready` — observation is active and at least one span has been retained.
+ * `collection-failed` is a CONNECTOR-side answer only (the registered source
+ * threw or answered a shape that failed validation); a source never reports
+ * it about itself.
+ *
+ * @since 0.8.0
+ */
+export type TraceSourceState =
+  | 'disabled'
+  | 'unsupported'
+  | 'no-data'
+  | 'ready'
+  | 'collection-failed';
+
+/**
+ * What completed-span population the tracing stack makes observable (M98g).
+ *
+ * `completed-sampled-spans` — the built-in OTel provider is in use, so every
+ * SAMPLED span that finishes reaches the diagnostic span processor. Unsampled
+ * spans are absent because the sampler decides before any processor runs.
+ * `custom-provider` — the application supplied `tracerProviderFactory`; a
+ * custom host exposes start/activate/shutdown only and no completed-span
+ * feed, so nothing is captured and nothing is fabricated.
+ * `noop-no-provider` — no exporter is configured, so there is no provider to
+ * observe.
+ * `unknown` — the responder cannot describe the tracing stack: the connector
+ * answering with no TelemetryPlugin registered at all, or a client answering
+ * locally before any server exchange. Availability is reported, never
+ * improvised.
+ *
+ * @since 0.8.0
+ */
+export type TraceCoverage =
+  | 'completed-sampled-spans'
+  | 'custom-provider'
+  | 'noop-no-provider'
+  | 'unknown';
+
+/**
+ * The auto-instrumentation families whose spans the trace observations can
+ * include (M98g).
+ *
+ * The vocabulary mirrors the telemetry plugin's own instrumentation kinds,
+ * restated here because this is the protocol's wire vocabulary and `common`
+ * is the only channel between the two packages. A kind is listed only when
+ * its registry outcome reported it ENABLED — the Node-only auto
+ * instrumentations no-op elsewhere, so absence on Deno means the
+ * observations are limited to spans created through the framework telemetry
+ * service (including the queue and messaging trace hops).
+ *
+ * @since 0.8.0
+ */
+export type TraceInstrumentationKind = 'http' | 'fetch' | 'ioredis' | 'amqplib' | 'kafkajs';
+
+/**
+ * The configured sampler as the batch reports it (M98g).
+ *
+ * `kind` is `'always-on'` when the provider samples every trace, and
+ * `'traceidratio'` with the configured `ratio` when ratio sampling is set —
+ * matching what the built-in provider actually constructs. `unknown` marks
+ * the modes where no sampler applies (no provider, custom host, or no
+ * telemetry plugin at all).
+ *
+ * @since 0.8.0
+ */
+export interface TraceSamplerDescription {
+  /** Which sampler the provider was built with, or `unknown`. */
+  readonly kind: 'always-on' | 'traceidratio' | 'unknown';
+  /** The configured ratio, present exactly when `kind` is `'traceidratio'`. */
+  readonly ratio?: number;
+}
+
+/**
+ * One approved trace/span identifier relationship carried as a link (M98g).
+ * Both identifiers are validated W3C lowercase-hex and never all-zero; a
+ * link is an identifier relationship only, never a fabricated causal edge.
+ *
+ * @since 0.8.0
+ */
+export interface TraceLinkRelationship {
+  /** 32-character lowercase-hex trace id of the linked span. */
+  readonly traceId: string;
+  /** 16-character lowercase-hex span id of the linked span. */
+  readonly spanId: string;
+}
+
+/**
+ * How a retained span completed (M98g) — the fixed minimization of the OTel
+ * span status code. The status MESSAGE is never carried.
+ *
+ * @since 0.8.0
+ */
+export type TraceOutcome = 'ok' | 'error' | 'unset';
+
+/**
+ * What the source knows about a retained span's parent (M98g).
+ *
+ * `observed` — the parent span was itself retained by this collector in the
+ * same process, so the relationship is locally evidenced.
+ * `remote-or-unobserved` — a valid parent span context was carried, but the
+ * parent span is not retained here: a remote parent (propagated
+ * `traceparent`), an unsampled parent, or one already evicted from the ring.
+ * `root` — the span carried no parent context.
+ * `unknown` — a parent context was present but its span id was not a valid
+ * W3C identifier, so nothing can be said.
+ *
+ * Visibility is decided when the CHILD completes. A child usually completes
+ * before its parent (a request span outlives the enqueue it performs), so a
+ * local parent that has not yet ended reports `remote-or-unobserved`, while a
+ * parent that ended first — an enqueue before its job is processed — reports
+ * `observed`. Join on `parentSpanId` across a batch, not on this value.
+ *
+ * A parent is an IDENTIFIER relationship only: no edge is fabricated when
+ * the referenced span is absent, and capture order is arrival order at this
+ * process — never global start order.
+ *
+ * @since 0.8.0
+ */
+export type TraceParentVisibility = 'observed' | 'remote-or-unobserved' | 'root' | 'unknown';
+
+/**
+ * One minimized completed-span observation (M98g).
+ *
+ * `serviceAlias` and `operationAlias` are the display aliases the
+ * application approved — never the raw service name or span name, which may
+ * carry dynamic request paths. `traceId`/`spanId`/`parentSpanId` are
+ * validated W3C lowercase-hex identifiers (all-zero rejected);
+ * `parentSpanId` is present exactly when {@linkcode parentVisibility} is
+ * `observed` or `remote-or-unobserved`. `links` carries at most eight
+ * validated link identifier pairs; link attributes are never read.
+ * `durationMs` is the span's measured duration; `ageMs` the monotonic time
+ * since the span was retained. The span NAME, attributes, events, resource
+ * labels, tracestate, baggage and exception data never enter the record.
+ *
+ * @since 0.8.0
+ */
+export interface TraceObservation {
+  /** Dense, source-local sequence number. */
+  readonly sequence: number;
+  /** The approved display alias for the service. */
+  readonly serviceAlias: string;
+  /** The approved display alias for the exact raw span name. */
+  readonly operationAlias: string;
+  /** 32-character lowercase-hex trace id. */
+  readonly traceId: string;
+  /** 16-character lowercase-hex span id. */
+  readonly spanId: string;
+  /** 16-character lowercase-hex parent span id, when locally meaningful. */
+  readonly parentSpanId?: string;
+  /** Validated link identifier pairs, at most eight. */
+  readonly links: readonly TraceLinkRelationship[];
+  /** The span kind. */
+  readonly kind: 'internal' | 'server' | 'client' | 'producer' | 'consumer';
+  /** How the span completed. */
+  readonly outcome: TraceOutcome;
+  /** Measured span duration in milliseconds. */
+  readonly durationMs: number;
+  /** Monotonic ms since the span was retained. */
+  readonly ageMs: number;
+  /** What the source knows about the span's parent. */
+  readonly parentVisibility: TraceParentVisibility;
+}
+
+/**
+ * One page of completed, sampled span observations from the tracing
+ * inspector (M98g), read non-destructively.
+ *
+ * `after`/`next`/`lost` follow the M98a cursor contract of
+ * {@linkcode DiagnosticsBatch} exactly: `after` is exclusive, a cursor older
+ * than the oldest retained span returns the oldest retained spans with the
+ * skipped sequences reported in `lost` (per batch, never cumulative), and
+ * `next` is the last returned sequence — or the requested cursor when
+ * nothing was returned, so polling an idle application re-sends the same
+ * cursor. `droppedSpans` counts spans dropped before the ring (saturating):
+ * a name outside the approved `operations` map, or a span whose projected
+ * identifiers, kind or status failed validation. No absolute time is
+ * carried: `ageMs` describes arrival at this process only.
+ *
+ * @since 0.8.0
+ */
+export interface TraceDiagnosticsBatch {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the batch was read for; equals the requested one. */
+  readonly instanceId: string;
+  /** The inspector's availability state. */
+  readonly state: TraceSourceState;
+  /** What completed-span population the tracing stack makes observable. */
+  readonly coverage: TraceCoverage;
+  /** Auto-instrumentation families whose spans can appear; empty when none. */
+  readonly instrumentation: readonly TraceInstrumentationKind[];
+  /** The configured sampler description. */
+  readonly sampler: TraceSamplerDescription;
+  /** Frozen spans with sequence numbers greater than the requested cursor. */
+  readonly records: readonly TraceObservation[];
+  /** Last returned sequence, or the requested cursor when nothing was returned. */
+  readonly next: number;
+  /** Ring sequences evicted between the requested cursor and the first returned record. */
+  readonly lost: number;
+  /** `true` once the source has closed and retains nothing. */
+  readonly closed: boolean;
+  /** Spans dropped before entering the ring (saturating). */
+  readonly droppedSpans: number;
+}
+
+/**
+ * Read-only trace diagnostics source — the surface the TelemetryPlugin
+ * ALWAYS registers under {@linkcode CAPABILITIES.TRACE_DIAGNOSTICS} and the
+ * DiagnosticsPlugin consumes to serve `GET /v1/traces`.
+ *
+ * Synchronous by contract: `read` returns already-captured, frozen data and
+ * never creates, ends, exports or flushes a span, and never touches the
+ * exporter or its processor. A source whose plugin was not configured for
+ * observation answers `disabled`; one whose tracing stack cannot supply
+ * completed spans answers `unsupported` with the fixed coverage reason.
+ *
+ * @example
+ * ```typescript
+ * const source = ctx.services.get<ITraceDiagnosticsSource>(
+ *   CAPABILITIES.TRACE_DIAGNOSTICS,
+ * );
+ * const batch = source.read(instanceId, 0, 128);
+ * ```
+ * @since 0.8.0
+ */
+export interface ITraceDiagnosticsSource {
+  /**
+   * Returns the retained span observations after `after`, oldest first.
+   *
+   * @param instanceId - The non-empty instance UUID to bind the batch to
+   * @param after - Source-local sequence cursor; `0` starts at the oldest retained span
+   * @param limit - Maximum spans to return, 1–128 (default 128)
+   * @returns A deeply frozen {@linkcode TraceDiagnosticsBatch} whose
+   * `instanceId` exactly equals the argument
+   * @throws {RangeError} When `instanceId` is not a non-empty string, when
+   * `after` is not a non-negative safe integer, when `limit` is not an
+   * integer from 1 to 128, or when `after` is beyond the source's current
+   * sequence — with a fixed message that never echoes the value
+   */
+  read(instanceId: string, after: number, limit?: number): TraceDiagnosticsBatch;
+}

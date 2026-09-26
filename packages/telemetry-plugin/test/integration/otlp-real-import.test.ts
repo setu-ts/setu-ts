@@ -137,7 +137,7 @@ describe('OTel real-import integration', () => {
       // This is the exact pattern used by buildTracerHost.startSpan.
       const serverSpan = tracer.startSpan(
         'GET /test-parenting',
-        { kind: 2 /* SpanKind.SERVER */ },
+        { kind: 1 /* SpanKind.SERVER */ },
         parentContext,
       );
       serverSpan.setAttribute('http.method', 'GET');

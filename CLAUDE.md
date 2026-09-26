@@ -5263,8 +5263,40 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   a signed body through an array `toJSON`, a flipping index getter, or its own `map` — closed by
   copying every source list index by index, bounded at budget+1. The independent re-audit of
   `87c3a588` passed with no finding open (9 negative controls) — complete (PR #366).
-- **Next milestone** — **M98g** (`packages/telemetry-plugin` — minimized distributed tracing and
-  correlation; design security review and implementation audit required).
+- **Milestone 98g** (`packages/telemetry-plugin` + `packages/common` + `packages/diagnostics-plugin`
+  — minimized distributed tracing and correlation): `TelemetryPlugin({ diagnostics })` appends an
+  internal OTel span processor AFTER the exporter processor in the same provider constructor —
+  exporter behavior unchanged (measured: the exporter still receives every span), never exports,
+  never throws into OTel, closed only by the provider's own shutdown. Only exact approved raw span
+  names are retained, as aliases, with W3C-validated ids, bounded links, kind/outcome/duration/age
+  and parent VISIBILITY (never a fabricated edge); kinds follow the `@opentelemetry/api` enum. The
+  plugin always registers `ITraceDiagnosticsSource` under the eager `CAPABILITIES.TRACE_DIAGNOSTICS`
+  (`disabled` / `unsupported`-with-coverage-reason when observation cannot capture); the connector
+  serves `GET /v1/traces?after=N&limit=N` and the client `traces()`; two independently paired apps
+  correlate by equal trace ids with no fabricated edge and no cross-instance authority.
+  **Verification found the headline path non-functional, at ≥92% coverage with every gate green**:
+  the e2e ran with the telemetry middleware OFF, so no HTTP span was ever observed — and every HTTP
+  span was being DROPPED, because `TelemetryService.setStatus` (pre-existing since M24) handed OTel
+  a bare string, leaving status `{}`, which the processor's fixed outcome table refuses. The same
+  service mapped kinds onto the OTLP wire numbering (server exported as CLIENT), and the new
+  processor's kind table had been written to match that encoding, so auto-instrumented spans were
+  misreported. Both fixed in `TelemetryService` (a CHANGELOG'd behavior change to exported spans)
+  and pinned by a real-SDK test plus an e2e with the middleware and a queue hop; the tracer fake now
+  honors OTel's `{ code }` contract, which is why the unit suite never saw it. Also fixed: the wire
+  validator followed the SOURCE's array iterator, so an in-process replacement source could hang the
+  event loop through `/v1/traces` (measured: the pre-fix validator never returns) — the M98e bypass
+  class, closed by index-by-index bounded copying with each field read once; and a cursor beyond the
+  source's sequence answered a 200 `collection-failed` where the docs promised `invalid-request`.
+  The independent committed-tree audit of `ee1bbed3` found one Low: a remote client controls
+  `traceparent`, so naming a retained span id under a DIFFERENT trace id made the cross-trace parent
+  read as `observed` — the observed-parent index was keyed on span id alone, and the processor's
+  trace-id comparison can never fire because OTel always gives a child its parent's trace id. Fixed
+  in `2fbac039` with a counted `traceId-spanId` index, pinned through the real middleware; the
+  independent re-audit of `2fbac039` passed with no finding open (5 new negative controls; all 13
+  round-1 controls and 10 probes re-run green). Plan
+  `plans/archive/milestone-98g-distributed-tracing.md` — complete (PR #369).
+- **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
+  security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

@@ -8,6 +8,41 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Distributed tracing observations (M98g): opt-in, minimized completed-span observations through
+  the diagnostics connector.** `TelemetryPlugin` accepts a `diagnostics` option
+  (`TraceDiagnosticsOptions`) that appends an internal span processor AFTER the exporter processor
+  in the same provider constructor — the exporter path is unchanged (measured: the exporter still
+  receives every span), the processor never exports, never throws into OTel, and observes only
+  finished SAMPLED spans whose exact raw name appears in the configured `operations` map, each
+  replaced by its approved alias before anything is retained. A record carries the service and
+  operation aliases, W3C-validated trace/span/parent identifiers (all-zero rejected; `parentSpanId`
+  present exactly when the parent is locally meaningful), at most eight validated link identifier
+  pairs, kind, outcome (`ok`/`error`/`unset`), monotonic `durationMs`/`ageMs` and `parentVisibility`
+  (`observed` / `remote-or-unobserved` / `root` / `unknown` — an identifier relationship only, never
+  a fabricated edge). Span names, attributes, events, resource labels, tracestate, baggage,
+  exceptions and status messages never reach collector state, and kind/status values outside the
+  fixed mapping drop the record — kinds follow the `@opentelemetry/api` `SpanKind` enum
+  (`INTERNAL = 0` … `CONSUMER = 4`), and a span created with no kind arrives as `0`. The plugin
+  ALWAYS registers one `ITraceDiagnosticsSource` under the new `CAPABILITIES.TRACE_DIAGNOSTICS`
+  token (claimed in `provides`): `disabled` without the option, `unsupported` with the coverage
+  reason (`custom-provider` / `noop-no-provider`) when the stack cannot supply completed spans,
+  `no-data`/`ready` when it can, and a `collection-failed` answer when the connector's exact
+  validator refuses a source DTO. The batch reports coverage, instrumentation coverage (only
+  families whose registry outcome said enabled), the configured sampler description, M98a's cursor
+  contract over a 1,024-record ring with exact per-batch `lost`, and a saturating `droppedSpans`
+  counter. New public surface on `@setu-ts/common`: `CAPABILITIES.TRACE_DIAGNOSTICS`,
+  `ITraceDiagnosticsSource`, `TraceDiagnosticsBatch`, `TraceObservation`, `TraceLinkRelationship`,
+  `TraceSamplerDescription`, `TraceSourceState`, `TraceCoverage`, `TraceInstrumentationKind`,
+  `TraceOutcome`, `TraceParentVisibility`. New connector surface: `GET /v1/traces?after=N&limit=N`
+  (authenticated like every operation; a cursor beyond the source's sequence refused
+  `invalid-request`, as `/v1/queues` refuses one beyond its merge sequence;
+  `collection-failed`/`unsupported` answered as typed 200 batches, never error text), the status
+  manifest's `traces` key now `true`, and `IDiagnosticsClient.traces(after, limit?)` as a required
+  member that answers a frozen typed `unsupported` batch without a request when the negotiated
+  manifest lacks the inspector. Cross-application correlation joins EQUAL trace ids across
+  independently authenticated sessions only; identifiers grant no discovery or connection authority,
+  and no global timeline is implied — `ageMs` is arrival age at one process.
+
 - **Configuration provenance (M98e): value-free provenance for approved keys, served through the
   diagnostics connector.** `ConfigPlugin` and `loadConfig` accept a `diagnostics` option
   (`ConfigDiagnosticsOptions`, exported from `@setu-ts/config-plugin`) that records — during the one
@@ -328,6 +363,18 @@ All notable changes to this project are documented here. The format follows
   provider. Nothing changes for the five built-in providers, which all return promises.
 
 ### Fixed
+
+- **`telemetry-plugin` — exported spans now carry the span kind and status OpenTelemetry defines.**
+  `TelemetryService` mapped the framework's `SpanKind` onto the OTLP WIRE numbering rather than the
+  `@opentelemetry/api` enum a span holds in memory, so every `server` span was exported as `CLIENT`,
+  `client` as `PRODUCER`, `producer` as `CONSUMER`, and `consumer` as an out-of-range kind. And
+  `ISpan.setStatus('ok' | 'error')` handed OTel the bare string, while OTel's `Span.setStatus` reads
+  `status.code` — so every span's status was exported as `{}`: an errored request or a thrown
+  handler never reached Datadog, New Relic or Application Insights as an error. Both are corrected
+  (kinds `0`–`4`, status `{ code: 0 | 1 | 2 }`), verified against the real locked SDK. **Behavior
+  change for dashboards:** server spans that were filed under CLIENT now appear as SERVER, and error
+  rates computed from span status become non-zero where requests actually failed. The same defect
+  made the M98g diagnostic processor drop every span that set a status — every HTTP server span.
 
 - **`queue-plugin` — a job whose thrown value cannot be described is no longer left stuck.** With a
   logger registered, `QueueService` converted a non-`Error` thrown by a processor with
