@@ -11793,6 +11793,244 @@ because one of them invalidated part of a previous run's claims:
   fixes. It crash-looped in the cluster and looked exactly like a High regression; ruling it out is
   what led to V7-5 being found properly.
 
+## Milestone 100: Authentication Beyond Bearer Tokens — Federation, Passkeys and MFA
+
+**Package(s):** `packages/auth-plugin` in every letter; 100a also `packages/starters/*`; 100b also
+`packages/cli` (one row in the health-indicator claim table); 100c and 100d also `packages/common`
+(the `IAuthSessionService` contract, its token, and one authorization-failure member);
+`packages/session-plugin` is consumed, not changed.
+
+**Plans:** `plans/milestone-100a-auth-composition.md`,
+`plans/milestone-100b-external-token-verification.md`, `plans/milestone-100c-oidc-sign-in.md`,
+`plans/milestone-100d-totp-mfa.md`, `plans/milestone-100e-passkeys.md`,
+`plans/milestone-100f-saml-sp.md`. Each carries its design security review.
+
+**Objective:** Bring `auth-plugin` to what a modern framework is expected to ship. Today it
+authenticates exactly what it issued itself, and a request carrying anything else is anonymous:
+
+| Mechanism                         | Today (source-checked)                                                                                              |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| JWT bearer                        | Its OWN tokens only — `JwtOptions.algorithm` is `'HS256' \| 'RS256'`, verified against one static `publicKey` PEM   |
+| API key, session cookie, password | Shipped (`ApiKeyStrategy`, M73 `SessionStrategy`, `verifyCredentials` + PBKDF2 `PasswordHasher`)                    |
+| Custom strategy                   | Shipped — `AuthPluginOptions.strategies` takes any `IAuthStrategy` (`name` + `authenticate(request)`)               |
+| OAuth 2.0 / OpenID Connect        | **Absent.** `grep -rniE 'oauth\|oidc\|openid\|jwks' packages/auth-plugin/src` returns nothing                       |
+| Tokens from an outside issuer     | **Absent.** No key-set fetch, no rotation, no ES256/EdDSA, so one pasted PEM breaks at the provider's next rotation |
+| Passkeys (WebAuthn)               | **Absent**                                                                                                          |
+| Multi-factor (TOTP)               | **Absent**                                                                                                          |
+| SAML 2.0                          | **Absent**                                                                                                          |
+
+The framework is not starting from nothing: M73's session strategy already turns a session into a
+principal, `react-router-plugin` already copies `ctx.request.user` onto its exported `userContext`
+key on every SSR request, and M16's `JwtService` already signs and verifies through
+`runtime.subtle`. Every letter below lands on those seams rather than beside them.
+
+**One number, six letters — the M97/M98 shape.** 100a repairs the two defects that make the existing
+plugin awkward to compose; 100b–100f are the five missing features. They share one package but no
+mechanism, and each feature crosses a trust boundary on its own, so each needs its own plan, its own
+design security review, and its own committed-tree security audit on the exact commit it merges.
+Bundling them would put six unrelated correctness boundaries into one PR that no reviewer can hold
+at once. They are ordered by dependency, not by size: every feature letter needs 100a, 100c
+validates ID tokens with 100b's verifier, and 100e contributes a factor to 100d's step-up model.
+
+**Facts the plans established by probe, not by reading docs** (Deno 2.9.6, Node 24.18, Bun 1.4.2,
+workerd via `wrangler dev`; Keycloak 26.4):
+
+- RS256, PS256, ES256, ES384 and Ed25519 verify from a JWK, and HMAC-SHA1 reproduces the RFC 6238
+  test vector, on all four runtimes — so 100b and 100d need no dependency.
+- Keycloak serves OIDC discovery with S256 PKCE, a key set containing an RSA **encryption** key
+  beside the signing key (100b filters by `use`/`alg`), and a SAML IdP descriptor, in 11 s from a
+  cold container — cheap enough for CI.
+- `@simplewebauthn/server@14` works everywhere but **installs a global `Reflect.getMetadata`** on
+  import and advertises ML-DSA-44 on Deno/Node/Bun only, while its docs promise neither — so 100e is
+  a zero-dependency verifier and the library is a test oracle.
+- `@node-saml/node-saml@5.1.0` verified a signed assertion and refused a tampered, an unsigned, and
+  a signature-wrapped response on all four runtimes (workerd with `nodejs_compat`; without it,
+  neither SAML library bundles) — so 100f uses it, lazily.
+- The session cookie defaults to `SameSite=Lax`, which accompanies the OIDC callback's top-level GET
+  but NOT a SAML IdP's cross-site POST — so 100f binds its pending request with a separate `__Host-`
+  cookie instead of the session.
+
+### Milestone 100a: Two Composition Defects in the Existing Plugin
+
+**Package(s):** `packages/auth-plugin`, `packages/starters/*`
+
+Both were found while adding a route-middleware example to the `full-stack` scaffold, and both make
+the plugin harder to use than its features warrant. Every later letter depends on them, so they ship
+first and on their own.
+
+**1. `jwt` stops being required.** `AuthPluginOptions.jwt` is required, and `auth-plugin.ts:49`
+throws at construction without a secret or a key pair. An application that authenticates ONLY
+through a session, an outside provider, a passkey or a SAML assertion would therefore have to invent
+a signing secret it never uses. `jwt` becomes optional, following the M68 `rbac` precedent exactly:
+absent, `provides` omits `CAPABILITIES.JWT` and the JWT strategy is not in the chain. An
+`AuthPlugin` with no strategy at all is refused at construction by name, since it could authenticate
+nothing. Source-compatible for every caller, since omitting `jwt` was previously impossible.
+
+**2. Nothing registers `authMiddleware()`.** Neither `AuthPlugin` nor the starters' `auth` arm adds
+it, so a principal reaches `ctx.request.user` — and `react-router-plugin`'s `userContext` — only
+when the application also calls `app.middleware.add(authMiddleware(), { priority: 300 })`.
+Forgetting it fails silently: every visitor reads as anonymous and every guard answers `401`. The
+fix is proposed IN THE PLUGIN rather than in the starters, for three source-checked reasons, to be
+confirmed by the plan:
+
+- The three starters each call `createApplication` separately (`rest-starter/src/app.ts`,
+  `microservice-starter/src/app.ts`, `full-stack-starter/src/app.ts:84`), so a starter-side fix is
+  three copies, and an application composed without a starter keeps the defect.
+- Registering its own middleware is what its neighbours already do: `SessionPlugin`,
+  `MultiTenancyPlugin`, `MetricsPlugin` and `TelemetryPlugin` all call `ctx.middleware.add`.
+- It is safe to run globally: `authMiddleware` never rejects — it only populates the principal, and
+  guards decide — which is also why M57 excludes it from derived OpenAPI security.
+
+It registers at 300 by default (after the session at 260, so the M73 session strategy sees a loaded
+session), with an option to change the priority or turn it off for an application that attaches it
+per route. **Behaviour change for an application that already adds it by hand:** the middleware then
+runs twice. That is harmless — it writes through `replacePrincipal`, the M71 explicit-replacement
+escape, so the second write does not throw — but it authenticates twice per request, so the
+CHANGELOG and `docs/upgrading.md` tell the reader to delete their own call. The starters' `auth`
+JSDoc and the three starter READMEs are corrected to match.
+
+### Milestone 100b: Tokens From an Outside Issuer
+
+**Package(s):** `packages/auth-plugin`, `packages/cli` (health-indicator claim table)
+
+The resource-server case: an API behind Auth0, Entra ID, Google, Keycloak or Cognito receives an
+access token it did not issue and must verify it.
+
+- An `issuers` option (name to be settled in the plan), one entry per trusted issuer: `issuer`,
+  `audience`, and either `jwksUri` or `discovery: true` (reading `jwks_uri` from
+  `/.well-known/openid-configuration`), plus a `toPrincipal(claims)` mapping — the M73 precedent, so
+  the plugin never guesses where roles live in a vendor's claims.
+- **Key-set handling as a requirement, not a convenience:** cache on the MONOTONIC clock; on an
+  unknown `kid`, refetch once and then back off (an attacker minting random `kid`s must not turn
+  every request into an outbound fetch); keep the last good set on fetch failure and report it
+  through a health indicator.
+- **Algorithm allowlist per issuer**, checked BEFORE key lookup. `alg: none` is refused, and an HMAC
+  `alg` is never accepted against an asymmetric key — the algorithm-confusion attack, which is the
+  defect a hand-rolled verifier most often ships with.
+- Algorithms: RS256, PS256, ES256, ES384 and EdDSA — each probed from a JWK on Deno, Node, Bun and
+  workerd (RS384/RS512/PS384/PS512/ES512 were not, and are left for later). Zero npm dependencies,
+  Workers-portable, through `runtime.subtle` like `JwtService`.
+- `exp`/`nbf`/`iat` with a bounded clock-skew option; `iss` and `aud` exact.
+- Outbound HTTP through one injectable seam defaulting to `fetch` (the M30 `INotificationHttp` / M50
+  `IDiscoveryHttp` precedent), so tests drive it without a network.
+
+### Milestone 100c: Sign-In With an Outside Provider (OAuth 2.0 / OpenID Connect)
+
+**Package(s):** `packages/auth-plugin`, `packages/common`
+
+The relying-party case: a user clicks "Sign in with Google" and comes back signed in.
+
+- **One owner of "who is signed in"**: `common` gains `IAuthSessionService` under a new
+  `CAPABILITIES.AUTH_SESSION` (`signIn`, `current`, `signOut`), registered by a `signIn` option.
+  Today every application writes its own session key (the `full-stack` scaffold writes `userEmail`),
+  and 100d–100f all need to create, hold back or promote that record, so it is a contract rather
+  than four private copies of one write.
+
+- Authorization-code flow with **PKCE (S256) always**, `state` always, and `nonce` for OIDC. All
+  three are held server-side in the session, single-use — so the arm requires `SessionPlugin` and
+  refuses at `register()` without it, naming both plugins (the M73 precedent).
+- OIDC providers through discovery; ID tokens validated with 100b's verifier (`iss`, `aud`, `exp`,
+  `nonce`, and `azp` when multiple audiences). Plain OAuth 2.0 providers with no ID token (GitHub is
+  the common one) through an explicit userinfo arm, so the difference is a compile-time choice
+  rather than a runtime surprise.
+- Plugin-registered `login` and `callback` routes per provider, paths configurable. The callback
+  maps claims to a principal through the application's `toPrincipal` (account linking is the
+  application's decision, never the plugin's), writes it into the session, and **regenerates the
+  session id** (M48's fixation defence).
+- `returnTo` accepts only a same-origin relative path — an open redirect on a login callback is a
+  phishing primitive.
+- Provider access and refresh tokens are NOT stored by default; storing them is an explicit option,
+  because persisting third-party credentials is a liability the application should opt into.
+- RP-initiated logout where the provider advertises `end_session_endpoint`.
+- **Real-provider proof, not a fake:** a Keycloak container in CI serves OIDC discovery, keys,
+  authorization and token endpoints, so the whole flow runs against a real authorization server (the
+  M53 real-backend thesis). Pinned in `test/apps-gate.test.ts` so it cannot silently skip.
+
+### Milestone 100d: Multi-Factor Authentication (TOTP)
+
+**Package(s):** `packages/auth-plugin`, `packages/common`
+
+- RFC 6238 over RFC 4226 through `runtime.subtle` HMAC: SHA-1 by default (what authenticator apps
+  implement), 30-second step, 6 digits, a ±1-step window. Zero dependencies.
+- Enrolment: secret from `runtime.randomBytes`, base32-encoded, plus an `otpauth://` URI. Rendering
+  a QR code is the application's concern.
+- **Replay protection**: a used time step is recorded through a store port (the M16b
+  `RefreshTokenStore` shape, with a memory default) and refused on reuse inside its window.
+- Recovery codes, each single-use and consumed atomically, stored as SHA-256 digests — not the
+  existing PBKDF2 `PasswordHasher`, since each code is 80 random bits and a slow hash across ten
+  candidates would cost seconds per attempt for no gain.
+- **Step-up, not just a check**: a first factor that succeeds with MFA enrolled leaves the session
+  in an MFA-pending state that is NOT an authenticated principal; completing the second factor
+  records the methods used (`amr`, RFC 8176 values). A `requireMfa()` guard joins the existing guard
+  factories, answering a new `second-factor-required` failure. Constant-time code comparison, and a
+  lockout counted per ACCOUNT in the store — a per-session limit is bypassed by opening new
+  sessions, and a six-digit code is brute-forceable without one.
+
+### Milestone 100e: Passkeys (WebAuthn)
+
+**Package(s):** `packages/auth-plugin`
+
+- Registration and authentication ceremonies: the plugin generates options, the browser calls
+  `navigator.credentials`, the plugin verifies the response. Challenges are held in the session,
+  single-use, with an expiry.
+- Verification of `clientDataJSON` (`type`, challenge, origin against an allowlist) and
+  `authenticatorData` (RP ID hash, user-present and user-verified flags, signature counter) and the
+  signature over ES256, RS256 and EdDSA, subject to 100b's Ed25519 probe.
+- A credential store port with a memory default; credentials are the application's data.
+- Attestation `none` by default. Verifying attestation statements against trust roots is out of
+  scope and says so.
+- A passkey assertion with user verification counts as a second factor for 100d's step-up.
+- **Zero-dependency verifier, decided by probe.** `@simplewebauthn/server` runs on every runtime,
+  but importing it installs a global `Reflect.getMetadata` and it advertises ML-DSA-44 on some
+  runtimes only; with attestation `none`, a verifier needs none of the X.509 parsing its
+  dependencies exist for. The plugin ships a bounded CBOR/COSE decoder over `runtime.subtle`, and
+  the library appears only in tests, as a differential oracle.
+
+### Milestone 100f: SAML 2.0 Service Provider
+
+**Package(s):** `packages/auth-plugin`
+
+The enterprise-SSO case, and the highest-risk letter, so it is last.
+
+- SP-initiated login over the HTTP-Redirect and HTTP-POST bindings; an assertion consumer route; an
+  SP metadata route.
+- Assertions MUST be signed; `Audience`, `Recipient`, `NotOnOrAfter` and `InResponseTo` checked;
+  assertion IDs recorded through a replay store. IdP-initiated login is refused by default, because
+  it has no `InResponseTo` to bind to.
+- **XML signature verification is where SAML implementations fail**, through signature-wrapping
+  attacks that verify one element and trust another. A hand-written verifier is therefore not
+  acceptable. `@node-saml/node-saml@5` is used, inject-or-lazy: probed, it verified a signed
+  assertion and refused tampered, unsigned and signature-wrapped responses on Deno, Node, Bun and
+  workerd. On Workers it needs `nodejs_compat` (neither candidate library bundles without it), so a
+  load failure names that flag at `register()` rather than failing at the first login.
+- **The pending request cannot live in the session**: the IdP returns by cross-site POST, which the
+  default `SameSite=Lax` session cookie does not accompany. It is held in a server-side store and
+  bound to the browser by a separate `__Host-` cookie (`SameSite=None; Secure; HttpOnly`) — without
+  that binding, a posted foreign response would sign the victim in as the attacker.
+- Encrypted assertions and single logout are decided in the plan, not assumed in.
+- The Keycloak container from 100c also serves SAML, so this letter reuses that real-backend proof.
+
+### Named and not taken
+
+- **Acting as an authorization server or identity provider** — issuing OAuth tokens to third-party
+  clients. A different product, with its own consent, client registration and token-endpoint
+  surface.
+- **LDAP / Active Directory binding, SCIM provisioning, the OAuth device flow, and WebAuthn
+  attestation trust roots.** Each is a real feature with a distinct audience; none is needed for the
+  five features to be complete.
+
+### Deliverables (each letter)
+
+- [ ] A plan in `plans/` that passes `deno task check:plan`, with its design security review, and
+      every external fact above re-established by probe (runtime Web Crypto support, library
+      portability, provider behaviour) before the design relies on it.
+- [ ] Implementation, every changed `src` file ≥90% branch/function/line.
+- [ ] A committed-tree security audit on the merge commit, run in a fresh context (`CLAUDE.md`).
+- [ ] README, `PUBLIC_API.md` and CHANGELOG entries; `docs/upgrading.md` where anything breaks.
+- [ ] A worked example driven through a real kernel application, and for 100c and 100f against the
+      real Keycloak container. For 100a, a starter-composed application with NO hand-added
+      `authMiddleware()` populates `ctx.request.user` and `userContext`.
+
 ## Progress Tracking
 
 | Milestone | Status | Package                                                                                                                                          |
@@ -11968,3 +12206,10 @@ because one of them invalidated part of a previous run's claims:
 | 99c       | ✅     | sdk + kernel — two first-party components that must agree, and do not                                                                            |
 | 99d       | ✅     | decorator-plugin + secrets-plugin — a composition the framework silently declines to give you                                                    |
 | 99e       | ✅     | cli + docs — a template axis that forces one style (class-based microservice)                                                                    |
+| 100       | ⬜     | auth-plugin — authentication beyond bearer tokens (umbrella; 100a–100f, each with a design security review and implementation audit)             |
+| 100a      | ⬜     | auth-plugin + starters — `jwt` optional; the plugin registers `authMiddleware()` itself                                                          |
+| 100b      | ⬜     | auth-plugin — tokens from an outside issuer (key sets, rotation, ES256/EdDSA)                                                                    |
+| 100c      | ⬜     | auth-plugin — sign-in with an outside provider (OAuth 2.0 / OpenID Connect)                                                                      |
+| 100d      | ⬜     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                     |
+| 100e      | ⬜     | auth-plugin — passkeys (WebAuthn)                                                                                                                |
+| 100f      | ⬜     | auth-plugin — SAML 2.0 service provider                                                                                                          |
