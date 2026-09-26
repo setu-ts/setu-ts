@@ -197,6 +197,31 @@ describe('QueueObservationMerger', () => {
     }
   });
 
+  it('isolates a ready source that reports a null alias', () => {
+    // `null` is the validator's own "no alias" sentinel, so a present `null`
+    // must not be read as absent (CodeRabbit PR #365).
+    const rogue: IQueueDiagnosticsSource = {
+      read: (after: number) =>
+        sourceBatch({
+          instanceAlias: null as unknown as string,
+          attempts: [sourceAttempt(after + 1)],
+          next: after + 1,
+        }),
+    };
+    const good = new ScriptedQueueSource();
+    good.produce(1);
+    const { merger } = merge([rogue, good]);
+    for (let read = 0; read < 2; read += 1) {
+      const batch = merger.read(TEST_INSTANCE_ID, 0, 128)!;
+      expect(batch.sources.map((s) => [s.sourceId, s.state, s.failure])).toEqual([
+        ['q1', 'collection-failed', 'source-read-failed'],
+        ['q2', 'ready', 'none'],
+      ]);
+      expect(batch.events.map((e) => e.sourceId)).toEqual(['q2']);
+      expect(isQueueBatchProjection(projectQueueBatch(batch))).toBe(true);
+    }
+  });
+
   it('stops draining a closed source after its closed batch', () => {
     let reads = 0;
     const closed: IQueueDiagnosticsSource = {

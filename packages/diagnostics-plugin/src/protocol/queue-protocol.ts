@@ -299,10 +299,12 @@ export function readQueueSourceBatch(
     if (!isOneOf(state, SOURCE_STATES) || hasAlias !== (state !== 'disabled')) {
       return null;
     }
-    const instanceAlias = hasAlias ? value.instanceAlias : null;
-    if (instanceAlias !== null && !isDisplayAlias(instanceAlias)) {
+    // Keyed on key presence, never on the value: `null` is this function's own
+    // "no alias" sentinel, so a present `null` must be refused, not read as absent.
+    if (hasAlias && !isDisplayAlias(value.instanceAlias)) {
       return null;
     }
+    const instanceAlias = hasAlias ? value.instanceAlias : null;
     const {
       depthCoverage,
       failure,

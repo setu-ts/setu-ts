@@ -104,6 +104,12 @@ describe('readQueueSourceBatch', () => {
       delete (batch as unknown as Record<string, unknown>).instanceAlias;
       return batch;
     }],
+    ['a ready batch with a null alias and an attempt', () =>
+      sourceBatch({
+        instanceAlias: null as unknown as string,
+        attempts: [sourceAttempt(1)],
+        next: 1,
+      })],
     ['an oversized alias', () => sourceBatch({ instanceAlias: 'x'.repeat(65) })],
     ['a control character in an alias', () => sourceBatch({ instanceAlias: 'a\u001b[2Jb' })],
     ['an unknown coverage', () => sourceBatch({ depthCoverage: 'full' as 'complete' })],
