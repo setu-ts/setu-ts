@@ -353,8 +353,16 @@ export class SpanObservationCollector implements ITraceDiagnosticsSource, SpanOb
   readonly #availability: TraceAvailability;
   readonly #clock: Pick<IRuntimeServices, 'hrtime'>;
   readonly #spans: RetainedSpan[] = [];
-  /** Span ids retained in the ring — the 'observed' parent evidence. */
-  readonly #observedSpanIds = new Set<string>();
+  /**
+   * `traceId-spanId` pairs retained in the ring, with a count per pair — the
+   * 'observed' parent evidence. Keyed on the PAIR, never the span id alone:
+   * a remote caller controls the incoming `traceparent`, so a span id seen in
+   * one trace can be named as the parent of a span in another, and a
+   * span-id-only index would then report that cross-trace edge as locally
+   * observed. Counted so evicting one span never withdraws evidence another
+   * retained span still carries.
+   */
+  readonly #observedParents = new Map<string, number>();
   #sequence = 0;
   #droppedSpans = 0;
   #closed = false;
@@ -421,15 +429,19 @@ export class SpanObservationCollector implements ITraceDiagnosticsSource, SpanOb
       retainedAtMs: this.#clock.hrtime(),
     };
     this.#spans.push(retained);
-    this.#observedSpanIds.add(candidate.spanId);
+    const key = parentKey(candidate.traceId, candidate.spanId);
+    this.#observedParents.set(key, (this.#observedParents.get(key) ?? 0) + 1);
     if (this.#spans.length > MAX_RETAINED_SPANS) {
       const evicted = this.#spans.shift()!;
-      // A parent id may outlive its span's own ring slot only while ANOTHER
-      // retained span carries the same id; span ids are unique in practice,
-      // so removing the evicted span's id is the honest index. A parent
-      // observed before its child but already evicted correctly degrades the
-      // child's visibility to `remote-or-unobserved`.
-      this.#observedSpanIds.delete(evicted.spanId);
+      // A parent observed before its child but already evicted correctly
+      // degrades the child's visibility to `remote-or-unobserved`.
+      const evictedKey = parentKey(evicted.traceId, evicted.spanId);
+      const remaining = (this.#observedParents.get(evictedKey) ?? 1) - 1;
+      if (remaining > 0) {
+        this.#observedParents.set(evictedKey, remaining);
+      } else {
+        this.#observedParents.delete(evictedKey);
+      }
     }
   }
 
@@ -442,14 +454,17 @@ export class SpanObservationCollector implements ITraceDiagnosticsSource, SpanOb
   }
 
   /**
-   * Reports whether the span id was retained by this collector and is still
-   * in the ring — the evidence for `observed` parent visibility.
+   * Reports whether a span with EXACTLY this trace id and span id was
+   * retained by this collector and is still in the ring — the evidence for
+   * `observed` parent visibility. The trace id is part of the identity: the
+   * same span id in another trace is not evidence.
    *
-   * @param spanId - The candidate parent span id
-   * @returns `true` when the id is currently retained
+   * @param traceId - The candidate parent's trace id
+   * @param spanId - The candidate parent's span id
+   * @returns `true` when that span is currently retained
    */
-  observes(spanId: string): boolean {
-    return this.#observedSpanIds.has(spanId);
+  observes(traceId: string, spanId: string): boolean {
+    return this.#observedParents.has(parentKey(traceId, spanId));
   }
 
   /**
@@ -533,8 +548,16 @@ export class SpanObservationCollector implements ITraceDiagnosticsSource, SpanOb
     }
     this.#closed = true;
     this.#spans.length = 0;
-    this.#observedSpanIds.clear();
+    this.#observedParents.clear();
   }
+}
+
+/**
+ * The observed-parent index key. Both parts are validated fixed-length
+ * lowercase hex, so the separator can never occur inside either.
+ */
+function parentKey(traceId: string, spanId: string): string {
+  return `${traceId}-${spanId}`;
 }
 
 /** Validates one alias value without throwing (the collector's read path). */

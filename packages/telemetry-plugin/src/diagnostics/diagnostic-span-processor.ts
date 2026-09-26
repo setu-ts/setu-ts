@@ -228,7 +228,10 @@ export class DiagnosticSpanProcessor {
    * root; a parent whose span id is not a valid W3C identifier, or whose
    * trace id differs from the span's own, leaves the relationship `unknown`
    * rather than carrying a meaningless identifier; a valid same-trace id is
-   * `observed` exactly when this collector still retains that span.
+   * `observed` exactly when this collector still retains the span with that
+   * trace id AND span id. The trace-id comparison above cannot catch a forged
+   * cross-trace parent — OTel always gives a child its parent's trace id — so
+   * the pair lookup is what does.
    */
   #projectParent(
     span: ReadableSpanInput,
@@ -246,7 +249,7 @@ export class DiagnosticSpanProcessor {
     }
     return {
       parentSpanId: parent.spanId,
-      parentVisibility: this.#collector.observes(parent.spanId)
+      parentVisibility: this.#collector.observes(parent.traceId, parent.spanId)
         ? 'observed'
         : 'remote-or-unobserved',
     };

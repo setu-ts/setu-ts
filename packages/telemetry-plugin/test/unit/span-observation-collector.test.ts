@@ -170,15 +170,39 @@ describe('SpanObservationCollector — bounds and loss', () => {
 });
 
 describe('SpanObservationCollector — observed parents', () => {
-  it('reports a retained parent id as observed until it is evicted', () => {
+  it('reports a retained parent as observed until it is evicted', () => {
     const collector = collectorFor(fakeClock());
-    collector.retain(candidate({ spanId: PARENT }));
-    expect(collector.observes(PARENT)).toBe(true);
+    const own = candidate({ spanId: PARENT });
+    collector.retain(own);
+    expect(collector.observes(own.traceId, PARENT)).toBe(true);
     // Roll the parent out of the ring.
     for (let index = 0; index <= TRACE_COLLECTOR_LIMITS.retainedSpans; index++) {
       collector.retain(candidate({ spanId: (index + 1).toString(16).padStart(16, '0') }));
     }
-    expect(collector.observes(PARENT)).toBe(false);
+    expect(collector.observes(own.traceId, PARENT)).toBe(false);
+  });
+
+  it('never treats the same span id in ANOTHER trace as observed evidence', () => {
+    // Security audit F1: a remote caller controls `traceparent`, so a span id
+    // retained in trace T1 can be named as the parent of a span in trace T2.
+    const collector = collectorFor(fakeClock());
+    const own = candidate({ spanId: PARENT });
+    collector.retain(own);
+    expect(collector.observes('f'.repeat(32), PARENT)).toBe(false);
+  });
+
+  it('keeps evidence while another retained span still carries the same pair', () => {
+    const collector = collectorFor(fakeClock());
+    const own = candidate({ spanId: PARENT });
+    collector.retain(own);
+    collector.retain(own);
+    for (let index = 0; index < TRACE_COLLECTOR_LIMITS.retainedSpans - 1; index++) {
+      collector.retain(candidate({ spanId: (index + 1).toString(16).padStart(16, '0') }));
+    }
+    // One copy evicted, one retained: still evidence.
+    expect(collector.observes(own.traceId, PARENT)).toBe(true);
+    collector.retain(candidate({ spanId: 'e'.repeat(16) }));
+    expect(collector.observes(own.traceId, PARENT)).toBe(false);
   });
 });
 

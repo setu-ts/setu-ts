@@ -263,6 +263,30 @@ describe('Distributed tracing observations (M98g) — end to end', () => {
       // The dynamic-path span is unapproved: dropped, and never disclosed.
       expect(batch.droppedSpans).toBeGreaterThanOrEqual(1);
       expect(JSON.stringify(batch).includes('CANARY')).toBe(false);
+
+      // Security audit F1: a remote caller controls `traceparent`. Naming the
+      // RETAINED request span's id under a DIFFERENT trace id must not make a
+      // cross-trace edge read as locally observed.
+      const forgedTrace = 'f'.repeat(31) + '1';
+      const forged = await app.inject({
+        method: 'GET',
+        url: 'http://localhost/broken',
+        headers: { traceparent: `00-${forgedTrace}-${request.spanId}-01` },
+      });
+      expect(forged.statusCode).toBe(503);
+      // Control: the genuine propagation of the same span (its own trace id)
+      // IS observed evidence.
+      await app.inject({
+        method: 'GET',
+        url: 'http://localhost/broken',
+        headers: { traceparent: `00-${request.traceId}-${request.spanId}-01` },
+      });
+      const after = await client.traces(batch.next);
+      const forgedRecord = after.records.find((r) => r.traceId === forgedTrace)!;
+      const genuineRecord = after.records.find((r) => r.traceId === request.traceId)!;
+      expect(forgedRecord.parentSpanId).toBe(request.spanId);
+      expect(forgedRecord.parentVisibility).toBe('remote-or-unobserved');
+      expect(genuineRecord.parentVisibility).toBe('observed');
     } finally {
       client.close();
       await app.stop();
