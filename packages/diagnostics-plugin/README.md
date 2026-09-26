@@ -186,9 +186,10 @@ the minimized health-observation snapshot the health plugin registers under
 The M98e inspector operation is read through
 `client.configuration(): Promise<ConfigDiagnosticsSnapshot>` — the value-free provenance snapshot
 the config plugin registers under `CAPABILITIES.CONFIG_DIAGNOSTICS` (always registered, so "no
-config plugin" answers `unsupported` where "present but off" answers `disabled`). Every string is an
-application-approved display alias: no configuration value, hash, length, raw key name, or file path
-is ever carried, and unapproved keys are never observed at all.
+config plugin" answers `unsupported` where "present but off" answers `disabled`). Every string from
+the config plugin is an application-approved display alias, and the connector and client both refuse
+an alias carrying a control character, whoever registered the source: no configuration value, hash,
+length, raw key name, or file path is ever carried, and unapproved keys are never observed at all.
 
 The M98f queue inspector is read through
 `client.queues(after, limit?): Promise<QueueDiagnosticsBatch>`. The cursor is the CONNECTOR's merge

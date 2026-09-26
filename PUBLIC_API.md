@@ -4141,13 +4141,16 @@ snapshot at `GET /v1/config`, read through
 `CAPABILITIES.CONFIG_DIAGNOSTICS` — the ConfigPlugin registers one EAGERLY, always, so "no config
 plugin" (typed `unsupported`) is distinguishable from "present but off" (the plugin's own `disabled`
 answer). A throwing source, or one whose projected DTO fails the exact validator (an unknown origin
-or schema effect, a `sourceAlias` on a non-`file` origin, an oversized alias, an over-budget alias
-array, a malformed shape), answers a value-free `collection-failed` snapshot, so nothing unvalidated
-is ever signed. Every string is an application-approved display alias: no configuration value, value
-hash, value length, raw key name, or file path is ever carried, and unapproved keys are never
-observed at all — no counter discloses that they exist. The negotiated manifest governs
-`configuration()` exactly as it governs `health()`: a legacy pairing answers `unsupported` without
-sending the request.
+or schema effect, a `sourceAlias` on a non-`file` origin, an oversized alias, an alias carrying a
+C0/C1 control character, an over-budget alias array, a malformed shape), answers a value-free
+`collection-failed` snapshot, so nothing unvalidated is ever signed; the native client runs the same
+validator. The connector also re-checks the instance binding on the projected copy it signs, so a
+source whose `instanceId` reads differently the second time is refused rather than signed. The same
+two rules apply to `GET /v1/health`. Every string from the first-party source is an
+application-approved display alias: no configuration value, value hash, value length, raw key name,
+or file path is ever carried, and unapproved keys are never observed at all — no counter discloses
+that they exist. The negotiated manifest governs `configuration()` exactly as it governs `health()`:
+a legacy pairing answers `unsupported` without sending the request.
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`

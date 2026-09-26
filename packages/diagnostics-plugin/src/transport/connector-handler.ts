@@ -313,65 +313,6 @@ function collectionFailedHealthSnapshot(instanceId: string): HealthDiagnosticsSn
 }
 
 /**
- * The outcome of reading the health source: either a validated projection
- * ready to sign, or a refusal code for a version or instance mismatch.
- *
- * @internal
- */
-type HealthReadOutcome =
-  | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
-  | { readonly kind: 'refused'; readonly code: 'unsupported-version' | 'unauthorized' };
-
-/**
- * Reads, projects and VALIDATES the health snapshot for the bound instance,
- * isolating every failure mode to a typed, value-free answer:
- *
- * - no registered source → `unsupported`
- * - a source that throws, whose DTO cannot be projected (a throwing getter,
- *   a non-array `observations`), or whose projection fails the exact DTO
- *   validator (an unknown enum such as a non-framework status, an oversized
- *   alias, a non-finite measurement) → `collection-failed`
- * - a DTO for another version or another instance → the matching refusal
- *
- * The projection copies each field once and the validator then runs over
- * that COPY, so nothing the connector signs was read twice or left
- * unchecked. The source is synchronous and never runs an indicator.
- *
- * @param deps - The handler dependencies
- * @param instanceId - The session's bound instance UUID
- * @returns The projection to sign, or the refusal to answer
- * @internal
- */
-function readHealthProjection(
-  deps: ConnectorHandlerDeps,
-  instanceId: string,
-): HealthReadOutcome {
-  const failed = (): HealthReadOutcome => ({
-    kind: 'projected',
-    projected: projectHealthSnapshot(collectionFailedHealthSnapshot(instanceId)),
-  });
-  if (deps.healthSource === null) {
-    return {
-      kind: 'projected',
-      projected: projectHealthSnapshot(unsupportedHealthSnapshot(instanceId)),
-    };
-  }
-  try {
-    const snapshot = deps.healthSource.snapshot(instanceId);
-    if (snapshot.version !== 1) {
-      return { kind: 'refused', code: 'unsupported-version' };
-    }
-    if (snapshot.instanceId !== instanceId) {
-      return { kind: 'refused', code: 'unauthorized' };
-    }
-    const projected = projectHealthSnapshot(snapshot);
-    return isHealthSnapshotProjection(projected) ? { kind: 'projected', projected } : failed();
-  } catch {
-    return failed();
-  }
-}
-
-/**
  * A typed `unsupported` configuration snapshot: the connector implements the
  * operation, but the application did not register a config-diagnostics
  * source. Bound to the session's instance so the client's instance check
@@ -414,65 +355,107 @@ function collectionFailedConfigSnapshot(instanceId: string): ConfigDiagnosticsSn
 }
 
 /**
- * The outcome of reading the configuration source: either a validated
- * projection ready to sign, or a refusal code for a version or instance
- * mismatch.
+ * The outcome of reading an inspector source: either a validated projection
+ * ready to sign, or a refusal code for a version or instance mismatch.
  *
  * @internal
  */
-type ConfigReadOutcome =
+type InspectorReadOutcome =
   | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
   | { readonly kind: 'refused'; readonly code: 'unsupported-version' | 'unauthorized' };
 
 /**
- * Reads, projects and VALIDATES the configuration snapshot for the bound
- * instance, isolating every failure mode to a typed, value-free answer:
+ * How one inspector operation projects, validates and answers for its
+ * snapshot DTO. One per operation; the read discipline itself is shared.
+ *
+ * @internal
+ */
+interface InspectorProjectionSpec<S> {
+  /** Copies the DTO field-by-field onto the wire allowlist. */
+  project(snapshot: S): Record<string, unknown>;
+  /** The exact DTO validator the native client runs too. */
+  validate(projected: unknown): boolean;
+  /** A value-free, instance-bound snapshot carrying no data. */
+  empty(instanceId: string, state: 'unsupported' | 'collection-failed'): S;
+}
+
+/**
+ * Reads, projects and VALIDATES an inspector snapshot for the bound
+ * instance — the ONE read discipline the health (M98d) and configuration
+ * (M98e) operations share — isolating every failure mode to a typed,
+ * value-free answer:
  *
  * - no registered source → `unsupported`
  * - a source that throws, whose DTO cannot be projected (a throwing getter,
- *   a non-array `entries`), or whose projection fails the exact DTO
- *   validator (an unknown origin or schema effect, an oversized alias, an
- *   over-budget alias array) → `collection-failed`
+ *   a non-array member), or whose projection fails the exact DTO validator
+ *   → `collection-failed`
  * - a DTO for another version or another instance → the matching refusal
  *
- * The projection copies each field once and the validator then runs over
- * that COPY, so nothing the connector signs was read twice or left
- * unchecked. The source is synchronous and never reads a configuration
- * value, enumerates keys, or invokes the `IConfig` implementation.
+ * The version and instance are checked on the source DTO so the refusal
+ * precedes any projection work; the projection then re-reads every field
+ * once, so the instance binding is checked AGAIN on the projected copy, and
+ * the exact validator runs over that same copy. What the connector signs is
+ * therefore exactly what was checked — a source whose getter answers
+ * differently on a second read is refused, never signed. The source is
+ * synchronous and never runs an indicator or reads a configuration value.
  *
- * @param deps - The handler dependencies
+ * @param source - The registered source, or `null` when none is
  * @param instanceId - The session's bound instance UUID
+ * @param spec - The operation's projection, validator and empty snapshots
  * @returns The projection to sign, or the refusal to answer
  * @internal
  */
-function readConfigProjection(
-  deps: ConnectorHandlerDeps,
+function readInspectorProjection<
+  S extends { readonly version: number; readonly instanceId: string },
+>(
+  source: { snapshot(instanceId: string): S } | null,
   instanceId: string,
-): ConfigReadOutcome {
-  const failed = (): ConfigReadOutcome => ({
-    kind: 'projected',
-    projected: projectConfigSnapshot(collectionFailedConfigSnapshot(instanceId)),
-  });
-  if (deps.configSource === null) {
-    return {
-      kind: 'projected',
-      projected: projectConfigSnapshot(unsupportedConfigSnapshot(instanceId)),
-    };
+  spec: InspectorProjectionSpec<S>,
+): InspectorReadOutcome {
+  if (source === null) {
+    return { kind: 'projected', projected: spec.project(spec.empty(instanceId, 'unsupported')) };
   }
+  const failed: InspectorReadOutcome = {
+    kind: 'projected',
+    projected: spec.project(spec.empty(instanceId, 'collection-failed')),
+  };
   try {
-    const snapshot = deps.configSource.snapshot(instanceId);
+    const snapshot = source.snapshot(instanceId);
     if (snapshot.version !== 1) {
       return { kind: 'refused', code: 'unsupported-version' };
     }
     if (snapshot.instanceId !== instanceId) {
       return { kind: 'refused', code: 'unauthorized' };
     }
-    const projected = projectConfigSnapshot(snapshot);
-    return isConfigSnapshotProjection(projected) ? { kind: 'projected', projected } : failed();
+    const projected = spec.project(snapshot);
+    if (projected.instanceId !== instanceId) {
+      return { kind: 'refused', code: 'unauthorized' };
+    }
+    return spec.validate(projected) ? { kind: 'projected', projected } : failed;
   } catch {
-    return failed();
+    return failed;
   }
 }
+
+/** The health operation's projection spec (M98d). */
+const HEALTH_PROJECTION: InspectorProjectionSpec<HealthDiagnosticsSnapshot> = {
+  project: projectHealthSnapshot,
+  validate: isHealthSnapshotProjection,
+  empty: (instanceId, state) =>
+    state === 'unsupported'
+      ? unsupportedHealthSnapshot(instanceId)
+      : collectionFailedHealthSnapshot(instanceId),
+};
+
+/** The configuration operation's projection spec (M98e). */
+const CONFIG_PROJECTION: InspectorProjectionSpec<ConfigDiagnosticsSnapshot> = {
+  project: projectConfigSnapshot,
+  validate: isConfigSnapshotProjection,
+  empty: (instanceId, state) =>
+    state === 'unsupported'
+      ? unsupportedConfigSnapshot(instanceId)
+      : collectionFailedConfigSnapshot(instanceId),
+};
 
 /**
  * Creates the protocol handler the connector hands to the runtime-owned
@@ -629,7 +612,11 @@ export function createConnectorHandler(
         if (boundInstance === null) {
           return refusalResponse('unauthorized');
         }
-        const outcome = readConfigProjection(deps, boundInstance);
+        const outcome = readInspectorProjection(
+          deps.configSource,
+          boundInstance,
+          CONFIG_PROJECTION,
+        );
         if (outcome.kind === 'refused') {
           return refusalResponse(outcome.code);
         }
@@ -660,7 +647,11 @@ export function createConnectorHandler(
         if (boundInstance === null) {
           return refusalResponse('unauthorized');
         }
-        const outcome = readHealthProjection(deps, boundInstance);
+        const outcome = readInspectorProjection(
+          deps.healthSource,
+          boundInstance,
+          HEALTH_PROJECTION,
+        );
         if (outcome.kind === 'refused') {
           return refusalResponse(outcome.code);
         }

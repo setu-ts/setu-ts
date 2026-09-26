@@ -19,6 +19,7 @@ import type { IConfig } from '@setu-ts/common';
 import {
   adoptConfigProvenance,
   applyConfigSnapshotBudget,
+  approvedReferenceAliases,
   buildConfigProvenanceEntries,
   type CompiledConfigDiagnosticsPolicy,
   CONFIG_DIAGNOSTICS_ERRORS,
@@ -60,7 +61,7 @@ describe('provenance builder | source evidence', () => {
       smallPolicy(),
       sources,
       new Map(),
-      { PORT: '8080', HOST: 'localhost' },
+      new Set(['PORT', 'HOST']),
       false,
     );
     expect(entries).toEqual([
@@ -93,7 +94,7 @@ describe('provenance builder | source evidence', () => {
       smallPolicy(),
       sources,
       new Map(),
-      { HOST: 'localhost' },
+      new Set(['HOST']),
       false,
     );
     expect(entries[0].origin).toEqual('file');
@@ -109,7 +110,7 @@ describe('provenance builder | source evidence', () => {
       smallPolicy(),
       sources,
       new Map(),
-      { SECRET_VALUE: 'canary', PORT: '8080' },
+      new Set(['SECRET_VALUE', 'PORT']),
       false,
     );
     expect(entries.length).toEqual(1);
@@ -124,13 +125,13 @@ describe('provenance builder | source evidence', () => {
     const expansions = new Map<string, readonly string[]>([
       // HOST is approved; SECRET_REF is not. DIST is approved and appears
       // twice (deduplicated by the expander's distinct-name report).
-      ['PORT', ['HOST', 'SECRET_REF', 'DIST', 'DIST']],
+      ['PORT', approvedReferenceAliases(policy, ['HOST', 'SECRET_REF', 'DIST'])],
     ]);
     const entries = buildConfigProvenanceEntries(
       policy,
       sources,
       expansions,
-      { PORT: 'x', HOST: 'h' },
+      new Set(['PORT', 'HOST']),
       false,
     );
     expect(entries[0].expanded).toBe(true);
@@ -150,8 +151,8 @@ describe('provenance builder | source evidence', () => {
     const entries = buildConfigProvenanceEntries(
       policy,
       new Map([['APP', observation('environment')]]),
-      new Map([['APP', references]]),
-      { APP: 'x' },
+      new Map([['APP', approvedReferenceAliases(policy, references)]]),
+      new Set(['APP']),
       false,
     );
     expect(entries[0].referenceAliases.length).toEqual(MAX_REFERENCE_ALIASES);
@@ -162,10 +163,56 @@ describe('provenance builder | source evidence', () => {
       smallPolicy(),
       new Map([['PORT', observation('environment')]]),
       new Map(),
-      { PORT: '8080' },
+      new Set(['PORT']),
       false,
     );
     expect(entries[0].expanded).toBe(false);
+  });
+});
+
+describe('provenance builder | structurally value-free inputs (audit F3)', () => {
+  it('cannot be handed the values record: presence is a set of approved key names', () => {
+    const entries = buildConfigProvenanceEntries(
+      smallPolicy(),
+      new Map([['PORT', observation('environment')]]),
+      new Map(),
+      new Set(['PORT']),
+      false,
+    );
+    expect(entries.length).toEqual(1);
+    // Compile-time: the builder's signature admits no configuration record.
+    // A later edit that makes it read values must change this parameter type
+    // first, which this directive then stops compiling.
+    expect(() =>
+      buildConfigProvenanceEntries(
+        smallPolicy(),
+        new Map(),
+        new Map(),
+        // @ts-expect-error — a values record is not a presence set
+        { PORT: 'canary-value' },
+        false,
+      )
+    ).toThrow(TypeError);
+  });
+
+  it('maps raw reference names to approved aliases BEFORE the builder sees them', () => {
+    // Unapproved names are dropped, and the mapped list is capped.
+    expect(approvedReferenceAliases(smallPolicy(), ['HOST', 'SECRET_REF', 'PORT'])).toEqual([
+      'host',
+      'port',
+    ]);
+    expect(approvedReferenceAliases(smallPolicy(), ['SECRET_REF'])).toEqual([]);
+  });
+
+  it('reports expanded=true when every reference was unapproved, with no reference aliases', () => {
+    const entries = buildConfigProvenanceEntries(
+      smallPolicy(),
+      new Map([['PORT', observation('environment')]]),
+      new Map([['PORT', approvedReferenceAliases(smallPolicy(), ['SECRET_REF'])]]),
+      new Set(['PORT']),
+      false,
+    );
+    expect(entries[0]).toMatchObject({ expanded: true, referenceAliases: [] });
   });
 });
 
@@ -180,7 +227,7 @@ describe('provenance builder | schema effects are presence-derived', () => {
       smallPolicy(),
       sources,
       new Map(),
-      { PORT: 8080 },
+      new Set(['PORT']),
       true,
     );
     const byAlias = new Map(entries.map((e) => [e.keyAlias, e]));
@@ -196,7 +243,7 @@ describe('provenance builder | schema effects are presence-derived', () => {
       smallPolicy(),
       new Map([['HOST', observation('environment')], ['PORT', observation('environment')]]),
       new Map(),
-      { PORT: 8080 },
+      new Set(['PORT']),
       true,
     );
     const byAlias = new Map(entries.map((e) => [e.keyAlias, e]));
@@ -210,7 +257,7 @@ describe('provenance builder | schema effects are presence-derived', () => {
       smallPolicy(),
       sources,
       new Map(),
-      { PORT: 8080, HOST: 'from-schema' },
+      new Set(['PORT', 'HOST']),
       true,
     );
     const byAlias = new Map(entries.map((e) => [e.keyAlias, e]));
@@ -226,14 +273,14 @@ describe('provenance builder | schema effects are presence-derived', () => {
       smallPolicy(),
       sources,
       new Map(),
-      { PORT: 8080, HOST: 'defaulted-by-schema' },
+      new Set(['PORT', 'HOST']),
       true,
     );
     const transformLike = buildConfigProvenanceEntries(
       smallPolicy(),
       sources,
       new Map(),
-      { PORT: 8080, HOST: 'derived-from-PORT' },
+      new Set(['PORT', 'HOST']),
       true,
     );
     expect(defaultLike.find((e) => e.keyAlias === 'host')!.schemaEffect).toEqual('introduced');
@@ -263,7 +310,7 @@ describe('provenance record store | WeakMap adoption', () => {
       smallPolicy(),
       new Map([['PORT', observation('environment')]]),
       new Map(),
-      { PORT: 8080 },
+      new Set(['PORT']),
       false,
     );
     storeConfigProvenance(config, entries);
@@ -277,7 +324,7 @@ describe('provenance record store | WeakMap adoption', () => {
       smallPolicy(),
       new Map([['PORT', observation('file', 'dotenv')]]),
       new Map(),
-      { PORT: '8080' },
+      new Set(['PORT']),
       false,
     );
     storeConfigProvenance(config, entries);
@@ -350,7 +397,7 @@ describe('config diagnostics source', () => {
         smallPolicy(),
         new Map([['PORT', observation('environment', undefined, ['dotenv'])]]),
         new Map(),
-        { PORT: 8080 },
+        new Set(['PORT']),
         true,
       ),
     );

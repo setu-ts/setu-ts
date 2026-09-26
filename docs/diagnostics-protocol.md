@@ -207,7 +207,9 @@ file path is ever carried: only application-approved display aliases, the eviden
 expansion relationships between them, and the presence-derived schema effect. `droppedEntries`
 counts only entries omitted by the 256 KiB budget — unapproved keys are never observed at all, so no
 counter discloses that they exist. The response is signed and bounded exactly like every other
-operation.
+operation. The connector and the client run one exact validator, and it refuses a C0/C1 control
+character in any alias (as the health and queue validators do), whoever registered the source; the
+connector also re-checks the instance binding on the projected copy it signs.
 
 ## Queue observations (M98f)
 

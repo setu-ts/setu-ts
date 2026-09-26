@@ -28,7 +28,12 @@ All notable changes to this project are documented here. The format follows
   serves it at `GET /v1/config` and its status manifest now reports `configuration: true`; the
   native client reads it through `client.configuration(): Promise<ConfigDiagnosticsSnapshot>`, which
   — like `health()` — answers a typed `unsupported` without sending the request when the negotiated
-  manifest (or a legacy M98b status body) reports the inspector unsupported.
+  manifest (or a legacy M98b status body) reports the inspector unsupported. The configuration and
+  health wire validators — shared by the connector and the native client — now refuse a C0/C1
+  control character in any alias, as the queue validator already did, so a replacement in-process
+  source cannot forge a consumer's terminal output; and the connector re-checks the instance binding
+  on the projected copy it signs, so a source whose `instanceId` reads differently twice is refused
+  rather than signed.
 - **Queue observations (M98f): opt-in, minimized attempt, outcome and depth observations through the
   diagnostics connector.** `QueuePlugin` accepts a `diagnostics` option (`QueueDiagnosticsOptions` /
   `QueueDepthDiagnosticsOptions`, exported from `@setu-ts/queue-plugin`) that observes each

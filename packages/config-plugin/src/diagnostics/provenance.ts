@@ -217,8 +217,35 @@ export interface EnvSourceObservation {
 }
 
 /**
+ * Maps one approved key's raw `${NAME}` reference names to the approved
+ * aliases of the keys they name, dropping every reference whose endpoint was
+ * not approved and capping the list at the approved budget. The ONE place a
+ * raw reference name is read: it is called by the expansion observer, so the
+ * builder below never receives a raw key name at all.
+ *
+ * @param policy - The compiled policy
+ * @param references - The distinct raw reference names, first occurrence first
+ * @returns The approved reference aliases, capped
+ * @internal
+ */
+export function approvedReferenceAliases(
+  policy: CompiledConfigDiagnosticsPolicy,
+  references: readonly string[],
+): readonly string[] {
+  return Object.freeze(
+    references
+      .map((reference) => policy.aliasByKey.get(reference))
+      .filter((referenceAlias): referenceAlias is string => referenceAlias !== undefined)
+      .slice(0, MAX_REFERENCE_ALIASES),
+  );
+}
+
+/**
  * Builds the final provenance entries from the load's already-collected
- * observations. Pure: it reads only the observed structure — never a value.
+ * observations. Structurally value-free: its inputs are the policy, the
+ * per-key source observations, the approved reference ALIASES per expanded
+ * approved key, and the SET of approved keys present in the post-schema
+ * snapshot — no configuration value and no unapproved key name can reach it.
  *
  * An entry exists when the key was observed at merge time OR is present in
  * the post-schema snapshot; a key neither observed nor present produces no
@@ -229,8 +256,10 @@ export interface EnvSourceObservation {
  *
  * @param policy - The compiled policy (declaration order is projection order)
  * @param sources - Final per-key source observations from the merge
- * @param expansions - Raw `${NAME}` reference names per expanded key
- * @param finalData - The post-schema (or post-merge) configuration record
+ * @param expansions - Approved reference aliases per expanded approved key;
+ * a key's presence here means its raw string carried the `${NAME}` grammar
+ * @param presentKeys - The approved keys present in the post-schema (or
+ * post-merge) snapshot
  * @param schemaConfigured - Whether a validation schema ran
  * @returns The frozen entries, in approved-key declaration order
  * @internal
@@ -239,13 +268,13 @@ export function buildConfigProvenanceEntries(
   policy: CompiledConfigDiagnosticsPolicy,
   sources: ReadonlyMap<string, EnvSourceObservation>,
   expansions: ReadonlyMap<string, readonly string[]>,
-  finalData: Readonly<Record<string, unknown>>,
+  presentKeys: ReadonlySet<string>,
   schemaConfigured: boolean,
 ): readonly ConfigProvenanceEntry[] {
   const entries: ConfigProvenanceEntry[] = [];
   for (const [key, alias] of policy.aliasByKey) {
     const observation = sources.get(key);
-    const outputPresent = Object.hasOwn(finalData, key);
+    const outputPresent = presentKeys.has(key);
     if (observation === undefined && !outputPresent) {
       continue;
     }
@@ -256,11 +285,7 @@ export function buildConfigProvenanceEntries(
       : observation === undefined && outputPresent
       ? 'introduced'
       : 'removed';
-    const rawReferences = expansions.get(key) ?? [];
-    const referenceAliases = rawReferences
-      .map((reference) => policy.aliasByKey.get(reference))
-      .filter((referenceAlias): referenceAlias is string => referenceAlias !== undefined)
-      .slice(0, MAX_REFERENCE_ALIASES);
+    const referenceAliases = expansions.get(key);
     const overriddenSourceAliases = (observation?.overriddenSourceAliases ?? []).slice(
       0,
       MAX_OVERRIDDEN_ALIASES,
@@ -270,8 +295,8 @@ export function buildConfigProvenanceEntries(
       origin: observation === undefined ? 'unknown' : observation.origin,
       ...(observation?.sourceAlias === undefined ? {} : { sourceAlias: observation.sourceAlias }),
       overriddenSourceAliases: Object.freeze(overriddenSourceAliases),
-      expanded: rawReferences.length > 0,
-      referenceAliases: Object.freeze(referenceAliases),
+      expanded: referenceAliases !== undefined,
+      referenceAliases: Object.freeze([...(referenceAliases ?? [])]),
       schemaEffect,
     }));
   }

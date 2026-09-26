@@ -690,19 +690,51 @@ export function hasExactKeys(value: Record<string, unknown>, keys: readonly stri
 
 /**
  * Reports whether a value is an approved-alias SHAPE: a string of 1–64
- * UTF-8 bytes. (Control characters are refused where the alias is approved;
- * the wire bound is the byte length.)
+ * UTF-8 bytes. The wire rule is {@linkcode isDisplayAlias}, which adds the
+ * control-character refusal.
  *
  * @param value - The candidate alias
  * @returns `true` for a well-shaped alias
- * @internal
  */
-export function isAliasShape(value: unknown): value is string {
+function isAliasShape(value: unknown): value is string {
   if (typeof value !== 'string') {
     return false;
   }
   const bytes = ALIAS_ENCODER.encode(value).length;
   return bytes >= 1 && bytes <= MAX_ALIAS_BYTES;
+}
+
+/**
+ * Reports whether a string carries a C0/C1 control code point.
+ *
+ * @param value - The string to scan
+ * @returns `true` when any code point is in U+0000–U+001F or U+007F–U+009F
+ * @internal
+ */
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0)!;
+    if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * A display alias on the wire: the approved-alias shape AND no control
+ * character. An inspector source is untrusted input to the connector — any
+ * in-process code can register a replacement — and a control character in a
+ * displayed alias could clear or forge a consumer's terminal output. The ONE
+ * alias rule every inspector validator (health, configuration, queues)
+ * applies on both sides of the wire.
+ *
+ * @param value - The candidate alias
+ * @returns `true` for a displayable alias
+ * @internal
+ */
+export function isDisplayAlias(value: unknown): value is string {
+  return isAliasShape(value) && !hasControlCharacter(value);
 }
 
 /** A finite, non-negative millisecond measurement, or `null` where allowed. */
@@ -720,7 +752,7 @@ function isHealthObservationProjection(value: unknown): boolean {
   if (!hasExactKeys(value, keys)) {
     return false;
   }
-  return isAliasShape(value.indicatorAlias) &&
+  return isDisplayAlias(value.indicatorAlias) &&
     typeof value.state === 'string' && OBSERVATION_STATES.has(value.state) &&
     (!reported || (typeof value.status === 'string' && HEALTH_STATUSES.has(value.status))) &&
     isMeasurement(value.latencyMs) &&
@@ -810,15 +842,9 @@ const MAX_CONFIG_ENTRIES = 128;
 const MAX_CONFIG_REFERENCES = 16;
 const MAX_CONFIG_OVERRIDDEN = 8;
 
-/** Validates one bounded alias array: strings of 1–64 UTF-8 bytes, at most `max`. */
+/** Validates one bounded alias array: at most `max` display aliases. */
 function isBoundedAliasArray(value: unknown, max: number): boolean {
-  return Array.isArray(value) && value.length <= max && value.every((alias) => {
-    if (typeof alias !== 'string') {
-      return false;
-    }
-    const bytes = ALIAS_ENCODER.encode(alias).length;
-    return bytes >= 1 && bytes <= MAX_ALIAS_BYTES;
-  });
+  return Array.isArray(value) && value.length <= max && value.every(isDisplayAlias);
 }
 
 /**
@@ -877,21 +903,13 @@ function isConfigEntryProjection(value: unknown): boolean {
   if (!hasExactKeys(value, keys)) {
     return false;
   }
-  const alias = value.keyAlias;
-  if (typeof alias !== 'string') {
-    return false;
-  }
-  const aliasBytes = ALIAS_ENCODER.encode(alias).length;
   // `sourceAlias` may ride only a `file` origin — an environment or unknown
   // origin carries no source alias at all, and a `file` origin may omit one
   // when its path was not approved.
   const sourceAliasOk = typeof value.origin !== 'string' || value.origin !== 'file'
     ? !Object.hasOwn(value, 'sourceAlias')
-    : !Object.hasOwn(value, 'sourceAlias') ||
-      (typeof value.sourceAlias === 'string' &&
-        ALIAS_ENCODER.encode(value.sourceAlias).length >= 1 &&
-        ALIAS_ENCODER.encode(value.sourceAlias).length <= MAX_ALIAS_BYTES);
-  return aliasBytes >= 1 && aliasBytes <= MAX_ALIAS_BYTES &&
+    : !Object.hasOwn(value, 'sourceAlias') || isDisplayAlias(value.sourceAlias);
+  return isDisplayAlias(value.keyAlias) &&
     typeof value.origin === 'string' && CONFIG_ORIGINS.has(value.origin) &&
     sourceAliasOk &&
     isBoundedAliasArray(value.overriddenSourceAliases, MAX_CONFIG_OVERRIDDEN) &&

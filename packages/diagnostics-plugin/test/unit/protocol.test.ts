@@ -358,6 +358,11 @@ describe('Protocol — health projection and validator (M98d)', () => {
     expect('status' in obs[1]).toBe(false);
   });
 
+  it('refuses a control character in an indicator alias (audit F1)', () => {
+    const forged = { ...reported, indicatorAlias: 'db\u001b[2J' };
+    expect(isHealthSnapshotProjection({ ...snapshot, observations: [forged] })).toBe(false);
+  });
+
   it('accepts a well-formed health snapshot and rejects malformed ones', () => {
     expect(isHealthSnapshotProjection(snapshot)).toBe(true);
     expect(isHealthSnapshotProjection({ ...snapshot, version: 2 })).toBe(false);
@@ -581,5 +586,33 @@ describe('Protocol — configuration target and projection (M98e)', () => {
       droppedEntries: -1,
     });
     expect(isConfigSnapshotProjection(negativeDropped)).toBe(false);
+  });
+
+  it('refuses a control character in EVERY alias position (audit F1)', () => {
+    // The first-party config plugin cannot produce these — its compiler
+    // refuses them — but a replacement in-process source can, and the wire
+    // validator is what the connector and the native client both run.
+    const forged = 'x\u001b[2J\u001b[31mFORGED\n';
+    const [entry] = readySnapshot().entries;
+    const positions: Record<string, ConfigDiagnosticsSnapshot['entries'][number]> = {
+      keyAlias: { ...entry, keyAlias: forged },
+      sourceAlias: { ...entry, sourceAlias: forged },
+      overriddenSourceAliases: { ...entry, overriddenSourceAliases: [forged] },
+      referenceAliases: { ...entry, referenceAliases: ['host', forged] },
+    };
+    for (const [position, bad] of Object.entries(positions)) {
+      const projected = projectConfigSnapshot({ ...readySnapshot(), entries: [bad] });
+      expect([position, isConfigSnapshotProjection(projected)]).toEqual([position, false]);
+    }
+    // C1 (U+0085) and DEL are refused too; a non-control code point is not.
+    for (
+      const [alias, accepted] of [['a\u0085b', false], ['a\u007fb', false], ['a\u00a0b', true]]
+    ) {
+      const projected = projectConfigSnapshot({
+        ...readySnapshot(),
+        entries: [{ ...entry, keyAlias: alias as string }],
+      });
+      expect([alias, isConfigSnapshotProjection(projected)]).toEqual([alias, accepted]);
+    }
   });
 });

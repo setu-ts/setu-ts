@@ -953,6 +953,21 @@ describe('Connector handler — health operation (M98d)', () => {
     expect(wrongInstance.status).toEqual(401);
   });
 
+  it('refuses a source whose instanceId answers differently on a second read (audit F2)', async () => {
+    let reads = 0;
+    const flipping = {
+      ...healthSnapshot,
+      get instanceId(): string {
+        reads += 1;
+        return reads === 1 ? TEST_INSTANCE_ID : 'other-canary-src';
+      },
+    };
+    const result = await readHealthWith({ snapshot: () => flipping });
+    expect(result.status).toEqual(401);
+    expect(JSON.stringify(result.body)).not.toContain('other-canary-src');
+    expect(reads).toBeGreaterThanOrEqual(2);
+  });
+
   it('refuses a cross-instance health read', async () => {
     const { handler, key } = await buildHarness();
     // Bind the session to TEST_INSTANCE_ID, then read for a DIFFERENT
@@ -1312,6 +1327,68 @@ describe('Connector handler — configuration provenance operation (M98e)', () =
       }),
     );
     expect(inspect(response).status).toEqual(401);
+  });
+
+  it('refuses a source whose instanceId answers differently on a second read (audit F2)', async () => {
+    let reads = 0;
+    const flipping = {
+      ...minimalConfigSnapshot(),
+      get instanceId(): string {
+        reads += 1;
+        return reads === 1 ? TEST_INSTANCE_ID : 'other-canary-src';
+      },
+    };
+    const { handler, key, session } = await buildHarness({
+      configSource: fakeConfigSource(flipping),
+    });
+    session.bindInstance(TEST_INSTANCE_ID);
+    const mac = await signRequest(crypto.subtle, key, '/v1/config', 1, TEST_INSTANCE_ID);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/config`,
+          headers: {
+            host: HOST,
+            'x-setu-session': TEST_SESSION_ID,
+            'x-setu-sequence': '1',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    // Before the fix this was a 200 SIGNED body carrying the second read.
+    expect(view.status).toEqual(401);
+    expect(view.bodyText).not.toContain('other-canary-src');
+  });
+
+  it('answers collection-failed for a control-character alias from a replacement source (audit F1)', async () => {
+    const [entry] = minimalConfigSnapshot().entries;
+    const { handler, key, session } = await buildHarness({
+      configSource: fakeConfigSource({
+        ...minimalConfigSnapshot(),
+        entries: [{ ...entry, keyAlias: 'x\u001b[2J\u001b[31mFORGED' }],
+      }),
+    });
+    session.bindInstance(TEST_INSTANCE_ID);
+    const mac = await signRequest(crypto.subtle, key, '/v1/config', 1, TEST_INSTANCE_ID);
+    const view = inspect(
+      await handler(
+        fakeRequest({
+          url: `http://${HOST}/v1/config`,
+          headers: {
+            host: HOST,
+            'x-setu-session': TEST_SESSION_ID,
+            'x-setu-sequence': '1',
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+    expect(view.status).toEqual(200);
+    expect(view.body).toMatchObject({ state: 'collection-failed', entries: [] });
+    expect(view.bodyText).not.toContain('FORGED');
   });
 
   it('answers collection-failed for a hostile DTO the validator rejects', async () => {

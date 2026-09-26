@@ -14,6 +14,7 @@
 import type { IConfig, IRuntimeServices } from '@setu-ts/common';
 
 import {
+  approvedReferenceAliases,
   buildConfigProvenanceEntries,
   compileConfigDiagnosticsPolicy,
   storeConfigProvenance,
@@ -91,6 +92,9 @@ export async function loadConfig(
       ? undefined
       : { approvedKeys: policy.aliasByKey, aliasByPath: policy.aliasByPath },
   );
+  // Approved reference ALIASES per expanded approved key: the raw reference
+  // names are mapped (and unapproved ones dropped) inside the observer, so
+  // no raw key name outlives the expansion step.
   const expansions = new Map<string, readonly string[]>();
   const raw = (options?.expandVariables ?? true)
     ? expandConfigVariables(
@@ -98,7 +102,7 @@ export async function loadConfig(
       policy === null ? undefined : {
         keys: policy.aliasByKey,
         onExpanded: (key, references) => {
-          expansions.set(key, references);
+          expansions.set(key, approvedReferenceAliases(policy, references));
         },
       },
     )
@@ -114,13 +118,18 @@ export async function loadConfig(
   if (policy !== null) {
     // Provenance is derived once, from the structures this pass already
     // produced — never from a second pass over values.
+    // The builder receives only which APPROVED keys are present — presence is
+    // read here, beside the values, so no value can reach the builder.
+    const presentKeys = new Set(
+      [...policy.aliasByKey.keys()].filter((key) => Object.hasOwn(data, key)),
+    );
     storeConfigProvenance(
       config,
       buildConfigProvenanceEntries(
         policy,
         sources,
         expansions,
-        data,
+        presentKeys,
         validationSchema !== undefined,
       ),
     );
