@@ -116,10 +116,13 @@ only its kind's fields under a unique id minted with its kind's prefix (`p`, `c`
 of at most 160 UTF-8 bytes with no control character, and every edge joining two nodes in the same
 snapshot, once. For the event batch it means at most 128 events, each with only the defined keys,
 every enum from its vocabulary, canonical `op<N>` and node ids, finite non-negative timings, a
-three-digit status code and validated W3C identifiers; consecutive sequences with `next` equal to
-the last; and the cursor the request sent honored — an empty page echoes `after` with `lost: 0`, and
-a returned page starts past `after` with `lost` counting exactly the evicted gap. Every returned
-result is deeply frozen.
+numeric status code and validated W3C identifiers; consecutive sequences with `next` equal to the
+last; and the cursor the request sent honored — an empty page echoes `after` with `lost: 0`, and a
+returned page starts past `after` with `lost` counting exactly the evicted gap. Every returned
+result is deeply frozen. Two fields are deliberately left as the DTO types them — a plain, unranged
+`number`: a middleware `priority` and an event `statusCode`, which the kernel records verbatim.
+Either may be any JSON number, or `null` (the serialization of `NaN` or `Infinity`), so an
+application's unusual priority or status never turns its own diagnostics into a refusal.
 
 Unauthenticated refusals are not signed and use one fixed shape:
 

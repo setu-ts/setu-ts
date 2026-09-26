@@ -201,4 +201,65 @@ describe('Strict core validators — the real kernel output conforms (F02)', () 
       await app.stop();
     }
   });
+
+  it('accepts non-finite priorities and out-of-range statuses the kernel records verbatim (audit F-A)', async () => {
+    const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
+    const port = (probe.addr as Deno.NetAddr).port;
+    probe.close();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DiagnosticsPlugin({
+          enabled: true,
+          port,
+          sessionId: TEST_SESSION_ID,
+          sessionKey: TEST_KEY_BYTES,
+        }),
+        {
+          name: 'odd',
+          version: '1.0.0',
+          register(ctx) {
+            // `Number(env.X)` for an unset variable yields exactly this.
+            ctx.middleware.add(async (_c, next) => {
+              await next();
+            }, { name: 'nan', priority: Number.NaN });
+            ctx.middleware.add(async (_c, next) => {
+              await next();
+            }, { name: 'inf', priority: Number.POSITIVE_INFINITY });
+            ctx.router.get(
+              '/odd/:code',
+              (c) => c.response.status(Number(c.params.code)).json({ odd: true }),
+            );
+          },
+        },
+      ],
+      diagnostics: {},
+    });
+    await app.start();
+    for (const code of ['1000', '99', '200.5']) {
+      await app.inject({ method: 'GET', url: `/odd/${code}` });
+    }
+    const client = createDiagnosticsClient({
+      endpoint: `http://127.0.0.1:${port}`,
+      sessionId: TEST_SESSION_ID,
+      sessionKey: TEST_KEY_BYTES,
+      subtle: crypto.subtle,
+      fetch,
+      timing: { setTimeout, clearTimeout },
+    });
+    try {
+      const snapshot = await client.snapshot();
+      expect(
+        snapshot.nodes.filter((node) => node.kind === 'middleware' && node.priority === null)
+          .length,
+      ).toBe(2);
+      const batch = await client.read(0, 128);
+      const statuses = batch.events.filter((event) => event.stage === 'request')
+        .map((event) => event.statusCode);
+      expect(statuses).toEqual([1000, 99, 200.5]);
+    } finally {
+      client.close();
+      await app.stop();
+    }
+  });
 });

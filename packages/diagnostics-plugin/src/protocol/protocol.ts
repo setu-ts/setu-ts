@@ -699,6 +699,16 @@ function isNodeLabel(value: unknown): boolean {
     !hasControlCharacter(value);
 }
 
+/**
+ * A field the DTO types as a plain, unranged `number` that the kernel records
+ * verbatim (a middleware priority, a response status): any JSON number, or
+ * `null` — the serialization of a non-finite value. Constraining it further
+ * would refuse honest output the kernel can produce and stall every read.
+ */
+function isRecordedNumber(value: unknown): boolean {
+  return value === null || typeof value === 'number';
+}
+
 /** A monotonic offset or elapsed time: finite and non-negative, or `null`. */
 function isTiming(value: unknown): boolean {
   return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
@@ -731,8 +741,7 @@ function isNodeProjection(value: unknown): value is DiagnosticsNode {
         PLUGIN_VERSION.test(value.version))) &&
     (!Object.hasOwn(value, 'method') ||
       (typeof value.method === 'string' && NODE_METHODS.has(value.method))) &&
-    (!Object.hasOwn(value, 'priority') ||
-      (typeof value.priority === 'number' && Number.isFinite(value.priority))) &&
+    (!Object.hasOwn(value, 'priority') || isRecordedNumber(value.priority)) &&
     (!Object.hasOwn(value, 'position') ||
       (isCount(value.position) && value.position >= 1)) &&
     (!Object.hasOwn(value, 'registered') || typeof value.registered === 'boolean');
@@ -812,7 +821,7 @@ export function isSnapshotProjection(value: unknown): value is DiagnosticsSnapsh
  * Validates one projected event against the exact M98a DTO: the nine required
  * keys plus only the three optional ones, every enum from its fixed
  * vocabulary, canonical operation and node ids, finite non-negative timings,
- * a three-digit status code, and validated non-zero W3C identifiers.
+ * a numeric (or `null`) status code, and validated non-zero W3C identifiers.
  *
  * @param value - The candidate event
  * @returns `true` for a well-formed event
@@ -832,9 +841,7 @@ function isEventProjection(value: unknown): value is DiagnosticsEvent {
     typeof value.outcome === 'string' && EVENT_OUTCOMES.has(value.outcome) &&
     isTiming(value.atMs) &&
     isTiming(value.durationMs) &&
-    (!Object.hasOwn(value, 'statusCode') ||
-      (Number.isSafeInteger(value.statusCode) &&
-        (value.statusCode as number) >= 100 && (value.statusCode as number) <= 999)) &&
+    (!Object.hasOwn(value, 'statusCode') || isRecordedNumber(value.statusCode)) &&
     (!Object.hasOwn(value, 'traceId') ||
       (typeof value.traceId === 'string' && TRACE_ID.test(value.traceId) &&
         NON_ZERO_HEX.test(value.traceId))) &&

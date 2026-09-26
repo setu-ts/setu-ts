@@ -268,14 +268,11 @@ const HOSTILE_BATCHES: ReadonlyArray<readonly [string, (value: Json) => void]> =
   ['a negative start offset', (v) => {
     eventsOf(v)[0].atMs = -1;
   }],
+  ['a string status code', (v) => {
+    eventsOf(v)[0].statusCode = '200';
+  }],
   ['a non-numeric duration', (v) => {
     eventsOf(v)[0].durationMs = '3';
-  }],
-  ['a status code outside three digits', (v) => {
-    eventsOf(v)[0].statusCode = 1000;
-  }],
-  ['a fractional status code', (v) => {
-    eventsOf(v)[0].statusCode = 200.5;
   }],
   ['an uppercase trace id', (v) => {
     eventsOf(v)[0].traceId = '0AF7651916CD43DD8448EB211C80319C';
@@ -306,6 +303,13 @@ describe('Core snapshot validator — the full M98a contract (F02)', () => {
       v.truncated = true;
       v.droppedEvents = Number.MAX_SAFE_INTEGER;
     }))).toBe(true);
+    // A middleware priority is recorded verbatim; NaN/Infinity serialize to
+    // `null` (audit F-A).
+    for (const priority of [null, 1e300, -0.5]) {
+      expect(isSnapshotProjection(mutated(fullSnapshot, (v) => {
+        nodesOf(v)[3].priority = priority;
+      }))).toBe(true);
+    }
     // An approved empty label is honest: the allowlist accepts an empty entry.
     expect(isSnapshotProjection(mutated(fullSnapshot, (v) => {
       nodesOf(v)[0].label = '';
@@ -354,6 +358,13 @@ describe('Core batch validator — the full M98a event contract (F02)', () => {
       v.next = 1;
       v.lost = 0;
     }))).toBe(true);
+    // The kernel records a response status verbatim, so any JSON number is
+    // honest — and a non-finite status serializes to `null` (audit F-A).
+    for (const statusCode of [99, 1000, 200.5, null]) {
+      expect(isBatchProjection(mutated(fullBatch, (v) => {
+        eventsOf(v)[0].statusCode = statusCode;
+      }))).toBe(true);
+    }
     // Exactly 128 events.
     expect(isBatchProjection(mutated(fullBatch, (v) => {
       v.events = Array.from({ length: 128 }, (_, i) => fullEvent(i + 1));
