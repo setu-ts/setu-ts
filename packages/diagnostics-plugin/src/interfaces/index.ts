@@ -164,6 +164,9 @@ export interface DiagnosticsClientOptions {
  * Once paired, every response is bound to the paired instance: its signed
  * `x-setu-instance` header and any body `instanceId` must both equal it, so
  * a peer holding the session key cannot answer as a different instance.
+ * Every body is then checked against its exact DTO before it is returned —
+ * the core snapshot and event batch included — and every result is deeply
+ * frozen.
  *
  * @since 0.8.0
  */
@@ -173,7 +176,13 @@ export interface IDiagnosticsClient {
    * protocol. Performs the `/v1/status` pairing exchange first if the
    * session has not yet been bound to the application instance.
    *
-   * @returns The frozen M98a snapshot projection
+   * The body must match the exact M98a snapshot DTO: only the defined keys,
+   * every enum from its fixed vocabulary, each node carrying only its kind's
+   * fields under a unique id minted with its kind's prefix, labels bounded
+   * and free of control characters, and every edge joining two nodes in the
+   * same snapshot, once.
+   *
+   * @returns The deeply frozen M98a snapshot projection (nodes and edges included)
    * @throws {Error} When the client is closed, pairing failed terminally,
    * the response cannot be verified, or the peer violates the protocol
    */
@@ -181,9 +190,15 @@ export interface IDiagnosticsClient {
   /**
    * Reads the next bounded batch of execution events after `after`.
    *
+   * The body must match the exact M98a batch DTO, with consecutive event
+   * sequences and `next` equal to the last one, and must honor the cursor
+   * this call sent: at most `limit` events, an empty page echoes `after` with
+   * no loss, and a returned page starts past `after` with `lost` counting
+   * exactly the evicted gap.
+   *
    * @param after - Sequence cursor; `0` starts at the oldest retained record
    * @param limit - Maximum events, 1–128 (default 128)
-   * @returns The frozen M98a event batch
+   * @returns The deeply frozen M98a event batch (every event included)
    * @throws {Error} Under the same conditions as {@linkcode snapshot}
    */
   read(after: number, limit?: number): Promise<DiagnosticsBatch>;

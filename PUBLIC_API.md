@@ -4096,6 +4096,9 @@ pairing automatically, serializes calls with strictly increasing sequence number
 response MAC over the exact bounded bytes before parsing, and marks failed pairing terminal. After
 pairing, every response's signed `x-setu-instance` header and every body `instanceId` (core snapshot
 and event batch included) must equal the paired instance; a mismatch is the fixed connection error.
+Every body is checked against its exact DTO before it is returned — the core snapshot's node and
+edge records and the event batch's events and cursor included (see
+[`docs/diagnostics-protocol.md`](docs/diagnostics-protocol.md)) — and every result is deeply frozen.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
 `{ health: true, configuration: true, queues: true, traces: true, authorization: false,

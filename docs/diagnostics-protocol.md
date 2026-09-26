@@ -109,6 +109,18 @@ The MAC alone does not establish this, because the header identity is an input t
 holding the session key could otherwise sign a response under any identity. Such a refusal is the
 fixed connection failure, and — like any post-pairing verification failure — it is not terminal.
 
+A verified body is authentic, not necessarily well-formed, so the client then checks it against its
+exact DTO before returning it. For the core snapshot that means only the defined keys, `state` and
+`failureCode` from their fixed vocabularies, at most 1,024 nodes and 4,096 edges, each node carrying
+only its kind's fields under a unique id minted with its kind's prefix (`p`, `c`, `r`, `m`), labels
+of at most 160 UTF-8 bytes with no control character, and every edge joining two nodes in the same
+snapshot, once. For the event batch it means at most 128 events, each with only the defined keys,
+every enum from its vocabulary, canonical `op<N>` and node ids, finite non-negative timings, a
+three-digit status code and validated W3C identifiers; consecutive sequences with `next` equal to
+the last; and the cursor the request sent honored — an empty page echoes `after` with `lost: 0`, and
+a returned page starts past `after` with `lost` counting exactly the evicted gap. Every returned
+result is deeply frozen.
+
 Unauthenticated refusals are not signed and use one fixed shape:
 
 ```json

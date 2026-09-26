@@ -433,7 +433,10 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         if (!isSnapshotProjection(parsed) || parsed.instanceId !== instanceId) {
           throw new Error(CLIENT_ERRORS.connection);
         }
-        return parsed;
+        // The parsed value is a fresh object graph owned by nobody else;
+        // deep-freezing it (nodes and edges too) is what makes the documented
+        // "frozen" true, as the addon paths already do.
+        return deepFreeze(parsed);
       });
     },
 
@@ -449,11 +452,21 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         const result = await exchange(target);
         const parsed = parseBody(result.bodyText);
         // The same body binding as `snapshot()`: a paired batch carries the
-        // paired identity, never `null` and never another instance's.
-        if (!isBatchProjection(parsed) || parsed.instanceId !== instanceId) {
+        // paired identity, never `null` and never another instance's. Then the
+        // cursor contract relative to THIS request, as `queues()` and
+        // `traces()` check it: an empty page echoes the cursor, and a returned
+        // page starts past it with `lost` counting exactly the gap.
+        if (
+          !isBatchProjection(parsed) || parsed.instanceId !== instanceId ||
+          parsed.events.length > effectiveLimit ||
+          (parsed.events.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
+            parsed.events[0].sequence <= after ||
+            parsed.lost !== parsed.events[0].sequence - after - 1
+          ))
+        ) {
           throw new Error(CLIENT_ERRORS.connection);
         }
-        return parsed;
+        return deepFreeze(parsed);
       });
     },
 

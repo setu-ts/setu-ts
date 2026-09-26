@@ -376,6 +376,17 @@ All notable changes to this project are documented here. The format follows
   A refusal is the existing fixed connection error and, like any post-pairing verification failure,
   not terminal. Legacy/current status negotiation and terminal initial pairing are unchanged. The
   client has not yet been published, so no released version carries the defect.
+- **`diagnostics-plugin` — the native client validates the full core DTO and freezes what it
+  returns.** The core snapshot and batch validators checked little more than primitive types: any
+  string passed as `state`, a node or edge record could carry any fields, and an event needed only a
+  numeric `sequence` and string `operationId`/`stage`. They now enforce the exact M98a contract —
+  only defined keys, fixed vocabularies, per-kind node fields, prefixed unique node ids, bounded
+  control-free labels, edges between present nodes, canonical operation ids, non-negative timings,
+  validated trace identifiers, consecutive sequences, and the 1,024/4,096/128 bounds — and `read()`
+  now checks the cursor contract it sent, as `queues()` and `traces()` already did. `snapshot()` and
+  `read()` also returned the parsed JSON unfrozen while their documentation promised frozen data;
+  both now deep-freeze it. An in-process `instanceId: null` remains valid; a refusal is the fixed
+  connection error.
 - **`telemetry-plugin` — exported spans now carry the span kind and status OpenTelemetry defines.**
   `TelemetryService` mapped the framework's `SpanKind` onto the OTLP WIRE numbering rather than the
   `@opentelemetry/api` enum a span holds in memory, so every `server` span was exported as `CLIENT`,

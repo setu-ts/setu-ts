@@ -90,6 +90,10 @@ function fakeServer(
     queuesBody?: (after: number) => Record<string, unknown>;
     /** The body to serve for `/v1/traces`; defaults to a one-record batch. */
     tracesBody?: (after: number) => Record<string, unknown>;
+    /** The body to serve for `/v1/snapshot`; defaults to `minimalSnapshot()`. */
+    snapshotBody?: () => Record<string, unknown>;
+    /** The body to serve for `/v1/events`; defaults to `minimalBatch()`. */
+    eventsBody?: (after: number) => Record<string, unknown>;
     /**
      * Per-response identity override, applied BEFORE signing so the hostile
      * response carries a valid MAC. `path` is the target's pathname and
@@ -150,7 +154,7 @@ function fakeServer(
         }
         bodyText = JSON.stringify(body);
       } else if (target === '/v1/snapshot') {
-        bodyText = JSON.stringify(minimalSnapshot());
+        bodyText = JSON.stringify(overrides.snapshotBody?.() ?? minimalSnapshot());
       } else if (target === '/v1/health') {
         bodyText = JSON.stringify(
           overrides.healthBody ?? {
@@ -198,7 +202,8 @@ function fakeServer(
         const after = Number(url.searchParams.get('after'));
         bodyText = JSON.stringify((overrides.tracesBody ?? traceBatchBody)(after));
       } else {
-        bodyText = JSON.stringify(minimalBatch());
+        const after = Number(url.searchParams.get('after'));
+        bodyText = JSON.stringify(overrides.eventsBody?.(after) ?? minimalBatch());
       }
       // Signed, therefore authentic — and not JSON. Deliberately NOT applied
       // to `/v1/status`: the pairing path has always guarded its parse, so a
@@ -478,11 +483,13 @@ describe('Client — pairing and reads', () => {
 
   it('reads events after binding and enforces the argument bounds', async () => {
     const { client, requests } = buildClient();
-    const batch = await client.read(4, 16);
+    // The fake serves sequence 1, which is past cursor 0 — a batch starting
+    // at or before the cursor is refused (see the cursor-contract suite).
+    const batch = await client.read(0, 16);
     expect(batch.version).toEqual(1);
     expect(batch.next).toEqual(1);
     // Status, then the canonical events target in exact order.
-    expect(requests[1].target).toEqual('/v1/events?after=4&limit=16');
+    expect(requests[1].target).toEqual('/v1/events?after=0&limit=16');
     await expect(client.read(-1)).rejects.toThrow(CLIENT_ERRORS.arguments);
     await expect(client.read(0, 0)).rejects.toThrow(CLIENT_ERRORS.arguments);
     await expect(client.read(0, 129)).rejects.toThrow(CLIENT_ERRORS.arguments);
@@ -1272,5 +1279,177 @@ describe('Client — paired-instance binding (correctly signed hostile responses
     });
     await expect(hostile.client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
     hostile.client.close();
+  });
+});
+
+/**
+ * A one-event core batch past `after`, carrying the paired identity.
+ *
+ * @param after - The requested cursor
+ * @param count - How many consecutive events to return
+ * @returns The batch body
+ */
+function coreBatchAfter(after: number, count = 1): Record<string, unknown> {
+  const events = Array.from({ length: count }, (_, i) => ({
+    sequence: after + 1 + i,
+    operationId: `op${after + 1 + i}`,
+    parentOperationId: null,
+    kind: 'request',
+    stage: 'request',
+    nodeId: null,
+    outcome: 'ok',
+    atMs: 1,
+    durationMs: 2,
+  }));
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    events,
+    next: count === 0 ? after : after + count,
+    lost: 0,
+    closed: false,
+  };
+}
+
+describe('Client — core DTO validation over correctly signed bodies (F02)', () => {
+  // Each body is SIGNED by the fake server, so MAC verification passes and
+  // only the DTO validator can refuse it.
+  const hostileSnapshots: ReadonlyArray<readonly [string, () => Record<string, unknown>]> = [
+    ['an unknown state', () => ({ ...minimalSnapshot(), state: 'exploded' })],
+    ['an extra top-level field', () => ({ ...minimalSnapshot(), secrets: ['x'] })],
+    ["a node carrying another kind's field", () => ({
+      ...minimalSnapshot(),
+      nodes: [{ id: 'p1', kind: 'plugin', method: 'GET' }, {
+        id: 'c1',
+        kind: 'capability',
+      }],
+    })],
+    ['a dangling edge', () => ({
+      ...minimalSnapshot(),
+      edges: [{ from: 'p1', to: 'c9', kind: 'owns' }],
+    })],
+    ['a control character in a label', () => ({
+      ...minimalSnapshot(),
+      nodes: [{ id: 'p1', kind: 'plugin', label: '\u001b[2Jcatalog' }, {
+        id: 'c1',
+        kind: 'capability',
+      }],
+    })],
+  ];
+
+  for (const [label, body] of hostileSnapshots) {
+    it(`refuses a signed snapshot with ${label}`, async () => {
+      const { client, requests } = buildClient({ server: { snapshotBody: body } });
+      await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
+      expect(requests.map((r) => r.target)).toEqual(['/v1/status', '/v1/snapshot']);
+      client.close();
+    });
+  }
+
+  const hostileBatches: ReadonlyArray<
+    readonly [string, (after: number) => Record<string, unknown>]
+  > = [
+    ['an event field outside the contract', (after) => {
+      const batch = coreBatchAfter(after);
+      (batch.events as Record<string, unknown>[])[0].message = 'boom';
+      return batch;
+    }],
+    ['an unknown event stage', (after) => {
+      const batch = coreBatchAfter(after);
+      (batch.events as Record<string, unknown>[])[0].stage = 'sql';
+      return batch;
+    }],
+    ['non-consecutive sequences', (after) => {
+      const batch = coreBatchAfter(after, 2);
+      (batch.events as Record<string, unknown>[])[1].sequence = after + 5;
+      batch.next = after + 5;
+      return batch;
+    }],
+    ['a next that is not the last returned sequence', (after) => ({
+      ...coreBatchAfter(after),
+      next: after + 7,
+    })],
+  ];
+
+  for (const [label, body] of hostileBatches) {
+    it(`refuses a signed batch with ${label}`, async () => {
+      const { client } = buildClient({ server: { eventsBody: body } });
+      await expect(client.read(3, 8)).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
+});
+
+describe('Client — read() cursor contract relative to the request (F02)', () => {
+  it('accepts a page past the cursor, an empty page echoing it, and an honest eviction gap', async () => {
+    // Vacuity guard for the refusals below: each is one change from these.
+    const page = buildClient({ server: { eventsBody: (after) => coreBatchAfter(after, 3) } });
+    const batch = await page.client.read(3, 8);
+    expect(batch.events.map((e) => e.sequence)).toEqual([4, 5, 6]);
+    page.client.close();
+
+    const empty = buildClient({ server: { eventsBody: (after) => coreBatchAfter(after, 0) } });
+    expect((await empty.client.read(9, 8)).next).toBe(9);
+    empty.client.close();
+
+    const evicted = buildClient({
+      server: { eventsBody: (after) => ({ ...coreBatchAfter(after + 4), lost: 4 }) },
+    });
+    expect((await evicted.client.read(3, 8)).lost).toBe(4);
+    evicted.client.close();
+  });
+
+  const cases: ReadonlyArray<readonly [string, (after: number) => Record<string, unknown>]> = [
+    ['a page starting at the cursor (a replayed event)', (after) => coreBatchAfter(after - 1)],
+    ['a page starting before the cursor', () => coreBatchAfter(0)],
+    ['more events than the requested limit', (after) => coreBatchAfter(after, 9)],
+    ['an empty page that moves the cursor', (after) => ({ ...coreBatchAfter(after, 0), next: 99 })],
+    ['an empty page reporting loss', (after) => ({ ...coreBatchAfter(after, 0), lost: 2 })],
+    ['a lost count that disagrees with the gap', (after) => ({
+      ...coreBatchAfter(after + 4),
+      lost: 1,
+    })],
+  ];
+
+  for (const [label, body] of cases) {
+    it(`refuses ${label}`, async () => {
+      const { client } = buildClient({ server: { eventsBody: body } });
+      await expect(client.read(3, 8)).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
+});
+
+describe('Client — core results are deeply frozen (F03)', () => {
+  it('freezes the snapshot, its nodes, and its edges', async () => {
+    const { client } = buildClient();
+    const snapshot = await client.snapshot();
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot.nodes)).toBe(true);
+    expect(Object.isFrozen(snapshot.edges)).toBe(true);
+    expect(snapshot.nodes.length).toBeGreaterThan(0);
+    expect(snapshot.edges.length).toBeGreaterThan(0);
+    expect(snapshot.nodes.every((node) => Object.isFrozen(node))).toBe(true);
+    expect(snapshot.edges.every((edge) => Object.isFrozen(edge))).toBe(true);
+    // A strict-mode write throws rather than silently changing the result.
+    expect(() => {
+      (snapshot as { state: string }).state = 'closed';
+    }).toThrow(TypeError);
+    client.close();
+  });
+
+  it('freezes the batch and every event', async () => {
+    const { client } = buildClient({
+      server: { eventsBody: (after) => coreBatchAfter(after, 2) },
+    });
+    const batch = await client.read(0, 8);
+    expect(Object.isFrozen(batch)).toBe(true);
+    expect(Object.isFrozen(batch.events)).toBe(true);
+    expect(batch.events.length).toBe(2);
+    expect(batch.events.every((event) => Object.isFrozen(event))).toBe(true);
+    expect(() => {
+      (batch.events as unknown[]).push({});
+    }).toThrow(TypeError);
+    client.close();
   });
 });
