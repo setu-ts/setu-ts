@@ -5287,8 +5287,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   event loop through `/v1/traces` (measured: the pre-fix validator never returns) — the M98e bypass
   class, closed by index-by-index bounded copying with each field read once; and a cursor beyond the
   source's sequence answered a 200 `collection-failed` where the docs promised `invalid-request`.
-  Plan `plans/archive/milestone-98g-distributed-tracing.md`; committed-tree security audit required
-  before merge.
+  The independent committed-tree audit of `ee1bbed3` found one Low: a remote client controls
+  `traceparent`, so naming a retained span id under a DIFFERENT trace id made the cross-trace parent
+  read as `observed` — the observed-parent index was keyed on span id alone, and the processor's
+  trace-id comparison can never fire because OTel always gives a child its parent's trace id. Fixed
+  in `2fbac039` with a counted `traceId-spanId` index, pinned through the real middleware; the
+  independent re-audit of `2fbac039` passed with no finding open (5 new negative controls; all 13
+  round-1 controls and 10 probes re-run green). Plan
+  `plans/archive/milestone-98g-distributed-tracing.md` — complete (PR pending).
 - **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
   security review and implementation audit required).
 
