@@ -42,6 +42,34 @@ All notable changes to this project are documented here. The format follows
   only; identifiers grant no discovery or connection authority, and no global timeline is implied —
   `ageMs` is arrival age at one process.
 
+- **Configuration provenance (M98e): value-free provenance for approved keys, served through the
+  diagnostics connector.** `ConfigPlugin` and `loadConfig` accept a `diagnostics` option
+  (`ConfigDiagnosticsOptions`, exported from `@setu-ts/config-plugin`) that records — during the one
+  load already performed, never a second pass — where each approved key's final value was observed
+  to come from: the source category and approved source aliases, evidenced precedence displacement,
+  `${NAME}` expansion references, and a schema effect derived only from input/output property
+  presence. No configuration value, value hash, value length, raw key name, or file path is ever
+  retained or served; unapproved keys are never observed at all, and an unapproved file path
+  contributes only its category. `loadConfig(runtime, { diagnostics })` builds the record with the
+  snapshot, and `ConfigPlugin({ instance, diagnostics })` adopts that exact instance's record —
+  keeping each entry's real `environment`/`file` origin — or reports an opaque injected instance as
+  `unknown` with no presence flag and without a single read of it. Provenance adds no read to any
+  configuration object: configured sections perform exactly the same `IConfig.get` calls with
+  diagnostics disabled and enabled. The plugin always registers the source under the new eager
+  `CAPABILITIES.CONFIG_DIAGNOSTICS` token (`common` 0.8.0: `IConfigDiagnosticsSource`,
+  `ConfigProvenanceEntry`, `ConfigProvenanceOrigin`, `ConfigSchemaEffect`,
+  `ConfigDiagnosticsSnapshot`), answering `disabled` without the option; the Diagnostics Connector
+  serves it at `GET /v1/config` and its status manifest now reports `configuration: true`; the
+  native client reads it through `client.configuration(): Promise<ConfigDiagnosticsSnapshot>`, which
+  — like `health()` — answers a typed `unsupported` without sending the request when the negotiated
+  manifest (or a legacy M98b status body) reports the inspector unsupported. The configuration and
+  health wire validators — shared by the connector and the native client — now refuse a C0/C1
+  control character in any alias, as the queue validator already did, so a replacement in-process
+  source cannot forge a consumer's terminal output; and the connector re-checks the instance binding
+  on the projected copy it signs, so a source whose `instanceId` reads differently twice is refused
+  rather than signed. The projection copies every source-supplied list itself — reading each item
+  once, never through a source's own `map` or `toJSON`, and never past its budget — so the validator
+  checks exactly the bytes that are signed.
 - **Queue observations (M98f): opt-in, minimized attempt, outcome and depth observations through the
   diagnostics connector.** `QueuePlugin` accepts a `diagnostics` option (`QueueDiagnosticsOptions` /
   `QueueDepthDiagnosticsOptions`, exported from `@setu-ts/queue-plugin`) that observes each

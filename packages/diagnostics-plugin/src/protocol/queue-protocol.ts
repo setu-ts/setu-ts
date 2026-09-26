@@ -26,7 +26,7 @@ import type {
   QueueSourceState,
 } from '@setu-ts/common';
 
-import { hasControlCharacter, hasExactKeys, isAliasShape, isRecord } from './protocol.ts';
+import { hasExactKeys, isDisplayAlias, isRecord } from './protocol.ts';
 
 /** The per-read attempt bound a source honours, and so a source batch's ceiling. */
 const MAX_SOURCE_ATTEMPTS = 128;
@@ -93,18 +93,6 @@ const CYCLE_COVERAGES: ReadonlySet<string> = new Set<QueueDepthCycleCoverage>([
 
 const JOB_ALIAS = /^j[1-9][0-9]{0,15}$/;
 const SOURCE_ID = /^q(?:[1-9]|1[0-6])$/;
-
-/**
- * A display alias on the wire: the approved-alias shape AND no control
- * character. A queue source is untrusted input, and a control character in a
- * displayed alias could forge a consumer's output.
- *
- * @param value - The candidate alias
- * @returns `true` for a displayable alias
- */
-function isDisplayAlias(value: unknown): value is string {
-  return isAliasShape(value) && !hasControlCharacter(value);
-}
 
 /** A non-negative safe integer. */
 function isCount(value: unknown): value is number {

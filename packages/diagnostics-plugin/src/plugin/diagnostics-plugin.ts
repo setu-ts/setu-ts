@@ -14,6 +14,7 @@
  */
 
 import type {
+  IConfigDiagnosticsSource,
   IHealthDiagnosticsSource,
   ILocalDiagnosticsListener,
   ILocalDiagnosticsListenerFactory,
@@ -163,6 +164,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
     dependencies: [CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER],
     optionalDependencies: [
       CAPABILITIES.HEALTH_DIAGNOSTICS,
+      CAPABILITIES.CONFIG_DIAGNOSTICS,
       CAPABILITIES.QUEUE_DIAGNOSTICS,
       CAPABILITIES.TRACE_DIAGNOSTICS,
     ],
@@ -197,6 +199,18 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       // creates, ends, exports or flushes a span, and neither fails startup.
       traceSource = ctx.services.has(CAPABILITIES.TRACE_DIAGNOSTICS)
         ? ctx.services.get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS)
+        : null;
+
+      // The optional configuration provenance source (M98e): the same shape.
+      // An absent source means no ConfigPlugin is registered and the
+      // connector answers a typed `unsupported`; the ConfigPlugin ALWAYS
+      // registers one, so a configuration without the `diagnostics` option
+      // answers `disabled` rather than unsupported. A provenance read never
+      // touches a configuration value.
+      const configSource: IConfigDiagnosticsSource | null = ctx.services.has(
+          CAPABILITIES.CONFIG_DIAGNOSTICS,
+        )
+        ? ctx.services.get<IConfigDiagnosticsSource>(CAPABILITIES.CONFIG_DIAGNOSTICS)
         : null;
 
       // Parent cleanup hooks FIRST — before the bootstrap below opens the
@@ -244,6 +258,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           source,
           clock: ctx.runtime,
           healthSource,
+          configSource,
           queues: merger,
           traces: traceSource,
         });

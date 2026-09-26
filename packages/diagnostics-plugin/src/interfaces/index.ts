@@ -9,6 +9,7 @@
  */
 
 import type {
+  ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
   DiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
@@ -199,6 +200,23 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   health(): Promise<HealthDiagnosticsSnapshot>;
+  /**
+   * Reads the value-free configuration provenance through the signed
+   * protocol (M98e). Performs the `/v1/status` pairing exchange first if the
+   * session has not yet been bound.
+   *
+   * The inspector support manifest negotiated during pairing decides the
+   * answer: when it reports the configuration inspector as unsupported, a
+   * frozen typed `unsupported` snapshot is returned WITHOUT sending an addon
+   * request. When supported, the authenticated `/v1/config` exchange is
+   * performed and its exact DTO is validated before being returned. The
+   * snapshot never carries a configuration value, hash, length, or path.
+   *
+   * @returns The frozen configuration provenance projection
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  configuration(): Promise<ConfigDiagnosticsSnapshot>;
   /**
    * Reads the next bounded page of queue attempt observations, plus every
    * queue source's status and latest depths, through the signed protocol

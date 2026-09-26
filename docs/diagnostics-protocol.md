@@ -28,6 +28,7 @@ devtool has been verified.
 | `GET /v1/snapshot`               | M98a's compact final snapshot JSON (not an envelope)                                                                                                                             |
 | `GET /v1/events?after=N&limit=N` | M98a's frozen event batch; `after` is a canonical non-negative decimal, `limit` is 1–128, in exactly this order                                                                  |
 | `GET /v1/health`                 | M98d's minimized health-observation snapshot (below)                                                                                                                             |
+| `GET /v1/config`                 | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
 | `GET /v1/queues?after=N&limit=N` | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
 | `GET /v1/traces?after=N&limit=N` | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 
@@ -123,11 +124,11 @@ No refusal ever echoes supplied input, error causes, or stacks.
 
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
-`health: true` (M98d), `queues: true` (M98f) and `traces: true` (M98g) and leaves the rest
-(`configuration`, `authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`,
+`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f) and `traces: true` (M98g)
+and leaves the rest (`authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`,
 `outboundHttp`) reserved and `false`. A client that reads a legacy M98b three-field status body (no
-`inspectors`) resolves the manifest to all-`false`, so its `health()` answers a typed `unsupported`
-without sending the request.
+`inspectors`) resolves the manifest to all-`false`, so its `health()`, `configuration()`, `queues()`
+and `traces()` answer a typed `unsupported` without sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -162,6 +163,54 @@ own status (present only when `reported`), the outcome state, and monotonic `lat
 indicator `data`, no error text, and no absolute time is admitted. The response is signed and
 bounded exactly like every other operation: the MAC covers the exact body bytes, and the parsed
 `instanceId` must equal the authenticated header.
+
+## Configuration provenance (M98e)
+
+`GET /v1/config` serves the config plugin's value-free provenance snapshot — the same frozen DTO the
+plugin registers under `CAPABILITIES.CONFIG_DIAGNOSTICS`, projected field-by-field:
+
+```json
+{
+  "version": 1,
+  "instanceId": "<bound instance UUID>",
+  "state": "ready",
+  "entries": [
+    {
+      "keyAlias": "port",
+      "origin": "environment",
+      "overriddenSourceAliases": ["dotenv", "dotenv-local"],
+      "expanded": false,
+      "referenceAliases": [],
+      "schemaEffect": "validated"
+    },
+    {
+      "keyAlias": "api-url",
+      "origin": "file",
+      "sourceAlias": "dotenv-local",
+      "overriddenSourceAliases": ["dotenv"],
+      "expanded": true,
+      "referenceAliases": ["host"],
+      "schemaEffect": "validated"
+    }
+  ],
+  "truncated": false,
+  "droppedEntries": 0
+}
+```
+
+`sourceAlias` may ride only a `file` origin, and only when the exact configured path was approved.
+`origin` is `environment`, `file`, or `unknown`; `unknown` has exactly two producers — an opaque
+injected `IConfig` instance (reported with schema effect `unknown`, honestly, with no presence flag
+and no read of the instance), and a key present only after schema parsing (effect `introduced`,
+which reports the appearance and never names a mechanism — a default and a transform are
+indistinguishable by presence). No configuration value, value hash, value length, raw key name, or
+file path is ever carried: only application-approved display aliases, the evidenced precedence and
+expansion relationships between them, and the presence-derived schema effect. `droppedEntries`
+counts only entries omitted by the 256 KiB budget — unapproved keys are never observed at all, so no
+counter discloses that they exist. The response is signed and bounded exactly like every other
+operation. The connector and the client run one exact validator, and it refuses a C0/C1 control
+character in any alias (as the health and queue validators do), whoever registered the source; the
+connector also re-checks the instance binding on the projected copy it signs.
 
 ## Queue observations (M98f)
 

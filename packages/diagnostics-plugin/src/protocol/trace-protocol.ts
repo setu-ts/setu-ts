@@ -25,7 +25,7 @@ import type {
   TraceSourceState,
 } from '@setu-ts/common';
 
-import { hasControlCharacter, hasExactKeys, isAliasShape, isRecord } from './protocol.ts';
+import { hasExactKeys, isDisplayAlias, isRecord } from './protocol.ts';
 
 /** The per-read record bound a source honours, and so a source batch's ceiling. */
 const MAX_TRACE_RECORDS = 128;
@@ -83,11 +83,6 @@ function isTraceId(value: unknown): value is string {
 /** A valid W3C span id: 16 lowercase hex, never all-zero. */
 function isSpanId(value: unknown): value is string {
   return typeof value === 'string' && SPAN_ID_PATTERN.test(value) && value !== ALL_ZERO_SPAN_ID;
-}
-
-/** A display alias on the wire: the approved-alias shape AND no control character. */
-function isDisplayAlias(value: unknown): value is string {
-  return isAliasShape(value) && !hasControlCharacter(value);
 }
 
 /** A non-negative safe integer. */

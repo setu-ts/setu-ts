@@ -13,11 +13,17 @@
 
 import type { IConfig, IRuntimeServices } from '@setu-ts/common';
 
+import {
+  approvedReferenceAliases,
+  buildConfigProvenanceEntries,
+  compileConfigDiagnosticsPolicy,
+  storeConfigProvenance,
+} from '../diagnostics/provenance.ts';
 import type { ConfigPluginOptions } from '../options.ts';
 import { validateConfigSections } from '../sections/validate-sections.ts';
 import { ConfigService } from './config-service.ts';
 import type { EnvLoaderOptions } from './env-loader.ts';
-import { loadEnv } from './env-loader.ts';
+import { loadEnvWithProvenance } from './env-loader.ts';
 import { expandVariables as expandConfigVariables } from './variable-expander.ts';
 import { validateConfig } from '../validators/config-validator.ts';
 
@@ -64,15 +70,43 @@ export async function loadConfig(
     return instance;
   }
 
+  // Compile the provenance policy once, before anything is read: an invalid
+  // diagnostics option refuses before any source is touched.
+  const diagnosticsOptions = options?.diagnostics;
+  const policy = diagnosticsOptions === undefined
+    ? null
+    : compileConfigDiagnosticsPolicy(diagnosticsOptions);
+
   const envFilePath = options?.envFilePath;
   const loaderOptions: EnvLoaderOptions = envFilePath === undefined ? {} : {
     envFilePath,
     ...(options?.envFileOptional === undefined ? {} : { envFileOptional: options.envFileOptional }),
   };
 
-  // Load raw string values from environment and files.
-  const loaded = await loadEnv(runtime, loaderOptions);
-  const raw = (options?.expandVariables ?? true) ? expandConfigVariables(loaded) : loaded;
+  // Load raw string values from environment and files — the ONE pass, with
+  // provenance observed as each existing merge step wins when enabled.
+  const { values: loaded, sources } = await loadEnvWithProvenance(
+    runtime,
+    loaderOptions,
+    policy === null
+      ? undefined
+      : { approvedKeys: policy.aliasByKey, aliasByPath: policy.aliasByPath },
+  );
+  // Approved reference ALIASES per expanded approved key: the raw reference
+  // names are mapped (and unapproved ones dropped) inside the observer, so
+  // no raw key name outlives the expansion step.
+  const expansions = new Map<string, readonly string[]>();
+  const raw = (options?.expandVariables ?? true)
+    ? expandConfigVariables(
+      loaded,
+      policy === null ? undefined : {
+        keys: policy.aliasByKey,
+        onExpanded: (key, references) => {
+          expansions.set(key, approvedReferenceAliases(policy, references));
+        },
+      },
+    )
+    : loaded;
 
   // If a validation schema is provided, validate and coerce.
   const validationSchema = options?.validationSchema;
@@ -81,6 +115,25 @@ export async function loadConfig(
     : raw;
 
   const config = new ConfigService(data);
+  if (policy !== null) {
+    // Provenance is derived once, from the structures this pass already
+    // produced — never from a second pass over values.
+    // The builder receives only which APPROVED keys are present — presence is
+    // read here, beside the values, so no value can reach the builder.
+    const presentKeys = new Set(
+      [...policy.aliasByKey.keys()].filter((key) => Object.hasOwn(data, key)),
+    );
+    storeConfigProvenance(
+      config,
+      buildConfigProvenanceEntries(
+        policy,
+        sources,
+        expansions,
+        presentKeys,
+        validationSchema !== undefined,
+      ),
+    );
+  }
   validateConfigSections(config, options?.sections ?? []);
   return config;
 }

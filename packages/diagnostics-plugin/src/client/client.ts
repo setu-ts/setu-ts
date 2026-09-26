@@ -14,6 +14,7 @@
  */
 
 import type {
+  ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
   DiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
@@ -32,9 +33,11 @@ import {
 } from '../security/authentication.ts';
 import type { DiagnosticsClientOptions, IDiagnosticsClient } from '../interfaces/index.ts';
 import {
+  CONFIG_TARGET,
   HEALTH_TARGET,
   type InspectorsManifest,
   isBatchProjection,
+  isConfigSnapshotProjection,
   isHealthSnapshotProjection,
   isSnapshotProjection,
   parseStatusBody,
@@ -480,6 +483,49 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         }
         Object.freeze(parsed.observations);
         return Object.freeze(parsed);
+      });
+    },
+
+    async configuration(): Promise<ConfigDiagnosticsSnapshot> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        // exchangeAndBind sets the instance or throws; capture it locally so
+        // the typed unsupported DTO below is built from a non-null UUID.
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: when the authenticated manifest reports the
+        // configuration inspector as unsupported, return a frozen typed
+        // `unsupported` DTO WITHOUT sending an addon request. This is the
+        // release-skew path — a legacy server advertised no inspectors — and
+        // it never probes an unknown route or infers support from a generic
+        // protocol error.
+        if (inspectors !== null && inspectors.configuration === false) {
+          return Object.freeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            entries: Object.freeze([]),
+            truncated: false,
+            droppedEntries: 0,
+          });
+        }
+        const result = await exchange(CONFIG_TARGET);
+        const parsed = parseBody(result.bodyText);
+        // The exact DTO validator, plus the body's own instance binding: the
+        // signed body must describe the instance this session paired with.
+        if (!isConfigSnapshotProjection(parsed) || parsed.instanceId !== bound) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // The parsed value is a fresh object graph owned by nobody else;
+        // deep-freezing it (entries AND their alias arrays) is what makes the
+        // documented "deeply frozen" true.
+        return deepFreeze(parsed);
       });
     },
 

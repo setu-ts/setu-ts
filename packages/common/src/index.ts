@@ -344,10 +344,14 @@ export { TELEMETRY_CONTEXT_OPAQUE } from './services/telemetry.ts';
 
 // Kernel diagnostics read contracts (M98a) — the pull-only DTO projection the
 // kernel's optional `IApplication.diagnostics` reader serves — plus the
-// minimized health-observation inspector contracts (M98d), plus the queue
-// attempt, outcome and depth observation contracts (M98f), plus the
-// completed-span trace observation contracts (M98g)
+// minimized health-observation (M98d), value-free configuration provenance
+// (M98e), queue attempt, outcome and depth observation (M98f), and
+// completed-span trace observation (M98g) inspector contracts
 export type {
+  ConfigDiagnosticsSnapshot,
+  ConfigProvenanceEntry,
+  ConfigProvenanceOrigin,
+  ConfigSchemaEffect,
   DiagnosticsBatch,
   DiagnosticsEdge,
   DiagnosticsEdgeKind,
@@ -364,6 +368,7 @@ export type {
   HealthDiagnosticsObservation,
   HealthDiagnosticsSnapshot,
   HealthObservationState,
+  IConfigDiagnosticsSource,
   IDiagnosticsSource,
   IHealthDiagnosticsSource,
   IQueueDiagnosticsSource,
