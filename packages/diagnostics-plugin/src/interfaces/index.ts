@@ -176,11 +176,14 @@ export interface IDiagnosticsClient {
    * protocol. Performs the `/v1/status` pairing exchange first if the
    * session has not yet been bound to the application instance.
    *
-   * The body must match the exact M98a snapshot DTO: only the defined keys,
+   * The body must match the M98a snapshot DTO: only the defined keys,
    * every enum from its fixed vocabulary, each node carrying only its kind's
    * fields under a unique id minted with its kind's prefix, labels bounded
    * and free of control characters, and every edge joining two nodes in the
-   * same snapshot, once.
+   * same snapshot, once. A middleware `priority` is left unranged, as the
+   * DTO types it and the kernel records it: it may be any number, or `null`
+   * when the kernel recorded `NaN` or `Infinity` (JSON has no non-finite
+   * number), so check for `null` before doing arithmetic on it.
    *
    * @returns The deeply frozen M98a snapshot projection (nodes and edges included)
    * @throws {Error} When the client is closed, pairing failed terminally,
@@ -190,11 +193,13 @@ export interface IDiagnosticsClient {
   /**
    * Reads the next bounded batch of execution events after `after`.
    *
-   * The body must match the exact M98a batch DTO, with consecutive event
+   * The body must match the M98a batch DTO, with consecutive event
    * sequences and `next` equal to the last one, and must honor the cursor
    * this call sent: at most `limit` events, an empty page echoes `after` with
    * no loss, and a returned page starts past `after` with `lost` counting
-   * exactly the evicted gap.
+   * exactly the evicted gap. An event `statusCode` is left unranged, as the
+   * kernel records it verbatim: it may be any number, or `null` for a
+   * non-finite value — check for `null` before treating it as an integer.
    *
    * @param after - Sequence cursor; `0` starts at the oldest retained record
    * @param limit - Maximum events, 1–128 (default 128)

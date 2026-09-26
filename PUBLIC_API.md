@@ -4099,6 +4099,9 @@ and event batch included) must equal the paired instance; a mismatch is the fixe
 Every body is checked against its exact DTO before it is returned — the core snapshot's node and
 edge records and the event batch's events and cursor included (see
 [`docs/diagnostics-protocol.md`](docs/diagnostics-protocol.md)) — and every result is deeply frozen.
+A middleware node's `priority` and an event's `statusCode` are left unranged because the kernel
+records both verbatim: either may be any number, or `null` when the kernel recorded `NaN` or
+`Infinity`, although the `common` type declares `number`.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
 `{ health: true, configuration: true, queues: true, traces: true, authorization: false,
