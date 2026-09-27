@@ -2,8 +2,9 @@
 
 > **Status:** Implemented on `feat/m98j-event-observations`; verification and code review done
 > (2026-09-27), with every finding fixed on this branch. **Both security gates in §10 remain
-> PENDING**: the design security review is recorded in §10.1 but awaits maintainer approval, and no
-> independent committed-tree audit has run. The milestone is not complete until both are recorded.
+> PENDING** until the audit runs: the design security review is recorded and approved in §10.1; no
+> independent committed-tree audit has run yet. The milestone is not complete until both are
+> recorded.
 
 ## 0. Objective & scope
 
@@ -264,13 +265,13 @@ audits; it is not implied by completing this milestone.
 
 ### 10.1 Design security review
 
-**Recorded 2026-09-27, after implementation, at the maintainer's direction — AWAITING MAINTAINER
-APPROVAL.** No design review was recorded before implementation (§11 records that this plan's header
-and the tracking docs claimed one anyway). As with M98i, this section is checked against the §3
-decisions — the design as planned — and every place the implementation departed from §3 is named and
-assessed below rather than silently adopted. It was written by the context that verified and fixed
-the milestone, not by its implementer; it is NOT the committed-tree audit, which must still run in a
-fresh context.
+**Recorded 2026-09-27, after implementation, at the maintainer's direction; approved the same day
+(see the end of this section).** No design review was recorded before implementation (§11 records
+that this plan's header and the tracking docs claimed one anyway). As with M98i, this section is
+checked against the §3 decisions — the design as planned — and every place the implementation
+departed from §3 is named and assessed below rather than silently adopted. It was written by the
+context that verified and fixed the milestone, not by its implementer; it is NOT the committed-tree
+audit, which must still run in a fresh context.
 
 **Purpose it serves.** M98 lets a developer inspect a running application on their own machine
 without the devtool gaining access to live services, application data, credentials or any mutation
@@ -403,7 +404,9 @@ a hostile source with accessor, index-getter, class-instance, symbol-key and `Pr
 assert no getter runs. Compare dispatch observed vs unobserved under a throwing handler, a throwing
 async `errorHandler` and a throwing clock.
 
-**Approved by:** — (pending maintainer confirmation).
+**Approved by:** the maintainer, 2026-09-27 — recorded text accepted, including the measured
+overhead (Deno −11.8% on the publish-only route, above §3.4's 5% target, accepted as the cost of an
+opt-in development-instance inspector).
 
 **Implementation gate — pending committed-tree audit before completion/publication.** Record commit,
 reviewed files, tested adapters/runtimes, findings and dispositions in the implementation PR. Test

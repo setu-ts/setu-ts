@@ -11126,9 +11126,10 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
 
 ### Milestone 98j: Event Dispatch Observations
 
-**Status:** Implemented on `feat/m98j-event-observations`; the recorded design security review and
-the independent committed-tree security audit are still PENDING, so the milestone is not complete.
-Owner: `packages/events-plugin`. Canonical plan: `plans/milestone-98j-event-observations.md`.
+**Status:** Implemented on `feat/m98j-event-observations`; the design security review is recorded
+and approved (plan §10.1); the independent committed-tree security audit is still PENDING, so the
+milestone is not complete. Owner: `packages/events-plugin`. Canonical plan:
+`plans/milestone-98j-event-observations.md`.
 
 - [x] Instrument publish entry and each existing handler await, without subscribing an extra handler
       or changing dispatch. Count publications, handler starts, successes and failures separately.
@@ -11142,10 +11143,11 @@ Owner: `packages/events-plugin`. Canonical plan: `plans/milestone-98j-event-obse
       raw errors before buffering.
 - [x] Only the in-process InMemoryEventBus; broker acknowledgements and cross-service delivery
       remain separate messaging work.
-- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
-      audit (PENDING — the behavioral tests are delivered: exercise sync/async dispatch, handler
-      rejection, errorHandler throwing, publishBatch, unsubscribe during dispatch, and shutdown
-      while handlers are pending. Assert exact invocation order/count and no second evaluation).
+- [ ] Pass recorded design review (approved 2026-09-27, plan §10.1) and committed-tree
+      implementation security audit (audit PENDING — the behavioral tests are delivered: exercise
+      sync/async dispatch, handler rejection, errorHandler throwing, publishBatch, unsubscribe
+      during dispatch, and shutdown while handlers are pending. Assert exact invocation order/count
+      and no second evaluation).
 
 ### Milestone 98k: Scheduler Execution Observations
 

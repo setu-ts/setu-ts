@@ -5333,8 +5333,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `plans/milestone-98j-event-observations.md` — **implemented, NOT complete**: verification and code
   review found and fixed two dispatch-parity defects (an async `errorHandler` throw was absorbed
   only when observed; a failing clock could reject `publish`), a `started` counter that duplicated
-  `count`, and three connector deviations (over-budget body, source bound, `s<N>` ids). The recorded
-  design security review and the independent committed-tree audit are still pending.
+  `count`, and three connector deviations (over-budget body, source bound, `s<N>` ids). The design
+  security review, recorded after implementation, found the snapshot reader invoking getters (now
+  the shared own-data reader) and is approved, including measured overhead of −1.2% (Node), −3.4%
+  (Bun) and −11.8% (Deno) on a publish-only route. The independent committed-tree audit is pending.
 - **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
   security review and implementation audit required).
 
