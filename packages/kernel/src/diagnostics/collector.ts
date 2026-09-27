@@ -218,14 +218,11 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
 
   /** @inheritDoc */
   read(after: number, limit?: number): DiagnosticsBatch {
-    // A closed ring has no "beyond the sequence" refusal: a reader that polled
-    // up to sequence N before shutdown must still get its empty closed batch,
-    // not a throw, for any valid cursor it holds.
-    const cursor = validateReadCursor(
-      after,
-      limit,
-      this.#ring.closed ? Number.MAX_SAFE_INTEGER : this.#ring.lastSequence,
-    );
+    // A closed ring keeps its sequence counter (`clear()` never rewinds it), so
+    // the ordinary "beyond the sequence" refusal still admits every cursor a
+    // reader could have been issued before shutdown — and refuses one it could
+    // not, rather than echoing an invented cursor back as `next`.
+    const cursor = validateReadCursor(after, limit, this.#ring.lastSequence);
     if (this.#ring.closed) {
       return deepFreeze({
         version: 1 as const,

@@ -182,8 +182,21 @@ describe('DiagnosticsCollector — snapshot contract', () => {
     expect(batch.closed).toBe(true);
     expect(batch.events).toEqual([]);
     expect(batch.next).toBe(0);
-    // A cursor that was valid before shutdown still reads as closed, not thrown.
-    expect(collector.read(500).closed).toBe(true);
+    // A cursor the collector issued before shutdown still reads as closed.
+    const issued = collector.read(1);
+    expect(issued.closed).toBe(true);
+    expect(issued.next).toBe(1);
+  });
+
+  it('closed reads refuse a cursor beyond the sequence instead of echoing it', () => {
+    const collector = collectorWith();
+    collector.markRunning();
+    collector.observeLifecycleEvent(collector.beginOperation(), 'bootstrap', null, 'ok');
+    collector.markClosed(false);
+    expect(() => collector.read(2)).toThrow('beyond the current sequence');
+    expect(() => collector.read(Number.MAX_SAFE_INTEGER)).toThrow(
+      'beyond the current sequence',
+    );
   });
 });
 
