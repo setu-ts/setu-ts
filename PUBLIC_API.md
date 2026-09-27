@@ -2900,16 +2900,20 @@ value.
 Every instance, opted in or not, registers an `ICacheDiagnosticsSource` under
 `CAPABILITIES.CACHE_DIAGNOSTICS` with `{ multi: true }` (not in `provides`); without the option it
 answers `disabled` and nothing is attached to the service — no clock read and no extra promise on
-any cache call. With it, each call reads the runtime monotonic clock twice and adds one promise hop;
+any cache call. With it, each call reads the runtime monotonic clock once (and a second time on the
+first call per operation and one in every eight after it, which are the timed calls) and observes
+settlement on a side branch of the backend's own promise, which is what the caller receives;
 results, `null` semantics, TTL, prefix, `getOrSet` coalescing and the ORIGINAL rejection reason are
 unchanged, and a synchronous backend throw is still thrown synchronously. A null `get`, a `false`
 `has` and a `false` `delete` are successful calls (miss / absent / notRemoved); a rejection is
 `failed` and never a collection failure. Records expire 60 seconds after their last observation and
-a snapshot whose freshest record is older than 30 seconds is `stale`. No eviction is ever counted or
-inferred. A clock failure latches `collection-failed` without changing any application result;
-closing the plugin detaches the collector before clearing it, and the source then answers
-`disabled`. Keys, prefixes, values, URLs, factory results and errors are never captured. Direct
-store calls and a `CacheService` constructed or registered by application code are outside coverage.
+a snapshot whose freshest record is older than 30 seconds is `stale`. `lastDurationMs` is the most
+recent TIMED call's duration (`null` when none in the retention window was timed). No eviction is
+ever counted or inferred. A clock failure latches `collection-failed` without changing any
+application result; closing the plugin detaches the collector before clearing it, and the source
+then answers `disabled`. Keys, prefixes, values, URLs, factory results and errors are never
+captured. Direct store calls and a `CacheService` constructed or registered by application code are
+outside coverage.
 
 ### Cache Middleware
 

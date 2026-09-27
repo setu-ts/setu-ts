@@ -50,11 +50,14 @@ legitimate miss-producing implementation. No eviction count is inferred from mis
 home:** owning package `test/unit/cache-observations.test.ts`.
 
 Attach the internal collector to the owned implementation during plugin registration through a
-non-barrel-exported WeakMap attachment helper. Existing exported constructor signatures remain
-unchanged. Each hot path checks for an attachment before reading clocks or deriving labels. The
-collector accepts only the fixed operation, approved alias, primitive outcome and measured values;
-raw inputs and errors never cross that seam. The source uses the same bounded collector and owns no
-reference to business payloads. Close detaches first, then clears collector state.
+non-barrel-exported attachment helper. **As implemented** the helper writes a private `CacheService`
+field (through a setter bound in the class's static block) rather than a `WeakMap`: the unobserved
+hot path is then one field read, and the fair benchmark measured it indistinguishable from the
+pre-M98i `CacheService`. Existing exported constructor signatures remain unchanged. Each hot path
+checks for an attachment before reading clocks or deriving labels. The collector accepts only the
+fixed operation, approved alias, primitive outcome and measured values; raw inputs and errors never
+cross that seam. The source uses the same bounded collector and owns no reference to business
+payloads. Close detaches first, then clears collector state.
 
 ### 3.2 Source ownership and registration
 
@@ -99,11 +102,13 @@ observed application behavior, not a collection-failed source state. Numbers are
 and clamped at Number.MAX_SAFE_INTEGER; durations are integer milliseconds. count counts settled
 observations, not currently active calls. Counters are cumulative within the retention window.
 Nonapplicable numeric counters are zero. lastDurationMs is null for instantaneous lifecycle
-observations; otherwise it is the last settled duration. Record alias is exactly the configured
-source alias (snapshot.alias); no event/job mapping exists. On failed collection the source clears
-records and exposes only state, approved alias, coverage and dropped. Lifecycle-closed and disabled
-states take precedence over collection-failed. Read only framework-owned primitive fields; never
-pass a business object or an Error to the collector.
+observations; otherwise it is the last settled duration. **As implemented** it is the last TIMED
+call's duration: the built-in source times the first call per operation and one in every eight after
+it (see §3.4's measurement), and reports `null` when no call in the retention window was timed.
+Record alias is exactly the configured source alias (snapshot.alias); no event/job mapping exists.
+On failed collection the source clears records and exposes only state, approved alias, coverage and
+dropped. Lifecycle-closed and disabled states take precedence over collection-failed. Read only
+framework-owned primitive fields; never pass a business object or an Error to the collector.
 
 `CacheDiagnosticsResponse` is exactly
 `{ version: 1, instanceId: string, state: DiagnosticsInspectorState, sources: readonly { sourceId: string, snapshot: CacheDiagnosticsSnapshot }[] }`.
@@ -154,17 +159,40 @@ Benchmark disabled/enabled on the same workload; require zero extra backend call
 memory after steady state. Target <=5% median throughput regression at 10,000 warmed operations;
 record five runs and investigate failures before completion rather than claiming a universal bound.
 
-**Measured, and the target is NOT met (recorded here for the maintainer's decision).** Five paired
-runs of 10,000 warmed `set`+`get` pairs against `MemoryStore` gave an enabled/disabled time ratio of
-2.08–2.71 (median 2.45). Diagnosis by elimination: with the collector's clock replaced by a
-constant, the ratio is ~1.5 — the one promise hop `observeCacheCall` adds to observe settlement —
-and the remainder is the two `performance.now()` reads per call. A `MemoryStore` call costs a
-fraction of a microsecond, so no instrumentation that measures a per-call duration can stay within
-5% of it; against a network backend the same fixed cost is a small fraction of each round trip, but
-that was not measured (no Redis was available). Zero extra backend calls is met (the
-enabled/disabled/failing comparison test asserts identical backend call sequences) and memory is
-bounded (five records). The CHANGELOG states the measured cost. Remaining options are the
-maintainer's: accept the stated cost, measure against real Redis, or drop/sample `lastDurationMs`.
+**Measurement, first pass (superseded below).** Five paired runs of 10,000 warmed `set`+`get` pairs
+against `MemoryStore` gave an enabled/disabled time ratio of 2.08–2.71 (median 2.45). Diagnosis by
+elimination: with the collector's clock replaced by a constant, the ratio is ~1.5 — the one promise
+hop `observeCacheCall` adds to observe settlement — and the remainder is the two `performance.now()`
+reads per call. A `MemoryStore` call costs a fraction of a microsecond, so no instrumentation that
+measures a per-call duration can stay within 5% of it; against a network backend the same fixed cost
+is a small fraction of each round trip, but that was not measured (no Redis was available). Zero
+extra backend calls is met (the enabled/disabled/failing comparison test asserts identical backend
+call sequences) and memory is bounded (five records).
+
+**Measurement against real Redis, and the reductions it drove (maintainer asked for both).** The
+first pass was biased: two instances in one process differ by ~11% with NO code difference (an A/A
+control), because the second-constructed instance runs slower under the JIT. The fair harness runs
+each configuration (`main`'s pre-M98i `CacheService`, disabled, enabled) in its own fresh process,
+alternated, with 10,000 (Redis) or 100,000 (memory) warmed `set`+`get` pairs. Three changes then
+landed: settlement is observed on a SIDE branch of the backend's own promise (no extra tick for the
+caller, and promise identity preserved); only the first call per operation and one in every eight
+after it reads a start time (one clock read per call instead of two); and the unobserved path reads
+a private field instead of a `WeakMap`. Results (medians, ops/s):
+
+| workload              | pre-M98i | disabled | enabled | enabled vs disabled |
+| --------------------- | -------- | -------- | ------- | ------------------- |
+| Redis 7, 50 in flight | 367k     | 361k     | 338k    | -6.2% (11 rounds)   |
+| Redis 7, 1 in flight  | 52.8k    | 57.7k    | 53.1k   | within noise        |
+| `MemoryStore`, serial | 8.63M    | 9.44M    | 4.54M   | about 2× slower     |
+
+Isolation at Redis-50 (each variant 7 rounds, enabled path only): removing the side branch, or
+replacing the clock with a constant, each left throughput at ~340k, while a collector that returns
+the call untouched matched disabled (~356k). The remaining cost is the collector's per-call work
+plus the one promise reaction every settlement observation needs; replacing the collector's `Map`s
+with fixed slots made no measurable difference and was not kept. The disabled path is
+indistinguishable from pre-M98i in every workload. **Status: the ≤5% target is met for serial Redis
+and not for 50-concurrent Redis (-6.2%) or the in-memory store; the residual is the stated cost of
+observing each settlement, recorded in the CHANGELOG for the maintainer's acceptance.**
 
 ### 3.5 Scope and isolation
 

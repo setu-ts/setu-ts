@@ -18,20 +18,20 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { CachePlugin, CacheService } from '../../src/index.ts';
+import { attachCacheCollector, detachCacheCollector } from '../../src/services/cache-service.ts';
 import type { CacheDiagnosticsOptions } from '../../src/index.ts';
 import type { CacheStore } from '../../src/stores/cache-store.ts';
 import { MemoryStore } from '../../src/stores/memory-store.ts';
 import { NoopStore } from '../../src/stores/noop-store.ts';
 import {
-  attachCacheCollector,
   bump,
   CACHE_COLLECTOR_LIMITS,
   CACHE_DIAGNOSTICS_ERRORS,
   CacheObservationCollector,
   compileCacheDiagnosticsAlias,
   createCacheDiagnosticsSource,
-  detachCacheCollector,
   observeCacheCall,
+  UNTIMED,
 } from '../../src/diagnostics/cache-observations.ts';
 
 /** A controllable monotonic clock. */
@@ -249,12 +249,18 @@ describe('observeCacheCall — outcome counters', () => {
 });
 
 describe('observeCacheCall — transparency', () => {
-  it('runs the backend call unobserved when no collector is attached', () => {
-    const backend = new MemoryStore('');
-    const service = new CacheService(backend, '');
+  it('returns the backend own promise, observed or not', () => {
     const direct = Promise.resolve('same');
-    // Without an attachment the backend's own promise is returned as is.
-    expect(observeCacheCall(service, 'get', () => direct)).toBe(direct);
+    const backend = {
+      ...scriptedBackend('resolve', null),
+      get: () => direct,
+    } as unknown as CacheStore;
+    const plain = new CacheService(backend, '');
+    expect(plain.get('k')).toBe(direct);
+    const { service } = observed(backend);
+    expect(service.get('k')).toBe(direct);
+    const collector = new CacheObservationCollector('x', new Clock().read);
+    expect(observeCacheCall(collector, 'get', () => direct)).toBe(direct);
   });
 
   it('reads no clock on a service whose plugin did not opt in', async () => {
@@ -395,6 +401,55 @@ describe('observeCacheCall — transparency', () => {
   });
 });
 
+describe('CacheObservationCollector — sampled timing', () => {
+  it('times the first call per operation and one in every eight after it', async () => {
+    const clock = new Clock();
+    const collector = new CacheObservationCollector('a', clock.read);
+    const interval = CACHE_COLLECTOR_LIMITS.timingSampleInterval;
+    const starts = Array.from({ length: interval * 2 + 1 }, () => collector.begin('get'));
+    const timed = starts.map((start) => start !== UNTIMED);
+    expect(timed.filter(Boolean).length).toBe(3);
+    expect(timed[0]).toBe(true);
+    expect(timed[interval]).toBe(true);
+    expect(timed[interval * 2]).toBe(true);
+    // Each operation cycles independently: set's first call is timed.
+    expect(collector.begin('set')).not.toBe(UNTIMED);
+    // Every call, timed or not, is still counted.
+    for (const start of starts) {
+      collector.settle('get', start, 'hit');
+    }
+    expect(collector.snapshot().records[0]).toMatchObject({ count: interval * 2 + 1, hits: 17 });
+    await Promise.resolve();
+  });
+
+  it('keeps the last TIMED duration across untimed calls', () => {
+    const clock = new Clock();
+    const collector = new CacheObservationCollector('a', clock.read);
+    const timed = collector.begin('get');
+    clock.now += 7;
+    collector.settle('get', timed, 'hit');
+    const untimed = collector.begin('get');
+    expect(untimed).toBe(UNTIMED);
+    clock.now += 500;
+    collector.settle('get', untimed, 'miss');
+    expect(collector.snapshot().records[0]).toMatchObject({
+      count: 2,
+      lastDurationMs: 7,
+      ageMs: 0,
+    });
+  });
+
+  it('reports a null duration when a retention reset lands on an untimed call', () => {
+    const clock = new Clock();
+    const collector = new CacheObservationCollector('a', clock.read);
+    collector.settle('get', collector.begin('get'), 'hit');
+    const untimed = collector.begin('get');
+    clock.now += CACHE_COLLECTOR_LIMITS.retentionMs + 1;
+    collector.settle('get', untimed, 'hit');
+    expect(collector.snapshot().records[0]).toMatchObject({ count: 1, lastDurationMs: null });
+  });
+});
+
 describe('CacheObservationCollector — retention, state and bounds', () => {
   it('reports no-data, ready, stale, and expires records after 60 s', async () => {
     const clock = new Clock();
@@ -452,7 +507,7 @@ describe('CacheObservationCollector — retention, state and bounds', () => {
     release();
     expect(await pending).toBe('v');
     expect(collector.snapshot()).toMatchObject({ state: 'disabled', alias: null, records: [] });
-    expect(collector.begin()).toBeNull();
+    expect(collector.begin('get')).toBeNull();
   });
 
   it('answers disabled from a source without a collector', () => {
@@ -470,7 +525,7 @@ describe('CacheObservationCollector — retention, state and bounds', () => {
     const collector = new CacheObservationCollector('a', clock.read);
     clock.fail = true;
     expect(collector.snapshot().state).toBe('collection-failed');
-    expect(collector.begin()).toBeNull();
+    expect(collector.begin('get')).toBeNull();
     // A settle with a null start is ignored.
     collector.settle('get', null, 'hit');
     expect(collector.snapshot().records).toEqual([]);

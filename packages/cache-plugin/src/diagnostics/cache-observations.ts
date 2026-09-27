@@ -4,13 +4,14 @@
  * CachePlugin instance registers under `CAPABILITIES.CACHE_DIAGNOSTICS`.
  *
  * INTERNAL: nothing here is exported from the package barrel. The collector
- * is attached to the plugin's OWN `CacheService` through a module-private
- * `WeakMap`, so the service's exported constructor is unchanged and a
- * service with no attachment runs exactly the pre-M98i code path — no clock
- * read, no label, no extra promise.
+ * is attached to the plugin's OWN `CacheService` through a private field set
+ * by the internal `attachCacheCollector` in `cache-service.ts`, so the
+ * service's exported constructor is unchanged and a service with no
+ * collector does one field read beyond the pre-M98i code path — no clock
+ * read, no label, no extra promise, no allocation.
  *
  * What crosses into the collector is only a fixed operation name, a fixed
- * outcome code and two monotonic clock readings. Keys, prefixes, values,
+ * outcome code and at most two monotonic clock readings. Keys, prefixes, values,
  * factory results, TTLs and thrown values never do: the wrapper classifies
  * a result into a primitive detail code before calling the collector, and a
  * rejection is recorded as `failed` without the error ever being read.
@@ -38,7 +39,24 @@ export const CACHE_COLLECTOR_LIMITS = {
   retentionMs: 60_000,
   /** A snapshot whose freshest record is older than this (ms) is `stale`. */
   staleMs: 30_000,
+  /**
+   * One in this many calls per operation is TIMED (the first always is): a
+   * timed call reads the clock at start and settle, every other call only at
+   * settle. Halves the per-call clock cost; see `lastDurationMs`.
+   */
+  timingSampleInterval: 8,
 } as const;
+
+/**
+ * What {@linkcode CacheObservationCollector.begin} returns for a call that is
+ * counted but not timed.
+ *
+ * @internal
+ */
+export const UNTIMED = 'untimed';
+
+/** A call's start marker: a clock reading, untimed, or `null` (not observed). */
+export type CacheCallStart = number | typeof UNTIMED | null;
 
 /**
  * The fixed, value-free refusal messages. None echoes a supplied value.
@@ -142,7 +160,7 @@ interface MutableRecord {
   absent: number;
   removed: number;
   notRemoved: number;
-  lastDurationMs: number;
+  lastDurationMs: number | null;
   lastAt: number;
 }
 
@@ -179,6 +197,8 @@ export class CacheObservationCollector {
   readonly #alias: string;
   readonly #clock: () => number;
   readonly #records = new Map<CacheDiagnosticsOperation, MutableRecord>();
+  /** Per-operation position in the timing sample cycle; `0` means "time the next call". */
+  readonly #cycle = new Map<CacheDiagnosticsOperation, number>();
   #failed = false;
   #closed = false;
 
@@ -192,14 +212,23 @@ export class CacheObservationCollector {
   }
 
   /**
-   * Reads the start time of a call, or `null` when capture has stopped or
-   * the clock threw (which latches `collection-failed`).
+   * Marks the start of a call. The first call per operation, and one in
+   * every `timingSampleInterval` after it, reads the clock and is timed;
+   * the rest are counted without a start reading.
    *
-   * @returns The monotonic start reading, or `null`
+   * @param operation - The backend operation starting
+   * @returns The monotonic start reading, {@linkcode UNTIMED}, or `null`
+   * when capture has stopped or the clock threw (which latches
+   * `collection-failed`)
    */
-  begin(): number | null {
+  begin(operation: CacheDiagnosticsOperation): CacheCallStart {
     if (this.#failed || this.#closed) {
       return null;
+    }
+    const position = this.#cycle.get(operation) ?? 0;
+    this.#cycle.set(operation, (position + 1) % CACHE_COLLECTOR_LIMITS.timingSampleInterval);
+    if (position !== 0) {
+      return UNTIMED;
     }
     try {
       return this.#clock();
@@ -213,12 +242,12 @@ export class CacheObservationCollector {
    * Records one settled backend call.
    *
    * @param operation - The fixed backend operation
-   * @param start - The reading {@linkcode begin} returned; `null` skips the call
+   * @param start - What {@linkcode begin} returned; `null` skips the call
    * @param outcome - The primitive classification of the call
    */
   settle(
     operation: CacheDiagnosticsOperation,
-    start: number | null,
+    start: CacheCallStart,
     outcome: CacheCallOutcome,
   ): void {
     if (start === null || this.#failed || this.#closed) {
@@ -226,7 +255,6 @@ export class CacheObservationCollector {
     }
     try {
       const now = this.#clock();
-      const duration = Math.round(Math.max(0, now - start));
       let record = this.#records.get(operation);
       if (record === undefined || now - record.lastAt > CACHE_COLLECTOR_LIMITS.retentionMs) {
         record = {
@@ -239,7 +267,7 @@ export class CacheObservationCollector {
           absent: 0,
           removed: 0,
           notRemoved: 0,
-          lastDurationMs: 0,
+          lastDurationMs: null,
           lastAt: now,
         };
         this.#records.set(operation, record);
@@ -270,7 +298,9 @@ export class CacheObservationCollector {
             break;
         }
       }
-      record.lastDurationMs = duration;
+      if (start !== UNTIMED) {
+        record.lastDurationMs = Math.round(Math.max(0, now - start));
+      }
       record.lastAt = now;
     } catch {
       this.#fail();
@@ -284,6 +314,7 @@ export class CacheObservationCollector {
   close(): void {
     this.#closed = true;
     this.#records.clear();
+    this.#cycle.clear();
   }
 
   /**
@@ -351,6 +382,7 @@ export class CacheObservationCollector {
   #fail(): void {
     this.#failed = true;
     this.#records.clear();
+    this.#cycle.clear();
   }
 }
 
@@ -398,56 +430,27 @@ export function createCacheDiagnosticsSource(
   });
 }
 
-/** Service → collector. Module-private: only this module attaches or reads. */
-const ATTACHMENTS = new WeakMap<object, CacheObservationCollector>();
-
 /**
- * Attaches a collector to the plugin's own service.
+ * Runs one backend call under an attached collector. The returned value is
+ * the backend's OWN promise and a synchronous throw propagates
+ * synchronously; settlement is observed on a side branch — the result is
+ * classified into a primitive outcome there — so the caller sees the same
+ * promise, the same value or rejection reason, and no extra microtask; a
+ * synchronous backend throw is recorded as `failed` and rethrown
+ * synchronously.
  *
- * @param service - The owned `CacheService`
- * @param collector - Its collector
- * @internal
- */
-export function attachCacheCollector(service: object, collector: CacheObservationCollector): void {
-  ATTACHMENTS.set(service, collector);
-}
-
-/**
- * Detaches a service's collector. Close detaches FIRST, then clears the
- * collector.
- *
- * @param service - The owned `CacheService`
- * @internal
- */
-export function detachCacheCollector(service: object): void {
-  ATTACHMENTS.delete(service);
-}
-
-/**
- * Runs one backend call, observing it when (and only when) a collector is
- * attached to `service`. Without an attachment the call runs exactly as
- * before: the returned value is the backend's own promise and a synchronous
- * throw propagates synchronously. With one, the result is classified into a
- * primitive outcome and the ORIGINAL value or rejection reason is passed
- * through unchanged; a synchronous backend throw is recorded as `failed` and
- * rethrown synchronously.
- *
- * @param service - The owning `CacheService`
+ * @param collector - The service's attached collector
  * @param operation - The fixed backend operation
  * @param call - Invokes the backend
- * @returns What the backend returned (observed or not)
+ * @returns What the backend returned
  * @internal
  */
 export function observeCacheCall<T>(
-  service: object,
+  collector: CacheObservationCollector,
   operation: CacheDiagnosticsOperation,
   call: () => Promise<T>,
 ): Promise<T> {
-  const collector = ATTACHMENTS.get(service);
-  if (collector === undefined) {
-    return call();
-  }
-  const start = collector.begin();
+  const start = collector.begin(operation);
   let pending: Promise<T>;
   try {
     pending = call();
@@ -455,16 +458,17 @@ export function observeCacheCall<T>(
     collector.settle(operation, start, 'failed');
     throw error;
   }
-  return pending.then(
-    (value) => {
-      collector.settle(operation, start, classify(operation, value));
-      return value;
-    },
-    (reason: unknown) => {
-      collector.settle(operation, start, 'failed');
-      throw reason;
-    },
+  // Observe on a SIDE branch and hand the caller the backend's own promise:
+  // the caller's await chain gains no extra tick, the returned promise is
+  // identical to the unobserved one, and the original value or rejection
+  // reaches the caller untouched. Both handlers are attached, and `settle`
+  // never throws, so the side branch can never become an unhandled
+  // rejection of its own.
+  pending.then(
+    (value) => collector.settle(operation, start, classify(operation, value)),
+    () => collector.settle(operation, start, 'failed'),
   );
+  return pending;
 }
 
 /**

@@ -7,7 +7,16 @@
 import type { ICacheStore } from '@setu-ts/common';
 import type { CacheStore } from '../stores/cache-store.ts';
 import { cacheCoalescer } from './coalescer.ts';
-import { observeCacheCall } from '../diagnostics/cache-observations.ts';
+import {
+  type CacheObservationCollector,
+  observeCacheCall,
+} from '../diagnostics/cache-observations.ts';
+
+/** Writes a service's private collector slot; bound in the class's static block. */
+let writeCollector: (
+  service: CacheService,
+  collector: CacheObservationCollector | undefined,
+) => void;
 
 /**
  * Service layer that delegates to a backend `CacheStore` while applying:
@@ -26,6 +35,19 @@ export class CacheService implements ICacheStore {
   #backend: CacheStore;
   #prefix: string;
   #defaultTtl: number | undefined;
+  /**
+   * The M98i collector, set only by the owning CachePlugin through
+   * {@linkcode attachCacheCollector}. `undefined` means unobserved: each
+   * operation then calls its backend directly, exactly as before M98i, and
+   * the only added work is this field read.
+   */
+  #collector: CacheObservationCollector | undefined = undefined;
+
+  static {
+    writeCollector = (service, collector) => {
+      service.#collector = collector;
+    };
+  }
 
   /**
    * @param backend - The CacheStore backend implementation
@@ -40,16 +62,20 @@ export class CacheService implements ICacheStore {
   }
 
   get<T>(key: string): Promise<T | null> {
-    return observeCacheCall(this, 'get', () => this.#backend.get<T>(`${this.#prefix}${key}`));
+    const prefixed = `${this.#prefix}${key}`;
+    const collector = this.#collector;
+    return collector === undefined
+      ? this.#backend.get<T>(prefixed)
+      : observeCacheCall(collector, 'get', () => this.#backend.get<T>(prefixed));
   }
 
   set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
     const ttl = ttlSeconds ?? this.#defaultTtl;
-    return observeCacheCall(
-      this,
-      'set',
-      () => this.#backend.set<T>(`${this.#prefix}${key}`, value, ttl),
-    );
+    const prefixed = `${this.#prefix}${key}`;
+    const collector = this.#collector;
+    return collector === undefined
+      ? this.#backend.set<T>(prefixed, value, ttl)
+      : observeCacheCall(collector, 'set', () => this.#backend.set<T>(prefixed, value, ttl));
   }
 
   /**
@@ -102,11 +128,19 @@ export class CacheService implements ICacheStore {
   }
 
   delete(key: string): Promise<boolean> {
-    return observeCacheCall(this, 'delete', () => this.#backend.delete(`${this.#prefix}${key}`));
+    const prefixed = `${this.#prefix}${key}`;
+    const collector = this.#collector;
+    return collector === undefined
+      ? this.#backend.delete(prefixed)
+      : observeCacheCall(collector, 'delete', () => this.#backend.delete(prefixed));
   }
 
   has(key: string): Promise<boolean> {
-    return observeCacheCall(this, 'has', () => this.#backend.has(`${this.#prefix}${key}`));
+    const prefixed = `${this.#prefix}${key}`;
+    const collector = this.#collector;
+    return collector === undefined
+      ? this.#backend.has(prefixed)
+      : observeCacheCall(collector, 'has', () => this.#backend.has(prefixed));
   }
 
   /**
@@ -115,6 +149,36 @@ export class CacheService implements ICacheStore {
    * since `clear()` takes no key argument.
    */
   clear(): Promise<void> {
-    return observeCacheCall(this, 'clear', () => this.#backend.clear());
+    const collector = this.#collector;
+    return collector === undefined
+      ? this.#backend.clear()
+      : observeCacheCall(collector, 'clear', () => this.#backend.clear());
   }
+}
+
+/**
+ * Attaches the owning plugin's collector to its service (M98i). INTERNAL:
+ * not exported from the package barrel, so application code cannot observe
+ * or replace a service's collector.
+ *
+ * @param service - The plugin-owned service
+ * @param collector - Its collector
+ * @internal
+ */
+export function attachCacheCollector(
+  service: CacheService,
+  collector: CacheObservationCollector,
+): void {
+  writeCollector(service, collector);
+}
+
+/**
+ * Detaches a service's collector. The plugin's close hook detaches FIRST and
+ * then clears the collector, so no late call is observed.
+ *
+ * @param service - The plugin-owned service
+ * @internal
+ */
+export function detachCacheCollector(service: CacheService): void {
+  writeCollector(service, undefined);
 }

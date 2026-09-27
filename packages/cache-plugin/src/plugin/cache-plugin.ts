@@ -26,13 +26,15 @@ import type { CacheStore } from '../stores/cache-store.ts';
 import { MemoryStore } from '../stores/memory-store.ts';
 import { RedisStore } from '../stores/redis-store.ts';
 import { NoopStore } from '../stores/noop-store.ts';
-import { CacheService } from '../services/cache-service.ts';
 import {
   attachCacheCollector,
+  CacheService,
+  detachCacheCollector,
+} from '../services/cache-service.ts';
+import {
   CacheObservationCollector,
   compileCacheDiagnosticsAlias,
   createCacheDiagnosticsSource,
-  detachCacheCollector,
 } from '../diagnostics/cache-observations.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 

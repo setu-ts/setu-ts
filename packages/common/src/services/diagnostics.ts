@@ -1252,9 +1252,12 @@ export type CacheDiagnosticsOperation = 'get' | 'set' | 'delete' | 'has' | 'clea
  * and `clear` carry only the outcome counters; every non-applicable counter
  * is `0`. Every counter saturates independently at
  * `Number.MAX_SAFE_INTEGER`. No eviction count exists: a miss is never
- * reported as an eviction. `lastDurationMs` is the integer duration of the
- * most recently settled call on the runtime's monotonic clock and `ageMs`
- * the elapsed time since it settled. Keys, prefixes, values, factory
+ * reported as an eviction. `lastDurationMs` is the integer duration, on the
+ * runtime's monotonic clock, of the most recently settled TIMED call — a
+ * source may time only a sample of calls (the built-in cache source times
+ * the first call per operation and one in every eight after it) — and is
+ * `null` when no call in the current retention window was timed. `ageMs` is
+ * the elapsed time since the most recent settled call, timed or not. Keys, prefixes, values, factory
  * results and errors are never carried.
  *
  * @since 0.8.0
@@ -1266,7 +1269,7 @@ export interface CacheDiagnosticsRecord {
   readonly operation: CacheDiagnosticsOperation;
   /** Settled calls observed. */
   readonly count: number;
-  /** Integer ms of the last settled call; `null` when not measured. */
+  /** Integer ms of the most recent timed call; `null` when none was timed. */
   readonly lastDurationMs: number | null;
   /** Monotonic ms since the last settled call. */
   readonly ageMs: number;
