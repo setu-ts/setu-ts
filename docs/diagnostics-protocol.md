@@ -5,9 +5,11 @@ native client (`createDiagnosticsClient`). This document is the specification th
 under `packages/diagnostics-plugin/test/fixtures/` pin, and the starting point for the separately
 maintained devtool's implementation.
 
-This protocol required security review before implementation acceptance; shipping standard
-primitives is not that review, and this document makes no claim that the separately maintained
-devtool has been verified.
+The design security review for this protocol — its assets, attackers, approved budgets, design
+findings and the obligations a committed-tree audit must meet — is
+[`diagnostics-security-review.md`](./diagnostics-security-review.md). Standard primitives are not
+that review, and this document makes no claim that the separately maintained devtool has been
+verified.
 
 ## Transport
 
@@ -85,6 +87,10 @@ response
 Verification uses `subtle.verify`, never string equality. Request and response domain separation
 (the second line) prevents reflection.
 
+Every field's grammar excludes the line feed, which is what makes newline-joining an unambiguous
+encoding: two different field sequences can never produce the same MAC input. A new operation must
+keep that property for its canonical target.
+
 ## Replay, expiry, and binding
 
 - Sequence numbers are strictly monotonic per session; the server atomically advances its highest
@@ -141,7 +147,16 @@ Unauthenticated refusals are not signed and use one fixed shape:
 | `unavailable`         | 503    | internal failure or an over-limit result         |
 | `rate-limited`        | 429    | refusal budget exhausted or session budget spent |
 
-No refusal ever echoes supplied input, error causes, or stacks.
+No refusal ever echoes supplied input, error causes, or stacks. A wrong key, a wrong instance and a
+replay are all the same `unauthorized` while the session is live (a replay is refused by the
+post-MAC sequence gate). Once the session has expired, a replay whose MAC verifies is answered
+`expired`, like any other MAC-valid request. `expired` is answered only to a request whose MAC
+verified, so an unauthenticated prober cannot learn whether a session is live or has ended. One
+admission exception: a session-ID mismatch is refused before MAC verification and debits the
+anonymous refusal budget, so once that budget is exhausted a wrong session ID answers `rate-limited`
+while the matching session ID with an invalid MAC answers `unauthorized`. That confirms only a
+candidate session ID; it reveals nothing about whether the session is live or has ended (see the
+design security review, R7).
 
 ## Health observations (M98d)
 
