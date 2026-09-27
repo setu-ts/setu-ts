@@ -9,6 +9,7 @@
  */
 
 import type {
+  CacheDiagnosticsResponse,
   ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
   DiagnosticsSnapshot,
@@ -239,6 +240,23 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   configuration(): Promise<ConfigDiagnosticsSnapshot>;
+  /**
+   * Reads every registered cache source's operation counters through the
+   * signed protocol (M98i). Performs the `/v1/status` pairing exchange first
+   * if the session has not yet been bound.
+   *
+   * When the negotiated inspector manifest reports the cache inspector as
+   * unsupported, a frozen typed `unsupported` response with no sources is
+   * returned WITHOUT sending an addon request. Otherwise the authenticated
+   * `/v1/cache` exchange is performed and its exact contract validated. The
+   * response never carries a key, prefix, value, URL, factory result or
+   * error text.
+   *
+   * @returns The deeply frozen cache response
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  cache(): Promise<CacheDiagnosticsResponse>;
   /**
    * Reads the next bounded page of queue attempt observations, plus every
    * queue source's status and latest depths, through the signed protocol

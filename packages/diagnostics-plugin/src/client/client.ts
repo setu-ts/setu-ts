@@ -14,6 +14,7 @@
  */
 
 import type {
+  CacheDiagnosticsResponse,
   ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
   DiagnosticsSnapshot,
@@ -33,6 +34,7 @@ import {
 } from '../security/authentication.ts';
 import type { DiagnosticsClientOptions, IDiagnosticsClient } from '../interfaces/index.ts';
 import {
+  CACHE_TARGET,
   CONFIG_TARGET,
   HEALTH_TARGET,
   type InspectorsManifest,
@@ -47,6 +49,7 @@ import {
   TRACES_PATH,
 } from '../protocol/protocol.ts';
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
+import { isCacheResponseProjection } from '../protocol/cache-protocol.ts';
 import { isTraceBatchProjection } from '../protocol/trace-protocol.ts';
 
 /**
@@ -554,6 +557,39 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // The parsed value is a fresh object graph owned by nobody else;
         // deep-freezing it (entries AND their alias arrays) is what makes the
         // documented "deeply frozen" true.
+        return deepFreeze(parsed);
+      });
+    },
+
+    async cache(): Promise<CacheDiagnosticsResponse> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the cache inspector — a
+        // legacy or pre-M98i server — answers a local typed `unsupported`
+        // response and sends no request.
+        if (inspectors !== null && inspectors.cache === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            sources: [],
+          });
+        }
+        const result = await exchange(CACHE_TARGET);
+        const parsed = parseBody(result.bodyText);
+        // The same exact validator the connector ran before signing, plus
+        // the body's own instance binding.
+        if (!isCacheResponseProjection(parsed) || parsed.instanceId !== bound) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
         return deepFreeze(parsed);
       });
     },

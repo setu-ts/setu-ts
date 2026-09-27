@@ -17,6 +17,7 @@ import type {
   DiagnosticsBatch,
   HandlerResult,
   HealthDiagnosticsSnapshot,
+  ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
   IDiagnosticsSource,
   IHealthDiagnosticsSource,
@@ -32,6 +33,7 @@ import type { DiagnosticsSessionState } from '../security/session.ts';
 import type { ConnectorLimits, LimitsClock } from './limits.ts';
 import type { IQueueMerger } from './queue-merger.ts';
 import { isQueueBatchProjection, projectQueueBatch } from '../protocol/queue-protocol.ts';
+import { buildCacheResponse, isCacheResponseProjection } from '../protocol/cache-protocol.ts';
 import {
   isTraceBatchProjection,
   projectTraceBatch,
@@ -198,6 +200,14 @@ export interface ConnectorHandlerDeps {
    * configuration value.
    */
   readonly configSource: IConfigDiagnosticsSource | null;
+  /**
+   * Every cache-diagnostics source (M98i), resolved ONCE from
+   * `CAPABILITIES.CACHE_DIAGNOSTICS` at bootstrap, in registration order and
+   * at most 16. Empty when no CachePlugin is registered: the connector then
+   * answers a typed `unsupported` response for `GET /v1/cache`. A read calls
+   * only each source's synchronous `snapshot()` — never a cache operation.
+   */
+  readonly cacheSources: readonly ICacheDiagnosticsSource[];
   /**
    * The queue-observation merger (M98f) over every queue-diagnostics source
    * registered when the connector bootstrapped. With no source registered it
@@ -799,6 +809,20 @@ export function createConnectorHandler(
           return refusalResponse(outcome.code);
         }
         projected = outcome.projected;
+      } else if (target.op === 'cache') {
+        // The cache operation (M98i). Every session and request check above
+        // ran before any source is read. Each source read is isolated, and
+        // the wire validator — the SAME one the client runs — checks the
+        // built response before anything is signed.
+        const boundInstance = deps.session.instanceId;
+        if (boundInstance === null) {
+          return refusalResponse('unauthorized');
+        }
+        const candidate = buildCacheResponse(boundInstance, deps.cacheSources);
+        if (!isCacheResponseProjection(candidate)) {
+          return refusalResponse('unavailable');
+        }
+        projected = candidate;
       } else if (target.op === 'queues') {
         // The queue operation (M98f). Every session and request check above
         // ran before any source is read: the merger drains the sources only

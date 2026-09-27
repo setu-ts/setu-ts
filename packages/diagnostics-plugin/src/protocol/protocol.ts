@@ -75,6 +75,8 @@ export const STATUS_TARGET = '/v1/status';
 export const SNAPSHOT_TARGET = '/v1/snapshot';
 export const HEALTH_TARGET = '/v1/health';
 export const CONFIG_TARGET = '/v1/config';
+/** The cache observations target (M98i); it carries no query. */
+export const CACHE_TARGET = '/v1/cache';
 const EVENTS_PATH = '/v1/events';
 
 /**
@@ -114,7 +116,15 @@ const EVENTS_QUERY = /^after=([0-9]+)&limit=([0-9]+)$/;
  * @internal
  */
 export interface ParsedTarget {
-  readonly op: 'status' | 'snapshot' | 'events' | 'health' | 'config' | 'queues' | 'traces';
+  readonly op:
+    | 'status'
+    | 'snapshot'
+    | 'events'
+    | 'health'
+    | 'config'
+    | 'cache'
+    | 'queues'
+    | 'traces';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events and queues); `0` for the other ops. */
@@ -148,6 +158,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === CONFIG_TARGET && search === '') {
     return { op: 'config', canonicalTarget: CONFIG_TARGET, after: 0, limit: 0 };
+  }
+  if (path === CACHE_TARGET && search === '') {
+    return { op: 'cache', canonicalTarget: CACHE_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENTS_PATH) {
     return parsePagedTarget('events', path, search);
@@ -385,7 +398,8 @@ export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number]
 
 /**
  * The inspector manifest this connector serves: `health` (M98d),
- * `configuration` (M98e) and `queues` (M98f) are implemented; the rest are
+ * `configuration` (M98e), `queues` (M98f), `traces` (M98g) and `cache`
+ * (M98i) are implemented; the rest are
  * reserved and false until their own connector operation ships.
  *
  * @returns The fixed manifest
@@ -398,7 +412,7 @@ export function currentInspectorsManifest(): InspectorsManifest {
     queues: true,
     traces: true,
     authorization: false,
-    cache: false,
+    cache: true,
     events: false,
     scheduler: false,
     realtime: false,
