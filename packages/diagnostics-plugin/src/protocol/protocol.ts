@@ -1101,6 +1101,85 @@ const MAX_ALIAS_BYTES = 64;
 const ALIAS_ENCODER = new TextEncoder();
 
 /**
+ * Copies a source-supplied object's own DATA properties into a fresh plain
+ * record — or `null` when the value is not a plain object (its prototype is
+ * neither `Object.prototype` nor `null`), carries an accessor, or carries a
+ * key outside `keys`. Each property is read exactly once through its
+ * descriptor, so a getter is never invoked. Shared by every inspector whose
+ * source is an untrusted registered capability (M98i cache, M98j events).
+ *
+ * @param value - The source value
+ * @param keys - The exact admitted keys
+ * @returns The copy, or `null`
+ * @internal
+ */
+export function copyOwnData(
+  value: unknown,
+  keys: readonly string[],
+): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return null;
+  }
+  const own = Reflect.ownKeys(value);
+  if (own.length !== keys.length) {
+    return null;
+  }
+  const copy: Record<string, unknown> = {};
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !('value' in descriptor)) {
+      return null;
+    }
+    copy[key] = descriptor.value;
+  }
+  return copy;
+}
+
+/**
+ * Copies a source-supplied list of plain records: an intrinsic array read by
+ * index through each element's descriptor (never its own iterator, `map`,
+ * `toJSON` or an index getter), each item copied by {@linkcode copyOwnData}.
+ * At most `max + 1` items are read, so an over-budget list refuses without
+ * walking an attacker-chosen length.
+ *
+ * @param value - The source list
+ * @param max - The item budget
+ * @param keys - The exact admitted keys of each item
+ * @returns The copied records, or `null`
+ * @internal
+ */
+export function copyOwnDataList(
+  value: unknown,
+  max: number,
+  keys: readonly string[],
+): Record<string, unknown>[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const length = Math.min(value.length, max + 1);
+  if (length > max) {
+    return null;
+  }
+  const copies: Record<string, unknown>[] = [];
+  for (let index = 0; index < length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor === undefined || !('value' in descriptor)) {
+      return null;
+    }
+    const copy = copyOwnData(descriptor.value, keys);
+    if (copy === null) {
+      return null;
+    }
+    copies.push(copy);
+  }
+  return copies;
+}
+
+/**
  * Reports whether a record has exactly the given own keys.
  *
  * @internal

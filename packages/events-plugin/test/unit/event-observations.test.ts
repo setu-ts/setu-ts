@@ -623,7 +623,8 @@ describe('Observation never changes dispatch (M98j review fixes)', () => {
 
   for (const async of [false, true]) {
     it(`a throwing clock changes nothing about dispatch (async: ${async})`, async () => {
-      for (let failAt = 1; failAt <= 6; failAt++) {
+      // Two handlers read the clock 1 + 2 times; fail at each of those reads.
+      for (let failAt = 1; failAt <= 3; failAt++) {
         let reads = 0;
         const runtime = {
           hrtime: () => {
@@ -805,5 +806,30 @@ describe('Observation never changes dispatch (M98j review fixes)', () => {
       records: [],
       dropped: 0,
     });
+  });
+});
+
+describe('Clock reads per publication (M98j overhead)', () => {
+  it('reads the clock 1 + handlers times, and once for a no-subscriber publish', async () => {
+    let reads = 0;
+    const runtime = { hrtime: () => ++reads } as unknown as IRuntimeServices;
+    const observer = new EventObservationCollector(
+      compileEventsDiagnosticsPolicy({
+        enabled: true,
+        alias: 'bus',
+        events: { 'user-created': 'users', idle: 'idle' },
+      }),
+      runtime,
+    );
+    const bus = new InMemoryEventBus({ async: false, errorHandler: () => {} });
+    attachEventObserver(bus, observer);
+    bus.subscribe('user-created', () => {});
+    bus.subscribe('user-created', () => {});
+    await bus.publish(EVENT);
+    expect(reads).toBe(3);
+    await bus.publish({ ...EVENT, type: 'idle' });
+    expect(reads).toBe(4);
+    const handler = observer.snapshot().records.find((r) => r.operation === 'handler')!;
+    expect(handler).toMatchObject({ started: 2, count: 2, succeeded: 2 });
   });
 });

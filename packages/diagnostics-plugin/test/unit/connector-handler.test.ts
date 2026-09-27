@@ -2127,28 +2127,59 @@ describe('Connector handler — event observation operation (M98j)', () => {
     });
   });
 
-  it('reads each snapshot field once, so a flipping alias getter cannot reach the wire', async () => {
-    let aliasReads = 0;
-    const flipping = {
+  it('never invokes a getter: accessor-bearing or non-plain sources become collection-failed', async () => {
+    let getterCalls = 0;
+    const accessorSnapshot = {
       state: 'ready',
       get alias() {
-        aliasReads += 1;
-        return aliasReads === 1 ? 'bus' : 'bad\u0007alias';
+        getterCalls += 1;
+        return 'bus';
       },
       coverage: 'owned-instance',
       records: [],
       dropped: 0,
     };
+    const record = (eventSnapshot('rec').records as Record<string, unknown>[])[0]!;
+    const indexGetterRecords: unknown[] = [];
+    Object.defineProperty(indexGetterRecords, 0, {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return record;
+      },
+    });
+    class Snapshot {
+      state = 'ready';
+      alias = 'cls';
+      coverage = 'owned-instance';
+      records = [];
+      dropped = 0;
+    }
     const harness = await eventHarness([
-      eventSource(flipping),
-      eventSource(eventSnapshot('other')),
+      eventSource(accessorSnapshot),
+      eventSource({ ...eventSnapshot('idx'), records: indexGetterRecords }),
+      eventSource(new Snapshot() as unknown as Record<string, unknown>),
+      eventSource({ ...eventSnapshot('sym'), [Symbol('extra')]: 1 }),
+      eventSource(eventSnapshot('good')),
     ]);
     const view = await sendEvent(harness);
     expect(view.status).toEqual(200);
-    const sources = view.body.sources as { sourceId: string; snapshot: { alias: string } }[];
-    expect(sources.map((entry) => entry.sourceId)).toEqual(['s1', 's2']);
-    expect(sources[0]!.snapshot.alias).toEqual('bus');
-    expect(aliasReads).toEqual(1);
+    const sources = view.body.sources as {
+      sourceId: string;
+      snapshot: { state: string; alias: string | null };
+    }[];
+    expect(sources.map((entry) => entry.sourceId)).toEqual(['s1', 's2', 's3', 's4', 's5']);
+    expect(sources.slice(0, 4).map((entry) => entry.snapshot)).toEqual(
+      Array.from({ length: 4 }, () => ({
+        state: 'collection-failed',
+        alias: null,
+        coverage: 'owned-instance',
+        records: [],
+        dropped: 0,
+      })),
+    );
+    expect(sources[4]!.snapshot.alias).toEqual('good');
+    expect(getterCalls).toEqual(0);
   });
 
   it('answers a typed unsupported response when no event source is registered', async () => {

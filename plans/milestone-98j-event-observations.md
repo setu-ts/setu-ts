@@ -2,8 +2,8 @@
 
 > **Status:** Implemented on `feat/m98j-event-observations`; verification and code review done
 > (2026-09-27), with every finding fixed on this branch. **Both security gates in §10 remain
-> PENDING**: no design security review was recorded before implementation, and no independent
-> committed-tree audit has run. The milestone is not complete until both are recorded.
+> PENDING**: the design security review is recorded in §10.1 but awaits maintainer approval, and no
+> independent committed-tree audit has run. The milestone is not complete until both are recorded.
 
 ## 0. Objective & scope
 
@@ -262,10 +262,125 @@ audits; it is not implied by completing this milestone.
 
 ## 10. Required security reviews and acceptance evidence
 
-**Design gate — pending recorded review before implementation.** Review this exact dataflow: real
-producer -> primitive-only observation -> bounded source -> authenticated fixed route -> exact
-projector -> validating native client. Confirm field allowlist, instance/data scope, budgets,
-retention and negative tests. Resolve security-boundary findings in this plan first.
+### 10.1 Design security review
+
+**Recorded 2026-09-27, after implementation, at the maintainer's direction — AWAITING MAINTAINER
+APPROVAL.** No design review was recorded before implementation (§11 records that this plan's header
+and the tracking docs claimed one anyway). As with M98i, this section is checked against the §3
+decisions — the design as planned — and every place the implementation departed from §3 is named and
+assessed below rather than silently adopted. It was written by the context that verified and fixed
+the milestone, not by its implementer; it is NOT the committed-tree audit, which must still run in a
+fresh context.
+
+**Purpose it serves.** M98 lets a developer inspect a running application on their own machine
+without the devtool gaining access to live services, application data, credentials or any mutation
+control. For the event inspector the devtool may learn HOW the owned in-process bus is dispatching —
+per approved event alias, how many publications, how many handler runs started and settled, how many
+failed, how long the last one took — and never WHAT was dispatched or WHO handled it.
+
+**Reviewed flow:** application code → `publish`/`publishBatch` on the plugin-created
+`InMemoryEventBus` → one `WeakMap` probe for an attached collector (none → the pre-M98j path,
+byte-identical) → exact-type lookup in the compiled allowlist `Map` (miss → the unobserved path, no
+clock read) → `begin`/`end` calls carrying only
+`(alias, fixed operation, boolean outcome, boolean
+noSubscribers)` → bounded collector (64 slots
+keyed alias × operation, monotonic readings only) → frozen `IEventDiagnosticsSource` snapshot under
+the multi-provider `CAPABILITIES.EVENTS_DIAGNOSTICS` → connector resolves the sources once at
+bootstrap (more than 16 refuses startup) → authenticated `GET /v1/event` behind every M98b control
+(exact `Host` authority, `Origin` refusal, forwarding-header refusal, MAC over canonical fields,
+sequence replay refusal, expiry and revocation, instance binding) → own-data copy of each snapshot
+with per-source isolation → exact validator → fixed 256 KiB budget → signed frame → native client
+re-validates and binds the instance. Minimization happens in the BUS, before the collector: the
+event object, its type, payload, id, aggregate id, the handler function and any thrown value stay in
+the bus's own locals and are never passed across the observer seam.
+
+**Assets.**
+
+| Asset                              | Why it is sensitive                                                                                     |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Event payloads (`data`)            | Application data: orders, users, tokens, PII.                                                           |
+| Event ids and aggregate ids        | Correlate to users, tenants and resources.                                                              |
+| Event type names                   | May carry domain or tenant naming (`tenant-42.invoice.paid`); unbounded if attacker-influenced.         |
+| Handler function names/identities  | Reveal code structure and third-party integrations.                                                     |
+| Handler / `errorHandler` errors    | May quote payloads, hosts, SQL, credentials.                                                            |
+| Counts, starts and timings         | Low sensitivity; reveal activity levels and handler latency, aggregated across every tenant of the app. |
+| The session key and signed channel | Owned by M98b; this letter adds a route behind it and must not weaken it.                               |
+
+**Attackers and their reach.**
+
+| Attacker                                                                                      | Must not be able to                                                                                                                                                             |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An unpaired local process, or a browser tab on the host                                       | Read any event observation, cause a source read, or obtain an unsigned response.                                                                                                |
+| A website using DNS rebinding (its hostname re-resolved to `127.0.0.1`; may send no `Origin`) | Read any event observation or cause a source read.                                                                                                                              |
+| The paired devtool (trusted reader of the minimized DTO)                                      | Obtain any asset above except counts/starts/timings under approved aliases, publish an event, invoke a handler, subscribe, or enumerate subscriptions.                          |
+| A third-party in-process plugin registering a hostile source                                  | Put an unvalidated field, accessor result, control character or oversized list into the signed frame; break other sources' reporting; or make the connector invoke its getters. |
+| Application traffic publishing attacker-chosen event types                                    | Grow collector or connector state, or have an unapproved type observed, counted or named.                                                                                       |
+| A failing, throwing or hung handler, `errorHandler`, or clock                                 | Change any dispatch result, ordering, rejection, unhandled-rejection reporting or `whenIdle()` outcome, reject a `publish`, reach `errorHandler`, or leak error text.           |
+
+**Out of the threat model (unchanged from M98b/M98i):** a privileged local sniffer, remote access,
+and shared multi-tenant production use. A third-party source runs with application privileges and is
+not sandboxed — it can block the event loop in `snapshot()`; the reader's job is to keep its OUTPUT
+out of the signed frame, not to contain its code. Existing application logging (the default
+`errorHandler` logs through `ctx.logger`) is a separate path this change neither alters nor
+sanitizes. Other buses (an application-constructed `InMemoryEventBus`, a replacement registered
+under `CAPABILITIES.EVENTS`, or a broker) are not observed and never mislabeled as observed.
+
+**Approved budgets.** At most 64 approved event types per source and at most 64 record slots, one
+per (alias, operation) — so more than 32 active aliases can reach capacity, at which point new
+tuples are ignored and a saturating `dropped` counts one per refused settlement; 60-second retention
+and 30-second staleness checked during update and read, never by a timer; every counter saturates at
+`Number.MAX_SAFE_INTEGER`; per publication `1 + handlers` monotonic clock reads (each handler starts
+at the previous boundary's settlement reading; a no-subscriber publish reads once), an alias-indexed
+slot lookup with no per-event string building, and an O(64) expiry walk at most once per second on
+the write path (every `snapshot()` still walks, so a read never reports a record past retention); no
+queue, I/O or per-event allocation; at most 16 sources (a 17th refuses startup with a fixed error);
+a 256 KiB response that collapses to a fixed `collection-failed` with no sources rather than
+truncating or refusing. The disabled path is one `WeakMap.get` per publish.
+
+**Overhead — measured; §3.4's ≤5% target is NOT met, and the maintainer must accept or reject it
+before approving.** Harness: one process per configuration (the M98i A/A-bias lesson), a sync bus
+with one handler, 10,000 warm-up publications then 20 × 10,000, median reported, five paired runs.
+Enabled costs about **0.25–0.4 µs per publication** absolute. Against a no-op handler (disabled ≈
+1.1–1.5 ms per 10,000) that is 3–4× the bus's own cost; against a handler doing a small JSON
+serialization and a `Map` write (disabled ≈ 12.9–14.1 ms, enabled ≈ 16.3–17.5 ms) it is about
+**+20–30%**. Clock reads dominate (~62 ns each on this machine, measured); an interim version
+reading four per publication cost ~5×, and threading readings between boundaries halved that. A
+timing sample (M98i's one-in-eight) was rejected: an unsampled call would not advance the record's
+activity reading, so a slow-moving alias could expire from retention while in use. The cost is paid
+only when `diagnostics` is enabled, on the development instance the inspector exists for.
+
+| Finding                                                                                       | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Payloads, ids, handler identities or errors could enter capture.                              | The collector's only entry points are `begin(alias, operation, at?)` and `end(alias, operation, startedAt, succeeded, noSubscribers?, at?)` — an alias string, a fixed operation, booleans and monotonic readings; the bus keeps the event, handler and thrown value in its own locals and passes a boolean. A test plants canaries in payload, event id, aggregate id, error and an unapproved type and asserts absence at snapshot, wire and client DTO, with approved aggregates as the positive control.                                                                 |
+| Event type names could disclose domain naming or grow state with attacker-chosen types.       | Only exact types in the approved allowlist are observed, and each is replaced by its alias before anything is retained; an unapproved type costs one `Map` miss, no clock read, no slot, no `dropped` increment. The allowlist is compiled once at `EventsPlugin(...)` from OWN entries only, so `toString`/`__proto__` cannot become an approval.                                                                                                                                                                                                                           |
+| An alias could carry a secret or forge terminal output.                                       | Aliases are explicit; approving one authorizes its disclosure. 1–64 UTF-8 bytes, no C0/C1 control, unique within the source, validated in the plugin, the connector and the client. The instance alias never derives from the plugin name.                                                                                                                                                                                                                                                                                                                                   |
+| Observation could change dispatch semantics.                                                  | **Found and fixed in review (§11):** an async `errorHandler` throw was absorbed only when observed, and an unguarded clock read could reject `publish`. Now every collector call is non-throwing, a failing clock latches `collection-failed`, and the observed async path rethrows so the rejection stays unhandled and `whenIdle()` still rejects. Parity is tested observed vs unobserved, and at every clock-read position in sync and async mode.                                                                                                                       |
+| A hung handler would be invisible, hiding the failure an operator most needs to see.          | **Found and fixed in review:** `started` is counted at `begin`, so `started - count` is in-flight work; a never-settled slot still ages out after 60 s through `lastSeenAtMs`.                                                                                                                                                                                                                                                                                                                                                                                               |
+| A hostile third-party source could smuggle fields or have the connector run its code.         | **Found in this review and fixed:** §3.3 requires rejecting getters and non-plain prototypes, but the reader destructured the snapshot and indexed `records` directly, invoking accessors. Snapshot and records now go through the shared `copyOwnData`/`copyOwnDataList` (own DATA properties only, exact keys including symbols, plain prototype, arrays read by descriptor), extracted from the M98i cache reader so both inspectors share one implementation. A test proves no getter is invoked and each malformed source isolates to a value-free `collection-failed`. |
+| Two sources claiming one alias would make the report ambiguous.                               | Duplicate non-null instance aliases collapse the whole response to `collection-failed` with no sources.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Too many sources or an oversized body could truncate, refuse or leak partial data.            | **Found and fixed in review:** more than 16 sources refuses startup (was: silently read the first 16); an over-budget body is the fixed `collection-failed` (was: a 503 the client reported as a connection failure).                                                                                                                                                                                                                                                                                                                                                        |
+| A DNS-rebinding page reaches the loopback port as same-origin to its own hostname.            | Identical to M98i: (1) `Host` must be exactly `127.0.0.1:<port>` (`connector-handler.ts:800`, and the parsed URL authority at `:823`), refused before any cryptography or source read; (2) any `Origin` is refused (`:806`), not relied on; (3) a per-launch-key MAC is required; (4) no CORS permission is emitted. The listener binds `127.0.0.1` only (runtime `local-diagnostics-listener.ts:214`).                                                                                                                                                                      |
+| A source could be read before authentication.                                                 | The event sources are read only inside the authenticated dispatch (`connector-handler.ts:996`), after the shared M98b gate; bootstrap only collects the list.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Shutdown could resurrect state or strand work.                                                | `onClose` detaches the observer first, then closes the collector (marking it closed before clearing), then clears the bus; a late settlement is discarded and the source answers `disabled`. Tested with a pending handler.                                                                                                                                                                                                                                                                                                                                                  |
+| An older connector cannot serve the route.                                                    | The negotiated manifest answers a local `unsupported` without a request.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Counts and timings aggregate every tenant; `lastDurationMs` is a coarse latency side channel. | Documented as in M98i: enable on an approved development dataset; no tenant selector or per-user identifier exists, and timings are integer milliseconds of the last settled call per alias, not per event.                                                                                                                                                                                                                                                                                                                                                                  |
+
+**Implementation departures from §3, assessed.** (1) Source ids are positional `s1`…`s16`, as §3.2
+specified; an interim `e<N>` departure was reverted in review. (2) The route is `/v1/event` beside
+the paged kernel `/v1/events`; §3.3 named it, the distinction is documented, and a path cannot be
+confused into the other because each target is parsed exactly. (3) `started` is counted at `begin`,
+which is what §3.1's "count handler starts" requires; the first implementation counted it at
+settlement. (4) The own-data reader is shared with M98i rather than a second copy. None widens the
+boundary.
+
+**For the audit (in addition to the implementation gate below):** probe DNS rebinding on a RAW
+socket exactly as M98i did (`Host: rebind.example:<port>`, no `Origin`, a valid MAC → refused with
+no source read; `Host: 127.0.0.1:<port>` → served; negative control reverts the `Host` check). Probe
+a hostile source with accessor, index-getter, class-instance, symbol-key and `Proxy` snapshots and
+assert no getter runs. Compare dispatch observed vs unobserved under a throwing handler, a throwing
+async `errorHandler` and a throwing clock.
+
+**Approved by:** — (pending maintainer confirmation).
 
 **Implementation gate — pending committed-tree audit before completion/publication.** Record commit,
 reviewed files, tested adapters/runtimes, findings and dispositions in the implementation PR. Test
@@ -300,8 +415,9 @@ This is NOT the §10 security audit.
 | More than 16 sources were silently truncated (§3.2 says refuse); ids were `e<N>` not `s<N>`.                                                     | Fixed: startup refuses the 17th with a fixed error (the M98i rule); ids are positional `s1`…`s16`, validated positionally on both sides.                                 |
 | Doc inaccuracies (capacity "unreachable", `collection-failed` "connector-only", stale/retention, CHANGELOG "handler rejection rejects publish"). | Fixed in source JSDoc, `common`, CHANGELOG, PUBLIC_API and the protocol doc.                                                                                             |
 | Dead surface: collector `generation`; `EventSourceReader` type.                                                                                  | Deleted.                                                                                                                                                                 |
-| `alias`/`dropped` read twice by the snapshot validator.                                                                                          | Fixed: every field read once; a flipping-getter test pins it.                                                                                                            |
+| `alias`/`dropped` read twice by the snapshot validator.                                                                                          | Fixed: every field read once through its descriptor, and (per §10.1) no getter is ever invoked; a test pins it.                                                          |
 | `/v1/event` beside `/v1/events`.                                                                                                                 | Kept (this plan names the route, and M98i's `/v1/cache` set the singular-snapshot pattern); the one-letter distinction is now stated in PUBLIC_API and the protocol doc. |
 | Missing tests: unsubscribe during dispatch, async `errorHandler` throw, shutdown with a pending handler.                                         | Added.                                                                                                                                                                   |
 | `IDiagnosticsClient.events` is a new required member.                                                                                            | CHANGELOG now marks it breaking for implementors.                                                                                                                        |
+| Design review (§10.1) found the snapshot reader invoked getters and indexed `records` directly, violating §3.3.                                  | Fixed: shared own-data reader (`copyOwnData`/`copyOwnDataList` in `protocol.ts`, extracted from the M98i cache reader); no-getter test.                                  |
 | Branch conflicted with `main` (M98i).                                                                                                            | Merged `main`; the status fixture was re-signed for the combined manifest.                                                                                               |

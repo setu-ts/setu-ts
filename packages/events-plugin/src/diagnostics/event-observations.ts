@@ -51,6 +51,8 @@ const MAX_APPROVED_TYPES = EVENT_COLLECTOR_LIMITS.approvedTypes;
 const MAX_ALIAS_BYTES = EVENT_COLLECTOR_LIMITS.aliasBytes;
 const RETENTION_MS = EVENT_COLLECTOR_LIMITS.retentionMs;
 const STALE_MS = EVENT_COLLECTOR_LIMITS.staleMs;
+/** Minimum interval between write-path expiry scans. */
+const EXPIRY_SCAN_INTERVAL_MS = 1_000;
 
 /**
  * Fixed construction errors. Each names the constraint it enforces and never
@@ -246,6 +248,13 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
   readonly #clock: IRuntimeServices;
   /** (alias, operation) → aggregate slot, insertion-ordered for stable reads. */
   readonly #slots = new Map<string, ObservationSlot>();
+  /**
+   * The same slots indexed by alias, so the hot path finds a slot without
+   * building a key string. Kept in step with {@linkcode #slots}.
+   */
+  readonly #byAlias = new Map<string, { publish?: ObservationSlot; handler?: ObservationSlot }>();
+  /** Monotonic reading of the last write-path expiry scan. */
+  #lastExpireAt = Number.NEGATIVE_INFINITY;
   #dropped = 0;
   #closed = false;
   /**
@@ -280,10 +289,21 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
    *
    * @param alias - The already-approved alias
    * @param operation - Which dispatch boundary started
+   * @param at - A reading the caller already holds (the previous boundary's
+   * settlement), reused instead of reading the clock again; `null` means
+   * the clock has already failed
    * @returns The start reading, or `null` when nothing is being captured
    */
-  begin(alias: string, operation: EventObservationOperation): number | null {
-    const now = this.#read();
+  begin(
+    alias: string,
+    operation: EventObservationOperation,
+    at?: number | null,
+  ): number | null {
+    const now = at === undefined
+      ? this.#read()
+      : this.#closed || this.#collectionFailed
+      ? null
+      : at;
     if (now === null) {
       return null;
     }
@@ -314,6 +334,10 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
    * @param startedAt - The reading {@linkcode begin} returned
    * @param succeeded - Whether the boundary completed normally
    * @param noSubscribers - For `publish`, whether no handler was subscribed
+   * @param at - A settlement reading the caller already holds, reused
+   * instead of reading the clock again
+   * @returns The settlement reading (for the next boundary to reuse), or
+   * `null` when nothing is being captured
    */
   end(
     alias: string,
@@ -321,15 +345,17 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     startedAt: number | null,
     succeeded: boolean,
     noSubscribers = false,
-  ): void {
+    at?: number | null,
+  ): number | null {
     if (startedAt === null) {
-      return;
+      return null;
     }
-    const now = this.#read();
+    const now = at === undefined ? this.#read() : at;
     if (now === null) {
-      return;
+      return null;
     }
     this.observe(alias, operation, succeeded, now - startedAt, noSubscribers, now);
+    return this.#closed || this.#collectionFailed ? null : now;
   }
 
   /**
@@ -374,7 +400,12 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       slot.lastDurationMs = clampDuration(durationMs);
       slot.lastSettledAtMs = now;
       slot.lastSeenAtMs = now;
-      this.#expire(now);
+      // The write path scans for expired slots at most once per second, so
+      // a publish does not pay an O(64) walk; `snapshot()` always scans, so
+      // a read never reports a record past the retention window.
+      if (now - this.#lastExpireAt >= EXPIRY_SCAN_INTERVAL_MS) {
+        this.#expire(now);
+      }
     } catch {
       this.#collectionFailed = true;
     }
@@ -405,8 +436,8 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     operation: EventObservationOperation,
     countDrop = true,
   ): ObservationSlot | null {
-    const key = `${operation}\u0000${alias}`;
-    let slot = this.#slots.get(key);
+    const pair = this.#byAlias.get(alias);
+    let slot = pair?.[operation];
     if (slot === undefined) {
       if (this.#slots.size >= MAX_RECORD_SLOTS) {
         // A refused start and its settlement are one ignored observation:
@@ -428,7 +459,12 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
         lastSettledAtMs: null,
         lastSeenAtMs: 0,
       };
-      this.#slots.set(key, slot);
+      this.#slots.set(`${operation}\u0000${alias}`, slot);
+      if (pair === undefined) {
+        this.#byAlias.set(alias, { [operation]: slot });
+      } else {
+        pair[operation] = slot;
+      }
     }
     return slot;
   }
@@ -439,9 +475,17 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
    * background timer.
    */
   #expire(now: number): void {
+    this.#lastExpireAt = now;
     for (const [key, slot] of this.#slots) {
       if (now - slot.lastSeenAtMs > RETENTION_MS) {
         this.#slots.delete(key);
+        const pair = this.#byAlias.get(slot.alias);
+        if (pair !== undefined) {
+          delete pair[slot.operation];
+          if (pair.publish === undefined && pair.handler === undefined) {
+            this.#byAlias.delete(slot.alias);
+          }
+        }
       }
     }
   }
@@ -513,5 +557,6 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     }
     this.#closed = true;
     this.#slots.clear();
+    this.#byAlias.clear();
   }
 }

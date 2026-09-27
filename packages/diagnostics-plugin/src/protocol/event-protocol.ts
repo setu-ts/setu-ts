@@ -22,7 +22,13 @@ import type {
   EventObservationOperation,
 } from '@setu-ts/common';
 
-import { hasExactKeys, isDisplayAlias, isRecord } from './protocol.ts';
+import {
+  copyOwnData,
+  copyOwnDataList,
+  hasExactKeys,
+  isDisplayAlias,
+  isRecord,
+} from './protocol.ts';
 
 /** The per-source record-slot budget — the same fixed 64 the collector enforces. */
 const MAX_EVENT_RECORDS = 64;
@@ -78,28 +84,6 @@ function isOneOf(value: unknown, vocabulary: ReadonlySet<string>): value is stri
   return typeof value === 'string' && vocabulary.has(value);
 }
 
-/**
- * Copies a source-supplied list INDEX BY INDEX, reading its `length` once
- * and never more than `max + 1` items — never through the source's own
- * iterator, `map` or `toJSON` (the M98g/M98f precedent: an `Array` subclass
- * or `Proxy` can report one length while yielding any number of items).
- *
- * @param value - The candidate list
- * @param max - The budget
- * @returns The copied items (at most `max + 1`), or `null` for a non-array
- */
-function copyBounded(value: unknown, max: number): unknown[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  const length = Math.min(value.length, max + 1);
-  const copy: unknown[] = [];
-  for (let index = 0; index < length; index++) {
-    copy.push(value[index]);
-  }
-  return copy;
-}
-
 const SNAPSHOT_KEYS: readonly string[] = ['state', 'alias', 'coverage', 'records', 'dropped'];
 const RECORD_KEYS: readonly string[] = [
   'alias',
@@ -114,20 +98,14 @@ const RECORD_KEYS: readonly string[] = [
 ];
 
 /**
- * Validates and copies one record. Every field is read EXACTLY once into a
- * local, validated there, and the copy is built from those locals — a getter
- * that answers differently on a second read never reaches the copy.
+ * Validates one record already copied by {@linkcode copyOwnDataList} (so
+ * every field is a plain own DATA value read exactly once, and no getter
+ * was ever invoked).
  */
-function readRecord(value: unknown): EventDiagnosticsRecord | null {
-  if (!isRecord(value) || !hasExactKeys(value, RECORD_KEYS)) {
-    return null;
-  }
-  const operation = value.operation;
-  if (!isOneOf(operation, OPERATIONS)) {
-    return null;
-  }
+function readRecord(value: Record<string, unknown>): EventDiagnosticsRecord | null {
   const {
     alias,
+    operation,
     count,
     started,
     succeeded,
@@ -137,7 +115,7 @@ function readRecord(value: unknown): EventDiagnosticsRecord | null {
     ageMs,
   } = value;
   if (
-    !isDisplayAlias(alias) ||
+    !isDisplayAlias(alias) || !isOneOf(operation, OPERATIONS) ||
     !isCount(count) || !isCount(started) || !isCount(succeeded) || !isCount(failed) ||
     !isCount(noSubscribers) ||
     (lastDurationMs !== null && !isMs(lastDurationMs)) ||
@@ -153,7 +131,7 @@ function readRecord(value: unknown): EventDiagnosticsRecord | null {
     succeeded,
     failed,
     noSubscribers,
-    lastDurationMs,
+    lastDurationMs: lastDurationMs as number | null,
     ageMs,
   };
 }
@@ -162,14 +140,15 @@ function readRecord(value: unknown): EventDiagnosticsRecord | null {
  * Validates an untrusted event source snapshot against the exact M98j DTO
  * and returns a field-by-field copy.
  *
- * Refused: any unknown, missing or extra key; a value outside its fixed
- * vocabulary or bound; an alias outside the display shape (including the
- * required non-null alias of an enabled source); a non-plain-object record;
- * a non-array or oversized `records`; more records than the fixed 64 slots;
- * a `disabled` or `collection-failed` snapshot carrying any record; and any
- * throw while reading — a hostile getter is a refusal too. Prototypes other
- * than `Object.prototype` (or `null`) are rejected: only own data properties
- * are copied.
+ * The snapshot and every record are copied through the shared own-data
+ * reader FIRST: only a plain object (prototype `Object.prototype` or `null`)
+ * of own DATA properties with exactly the contract's keys is admitted, each
+ * property is read once through its descriptor, and a getter is never
+ * invoked — the M98i cache precedent. Then refused: a value outside its
+ * fixed vocabulary or bound; an alias outside the display shape (including
+ * the required non-null alias of an enabled source); a non-array or
+ * oversized `records`; a `disabled` or `collection-failed` snapshot carrying
+ * any record; and any throw while reading (a `Proxy` trap).
  *
  * @param value - The snapshot the source returned
  * @returns The validated copy, or `null` for any violation
@@ -179,18 +158,11 @@ export function readEventSourceSnapshot(
   value: unknown,
 ): EventDiagnosticsSnapshot | null {
   try {
-    if (!isRecord(value) || !hasExactKeys(value, SNAPSHOT_KEYS)) {
+    const copy = copyOwnData(value, SNAPSHOT_KEYS);
+    if (copy === null) {
       return null;
     }
-    if (
-      Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null
-    ) {
-      return null;
-    }
-    // Every field is read EXACTLY once into a local; the checks and the copy
-    // both use the locals, so a getter answering differently on a second
-    // read never reaches the copy.
-    const { state, alias, coverage, dropped } = value;
+    const { state, alias, coverage, dropped } = copy;
     if (!isOneOf(state, SOURCE_STATES)) {
       return null;
     }
@@ -211,8 +183,8 @@ export function readEventSourceSnapshot(
     if (coverage !== 'owned-instance' || !isCount(dropped)) {
       return null;
     }
-    const rawRecords = copyBounded(value.records, MAX_EVENT_RECORDS);
-    if (rawRecords === null || rawRecords.length > MAX_EVENT_RECORDS) {
+    const rawRecords = copyOwnDataList(copy.records, MAX_EVENT_RECORDS, RECORD_KEYS);
+    if (rawRecords === null) {
       return null;
     }
     // `disabled` and `collection-failed` observe by definition (or latched a

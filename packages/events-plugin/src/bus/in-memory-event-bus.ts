@@ -81,8 +81,9 @@ export class InMemoryEventBus implements IEventBus {
       // A no-subscriber publication is still a publication: observed as
       // succeeded with `noSubscribers`, then the unchanged early return.
       if (handlers.length === 0) {
+        // One clock read: the settlement reuses the start reading.
         const startedAt = observer.begin(alias, 'publish');
-        observer.end(alias, 'publish', startedAt, true, true);
+        observer.end(alias, 'publish', startedAt, true, true, startedAt);
         return;
       }
       await this.#dispatchObserved(observer, alias, event, handlers);
@@ -135,10 +136,14 @@ export class InMemoryEventBus implements IEventBus {
     // clock latches `collection-failed` inside the collector), so no
     // observation can change a result, reject a publish, or reach the
     // application's errorHandler.
+    // One clock read per boundary edge: each handler starts at the reading
+    // the previous boundary settled at, and the publish settles at the last
+    // handler's settlement — 1 + handlers reads per publication.
     const publishStartedAt = observer.begin(alias, 'publish');
+    let last: number | null = publishStartedAt;
     const dispatch = async () => {
       for (const handler of handlers) {
-        const handlerStartedAt = observer.begin(alias, 'handler');
+        const handlerStartedAt = observer.begin(alias, 'handler', last);
         let failed = false;
         let error: unknown;
         try {
@@ -147,7 +152,7 @@ export class InMemoryEventBus implements IEventBus {
           failed = true;
           error = err;
         }
-        observer.end(alias, 'handler', handlerStartedAt, !failed);
+        last = observer.end(alias, 'handler', handlerStartedAt, !failed);
         if (failed) {
           this.errorHandler(error, event);
         }
@@ -162,10 +167,10 @@ export class InMemoryEventBus implements IEventBus {
       const p = dispatch().then(
         () => {
           this.pending.delete(p);
-          observer.end(alias, 'publish', publishStartedAt, true);
+          observer.end(alias, 'publish', publishStartedAt, true, false, last);
         },
         (err: unknown) => {
-          observer.end(alias, 'publish', publishStartedAt, false);
+          observer.end(alias, 'publish', publishStartedAt, false, false, last);
           throw err;
         },
       );
@@ -176,10 +181,10 @@ export class InMemoryEventBus implements IEventBus {
     try {
       await dispatch();
     } catch (err) {
-      observer.end(alias, 'publish', publishStartedAt, false);
+      observer.end(alias, 'publish', publishStartedAt, false, false, last);
       throw err;
     }
-    observer.end(alias, 'publish', publishStartedAt, true);
+    observer.end(alias, 'publish', publishStartedAt, true, false, last);
   }
 
   /**
