@@ -1089,3 +1089,79 @@ describe('Round-4 audit fixes (R4-F1, R4-F2)', () => {
     expect(observer.snapshot().dropped).toBe(100);
   });
 });
+
+describe('Round-5 audit fixes (R5-F1, R5-F2, R5-F3)', () => {
+  function approved(count: number): Record<string, string> {
+    const events: Record<string, string> = {};
+    for (let index = 0; index < count; index++) events[`t${index}`] = `a${index}`;
+    events['tx'] = 'x';
+    return events;
+  }
+
+  it("R5-F1: a walk that expires the alias's other slot does not orphan the new one", () => {
+    const clock = new MutableClock();
+    const observer = collector(clock, approved(32));
+    // 31 aliases with both operations, a31 with a handler slot, and x with
+    // only a handler slot: 64 slots, a full table.
+    for (let index = 0; index < 31; index++) {
+      observer.observe(`a${index}`, 'publish', true, 1);
+      observer.observe(`a${index}`, 'handler', true, 1);
+    }
+    observer.observe('a31', 'handler', true, 1);
+    observer.observe('x', 'handler', true, 1);
+    // Refresh every slot except x's, then age x's slot past retention.
+    clock.advance(59_000);
+    for (let index = 0; index < 31; index++) {
+      observer.observe(`a${index}`, 'publish', true, 1);
+      observer.observe(`a${index}`, 'handler', true, 1);
+    }
+    observer.observe('a31', 'handler', true, 1);
+    clock.advance(1_001);
+    // x's publish is a NEW tuple at a full table: the walk expires x's handler
+    // slot (and its alias entry) before the publish slot is attached.
+    const started = observer.begin('x', 'publish');
+    observer.end('x', 'publish', started, true);
+    const snapshot = observer.snapshot();
+    const publish = snapshot.records.filter((r) => r.alias === 'x');
+    expect(publish.map((r) => [r.operation, r.started, r.count])).toEqual([['publish', 1, 1]]);
+    expect(snapshot.dropped).toBe(0);
+  });
+
+  it('R5-F2: a settlement carrying an earlier held reading never ages a slot backwards', () => {
+    const clock = new MutableClock();
+    const observer = collector(clock);
+    clock.advance(100);
+    const first = observer.begin('users', 'handler'); // lastSeen 100
+    clock.advance(100);
+    const second = observer.begin('users', 'handler'); // lastSeen 200
+    // Settle the first with the reading it was started at (100).
+    observer.end('users', 'handler', first, true, false, 100);
+    clock.advance(60_000 - 50); // 60,150: live if lastSeen is 200, expired if 100
+    expect(observer.snapshot().records.find((r) => r.operation === 'handler')).toMatchObject({
+      started: 2,
+      count: 1,
+    });
+    observer.end('users', 'handler', second, true);
+  });
+
+  it('R5-F3: a table refilled after emptying still reclaims expired slots at capacity', () => {
+    const clock = new MutableClock();
+    const observer = collector(clock, approved(32));
+    for (let index = 0; index < 32; index++) {
+      observer.observe(`a${index}`, 'publish', true, 1);
+    }
+    clock.advance(60_001);
+    expect(observer.snapshot().records).toEqual([]); // empty: the bound resets
+    for (let index = 0; index < 32; index++) {
+      observer.observe(`a${index}`, 'publish', true, 1);
+      observer.observe(`a${index}`, 'handler', true, 1);
+    }
+    clock.advance(60_001);
+    // Every slot has expired; the bound must have been lowered as they were
+    // created, or the capacity path never walks and this tuple is dropped.
+    observer.observe('x', 'publish', true, 1);
+    const snapshot = observer.snapshot();
+    expect(snapshot.dropped).toBe(0);
+    expect(snapshot.records.map((r) => r.alias)).toEqual(['x']);
+  });
+});

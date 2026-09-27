@@ -274,10 +274,12 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
   #lastExpireAt = Number.NEGATIVE_INFINITY;
   /**
    * A lower bound on the earliest instant any retained slot can expire
-   * (`lastSeenAtMs + RETENTION_MS`). `lastSeenAtMs` only moves forward, so a
-   * bound computed at the last walk stays a valid lower bound; a walk at
-   * capacity runs only once `now` passes it, which is what keeps the
-   * capacity path from walking all 64 slots on every refused tuple.
+   * (`lastSeenAtMs + RETENTION_MS`). `lastSeenAtMs` is only ever raised —
+   * a settlement carrying an earlier, caller-held reading takes the max, it
+   * never lowers it — so a bound computed at the last walk stays a valid
+   * lower bound; a walk at capacity runs only once `now` passes it, which is
+   * what keeps the capacity path from walking all 64 slots on every refused
+   * tuple.
    */
   #earliestExpiryAt = Number.POSITIVE_INFINITY;
   #dropped = 0;
@@ -336,7 +338,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       const slot = this.#slotFor(alias, operation, now, false);
       if (slot !== null) {
         slot.started = saturatingNext(slot.started);
-        slot.lastSeenAtMs = now;
+        slot.lastSeenAtMs = Math.max(slot.lastSeenAtMs, now);
       }
       return { at: now, slot };
     } catch {
@@ -453,7 +455,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       }
       slot.lastDurationMs = clampDuration(durationMs);
       slot.lastSettledAtMs = now;
-      slot.lastSeenAtMs = now;
+      slot.lastSeenAtMs = Math.max(slot.lastSeenAtMs, now);
       // The write path scans for expired slots at most once per second, so
       // a publish does not pay an O(64) walk; `snapshot()` always scans, so
       // a read never reports a record past the retention window.
@@ -491,16 +493,22 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     now: number,
     countDrop = true,
   ): ObservationSlot | null {
-    const pair = this.#byAlias.get(alias);
-    let slot = pair?.[operation];
+    let slot = this.#byAlias.get(alias)?.[operation];
     if (slot === undefined) {
       // Only a NEW tuple at a full table can be refused, so only here is it
       // worth reclaiming expired slots first — and only once some slot can
-      // actually have expired, so an at-capacity table of live slots pays
-      // no walk (the approved once-per-second write-path budget holds).
+      // actually have expired, so an at-capacity table of live slots pays no
+      // walk. Each capacity walk therefore needs a slot to have reached its
+      // expiry: at most one per expiring slot (64 per retention window) on
+      // top of the once-per-second throttled scan, and clustered expiries can
+      // put several in one second.
       if (this.#slots.size >= MAX_RECORD_SLOTS && now > this.#earliestExpiryAt) {
         this.#expire(now);
       }
+      // Read the alias entry AFTER any walk: a walk that expired this alias's
+      // other-operation slot deletes the entry, and attaching the new slot to
+      // the detached one would orphan it (audit R5-F1).
+      const pair = this.#byAlias.get(alias);
       if (this.#slots.size >= MAX_RECORD_SLOTS) {
         // A refused start and its settlement are one ignored observation:
         // only the settlement counts the drop.
