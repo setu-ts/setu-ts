@@ -453,13 +453,14 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       if (operation === 'publish' && noSubscribers) {
         slot.noSubscribers = saturatingNext(slot.noSubscribers);
       }
-      slot.lastDurationMs = clampDuration(durationMs);
       // Like `lastSeenAtMs`, never moved backwards by a settlement carrying an
       // earlier caller-held reading: `ageMs` is time since the most recent
-      // settlement (audit R6-F2).
-      slot.lastSettledAtMs = slot.lastSettledAtMs === null
-        ? now
-        : Math.max(slot.lastSettledAtMs, now);
+      // settlement (audit R6-F2). `lastDurationMs` moves only with it, so the
+      // two always describe the same settlement (audit R7-F1).
+      if (slot.lastSettledAtMs === null || now >= slot.lastSettledAtMs) {
+        slot.lastDurationMs = clampDuration(durationMs);
+        slot.lastSettledAtMs = now;
+      }
       slot.lastSeenAtMs = Math.max(slot.lastSeenAtMs, now);
       // The write path scans for expired slots at most once per second, so
       // a publish does not pay an O(64) walk; `snapshot()` always scans, so
@@ -505,9 +506,11 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       // tracked earliest-expiry bound. A walk recomputes that bound exactly,
       // so the next walk waits until some slot's CURRENT expiry passes; a
       // slot refreshed since the bound was taken can still trigger one walk
-      // that expires nothing. At most one capacity walk per slot per
-      // retention window (64 per 60 s), on top of the once-per-second
-      // throttled scan, and they can cluster within one second.
+      // that expires nothing. The count of such walks is bounded by the
+      // number of slot refreshes that move the earliest expiry — roughly one
+      // per slot per retention window, not a hard 64 (65 were measured), on
+      // top of the once-per-second throttled scan; they can cluster within
+      // one second (audit R7-F2).
       if (this.#slots.size >= MAX_RECORD_SLOTS && now > this.#earliestExpiryAt) {
         this.#expire(now);
       }

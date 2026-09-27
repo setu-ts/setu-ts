@@ -1197,3 +1197,21 @@ describe('Round-6 audit fixes (R6-F1, R6-F2)', () => {
     expect(snapshot.records[0]!.ageMs).toBe(29_950);
   });
 });
+
+describe('Round-7 audit fixes (R7-F1)', () => {
+  it('R7-F1: lastDurationMs describes the same settlement as ageMs', () => {
+    const clock = new MutableClock();
+    const observer = collector(clock);
+    clock.advance(100);
+    const first = observer.begin('users', 'publish'); // at 100
+    clock.advance(100);
+    const second = observer.begin('users', 'publish'); // at 200
+    clock.advance(5);
+    observer.end('users', 'publish', second, true); // settles at 205, 5 ms
+    observer.end('users', 'publish', first, true, false, 150); // older settlement, 50 ms
+    const record = observer.snapshot().records[0]!;
+    expect(record.lastDurationMs).toBe(5);
+    expect(record.ageMs).toBe(0);
+    expect(record.count).toBe(2);
+  });
+});
