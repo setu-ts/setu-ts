@@ -78,6 +78,14 @@ export const CONFIG_TARGET = '/v1/config';
 const EVENTS_PATH = '/v1/events';
 
 /**
+ * The event-dispatch observations path (M98j); its target carries NO query —
+ * a snapshot operation, not a paged one.
+ *
+ * @internal
+ */
+export const EVENT_PATH = '/v1/event';
+
+/**
  * The queue observations path (M98f); its target carries the same canonical
  * `?after=<N>&limit=<N>` query as the events target.
  *
@@ -114,7 +122,15 @@ const EVENTS_QUERY = /^after=([0-9]+)&limit=([0-9]+)$/;
  * @internal
  */
 export interface ParsedTarget {
-  readonly op: 'status' | 'snapshot' | 'events' | 'health' | 'config' | 'queues' | 'traces';
+  readonly op:
+    | 'status'
+    | 'snapshot'
+    | 'events'
+    | 'health'
+    | 'config'
+    | 'queues'
+    | 'traces'
+    | 'event';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events and queues); `0` for the other ops. */
@@ -148,6 +164,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === CONFIG_TARGET && search === '') {
     return { op: 'config', canonicalTarget: CONFIG_TARGET, after: 0, limit: 0 };
+  }
+  if (path === EVENT_PATH && search === '') {
+    return { op: 'event', canonicalTarget: EVENT_PATH, after: 0, limit: 0 };
   }
   if (path === EVENTS_PATH) {
     return parsePagedTarget('events', path, search);
@@ -385,8 +404,9 @@ export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number]
 
 /**
  * The inspector manifest this connector serves: `health` (M98d),
- * `configuration` (M98e) and `queues` (M98f) are implemented; the rest are
- * reserved and false until their own connector operation ships.
+ * `configuration` (M98e), `queues` (M98f), `traces` (M98g) and `events`
+ * (M98j) are implemented; the rest are reserved and false until their own
+ * connector operation ships.
  *
  * @returns The fixed manifest
  * @internal
@@ -399,7 +419,7 @@ export function currentInspectorsManifest(): InspectorsManifest {
     traces: true,
     authorization: false,
     cache: false,
-    events: false,
+    events: true,
     scheduler: false,
     realtime: false,
     storage: false,

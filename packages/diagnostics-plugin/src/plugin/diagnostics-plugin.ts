@@ -15,6 +15,7 @@
 
 import type {
   IConfigDiagnosticsSource,
+  IEventDiagnosticsSource,
   IHealthDiagnosticsSource,
   ILocalDiagnosticsListener,
   ILocalDiagnosticsListenerFactory,
@@ -167,6 +168,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       CAPABILITIES.CONFIG_DIAGNOSTICS,
       CAPABILITIES.QUEUE_DIAGNOSTICS,
       CAPABILITIES.TRACE_DIAGNOSTICS,
+      CAPABILITIES.EVENTS_DIAGNOSTICS,
     ],
 
     register(ctx: IPluginContext): void {
@@ -250,6 +252,14 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           : [];
         const merger = new QueueObservationMerger(queueSources, ctx.runtime);
         queueMerger = merger;
+        // The event-diagnostics sources (M98j), read ONCE here: every plugin
+        // has registered by bootstrap, so an events plugin ordered after this
+        // one is still included. Each EventsPlugin instance contributes its
+        // own multi-provider source; none means the connector answers a
+        // typed `unsupported` response. Only the first 16 are ever read.
+        const eventSources = ctx.services.has(CAPABILITIES.EVENTS_DIAGNOSTICS)
+          ? ctx.services.getAll<IEventDiagnosticsSource>(CAPABILITIES.EVENTS_DIAGNOSTICS)
+          : [];
         const handler = createConnectorHandler({
           port: options.port,
           subtle: ctx.runtime.subtle,
@@ -261,6 +271,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           configSource,
           queues: merger,
           traces: traceSource,
+          eventSources,
         });
         // The devtool's own startup line. Without it the runtime prints a
         // bare `Listening on http://127.0.0.1:<port>/`, which in an

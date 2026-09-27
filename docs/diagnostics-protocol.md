@@ -33,6 +33,7 @@ verified.
 | `GET /v1/config`                 | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
 | `GET /v1/queues?after=N&limit=N` | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
 | `GET /v1/traces?after=N&limit=N` | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
+| `GET /v1/event`                  | M98j's aggregated event-dispatch observation snapshot (below); a SNAPSHOT operation — no query is admitted, exactly like `/v1/health` and `/v1/config`                           |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
 duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
@@ -162,11 +163,12 @@ design security review, R7).
 
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
-`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f) and `traces: true` (M98g)
-and leaves the rest (`authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`,
-`outboundHttp`) reserved and `false`. A client that reads a legacy M98b three-field status body (no
-`inspectors`) resolves the manifest to all-`false`, so its `health()`, `configuration()`, `queues()`
-and `traces()` answer a typed `unsupported` without sending the request.
+`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g)
+and `events: true` (M98j) and leaves the rest (`authorization`, `cache`, `scheduler`, `realtime`,
+`storage`, `outboundHttp`) reserved and `false`. A client that reads a legacy M98b three-field
+status body (no `inspectors`) resolves the manifest to all-`false`, so its `health()`,
+`configuration()`, `queues()`, `traces()` and `events()` answer a typed `unsupported` without
+sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -378,9 +380,62 @@ parent that completes after its child, the ordinary nesting — join on `parentS
 `unknown` — no edge is fabricated, and capture order is arrival order at one process, never a global
 timeline. Cross-app correlation joins EQUAL trace ids across independently authenticated sessions;
 identifiers grant no discovery or connection authority. With no trace source registered the batch is
-`state:
-'unsupported'` with `coverage: 'unknown'`; a client whose negotiated manifest has
-`traces: false` answers that frozen batch, echoing its cursor, without sending the request.
+`state:`'unsupported'`with`coverage: 'unknown'`; a client whose negotiated manifest has`traces:
+false` answers that frozen batch, echoing its cursor, without sending the request.
+
+## Event dispatch observations (M98j)
+
+`GET /v1/event` serves the events plugin's aggregated dispatch-observation snapshot — a SNAPSHOT
+operation with no query, projected field-by-field from every source registered under the multi token
+`CAPABILITIES.EVENTS_DIAGNOSTICS` (at most 16 are read; the 17th is never consulted):
+
+```json
+{
+  "version": 1,
+  "instanceId": "<bound instance UUID>",
+  "state": "ready",
+  "sources": [
+    {
+      "sourceId": "e1",
+      "snapshot": {
+        "state": "ready",
+        "alias": "dev-bus",
+        "coverage": "owned-instance",
+        "records": [
+          {
+            "alias": "users",
+            "operation": "publish",
+            "count": 3,
+            "started": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "noSubscribers": 1,
+            "lastDurationMs": 2,
+            "ageMs": 11
+          }
+        ],
+        "dropped": 0
+      }
+    }
+  ]
+}
+```
+
+The events plugin registers its source whenever it is present — `disabled` without the `diagnostics`
+option, otherwise the collector behind the bus. Opt-in collection reduces each dispatch to counters
+BEFORE anything is retained: only event types whose exact raw name appears in the configured
+`events` map are observed, each replaced by its approved alias; records aggregate per (alias,
+operation) — `publish` (every publication, including no-subscriber ones) and `handler` (each
+existing handler's await; async publication completion is not handler completion) — over a 64-slot
+table with 60-second retention and a 30-second stale threshold. Event payloads, event ids, aggregate
+ids, handler names, unapproved type names and error text never enter the record, and a saturating
+`dropped` counter counts overflow refusals. `state` follows the shared vocabulary: `unsupported` (no
+events plugin registered — the connector's answer), `disabled`, `no-data`, `stale`, `ready`, and
+`collection-failed` — per source when that source throws (its snapshot is answered value-free) or
+fails the exact validator, and for the WHOLE response (with NO sources listed) when two sources
+report the same alias. The aggregate `state` is the strongest across sources: `ready` beats
+everything, then `collection-failed`, `stale`, `no-data`, `disabled`. A client whose negotiated
+manifest has `events: false` answers a frozen `unsupported` response without sending the request.
 
 ## Bounds (fixed, not configurable)
 
@@ -396,6 +451,8 @@ identifiers grant no discovery or connection authority. With no trace source reg
 | Events per read                 | 128                                    |
 | Queue sources read              | 16                                     |
 | Queue merge ring                | 1,024 events                           |
+| Event sources read              | 16                                     |
+| Event records per source        | 64 (60 s retention, 30 s stale)        |
 | Client request deadline         | 5 seconds                              |
 
 ## Revocation

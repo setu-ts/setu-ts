@@ -5,6 +5,39 @@
  */
 import type { EventHandler, IDomainEvent, IEventBus } from '@setu-ts/common';
 import type { EventDispatchOptions } from '../interfaces/index.ts';
+import type { EventObservationCollector } from '../diagnostics/event-observations.ts';
+
+/**
+ * The per-bus observation attachment (M98j). The plugin attaches its
+ * collector here during registration through the helper below; the bus's hot
+ * path checks for an attachment before reading clocks or resolving aliases,
+ * so an unobserved bus performs exactly one `WeakMap.get` per publish and
+ * dispatch is otherwise untouched.
+ *
+ * @internal
+ */
+const OBSERVERS = new WeakMap<InMemoryEventBus, EventObservationCollector>();
+
+/**
+ * Attaches (or detaches, with `null`) the observation collector for one bus
+ * instance. Internal — never a barrel export. Existing constructor signatures
+ * are unchanged: a bus an application constructs itself has no collector and
+ * is never observed.
+ *
+ * @param bus - The bus to attach to
+ * @param collector - The collector, or `null` to detach
+ * @internal
+ */
+export function attachEventObserver(
+  bus: InMemoryEventBus,
+  collector: EventObservationCollector | null,
+): void {
+  if (collector === null) {
+    OBSERVERS.delete(bus);
+  } else {
+    OBSERVERS.set(bus, collector);
+  }
+}
 
 /**
  * In-memory publish/subscribe event bus.
@@ -12,6 +45,11 @@ import type { EventDispatchOptions } from '../interfaces/index.ts';
  * Implements `IEventBus`. Dispatch policy (`async`/`errorHandler`) is
  * configured at construction. Handler errors are isolated through
  * `errorHandler` and never cause `publish` to reject.
+ *
+ * M98j: when the plugin attached an observation collector, publish entry and
+ * each existing handler await are instrumented WITHOUT changing dispatch —
+ * no extra subscription, no reordering, no second handler evaluation. A
+ * thrown `errorHandler` keeps its existing propagation behavior.
  *
  * @since 0.1.0
  */
@@ -36,6 +74,22 @@ export class InMemoryEventBus implements IEventBus {
    */
   async publish<T>(event: IDomainEvent<T>): Promise<void> {
     const handlers = this.handlers.get(event.type) ?? [];
+    const observer = OBSERVERS.get(this);
+    const alias = observer?.aliasFor(event.type);
+
+    if (observer !== undefined && alias !== undefined) {
+      // A no-subscriber publication is still a publication: observed as
+      // succeeded with `noSubscribers`, then the unchanged early return.
+      if (handlers.length === 0) {
+        const publishStartedAt = observer.clock.hrtime();
+        const settledAt = observer.clock.hrtime();
+        observer.observe(alias, 'publish', true, true, settledAt - publishStartedAt, true);
+        return;
+      }
+      await this.#dispatchObserved(observer, alias, event, handlers);
+      return;
+    }
+
     if (handlers.length === 0) return;
 
     const dispatch = async () => {
@@ -57,6 +111,71 @@ export class InMemoryEventBus implements IEventBus {
     }
 
     await dispatch();
+  }
+
+  /**
+   * The observed dispatch: instruments publish entry and each EXISTING
+   * handler await. Handler failures count on the handler record and the
+   * thrown value still reaches the unchanged `errorHandler`; a thrown
+   * `errorHandler` counts a failed publish and keeps its propagation.
+   * Async publication resolves before the handlers settle, exactly as the
+   * unobserved bus; its publish record settles when the dispatch settles.
+   *
+   * @param observer - The attached collector
+   * @param alias - The already-approved alias for this event type
+   * @param event - The event being dispatched
+   * @param handlers - The subscribed handlers
+   */
+  async #dispatchObserved(
+    observer: EventObservationCollector,
+    alias: string,
+    event: IDomainEvent,
+    handlers: EventHandler[],
+  ): Promise<void> {
+    const publishStartedAt = observer.clock.hrtime();
+    const dispatch = async () => {
+      for (const handler of handlers) {
+        const handlerStartedAt = observer.clock.hrtime();
+        try {
+          await handler(event);
+          const handlerSettledAt = observer.clock.hrtime();
+          observer.observe(alias, 'handler', true, true, handlerSettledAt - handlerStartedAt);
+        } catch (err) {
+          const handlerSettledAt = observer.clock.hrtime();
+          observer.observe(alias, 'handler', true, false, handlerSettledAt - handlerStartedAt);
+          this.errorHandler(err, event);
+        }
+      }
+    };
+
+    if (this.async) {
+      const p = dispatch().then(
+        () => {
+          this.pending.delete(p);
+          const settledAt = observer.clock.hrtime();
+          observer.observe(alias, 'publish', true, true, settledAt - publishStartedAt);
+        },
+        () => {
+          // The errorHandler threw asynchronously: a failed publish, and the
+          // rejection is absorbed exactly as the unobserved bus absorbs it.
+          this.pending.delete(p);
+          const settledAt = observer.clock.hrtime();
+          observer.observe(alias, 'publish', true, false, settledAt - publishStartedAt);
+        },
+      );
+      this.pending.add(p);
+      return;
+    }
+
+    try {
+      await dispatch();
+    } catch (err) {
+      const settledAt = observer.clock.hrtime();
+      observer.observe(alias, 'publish', true, false, settledAt - publishStartedAt);
+      throw err;
+    }
+    const settledAt = observer.clock.hrtime();
+    observer.observe(alias, 'publish', true, true, settledAt - publishStartedAt);
   }
 
   /**

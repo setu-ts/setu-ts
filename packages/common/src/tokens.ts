@@ -151,6 +151,16 @@ export const CAPABILITIES = {
    * A read never starts, exports or flushes a span.
    */
   TRACE_DIAGNOSTICS: 'trace-diagnostics',
+  /**
+   * Minimized event-dispatch observations (M98j) — an
+   * `IEventDiagnosticsSource` every EventsPlugin instance registers under
+   * this token with `{ multi: true }`, without claiming it in `provides`, so
+   * multiple bus instances never collide. The DiagnosticsPlugin reads every
+   * source to serve `GET /v1/event`; no registered source means the
+   * connector answers a typed `unsupported` response. A read never
+   * publishes an event or invokes a handler.
+   */
+  EVENTS_DIAGNOSTICS: 'event-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

@@ -12,6 +12,7 @@ import type {
   ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
   DiagnosticsSnapshot,
+  EventDiagnosticsResponse,
   HealthDiagnosticsSnapshot,
   IPlugin,
   QueueDiagnosticsBatch,
@@ -278,6 +279,24 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   traces(after: number, limit?: number): Promise<TraceDiagnosticsBatch>;
+  /**
+   * Reads the minimized event-dispatch observations through the signed
+   * protocol (M98j). Performs the `/v1/status` pairing exchange first if the
+   * session has not yet been bound.
+   *
+   * The inspector support manifest negotiated during pairing decides the
+   * answer: when it reports the event inspector as unsupported, a frozen
+   * typed `unsupported` response is returned WITHOUT sending an addon
+   * request. When supported, the authenticated `/v1/event` exchange is
+   * performed and its exact DTO is validated before being returned. The
+   * response never carries an event type, payload, identifier, handler name
+   * or thrown value — only approved aliases and bounded counters.
+   *
+   * @returns The frozen event-dispatch response projection
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  events(): Promise<EventDiagnosticsResponse>;
   /**
    * Closes the client: aborts pending fetches, drops key references, and
    * rejects subsequent calls with a fixed error. Idempotent.

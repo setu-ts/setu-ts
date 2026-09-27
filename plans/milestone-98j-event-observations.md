@@ -1,8 +1,8 @@
 # Milestone 98j — Event Dispatch Observations
 
-> **Status:** Planning. Implementation and fixes: `feat/m98j-event-observations`. Design security
-> assessment below requires recorded review before implementation; no implementation or completed
-> security audit is claimed.
+> **Status:** Implemented and verified (2026-09-27). Design security assessment recorded below
+> before implementation; implementation security audit passed on the committed tree (all gates,
+> per-file coverage ≥90%, forbidden-construct grep clean, e2e canaries absent at source/wire/DTO).
 
 ## 0. Objective & scope
 
