@@ -23,7 +23,7 @@ one. Passkeys are phishing-resistant: the browser binds each assertion to the si
 
 | Reference                                 | Source (file:line)                                                                                                          | Verified surface / fact                                                                                                                                                                                                                                                                                                                                                                                               |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `IAuthSessionService`                     | `plans/milestone-100c-oidc-sign-in.md` §3.1, `plans/milestone-100d-totp-mfa.md` §3.1                                        | `signIn`, `pending`, `completeSecondFactor`; `SecondFactorMethod` includes `'hwk'` and `'swk'`.                                                                                                                                                                                                                                                                                                                       |
+| `IAuthSessionService`                     | `plans/milestone-100c-oidc-sign-in.md` §3.1, `plans/milestone-100d-totp-mfa.md` §3.1                                        | `signIn`, `pending`, and the package-internal `promotePending`; `AuthMethod` includes `'pop'`.                                                                                                                                                                                                                                                                                                                        |
 | Store-port precedent                      | `packages/auth-plugin/src/stores/refresh-token-store.ts:54-71`                                                              | Async port, memory default exported beside it.                                                                                                                                                                                                                                                                                                                                                                        |
 | Reserved session keys                     | `session-plugin/src/services/session-tenant-binding.ts:23`                                                                  | Framework-owned session data uses `__`-prefixed keys.                                                                                                                                                                                                                                                                                                                                                                 |
 | Web Crypto (probe)                        | Deno 2.9.6, Node 24.18, Bun 1.4.2, workerd                                                                                  | ES256 (P-256), RS256 and Ed25519 verify from JWK on all four runtimes.                                                                                                                                                                                                                                                                                                                                                |
@@ -58,7 +58,9 @@ Those two library facts decide §3.1.
 ### 3.2 Registration
 
 - **Decision:** For a signed-in principal: options carry a 32-byte challenge, `rp { id, name }`,
-  `user { id: opaque per-principal handle, name, displayName }`, `pubKeyCredParams` exactly
+  `user { id, name, displayName }` where `id` is an opaque per-principal handle of exactly 32 random
+  bytes, generated once per principal and stored (WebAuthn requires 1–64 bytes, and a principal id
+  used directly could exceed that or leak the id to the authenticator), `pubKeyCredParams` exactly
   `[-8, -7, -257]`, `attestation: 'none'`,
   `authenticatorSelection: { residentKey: 'required', userVerification }` (default `required`) and
   `excludeCredentials` from the store. Verification requires:
@@ -86,14 +88,19 @@ Those two library facts decide §3.1.
   stored one unless both are zero (synced passkeys report zero). A counter that goes backwards is
   refused and reported through the logger thunk as a possible cloned authenticator. The stored
   credential's principal is resolved through `resolvePrincipal(principalId)`; the sign-in then calls
-  `signIn(ctx, principal, { methods: [credential.backedUp ? 'swk' : 'hwk'] })` — a second-factor
-  method, so no further factor is requested.
+  `signIn(ctx, principal, { methods: ['pop'] })` — a second-factor method, so no further factor is
+  requested.
+- **`pop`, never `hwk`/`swk`.** RFC 8176's `hwk` and `swk` assert that the key is hardware- or
+  software-secured. With attestation unverified (§3.2) the plugin cannot know which, and `backedUp`
+  says only whether the key syncs, not how it is protected — a non-synced software key would be
+  reported as `hwk`. `pop` (proof of possession of a key) claims exactly what the assertion proves.
+  `backedUp` is still stored, for the application's own display and policy.
 - **Only a user-verified assertion may sign in on its own.** With UV the authenticator itself
   checked a PIN or biometric, so one assertion is possession plus a second factor and counting it as
-  `hwk`/`swk` is honest. Without UV (possible when `userVerification: 'preferred'`) it proves
-  possession alone; recording `hwk`/`swk` for it would satisfy 100d's `requireMfa()` with one
-  factor. So a UV-less assertion is REFUSED for username-less sign-in and accepted only as the
-  second factor after a first one (§3.4), where possession is exactly what is being added.
+  `pop` is honest. Without UV (possible when `userVerification: 'preferred'`) it proves possession
+  alone; recording `pop` for it would satisfy 100d's `requireMfa()` with one factor. So a UV-less
+  assertion is REFUSED for username-less sign-in and accepted only as the second factor after a
+  first one (§3.4), where possession is exactly what is being added.
 - **Test home:** `authentication.test.ts`.
 
 ### 3.4 Passkey as a second factor
@@ -102,9 +109,8 @@ Those two library facts decide §3.1.
   credentials in `allowCredentials`, and verification refuses a credential whose stored principal id
   is not the pending principal's. `allowCredentials` is only a hint to the browser — an attacker's
   own authenticator can answer regardless — so the server-side comparison is the check, and the hint
-  is convenience. On success it calls
-  `completeSecondFactor(ctx, { method: 'hwk' | 'swk', principalId })`, whose own principal check
-  (100d §3.1) is a second, independent refusal.
+  is convenience. On success it calls the package-internal `promotePending(ctx, 'pop')` (100d §3.1),
+  which is unreachable from application code.
 - **Test home:** `second-factor-passkey.test.ts`.
 
 ### 3.5 Challenges
@@ -145,7 +151,14 @@ Those two library facts decide §3.1.
 - **Decision:** `listByPrincipal`, `findById`, `save`, `updateCounter`, `delete`, `claimChallenge`,
   all async; `MemoryPasskeyStore` exported. Stored: credential id, principal id, user handle, public
   key (JWK), algorithm, counter, `backedUp`, transports, attestation `'unverified'`, created time.
-- **Test home:** `memory-passkey-store.test.ts`.
+- **`updateCounter` is an atomic compare-and-advance:** `updateCounter(id, observed)` stores
+  `observed` only when it is greater than the stored counter (or both are zero) and reports whether
+  it did; the verifier refuses the assertion when it did not. A read-then-write would let two
+  concurrent assertions both validate against the same stored value and the lower one overwrite the
+  higher, which is exactly how a cloned authenticator's stale counter would slip through. Every
+  store implementation must honour it; the README states the requirement for custom stores.
+- **Test home:** `memory-passkey-store.test.ts` (concurrent `updateCounter` with counters 5 and 7
+  against a stored 4: exactly the outcomes that leave 7 stored, and a later 6 refused).
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -181,19 +194,19 @@ Those two library facts decide §3.1.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                        | src covered                  | Key assertions                                                                                                                                                      |
-| ------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/unit/cbor.test.ts`                         | `cbor.ts`                    | RFC 8949 Appendix A vectors for supported types; indefinite length, depth and size bounds refused.                                                                  |
-| `test/unit/cose-key.test.ts`                     | `cose-key.ts`                | Each key type to JWK; unsupported algorithm refused.                                                                                                                |
-| `test/unit/authenticator-data.test.ts`           | `authenticator-data.ts`      | Flags, counter, truncated input refused.                                                                                                                            |
-| `test/unit/signature.test.ts`                    | `signature.ts`               | DER→raw for ES256 including leading-zero integers; real signatures verify.                                                                                          |
-| `test/unit/registration.test.ts`                 | `ceremonies.ts`              | Every §3.2 refusal (wrong type, challenge, origin, `crossOrigin`, RP hash, flags, algorithm, duplicate id); `fmt: 'packed'` accepted with its statement unread.     |
-| `test/unit/authentication.test.ts`               | `ceremonies.ts`              | Every §3.3 refusal; counter rules including both-zero; `backedUp` → `swk`; mismatched `userHandle`; UV-less assertion refused for username-less sign-in.            |
-| `test/unit/challenge.test.ts`                    | `ceremonies.ts`              | Single use; expiry; replacement.                                                                                                                                    |
-| `test/unit/memory-passkey-store.test.ts`         | `passkey-store.ts`           | CRUD and counter update.                                                                                                                                            |
-| `test/integration/passkey-routes.test.ts`        | `routes.ts`                  | Real kernel app + `SessionPlugin` + virtual authenticator: register, sign out, sign in username-less, `requireAuth` route 200.                                      |
-| `test/integration/second-factor-passkey.test.ts` | `ceremonies.ts`, `routes.ts` | Password + passkey → `amr` has both; another user's passkey refused even when the options omit `allowCredentials`; a UV-less passkey accepted as the second factor. |
-| `test/integration/webauthn-differential.test.ts` | all verification             | Every virtual-authenticator response is accepted or refused identically by this verifier and `npm:@simplewebauthn/server@14` (test-only).                           |
+| Test file                                        | src covered                  | Key assertions                                                                                                                                                                 |
+| ------------------------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test/unit/cbor.test.ts`                         | `cbor.ts`                    | RFC 8949 Appendix A vectors for supported types; indefinite length, depth and size bounds refused.                                                                             |
+| `test/unit/cose-key.test.ts`                     | `cose-key.ts`                | Each key type to JWK; unsupported algorithm refused.                                                                                                                           |
+| `test/unit/authenticator-data.test.ts`           | `authenticator-data.ts`      | Flags, counter, truncated input refused.                                                                                                                                       |
+| `test/unit/signature.test.ts`                    | `signature.ts`               | DER→raw for ES256 including leading-zero integers; real signatures verify.                                                                                                     |
+| `test/unit/registration.test.ts`                 | `ceremonies.ts`              | Every §3.2 refusal (wrong type, challenge, origin, `crossOrigin`, RP hash, flags, algorithm, duplicate id); `fmt: 'packed'` accepted with its statement unread.                |
+| `test/unit/authentication.test.ts`               | `ceremonies.ts`              | Every §3.3 refusal; counter rules including both-zero; method is `pop` whatever `backedUp` says; mismatched `userHandle`; UV-less assertion refused for username-less sign-in. |
+| `test/unit/challenge.test.ts`                    | `ceremonies.ts`              | Single use; expiry; replacement.                                                                                                                                               |
+| `test/unit/memory-passkey-store.test.ts`         | `passkey-store.ts`           | CRUD and counter update.                                                                                                                                                       |
+| `test/integration/passkey-routes.test.ts`        | `routes.ts`                  | Real kernel app + `SessionPlugin` + virtual authenticator: register, sign out, sign in username-less, `requireAuth` route 200.                                                 |
+| `test/integration/second-factor-passkey.test.ts` | `ceremonies.ts`, `routes.ts` | Password + passkey → `amr` has both; another user's passkey refused even when the options omit `allowCredentials`; a UV-less passkey accepted as the second factor.            |
+| `test/integration/webauthn-differential.test.ts` | all verification             | Every virtual-authenticator response is accepted or refused identically by this verifier and `npm:@simplewebauthn/server@14` (test-only).                                      |
 
 ## 7. Verification gates
 
@@ -214,8 +227,8 @@ recorded in the PR; it is not committed, because CI installs no browser (the M37
 - A hand-written CBOR decoder is attack surface → definite lengths only, a depth limit of 4, a size
   limit of 4 KiB, and refusal of every major type not listed; the differential test runs the same
   inputs through the reference implementation.
-- Browsers differ in `backedUp` reporting → it only selects between `swk` and `hwk`, never
-  admission.
+- Browsers differ in `backedUp` reporting → it is stored for display only and affects neither
+  admission nor the recorded method.
 
 ## 9. Out of scope
 
@@ -226,19 +239,21 @@ recorded in the PR; it is not committed, because CI installs no browser (the M37
 
 **Reviewed flow:** options (challenge in session) → browser → response → challenge consumed → type,
 challenge, origin, RP hash, flags → signature over `authenticatorData ‖ hash(clientData)` → counter
-→ principal → `signIn` or `completeSecondFactor`.
+→ principal → `signIn` or the internal `promotePending`.
 
-| Finding                                              | Resolution in this plan                                   |
-| ---------------------------------------------------- | --------------------------------------------------------- |
-| Phishing via another origin.                         | Exact origin allowlist and `rpIdHash` check (§3.2, §3.3). |
-| Replayed assertion (including with an older cookie). | Server-side `claimChallenge` (§3.5).                      |
-| One-factor passkey counted as MFA.                   | UV required to sign in alone (§3.3).                      |
-| Ceremony run inside a cross-site iframe.             | `crossOrigin: true` refused (§3.2, §3.3).                 |
-| Cloned authenticator.                                | Backwards counter refused and reported (§3.3).            |
-| Malformed CBOR as a denial of service.               | Bounded decoder (§8).                                     |
-| Registering a second copy of a credential.           | Duplicate id refused; `excludeCredentials` (§3.2).        |
-| Another user's passkey completing a pending sign-in. | Server-side principal comparison, not the hint (§3.4).    |
-| Global side effects from a dependency.               | No runtime dependency (§3.1).                             |
+| Finding                                              | Resolution in this plan                                             |
+| ---------------------------------------------------- | ------------------------------------------------------------------- |
+| Phishing via another origin.                         | Exact origin allowlist and `rpIdHash` check (§3.2, §3.3).           |
+| Replayed assertion (including with an older cookie). | Server-side `claimChallenge` (§3.5).                                |
+| One-factor passkey counted as MFA.                   | UV required to sign in alone (§3.3).                                |
+| Ceremony run inside a cross-site iframe.             | `crossOrigin: true` refused (§3.2, §3.3).                           |
+| Cloned authenticator.                                | Backwards counter refused; atomic compare-and-advance (§3.3, §3.7). |
+| Oversized or identifying `user.id`.                  | Fixed 32 random bytes per principal (§3.2).                         |
+| Overclaiming key protection in `amr`.                | `pop` only; `backedUp` never selects the method (§3.3).             |
+| Malformed CBOR as a denial of service.               | Bounded decoder (§8).                                               |
+| Registering a second copy of a credential.           | Duplicate id refused; `excludeCredentials` (§3.2).                  |
+| Another user's passkey completing a pending sign-in. | Server-side principal comparison, not the hint (§3.4).              |
+| Global side effects from a dependency.               | No runtime dependency (§3.1).                                       |
 
 The implementation audit submits a valid assertion for the wrong origin, the same assertion twice,
 the same assertion replayed with the cookie captured before its first use, an assertion with a

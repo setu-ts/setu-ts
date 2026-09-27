@@ -120,7 +120,12 @@ must never be used to verify a signature, whatever its `kid`.
   because the Keycloak rotation e2e must shorten the cooldown to run in seconds. An unknown `kid`
   triggers at most one refetch per `minRefreshIntervalMs`, so a stream of forged `kid`s cannot turn
   requests into outbound fetches. Concurrent misses share one in-flight fetch. On fetch failure the
-  last good set is kept. Each fetch is bounded by `fetchTimeoutMs` (via `AbortSignal` and `runtime`
+  last good set is kept, but only up to `keySet.maxStaleMs` (default 24 hours) past the moment it
+  was last confirmed current; beyond that the set is dropped and every token from that issuer is
+  refused until a fetch succeeds. Without the cap, a key the provider removed after a compromise
+  would keep authenticating for as long as its key-set endpoint stayed unreachable — which an
+  attacker able to block that endpoint could arrange. The health indicator reports `expired` for
+  such an issuer. Each fetch is bounded by `fetchTimeoutMs` (via `AbortSignal` and `runtime`
   timers), a 64 KiB response limit and a 64-key limit; exceeding one of them is a refresh failure.
   The byte limit is enforced BY THE SEAM while reading (§3.8), not after — a limit checked on a
   finished `string` has already buffered the oversized body it exists to refuse.
@@ -131,8 +136,13 @@ must never be used to verify a signature, whatever its `kid`.
 
 - **Decision:** `iss` exact; `aud` contains the configured audience (string or array); `exp`
   required; `exp`, `nbf` and a future `iat` checked with `clockToleranceSec` (default 30).
-  Verification failures return `null` and are logged at `debug` with a fixed reason code — never the
-  token — through a logger thunk read at call time (the M52b lesson).
+  Construction refuses a `clockToleranceSec` that is not a finite number in `[0, 300]`: every claim
+  check is a comparison, and a comparison against `NaN` is always `false`, so `NaN` (what
+  `Number(env.X)` yields for an unset variable) would silently disable `exp`/`nbf`/`iat` — the M90a
+  fail-open class — and `Infinity` would do the same honestly. The same finite-positive rule already
+  covers the three `keySet` timings and `maxStaleMs`. Verification failures return `null` and are
+  logged at `debug` with a fixed reason code — never the token — through a logger thunk read at call
+  time (the M52b lesson).
 - **Test home:** `claims.test.ts`.
 
 ### 3.7 Health
@@ -165,15 +175,15 @@ must never be used to verify a signature, whatever its `kid`.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                            | Consumer                    | Behavior (per implementation)                             |
-| --------------------------------- | --------------------------- | --------------------------------------------------------- |
-| `issuers`                         | `register()` chain assembly | Builds the `issuers` strategy (§3.1).                     |
-| `TrustedIssuer.audience`          | claim validation            | Required; must be contained in `aud` (§3.6).              |
-| `TrustedIssuer.algorithms`        | key selection               | Allowlist, default all five (§3.4).                       |
-| `TrustedIssuer.clockToleranceSec` | claim validation            | Default 30 (§3.6).                                        |
-| `TrustedIssuer.keySet`            | key-set cache               | `ttlMs`, `minRefreshIntervalMs`, `fetchTimeoutMs` (§3.5). |
-| `TrustedIssuer.toPrincipal`       | strategy                    | Maps verified claims; `null` → anonymous.                 |
-| `http`                            | key-set fetcher             | Replaces the default `fetch` seam (§3.8).                 |
+| Option                            | Consumer                    | Behavior (per implementation)                                           |
+| --------------------------------- | --------------------------- | ----------------------------------------------------------------------- |
+| `issuers`                         | `register()` chain assembly | Builds the `issuers` strategy (§3.1).                                   |
+| `TrustedIssuer.audience`          | claim validation            | Required; must be contained in `aud` (§3.6).                            |
+| `TrustedIssuer.algorithms`        | key selection               | Allowlist, default all five (§3.4).                                     |
+| `TrustedIssuer.clockToleranceSec` | claim validation            | Default 30 (§3.6).                                                      |
+| `TrustedIssuer.keySet`            | key-set cache               | `ttlMs`, `minRefreshIntervalMs`, `fetchTimeoutMs`, `maxStaleMs` (§3.5). |
+| `TrustedIssuer.toPrincipal`       | strategy                    | Maps verified claims; `null` → anonymous.                               |
+| `http`                            | key-set fetcher             | Replaces the default `fetch` seam (§3.8).                               |
 
 ## 5. Implementation files
 
@@ -195,9 +205,9 @@ must never be used to verify a signature, whatever its `kid`.
 | ------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test/unit/issuer-strategy.test.ts`               | `issuer-strategy.ts` | Routes by `iss`; unknown issuer → null; a self-issued JWT still authenticates first; malformed token → null.                                                                                                                |
 | `test/unit/key-selection.test.ts`                 | `key-selection.ts`   | Real-crypto round trip per algorithm; `none`/`HS256` refused; `enc` key ignored; `kid`-less multi-key refused.                                                                                                              |
-| `test/unit/key-set-cache.test.ts`                 | `key-set-cache.ts`   | TTL on a fake monotonic clock; refetch cooldown; coalescing; last-good on failure; size and key-count limits.                                                                                                               |
+| `test/unit/key-set-cache.test.ts`                 | `key-set-cache.ts`   | TTL on a fake monotonic clock; refetch cooldown; coalescing; last-good on failure, then dropped past `maxStaleMs` (token refused); size and key-count limits.                                                               |
 | `test/unit/discovery.test.ts`                     | `key-set-cache.ts`   | Issuer mismatch refused; non-https refused; loopback allowed; a trailing-`/` issuer builds one `/.well-known` path; failed discovery retried only after the cooldown.                                                       |
-| `test/unit/claims.test.ts`                        | `issuer-strategy.ts` | `aud` array/string; `exp` required; skew both sides; future `iat`.                                                                                                                                                          |
+| `test/unit/claims.test.ts`                        | `issuer-strategy.ts` | `aud` array/string; `exp` required; skew both sides; future `iat`; `clockToleranceSec` of `NaN`, `Infinity`, `-1` and `301` refused at construction.                                                                        |
 | `test/unit/auth-http.test.ts`                     | `auth-http.ts`       | Default seam: status, body, abort on timeout; a body past `maxBytes` rejects and the source stream is cancelled (a never-ending fake stream would hang otherwise).                                                          |
 | `test/unit/trusted-issuer-options.test.ts`        | `auth-plugin.ts`     | Every §3.2 refusal by name.                                                                                                                                                                                                 |
 | `test/integration/issuers-health.test.ts`         | `auth-plugin.ts`     | Real kernel app: `up`, `degraded` stale/unfetched, never `down`; no fetch during a probe.                                                                                                                                   |
@@ -242,6 +252,8 @@ checks → `toPrincipal`.
 | Token for another API at the same provider.              | `audience` required and checked (§3.2, §3.6).               |
 | Spoofed discovery document.                              | `issuer` equality and https-or-loopback (§3.3).             |
 | Forged `kid` flood causing outbound fetches.             | One refetch per cooldown, coalesced (§3.5).                 |
+| Removed key trusted indefinitely while fetches fail.     | `maxStaleMs` cap on the last good set (§3.5).               |
+| `NaN` skew disabling time checks.                        | `clockToleranceSec` validated finite and bounded (§3.6).    |
 | Oversized key-set response.                              | 64 KiB enforced while streaming; 64-key bound (§3.5, §3.8). |
 | Curve substitution (ES256 against a P-384 key).          | `crv` must match the `alg` (§3.4).                          |
 | Provider ID token presented as an access token.          | Named gap; distinct API audience documented (§3.2).         |

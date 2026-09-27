@@ -11912,13 +11912,15 @@ confirmed by the plan:
 - It is safe to run globally: `authMiddleware` never rejects — it only populates the principal, and
   guards decide — which is also why M57 excludes it from derived OpenAPI security.
 
-It registers at 300 by default (after the session at 260, so the M73 session strategy sees a loaded
-session), with an option to change the priority or turn it off for an application that attaches it
-per route. **Behaviour change for an application that already adds it by hand:** the middleware then
-runs twice. That is harmless — it writes through `replacePrincipal`, the M71 explicit-replacement
-escape, so the second write does not throw — but it authenticates twice per request, so the
-CHANGELOG and `docs/upgrading.md` tell the reader to delete their own call. The starters' `auth`
-JSDoc and the three starter READMEs are corrected to match.
+It registers at 300 by default — the authentication band ARCHITECTURE §10 assigns, after the session
+at 260 by convention rather than necessity (the M73 session strategy reads the cookie through
+`fromHeaders`, so it does not depend on the session middleware having run) — with an option to
+change the priority or turn it off for an application that attaches it per route. **Behaviour change
+for an application that already adds it by hand:** the middleware then runs twice. That is harmless
+— it writes through `replacePrincipal`, the M71 explicit-replacement escape, so the second write
+does not throw — but it authenticates twice per request, so the CHANGELOG and `docs/upgrading.md`
+tell the reader to delete their own call. The starters' `auth` JSDoc and the three starter READMEs
+are corrected to match.
 
 ### Milestone 100b: Tokens From an Outside Issuer
 

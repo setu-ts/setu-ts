@@ -9,12 +9,12 @@ Add a second factor: six-digit codes from an authenticator app (RFC 6238 TOTP), 
 and a sign-in that stays incomplete until the second factor is given. A password alone must not
 produce a signed-in session for a user who has enrolled.
 
-- **In scope:** widening `IAuthSessionService` (100c) with a pending state and
-  `completeSecondFactor`; a `signIn.mfa` option deciding when a second factor is required; an
-  application-instantiated `TotpService` for enrolment, verification and recovery codes over an
-  `ITotpStore` port with a memory default; replay protection and per-account lockout; a
-  `requireMfa()` guard; a `second-factor-required` authorization failure.
-- **NOT this milestone:** passkeys as a second factor (100e reuses `completeSecondFactor`); SMS or
+- **In scope:** widening `IAuthSessionService` (100c) with a `pending` read, and an internal
+  promotion reachable only from the package's own verifiers; a `signIn.mfa` option deciding when a
+  second factor is required; an application-instantiated `TotpService` for enrolment, verification
+  and recovery codes over an `ITotpStore` port with a memory default; replay protection and
+  per-account lockout; a `requireMfa()` guard; a `second-factor-required` authorization failure.
+- **NOT this milestone:** passkeys as a second factor (100e reuses the internal promotion); SMS or
   email codes (weak, and they need a delivery channel — `notification-plugin` could back a later
   addition); QR-code rendering (the application renders the `otpauth://` URI); re-authentication
   ("step up again after N minutes"); administrator reset flows.
@@ -42,29 +42,33 @@ produce a signed-in session for a user who has enrolled.
 
 ### 3.1 Widen `IAuthSessionService`
 
-- **Decision:** Add `pending(ctx): PendingSignIn | null` and
-  `completeSecondFactor(ctx, proof: SecondFactorProof): Promise<SignInOutcome>`, where
-  `SecondFactorProof = { method: SecondFactorMethod; principalId: string }`, with
-  `SecondFactorMethod = 'otp' | 'hwk' | 'swk'`, and widen `SignInOutcome` to
+- **Decision:** Add `pending(ctx): PendingSignIn | null`, and widen `SignInOutcome` to
   `{ status: 'signed-in' } | { status: 'second-factor-required' }`. `signIn` asks
   `signIn.mfa.required(principal, methods)`; when it answers `true` and `methods` holds no second
   factor, it stores `{ principal, methods, at }` under `__setu_auth_pending_mfa` (NOT the signed-in
-  key), regenerates the session and resolves `second-factor-required`. `completeSecondFactor` moves
-  the pending record to the signed-in key with the method appended, regenerates again, and rejects
-  when nothing is pending, when the record is older than `pendingTtlMs` (default 5 minutes), or when
-  `proof.principalId` is not the pending principal's id.
-- **Why the proof carries the principal id.** Verification (`TotpService.verify`, 100e's ceremony)
-  and promotion are separate calls, so without the id nothing ties the factor that was checked to
-  the sign-in being promoted. An application that read the principal id from its own form could
-  verify an attacker's OWN code and then promote the victim's pending sign-in — a complete
-  second-factor bypass for anyone holding the victim's password. With the id in the proof, the
-  service refuses the mismatch whatever the application did.
+  key), regenerates the session and resolves `second-factor-required`.
+- **Promotion is NOT on the public contract.** Moving the pending record to the signed-in key is an
+  internal `promotePending(ctx, method)` in `auth-plugin`, reached through a module-private function
+  that `src/index.ts` does not export, and called ONLY by the package's own verifiers
+  (`TotpService.completeSignIn`, §3.2; 100e's ceremony). Each verifier reads the pending principal
+  itself, checks the factor against THAT principal, and promotes in the same call. It appends the
+  method, regenerates again, and rejects when nothing is pending or the record is older than
+  `pendingTtlMs` (default 5 minutes).
+- **Why not a public `completeSecondFactor`.** Verification and promotion as two public calls let
+  the caller decide what was verified: a caller-supplied `{ method, principalId }` is not evidence,
+  so an application that verified the wrong principal's code (an attacker's own, with the victim's
+  principal id from a form) — or verified nothing — could promote the victim's pending sign-in, a
+  complete second-factor bypass for anyone holding the password. With promotion reachable only from
+  a verifier that checked the pending principal's own factor, no call sequence can promote without a
+  successful check. The named cost: an out-of-repo second factor cannot promote a sign-in until a
+  factor-plugin seam is designed, which is recorded under §9.
 - **Why:** Holding the principal back is what makes the password alone insufficient; routes guarded
   only by `requireAuth()` stay closed during the pending state.
-- **Breaking:** new required members on a `common` interface (only in-repo implementor: 100c's
+- **Breaking:** a new required member on a `common` interface (only in-repo implementor: 100c's
   service), and a widened result union — CHANGELOG'd.
-- **Test home:** `auth-session-mfa.test.ts` (includes a code verified for principal B completing a
-  sign-in pending for principal A → rejected, A stays pending).
+- **Test home:** `auth-session-mfa.test.ts` (includes principal B's valid code submitted while A is
+  pending → `invalid`, A stays pending; and a barrel test pinning that `promotePending` is not
+  exported).
 
 ### 3.2 `TotpService` — application-instantiated
 
@@ -77,9 +81,12 @@ produce a signed-in session for a user who has enrolled.
   - `verify(principalId, code)` → `'ok' | 'invalid' | 'locked' | 'not-enrolled'`;
   - `generateRecoveryCodes(principalId)` → ten codes, returned once;
   - `verifyRecoveryCode(principalId, code)` → `'ok' | 'invalid' | 'locked'`;
-  - `disable(principalId)`. The application reads `pending(ctx)`, calls
-    `verify(pending.principal.id, code)` and then
-    `completeSecondFactor(ctx, { method: 'otp', principalId: pending.principal.id })`.
+  - `disable(principalId)`;
+  - `completeSignIn(ctx, code)` and `completeSignInWithRecoveryCode(ctx, code)` →
+    `'signed-in' | 'invalid' | 'locked' | 'not-enrolled' | 'no-pending'`: each reads `pending(ctx)`
+    from the `AUTH_SESSION` capability, verifies the code for the PENDING principal (never a
+    caller-supplied id), and promotes on success (§3.1). This is the only sign-in path; the
+    principal-id methods above serve enrolment and settings pages.
 - **Why:** The code form is application UI; the service owns every rule that must not vary.
 - **Test home:** `totp-service.test.ts`.
 
@@ -128,8 +135,8 @@ produce a signed-in session for a user who has enrolled.
 ### 3.7 `requireMfa()` guard
 
 - **Decision:** No principal → `authentication-required` (401). A principal whose `claims.amr` holds
-  none of `otp`/`hwk`/`swk` → new failure `second-factor-required` (403, detail "Second factor
-  required"). Branded authenticated for M57 OpenAPI derivation.
+  none of `otp`/`pop` → new failure `second-factor-required` (403, detail "Second factor required").
+  Branded authenticated for M57 OpenAPI derivation.
 - **Whose `amr` the guard trusts, stated rather than implied.** The `auth-session` strategy
   OVERWRITES `amr` from its own record (100c §3.2), so a session principal cannot smuggle one in.
   Every other strategy's claims come from something the application controls: the JWT strategy
@@ -144,22 +151,22 @@ produce a signed-in session for a user who has enrolled.
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol (package)                                             | Kind        | Consumer / real code path that READS it                 |
-| --------------------------------------------------------------------- | ----------- | ------------------------------------------------------- |
-| `PendingSignIn`, `SecondFactorMethod`, `SecondFactorProof` (`common`) | types       | `IAuthSessionService.pending` / `completeSecondFactor`. |
-| `AuthorizationFailure` member (`common`)                              | type        | `requireMfa()`; applications mapping failures.          |
-| `TotpService` (`auth-plugin`)                                         | class       | Applications' enrolment and code forms.                 |
-| `ITotpStore`, `MemoryTotpStore` (`auth-plugin`)                       | type, class | `TotpService` constructor.                              |
-| `TotpVerifyResult` (`auth-plugin`)                                    | type        | `verify` / `verifyRecoveryCode` results.                |
-| `requireMfa` (`auth-plugin`)                                          | function    | Route guards.                                           |
-| `MfaOptions` (`auth-plugin`)                                          | type        | `SignInConfig.mfa`.                                     |
+| Exported symbol (package)                       | Kind        | Consumer / real code path that READS it        |
+| ----------------------------------------------- | ----------- | ---------------------------------------------- |
+| `PendingSignIn` (`common`)                      | types       | `IAuthSessionService.pending`.                 |
+| `AuthorizationFailure` member (`common`)        | type        | `requireMfa()`; applications mapping failures. |
+| `TotpService` (`auth-plugin`)                   | class       | Applications' enrolment and code forms.        |
+| `ITotpStore`, `MemoryTotpStore` (`auth-plugin`) | type, class | `TotpService` constructor.                     |
+| `TotpVerifyResult` (`auth-plugin`)              | type        | `verify` / `verifyRecoveryCode` results.       |
+| `requireMfa` (`auth-plugin`)                    | function    | Route guards.                                  |
+| `MfaOptions` (`auth-plugin`)                    | type        | `SignInConfig.mfa`.                            |
 
 ### 4.1 Options — every option names its consumer
 
 | Option                    | Consumer                     | Behavior                                              |
 | ------------------------- | ---------------------------- | ----------------------------------------------------- |
 | `signIn.mfa.required`     | `IAuthSessionService.signIn` | `(principal, methods) → boolean \| Promise<boolean>`. |
-| `signIn.mfa.pendingTtlMs` | `completeSecondFactor`       | Default 300 000.                                      |
+| `signIn.mfa.pendingTtlMs` | `promotePending` (internal)  | Default 300 000.                                      |
 | `TotpService` `issuer`    | `beginEnrolment`             | Shown by the authenticator app.                       |
 
 ## 5. Implementation files
@@ -168,7 +175,7 @@ produce a signed-in session for a user who has enrolled.
 | ---------------------------------------------------------- | ------------------------------------------- |
 | `packages/common/src/services/auth-session.ts`             | §3.1 widening.                              |
 | `packages/common/src/errors/authorization-responder.ts`    | `second-factor-required`.                   |
-| `packages/auth-plugin/src/sign-in/auth-session-service.ts` | Pending state, `completeSecondFactor`.      |
+| `packages/auth-plugin/src/sign-in/auth-session-service.ts` | Pending state, internal `promotePending`.   |
 | `packages/auth-plugin/src/mfa/totp-service.ts`             | §3.2–3.5.                                   |
 | `packages/auth-plugin/src/mfa/totp-codes.ts`               | Counter, truncation, constant-time compare. |
 | `packages/auth-plugin/src/mfa/base32.ts`                   | RFC 4648 base32.                            |
@@ -212,25 +219,28 @@ deno task publish:check && deno task release:verify <version>
 
 - Passkeys — 100e.
 - SMS and email codes, QR rendering, re-authentication windows, administrator resets.
+- A seam letting an out-of-repo second factor promote a pending sign-in — deliberately absent
+  (§3.1); it needs its own design review, because a public promotion call is the bypass §3.1
+  removes.
 
 ## 10. Design security review — completed before implementation
 
 **Reviewed flow:** first factor → `signIn` → pending record (no principal) → code form → `verify`
-(lockout check, window, constant-time compare, step claim) → `completeSecondFactor` → regenerate →
-signed in with `amr`.
+(lockout check, window, constant-time compare, step claim) → internal `promotePending` → regenerate
+→ signed in with `amr`.
 
-| Finding                                       | Resolution in this plan                                  |
-| --------------------------------------------- | -------------------------------------------------------- |
-| Password alone yields a session.              | Pending record is not a principal (§3.1).                |
-| Code brute force across sessions.             | Per-account lockout in the store (§3.4).                 |
-| Lockout bypassed by concurrent guesses.       | Attempt reserved atomically before checking (§3.4).      |
-| Attacker's own factor promoting a victim.     | Proof carries the principal id; mismatch refused (§3.1). |
-| `amr` forged through another strategy.        | Trust boundary stated; session `amr` overwritten (§3.7). |
-| Code replay within its window.                | Monotonic `claimStep` (§3.3).                            |
-| Timing leak on code comparison.               | Constant-time compare (§3.3).                            |
-| Recovery code double-spend under concurrency. | Atomic consume by index (§3.5, §3.6).                    |
-| Session fixation across the two steps.        | Regenerate at both steps (§3.1).                         |
-| A 403 disclosing policy.                      | New failure names only the required action (§3.7, C1).   |
+| Finding                                       | Resolution in this plan                                           |
+| --------------------------------------------- | ----------------------------------------------------------------- |
+| Password alone yields a session.              | Pending record is not a principal (§3.1).                         |
+| Code brute force across sessions.             | Per-account lockout in the store (§3.4).                          |
+| Lockout bypassed by concurrent guesses.       | Attempt reserved atomically before checking (§3.4).               |
+| Attacker's own factor promoting a victim.     | Promotion internal; verifiers check the pending principal (§3.1). |
+| `amr` forged through another strategy.        | Trust boundary stated; session `amr` overwritten (§3.7).          |
+| Code replay within its window.                | Monotonic `claimStep` (§3.3).                                     |
+| Timing leak on code comparison.               | Constant-time compare (§3.3).                                     |
+| Recovery code double-spend under concurrency. | Atomic consume by index (§3.5, §3.6).                             |
+| Session fixation across the two steps.        | Regenerate at both steps (§3.1).                                  |
+| A 403 disclosing policy.                      | New failure names only the required action (§3.7, C1).            |
 
 The implementation audit submits the same code twice, a code from the previous window after a newer
 one was accepted, six wrong codes from six fresh sessions, twenty wrong codes concurrently, a code

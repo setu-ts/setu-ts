@@ -96,6 +96,16 @@ every other method.
   are the same record. Leaving the library's default in place would create a second, per-process
   store: several replicas would then fail even with a shared `ISamlRequestStore`, because the
   library's check runs first on whichever replica receives the POST.
+- **Consumption happens in `removeAsync`, and the ACS trusts only what it returned.** node-saml
+  5.1.0 checks a request id with `getAsync`, then calls `removeAsync` on BOTH its success path and
+  its failure paths (`lib/saml.js:628`, `:803-828`). The adapter is built per ACS request:
+  `getAsync` reads without consuming; `removeAsync` calls `store.consumeRequest(id)`, which
+  atomically deletes the entry and returns it (or `null` if it was already gone), and the adapter
+  captures that return value. After the library resolves, the ACS reads `provider`, `returnTo` and
+  `binding` from the CAPTURED record only; nothing captured means a replayed or concurrently
+  consumed response, which is refused. So of two concurrent posts of one response both may pass
+  `getAsync`, but exactly one captures the record, and a response that fails validation still
+  consumes its entry (fail closed).
 - **One binding cookie per browser.** A second login started in another tab overwrites the cookie,
   so the first tab's response is refused (fails closed). Accepted and stated in the README; the
   failure is a retry, never a wrong sign-in.
@@ -180,7 +190,7 @@ every other method.
 | `test/unit/saml-loader.test.ts`                       | `loader.ts`                      | Injected module used; failed load → `SamlRuntimeLoadError` naming the specifier and `nodejs_compat`.                                                                                                                                                   |
 | `test/unit/saml-options.test.ts`                      | `routes.ts`                      | Each construction refusal; configuration handed to the library field by field.                                                                                                                                                                         |
 | `test/unit/binding-cookie.test.ts`                    | `binding-cookie.ts`              | Attributes exact (`__Host-`, `SameSite=None`, `Secure`, `HttpOnly`, `Path=/`, `Max-Age`); cleared after use.                                                                                                                                           |
-| `test/unit/memory-saml-request-store.test.ts`         | `saml-request-store.ts`          | Single-use consume; assertion-id replay refused; expiry.                                                                                                                                                                                               |
+| `test/unit/memory-saml-request-store.test.ts`         | `saml-request-store.ts`          | Single-use consume; two concurrent `consumeRequest` calls → exactly one record returned; assertion-id replay refused; expiry.                                                                                                                          |
 | `test/integration/saml-acs.test.ts`                   | `routes.ts`, `binding-cookie.ts` | Real kernel app + test IdP: valid → signed in; tampered, unsigned, wrapped (evil-first and evil-last), wrong audience, expired, unsolicited, replayed assertion, missing or mismatched binding cookie → refused; library message absent from the body. |
 | `test/integration/saml-routes.test.ts`                | `routes.ts`                      | AuthnRequest redirect parameters; metadata document fields.                                                                                                                                                                                            |
 | `test/integration/saml-csrf-composition.test.ts`      | `routes.ts`                      | Real `SessionPlugin({ csrf })` + `HttpSecurityPlugin({ csrf })`: ACS 403 without the documented `exclude`/`trustedOrigins`, signed in with them; the pre-existing session's data is absent afterwards (§3.6).                                          |
@@ -219,18 +229,19 @@ cookie → IdP → cross-site POST to ACS → library verification (signature, i
 recipient, time, `InResponseTo`) → entry consumed and binding matched → assertion id claimed →
 principal → `signIn` → redirect to a validated `returnTo`.
 
-| Finding                                          | Resolution in this plan                                                       |
-| ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| XML signature wrapping.                          | Maintained library, probed against the attack; tests on every run (§3.1, §6). |
-| Login CSRF via a posted foreign response.        | Browser-binding cookie matched against the pending entry (§3.4).              |
-| Unsolicited (IdP-initiated) responses.           | Refused (§0, §3.5).                                                           |
-| Assertion replay.                                | Assertion ids claimed once (§3.5).                                            |
-| Library error text reaching the client.          | Fixed detail; message logged at `debug` only (§3.5).                          |
-| Weakening the session cookie to `SameSite=None`. | Not required; stated in the README (§8).                                      |
-| Session fixation.                                | `signIn` regenerates (100c §3.1).                                             |
-| Unsafe library defaults.                         | Every security option set explicitly and asserted (§3.2).                     |
-| Replicas disagreeing about a pending request.    | node-saml's `cacheProvider` is the plugin's store (§3.4).                     |
-| CSRF exemption for the ACS.                      | Justified by the ACS's own defences; documented and tested (§3.7).            |
+| Finding                                           | Resolution in this plan                                                       |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| XML signature wrapping.                           | Maintained library, probed against the attack; tests on every run (§3.1, §6). |
+| Login CSRF via a posted foreign response.         | Browser-binding cookie matched against the pending entry (§3.4).              |
+| Unsolicited (IdP-initiated) responses.            | Refused (§0, §3.5).                                                           |
+| Assertion replay.                                 | Assertion ids claimed once (§3.5).                                            |
+| Library error text reaching the client.           | Fixed detail; message logged at `debug` only (§3.5).                          |
+| Weakening the session cookie to `SameSite=None`.  | Not required; stated in the README (§8).                                      |
+| Session fixation.                                 | `signIn` regenerates (100c §3.1).                                             |
+| Unsafe library defaults.                          | Every security option set explicitly and asserted (§3.2).                     |
+| Replicas disagreeing about a pending request.     | node-saml's `cacheProvider` is the plugin's store (§3.4).                     |
+| Concurrent posts of one response both signing in. | Atomic consume in `removeAsync`; ACS uses only the captured record (§3.4).    |
+| CSRF exemption for the ACS.                       | Justified by the ACS's own defences; documented and tested (§3.7).            |
 
 The implementation audit posts a captured valid response twice, from a browser without the binding
 cookie, with the assertion wrapped after an unsigned copy, and with `InResponseTo` from another

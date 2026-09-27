@@ -19,7 +19,8 @@ to create, hold back, or promote that record, so it is a contract, not a private
   a `signIn` option on `AuthPlugin` that registers the service and an `auth-session` strategy;
   sign-in `providers` with an `oidc` arm (discovery, ID token) and an `oauth2` arm (profile from a
   userinfo endpoint); plugin-registered login, callback and logout routes; PKCE S256, `state` and
-  `nonce` held server-side in the session; ID token validation through 100b's verifier; session
+  `nonce` bound to the user's session (in the browser's encrypted cookie on the default strategy,
+  server-side on the store strategy — §3.5); ID token validation through 100b's verifier; session
   regeneration on sign-in; a same-origin `returnTo`; optional RP-initiated logout; a headless
   end-to-end test against a real Keycloak.
 - **NOT this milestone:** a second factor (100d); Setu-TS acting as an authorization server or
@@ -71,7 +72,7 @@ to create, hold back, or promote that record, so it is a contract, not a private
   interface SignInOptions {
     readonly methods: readonly AuthMethod[];
   }
-  type AuthMethod = 'pwd' | 'otp' | 'hwk' | 'swk' | 'fed'; // RFC 8176 values
+  type AuthMethod = 'pwd' | 'otp' | 'pop' | 'fed'; // RFC 8176 values
   type SignInOutcome = { readonly status: 'signed-in' };
   ```
 
@@ -127,7 +128,7 @@ to create, hold back, or promote that record, so it is a contract, not a private
   two `GET` routes are unaffected by form CSRF (safe methods).
 - **Test home:** `sign-in-routes.test.ts`.
 
-### 3.5 Login: state, nonce and PKCE held server-side
+### 3.5 Login: state, nonce and PKCE bound to the session
 
 - **Decision:** `login` creates `state` (32 random bytes), a PKCE verifier (32 random bytes, S256
   challenge through `runtime.subtle.digest`) and, for `oidc`, a `nonce`; stores
@@ -165,8 +166,12 @@ to create, hold back, or promote that record, so it is a contract, not a private
 ### 3.7 `returnTo`
 
 - **Decision:** Accepted only when it starts with a single `/`, contains no `\`, no scheme and no
-  control character; anything else becomes `/`. Checked at login, stored in the entry, never read
-  from the callback URL.
+  control character, and is at most 512 bytes UTF-8; anything else becomes `/`. The byte cap exists
+  because the value is stored in the pending entry: on the cookie strategy an unbounded path could
+  push the session past its 4096-byte budget, and the session plugin throws at commit, so a long
+  link would make the login itself fail. Five pending entries of 512 bytes plus their fixed fields
+  stay well inside the budget. Checked at login, stored in the entry, never read from the callback
+  URL.
 - **Why:** An open redirect after sign-in is a phishing primitive.
 - **Test home:** `return-to.test.ts`.
 
@@ -237,7 +242,7 @@ to create, hold back, or promote that record, so it is a contract, not a private
 | `auth-plugin/test/unit/auth-session-service.test.ts`         | `auth-session-service.ts`           | `signIn` writes the record and changes the session id; `current`; `signOut` destroys.                                                                                                                                                 |
 | `auth-plugin/test/unit/pkce.test.ts`                         | `pkce.ts`                           | RFC 7636 Appendix B vector.                                                                                                                                                                                                           |
 | `auth-plugin/test/unit/pending-state.test.ts`                | `pending-state.ts`                  | Five-entry cap, expiry on a fake clock, single use.                                                                                                                                                                                   |
-| `auth-plugin/test/unit/return-to.test.ts`                    | `return-to.ts`                      | Table: `/a` kept; `//evil`, `/\evil`, `https://evil`, `javascript:`, control characters → `/`.                                                                                                                                        |
+| `auth-plugin/test/unit/return-to.test.ts`                    | `return-to.ts`                      | Table: `/a` kept; `//evil`, `/\evil`, `https://evil`, `javascript:`, control characters, and a 513-byte path → `/`.                                                                                                                   |
 | `auth-plugin/test/unit/token-exchange.test.ts`               | `token-exchange.ts`, `auth-http.ts` | Each auth method's exact request; `Accept: application/json`; provider error bodies.                                                                                                                                                  |
 | `auth-plugin/test/integration/login-flow.test.ts`            | `routes.ts`                         | Real kernel app + `SessionPlugin`: redirect parameters, pending entry written.                                                                                                                                                        |
 | `auth-plugin/test/integration/callback-flow.test.ts`         | `routes.ts`                         | Fake provider seam: success, provider error, unknown/expired/replayed `state`, wrong provider, bad `nonce`, `toPrincipal` null → 403, session id changes.                                                                             |
