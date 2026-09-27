@@ -454,7 +454,12 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
         slot.noSubscribers = saturatingNext(slot.noSubscribers);
       }
       slot.lastDurationMs = clampDuration(durationMs);
-      slot.lastSettledAtMs = now;
+      // Like `lastSeenAtMs`, never moved backwards by a settlement carrying an
+      // earlier caller-held reading: `ageMs` is time since the most recent
+      // settlement (audit R6-F2).
+      slot.lastSettledAtMs = slot.lastSettledAtMs === null
+        ? now
+        : Math.max(slot.lastSettledAtMs, now);
       slot.lastSeenAtMs = Math.max(slot.lastSeenAtMs, now);
       // The write path scans for expired slots at most once per second, so
       // a publish does not pay an O(64) walk; `snapshot()` always scans, so
@@ -496,12 +501,13 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     let slot = this.#byAlias.get(alias)?.[operation];
     if (slot === undefined) {
       // Only a NEW tuple at a full table can be refused, so only here is it
-      // worth reclaiming expired slots first — and only once some slot can
-      // actually have expired, so an at-capacity table of live slots pays no
-      // walk. Each capacity walk therefore needs a slot to have reached its
-      // expiry: at most one per expiring slot (64 per retention window) on
-      // top of the once-per-second throttled scan, and clustered expiries can
-      // put several in one second.
+      // worth reclaiming expired slots first — and only once `now` passes the
+      // tracked earliest-expiry bound. A walk recomputes that bound exactly,
+      // so the next walk waits until some slot's CURRENT expiry passes; a
+      // slot refreshed since the bound was taken can still trigger one walk
+      // that expires nothing. At most one capacity walk per slot per
+      // retention window (64 per 60 s), on top of the once-per-second
+      // throttled scan, and they can cluster within one second.
       if (this.#slots.size >= MAX_RECORD_SLOTS && now > this.#earliestExpiryAt) {
         this.#expire(now);
       }

@@ -1165,3 +1165,35 @@ describe('Round-5 audit fixes (R5-F1, R5-F2, R5-F3)', () => {
     expect(snapshot.records.map((r) => r.alias)).toEqual(['x']);
   });
 });
+
+describe('Round-6 audit fixes (R6-F1, R6-F2)', () => {
+  it('R6-F1: a start carrying an earlier held reading never ages a slot backwards', () => {
+    const clock = new MutableClock();
+    const observer = collector(clock);
+    clock.advance(200);
+    const later = observer.begin('users', 'handler'); // lastSeen 200
+    const earlier = observer.begin('users', 'handler', 100); // held reading 100
+    clock.advance(60_000 - 50); // 60,150: live from 200, expired from 100
+    expect(observer.snapshot().records.find((r) => r.operation === 'handler')).toMatchObject({
+      started: 2,
+      count: 0,
+    });
+    observer.end('users', 'handler', later, true);
+    observer.end('users', 'handler', earlier, true);
+  });
+
+  it('R6-F2: ageMs measures from the most recent settlement, not the last one processed', () => {
+    const clock = new MutableClock();
+    const observer = collector(clock);
+    clock.advance(100);
+    const first = observer.begin('users', 'publish'); // at 100
+    clock.advance(100);
+    const second = observer.begin('users', 'publish'); // at 200
+    observer.end('users', 'publish', second, true); // settles at 200
+    observer.end('users', 'publish', first, true, false, 100); // held earlier reading
+    clock.advance(30_000 - 50); // 30,150: 29,950 since the latest settlement
+    const snapshot = observer.snapshot();
+    expect(snapshot.state).toBe('ready');
+    expect(snapshot.records[0]!.ageMs).toBe(29_950);
+  });
+});
