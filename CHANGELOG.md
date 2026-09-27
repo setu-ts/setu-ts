@@ -364,6 +364,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`diagnostics-plugin` — the connector refuses URL aliases of a target and answers an out-of-range
+  events cursor as a caller error.** Found by the M98b committed-tree security audit. The handler
+  parsed the target from the NORMALIZED URL, so `/v1/./snapshot`, `/v1/x/../snapshot`,
+  `/v1/snapshot?` and a target carrying a fragment were each served as the canonical operation,
+  contradicting the protocol specification's refusal of non-canonical forms; the raw request target
+  must now equal the canonical one. Integrity was never affected — the MAC covers the canonical
+  target, so no request could be retargeted without the key. Separately, `GET /v1/events` with a
+  cursor beyond the reader's sequence let the reader's `RangeError` escape and answered
+  `503 unavailable`; it now answers `400 invalid-request`, as `/v1/queues` and `/v1/traces` already
+  did. No released version carries either defect.
 - **`kernel`, `queue-plugin`, `telemetry-plugin` — a stopped diagnostics reader no longer echoes an
   invented cursor.** After shutdown, `IApplication.diagnostics.read()`, the queue diagnostics source
   and the trace diagnostics source accepted ANY non-negative safe integer as `after` and returned it

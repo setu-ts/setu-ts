@@ -582,6 +582,96 @@ describe('Connector handler — authentication and binding', () => {
   });
 });
 
+describe('Connector handler — raw target and events cursor (M98b audit)', () => {
+  it('refuses a URL alias of a canonical target even when signed over the canonical form', async () => {
+    const { handler, key, source } = await buildHarness();
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
+    const snapshotsAfterPairing = source.snapshotCalls;
+    // Each alias normalizes to a canonical target under `new URL`: dot
+    // segments resolve, an empty query and a fragment drop. The signature
+    // covers the canonical form, so only the raw-target check can refuse it.
+    const aliases: readonly (readonly [string, string])[] = [
+      ['/v1/./snapshot', '/v1/snapshot'],
+      ['/v1/x/../snapshot', '/v1/snapshot'],
+      ['/v1/snapshot?', '/v1/snapshot'],
+      ['/v1/events?after=0&limit=1#frag', '/v1/events?after=0&limit=1'],
+    ];
+    let sequence = 2;
+    for (const [raw, canonical] of aliases) {
+      const mac = await signRequest(crypto.subtle, key, canonical, sequence, TEST_INSTANCE_ID);
+      const response = await handler(
+        fakeRequest({
+          url: `http://${HOST}${raw}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': String(sequence),
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      );
+      expect(inspect(response).status).toEqual(400);
+      expect(inspect(response).body).toEqual({ version: 1, error: 'invalid-request' });
+      sequence += 1;
+    }
+    expect(source.snapshotCalls).toEqual(snapshotsAfterPairing);
+    expect(source.readCalls).toEqual(0);
+    // Positive control: the canonical form is served on the same session.
+    const mac = await signRequest(crypto.subtle, key, '/v1/snapshot', sequence, TEST_INSTANCE_ID);
+    const served = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/snapshot`,
+        headers: {
+          host: HOST,
+          'x-setu-session': 'a'.repeat(32),
+          'x-setu-sequence': String(sequence),
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    expect(inspect(served).status).toEqual(200);
+  });
+
+  it('answers invalid-request for an events cursor the reader refuses, and rethrows anything else', async () => {
+    const { handler, key, source } = await buildHarness();
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
+    const sendEvents = async (sequence: number) => {
+      const target = '/v1/events?after=9&limit=1';
+      const mac = await signRequest(crypto.subtle, key, target, sequence, TEST_INSTANCE_ID);
+      return await handler(
+        fakeRequest({
+          url: `http://${HOST}${target}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': String(sequence),
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      );
+    };
+    // The M98a reader's documented refusal of a cursor beyond its sequence.
+    Object.assign(source, {
+      read: (): never => {
+        throw new RangeError('Invalid diagnostics cursor: beyond the current sequence.');
+      },
+    });
+    const refused = inspect(await sendEvents(2));
+    expect(refused.status).toEqual(400);
+    expect(refused.body).toEqual({ version: 1, error: 'invalid-request' });
+    // Any other failure is not a caller error and is not reported as one.
+    Object.assign(source, {
+      read: (): never => {
+        throw new TypeError('reader failure');
+      },
+    });
+    await expect(sendEvents(3)).rejects.toThrow('reader failure');
+  });
+});
+
 describe('Connector handler — projection hardening', () => {
   it('drops every forbidden canary field from the hostile provider DTO', async () => {
     const { handler, key } = await buildHarness({

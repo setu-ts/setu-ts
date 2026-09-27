@@ -14,6 +14,7 @@
 
 import type {
   ConfigDiagnosticsSnapshot,
+  DiagnosticsBatch,
   HandlerResult,
   HealthDiagnosticsSnapshot,
   IConfigDiagnosticsSource,
@@ -675,6 +676,15 @@ export function createConnectorHandler(
       if (target === null) {
         return rawRefusal(deps.limits, 'invalid-request');
       }
+      // `new URL` normalizes: it resolves dot segments and drops an empty
+      // query and a fragment, so `/v1/./snapshot`, `/v1/snapshot?` and
+      // `/v1/events?after=0&limit=1#x` all parse to a canonical target. The
+      // runtime hands over the request-target as the client sent it, so the
+      // raw URL must BE the canonical one — an alias is refused, never
+      // silently served as the operation it normalizes to.
+      if (request.url !== `http://${authority}${target.canonicalTarget}`) {
+        return rawRefusal(deps.limits, 'invalid-request');
+      }
       if (parsed.sessionId !== deps.session.sessionId) {
         return rawRefusal(deps.limits, 'unauthorized');
       }
@@ -751,7 +761,18 @@ export function createConnectorHandler(
         }
         projected = projectSnapshot(snapshot);
       } else if (target.op === 'events') {
-        const batch = deps.source.read(target.after, target.limit);
+        let batch: DiagnosticsBatch;
+        try {
+          batch = deps.source.read(target.after, target.limit);
+        } catch (error) {
+          // The reader's documented refusal of a cursor beyond its sequence
+          // (the parser has already bounded both parameters) is a caller
+          // error, answered as the queue and trace operations answer it.
+          if (error instanceof RangeError) {
+            return refusalResponse('invalid-request');
+          }
+          throw error;
+        }
         if (batch.version !== 1) {
           return refusalResponse('unsupported-version');
         }
