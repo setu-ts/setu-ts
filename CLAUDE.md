@@ -5315,7 +5315,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   modes. The first audit failed only because §10 listed what a design review must cover rather than
   recording one; the maintainer then had it recorded (adding a DNS-rebinding attacker, whose raw-
   socket probe proved the exact-`Host` check sufficient on its own, since a rebound same-origin GET
-  may omit `Origin`). Audit passed on re-audit of `aab0bd78` — complete (PR pending)
+  may omit `Origin`). Audit passed on re-audit of `aab0bd78` — complete (PR #374)
 - **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
   security review and implementation audit required).
 
