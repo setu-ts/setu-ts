@@ -9,6 +9,7 @@
  */
 
 import type {
+  AuthorizationDiagnosticsBatch,
   CacheDiagnosticsResponse,
   ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
@@ -315,6 +316,25 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   events(): Promise<EventDiagnosticsResponse>;
+  /**
+   * Reads the next bounded page of authorization decision explanations
+   * through the signed protocol (M98h). Performs the `/v1/status` pairing
+   * exchange first if the session has not yet been bound.
+   *
+   * The cursor follows the M98a contract: `0` starts at the oldest retained
+   * decision, `lost` is per batch, and an empty page echoes the cursor. When
+   * the negotiated inspector manifest reports the authorization inspector as
+   * unsupported, a frozen typed `unsupported` batch echoing the cursor is
+   * returned WITHOUT sending an addon request.
+   *
+   * @param after - Sequence cursor; `0` starts at the oldest retained decision
+   * @param limit - Maximum decisions, 1–128 (default 128)
+   * @returns The frozen authorization batch projection
+   * @throws {Error} For invalid arguments, and under the same conditions as
+   * {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  authorization(after: number, limit?: number): Promise<AuthorizationDiagnosticsBatch>;
   /**
    * Closes the client: aborts pending fetches, drops key references, and
    * rejects subsequent calls with a fixed error. Idempotent.

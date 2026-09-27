@@ -14,6 +14,7 @@
  */
 
 import type {
+  IAuthorizationDiagnosticsSource,
   ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
   IEventDiagnosticsSource,
@@ -178,6 +179,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       CAPABILITIES.QUEUE_DIAGNOSTICS,
       CAPABILITIES.TRACE_DIAGNOSTICS,
       CAPABILITIES.EVENTS_DIAGNOSTICS,
+      CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
     ],
 
     register(ctx: IPluginContext): void {
@@ -211,6 +213,22 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       traceSource = ctx.services.has(CAPABILITIES.TRACE_DIAGNOSTICS)
         ? ctx.services.get<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS)
         : null;
+
+      // The optional authorization-diagnostics source (M98h): resolved once,
+      // during registration, through its declared optional capability. A
+      // single source — the AuthPlugin always registers exactly one, and the
+      // kernel admits one provider of the token. Absent means no auth plugin
+      // at all, and the connector answers a typed `unsupported` batch. An
+      // auth plugin without the observation option still registers a
+      // source, which answers `disabled`; with the option but without RBAC
+      // it answers `unsupported`. A read never evaluates a role, permission or wildcard,
+      // and neither fails startup.
+      const authorizationSource: IAuthorizationDiagnosticsSource | null =
+        ctx.services.has(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS)
+          ? ctx.services.get<IAuthorizationDiagnosticsSource>(
+            CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+          )
+          : null;
 
       // The optional configuration provenance source (M98e): the same shape.
       // An absent source means no ConfigPlugin is registered and the
@@ -300,6 +318,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           queues: merger,
           traces: traceSource,
           eventSources,
+          authorization: authorizationSource,
         });
         // The devtool's own startup line. Without it the runtime prints a
         // bare `Listening on http://127.0.0.1:<port>/`, which in an

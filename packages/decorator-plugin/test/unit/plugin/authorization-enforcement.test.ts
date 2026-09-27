@@ -391,3 +391,110 @@ describe('DecoratorPlugin authorization enforcement (X18-3)', () => {
     expect(asRouteDef(routes[0].route).middleware).toBeUndefined();
   });
 });
+
+describe('authorization middleware evaluation fidelity (M98h)', () => {
+  /**
+   * A recording authorization service: counts every call so a test can prove
+   * the middleware evaluated exactly the calls its decision describes — no
+   * fabricated branch, no re-evaluation.
+   */
+  function recordingAuthorization(options: {
+    roles?: readonly string[];
+    permissions?: readonly string[];
+  }): IAuthorizationService & {
+    calls: {
+      hasRole: number;
+      hasPermission: number;
+      hasAnyRole: number;
+      hasAllPermissions: number;
+    };
+  } {
+    const calls = { hasRole: 0, hasPermission: 0, hasAnyRole: 0, hasAllPermissions: 0 };
+    const roles = options.roles ?? [];
+    const permissions = options.permissions ?? [];
+    return {
+      calls,
+      hasRole: (_principal, role) => {
+        calls.hasRole += 1;
+        return roles.includes(role);
+      },
+      hasPermission: (_principal, permission) => {
+        calls.hasPermission += 1;
+        return permissions.includes(permission);
+      },
+      hasAnyRole: (_principal, names) => {
+        calls.hasAnyRole += 1;
+        return names.some((role) => roles.includes(role));
+      },
+      hasAllPermissions: (_principal, names) => {
+        calls.hasAllPermissions += 1;
+        return names.every((permission) => permissions.includes(permission));
+      },
+    };
+  }
+
+  it('enforces @Roles through ONE compound hasAnyRole call, not one check per role', async () => {
+    const authorization = recordingAuthorization({ roles: ['viewer'] });
+    const middleware = createRolesMiddleware(['admin', 'editor', 'viewer']);
+    const { ctx, response } = fakeRequestContext({
+      user: { id: 'v', roles: ['viewer'] },
+      authorization,
+    });
+    await middleware(ctx, next);
+    expect(response.statuses).toEqual([]);
+    // The compound is one service call: an explanation built from the service
+    // sees the whole any-role evaluation, never a fabricated per-role fan-out.
+    expect(authorization.calls.hasAnyRole).toBe(1);
+    expect(authorization.calls.hasRole).toBe(0);
+  });
+
+  it('short-circuits a refused @Roles compound after the single hasAnyRole call', async () => {
+    const authorization = recordingAuthorization({ roles: [] });
+    const middleware = createRolesMiddleware(['admin', 'editor']);
+    const { ctx, response } = fakeRequestContext({
+      user: { id: 'v', roles: [] },
+      authorization,
+    });
+    await middleware(ctx, next);
+    expect(response.statuses).toEqual([403]);
+    expect(authorization.calls.hasAnyRole).toBe(1);
+  });
+
+  it('short-circuits @Permissions on the first satisfied check', async () => {
+    const authorization = recordingAuthorization({ permissions: ['read'] });
+    const middleware = createPermissionsMiddleware(['read', 'write', 'delete']);
+    const { ctx, response } = fakeRequestContext({
+      user: { id: 'v' },
+      authorization,
+    });
+    await middleware(ctx, next);
+    expect(response.statuses).toEqual([]);
+    // ANY-of: 'read' satisfied, so 'write' and 'delete' are never evaluated.
+    expect(authorization.calls.hasPermission).toBe(1);
+  });
+
+  it('evaluates each @Permissions check in order until one is satisfied', async () => {
+    const authorization = recordingAuthorization({ permissions: ['write'] });
+    const middleware = createPermissionsMiddleware(['read', 'write', 'delete']);
+    const { ctx, response } = fakeRequestContext({
+      user: { id: 'v' },
+      authorization,
+    });
+    await middleware(ctx, next);
+    expect(response.statuses).toEqual([]);
+    // 'read' fails, 'write' satisfies: exactly two evaluations, in order.
+    expect(authorization.calls.hasPermission).toBe(2);
+  });
+
+  it('evaluates every @Permissions check when none is satisfied', async () => {
+    const authorization = recordingAuthorization({ permissions: [] });
+    const middleware = createPermissionsMiddleware(['read', 'write']);
+    const { ctx, response } = fakeRequestContext({
+      user: { id: 'v' },
+      authorization,
+    });
+    await middleware(ctx, next);
+    expect(response.statuses).toEqual([403]);
+    expect(authorization.calls.hasPermission).toBe(2);
+  });
+});

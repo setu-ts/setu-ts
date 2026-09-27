@@ -4,7 +4,12 @@
  * @module
  */
 
-import type { IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import type {
+  IAuthorizationDiagnosticsSource,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+} from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IAuthStrategy, IPrincipal, ISessionService } from '@setu-ts/common';
 import type { AuthPluginOptions } from '../interfaces/index.ts';
@@ -15,6 +20,13 @@ import { JwtStrategy } from '../strategies/jwt-strategy.ts';
 import { ApiKeyStrategy } from '../strategies/api-key-strategy.ts';
 import { SessionStrategy } from '../strategies/session-strategy.ts';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
+import { attachAuthorizationObserver } from '../diagnostics/authorization-observer.ts';
+import {
+  AuthorizationObservationCollector,
+  compileAuthorizationDiagnosticsOptions,
+  createDisabledAuthorizationSource,
+  createUnsupportedAuthorizationSource,
+} from '../diagnostics/authorization-observation-collector.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -54,12 +66,21 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
 
   const algorithm = options.jwt.algorithm ?? (options.jwt.secret ? 'HS256' : 'RS256');
 
+  // Authorization decision explanations (M98h): the option is validated HERE,
+  // at construction, whether or not RBAC is configured — a malformed option
+  // refuses before any application exists rather than at `start()`, and is
+  // never silently accepted by a JWT-only registration.
+  const authorizationPolicy = options.authorizationDiagnostics === undefined
+    ? null
+    : compileAuthorizationDiagnosticsOptions(options.authorizationDiagnostics);
+
   return {
     name: 'auth-plugin',
     version: denoJson.version,
     provides: [
       CAPABILITIES.JWT,
       CAPABILITIES.AUTH,
+      CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
       ...(options.rbac === undefined ? [] : [CAPABILITIES.AUTHORIZATION]),
     ],
     // The session strategy reads the session service, but only when
@@ -181,13 +202,46 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       // Register services
       ctx.services.register(CAPABILITIES.JWT, jwtService);
       ctx.services.register(CAPABILITIES.AUTH, authService);
-      if (options.rbac !== undefined) {
-        ctx.services.register(CAPABILITIES.AUTHORIZATION, new RbacService(options.rbac));
+
+      // Authorization decision explanations (M98h). The AuthPlugin ALWAYS
+      // registers a source under CAPABILITIES.AUTHORIZATION_DIAGNOSTICS: a
+      // `disabled`-answering source without the option (whether or not RBAC
+      // is configured — the owning plugin's answer that observation was never
+      // opted into), an `unsupported` (`rbac-not-configured`) source when the
+      // option is present but RBAC is absent, and an active collector when
+      // both are present. The boolean IAuthorizationService remains
+      // authoritative and unchanged; a diagnostic failure can never alter an
+      // allow/deny or a guard's short-circuit order.
+      const rbacService = options.rbac === undefined ? null : new RbacService(options.rbac);
+      if (rbacService !== null) {
+        ctx.services.register(CAPABILITIES.AUTHORIZATION, rbacService);
       }
+      let authorizationSource: IAuthorizationDiagnosticsSource;
+      if (authorizationPolicy === null) {
+        authorizationSource = createDisabledAuthorizationSource();
+      } else if (rbacService === null) {
+        authorizationSource = createUnsupportedAuthorizationSource('rbac-not-configured');
+      } else {
+        const collector = new AuthorizationObservationCollector(
+          authorizationPolicy,
+          runtime,
+          ctx.services,
+          rbacService,
+        );
+        attachAuthorizationObserver(rbacService, collector);
+        authorizationSource = collector;
+      }
+      ctx.services.register(
+        CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+        authorizationSource,
+      );
 
       // Cleanup on close
       ctx.lifecycle.onClose(() => {
         // JwtService cached keys are GC'd when the service is dropped
+        if (authorizationSource instanceof AuthorizationObservationCollector) {
+          authorizationSource.close();
+        }
       });
     },
   };

@@ -5316,6 +5316,35 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   recording one; the maintainer then had it recorded (adding a DNS-rebinding attacker, whose raw-
   socket probe proved the exact-`Host` check sufficient on its own, since a rebound same-origin GET
   may omit `Origin`). Audit passed on re-audit of `aab0bd78` — complete (PR #374)
+- **Milestone 98h** (`packages/auth-plugin` + `packages/common` + `packages/kernel` +
+  `packages/diagnostics-plugin` — authorization decision explanations):
+  `AuthPlugin({ authorizationDiagnostics })` attaches a package-private observer (WeakMap-keyed by
+  the `RbacService` instance) to the first-party RBAC evaluator; the boolean `IAuthorizationService`
+  and every guard's status, body and short-circuit order are unchanged, and with no observer the
+  evaluator builds nothing. A decision carries only approved rule aliases (the distinct requested
+  set, first-requested order, at most 128), the fixed reason vocabulary, the true evaluated count (a
+  compound over 16 steps is retained with `stepsTruncated: true` and its first 16 steps) and
+  `ageMs`. A requested rule without an approved alias drops the decision (`droppedUnapproved`); an
+  unapproved GRANTING role is only omitted from `viaRoleAlias`. The option is validated when
+  `AuthPlugin(...)` is called, with or without `rbac`. The plugin always registers
+  `IAuthorizationDiagnosticsSource` under the eager `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`:
+  `disabled` without the option; `unsupported` latched terminal with `rbac-not-configured` /
+  `provider-identity-unavailable` / `custom-provider`. The provider is re-verified at every capture
+  and read through the new OPTIONAL non-resolving `IServiceRegistry.isCurrent?(token, instance)`,
+  implemented by the kernel `ServiceRegistry`, so a replacement is never explained from booleans.
+  The connector serves `GET /v1/authorization?after=N&limit=N`, the client `authorization()`, and
+  the status manifest reports `authorization: true`. Code review fixed a malformed option being
+  silently accepted without `rbac`, the no-option state answering `unsupported`, an empty compound
+  (`requireAnyRole([])`) that turned every later read into `collection-failed` with no way to page
+  past it, and a wire validator that let a compound present a partial trace as complete. The
+  security audit ran five rounds, each in a fresh context: round 1 found a Medium (the wire refused
+  every truncated compound over 16 rules, fixed in `a858afce`); round 3 found a Low (a request
+  repeating one rule more than 128 times bricked the inspector until eviction, fixed in `e9730627`
+  by de-duplicating aliases); round 4 passed with nothing open, and round 5 re-audited the merge
+  with `main` (M98i) and passed on `44789a1d`. PR review then caught `close()` rewinding the
+  sequence, so a closed source echoed an invented cursor as `next` — the defect #372 had just fixed
+  in the kernel, queue and trace readers — now refused as while running. Plan
+  `plans/archive/milestone-98h-authorization-explanations.md` — complete (PR #376).
 - **Milestone 98j** (`packages/events-plugin` + `packages/common` + `packages/diagnostics-plugin` —
   event dispatch observations): `EventsPlugin({ diagnostics })` attaches a bounded collector to the
   EXISTING dispatch path through a module-private WeakMap — no extra subscription and no change to
@@ -5333,8 +5362,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   accepted by the maintainer. The independent audit failed round 1 on three Lows (a late settlement
   re-creating state after close, `event.type` read twice, an overstated review row) and round 2 on a
   regression test that could not fail; round 3 passed on `d458975c` — complete (PR #375).
-- **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
-  security review and implementation audit required).
+- **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
+  design security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

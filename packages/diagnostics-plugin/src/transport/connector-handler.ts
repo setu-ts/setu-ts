@@ -13,12 +13,14 @@
  */
 
 import type {
+  AuthorizationDiagnosticsBatch,
   ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
   EventDiagnosticsResponse,
   EventDiagnosticsSnapshot,
   HandlerResult,
   HealthDiagnosticsSnapshot,
+  IAuthorizationDiagnosticsSource,
   ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
   IDiagnosticsSource,
@@ -44,6 +46,11 @@ import {
   projectEventSource,
   readEventSourceSnapshot,
 } from '../protocol/event-protocol.ts';
+import {
+  isAuthorizationBatchProjection,
+  projectAuthorizationBatch,
+  readAuthorizationSourceBatch,
+} from '../protocol/authorization-protocol.ts';
 import {
   isTraceBatchProjection,
   projectTraceBatch,
@@ -241,6 +248,16 @@ export interface ConnectorHandlerDeps {
    * publishes an event or invokes a handler.
    */
   readonly eventSources: readonly IEventDiagnosticsSource[];
+  /**
+   * The authorization-diagnostics source (M98h), resolved from
+   * `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS` during registration. `null` when
+   * the application did not register the AuthPlugin at all: the connector
+   * then answers a typed `unsupported` batch for `GET /v1/authorization` and
+   * never evaluates a role, permission or wildcard. An AuthPlugin without the
+   * option still registers a source, which answers `disabled`; one with the
+   * option but without RBAC answers `unsupported`.
+   */
+  readonly authorization: IAuthorizationDiagnosticsSource | null;
 }
 
 /**
@@ -764,6 +781,157 @@ function readEventProjection(
 }
 
 /**
+ * A value-free `unsupported` authorization batch: the connector's own answer
+ * when no authorization source is registered at all. The connector cannot
+ * distinguish a missing RBAC from a missing registry predicate or a replaced
+ * provider — only the owning plugin's source knows that — so it reports the
+ * fixed coverage `unknown`, the same way the trace connector reports
+ * `unknown` when no TelemetryPlugin is registered. The cursor is echoed so an
+ * empty page continues a poll.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @param after - The exclusive cursor of the request
+ * @returns The unsupported batch
+ * @internal
+ */
+function unsupportedAuthorizationBatch(
+  instanceId: string,
+  after: number,
+): AuthorizationDiagnosticsBatch {
+  return {
+    version: 1,
+    instanceId,
+    state: 'unsupported',
+    coverage: 'unknown',
+    decisions: [],
+    next: after,
+    lost: 0,
+    closed: false,
+    droppedUnapproved: 0,
+  };
+}
+
+/**
+ * A value-free `collection-failed` authorization batch: the registered source
+ * threw (or answered a shape the exact validator refused). Carries no error
+ * text, cause, or stack — a source failure must not change the
+ * application's behavior or disclose a fault.
+ *
+ * @param instanceId - The session's bound instance UUID
+ * @param after - The exclusive cursor of the request
+ * @returns The collection-failed batch
+ * @internal
+ */
+function collectionFailedAuthorizationBatch(
+  instanceId: string,
+  after: number,
+): AuthorizationDiagnosticsBatch {
+  return {
+    version: 1,
+    instanceId,
+    state: 'collection-failed',
+    decisions: [],
+    next: after,
+    lost: 0,
+    closed: false,
+    droppedUnapproved: 0,
+  };
+}
+
+/**
+ * The outcome of reading the authorization source: either a validated
+ * projection ready to sign, or a refusal code.
+ *
+ * @internal
+ */
+type AuthorizationReadOutcome =
+  | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
+  | {
+    readonly kind: 'refused';
+    readonly code: 'unsupported-version' | 'unauthorized' | 'invalid-request';
+  };
+
+/**
+ * Projects one of the connector's OWN value-free batches (unsupported or
+ * collection-failed) onto the wire shape.
+ */
+function projectOwnAuthorizationBatch(
+  batch: AuthorizationDiagnosticsBatch,
+  after: number,
+): AuthorizationReadOutcome {
+  const validated = readAuthorizationSourceBatch(batch, batch.instanceId, after, 1);
+  // The connector's own batches carry no decisions and always validate.
+  return { kind: 'projected', projected: projectAuthorizationBatch(validated!, batch.instanceId) };
+}
+
+/**
+ * Reads, projects and VALIDATES the authorization batch for the bound
+ * instance, isolating every failure mode to a typed, value-free answer:
+ *
+ * - no registered source → `unsupported` with the fixed coverage `unknown`:
+ *   only the owning plugin's source can name the specific reason
+ * - a `RangeError` from the source → `invalid-request`: the source's
+ *   documented refusal for a cursor beyond its sequence (the connector's
+ *   parser has already bounded `after` and `limit`), the same answer the
+ *   queue and trace operations give a cursor beyond their sequences
+ * - any other throw, or a DTO failing the exact validator →
+ *   `collection-failed`
+ * - a DTO for another version or another instance → the matching refusal
+ *
+ * The source is synchronous and never evaluates a role, permission or
+ * wildcard. The validator copies every field once — every list by index,
+ * never through the source's own iterator — and the wire validator runs
+ * again over that COPY, so nothing the connector signs was read twice or
+ * left unchecked.
+ *
+ * @param deps - The handler dependencies
+ * @param instanceId - The session's bound instance UUID
+ * @param after - The exclusive cursor of the request
+ * @param limit - The decision bound of the request
+ * @returns The projection to sign, or the refusal to answer
+ * @internal
+ */
+function readAuthorizationProjection(
+  deps: ConnectorHandlerDeps,
+  instanceId: string,
+  after: number,
+  limit: number,
+): AuthorizationReadOutcome {
+  if (deps.authorization === null) {
+    return projectOwnAuthorizationBatch(unsupportedAuthorizationBatch(instanceId, after), after);
+  }
+  try {
+    const batch = deps.authorization.read(instanceId, after, limit);
+    if (batch.version !== 1) {
+      return { kind: 'refused', code: 'unsupported-version' };
+    }
+    if (batch.instanceId !== instanceId) {
+      return { kind: 'refused', code: 'unauthorized' };
+    }
+    // The exact source validator: one malformed field refuses the whole
+    // batch, so nothing unvalidated reaches the signed frame.
+    const validated = readAuthorizationSourceBatch(batch, instanceId, after, limit);
+    if (validated !== null) {
+      const candidate = projectAuthorizationBatch(validated, instanceId);
+      // The wire validator — the SAME one the client runs — over the
+      // projection, before anything is signed.
+      if (isAuthorizationBatchProjection(candidate)) {
+        return { kind: 'projected', projected: candidate };
+      }
+    }
+  } catch (error) {
+    if (error instanceof RangeError) {
+      return { kind: 'refused', code: 'invalid-request' };
+    }
+    // any other throw: the value-free collection-failed answer below
+  }
+  return projectOwnAuthorizationBatch(
+    collectionFailedAuthorizationBatch(instanceId, after),
+    after,
+  );
+}
+
+/**
  * Creates the protocol handler the connector hands to the runtime-owned
  * listener factory.
  *
@@ -1017,6 +1185,25 @@ export function createConnectorHandler(
         } else {
           projected = outcome.projected;
         }
+      } else if (target.op === 'authorization') {
+        // The authorization operation (M98h). Every session and request
+        // check above ran before the source is called; the source is
+        // synchronous and never evaluates a role, permission or wildcard.
+        // The instance is bound by the auth path for every non-status target.
+        const boundInstance = deps.session.instanceId;
+        if (boundInstance === null) {
+          return refusalResponse('unauthorized');
+        }
+        const outcome = readAuthorizationProjection(
+          deps,
+          boundInstance,
+          target.after,
+          target.limit,
+        );
+        if (outcome.kind === 'refused') {
+          return refusalResponse(outcome.code);
+        }
+        projected = outcome.projected;
       } else {
         // The health operation (M98d). All session and request checks above
         // ran before the source is called; the source itself is synchronous

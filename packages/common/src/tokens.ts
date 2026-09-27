@@ -152,6 +152,17 @@ export const CAPABILITIES = {
    */
   TRACE_DIAGNOSTICS: 'trace-diagnostics',
   /**
+   * Authorization decision explanations (M98h) — an
+   * `IAuthorizationDiagnosticsSource` the AuthPlugin always registers under
+   * this token (a `disabled`-answering one when observation was not opted
+   * into; an `unsupported`-answering one when RBAC is absent, the registry
+   * lacks the non-resolving identity predicate, or the authorization provider
+   * was replaced). The DiagnosticsPlugin consumes it
+   * optionally to serve `GET /v1/authorization`. A read never evaluates a
+   * role, permission or wildcard, and never resolves a service.
+   */
+  AUTHORIZATION_DIAGNOSTICS: 'authorization-diagnostics',
+  /**
    * Minimized cache operation counters (M98i) — an `ICacheDiagnosticsSource`
    * every CachePlugin instance registers under this token with
    * `{ multi: true }`, without claiming it in `provides`, so named cache

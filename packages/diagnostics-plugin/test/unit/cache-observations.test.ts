@@ -338,6 +338,7 @@ async function harness(cacheSources: readonly ICacheDiagnosticsSource[]) {
     limits: new ConnectorLimits(clock),
     queues: new QueueObservationMerger([], clock),
     traces: null,
+    authorization: null,
     source: fakeSource(minimalSnapshot(), minimalBatch()),
     clock,
     healthSource: null,

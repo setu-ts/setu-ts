@@ -2325,48 +2325,50 @@ They still fail closed either way; what changed is that the refusal is legible.
 
 ### Exports
 
-| Export                              | File                                          | Description                                                                                     |
-| ----------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `AuthPlugin`                        | `src/plugin/auth-plugin.ts`                   | Plugin factory                                                                                  |
-| `AuthPluginOptions`                 | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies`)         |
-| `JwtOptions`                        | `src/interfaces/index.ts`                     | JWT config (key material, algorithm, expected aud/iss, header/scheme)                           |
-| `ApiKeyOptions`                     | `src/interfaces/index.ts`                     | API-key strategy config (header + `validate` callback)                                          |
-| `LocalOptions`                      | `src/interfaces/index.ts`                     | Local credential config (`verify` callback)                                                     |
-| `SessionAuthOptions`                | `src/interfaces/index.ts`                     | Session strategy config (required `toPrincipal` callback)                                       |
-| `PasswordHasher`                    | `src/services/password-hasher.ts`             | PBKDF2-SHA256 hash/verify utility                                                               |
-| `MalformedPasswordHashError`        | `src/services/password-hasher.ts`             | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash                       |
-| `authMiddleware`                    | `src/middleware/auth-middleware.ts`           | Global middleware: authenticates and populates `ctx.request.user`                               |
-| `requireAuth`                       | `src/guards/index.ts`                         | Guard: require an authenticated principal (401)                                                 |
-| `requireRole`                       | `src/guards/index.ts`                         | Guard: require a role (401/403)                                                                 |
-| `requirePermission`                 | `src/guards/index.ts`                         | Guard: require a permission (401/403)                                                           |
-| `requireAnyRole`                    | `src/guards/index.ts`                         | Guard: require any of the given roles                                                           |
-| `requireAllPermissions`             | `src/guards/index.ts`                         | Guard: require all of the given permissions                                                     |
-| `publicRoute`                       | `src/guards/index.ts`                         | Guard: explicitly allow unauthenticated access                                                  |
-| `RefreshTokenService`               | `src/services/refresh-token-service.ts`       | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                                       |
-| `RefreshTokenOptions`               | `src/services/refresh-token-service.ts`       | `RefreshTokenService` constructor options                                                       |
-| `TokenPair`                         | `src/services/refresh-token-service.ts`       | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                                   |
-| `RefreshTokenStore`                 | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                                       |
-| `RefreshTokenRecord`                | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                              |
-| `IRefreshTokenRotation`             | `src/stores/refresh-token-store.ts`           | Result of atomically rotating a refresh record                                                  |
-| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                        |
-| `IAccessTokenRevocationStore`       | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                             |
-| `MemoryAccessTokenRevocationStore`  | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                                   |
-| `rateLimitMiddleware`               | `src/middleware/rate-limit-middleware.ts`     | Fixed-window rate limiter middleware factory (429 short-circuit)                                |
-| `RateLimitOptions`                  | `src/middleware/rate-limit-middleware.ts`     | `rateLimitMiddleware(options)` parameter, including `exclude`                                   |
-| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | `src/middleware/rate-limit-middleware.ts`     | The six operational paths `exclude` exempts by default; spread it to extend rather than replace |
-| `RateLimitStore`                    | `src/stores/rate-limit-store.ts`              | Pluggable store interface (`increment`/`reset`)                                                 |
-| `RateLimitResult`                   | `src/stores/rate-limit-store.ts`              | `{ count, resetTime }` returned by `increment`                                                  |
-| `MemoryRateLimitStore`              | `src/stores/rate-limit-store.ts`              | Default in-memory fixed-window store                                                            |
-| `RedisRateLimitStore`               | `src/stores/redis-rate-limit-store.ts`        | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`), namespacing keys under `keyPrefix`       |
-| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | `src/stores/redis-rate-limit-store.ts`        | `'setu:ratelimit:'` — the namespace `RedisRateLimitStore` applies when no `keyPrefix` is given  |
-| `IAuthService`                      | re-export                                     | From `@setu-ts/common`                                                                          |
-| `IJwtService`                       | re-export                                     | From `@setu-ts/common`                                                                          |
-| `IAuthorizationService`             | re-export                                     | From `@setu-ts/common`                                                                          |
-| `IAuthStrategy`                     | re-export                                     | From `@setu-ts/common`                                                                          |
-| `IPrincipal`                        | re-export                                     | From `@setu-ts/common`                                                                          |
-| `JwtSignOptions`                    | re-export                                     | From `@setu-ts/common`                                                                          |
-| `RbacConfig`                        | re-export                                     | From `@setu-ts/common`                                                                          |
-| `RoleDefinition`                    | re-export                                     | From `@setu-ts/common`                                                                          |
+| Export                              | File                                          | Description                                                                                                          |
+| ----------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `AuthPlugin`                        | `src/plugin/auth-plugin.ts`                   | Plugin factory                                                                                                       |
+| `AuthPluginOptions`                 | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies` / `authorizationDiagnostics`) |
+| `AuthorizationDiagnosticsOptions`   | `src/interfaces/index.ts`                     | M98h opt-in for minimized authorization decision explanations through the diagnostics connector                      |
+| `IAuthorizationDiagnosticsSource`   | re-export                                     | From `@setu-ts/common` — the source AuthPlugin registers under `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`              |
+| `JwtOptions`                        | `src/interfaces/index.ts`                     | JWT config (key material, algorithm, expected aud/iss, header/scheme)                                                |
+| `ApiKeyOptions`                     | `src/interfaces/index.ts`                     | API-key strategy config (header + `validate` callback)                                                               |
+| `LocalOptions`                      | `src/interfaces/index.ts`                     | Local credential config (`verify` callback)                                                                          |
+| `SessionAuthOptions`                | `src/interfaces/index.ts`                     | Session strategy config (required `toPrincipal` callback)                                                            |
+| `PasswordHasher`                    | `src/services/password-hasher.ts`             | PBKDF2-SHA256 hash/verify utility                                                                                    |
+| `MalformedPasswordHashError`        | `src/services/password-hasher.ts`             | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash                                            |
+| `authMiddleware`                    | `src/middleware/auth-middleware.ts`           | Global middleware: authenticates and populates `ctx.request.user`                                                    |
+| `requireAuth`                       | `src/guards/index.ts`                         | Guard: require an authenticated principal (401)                                                                      |
+| `requireRole`                       | `src/guards/index.ts`                         | Guard: require a role (401/403)                                                                                      |
+| `requirePermission`                 | `src/guards/index.ts`                         | Guard: require a permission (401/403)                                                                                |
+| `requireAnyRole`                    | `src/guards/index.ts`                         | Guard: require any of the given roles                                                                                |
+| `requireAllPermissions`             | `src/guards/index.ts`                         | Guard: require all of the given permissions                                                                          |
+| `publicRoute`                       | `src/guards/index.ts`                         | Guard: explicitly allow unauthenticated access                                                                       |
+| `RefreshTokenService`               | `src/services/refresh-token-service.ts`       | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                                                            |
+| `RefreshTokenOptions`               | `src/services/refresh-token-service.ts`       | `RefreshTokenService` constructor options                                                                            |
+| `TokenPair`                         | `src/services/refresh-token-service.ts`       | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                                                        |
+| `RefreshTokenStore`                 | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                                                            |
+| `RefreshTokenRecord`                | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                                                   |
+| `IRefreshTokenRotation`             | `src/stores/refresh-token-store.ts`           | Result of atomically rotating a refresh record                                                                       |
+| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                                             |
+| `IAccessTokenRevocationStore`       | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                                                  |
+| `MemoryAccessTokenRevocationStore`  | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                                                        |
+| `rateLimitMiddleware`               | `src/middleware/rate-limit-middleware.ts`     | Fixed-window rate limiter middleware factory (429 short-circuit)                                                     |
+| `RateLimitOptions`                  | `src/middleware/rate-limit-middleware.ts`     | `rateLimitMiddleware(options)` parameter, including `exclude`                                                        |
+| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | `src/middleware/rate-limit-middleware.ts`     | The six operational paths `exclude` exempts by default; spread it to extend rather than replace                      |
+| `RateLimitStore`                    | `src/stores/rate-limit-store.ts`              | Pluggable store interface (`increment`/`reset`)                                                                      |
+| `RateLimitResult`                   | `src/stores/rate-limit-store.ts`              | `{ count, resetTime }` returned by `increment`                                                                       |
+| `MemoryRateLimitStore`              | `src/stores/rate-limit-store.ts`              | Default in-memory fixed-window store                                                                                 |
+| `RedisRateLimitStore`               | `src/stores/redis-rate-limit-store.ts`        | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`), namespacing keys under `keyPrefix`                            |
+| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | `src/stores/redis-rate-limit-store.ts`        | `'setu:ratelimit:'` — the namespace `RedisRateLimitStore` applies when no `keyPrefix` is given                       |
+| `IAuthService`                      | re-export                                     | From `@setu-ts/common`                                                                                               |
+| `IJwtService`                       | re-export                                     | From `@setu-ts/common`                                                                                               |
+| `IAuthorizationService`             | re-export                                     | From `@setu-ts/common`                                                                                               |
+| `IAuthStrategy`                     | re-export                                     | From `@setu-ts/common`                                                                                               |
+| `IPrincipal`                        | re-export                                     | From `@setu-ts/common`                                                                                               |
+| `JwtSignOptions`                    | re-export                                     | From `@setu-ts/common`                                                                                               |
+| `RbacConfig`                        | re-export                                     | From `@setu-ts/common`                                                                                               |
+| `RoleDefinition`                    | re-export                                     | From `@setu-ts/common`                                                                                               |
 
 ### Registration
 
@@ -4139,24 +4141,24 @@ sets both: either may be any finite number (a status is not necessarily a valid 
 the kernel omits a non-finite value rather than letting it serialize to `null`.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
-`{ health: true, configuration: true, queues: true, traces: true, authorization: false,
+`{ health: true, configuration: true, queues: true, traces: true, authorization: true,
 cache: true, events: false, scheduler: false, realtime: false, storage: false,
 outboundHttp: false }`
-(`configuration` is `true` since M98e, `queues` since M98f, `traces` since M98g and `cache` since
-M98i, all below) — and the connector serves a first inspector operation, `GET /v1/health`. The
-client reads it through `client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector
-resolves the optional health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration:
-an absent source answers a typed `unsupported` snapshot (no indicator runs, startup never fails), a
-registered-but-disabled source answers `disabled`, and a throwing source answers a value-free
-`collection-failed` snapshot — as does a source whose projected DTO fails the exact validator (an
-unknown enum, a non-finite or negative measurement, an oversized alias, more than 64 observations, a
-malformed shape), so nothing unvalidated is ever signed — none of which changes the application's
-readiness. The snapshot is the health plugin's minimized DTO (approved alias, framework status,
-outcome state, monotonic timing only — no indicator `data`, no error text, no absolute time),
-projected field-by-field and bounded by the same 256 KiB response ceiling as every other operation.
-A client paired against a legacy M98b status body (no manifest) resolves all inspectors to `false`
-and its `health()` answers `unsupported` without sending the request. The full wire shape is in
-`docs/diagnostics-protocol.md`.
+(`configuration` is `true` since M98e, `queues` since M98f, `traces` since M98g, `cache` since M98i
+and `authorization` since M98h, all below) — and the connector serves a first inspector operation,
+`GET /v1/health`. The client reads it through `client.health(): Promise<HealthDiagnosticsSnapshot>`.
+The connector resolves the optional health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at
+registration: an absent source answers a typed `unsupported` snapshot (no indicator runs, startup
+never fails), a registered-but-disabled source answers `disabled`, and a throwing source answers a
+value-free `collection-failed` snapshot — as does a source whose projected DTO fails the exact
+validator (an unknown enum, a non-finite or negative measurement, an oversized alias, more than 64
+observations, a malformed shape), so nothing unvalidated is ever signed — none of which changes the
+application's readiness. The snapshot is the health plugin's minimized DTO (approved alias,
+framework status, outcome state, monotonic timing only — no indicator `data`, no error text, no
+absolute time), projected field-by-field and bounded by the same 256 KiB response ceiling as every
+other operation. A client paired against a legacy M98b status body (no manifest) resolves all
+inspectors to `false` and its `health()` answers `unsupported` without sending the request. The full
+wire shape is in `docs/diagnostics-protocol.md`.
 
 **Queue observations (M98f).** The connector serves `GET /v1/queues?after=<N>&limit=<N>` (the same
 canonical query grammar as `/v1/events`), read through
@@ -4239,6 +4241,41 @@ whose negotiated manifest has `traces: false` answers that frozen batch, echoing
 sending the request. `IDiagnosticsClient.traces` is a new REQUIRED member — additive for callers; a
 structural implementation of `IDiagnosticsClient` must add it (the package has not yet been
 published).
+
+**Authorization decision explanations (M98h).** The connector serves
+`GET /v1/authorization?after=<N>&limit=<N>` (the same canonical query grammar as `/v1/events`), read
+through
+`client.authorization(after: number, limit?: number): Promise<AuthorizationDiagnosticsBatch>` — same
+argument bounds as `read()`. `AuthPlugin` ALWAYS registers one `IAuthorizationDiagnosticsSource`
+under `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`: without its `authorizationDiagnostics` option it
+answers `disabled`; with the option it observes the first-party `RbacService` — the boolean
+`IAuthorizationService` surface and every guard's status, body and short-circuit behaviour are
+unchanged — and answers `no-data`/`ready` while it does. The observer records, per decision, only
+the approved role and permission aliases (raw names, principal identifiers, request paths and error
+text are never retained), the per-step outcome, the fixed reason vocabulary, the evaluation count
+actually performed — a compound that short-circuits reports the steps it really took, never a
+fabricated full sweep — `stepsTruncated` (a compound over 16 steps is RETAINED with its real result
+and the true `stepsEvaluated`, its step list holding only the first 16), and `ageMs`. `ruleAliases`
+is the set of DISTINCT requested rules in first-requested order (at most 128); `stepsEvaluated`
+counts every evaluated occurrence, so a request repeating a rule may report more evaluated steps
+than it names rules. A decision whose requested rule lacks an approved alias is dropped before
+buffering and counted in a saturating `droppedUnapproved`; partial rule lists are never emitted. An
+unapproved granting role never drops a decision — it is omitted, leaving no `viaRoleAlias`. The
+source re-verifies its provider at read time through the new optional
+`IServiceRegistry.isCurrent?(token, instance)` identity predicate — non-resolving, never returning a
+service, never instantiating a lazy factory — and LATCHES `unsupported` terminal:
+`coverage:
+'provider-identity-unavailable'` when the registry lacks the predicate,
+`coverage: 'custom-provider'` when the current `CAPABILITIES.AUTHORIZATION` provider is not the
+exact `RbacService` instance the plugin created. A direct custom-service decision is never guessed
+from booleans or status; latching clears retained state and never resumes. A source that throws or
+fails the exact validator answers `collection-failed`; a client whose negotiated manifest has
+`authorization: false` answers the frozen `unsupported` batch, echoing its cursor, without sending
+the request. `IDiagnosticsClient.authorization` is a new REQUIRED member — additive for callers; a
+structural implementation of `IDiagnosticsClient` must add it (the package has not yet been
+published). `IServiceRegistry.isCurrent` is OPTIONAL so third-party registry-shaped implementations
+keep compiling; its absence conservatively disables explanations rather than falling back to a
+resolving `get`.
 
 **Event dispatch observations (M98j).** The connector serves `GET /v1/event` — a SNAPSHOT operation
 with no query, unlike the paged kernel-event stream `/v1/events` (one letter apart; the manifest key
@@ -10243,6 +10280,31 @@ the connector's merged DTOs are `QueueDiagnosticsBatch`, `QueueDiagnosticsSource
 member is a bounded primitive or an approved alias: no payload, header, raw job id, claim token,
 credential or error text is expressible. See [Queue observations](#queue-observations-m98f) and
 `docs/diagnostics-protocol.md`.
+
+**Authorization observation contracts (M98h).** `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`
+(`'authorization-diagnostics'`) is a SINGLE-provider token: the AuthPlugin always registers one
+`IAuthorizationDiagnosticsSource` (`read(instanceId, after, limit?): AuthorizationDiagnosticsBatch`
+— synchronous, requires a non-empty instance id the batch must match, M98a cursor contract over a
+1,024-decision ring, `limit` 1–128, throws the fixed value-free `RangeError` for a bad instance, a
+bad cursor, or a cursor beyond the source's sequence). The DTOs are `AuthorizationDiagnosticsBatch`,
+`AuthorizationDecisionObservation` and `AuthorizationDecisionStep`; the closed vocabularies are
+`AuthorizationSourceState`, `AuthorizationCoverage` (`rbac-not-configured` /
+`provider-identity-unavailable` / `custom-provider` / `unknown`), `AuthorizationDecisionOperation`
+and `AuthorizationDecisionReason`. Every member is a bounded primitive or an application-approved
+alias: no principal identifier, role or permission value, request path, raw rule, credential or
+error text is expressible, and a step count is a count only — it never carries a rule name that was
+not approved. See the diagnostics-connector section and `docs/diagnostics-protocol.md`.
+
+**Registry current-provider identity (M98h).** `IServiceRegistry` gains one OPTIONAL method,
+`isCurrent?(token, instance): boolean` — a non-resolving identity predicate that reports whether
+`instance` is still the registration `get` would select for `token`, without resolving a lazy
+factory, enumerating services, or returning the current value. `ServiceRegistry` implements it as an
+identity comparison (request-scoped children delegate to their parent). It is optional on purpose:
+third-party registry-shaped implementations keep compiling, and a consumer that needs a
+current-provider check must treat an absent `isCurrent` as "cannot verify" — never as a fallback to
+a resolving `get`, which could instantiate a custom lazy service. The M98h authorization source is
+the first consumer: its absence latches `provider-identity-unavailable` and a false result latches
+`custom-provider`, both terminal.
 
 ### Ingress behaviours
 
