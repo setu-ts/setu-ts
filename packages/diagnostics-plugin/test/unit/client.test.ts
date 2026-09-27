@@ -86,6 +86,8 @@ function fakeServer(
     healthBody?: Record<string, unknown>;
     /** The body to serve for `/v1/config`; defaults to a ready snapshot. */
     configBody?: Record<string, unknown>;
+    /** The body to serve for `/v1/cache`; defaults to a one-source ready response. */
+    cacheBody?: Record<string, unknown>;
     /** The body to serve for `/v1/queues`; defaults to a one-event batch. */
     queuesBody?: (after: number) => Record<string, unknown>;
     /** The body to serve for `/v1/traces`; defaults to a one-record batch. */
@@ -195,6 +197,8 @@ function fakeServer(
             droppedEntries: 0,
           },
         );
+      } else if (target === '/v1/cache') {
+        bodyText = JSON.stringify(overrides.cacheBody ?? cacheResponseBody());
       } else if (url.pathname === '/v1/queues') {
         const after = Number(url.searchParams.get('after'));
         bodyText = JSON.stringify((overrides.queuesBody ?? queueBatchBody)(after));
@@ -701,6 +705,104 @@ describe('Client — health negotiation (M98d)', () => {
     expect(Object.isFrozen(health.observations[0])).toBe(true);
     client.close();
   });
+});
+
+/** A ready one-source cache response (M98i). */
+function cacheResponseBody(): Record<string, unknown> {
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    sources: [{
+      sourceId: 's1',
+      snapshot: {
+        state: 'ready',
+        alias: 'primary',
+        coverage: 'owned-instance',
+        records: [{
+          alias: 'primary',
+          operation: 'get',
+          count: 2,
+          lastDurationMs: 1,
+          ageMs: 3,
+          succeeded: 1,
+          failed: 1,
+          hits: 1,
+          misses: 0,
+          present: 0,
+          absent: 0,
+          removed: 0,
+          notRemoved: 0,
+        }],
+        dropped: 0,
+      },
+    }],
+  };
+}
+
+describe('Client — cache negotiation (M98i)', () => {
+  it('reads the cache response through the signed exchange and deep-freezes it', async () => {
+    const { client, requests } = buildClient();
+    const response = await client.cache();
+    expect(response.state).toEqual('ready');
+    expect(response.sources[0]!.snapshot.records[0]).toMatchObject({ succeeded: 1, failed: 1 });
+    expect(requests.map((r) => r.target)).toEqual(['/v1/status', '/v1/cache']);
+    expect(Object.isFrozen(response.sources[0]!.snapshot.records[0])).toBe(true);
+    client.close();
+  });
+
+  it('answers unsupported WITHOUT a request when the manifest cache key is false', async () => {
+    const noCache = { ...currentInspectorsManifest(), cache: false };
+    const { client, requests } = buildClient({ server: { statusInspectors: noCache } });
+    const response = await client.cache();
+    expect(response).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'unsupported',
+      sources: [],
+    });
+    expect(Object.isFrozen(response)).toBe(true);
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  it('never probes the route when paired against the legacy status body', async () => {
+    const { client, requests } = buildClient({ server: { legacyStatus: true } });
+    expect((await client.cache()).state).toEqual('unsupported');
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  const hostile: ReadonlyArray<[string, (body: Record<string, unknown>) => void]> = [
+    ['a missing outcome field', (b) => {
+      const record = ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!;
+      delete record.failed;
+    }],
+    ['an extra record field', (b) => {
+      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!.key = 'canary-key';
+    }],
+    ['an invalid operation', (b) => {
+      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!.operation = 'evict';
+    }],
+    ['a wrong aggregate state', (b) => {
+      b.state = 'no-data';
+    }],
+    ['a different instance', (b) => {
+      b.instanceId = '00000000-0000-4000-8000-000000000000';
+    }],
+  ];
+  for (const [name, mutate] of hostile) {
+    it(`refuses a correctly signed body carrying ${name}`, async () => {
+      const body = cacheResponseBody();
+      mutate(body);
+      const { client } = buildClient({ server: { cacheBody: body } });
+      await expect(client.cache()).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
 });
 
 describe('Client — configuration negotiation (M98e)', () => {

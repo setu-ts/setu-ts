@@ -192,7 +192,11 @@ export function isCacheSnapshotProjection(value: unknown): value is CacheDiagnos
     return false;
   }
   const disabled = value.state === 'disabled';
-  if (disabled ? value.alias !== null : !isDisplayAlias(value.alias)) {
+  // A disabled source has no alias; a collection-failed one may carry its
+  // own approved alias or none (the connector's fixed failed snapshot); every
+  // other state carries its approved alias.
+  const aliasAllowedNull = disabled || value.state === 'collection-failed';
+  if (value.alias === null ? !aliasAllowedNull : disabled || !isDisplayAlias(value.alias)) {
     return false;
   }
   const records = value.records;
