@@ -2611,6 +2611,45 @@ root, or unknown — and no global clock is implied: `ageMs` is arrival age at o
 stays authoritative: unsampled spans never complete through a processor, and the batch reports the
 configured sampler so partial traces stay visible as partial.
 
+### Authorization Decision Explanation Boundary (Milestone 98h)
+
+Authorization decision explanations apply the pattern to the first-party RBAC evaluator, with two
+structural differences that make the boundary stricter than every inspector before it.
+
+The first is the observation SEAM. The `RbacService` is framework-owned, but its public surface is
+four synchronous boolean methods (`IAuthorizationService`) that every guard, decorator middleware
+and direct consumer calls — and the boolean IS the answer. There is no side channel to hook: the
+evaluation must be refactored so that the SAME code path that produces the boolean also emits one
+guarded decision observation, and the refactor is proven by the guards' byte-identical status/body
+and short-circuit behaviour. The observer is stored in a package-private `WeakMap` keyed by the
+`RbacService` instance and attached only when the `authorizationDiagnostics` option is passed, so a
+JWT-only registration and a registration with RBAC but no option are both unobserved with zero
+runtime cost. Minimization is structural: the evaluator hands the observer an approved alias (or
+nothing), the fixed reason, and the step it just ran — its signatures cannot accept a principal, a
+request, a raw rule name, a credential or an error. A compound that short-circuits emits exactly the
+steps it evaluated (at most 16 retained, the true count in `stepsEvaluated`, `stepsTruncated` `true`
+when more ran), never a fabricated full sweep; a decision whose requested or granting rule lacks an
+approved alias is dropped BEFORE buffering and counted in a saturating `droppedUnapproved` counter,
+so partial rule lists are never emitted.
+
+The second is the TRUST boundary. The `CAPABILITIES.AUTHORIZATION` provider is replaceable — an
+application may register its own `IAuthorizationService` after the AuthPlugin, and the guards will
+enforce through it. The observer can therefore see a decision it did not produce, and a decision it
+did produce may no longer be authoritative. The source never guesses: before buffering it checks,
+and before every read it re-checks, that the current provider is still the exact `RbacService`
+instance it created, through the new OPTIONAL `IServiceRegistry.isCurrent?(token, instance)`
+identity predicate — non-resolving (it never instantiates a lazy factory), non-enumerating, and
+returning a boolean only. A registry without the predicate latches the source to
+`unsupported`/`provider-identity-unavailable`; a false result latches `custom-provider`. Both
+latches are terminal: the source detaches, clears retained state, and never resumes even if startup
+code later restores the old registration. Keeping the predicate optional means third-party
+registry-shaped implementations keep compiling, and a consumer that needs a current-provider check
+must treat its absence as "cannot verify" rather than falling back to a resolving `get`.
+
+The connector consumes the source to serve `GET /v1/authorization` with the identical projection,
+validation, bounding, and failure isolation as every other inspector; the full wire shape is in
+`docs/diagnostics-protocol.md`.
+
 ---
 
 ## 15. Performance Philosophy

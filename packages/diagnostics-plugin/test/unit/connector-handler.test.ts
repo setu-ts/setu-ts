@@ -11,12 +11,14 @@ import { expect } from '@std/expect';
 import type {
   ConfigDiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
+  IAuthorizationDiagnosticsSource,
   IConfigDiagnosticsSource,
   IResponse,
   ITraceDiagnosticsSource,
 } from '@setu-ts/common';
 import { createConnectorHandler, refusalResponse } from '../../src/transport/connector-handler.ts';
 import { currentInspectorsManifest, projectConfigSnapshot } from '../../src/protocol/protocol.ts';
+import { isAuthorizationBatchProjection } from '../../src/protocol/authorization-protocol.ts';
 import { isTraceBatchProjection } from '../../src/protocol/trace-protocol.ts';
 import { ConnectorLimits } from '../../src/transport/limits.ts';
 import { QueueObservationMerger } from '../../src/transport/queue-merger.ts';
@@ -123,6 +125,7 @@ async function buildHarness(options?: {
     limits: new ConnectorLimits(clock),
     queues: new QueueObservationMerger([], clock),
     traces: null,
+    authorization: null,
     source,
     clock,
     healthSource: null,
@@ -570,6 +573,7 @@ describe('Connector handler — authentication and binding', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -683,6 +687,7 @@ describe('Connector handler — projection hardening', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      authorization: null,
       source: throwingSource,
       clock,
       healthSource: null,
@@ -756,6 +761,7 @@ describe('Connector handler — health operation (M98d)', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: { snapshot: () => healthSnapshot },
@@ -792,6 +798,7 @@ describe('Connector handler — health operation (M98d)', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: {
@@ -842,6 +849,7 @@ describe('Connector handler — health operation (M98d)', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
@@ -1157,6 +1165,7 @@ describe('Connector handler — remaining structural arms', () => {
       limits,
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -1201,6 +1210,7 @@ describe('Connector handler — remaining structural arms', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -1585,6 +1595,7 @@ describe('Connector handler — queue observations (M98f)', () => {
       limits: new ConnectorLimits(clock),
       queues,
       traces: null,
+      authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -1728,6 +1739,7 @@ describe('Connector handler — trace observations (M98g)', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces,
+      authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -1862,5 +1874,184 @@ describe('Connector handler — trace observations (M98g)', () => {
     };
     const harness = await traceHarness(foreign);
     expect((await sendTraces(harness, 'after=0&limit=1')).status).toEqual(401);
+  });
+});
+
+describe('Connector handler — authorization explanations (M98h)', () => {
+  /** A well-formed authorization source batch at the requested cursor. */
+  function authorizationBatch(instanceId: string, after: number): Record<string, unknown> {
+    return {
+      version: 1,
+      instanceId,
+      state: 'ready',
+      decisions: [{
+        sequence: after + 1,
+        id: 'd1',
+        operation: 'role',
+        result: true,
+        ruleAliases: ['A'],
+        steps: [{ ruleAlias: 'A', reason: 'direct-role' }],
+        stepsEvaluated: 1,
+        stepsTruncated: false,
+        reason: 'direct-role',
+        policyRevision: 'rev-1',
+        ageMs: 6,
+      }],
+      next: after + 1,
+      lost: 0,
+      closed: false,
+      droppedUnapproved: 0,
+    };
+  }
+
+  async function authorizationHarness(authorization: IAuthorizationDiagnosticsSource | null) {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      queues: new QueueObservationMerger([], clock),
+      traces: null,
+      authorization,
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: null,
+      configSource: null,
+    });
+    return { handler, key, clock };
+  }
+
+  async function sendAuthorization(
+    harness: Awaited<ReturnType<typeof authorizationHarness>>,
+    search: string,
+    options: { sequence?: number; mac?: string; instance?: string } = {},
+  ) {
+    const target = `/v1/authorization?${search}`;
+    const sequence = options.sequence ?? 2;
+    const instance = options.instance ?? TEST_INSTANCE_ID;
+    const mac = options.mac ??
+      await signRequest(crypto.subtle, harness.key, target, sequence, instance);
+    return inspect(
+      await harness.handler(
+        fakeRequest({
+          url: `http://${HOST}${target}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': String(sequence),
+            'x-setu-instance': instance,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+  }
+
+  it('serves a signed, exactly-projected authorization batch from the source', async () => {
+    const source: IAuthorizationDiagnosticsSource = {
+      read: (instanceId, after) => authorizationBatch(instanceId, after) as never,
+    };
+    const harness = await authorizationHarness(source);
+    const view = await sendAuthorization(harness, 'after=0&limit=128');
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('ready');
+    expect(isAuthorizationBatchProjection(view.body)).toBe(true);
+    const mac = view.headers.get('x-setu-mac')!;
+    const digest = await sha256Hex(crypto.subtle, utf8(view.bodyText));
+    expect(
+      await verifyFields(crypto.subtle, harness.key, mac, [
+        'setu-diagnostics-v1',
+        'response',
+        'a'.repeat(32),
+        TEST_INSTANCE_ID,
+        '2',
+        '/v1/authorization?after=0&limit=128',
+        '200',
+        digest,
+      ]),
+    ).toBe(true);
+  });
+
+  it('answers a typed unsupported batch when no authorization source is registered', async () => {
+    const harness = await authorizationHarness(null);
+    const view = await sendAuthorization(harness, 'after=7&limit=16');
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('unsupported');
+    expect(view.body.coverage).toEqual('unknown');
+    expect(view.body.next).toEqual(7);
+    expect(isAuthorizationBatchProjection(view.body)).toBe(true);
+  });
+
+  it('answers collection-failed when the source throws, and reads it only after authentication', async () => {
+    let reads = 0;
+    const source: IAuthorizationDiagnosticsSource = {
+      read: () => {
+        reads += 1;
+        throw new Error('hostile source');
+      },
+    };
+    const harness = await authorizationHarness(source);
+    // Bad MAC: refused before the source is ever read.
+    expect((await sendAuthorization(harness, 'after=0&limit=1', { mac: 'f'.repeat(64) })).status)
+      .toEqual(401);
+    expect(reads).toEqual(0);
+    const view = await sendAuthorization(harness, 'after=0&limit=1');
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('collection-failed');
+    expect(JSON.stringify(view.body).includes('hostile')).toBe(false);
+  });
+
+  it('answers invalid-request for a cursor beyond the source sequence (the RangeError contract)', async () => {
+    const source: IAuthorizationDiagnosticsSource = {
+      read: (_instance, after) => {
+        if (after > 3) {
+          throw new RangeError('Authorization diagnostics: after is beyond the retained sequence.');
+        }
+        return authorizationBatch(TEST_INSTANCE_ID, after) as never;
+      },
+    };
+    const harness = await authorizationHarness(source);
+    const refused = await sendAuthorization(harness, 'after=9&limit=1');
+    expect(refused.status).toEqual(400);
+    expect(refused.body).toEqual({ version: 1, error: 'invalid-request' });
+    const served = await sendAuthorization(harness, 'after=0&limit=1', { sequence: 3 });
+    expect(served.status).toEqual(200);
+  });
+
+  it('refuses a source DTO for another instance as unauthorized', async () => {
+    const foreign: IAuthorizationDiagnosticsSource = {
+      read: () => authorizationBatch('0'.repeat(32) + 'x', 0) as never,
+    };
+    const harness = await authorizationHarness(foreign);
+    expect((await sendAuthorization(harness, 'after=0&limit=1')).status).toEqual(401);
+  });
+
+  it('refuses a source DTO whose shape fails the exact validator as collection-failed', async () => {
+    const broken: IAuthorizationDiagnosticsSource = {
+      read: (instanceId, after) =>
+        ({
+          ...authorizationBatch(instanceId, after),
+          decisions: [{
+            sequence: after + 1,
+            id: 'd0',
+            operation: 'role',
+            result: true,
+            ruleAliases: ['A'],
+            steps: [],
+            stepsEvaluated: 1,
+            stepsTruncated: false,
+            reason: 'direct-role',
+            ageMs: 6,
+          }],
+        }) as never,
+    };
+    const harness = await authorizationHarness(broken);
+    const view = await sendAuthorization(harness, 'after=0&limit=1');
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('collection-failed');
   });
 });

@@ -62,3 +62,9 @@ describe('CAPABILITIES — M98g trace diagnostics', () => {
     expect(CAPABILITIES.TRACE_DIAGNOSTICS).toBe('trace-diagnostics');
   });
 });
+
+describe('CAPABILITIES — M98h authorization diagnostics', () => {
+  it('exposes the eager authorization-diagnostics token in kebab-case', () => {
+    expect(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS).toBe('authorization-diagnostics');
+  });
+});

@@ -106,10 +106,17 @@ describe('AuthPlugin', () => {
 
     await plugin.register!(ctx);
 
-    expect(plugin.provides).toEqual([CAPABILITIES.JWT, CAPABILITIES.AUTH]);
+    expect(plugin.provides).toEqual([
+      CAPABILITIES.JWT,
+      CAPABILITIES.AUTH,
+      CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+    ]);
     expect(registered.has(CAPABILITIES.JWT)).toBe(true);
     expect(registered.has(CAPABILITIES.AUTH)).toBe(true);
     expect(registered.has(CAPABILITIES.AUTHORIZATION)).toBe(false);
+    // The authorization-diagnostics source is always registered, even without
+    // RBAC — it answers `unsupported` (rbac-not-configured).
+    expect(registered.has(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS)).toBe(true);
   });
 
   it('returns a plugin with correct name and version', () => {

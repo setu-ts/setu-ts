@@ -90,6 +90,8 @@ function fakeServer(
     queuesBody?: (after: number) => Record<string, unknown>;
     /** The body to serve for `/v1/traces`; defaults to a one-record batch. */
     tracesBody?: (after: number) => Record<string, unknown>;
+    /** The body to serve for `/v1/authorization`; defaults to a one-decision batch. */
+    authorizationBody?: (after: number) => Record<string, unknown>;
   } = {},
 ): { fetch: typeof fetch; requests: RecordedRequest[] } {
   const requests: RecordedRequest[] = [];
@@ -185,6 +187,11 @@ function fakeServer(
       } else if (url.pathname === '/v1/traces') {
         const after = Number(url.searchParams.get('after'));
         bodyText = JSON.stringify((overrides.tracesBody ?? traceBatchBody)(after));
+      } else if (url.pathname === '/v1/authorization') {
+        const after = Number(url.searchParams.get('after'));
+        bodyText = JSON.stringify(
+          (overrides.authorizationBody ?? authorizationBatchBody)(after),
+        );
       } else {
         bodyText = JSON.stringify(minimalBatch());
       }
@@ -311,6 +318,31 @@ function traceBatchBody(after: number): Record<string, unknown> {
     lost: 0,
     closed: false,
     droppedSpans: 0,
+  };
+}
+
+/** A well-formed one-decision authorization batch for the fake server. */
+function authorizationBatchBody(after: number): Record<string, unknown> {
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    decisions: [{
+      sequence: after + 1,
+      id: `d${after + 1}`,
+      operation: 'role',
+      result: true,
+      ruleAliases: ['A'],
+      steps: [{ ruleAlias: 'A', reason: 'direct-role' }],
+      stepsEvaluated: 1,
+      stepsTruncated: false,
+      reason: 'direct-role',
+      ageMs: 2,
+    }],
+    next: after + 1,
+    lost: 0,
+    closed: false,
+    droppedUnapproved: 0,
   };
 }
 
@@ -1074,6 +1106,91 @@ describe('Client — trace observations (M98g)', () => {
     await expect(client.traces(-1)).rejects.toThrow(CLIENT_ERRORS.arguments);
     await expect(client.traces(0, 0)).rejects.toThrow(CLIENT_ERRORS.arguments);
     expect(requests.every((request) => !request.target.startsWith('/v1/traces'))).toBe(true);
+    client.close();
+  });
+});
+
+describe('Client — authorization observations (M98h)', () => {
+  it('pairs, sends the signed authorization request, and returns the validated frozen batch', async () => {
+    const { client, requests } = buildClient();
+    const batch = await client.authorization(0);
+    expect(requests.some((request) => request.target === '/v1/authorization?after=0&limit=128'))
+      .toBe(
+        true,
+      );
+    expect(requests.some((request) => request.instance === TEST_INSTANCE_ID)).toBe(true);
+    expect(batch.state).toBe('ready');
+    expect(batch.decisions[0]!.ruleAliases).toEqual(['A']);
+    expect(Object.isFrozen(batch)).toBe(true);
+    expect(Object.isFrozen(batch.decisions)).toBe(true);
+    client.close();
+  });
+
+  it('echoes the cursor and limit on the wire for a paged read', async () => {
+    const { client, requests } = buildClient();
+    const batch = await client.authorization(41, 7);
+    expect(requests.some((request) => request.target === '/v1/authorization?after=41&limit=7'))
+      .toBe(
+        true,
+      );
+    expect(batch.decisions[0]!.sequence).toBe(42);
+    client.close();
+  });
+
+  it('answers a manifest without the authorization inspector locally, without probing the route', async () => {
+    const inspectors: Record<string, boolean> = {
+      health: true,
+      configuration: false,
+      queues: true,
+      traces: true,
+      authorization: false,
+      cache: false,
+      events: false,
+      scheduler: false,
+      realtime: false,
+      storage: false,
+      outboundHttp: false,
+    };
+    const { client, requests } = buildClient({
+      server: { statusInspectors: inspectors },
+    });
+    const batch = await client.authorization(9);
+    expect(batch.state).toBe('unsupported');
+    expect(batch.coverage).toBe('unknown');
+    expect(batch.next).toBe(9);
+    expect(requests.some((request) => request.target.startsWith('/v1/authorization'))).toBe(false);
+    client.close();
+  });
+
+  it('refuses a served body that fails the exact authorization validator', async () => {
+    const bad = authorizationBatchBody(0);
+    (bad.decisions as Array<Record<string, unknown>>)[0]!.id = 'not-a-decision-id';
+    const { client } = buildClient({ server: { authorizationBody: () => bad } });
+    await expect(client.authorization(0)).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('refuses a served body whose cursor contract disagrees with the request', async () => {
+    const bad = authorizationBatchBody(5);
+    bad.lost = 3; // first sequence is 6: the gap must be 0, not 3
+    const { client } = buildClient({ server: { authorizationBody: () => bad } });
+    await expect(client.authorization(5)).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('refuses a served body bound to another instance', async () => {
+    const bad = authorizationBatchBody(0);
+    bad.instanceId = 'other-instance';
+    const { client } = buildClient({ server: { authorizationBody: () => bad } });
+    await expect(client.authorization(0)).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+
+  it('refuses invalid arguments before any request', async () => {
+    const { client, requests } = buildClient();
+    await expect(client.authorization(-1)).rejects.toThrow(CLIENT_ERRORS.arguments);
+    await expect(client.authorization(0, 0)).rejects.toThrow(CLIENT_ERRORS.arguments);
+    expect(requests.every((request) => !request.target.startsWith('/v1/authorization'))).toBe(true);
     client.close();
   });
 });

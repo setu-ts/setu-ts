@@ -82,6 +82,14 @@ export const QUEUES_PATH = '/v1/queues';
  * @internal
  */
 export const TRACES_PATH = '/v1/traces';
+/**
+ * The authorization decision-explanation path (M98h); its target carries the
+ * same canonical `?after=<N>&limit=<N>` query as the events, queues and
+ * traces targets.
+ *
+ * @internal
+ */
+export const AUTHORIZATION_PATH = '/v1/authorization';
 
 /**
  * The maximum events per read — the same fixed 128 the kernel's reader
@@ -105,7 +113,15 @@ const EVENTS_QUERY = /^after=([0-9]+)&limit=([0-9]+)$/;
  * @internal
  */
 export interface ParsedTarget {
-  readonly op: 'status' | 'snapshot' | 'events' | 'health' | 'config' | 'queues' | 'traces';
+  readonly op:
+    | 'status'
+    | 'snapshot'
+    | 'events'
+    | 'health'
+    | 'config'
+    | 'queues'
+    | 'traces'
+    | 'authorization';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events and queues); `0` for the other ops. */
@@ -149,6 +165,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   if (path === TRACES_PATH) {
     return parsePagedTarget('traces', path, search);
   }
+  if (path === AUTHORIZATION_PATH) {
+    return parsePagedTarget('authorization', path, search);
+  }
   return null;
 }
 
@@ -163,7 +182,7 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
  * @returns The parsed target, or `null` for any non-canonical form
  */
 function parsePagedTarget(
-  op: 'events' | 'queues' | 'traces',
+  op: 'events' | 'queues' | 'traces' | 'authorization',
   path: string,
   search: string,
 ): ParsedTarget | null {
@@ -376,8 +395,9 @@ export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number]
 
 /**
  * The inspector manifest this connector serves: `health` (M98d),
- * `configuration` (M98e) and `queues` (M98f) are implemented; the rest are
- * reserved and false until their own connector operation ships.
+ * `configuration` (M98e), `queues` (M98f), `traces` (M98g) and
+ * `authorization` (M98h) are implemented; the rest are reserved and false
+ * until their own connector operation ships.
  *
  * @returns The fixed manifest
  * @internal
@@ -388,7 +408,7 @@ export function currentInspectorsManifest(): InspectorsManifest {
     configuration: true,
     queues: true,
     traces: true,
-    authorization: false,
+    authorization: true,
     cache: false,
     events: false,
     scheduler: false,

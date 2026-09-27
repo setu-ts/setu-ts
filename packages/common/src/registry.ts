@@ -148,6 +148,32 @@ export interface IServiceRegistry {
   has(token: CapabilityToken): boolean;
 
   /**
+   * Reports whether a known instance is the CURRENT provider a resolving
+   * {@linkcode get} would select for a token — WITHOUT resolving it.
+   *
+   * This is a non-resolving identity check: it compares the supplied instance
+   * against the registration `get` would choose (own single registration, then
+   * own first multi-provider, then the parent) and returns a boolean. It never
+   * invokes a lazy factory, never returns the current service, and never
+   * enumerates the registry. A token whose selected registration is a factory
+   * that has not yet run answers `false`, not the parent's instance: "present
+   * but never constructed" must not be mistaken for a foreign provider.
+   *
+   * The method is OPTIONAL so that third-party registry-shaped test doubles and
+   * request-scoped contexts that predate it keep compiling. A consumer that
+   * needs a current-provider check must treat an absent `isCurrent` as "cannot
+   * verify" rather than falling back to `get`, which would instantiate a lazy
+   * replacement.
+   *
+   * @typeParam T - The service's interface type
+   * @param token - The capability token to check
+   * @param instance - The instance to compare against the current registration
+   * @returns `true` only when `instance` IS the registration `get` would select
+   * @since 0.8.0
+   */
+  isCurrent?<T extends object>(token: CapabilityToken, instance: T): boolean;
+
+  /**
    * Removes a registration. On a multi-provider token this removes EVERY
    * provider registered under it, not just the first.
    *

@@ -360,6 +360,14 @@ describe('DiagnosticsPlugin — trace source (M98g)', () => {
   });
 });
 
+describe('DiagnosticsPlugin — authorization source (M98h)', () => {
+  it('declares the authorization source as an OPTIONAL dependency, never a required one', () => {
+    const plugin = DiagnosticsPlugin(OPTIONS);
+    expect(plugin.optionalDependencies).toContain(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS);
+    expect(plugin.dependencies ?? []).not.toContain(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS);
+  });
+});
+
 describe('DiagnosticsPlugin — queue sources (M98f)', () => {
   it('declares the queue source optionally and resolves every source at BOOTSTRAP', async () => {
     const plugin = DiagnosticsPlugin(OPTIONS);

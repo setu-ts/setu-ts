@@ -191,6 +191,9 @@ package fits the plugin architecture.
 | `UPGRADE_INTENT`                   | const     |
 | `VALIDATION_METADATA`              | const     |
 | `AddJobOptions`                    | interface |
+| `AuthorizationDecisionObservation` | interface |
+| `AuthorizationDecisionStep`        | interface |
+| `AuthorizationDiagnosticsBatch`    | interface |
 | `AuditEntry`                       | interface |
 | `BehaviorLike`                     | interface |
 | `BulkheadPolicy`                   | interface |
@@ -234,6 +237,7 @@ package fits the plugin architecture.
 | `IAdapterTransaction`              | interface |
 | `IApplication`                     | interface |
 | `IAuditLogger`                     | interface |
+| `IAuthorizationDiagnosticsSource`  | interface |
 | `IAuthorizationService`            | interface |
 | `IAuthService`                     | interface |
 | `IAuthStrategy`                    | interface |
@@ -411,7 +415,11 @@ package fits the plugin architecture.
 | `WorkerTaskReply`                  | interface |
 | `WorkerTaskRequest`                | interface |
 | `WrapOptions`                      | interface |
+| `AuthorizationCoverage`            | type      |
+| `AuthorizationDecisionOperation`   | type      |
+| `AuthorizationDecisionReason`      | type      |
 | `AuthorizationFailure`             | type      |
+| `AuthorizationSourceState`         | type      |
 | `BackoffStrategy`                  | type      |
 | `CapabilityToken`                  | type      |
 | `ChannelSendResult`                | type      |

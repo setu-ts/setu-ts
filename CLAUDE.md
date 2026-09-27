@@ -5295,8 +5295,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   independent re-audit of `2fbac039` passed with no finding open (5 new negative controls; all 13
   round-1 controls and 10 probes re-run green). Plan
   `plans/archive/milestone-98g-distributed-tracing.md` — complete (PR #369).
-- **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
-  security review and implementation audit required).
+- **Milestone 98h** (`packages/auth-plugin` + `packages/common` + `packages/diagnostics-plugin` —
+  authorization decision explanations): IN PROGRESS. `AuthPlugin({ authorizationDiagnostics })`
+  attaches a package-private observer (WeakMap-keyed by the `RbacService` instance) to the
+  first-party RBAC evaluator — the boolean `IAuthorizationService` surface and every guard's status,
+  body and short-circuit behaviour are unchanged. A decision carries only approved rule aliases, the
+  fixed reason vocabulary, the true evaluated count (a compound over 16 steps is retained with
+  `stepsTruncated: true` and the first 16 steps), and `ageMs`; a decision whose requested or
+  granting rule lacks an approved alias is dropped before buffering (`droppedUnapproved`). The
+  plugin always registers `IAuthorizationDiagnosticsSource` under the eager
+  `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS` (`disabled` without the option; `unsupported` latched
+  terminal with coverage `rbac-not-configured` / `provider-identity-unavailable` /
+  `custom-provider`), re-verifying its provider at read time through the new OPTIONAL non-resolving
+  `IServiceRegistry.isCurrent?(token, instance)` identity predicate — a replacement provider is
+  never guessed from booleans. The connector serves `GET /v1/authorization?after=N&limit=N` and the
+  client `authorization()`; the status manifest reports `authorization: true`. Plan
+  `plans/milestone-98h-authorization-explanations.md` — design security review complete (plan §10);
+  the committed-tree implementation security audit is still required.
+- **Next milestone** — **M98i** (`packages/cache-plugin` — cache observations; design security
+  review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

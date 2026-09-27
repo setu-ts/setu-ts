@@ -1215,3 +1215,238 @@ export interface ITraceDiagnosticsSource {
    */
   read(instanceId: string, after: number, limit?: number): TraceDiagnosticsBatch;
 }
+
+/**
+ * The authorization operation a retained decision explained (M98h).
+ *
+ * The four names map one-to-one onto the synchronous `IAuthorizationService`
+ * methods the RBAC service implements: `role` and `permission` are the single
+ * checks, `any-role` the short-circuiting `hasAnyRole`, and `all-permissions`
+ * the short-circuiting `hasAllPermissions`. The vocabulary is fixed — a
+ * decision is never described by an application-supplied operation name.
+ *
+ * @since 0.8.0
+ */
+export type AuthorizationDecisionOperation =
+  | 'role'
+  | 'permission'
+  | 'any-role'
+  | 'all-permissions';
+
+/**
+ * Why the RBAC evaluator reached a decision's result (M98h).
+ *
+ * The vocabulary names the FIXED mechanism the evaluator used, not a policy
+ * name: `direct-role`/`inherited-role` for a role check, `direct-permission` /
+ * `direct-wildcard` / `role-permission` / `role-wildcard` for a permission
+ * check, `not-held` for a single check that found no grant, and the two
+ * compound outcomes `compound-satisfied`/`compound-unsatisfied`. Every step
+ * in a compound decision carries one of the single-check reasons; the
+ * compound reason describes the loop's overall stop.
+ *
+ * @since 0.8.0
+ */
+export type AuthorizationDecisionReason =
+  | 'direct-role'
+  | 'inherited-role'
+  | 'direct-permission'
+  | 'direct-wildcard'
+  | 'role-permission'
+  | 'role-wildcard'
+  | 'not-held'
+  | 'compound-satisfied'
+  | 'compound-unsatisfied';
+
+/**
+ * One evaluated step of a compound authorization decision (M98h).
+ *
+ * A step records ONLY what the evaluator actually ran: the single-check
+ * reason it produced, the approved alias of the rule that was requested, and
+ * — for a satisfied role or permission check — the approved alias of the
+ * granting role. `ruleAlias` is present only for a step that named a requested
+ * rule; an unevaluated compound branch has no step at all, and a step never
+ * carries a rule name that was not approved.
+ *
+ * @since 0.8.0
+ */
+export interface AuthorizationDecisionStep {
+  /** The approved display alias of the requested rule. */
+  readonly ruleAlias: string;
+  /** How this single check resolved. */
+  readonly reason: AuthorizationDecisionReason;
+  /** The approved alias of the granting role, when the check was granted through one. */
+  readonly viaRoleAlias?: string;
+}
+
+/**
+ * One observed authorization decision, as the RBAC source retains it (M98h).
+ *
+ * The record describes the evaluation that PRODUCED the returned boolean — it
+ * is never a replay. `id` is an opaque, per-source sequential `d<N>` identifier
+ * carrying no rule or principal identity. `result` is the authoritative
+ * decision the service returned. `ruleAliases` is the COMPLETE requested rule
+ * set — every one of them approved, or the whole decision was dropped before
+ * buffering — while `steps` holds at most 16 EVALUATED steps: a single check
+ * carries exactly one, a compound carries one per input actually evaluated,
+ * and unevaluated compound branches have no step at all. `stepsEvaluated` is
+ * the TRUE evaluated count (saturating) and `stepsTruncated` is `true` exactly
+ * when the evaluation ran more than 16 steps — a decision that evaluated
+ * exactly 16 is complete and reports `false`, so a consumer can never mistake
+ * a full list for a truncated one. `viaRoleAlias` is the approved alias of the
+ * granting role, when the decision was granted through a single identifiable
+ * one. The observation carries no principal, request, route, credential,
+ * claim, resource, raw rule, error, or arbitrary detail field.
+ *
+ * @since 0.8.0
+ */
+export interface AuthorizationDecisionObservation {
+  /** Dense, source-local sequence number. */
+  readonly sequence: number;
+  /** Opaque per-source sequential decision identifier (`d<N>`). */
+  readonly id: string;
+  /** Which authorization operation produced the decision. */
+  readonly operation: AuthorizationDecisionOperation;
+  /** The authoritative decision the service returned. */
+  readonly result: boolean;
+  /** The complete requested rule set, every entry an approved alias. */
+  readonly ruleAliases: readonly string[];
+  /** Evaluated steps, at most 16; one per input actually evaluated. */
+  readonly steps: readonly AuthorizationDecisionStep[];
+  /** The true evaluated step count (saturating). */
+  readonly stepsEvaluated: number;
+  /** `true` when the evaluation ran more steps than the retained list holds. */
+  readonly stepsTruncated: boolean;
+  /** The approved alias of the granting role, when granted through a single identifiable one. */
+  readonly viaRoleAlias?: string;
+  /** The fixed reason the evaluator reached the result. */
+  readonly reason: AuthorizationDecisionReason;
+  /** The approved policy revision alias, present only when configured. */
+  readonly policyRevision?: string;
+  /** Monotonic ms since the decision was retained. */
+  readonly ageMs: number;
+}
+
+/**
+ * Availability of the authorization-diagnostics inspector (M98h), from the
+ * AuthPlugin's own source.
+ *
+ * `disabled` — the AuthPlugin configured RBAC but the application did not pass
+ * the `diagnostics` option: no collector or ring exists. This is the owning
+ * plugin's answer, distinct from `unsupported`.
+ * `no-data` — observation is active and nothing has been retained yet.
+ * `ready` — observation is active and at least one decision has been retained.
+ * `unsupported` — observation cannot explain enforcement: the coverage names
+ * why — RBAC was not configured, the registry lacks the non-resolving
+ * identity predicate, or the authorization provider was replaced.
+ * `collection-failed` is a CONNECTOR-side answer only (the registered source
+ * threw or answered a shape that failed validation); a source never reports
+ * it about itself.
+ *
+ * @since 0.8.0
+ */
+export type AuthorizationSourceState =
+  | 'disabled'
+  | 'no-data'
+  | 'ready'
+  | 'unsupported'
+  | 'collection-failed';
+
+/**
+ * Why the authorization inspector cannot explain enforcement (M98h).
+ *
+ * `rbac-not-configured` — the AuthPlugin registered no authorization service
+ * (no `rbac` option), so there is no first-party RBAC to observe.
+ * `provider-identity-unavailable` — the registry lacks the optional
+ * `isCurrent` identity predicate, so the source cannot verify it is still the
+ * authoritative provider without resolving a replacement factory.
+ * `custom-provider` — the current `CAPABILITIES.AUTHORIZATION` provider is not
+ * the exact `RbacService` instance the plugin created, so a decision it
+ * returns cannot be explained by the first-party evaluator.
+ * `unknown` — the responder cannot name a reason: the connector answering
+ * with no authorization source registered at all, or a client answering
+ * locally before any server exchange. Availability is reported, never
+ * improvised.
+ *
+ * @since 0.8.0
+ */
+export type AuthorizationCoverage =
+  | 'rbac-not-configured'
+  | 'provider-identity-unavailable'
+  | 'custom-provider'
+  | 'unknown';
+
+/**
+ * One page of authorization decision explanations from the authorization
+ * inspector (M98h), read non-destructively.
+ *
+ * `after`/`next`/`lost` follow the M98a cursor contract of
+ * {@linkcode DiagnosticsBatch} exactly: `after` is exclusive, a cursor older
+ * than the oldest retained decision returns the oldest retained decisions with
+ * the skipped sequences reported in `lost` (per batch, never cumulative), and
+ * `next` is the last returned sequence — or the requested cursor when nothing
+ * was returned, so polling an idle application re-sends the same cursor.
+ * `droppedUnapproved` counts decisions dropped BEFORE buffering because a
+ * requested or granting rule lacked an approved alias (saturating); those
+ * consume no sequence, so they appear in neither `lost` nor the ring. No
+ * absolute time is carried: `ageMs` describes arrival at this process only.
+ *
+ * @since 0.8.0
+ */
+export interface AuthorizationDiagnosticsBatch {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the batch was read for; equals the requested one. */
+  readonly instanceId: string;
+  /** The inspector's availability state. */
+  readonly state: AuthorizationSourceState;
+  /** Why the inspector cannot explain enforcement, when `unsupported`. */
+  readonly coverage?: AuthorizationCoverage;
+  /** Frozen decisions with sequence numbers greater than the requested cursor. */
+  readonly decisions: readonly AuthorizationDecisionObservation[];
+  /** Last returned sequence, or the requested cursor when nothing was returned. */
+  readonly next: number;
+  /** Ring sequences evicted between the requested cursor and the first returned decision. */
+  readonly lost: number;
+  /** `true` once the source has closed and retains nothing. */
+  readonly closed: boolean;
+  /** Decisions dropped for an unapproved rule alias (saturating). */
+  readonly droppedUnapproved: number;
+}
+
+/**
+ * Read-only authorization-diagnostics source — the surface the AuthPlugin
+ * registers under {@linkcode CAPABILITIES.AUTHORIZATION_DIAGNOSTICS} and the
+ * DiagnosticsPlugin consumes to serve `GET /v1/authorization`.
+ *
+ * Synchronous by contract: `read` returns already-captured, frozen data and
+ * never evaluates a role, permission or wildcard, resolves a service, or
+ * mutates state. A source whose RBAC was not configured, whose registry lacks
+ * the identity predicate, or whose provider was replaced answers `unsupported`
+ * with the fixed coverage reason; one not opted into observation answers
+ * `disabled`.
+ *
+ * @example
+ * ```typescript
+ * const source = ctx.services.get<IAuthorizationDiagnosticsSource>(
+ *   CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+ * );
+ * const batch = source.read(instanceId, 0, 128);
+ * ```
+ * @since 0.8.0
+ */
+export interface IAuthorizationDiagnosticsSource {
+  /**
+   * Returns the retained decision explanations after `after`, oldest first.
+   *
+   * @param instanceId - The non-empty instance UUID to bind the batch to
+   * @param after - Source-local sequence cursor; `0` starts at the oldest retained decision
+   * @param limit - Maximum decisions to return, 1–128 (default 128)
+   * @returns A deeply frozen {@linkcode AuthorizationDiagnosticsBatch} whose
+   * `instanceId` exactly equals the argument
+   * @throws {RangeError} When `instanceId` is not a non-empty string, when
+   * `after` is not a non-negative safe integer, when `limit` is not an
+   * integer from 1 to 128, or when `after` is beyond the source's current
+   * sequence — with a fixed message that never echoes the value
+   */
+  read(instanceId: string, after: number, limit?: number): AuthorizationDiagnosticsBatch;
+}

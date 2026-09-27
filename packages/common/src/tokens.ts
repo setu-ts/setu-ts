@@ -151,6 +151,17 @@ export const CAPABILITIES = {
    * A read never starts, exports or flushes a span.
    */
   TRACE_DIAGNOSTICS: 'trace-diagnostics',
+  /**
+   * Authorization decision explanations (M98h) — an
+   * `IAuthorizationDiagnosticsSource` the AuthPlugin always registers under
+   * this token when it configures RBAC (a `disabled`, `no-data` or
+   * `unsupported`-answering one when observation was not opted into, RBAC is
+   * absent, the registry lacks the non-resolving identity predicate, or the
+   * authorization provider was replaced). The DiagnosticsPlugin consumes it
+   * optionally to serve `GET /v1/authorization`. A read never evaluates a
+   * role, permission or wildcard, and never resolves a service.
+   */
+  AUTHORIZATION_DIAGNOSTICS: 'authorization-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

@@ -4,7 +4,12 @@
  * @module
  */
 
-import type { IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import type {
+  IAuthorizationDiagnosticsSource,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+} from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IAuthStrategy, IPrincipal, ISessionService } from '@setu-ts/common';
 import type { AuthPluginOptions } from '../interfaces/index.ts';
@@ -15,6 +20,13 @@ import { JwtStrategy } from '../strategies/jwt-strategy.ts';
 import { ApiKeyStrategy } from '../strategies/api-key-strategy.ts';
 import { SessionStrategy } from '../strategies/session-strategy.ts';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
+import { attachAuthorizationObserver } from '../diagnostics/authorization-observer.ts';
+import {
+  AuthorizationObservationCollector,
+  compileAuthorizationDiagnosticsOptions,
+  createDisabledAuthorizationSource,
+  createUnsupportedAuthorizationSource,
+} from '../diagnostics/authorization-observation-collector.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -60,6 +72,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     provides: [
       CAPABILITIES.JWT,
       CAPABILITIES.AUTH,
+      CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
       ...(options.rbac === undefined ? [] : [CAPABILITIES.AUTHORIZATION]),
     ],
     // The session strategy reads the session service, but only when
@@ -181,13 +194,46 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       // Register services
       ctx.services.register(CAPABILITIES.JWT, jwtService);
       ctx.services.register(CAPABILITIES.AUTH, authService);
-      if (options.rbac !== undefined) {
-        ctx.services.register(CAPABILITIES.AUTHORIZATION, new RbacService(options.rbac));
+
+      // Authorization decision explanations (M98h). The AuthPlugin ALWAYS
+      // registers a source under CAPABILITIES.AUTHORIZATION_DIAGNOSTICS: an
+      // active collector when RBAC and the observation option are both
+      // present, a `disabled`-answering source without the option, and an
+      // `unsupported`-answering source when RBAC itself is absent. The
+      // boolean IAuthorizationService remains authoritative and unchanged; a
+      // diagnostic failure can never alter an allow/deny or a guard's
+      // short-circuit order.
+      let authorizationSource: IAuthorizationDiagnosticsSource;
+      if (options.rbac === undefined) {
+        authorizationSource = createUnsupportedAuthorizationSource('rbac-not-configured');
+      } else {
+        const rbacService = new RbacService(options.rbac);
+        ctx.services.register(CAPABILITIES.AUTHORIZATION, rbacService);
+        if (options.authorizationDiagnostics === undefined) {
+          authorizationSource = createDisabledAuthorizationSource();
+        } else {
+          const policy = compileAuthorizationDiagnosticsOptions(options.authorizationDiagnostics);
+          const collector = new AuthorizationObservationCollector(
+            policy,
+            runtime,
+            ctx.services,
+            rbacService,
+          );
+          attachAuthorizationObserver(rbacService, collector);
+          authorizationSource = collector;
+        }
       }
+      ctx.services.register(
+        CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+        authorizationSource,
+      );
 
       // Cleanup on close
       ctx.lifecycle.onClose(() => {
         // JwtService cached keys are GC'd when the service is dropped
+        if (authorizationSource instanceof AuthorizationObservationCollector) {
+          authorizationSource.close();
+        }
       });
     },
   };
