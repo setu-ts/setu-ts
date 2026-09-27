@@ -1,8 +1,8 @@
 # Milestone 98i — Cache Observations
 
-> **Status:** Planning. Implementation and fixes: `feat/m98i-cache-observations`. Design security
-> assessment below requires recorded review before implementation; no implementation or completed
-> security audit is claimed.
+> **Status:** Implementation on `feat/m98i-cache-observations`; plan reviewed and verified by the
+> maintainer before implementation. Design security assessment below requires recorded review before
+> implementation; no implementation or completed security audit is claimed.
 
 ## 0. Objective & scope
 

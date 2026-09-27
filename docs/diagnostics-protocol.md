@@ -32,6 +32,7 @@ verified.
 | `GET /v1/health`                 | M98d's minimized health-observation snapshot (below)                                                                                                                             |
 | `GET /v1/config`                 | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
 | `GET /v1/queues?after=N&limit=N` | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
+| `GET /v1/cache`                  | M98i's cache operation counters across every cache source (below)                                                                                                                |
 | `GET /v1/traces?after=N&limit=N` | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
@@ -162,11 +163,12 @@ design security review, R7).
 
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
-`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f) and `traces: true` (M98g)
-and leaves the rest (`authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`,
-`outboundHttp`) reserved and `false`. A client that reads a legacy M98b three-field status body (no
-`inspectors`) resolves the manifest to all-`false`, so its `health()`, `configuration()`, `queues()`
-and `traces()` answer a typed `unsupported` without sending the request.
+`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g)
+and `cache: true` (M98i) and leaves the rest (`authorization`, `events`, `scheduler`, `realtime`,
+`storage`, `outboundHttp`) reserved and `false`. A client that reads a legacy M98b three-field
+status body (no `inspectors`) resolves the manifest to all-`false`, so its `health()`,
+`configuration()`, `queues()`, `traces()` and `cache()` answer a typed `unsupported` without sending
+the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -347,6 +349,40 @@ values only — never a payload, header, raw id, claim token, credential, queue 
 is untrusted input to the connector: its batch is validated key-by-key (aliases 1–64 UTF-8 bytes
 with no control character) before anything is merged, and the merged frame runs the same exact
 validator the client runs before it is signed.
+
+## Cache observations (M98i)
+
+`GET /v1/cache` (no query) answers
+`{ version: 1, instanceId, state, sources: [{ sourceId, snapshot }] }` over every
+`ICacheDiagnosticsSource` registered under `CAPABILITIES.CACHE_DIAGNOSTICS`. Every CachePlugin
+instance registers one as a multi provider (never in `provides`); the connector resolves them ONCE
+at bootstrap, in registration order, and REFUSES to start with more than 16 (a fixed, value-free
+configuration error, never a silent drop). Sources are read only after the request authenticated;
+`sourceId` is the session-local `s1`…`s16`.
+
+A snapshot is exactly `{ state, alias, coverage: 'owned-instance', records, dropped }`; `alias` is
+`null` when the plugin was not opted in (`state: 'disabled'`). A record is exactly
+`{ alias, operation, count, lastDurationMs, ageMs, succeeded, failed, hits, misses, present, absent,
+removed, notRemoved }`
+for one of the five backend operations `get`, `set`, `delete`, `has`, `clear` (a `getOrSet` is
+counted as its internal `get`/`set` calls). Every settled call increments `count` and exactly one of
+`succeeded`/`failed`; the detail counters count only successful calls of their operation. There is
+no eviction counter — a miss is never reported as an eviction.
+
+Each source is untrusted input: only a plain object (`Object.prototype` or `null` prototype) of own
+DATA properties is admitted, each field read once through its descriptor (a getter is never
+invoked), lists read by index, at most 64 records, exact keys and enums, unique operations,
+non-negative safe-integer counters. A source that throws or fails any check is reported as a fixed
+`{ state: 'collection-failed', alias: null, records: [], dropped: 0 }` — no error text. Duplicate
+non-null aliases across sources, or a response over 256 KiB, collapse the whole response to
+`{ state: 'collection-failed', sources: [] }`; a partial document is never produced. The aggregate
+`state` is `unsupported` with no source, otherwise the first of `ready`, `collection-failed`,
+`stale`, `no-data`, `disabled` present. The client runs the same validator; a manifest with
+`cache: false` answers a local typed `unsupported` response without a request.
+
+Keys, prefixes, values, Redis URLs, factory results and errors never reach the collector, the wire,
+or the client. Only calls through the plugin's OWN `CacheService` are counted: direct store calls
+and a replacement service registered later are outside coverage.
 
 ## Trace observations (M98g)
 

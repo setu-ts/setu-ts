@@ -2801,21 +2801,22 @@ Registers `ICacheStore` under `CAPABILITIES.CACHE`.
 
 ### Exports
 
-| Export                   | File                                 | Description                             |
-| ------------------------ | ------------------------------------ | --------------------------------------- |
-| `CachePlugin`            | `src/plugin/cache-plugin.ts`         | Plugin factory                          |
-| `CacheService`           | `src/services/cache-service.ts`      | Wrapper applying prefix + defaultTTL    |
-| `MemoryStore`            | `src/stores/memory-store.ts`         | In-memory LRU + TTL store               |
-| `RedisStore`             | `src/stores/redis-store.ts`          | Redis store via ioredis                 |
-| `NoopStore`              | `src/stores/noop-store.ts`           | No-op store (dev/test)                  |
-| `cacheMiddleware`        | `src/middleware/cache-middleware.ts` | Transparent response-caching middleware |
-| `CacheStoreType`         | `src/interfaces/index.ts`            | `'memory' \| 'redis' \| 'noop'`         |
-| `CacheStoreOptions`      | `src/interfaces/index.ts`            | Store-specific options                  |
-| `CachePluginOptions`     | `src/interfaces/index.ts`            | Plugin factory options                  |
-| `IRedisClient`           | `src/interfaces/index.ts`            | Structural ioredis shape                |
-| `CacheMiddlewareOptions` | `src/interfaces/index.ts`            | Middleware options                      |
-| `CachedResponsePayload`  | `src/interfaces/index.ts`            | Cached response shape                   |
-| `ICacheStore`            | `src/interfaces/index.ts`            | Re-export from `@setu-ts/common`        |
+| Export                    | File                                 | Description                             |
+| ------------------------- | ------------------------------------ | --------------------------------------- |
+| `CachePlugin`             | `src/plugin/cache-plugin.ts`         | Plugin factory                          |
+| `CacheService`            | `src/services/cache-service.ts`      | Wrapper applying prefix + defaultTTL    |
+| `MemoryStore`             | `src/stores/memory-store.ts`         | In-memory LRU + TTL store               |
+| `RedisStore`              | `src/stores/redis-store.ts`          | Redis store via ioredis                 |
+| `NoopStore`               | `src/stores/noop-store.ts`           | No-op store (dev/test)                  |
+| `cacheMiddleware`         | `src/middleware/cache-middleware.ts` | Transparent response-caching middleware |
+| `CacheStoreType`          | `src/interfaces/index.ts`            | `'memory' \| 'redis' \| 'noop'`         |
+| `CacheStoreOptions`       | `src/interfaces/index.ts`            | Store-specific options                  |
+| `CachePluginOptions`      | `src/interfaces/index.ts`            | Plugin factory options                  |
+| `IRedisClient`            | `src/interfaces/index.ts`            | Structural ioredis shape                |
+| `CacheMiddlewareOptions`  | `src/interfaces/index.ts`            | Middleware options                      |
+| `CachedResponsePayload`   | `src/interfaces/index.ts`            | Cached response shape                   |
+| `ICacheStore`             | `src/interfaces/index.ts`            | Re-export from `@setu-ts/common`        |
+| `CacheDiagnosticsOptions` | `src/interfaces/index.ts`            | Opt-in cache operation counters (M98i)  |
 
 ### Registration
 
@@ -2886,6 +2887,29 @@ backend to reach). The probe is cached for 5 seconds and bounded at 2 seconds th
 `data` reports `{ store, name, reachable }`, where `reachable` is `true`, `false`, or `'unknown'`
 when the store offers no probe. A store that cannot probe is never reported as reachable — the
 absent capability stays explicitly `'unknown'`.
+
+### Cache diagnostics (M98i)
+
+`CachePlugin({ diagnostics: { enabled: true, alias: 'primary' } })` counts every backend call its
+OWN `CacheService` makes — `get`, `set`, `delete`, `has`, `clear`, with `getOrSet` counted as its
+internal `get`/`set` calls — for the local diagnostics connector's `GET /v1/cache`. `enabled` must
+be the literal `true`; `alias` is 1–64 UTF-8 bytes with no control character; any other key is
+refused. All three refuse when `CachePlugin(...)` is called, with fixed messages that never echo a
+value.
+
+Every instance, opted in or not, registers an `ICacheDiagnosticsSource` under
+`CAPABILITIES.CACHE_DIAGNOSTICS` with `{ multi: true }` (not in `provides`); without the option it
+answers `disabled` and nothing is attached to the service — no clock read and no extra promise on
+any cache call. With it, each call reads the runtime monotonic clock twice and adds one promise hop;
+results, `null` semantics, TTL, prefix, `getOrSet` coalescing and the ORIGINAL rejection reason are
+unchanged, and a synchronous backend throw is still thrown synchronously. A null `get`, a `false`
+`has` and a `false` `delete` are successful calls (miss / absent / notRemoved); a rejection is
+`failed` and never a collection failure. Records expire 60 seconds after their last observation and
+a snapshot whose freshest record is older than 30 seconds is `stale`. No eviction is ever counted or
+inferred. A clock failure latches `collection-failed` without changing any application result;
+closing the plugin detaches the collector before clearing it, and the source then answers
+`disabled`. Keys, prefixes, values, URLs, factory results and errors are never captured. Direct
+store calls and a `CacheService` constructed or registered by application code are outside coverage.
 
 ### Cache Middleware
 
@@ -4107,22 +4131,23 @@ the kernel omits a non-finite value rather than letting it serialize to `null`.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
 `{ health: true, configuration: true, queues: true, traces: true, authorization: false,
-cache: false, events: false, scheduler: false, realtime: false, storage: false,
+cache: true, events: false, scheduler: false, realtime: false, storage: false,
 outboundHttp: false }`
-(`configuration` is `true` since M98e, `queues` since M98f and `traces` since M98g, all below) — and
-the connector serves a first inspector operation, `GET /v1/health`. The client reads it through
-`client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector resolves the optional health
-source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source answers a
-typed `unsupported` snapshot (no indicator runs, startup never fails), a registered-but-disabled
-source answers `disabled`, and a throwing source answers a value-free `collection-failed` snapshot —
-as does a source whose projected DTO fails the exact validator (an unknown enum, a non-finite or
-negative measurement, an oversized alias, more than 64 observations, a malformed shape), so nothing
-unvalidated is ever signed — none of which changes the application's readiness. The snapshot is the
-health plugin's minimized DTO (approved alias, framework status, outcome state, monotonic timing
-only — no indicator `data`, no error text, no absolute time), projected field-by-field and bounded
-by the same 256 KiB response ceiling as every other operation. A client paired against a legacy M98b
-status body (no manifest) resolves all inspectors to `false` and its `health()` answers
-`unsupported` without sending the request. The full wire shape is in `docs/diagnostics-protocol.md`.
+(`configuration` is `true` since M98e, `queues` since M98f, `traces` since M98g and `cache` since
+M98i, all below) — and the connector serves a first inspector operation, `GET /v1/health`. The
+client reads it through `client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector
+resolves the optional health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration:
+an absent source answers a typed `unsupported` snapshot (no indicator runs, startup never fails), a
+registered-but-disabled source answers `disabled`, and a throwing source answers a value-free
+`collection-failed` snapshot — as does a source whose projected DTO fails the exact validator (an
+unknown enum, a non-finite or negative measurement, an oversized alias, more than 64 observations, a
+malformed shape), so nothing unvalidated is ever signed — none of which changes the application's
+readiness. The snapshot is the health plugin's minimized DTO (approved alias, framework status,
+outcome state, monotonic timing only — no indicator `data`, no error text, no absolute time),
+projected field-by-field and bounded by the same 256 KiB response ceiling as every other operation.
+A client paired against a legacy M98b status body (no manifest) resolves all inspectors to `false`
+and its `health()` answers `unsupported` without sending the request. The full wire shape is in
+`docs/diagnostics-protocol.md`.
 
 **Queue observations (M98f).** The connector serves `GET /v1/queues?after=<N>&limit=<N>` (the same
 canonical query grammar as `/v1/events`), read through
@@ -4163,6 +4188,18 @@ no configuration value, value hash, value length, raw key name, or file path is 
 unapproved keys are never observed at all — no counter discloses that they exist. The negotiated
 manifest governs `configuration()` exactly as it governs `health()`: a legacy pairing answers
 `unsupported` without sending the request.
+
+**Cache observations (M98i).** The connector serves `GET /v1/cache`, read through
+`client.cache(): Promise<CacheDiagnosticsResponse>`. At bootstrap it resolves every
+`ICacheDiagnosticsSource` registered under `CAPABILITIES.CACHE_DIAGNOSTICS` (each CachePlugin
+instance contributes one as a multi provider) and refuses to start with more than 16. Each
+authenticated read calls every source's synchronous `snapshot()` once, copies only plain own data
+properties, and isolates a throwing or malformed source as a value-free `collection-failed`
+snapshot; duplicate non-null aliases or a body over 256 KiB collapse the response to
+`collection-failed` with no sources. With no source the response is `unsupported`; a client whose
+negotiated manifest has `cache: false` answers that locally without a request.
+`IDiagnosticsClient.cache` is a new REQUIRED member — additive for callers; a structural
+implementation must add it. The wire shape is in `docs/diagnostics-protocol.md`.
 
 **Trace observations (M98g).** The connector serves `GET /v1/traces?after=<N>&limit=<N>` (the same
 canonical query grammar as `/v1/events`), read through
@@ -10125,6 +10162,15 @@ not opted in). The M98e DTOs — `ConfigProvenanceOrigin` (`environment`/`file`/
 `ConfigProvenanceEntry`, and `ConfigDiagnosticsSnapshot` — are type-only exports carrying
 application-approved aliases and evidence only; the privacy rules are the config plugin's and the
 wire shape is `docs/diagnostics-protocol.md`'s.
+
+**Cache observation contracts (M98i).** `CAPABILITIES.CACHE_DIAGNOSTICS` (`'cache-diagnostics'`) is
+a MULTI-provider token: every CachePlugin instance registers one `ICacheDiagnosticsSource`
+(`snapshot(): CacheDiagnosticsSnapshot` — synchronous, performs no cache operation). The DTOs are
+`CacheDiagnosticsSnapshot` (`state`, `alias | null`, `coverage: 'owned-instance'`, `records`,
+`dropped`), `CacheDiagnosticsRecord` (alias, `CacheDiagnosticsOperation`, `count`, `lastDurationMs`,
+`ageMs`, and the non-negative saturating counters `succeeded`, `failed`, `hits`, `misses`,
+`present`, `absent`, `removed`, `notRemoved`) and the connector's `CacheDiagnosticsResponse`. See
+the diagnostics-connector section for the wire operation.
 
 **Trace observation contracts (M98g).** `CAPABILITIES.TRACE_DIAGNOSTICS` (`'trace-diagnostics'`) is
 a SINGLE-provider token: the TelemetryPlugin always registers one `ITraceDiagnosticsSource`

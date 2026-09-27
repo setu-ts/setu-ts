@@ -11101,20 +11101,20 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
 
 ### Milestone 98i: Cache Observations
 
-**Status:** Planned. Owner: `packages/cache-plugin`. Canonical plan:
-`plans/milestone-98i-cache-observations.md`.
+**Status:** Implemented on `feat/m98i-cache-observations`; committed-tree security audit pending.
+Owner: `packages/cache-plugin`. Canonical plan: `plans/milestone-98i-cache-observations.md`.
 
-- [ ] Instrument actual CacheService backend calls once. get records hit only for a non-null result;
+- [x] Instrument actual CacheService backend calls once. get records hit only for a non-null result;
       null is miss, and rejection is failure. has records present/absent separately from get hit
       rate. getOrSet internal get/set calls count as backend operations; joining the coalescer does
       not invent a backend read. Do not change factory execution or fallback behavior. Noop remains
       a legitimate miss-producing implementation. Every operation includes explicit succeeded/failed
       counters, including set and clear; rejected calls are not collection failures. No eviction
       count is inferred from misses or expiration.
-- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+- [x] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
       reader and native client method; activate only the reserved `cache` manifest entry.
-- [ ] Exclude keys, prefixes, values, Redis URLs, factory results, raw errors before buffering.
-- [ ] Only calls through the owned CacheService; direct store calls and replacement services are
+- [x] Exclude keys, prefixes, values, Redis URLs, factory results, raw errors before buffering.
+- [x] Only calls through the owned CacheService; direct store calls and replacement services are
       outside coverage.
 - [ ] Pass recorded pre-implementation design review and committed-tree implementation security
       audit. Compare TTL, prefix, concurrent getOrSet factory counts, null semantics and original

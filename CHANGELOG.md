@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Cache operation counters (M98i): opt-in, minimized cache observations through the diagnostics
+  connector.** `CachePlugin` accepts `diagnostics: { enabled: true, alias }` (the new exported
+  `CacheDiagnosticsOptions`, validated when `CachePlugin(...)` is called); the instance's own
+  `CacheService` then counts each backend `get`/`set`/`delete`/`has`/`clear` call — `getOrSet`
+  counted as its internal calls — with explicit `succeeded`/`failed` outcomes and `hits`/`misses`,
+  `present`/`absent`, `removed`/`notRemoved` detail counters. No eviction is ever inferred; keys,
+  prefixes, values, URLs, factory results and errors are never captured. Every CachePlugin instance
+  registers an `ICacheDiagnosticsSource` under the new multi-provider
+  `CAPABILITIES.CACHE_DIAGNOSTICS` (`disabled` without the option, with nothing attached to the
+  service). New public surface on `@setu-ts/common`: `CAPABILITIES.CACHE_DIAGNOSTICS`,
+  `ICacheDiagnosticsSource`, `CacheDiagnosticsSnapshot`, `CacheDiagnosticsRecord`,
+  `CacheDiagnosticsResponse`, `CacheDiagnosticsOperation`. New connector surface: `GET /v1/cache`
+  and the REQUIRED `IDiagnosticsClient.cache()`; the status manifest now reports `cache: true`, and
+  the connector refuses to start with more than 16 cache sources. Enabled calls add two monotonic
+  clock reads and one promise hop each — measured at roughly 2.5× the time of an in-memory
+  `MemoryStore` call, whose own cost is sub-microsecond; results, errors and ordering are unchanged.
+
 - **Distributed tracing observations (M98g): opt-in, minimized completed-span observations through
   the diagnostics connector.** `TelemetryPlugin` accepts a `diagnostics` option
   (`TraceDiagnosticsOptions`) that appends an internal span processor AFTER the exporter processor

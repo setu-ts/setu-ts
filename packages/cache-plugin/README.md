@@ -40,14 +40,28 @@ const profile = await readThroughCache.getOrSet('profile:1', async () => {
 
 ## Options
 
-| Option    | Type                            | Default     | Description                           |
-| --------- | ------------------------------- | ----------- | ------------------------------------- |
-| `store`   | `'memory' \| 'redis' \| 'noop'` | `'memory'`  | Backend implementation.               |
-| `name`    | `string`                        | `'default'` | Instance name for multi-cache setups. |
-| `options` | `CacheStoreOptions`             | —           | Store-specific configuration.         |
+| Option        | Type                            | Default     | Description                           |
+| ------------- | ------------------------------- | ----------- | ------------------------------------- |
+| `store`       | `'memory' \| 'redis' \| 'noop'` | `'memory'`  | Backend implementation.               |
+| `name`        | `string`                        | `'default'` | Instance name for multi-cache setups. |
+| `options`     | `CacheStoreOptions`             | —           | Store-specific configuration.         |
+| `diagnostics` | `CacheDiagnosticsOptions`       | —           | Opt-in operation counters (M98i).     |
 
 A `name` other than `'default'` derives the capability token as `cache.<name>`, so several caches
 can coexist in one application.
+
+## Diagnostics (M98i)
+
+`CachePlugin({ diagnostics: { enabled: true, alias: 'primary' } })` counts every backend call this
+instance's own `CacheService` makes (`get`, `set`, `delete`, `has`, `clear`; `getOrSet` counts as
+its internal `get`/`set`) — succeeded, failed, hits, misses, present/absent and removed/notRemoved —
+for the local diagnostics connector's `GET /v1/cache` (`@setu-ts/diagnostics-plugin`). Keys,
+prefixes, values, Redis URLs, factory results and errors are never captured, and no eviction is
+inferred. Without the option the instance registers an inert `disabled` source and its cache calls
+are not touched. Results, errors, TTL, prefix and `getOrSet` coalescing are identical either way;
+enabled calls add two monotonic clock reads and one promise hop each. Direct store calls and a
+replacement service are outside coverage. Enable only on an approved development dataset: counts
+aggregate every tenant using the instance.
 
 ## Response caching
 
@@ -64,21 +78,22 @@ programmatic read-through calls.
 
 ## Exports
 
-| Export                   | Kind      |
-| ------------------------ | --------- |
-| `cacheMiddleware`        | function  |
-| `CachePlugin`            | function  |
-| `CacheService`           | class     |
-| `MemoryStore`            | class     |
-| `NoopStore`              | class     |
-| `RedisStore`             | class     |
-| `CachedResponsePayload`  | interface |
-| `CacheMiddlewareOptions` | interface |
-| `CachePluginOptions`     | interface |
-| `CacheStoreOptions`      | interface |
-| `ICacheStore`            | interface |
-| `IRedisClient`           | interface |
-| `CacheStoreType`         | type      |
+| Export                    | Kind      |
+| ------------------------- | --------- |
+| `cacheMiddleware`         | function  |
+| `CachePlugin`             | function  |
+| `CacheService`            | class     |
+| `MemoryStore`             | class     |
+| `NoopStore`               | class     |
+| `RedisStore`              | class     |
+| `CacheDiagnosticsOptions` | interface |
+| `CachedResponsePayload`   | interface |
+| `CacheMiddlewareOptions`  | interface |
+| `CachePluginOptions`      | interface |
+| `CacheStoreOptions`       | interface |
+| `ICacheStore`             | interface |
+| `IRedisClient`            | interface |
+| `CacheStoreType`          | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

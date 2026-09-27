@@ -2611,6 +2611,19 @@ root, or unknown — and no global clock is implied: `ageMs` is arrival age at o
 stays authoritative: unsampled spans never complete through a processor, and the batch reports the
 configured sampler so partial traces stay visible as partial.
 
+Cache observations (M98i) follow the queue pattern's multi-provider registration without its merge
+ring: each CachePlugin instance attaches a bounded collector to its OWN `CacheService` through a
+module-private `WeakMap` (the exported constructor is unchanged, and an unattached service runs the
+pre-M98i path with no clock read) and registers an `ICacheDiagnosticsSource` under
+`CAPABILITIES.CACHE_DIAGNOSTICS` with `{ multi: true }`. Only a fixed operation name, a primitive
+outcome code and two monotonic readings cross into the collector — the wrapper classifies a result
+(`=== null` for `get`, `=== true` for `has`/`delete`) before calling it, and a rejection is recorded
+without the error being read. The connector resolves the sources once at bootstrap (refusing more
+than 16), reads each synchronously only after authentication, and copies only own data properties of
+plain objects, so a hostile replacement source cannot run a getter or smuggle a field. Coverage is
+`owned-instance`: direct store calls and replacement services are not represented, and no eviction
+is inferred from misses.
+
 ---
 
 ## 15. Performance Philosophy
