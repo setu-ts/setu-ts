@@ -431,13 +431,12 @@ export function createCacheDiagnosticsSource(
 }
 
 /**
- * Runs one backend call under an attached collector. The returned value is
- * the backend's OWN promise and a synchronous throw propagates
- * synchronously; settlement is observed on a side branch — the result is
- * classified into a primitive outcome there — so the caller sees the same
- * promise, the same value or rejection reason, and no extra microtask; a
- * synchronous backend throw is recorded as `failed` and rethrown
- * synchronously.
+ * Runs one backend call under an attached collector. The caller receives a
+ * promise derived from the backend's: it resolves to the same value, and
+ * rejects with the ORIGINAL reason, so an unhandled backend rejection stays
+ * unhandled exactly as without diagnostics. A synchronous backend throw is
+ * recorded as `failed` and rethrown synchronously. The result is classified
+ * into a primitive outcome before the collector sees it.
  *
  * @param collector - The service's attached collector
  * @param operation - The fixed backend operation
@@ -458,17 +457,23 @@ export function observeCacheCall<T>(
     collector.settle(operation, start, 'failed');
     throw error;
   }
-  // Observe on a SIDE branch and hand the caller the backend's own promise:
-  // the caller's await chain gains no extra tick, the returned promise is
-  // identical to the unobserved one, and the original value or rejection
-  // reaches the caller untouched. Both handlers are attached, and `settle`
-  // never throws, so the side branch can never become an unhandled
-  // rejection of its own.
-  pending.then(
-    (value) => collector.settle(operation, start, classify(operation, value)),
-    () => collector.settle(operation, start, 'failed'),
+  // Return a DERIVED promise that re-rejects with the original reason. A
+  // side branch on the caller's own promise (`pending.then(ok, err)` while
+  // returning `pending`) would be cheaper, but attaching a rejection handler
+  // marks `pending` as handled: a fire-and-forget call whose backend rejects
+  // would then stop surfacing as an unhandled rejection whenever diagnostics
+  // are on, silently hiding an application error. Deriving costs one
+  // microtask tick and promise identity; it keeps error visibility intact.
+  return pending.then(
+    (value) => {
+      collector.settle(operation, start, classify(operation, value));
+      return value;
+    },
+    (reason: unknown) => {
+      collector.settle(operation, start, 'failed');
+      throw reason;
+    },
   );
-  return pending;
 }
 
 /**

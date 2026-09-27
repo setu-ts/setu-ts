@@ -22,12 +22,14 @@ All notable changes to this project are documented here. The format follows
   `CacheDiagnosticsResponse`, `CacheDiagnosticsOperation`. New connector surface: `GET /v1/cache`
   and the REQUIRED `IDiagnosticsClient.cache()`; the status manifest now reports `cache: true`, and
   the connector refuses to start with more than 16 cache sources. Enabled calls read the monotonic
-  clock once (twice on a timed one-in-eight sample, which `lastDurationMs` reports) and observe
-  settlement on a side branch, so the caller receives the backend's own promise. Measured against a
-  real Redis 7: within run-to-run noise with one call in flight, and about 6% of throughput at 50
-  concurrent calls; against an in-memory `MemoryStore`, whose own call is about 100 ns, enabled
-  calls take about twice as long. Disabled calls are unchanged. Results, errors, promise identity
-  and ordering are unchanged either way.
+  clock once (twice on a timed one-in-eight sample, which `lastDurationMs` reports) and settle
+  through one derived promise that re-rejects with the original reason, so an unhandled backend
+  rejection stays unhandled. Measured against a real Redis 7: within run-to-run noise with one call
+  in flight, and about 5% of throughput at 50 concurrent calls; against an in-memory `MemoryStore`,
+  whose own call is about 100 ns, enabled calls take about twice as long. Disabled calls are
+  unchanged. Results, errors, rejection reasons, unhandled-rejection reporting and relative ordering
+  are unchanged either way; with diagnostics on, the returned promise is a derived one rather than
+  the backend's own.
 
 - **Distributed tracing observations (M98g): opt-in, minimized completed-span observations through
   the diagnostics connector.** `TelemetryPlugin` accepts a `diagnostics` option

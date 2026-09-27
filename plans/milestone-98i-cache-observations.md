@@ -175,10 +175,10 @@ first pass was biased: two instances in one process differ by ~11% with NO code 
 control), because the second-constructed instance runs slower under the JIT. The fair harness runs
 each configuration (`main`'s pre-M98i `CacheService`, disabled, enabled) in its own fresh process,
 alternated, with 10,000 (Redis) or 100,000 (memory) warmed `set`+`get` pairs. Three changes then
-landed: settlement is observed on a SIDE branch of the backend's own promise (no extra tick for the
-caller, and promise identity preserved); only the first call per operation and one in every eight
-after it reads a start time (one clock read per call instead of two); and the unobserved path reads
-a private field instead of a `WeakMap`. Results (medians, ops/s):
+landed: settlement was observed on a SIDE branch of the backend's own promise (later reverted — see
+the correction below); only the first call per operation and one in every eight after it reads a
+start time (one clock read per call instead of two); and the unobserved path reads a private field
+instead of a `WeakMap`. Results (medians, ops/s):
 
 | workload              | pre-M98i | disabled | enabled | enabled vs disabled |
 | --------------------- | -------- | -------- | ------- | ------------------- |
@@ -195,6 +195,16 @@ indistinguishable from pre-M98i in every workload. **Status: the ≤5% target is
 and not for 50-concurrent Redis (-6.2%) or the in-memory store; the residual is the cost of
 observing each settlement. Accepted by the maintainer on 2026-09-27 ("6% is acceptable"), and
 recorded in §10's approved budgets.**
+
+**Correction after the committed-tree audit (2026-09-27).** The side branch was a defect: attaching
+`then(onFulfilled, onRejected)` to the caller's own promise marks it HANDLED, so a fire-and-forget
+cache call whose backend rejects stopped surfacing as an unhandled rejection whenever diagnostics
+were on — an application error silently hidden (audit finding F2, Low). The caller again receives a
+derived promise that re-rejects with the original reason; a test drives a fire-and-forget rejection
+and asserts exactly one unhandled-rejection event with diagnostics off and on. The isolation above
+had already shown the side branch bought nothing measurable, and re-measured with the derived
+promise (Redis 7, 50 in flight, 11 rounds): pre-M98i 378k, disabled 377k, enabled 358k — **-5.0%**,
+within the accepted budget.
 
 ### 3.5 Scope and isolation
 
@@ -366,7 +376,7 @@ collector: no key, prefix, value, TTL, factory result or error value ever reache
 | The paired devtool (trusted reader of the minimized DTO)                                                                                                           | Obtain any asset above except counts/timings, or perform any cache operation.                                                                                                         |
 | A third-party in-process plugin registering a hostile source                                                                                                       | Put an unvalidated field, control character or oversized list into the signed frame, or break other sources' reporting.                                                               |
 | Application traffic with attacker-chosen keys                                                                                                                      | Grow collector or connector state.                                                                                                                                                    |
-| A failing or hung cache backend                                                                                                                                    | Change any application result, error, ordering or promise identity, or leak its error text.                                                                                           |
+| A failing or hung cache backend                                                                                                                                    | Change any application result, error, rejection reason, ordering or unhandled-rejection reporting, or leak its error text.                                                            |
 
 **Out of the threat model (unchanged from M98b):** a privileged local sniffer (loopback carries no
 encryption), remote access, and shared multi-tenant production use. A third-party source runs with
@@ -389,7 +399,7 @@ and **accepted by the maintainer on 2026-09-27** in place of §3.4's 5% target.
 | Keys, values or errors could enter capture.                                        | The wrapper classifies before the collector; the collector's API accepts only an operation, an outcome code and clock readings. A rejection is recorded without reading the error.                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Per-key labels would grow with attacker-chosen keys and disclose them.             | No per-key label exists; one alias per instance, fixed and validated when `CachePlugin(...)` is called.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | An alias could carry a secret or forge terminal output.                            | Aliases are explicit and approving one authorizes its disclosure; 1–64 UTF-8 bytes, no C0/C1 control character, validated on the plugin, the connector and the client.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| Observation could change application semantics.                                    | Settlement is observed on a side branch; the caller receives the backend's own promise, value and rejection reason, with no extra tick. Enabled, disabled and failing observers are compared by test.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Observation could change application semantics.                                    | The caller receives a promise derived from the backend's: same value, ORIGINAL rejection reason, and an unhandled rejection stays unhandled (a side branch on the caller's promise would mark it handled — audit F2). Enabled, disabled and failing observers are compared by test.                                                                                                                                                                                                                                                                                                                                                                            |
 | A failing observer could break the cache.                                          | Every collector entry point catches its own failures and latches a value-free `collection-failed`; application results are unaffected.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | A hostile third-party source could smuggle fields or run code during the read.     | Copy-once reader: plain objects of own DATA properties only (a getter is never invoked), lists by index, exact keys and enums, per-source isolation to a fixed failed snapshot.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Two sources claiming one alias would make the report ambiguous.                    | Duplicate non-null aliases collapse the whole response to `collection-failed` with no sources.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -405,8 +415,13 @@ and **accepted by the maintainer on 2026-09-27** in place of §3.4's 5% target.
 field set through a non-barrel internal function rather than a `WeakMap` — equivalent isolation (no
 public way to read or replace a collector), less hot-path work. (2) Only one call in eight per
 operation is timed, so `lastDurationMs` reports the most recent TIMED call — this narrows what is
-measured and discloses nothing new. (3) Settlement is observed on a side branch rather than by
-wrapping the promise — strictly less intrusive. None widens the boundary.
+measured and discloses nothing new. (3) A side-branch observation briefly replaced the derived
+promise and was reverted: it hid unhandled rejections (audit F2). None widens the boundary.
+
+**Amended after approval (2026-09-27), flagged for the maintainer:** the backend-attacker row above
+originally listed "promise identity" among what must not change. The F2 correction returns a derived
+promise when diagnostics are on, so identity does change; identity is not a security property, and
+the row now names what is — unhandled-rejection reporting — instead.
 
 **Added at the maintainer's request (2026-09-27):** the DNS-rebinding attacker above. The audit must
 probe it on a RAW socket (the Fetch API cannot set `Host`): a request whose `Host` is

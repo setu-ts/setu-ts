@@ -2622,10 +2622,11 @@ before calling it, and a rejection is recorded without the error being read. The
 the sources once at bootstrap (refusing more than 16), reads each synchronously only after
 authentication, and copies only own data properties of plain objects, so a hostile replacement
 source cannot run a getter or smuggle a field. Coverage is `owned-instance`: direct store calls and
-replacement services are not represented, and no eviction is inferred from misses. Settlement is
-observed on a side branch of the backend's own promise, so the caller's await chain and promise
-identity are unchanged, and only one call in eight per operation is timed with a start reading — the
-per-call cost is one clock read plus one promise reaction.
+replacement services are not represented, and no eviction is inferred from misses. The caller
+receives a promise derived from the backend's, which re-rejects with the ORIGINAL reason, so an
+unhandled backend rejection stays unhandled with diagnostics on (a side branch on the caller's own
+promise would have marked it handled and hidden it). Only one call in eight per operation is timed
+with a start reading — the per-call cost is one clock read plus one promise reaction.
 
 ---
 

@@ -59,10 +59,11 @@ for the local diagnostics connector's `GET /v1/cache` (`@setu-ts/diagnostics-plu
 prefixes, values, Redis URLs, factory results and errors are never captured, and no eviction is
 inferred. Without the option the instance registers an inert `disabled` source and its cache calls
 are not touched. Results, errors, TTL, prefix and `getOrSet` coalescing are identical either way;
-enabled calls add one clock read (two on the timed one-in-eight sample) and one side-branch promise
-reaction each, measured at about 6% of throughput against a real Redis at 50 concurrent calls.
-Direct store calls and a replacement service are outside coverage. Enable only on an approved
-development dataset: counts aggregate every tenant using the instance.
+enabled calls add one clock read (two on the timed one-in-eight sample) and one derived promise each
+(which re-rejects with the original reason, so an unhandled rejection stays unhandled), measured at
+about 5% of throughput against a real Redis at 50 concurrent calls. Direct store calls and a
+replacement service are outside coverage. Enable only on an approved development dataset: counts
+aggregate every tenant using the instance.
 
 ## Response caching
 

@@ -30,7 +30,6 @@ import {
   CacheObservationCollector,
   compileCacheDiagnosticsAlias,
   createCacheDiagnosticsSource,
-  observeCacheCall,
   UNTIMED,
 } from '../../src/diagnostics/cache-observations.ts';
 
@@ -249,18 +248,21 @@ describe('observeCacheCall — outcome counters', () => {
 });
 
 describe('observeCacheCall — transparency', () => {
-  it('returns the backend own promise, observed or not', () => {
+  it('returns the backend promise unobserved, and one settling identically observed', async () => {
     const direct = Promise.resolve('same');
     const backend = {
       ...scriptedBackend('resolve', null),
       get: () => direct,
     } as unknown as CacheStore;
     const plain = new CacheService(backend, '');
+    // Unobserved: no wrapping at all.
     expect(plain.get('k')).toBe(direct);
+    // Observed: a derived promise (so an unhandled rejection stays unhandled)
+    // that settles to the same value.
     const { service } = observed(backend);
-    expect(service.get('k')).toBe(direct);
-    const collector = new CacheObservationCollector('x', new Clock().read);
-    expect(observeCacheCall(collector, 'get', () => direct)).toBe(direct);
+    const wrapped = service.get('k');
+    expect(wrapped).not.toBe(direct);
+    expect(await wrapped).toBe('same');
   });
 
   it('reads no clock on a service whose plugin did not opt in', async () => {
@@ -320,6 +322,35 @@ describe('observeCacheCall — transparency', () => {
       expect(other.results).toEqual(off.results);
       expect(other.rejected).toBe(other.failure);
     }
+  });
+
+  it('leaves an unhandled backend rejection unhandled, exactly as when unobserved', async () => {
+    // A fire-and-forget call whose backend rejects must still surface as an
+    // unhandled rejection with diagnostics on: observing settlement must
+    // never mark the caller's promise as handled and swallow the error.
+    const count = async (enabled: boolean): Promise<number> => {
+      const reason = new Error('fire-and-forget');
+      const { service } = enabled
+        ? observed(scriptedBackend('reject', reason))
+        : { service: new CacheService(scriptedBackend('reject', reason), '') };
+      let unhandled = 0;
+      const onUnhandled = (event: PromiseRejectionEvent): void => {
+        if (event.reason === reason) {
+          unhandled++;
+          event.preventDefault();
+        }
+      };
+      globalThis.addEventListener('unhandledrejection', onUnhandled);
+      try {
+        void service.get('k');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      } finally {
+        globalThis.removeEventListener('unhandledrejection', onUnhandled);
+      }
+      return unhandled;
+    };
+    expect(await count(false)).toBe(1);
+    expect(await count(true)).toBe(1);
   });
 
   it('keeps the settlement order of interleaved calls identical enabled and disabled', async () => {
