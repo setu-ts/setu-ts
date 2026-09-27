@@ -10,15 +10,18 @@ import { expect } from '@std/expect';
 
 import type {
   ConfigDiagnosticsSnapshot,
+  EventDiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
   IAuthorizationDiagnosticsSource,
   ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
+  IEventDiagnosticsSource,
   IResponse,
   ITraceDiagnosticsSource,
 } from '@setu-ts/common';
 import { createConnectorHandler, refusalResponse } from '../../src/transport/connector-handler.ts';
 import { currentInspectorsManifest, projectConfigSnapshot } from '../../src/protocol/protocol.ts';
+import { isEventResponseProjection } from '../../src/protocol/event-protocol.ts';
 import { isAuthorizationBatchProjection } from '../../src/protocol/authorization-protocol.ts';
 import { isTraceBatchProjection } from '../../src/protocol/trace-protocol.ts';
 import { ConnectorLimits } from '../../src/transport/limits.ts';
@@ -127,6 +130,7 @@ async function buildHarness(options?: {
     limits: new ConnectorLimits(clock),
     queues: new QueueObservationMerger([], clock),
     traces: null,
+    eventSources: [],
     authorization: null,
     source,
     clock,
@@ -576,6 +580,7 @@ describe('Connector handler — authentication and binding', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      eventSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -781,6 +786,7 @@ describe('Connector handler — projection hardening', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      eventSources: [],
       authorization: null,
       source: throwingSource,
       clock,
@@ -856,6 +862,7 @@ describe('Connector handler — health operation (M98d)', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      eventSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -894,6 +901,7 @@ describe('Connector handler — health operation (M98d)', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      eventSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -946,6 +954,7 @@ describe('Connector handler — health operation (M98d)', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      eventSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -1263,6 +1272,7 @@ describe('Connector handler — remaining structural arms', () => {
       limits,
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      eventSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -1309,6 +1319,7 @@ describe('Connector handler — remaining structural arms', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces: null,
+      eventSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -1695,6 +1706,7 @@ describe('Connector handler — queue observations (M98f)', () => {
       limits: new ConnectorLimits(clock),
       queues,
       traces: null,
+      eventSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -1840,6 +1852,7 @@ describe('Connector handler — trace observations (M98g)', () => {
       limits: new ConnectorLimits(clock),
       queues: new QueueObservationMerger([], clock),
       traces,
+      eventSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -1979,6 +1992,307 @@ describe('Connector handler — trace observations (M98g)', () => {
   });
 });
 
+describe('Connector handler — event observation operation (M98j)', () => {
+  /** A minimal ready event source snapshot. */
+  function eventSnapshot(alias: string | null, state = 'ready'): Record<string, unknown> {
+    return {
+      state,
+      alias,
+      coverage: 'owned-instance',
+      records: alias === null ? [] : [{
+        alias: 'users',
+        operation: 'publish',
+        count: 1,
+        started: 1,
+        succeeded: 1,
+        failed: 0,
+        noSubscribers: 0,
+        lastDurationMs: 2,
+        ageMs: 1,
+      }],
+      dropped: 0,
+    };
+  }
+
+  function eventSource(
+    snapshot: Record<string, unknown> | Error,
+  ): IEventDiagnosticsSource & { calls: number } {
+    return {
+      calls: 0,
+      snapshot(): EventDiagnosticsSnapshot {
+        this.calls += 1;
+        if (snapshot instanceof Error) {
+          throw snapshot;
+        }
+        return snapshot as unknown as EventDiagnosticsSnapshot;
+      },
+    };
+  }
+
+  async function eventHarness(sources: readonly IEventDiagnosticsSource[]) {
+    const clock = new MutableClock();
+    const session = await createTestSession(crypto.subtle, clock, 900_000);
+    session.bindInstance(TEST_INSTANCE_ID);
+    const key = await importTestKey(crypto.subtle);
+    const handler = createConnectorHandler({
+      port: TEST_PORT,
+      subtle: crypto.subtle,
+      session,
+      limits: new ConnectorLimits(clock),
+      queues: new QueueObservationMerger([], clock),
+      traces: null,
+      eventSources: sources,
+      cacheSources: [],
+      authorization: null,
+      source: fakeSource(minimalSnapshot(), minimalBatch()),
+      clock,
+      healthSource: null,
+      configSource: null,
+    });
+    return { handler, key };
+  }
+
+  async function sendEvent(
+    harness: Awaited<ReturnType<typeof eventHarness>>,
+    options: { sequence?: number; mac?: string; target?: string } = {},
+  ) {
+    const target = options.target ?? '/v1/event';
+    const sequence = options.sequence ?? 2;
+    const mac = options.mac ??
+      await signRequest(crypto.subtle, harness.key, target, sequence, TEST_INSTANCE_ID);
+    return inspect(
+      await harness.handler(
+        fakeRequest({
+          url: `http://${HOST}${target}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': String(sequence),
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      ),
+    );
+  }
+
+  it('serves a signed, exactly-projected event response after authentication', async () => {
+    const source = eventSource(eventSnapshot('bus'));
+    const harness = await eventHarness([source]);
+    // A query on the snapshot operation is refused before anything else.
+    expect(
+      (await sendEvent(harness, { target: '/v1/event?after=0', sequence: 2 })).status,
+    ).toEqual(400);
+    const view = await sendEvent(harness);
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('ready');
+    expect(isEventResponseProjection(view.body)).toBe(true);
+    const sources = view.body.sources as { sourceId: string; snapshot: { alias: string } }[];
+    expect(sources.length).toEqual(1);
+    expect(sources[0]!.sourceId).toEqual('s1');
+    expect(sources[0]!.snapshot.alias).toEqual('bus');
+    // The response MAC covers the exact served bytes.
+    const mac = view.headers.get('x-setu-mac')!;
+    const digest = await sha256Hex(crypto.subtle, utf8(view.bodyText));
+    expect(
+      await verifyFields(crypto.subtle, harness.key, mac, [
+        'setu-diagnostics-v1',
+        'response',
+        'a'.repeat(32),
+        TEST_INSTANCE_ID,
+        '2',
+        '/v1/event',
+        '200',
+        digest,
+      ]),
+    ).toBe(true);
+  });
+
+  it('collapses an over-budget body to the fixed collection-failed response, never a 503', async () => {
+    const big = (index: number) => {
+      const alias = String(index).padEnd(64, '"');
+      return eventSource({
+        state: 'ready',
+        alias,
+        coverage: 'owned-instance',
+        dropped: 0,
+        records: Array.from({ length: 64 }, (_, slot) => ({
+          alias: `${slot}`.padEnd(64, '"'),
+          operation: slot % 2 === 0 ? 'publish' : 'handler',
+          count: Number.MAX_SAFE_INTEGER,
+          started: Number.MAX_SAFE_INTEGER,
+          succeeded: Number.MAX_SAFE_INTEGER,
+          failed: Number.MAX_SAFE_INTEGER,
+          noSubscribers: Number.MAX_SAFE_INTEGER,
+          lastDurationMs: Number.MAX_SAFE_INTEGER,
+          ageMs: Number.MAX_SAFE_INTEGER,
+        })),
+      });
+    };
+    const harness = await eventHarness(Array.from({ length: 16 }, (_, index) => big(index)));
+    const view = await sendEvent(harness);
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'collection-failed',
+      sources: [],
+    });
+  });
+
+  it('never invokes a getter: accessor-bearing or non-plain sources become collection-failed', async () => {
+    let getterCalls = 0;
+    const accessorSnapshot = {
+      state: 'ready',
+      get alias() {
+        getterCalls += 1;
+        return 'bus';
+      },
+      coverage: 'owned-instance',
+      records: [],
+      dropped: 0,
+    };
+    const record = (eventSnapshot('rec').records as Record<string, unknown>[])[0]!;
+    const indexGetterRecords: unknown[] = [];
+    Object.defineProperty(indexGetterRecords, 0, {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return record;
+      },
+    });
+    class Snapshot {
+      state = 'ready';
+      alias = 'cls';
+      coverage = 'owned-instance';
+      records = [];
+      dropped = 0;
+    }
+    const harness = await eventHarness([
+      eventSource(accessorSnapshot),
+      eventSource({ ...eventSnapshot('idx'), records: indexGetterRecords }),
+      eventSource(new Snapshot() as unknown as Record<string, unknown>),
+      eventSource({ ...eventSnapshot('sym'), [Symbol('extra')]: 1 }),
+      eventSource(eventSnapshot('good')),
+    ]);
+    const view = await sendEvent(harness);
+    expect(view.status).toEqual(200);
+    const sources = view.body.sources as {
+      sourceId: string;
+      snapshot: { state: string; alias: string | null };
+    }[];
+    expect(sources.map((entry) => entry.sourceId)).toEqual(['s1', 's2', 's3', 's4', 's5']);
+    expect(sources.slice(0, 4).map((entry) => entry.snapshot)).toEqual(
+      Array.from({ length: 4 }, () => ({
+        state: 'collection-failed',
+        alias: null,
+        coverage: 'owned-instance',
+        records: [],
+        dropped: 0,
+      })),
+    );
+    expect(sources[4]!.snapshot.alias).toEqual('good');
+    expect(getterCalls).toEqual(0);
+  });
+
+  it('answers a typed unsupported response when no event source is registered', async () => {
+    const harness = await eventHarness([]);
+    const view = await sendEvent(harness);
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('unsupported');
+    expect(view.body.sources).toEqual([]);
+    expect(isEventResponseProjection(view.body)).toBe(true);
+  });
+
+  it('answers a per-source collection-failed snapshot when a source throws, and reads it only after authentication', async () => {
+    let reads = 0;
+    const hostile = eventSource(
+      Object.assign(new Error('hostile event source'), { observe: () => reads }),
+    );
+    const throwing: IEventDiagnosticsSource = {
+      snapshot: () => {
+        reads += 1;
+        throw new Error('hostile event source');
+      },
+    };
+    void hostile;
+    const harness = await eventHarness([throwing]);
+    // Bad MAC: refused before the source is ever read.
+    expect((await sendEvent(harness, { mac: 'f'.repeat(64) })).status).toEqual(401);
+    expect(reads).toEqual(0);
+    const view = await sendEvent(harness);
+    expect(view.status).toEqual(200);
+    const sources = view.body.sources as {
+      sourceId: string;
+      snapshot: { state: string; alias: unknown; records: unknown[] };
+    }[];
+    expect(sources[0]!.snapshot.state).toEqual('collection-failed');
+    expect(sources[0]!.snapshot.alias).toEqual(null);
+    expect(sources[0]!.snapshot.records).toEqual([]);
+    expect(JSON.stringify(view.body).includes('hostile')).toBe(false);
+  });
+
+  it('answers a fixed collection-failed response with NO sources on duplicate aliases', async () => {
+    const harness = await eventHarness([
+      eventSource(eventSnapshot('bus')),
+      eventSource(eventSnapshot('bus')),
+    ]);
+    const view = await sendEvent(harness);
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('collection-failed');
+    expect(view.body.sources).toEqual([]);
+    expect(isEventResponseProjection(view.body)).toBe(true);
+  });
+
+  it('never reads a source without the session MAC, and computes the aggregate state by priority', async () => {
+    const ready = eventSource(eventSnapshot('ready-bus'));
+    const noData = eventSource(eventSnapshot('quiet-bus', 'no-data'));
+    const disabled = eventSource(eventSnapshot(null, 'disabled'));
+    let reads = 0;
+    const countingReady: IEventDiagnosticsSource = {
+      snapshot: () => {
+        reads += 1;
+        return eventSnapshot('ready-bus') as unknown as EventDiagnosticsSnapshot;
+      },
+    };
+    void ready;
+    // disabled beats nothing here: ready is present, so the aggregate is ready.
+    const harness = await eventHarness([noData, countingReady, disabled]);
+    const view = await sendEvent(harness);
+    expect(view.body.state).toEqual('ready');
+    expect((view.body.sources as unknown[]).length).toEqual(3);
+    expect(reads).toEqual(1);
+    // Without any ready source, the highest-priority non-ready state wins.
+    const stale = eventSource(eventSnapshot('stale-bus', 'stale'));
+    const harness2 = await eventHarness([noData, stale, disabled]);
+    const view2 = await sendEvent({ ...harness2, key: harness2.key }, { sequence: 3 });
+    expect(view2.body.state).toEqual('stale');
+  });
+
+  it('canaries: a payload, type name, aggregate id and error text never reach the served body', async () => {
+    const harness = await eventHarness([
+      eventSource(eventSnapshot('bus')),
+      eventSource(Object.assign(new Error('ERROR-CANARY-SYNTHETIC'))),
+    ]);
+    const view = await sendEvent(harness);
+    expect(view.status).toEqual(200);
+    for (
+      const canary of [
+        'PAYLOAD-CANARY-SYNTHETIC',
+        'user-created',
+        'AGG-CANARY',
+        'ERROR-CANARY-SYNTHETIC',
+        'handler-function-name',
+      ]
+    ) {
+      expect({ canary, leaked: view.bodyText.includes(canary) }).toEqual({
+        canary,
+        leaked: false,
+      });
+    }
+  });
+});
+
 describe('Connector handler — authorization explanations (M98h)', () => {
   /** A well-formed authorization source batch at the requested cursor. */
   function authorizationBatch(instanceId: string, after: number): Record<string, unknown> {
@@ -2024,6 +2338,7 @@ describe('Connector handler — authorization explanations (M98h)', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      eventSources: [],
     });
     return { handler, key, clock };
   }

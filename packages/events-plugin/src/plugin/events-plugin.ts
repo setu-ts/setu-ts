@@ -3,7 +3,14 @@
  *
  * @module
  */
-import type { IEventBus, ILogger, IPlugin, IPluginContext, RegistryFactory } from '@setu-ts/common';
+import type {
+  IEventBus,
+  IEventDiagnosticsSource,
+  ILogger,
+  IPlugin,
+  IPluginContext,
+  RegistryFactory,
+} from '@setu-ts/common';
 import {
   CAPABILITIES,
   PLUGIN_PRIORITY,
@@ -12,6 +19,12 @@ import {
 } from '@setu-ts/common';
 import type { EventsPluginOptions } from '../interfaces/index.ts';
 import { InMemoryEventBus } from '../bus/in-memory-event-bus.ts';
+import { attachEventObserver } from '../bus/in-memory-event-bus.ts';
+import {
+  compileEventsDiagnosticsPolicy,
+  createDisabledEventSource,
+  EventObservationCollector,
+} from '../diagnostics/event-observations.ts';
 import { subscribeHandler } from '../handlers/event-handler.ts';
 import type { IEventHandler } from '../handlers/event-handler.ts';
 import type { EventDispatchOptions } from '../interfaces/index.ts';
@@ -56,6 +69,14 @@ const DEFAULT_OPTIONS: EventsPluginOptions = {
 export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const handlers = opts.handlers ?? [];
+
+  // M98j: the observation policy is validated ONCE, here at plugin
+  // construction, so an invalid option refuses before any application
+  // exists. `null` when `diagnostics` is absent — the inert, disabled source
+  // is registered instead, and dispatch stays byte-identical.
+  const diagnosticsPolicy = opts.diagnostics === undefined
+    ? null
+    : compileEventsDiagnosticsPolicy(opts.diagnostics);
 
   // Split the two arms once, at plugin construction. Instances keep their
   // `register()` timing (byte-identical to the pre-factory behaviour);
@@ -127,8 +148,29 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // Create the bus.
       const bus = new InMemoryEventBus(dispatchOptions);
 
+      // M98j: attach the collector ONLY when observation was opted in, with
+      // the runtime's monotonic clock. Attachment goes through the internal
+      // WeakMap helper — the bus constructor signature is unchanged, and an
+      // application-constructed bus is never observed.
+      const collector = diagnosticsPolicy === null
+        ? null
+        : new EventObservationCollector(diagnosticsPolicy, ctx.runtime);
+      attachEventObserver(bus, collector);
+
       // Register the bus under CAPABILITIES.EVENTS.
       ctx.services.register<IEventBus>(CAPABILITIES.EVENTS, bus);
+
+      // M98j: EVERY instance contributes one event-diagnostics source as a
+      // MULTI provider — never claimed in `provides`, so the shared token
+      // cannot collide with the application capability and two instances
+      // cannot collide with each other. An unconfigured instance contributes
+      // the inert `disabled` source, which observes nothing.
+      const source: IEventDiagnosticsSource = collector ?? createDisabledEventSource();
+      ctx.services.register<IEventDiagnosticsSource>(
+        CAPABILITIES.EVENTS_DIAGNOSTICS,
+        source,
+        { multi: true },
+      );
 
       // Subscribe the declaratively-supplied handler INSTANCES, through the
       // SAME `subscribeHandler` a caller would use by hand — so the option and
@@ -161,9 +203,14 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
         data: { handlers: bus.subscriptionCount },
       }));
 
-      // Register shutdown hook.
+      // Register shutdown hook. The collector closes FIRST — a late
+      // observation is discarded, then state is cleared — exactly the plan's
+      // "close detaches first, then clears" order. Detaching the observer
+      // makes the bus's hot path a single failing WeakMap probe again.
       // deno-lint-ignore require-await
       ctx.lifecycle.onClose(async () => {
+        attachEventObserver(bus, null);
+        collector?.close();
         bus.clear();
       });
     },

@@ -10667,14 +10667,15 @@ minimized completed-span trace observations and the `GET /v1/traces` inspector; 
 ([#374](https://github.com/setu-ts/setu-ts/pull/374)) — cache operation counters and the
 `GET /v1/cache` inspector; 98h complete ([#376](https://github.com/setu-ts/setu-ts/pull/376)) —
 authorization decision explanations and the `GET /v1/authorization` inspector. These nine are
-implemented, awaiting publication in the next release cycle. **98j–98n are planned**, each with its
-own implementation plan and mandatory security audit. This umbrella records framework work for the
-separately maintained devtool; adding the later letters does not make them prerequisites for
-publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE exception recorded under
-the release requirements below — M98d's status-shape change must precede the first publication of
-`packages/diagnostics-plugin`, because the shipped client refuses a status body it does not expect
-and that body is otherwise frozen for the lifetime of every published client. A roadmap status is
-not evidence that a security audit has passed.
+implemented, awaiting publication in the next release cycle. 98j is complete
+([#375](https://github.com/setu-ts/setu-ts/pull/375)) — event dispatch observations. **98k–98n are
+planned**, each with its own implementation plan and mandatory security audit. This umbrella records
+framework work for the separately maintained devtool; adding the later letters does not make them
+prerequisites for publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE
+exception recorded under the release requirements below — M98d's status-shape change must precede
+the first publication of `packages/diagnostics-plugin`, because the shipped client refuses a status
+body it does not expect and that body is otherwise frozen for the lifetime of every published
+client. A roadmap status is not evidence that a security audit has passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -11129,25 +11130,27 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
 
 ### Milestone 98j: Event Dispatch Observations
 
-**Status:** Planned. Owner: `packages/events-plugin`. Canonical plan:
-`plans/milestone-98j-event-observations.md`.
+**Status:** Complete. Design security review approved (plan §10.1); independent committed-tree
+security audit passed on round 3 (`d458975c`, plan §12). Owner: `packages/events-plugin`. Canonical
+plan: `plans/archive/milestone-98j-event-observations.md`.
 
-- [ ] Instrument publish entry and each existing handler await, without subscribing an extra handler
+- [x] Instrument publish entry and each existing handler await, without subscribing an extra handler
       or changing dispatch. Count publications, handler starts, successes and failures separately.
       async publication completion is not handler completion. A thrown errorHandler retains its
       existing propagation behavior. Aggregate handlers under their approved event alias; individual
       handler names and function identities are excluded. publishBatch counts constituent publish
       calls once.
-- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+- [x] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
       reader and native client method; activate only the reserved `events` manifest entry.
-- [ ] Exclude event data, event IDs, aggregate IDs, handler function names, arbitrary event types,
+- [x] Exclude event data, event IDs, aggregate IDs, handler function names, arbitrary event types,
       raw errors before buffering.
-- [ ] Only the in-process InMemoryEventBus; broker acknowledgements and cross-service delivery
+- [x] Only the in-process InMemoryEventBus; broker acknowledgements and cross-service delivery
       remain separate messaging work.
-- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
-      audit. Exercise sync/async dispatch, handler rejection, errorHandler throwing, publishBatch,
-      unsubscribe during dispatch, and shutdown while handlers are pending. Assert exact invocation
-      order/count and no second evaluation.
+- [x] Pass recorded design review (approved 2026-09-27, plan §10.1) and committed-tree
+      implementation security audit (passed on round 3, `d458975c` — the behavioral tests are
+      delivered: exercise sync/async dispatch, handler rejection, errorHandler throwing,
+      publishBatch, unsubscribe during dispatch, and shutdown while handlers are pending. Assert
+      exact invocation order/count and no second evaluation).
 
 ### Milestone 98k: Scheduler Execution Observations
 
@@ -12230,7 +12233,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                                                     |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                                                         |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                                                           |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98i complete, 98j–98n planned with security audit gates)                                                                 |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98j complete, 98k–98n planned with security audit gates)                                                                 |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                                                   |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))                                    |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                                                |
@@ -12240,7 +12243,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98g       | ✅     | telemetry-plugin — minimized distributed tracing and correlation ([#369](https://github.com/setu-ts/setu-ts/pull/369); security audit passed on re-audit of `2fbac039`)      |
 | 98h       | ✅     | auth-plugin — bounded authorization decision explanations ([#376](https://github.com/setu-ts/setu-ts/pull/376); security audit passed on round 5 of `44789a1d`)              |
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
-| 98j       | ⬜     | event dispatch observations — design security review and implementation audit required                                                                                       |
+| 98j       | ✅     | events-plugin + common + diagnostics-plugin — event dispatch observations ([#375](https://github.com/setu-ts/setu-ts/pull/375); security audit history in the plan §12)      |
 | 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |
 | 98l       | ⬜     | realtime lifecycle observations — design security review and implementation audit required                                                                                   |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                    |

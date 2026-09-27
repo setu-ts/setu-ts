@@ -36,6 +36,43 @@ export interface EventHandlerRegistration {
 }
 
 /**
+ * The opt-in event-dispatch observation policy (M98j).
+ *
+ * Event data, event IDs and aggregate IDs are treated as sensitive: only the
+ * exact event types listed in {@linkcode events} are observed, each under its
+ * approved display alias, and a type outside the map is neither observed nor
+ * counted. Handler function names and identities are never captured — the
+ * handlers of one approved type aggregate under the type's single alias. No
+ * payload, identifier or thrown value is admitted to the collector at all.
+ *
+ * "Safe" is a SHAPE, not secret detection: every alias is a string of `1`–`64`
+ * UTF-8 bytes containing no control character, and aliases are unique.
+ * Approving an exact alias IS authorizing its disclosure.
+ *
+ * @since 0.8.0
+ */
+export interface EventsDiagnosticsOptions {
+  /**
+   * The explicit opt-in, deliberately the LITERAL `true`: an acknowledgement,
+   * not a toggle. `enabled: false` (or any other value) is refused when
+   * `EventsPlugin(...)` is called; omit `diagnostics` instead.
+   */
+  readonly enabled: true;
+  /**
+   * The display alias for THIS bus instance. It never derives from the
+   * plugin's `name`, which is registry topology, so an instance is
+   * identified only by what the application approved.
+   */
+  readonly alias: string;
+  /**
+   * Exact event type → approved alias allowlist. At most 64 entries; aliases
+   * must be unique. Types are matched exactly — an unknown type is omitted
+   * before capture, and there is no pattern or dynamic handler enumeration.
+   */
+  readonly events: Readonly<Record<string, string>>;
+}
+
+/**
  * Options for the EventsPlugin.
  *
  * @since 0.1.0
@@ -75,6 +112,13 @@ export interface EventsPluginOptions {
    * a no-op. Errors never cause `publish` to reject.
    */
   errorHandler?: (error: unknown, event: IDomainEvent) => void;
+  /**
+   * Opt-in event-dispatch observations (M98j). Absent by default: no
+   * collector exists, the source answers `disabled`, and dispatch is
+   * byte-identical to an unobserved bus. Present, it activates the
+   * {@linkcode EventsDiagnosticsOptions} allowlist and the bounded collector.
+   */
+  diagnostics?: EventsDiagnosticsOptions;
 }
 
 /**

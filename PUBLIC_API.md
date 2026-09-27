@@ -3139,6 +3139,11 @@ interface IEventBus {
 - **`IEventHandler`** — Class-based event handler interface with a `handle(event)` method.
 - **`subscribeHandler`** — Function that adapts an `IEventHandler` instance to the `EventHandler`
   signature and subscribes it to the bus; returns an `Unsubscribe` function.
+- **`EventsDiagnosticsOptions`** — The plugin's opt-in event-dispatch observation option
+  (`diagnostics`), typed as `{ enabled: true, alias: string, events: Record<string, string> }`. The
+  collector behind the bus observes ONLY the exact event types the `events` map lists, replacing
+  each with its approved alias; payloads, event ids, aggregate ids and unapproved types are never
+  retained. See "Event dispatch observations (M98j)" in the diagnostics section.
 
 **Re-exports from `@setu-ts/common`:** `IEventBus`, `IDomainEvent`, `EventHandler`, `Unsubscribe`.
 
@@ -4271,6 +4276,34 @@ structural implementation of `IDiagnosticsClient` must add it (the package has n
 published). `IServiceRegistry.isCurrent` is OPTIONAL so third-party registry-shaped implementations
 keep compiling; its absence conservatively disables explanations rather than falling back to a
 resolving `get`.
+
+**Event dispatch observations (M98j).** The connector serves `GET /v1/event` — a SNAPSHOT operation
+with no query, unlike the paged kernel-event stream `/v1/events` (one letter apart; the manifest key
+`events` names THIS inspector) — read through `client.events(): Promise<EventDiagnosticsResponse>`.
+The EventsPlugin ALWAYS registers one `IEventDiagnosticsSource` under
+`CAPABILITIES.EVENTS_DIAGNOSTICS` as a multi provider (it is an optional dependency of the
+connector, not a claimed capability, and never appears in the plugin's `provides`): without the
+plugin's `diagnostics` option it answers `disabled`; with the option the collector behind the bus
+reduces each dispatch to counters BEFORE anything is retained. Only event types whose exact raw name
+appears in `EventsDiagnosticsOptions.events` are observed, each replaced by its approved alias (1–64
+UTF-8 bytes, no controls, unique, at most 64 entries, own-property lookup); records aggregate per
+(alias, operation) — `publish` (every publication, including no-subscriber ones) and `handler` (each
+existing handler's await; async publication completion is not handler completion) — over at most 64
+slots with 60-second retention, a 30-second stale threshold and saturating counters; `started` is
+counted when a boundary begins and `count` when it settles, so `started - count` is work in flight.
+Observation never changes dispatch: a thrown `errorHandler` propagates exactly as without
+diagnostics, and a failing clock latches the source `collection-failed` without rejecting a publish.
+Event payloads, event ids, aggregate ids, handler names, unapproved type names and error text never
+enter a record. At bootstrap the connector reads every registered source in registration order (more
+than 16 refuses startup with a fixed configuration error), assigns session-local positional
+`sourceId` values `s1`…`s16`, collapses a body over the 256 KiB budget to the fixed
+collection-failed response with no sources, answers a throwing or validator-refusing source with its
+own value-free `collection-failed` snapshot, and answers duplicate non-null aliases with a fixed
+collection-failed response listing NO sources; the aggregate `state` is `ready` if any source is
+ready, otherwise `collection-failed`, `stale`, `no-data`, `disabled`. A client whose negotiated
+manifest has `events: false` answers a frozen `unsupported` response without sending the request.
+`IDiagnosticsClient.events` is a new REQUIRED member — additive for callers; a structural
+implementation of `IDiagnosticsClient` must add it (the package has not yet been published).
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
@@ -10212,6 +10245,15 @@ a MULTI-provider token: every CachePlugin instance registers one `ICacheDiagnost
 `ageMs`, and the non-negative saturating counters `succeeded`, `failed`, `hits`, `misses`,
 `present`, `absent`, `removed`, `notRemoved`) and the connector's `CacheDiagnosticsResponse`. See
 the diagnostics-connector section for the wire operation.
+
+**Event observation contracts (M98j).** `CAPABILITIES.EVENTS_DIAGNOSTICS` (`'event-diagnostics'`) is
+a MULTI-provider token: every EventsPlugin instance registers one `IEventDiagnosticsSource`
+(`snapshot(): EventDiagnosticsSnapshot` — synchronous, never publishes, invokes a handler or
+enumerates subscriptions). The DTOs are `EventDiagnosticsSnapshot` (`state: EventDiagnosticsState`,
+`alias | null`, `coverage: EventDiagnosticsCoverage`, `records`, `dropped`),
+`EventDiagnosticsRecord` (alias, `EventObservationOperation`, `count`, `started`, `succeeded`,
+`failed`, `noSubscribers`, `lastDurationMs`, `ageMs`) and the connector's
+`EventDiagnosticsResponse`. See the diagnostics-connector section for the wire operation.
 
 **Trace observation contracts (M98g).** `CAPABILITIES.TRACE_DIAGNOSTICS` (`'trace-diagnostics'`) is
 a SINGLE-provider token: the TelemetryPlugin always registers one `ITraceDiagnosticsSource`

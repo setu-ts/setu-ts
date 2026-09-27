@@ -113,6 +113,7 @@ otherwise a no-op. **A failing handler never makes `publish` reject** in either 
 | `InMemoryEventBus`         | class     |
 | `IntegrationEvent`         | class     |
 | `EventHandlerRegistration` | interface |
+| `EventsDiagnosticsOptions` | interface |
 | `EventsPluginOptions`      | interface |
 | `IDomainEvent`             | interface |
 | `IDomainEvents`            | interface |

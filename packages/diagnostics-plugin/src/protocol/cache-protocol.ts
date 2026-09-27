@@ -24,7 +24,13 @@ import type {
   ICacheDiagnosticsSource,
 } from '@setu-ts/common';
 
-import { hasExactKeys, isDisplayAlias, isRecord } from './protocol.ts';
+import {
+  copyOwnData,
+  copyOwnDataList,
+  hasExactKeys,
+  isDisplayAlias,
+  isRecord,
+} from './protocol.ts';
 
 /**
  * The fixed source bound: a connector refuses to start with more cache
@@ -109,69 +115,13 @@ function isCounter(value: unknown): value is number {
 }
 
 /**
- * Copies a source-supplied object's own DATA properties into a fresh plain
- * record — or `null` when the value is not a plain object (its prototype is
- * neither `Object.prototype` nor `null`), carries an accessor, or carries a
- * key outside `keys`. Each property is read exactly once through its
- * descriptor, so a getter is never invoked.
- *
- * @param value - The source value
- * @param keys - The exact admitted keys
- * @returns The copy, or `null`
- */
-function copyPlain(value: unknown, keys: readonly string[]): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return null;
-  }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    return null;
-  }
-  const own = Reflect.ownKeys(value);
-  if (own.length !== keys.length) {
-    return null;
-  }
-  const copy: Record<string, unknown> = {};
-  for (const key of keys) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor === undefined || !('value' in descriptor)) {
-      return null;
-    }
-    copy[key] = descriptor.value;
-  }
-  return copy;
-}
-
-/**
- * Copies a source-supplied record list: an intrinsic array read by index
- * (never its own iterator, `map` or `toJSON`), each item copied by
- * {@linkcode copyPlain}. At most `max + 1` items are read, so an over-budget
- * list refuses without walking an attacker-chosen length.
+ * Copies a source-supplied record list through the shared own-data reader.
  *
  * @param value - The source list
  * @returns The copied records, or `null`
  */
 function copyRecords(value: unknown): Record<string, unknown>[] | null {
-  if (!Array.isArray(value)) {
-    return null;
-  }
-  const length = Math.min(value.length, MAX_CACHE_RECORDS + 1);
-  if (length > MAX_CACHE_RECORDS) {
-    return null;
-  }
-  const copies: Record<string, unknown>[] = [];
-  for (let index = 0; index < length; index++) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, index);
-    if (descriptor === undefined || !('value' in descriptor)) {
-      return null;
-    }
-    const copy = copyPlain(descriptor.value, RECORD_KEYS);
-    if (copy === null) {
-      return null;
-    }
-    copies.push(copy);
-  }
-  return copies;
+  return copyOwnDataList(value, MAX_CACHE_RECORDS, RECORD_KEYS);
 }
 
 /**
@@ -275,7 +225,7 @@ function failedSourceSnapshot(): Record<string, unknown> {
 function readSource(source: ICacheDiagnosticsSource): Record<string, unknown> {
   try {
     const raw: unknown = source.snapshot();
-    const copy = copyPlain(raw, SNAPSHOT_KEYS);
+    const copy = copyOwnData(raw, SNAPSHOT_KEYS);
     if (copy === null) {
       return failedSourceSnapshot();
     }
