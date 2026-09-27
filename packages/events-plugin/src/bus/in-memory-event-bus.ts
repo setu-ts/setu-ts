@@ -73,9 +73,13 @@ export class InMemoryEventBus implements IEventBus {
    * @param event - The event to publish
    */
   async publish<T>(event: IDomainEvent<T>): Promise<void> {
-    const handlers = this.handlers.get(event.type) ?? [];
+    // `type` is read ONCE: dispatch and observation use the same value, so an
+    // accessor-typed event runs its getter exactly as often as unobserved and
+    // cannot be counted under an alias other than the one it dispatched to.
+    const type = event.type;
+    const handlers = this.handlers.get(type) ?? [];
     const observer = OBSERVERS.get(this);
-    const alias = observer?.aliasFor(event.type);
+    const alias = observer?.aliasFor(type);
 
     if (observer !== undefined && alias !== undefined) {
       // A no-subscriber publication is still a publication: observed as

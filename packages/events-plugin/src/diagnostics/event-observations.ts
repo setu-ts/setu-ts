@@ -347,7 +347,9 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     noSubscribers = false,
     at?: number | null,
   ): number | null {
-    if (startedAt === null) {
+    // A caller-held reading must not bypass the lifecycle: after close() or
+    // a latched failure nothing is recorded (audit F1).
+    if (startedAt === null || this.#closed || this.#collectionFailed) {
       return null;
     }
     const now = at === undefined ? this.#read() : at;
@@ -379,6 +381,9 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     noSubscribers = false,
     at?: number,
   ): void {
+    if (this.#closed || this.#collectionFailed) {
+      return;
+    }
     const now = at ?? this.#read();
     if (now === null) {
       return;

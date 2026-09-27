@@ -308,14 +308,14 @@ the bus's own locals and are never passed across the observer seam.
 
 **Attackers and their reach.**
 
-| Attacker                                                                                      | Must not be able to                                                                                                                                                             |
-| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An unpaired local process, or a browser tab on the host                                       | Read any event observation, cause a source read, or obtain an unsigned response.                                                                                                |
-| A website using DNS rebinding (its hostname re-resolved to `127.0.0.1`; may send no `Origin`) | Read any event observation or cause a source read.                                                                                                                              |
-| The paired devtool (trusted reader of the minimized DTO)                                      | Obtain any asset above except counts/starts/timings under approved aliases, publish an event, invoke a handler, subscribe, or enumerate subscriptions.                          |
-| A third-party in-process plugin registering a hostile source                                  | Put an unvalidated field, accessor result, control character or oversized list into the signed frame; break other sources' reporting; or make the connector invoke its getters. |
-| Application traffic publishing attacker-chosen event types                                    | Grow collector or connector state, or have an unapproved type observed, counted or named.                                                                                       |
-| A failing, throwing or hung handler, `errorHandler`, or clock                                 | Change any dispatch result, ordering, rejection, unhandled-rejection reporting or `whenIdle()` outcome, reject a `publish`, reach `errorHandler`, or leak error text.           |
+| Attacker                                                                                      | Must not be able to                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An unpaired local process, or a browser tab on the host                                       | Read any event observation, cause a source read, or obtain an unsigned response.                                                                                                                                                                                                                                                                                                                                                                                    |
+| A website using DNS rebinding (its hostname re-resolved to `127.0.0.1`; may send no `Origin`) | Read any event observation or cause a source read.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| The paired devtool (trusted reader of the minimized DTO)                                      | Obtain any asset above except counts/starts/timings under approved aliases, publish an event, invoke a handler, subscribe, or enumerate subscriptions.                                                                                                                                                                                                                                                                                                              |
+| A third-party in-process plugin registering a hostile source                                  | Put an unvalidated field, accessor result, control character or oversized list into the signed frame, or make the connector invoke its getters. It MAY blank every source's reporting through the two deliberate whole-response collapses (claiming another source's alias; pushing the body over budget), which answer a value-free `collection-failed` rather than ambiguous or partial data; any other hostile snapshot isolates to its own `collection-failed`. |
+| Application traffic publishing attacker-chosen event types                                    | Grow collector or connector state, or have an unapproved type observed, counted or named.                                                                                                                                                                                                                                                                                                                                                                           |
+| A failing, throwing or hung handler, `errorHandler`, or clock                                 | Change any dispatch result, ordering, rejection, unhandled-rejection reporting or `whenIdle()` outcome, reject a `publish`, reach `errorHandler`, or leak error text.                                                                                                                                                                                                                                                                                               |
 
 **Out of the threat model (unchanged from M98b/M98i):** a privileged local sniffer, remote access,
 and shared multi-tenant production use. A third-party source runs with application privileges and is
@@ -403,6 +403,12 @@ a hostile source with accessor, index-getter, class-instance, symbol-key and `Pr
 assert no getter runs. Compare dispatch observed vs unobserved under a throwing handler, a throwing
 async `errorHandler` and a throwing clock.
 
+**Amended after approval (2026-09-27), flagged for the maintainer:** the third-party-source attacker
+row originally said a hostile source "must not … break other sources' reporting". The approved
+duplicate-alias and over-budget collapses (findings table, same section) do exactly that, by design,
+so the row overstated the guarantee (audit round 1, F3); it now states the two collapses as the
+exceptions. No behaviour changed.
+
 **Approved by:** the maintainer, 2026-09-27 — recorded text accepted, including the measured
 overhead (Deno −11.8% on the publish-only route, above §3.4's 5% target, accepted as the cost of an
 opt-in development-instance inspector).
@@ -446,3 +452,26 @@ This is NOT the §10 security audit.
 | `IDiagnosticsClient.events` is a new required member.                                                                                            | CHANGELOG now marks it breaking for implementors.                                                                                                                        |
 | Design review (§10.1) found the snapshot reader invoked getters and indexed `records` directly, violating §3.3.                                  | Fixed: shared own-data reader (`copyOwnData`/`copyOwnDataList` in `protocol.ts`, extracted from the M98i cache reader); no-getter test.                                  |
 | Branch conflicted with `main` (M98i).                                                                                                            | Merged `main`; the status fixture was re-signed for the combined manifest.                                                                                               |
+
+## 12. Security audit record
+
+**Round 1 — `12b412d7`, verdict FAILED on three Lows**, by a freshly spawned independent agent (no
+implementation or fix involvement), Deno 2.9.6. 8 obligation probe groups (raw-socket DNS rebinding,
+44 hostile-source cases, canaries at five layers, 120 parity comparisons plus microtask and
+late-settlement probes, exhaustion, 19 session cases, a re-signing client MITM, shutdown and
+configuration), 15 defect classes (12 applied, 3 N/A), 14 negative controls observed failing and
+restored. No Critical, High or Medium finding; the full record is outside the tree
+(`.verify-98j/audit/AUDIT-98j.md`).
+
+| Finding                                                                                                                                                                                                                                     | Disposition                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **F1 (Low)** — a caller-held reading bypassed the closed/latched check in `end`/`observe`, so a settlement landing one microtask after `close()` re-created an (invisible) slot, contradicting §3.4 "late results cannot repopulate state". | Fixed: both entry points refuse after close or a latch before touching a slot. Tests count collector map writes after `close()` (the only way to see an invisible slot) directly and through the bus at every microtask position; they fail without the fix. |
+| **F2 (Low)** — the observed path read `event.type` twice, so an accessor-typed event ran its getter an extra time and a flipping one was counted under a different approved alias than it dispatched to.                                    | Fixed: `publish` reads `type` once for both dispatch and observation. Tested observed and unobserved; fails without the fix.                                                                                                                                 |
+| **F3 (Low)** — §10.1's third-party attacker row claimed a hostile source cannot break other sources' reporting, while the approved duplicate-alias and over-budget collapses blank every source.                                            | Fixed in the review text (amendment flagged above); documentation only.                                                                                                                                                                                      |
+
+Observations the audit recorded and did not raise: an observed `publish` resolves one microtask
+later (§3.4 allows it); U+2028/U+202E are admitted in aliases (the shared C0/C1 rule, M98d–M98i
+precedent — a devtool rendering concern); an honest-MAC cross-instance request consumes its sequence
+(M98b behaviour).
+
+**Round 2 — re-audit of the fix range: pending.**

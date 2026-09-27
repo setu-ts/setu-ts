@@ -833,3 +833,122 @@ describe('Clock reads per publication (M98j overhead)', () => {
     expect(handler).toMatchObject({ started: 2, count: 2, succeeded: 2 });
   });
 });
+
+/**
+ * Counts `Map.prototype.set` calls while `run` executes. After `close()` the
+ * snapshot answers `disabled` no matter what, so a re-created slot would be
+ * invisible through the public surface; this is the only way to see one.
+ */
+function countMapWrites(run: () => void): number {
+  const original = Map.prototype.set;
+  let writes = 0;
+  Map.prototype.set = function (this: Map<unknown, unknown>, key: unknown, value: unknown) {
+    writes++;
+    return original.call(this, key, value);
+  };
+  try {
+    run();
+  } finally {
+    Map.prototype.set = original;
+  }
+  return writes;
+}
+
+describe('Audit fixes (M98j F1, F2)', () => {
+  it('F1: a caller-held reading cannot record after close or after a latched failure', () => {
+    const clock = new MutableClock();
+    const closed = collector(clock);
+    const startedAt = closed.begin('users', 'publish');
+    closed.close();
+    const writesAfterClose = countMapWrites(() => {
+      expect(closed.end('users', 'publish', startedAt, true, false, 5)).toBeNull();
+      closed.observe('users', 'handler', true, 1, false, 5);
+    });
+    expect(writesAfterClose).toBe(0);
+    expect(closed.snapshot().records).toEqual([]);
+
+    let reads = 0;
+    const flaky = {
+      hrtime: () => {
+        reads++;
+        if (reads === 2) throw new Error('clock gone');
+        return reads;
+      },
+    } as unknown as IRuntimeServices;
+    const latched = new EventObservationCollector(
+      compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus', events: { t: 'users' } }),
+      flaky,
+    );
+    const held = latched.begin('users', 'publish');
+    latched.begin('users', 'handler'); // this read throws and latches
+    const writesAfterLatch = countMapWrites(() => {
+      expect(latched.end('users', 'publish', held, true, false, 9)).toBeNull();
+    });
+    expect(writesAfterLatch).toBe(0);
+    expect(latched.snapshot()).toMatchObject({ state: 'collection-failed', records: [] });
+  });
+
+  for (const async of [false, true]) {
+    it(`F1: close() landing between the last handler and the publish settlement records nothing (async: ${async})`, async () => {
+      // Sweep the microtask at which close() lands after the handler returns,
+      // so one of them falls between the handler's settlement and the
+      // publication's. Any collector map write after close() is a re-created
+      // slot, invisible through the public snapshot.
+      for (let delay = 0; delay <= 6; delay++) {
+        const observer = collector(new MutableClock());
+        const bus = new InMemoryEventBus({ async, errorHandler: () => {} });
+        attachEventObserver(bus, observer);
+        const original = Map.prototype.set;
+        let writesAfterClose = 0;
+        const closeAfter = (remaining: number) => {
+          if (remaining > 0) {
+            queueMicrotask(() => closeAfter(remaining - 1));
+            return;
+          }
+          observer.close();
+          Map.prototype.set = function (this: Map<unknown, unknown>, k: unknown, v: unknown) {
+            writesAfterClose++;
+            return original.call(this, k, v);
+          };
+        };
+        bus.subscribe('user-created', () => closeAfter(delay));
+        try {
+          await bus.publish(EVENT);
+          await bus.whenIdle();
+          for (let tick = 0; tick < 10; tick++) await Promise.resolve();
+        } finally {
+          Map.prototype.set = original;
+        }
+        expect({ delay, writesAfterClose }).toEqual({ delay, writesAfterClose: 0 });
+        expect(observer.snapshot().records).toEqual([]);
+      }
+    });
+  }
+
+  for (const observed of [false, true]) {
+    it(`F2: event.type is read exactly once per publish (observed: ${observed})`, async () => {
+      const observer = collector(new MutableClock(), { a: 'alpha', b: 'beta' });
+      const bus = new InMemoryEventBus({ async: false, errorHandler: () => {} });
+      if (observed) attachEventObserver(bus, observer);
+      const ran: string[] = [];
+      bus.subscribe('a', () => void ran.push('a'));
+      bus.subscribe('b', () => void ran.push('b'));
+      let reads = 0;
+      const flipping = {
+        get type() {
+          reads++;
+          return reads === 1 ? 'a' : 'b';
+        },
+        id: 'e',
+        occurredOn: new Date(0),
+        data: null,
+      };
+      await bus.publish(flipping);
+      expect(reads).toBe(1);
+      expect(ran).toEqual(['a']);
+      if (observed) {
+        expect(observer.snapshot().records.map((r) => r.alias)).toEqual(['alpha', 'alpha']);
+      }
+    });
+  }
+});
