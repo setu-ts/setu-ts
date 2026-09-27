@@ -1,10 +1,9 @@
 # Milestone 98j — Event Dispatch Observations
 
 > **Status:** Implemented on `feat/m98j-event-observations`; verification and code review done
-> (2026-09-27), with every finding fixed on this branch. **Both security gates in §10 remain
-> PENDING** until the audit runs: the design security review is recorded and approved in §10.1; no
-> independent committed-tree audit has run yet. The milestone is not complete until both are
-> recorded.
+> (2026-09-27), with every finding fixed on this branch. The design security review is recorded and
+> approved (§10.1). The independent committed-tree security audit (§10) is PENDING; the milestone is
+> not complete until it is recorded.
 
 ## 0. Objective & scope
 
