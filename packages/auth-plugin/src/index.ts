@@ -35,6 +35,7 @@ export type { JwtOptions } from './interfaces/index.ts';
 export type { ApiKeyOptions } from './interfaces/index.ts';
 export type { LocalOptions } from './interfaces/index.ts';
 export type { SessionAuthOptions } from './interfaces/index.ts';
+export type { AuthorizationDiagnosticsOptions } from './interfaces/index.ts';
 
 // Exported utilities
 export { MalformedPasswordHashError, PasswordHasher } from './services/password-hasher.ts';
@@ -82,6 +83,7 @@ export {
 
 // Re-export common contracts
 export type {
+  IAuthorizationDiagnosticsSource,
   IAuthorizationService,
   IAuthService,
   IAuthStrategy,

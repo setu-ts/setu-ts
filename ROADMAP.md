@@ -10665,14 +10665,16 @@ observations and the `GET /v1/queues` inspector; 98e complete
 `GET /v1/config` inspector; 98g complete ([#369](https://github.com/setu-ts/setu-ts/pull/369)) —
 minimized completed-span trace observations and the `GET /v1/traces` inspector; 98i complete
 ([#374](https://github.com/setu-ts/setu-ts/pull/374)) — cache operation counters and the
-`GET /v1/cache` inspector. These eight are implemented, awaiting publication in the next release
-cycle. **98h and 98j–98n are planned**, each with its own implementation plan and mandatory security
-audit. This umbrella records framework work for the separately maintained devtool; adding the later
-letters does not make them prerequisites for publishing 98a–98c or for the devtool's initial D01–D04
-preview, with ONE exception recorded under the release requirements below — M98d's status-shape
-change must precede the first publication of `packages/diagnostics-plugin`, because the shipped
-client refuses a status body it does not expect and that body is otherwise frozen for the lifetime
-of every published client. A roadmap status is not evidence that a security audit has passed.
+`GET /v1/cache` inspector; 98h complete ([#376](https://github.com/setu-ts/setu-ts/pull/376)) —
+authorization decision explanations and the `GET /v1/authorization` inspector. These nine are
+implemented, awaiting publication in the next release cycle. **98j–98n are planned**, each with its
+own implementation plan and mandatory security audit. This umbrella records framework work for the
+separately maintained devtool; adding the later letters does not make them prerequisites for
+publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE exception recorded under
+the release requirements below — M98d's status-shape change must precede the first publication of
+`packages/diagnostics-plugin`, because the shipped client refuses a status body it does not expect
+and that body is otherwise frozen for the lifetime of every published client. A roadmap status is
+not evidence that a security audit has passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -11073,10 +11075,11 @@ source, in the raw signed bytes and in the client DTO.
 
 ### Milestone 98h: Authorization Decision Explanations
 
-**Status:** planned; design security review and implementation security audit required. **Owner:**
-`packages/auth-plugin`, with a necessary non-resolving registry identity predicate plus shared
-diagnostic and connector/client changes. **Plan:**
-`plans/milestone-98h-authorization-explanations.md`.
+**Status:** complete ([#376](https://github.com/setu-ts/setu-ts/pull/376)) — design security review
+complete (plan §10); the committed-tree implementation security audit passed on round 5 of
+`44789a1d`. **Owner:** `packages/auth-plugin`, with a necessary non-resolving registry identity
+predicate plus shared diagnostic and connector/client changes. **Plan:**
+`plans/archive/milestone-98h-authorization-explanations.md`.
 
 **Existing foundation:** `IAuthorizationService` returns booleans. The RBAC implementation knows
 direct permissions, wildcard grants and inherited roles internally, but publishes no explanation
@@ -11084,19 +11087,19 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
 
 **Deliverables:**
 
-- [ ] Opt-in observation of the actual evaluation once, with bounded decision IDs, allow/deny
+- [x] Opt-in observation of the actual evaluation once, with bounded decision IDs, allow/deny
       result, approved rule aliases, fixed reason categories and policy revision when available. Do
       not rerun policies to explain them, reconstruct reasons from status codes, or change
       short-circuit order. Unexecuted branches remain not evaluated.
-- [ ] Explicit support/availability behavior for custom authorization services. A replaceable
+- [x] Explicit support/availability behavior for custom authorization services. A replaceable
       service that exposes only a boolean cannot be assumed to supply detailed reasons. Keep the
       actual authorization implementation authoritative and diagnostic failures isolated from its
       result.
-- [ ] No credentials, JWTs, principal IDs, claims, request bodies, resource objects or arbitrary
+- [x] No credentials, JWTs, principal IDs, claims, request bodies, resource objects or arbitrary
       policy error text in capture. Role/rule names require approval. The initial scope is bounded
       observed RBAC reasons, not a general policy-tree serializer or hypothetical decision
       simulator.
-- [ ] Pass both security gates below. Compare observed and actual decisions for direct/inherited/
+- [x] Pass both security gates below. Compare observed and actual decisions for direct/inherited/
       wildcard/deny/short-circuit cases and custom replacements; prove no extra evaluations,
       identity leakage or altered enforcement when observation fails or buffers overflow.
 
@@ -12227,7 +12230,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                                                     |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                                                         |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                                                           |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98g and 98i complete, 98h and 98j–98n planned with security audit gates)                                                 |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98i complete, 98j–98n planned with security audit gates)                                                                 |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                                                   |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))                                    |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                                                |
@@ -12235,7 +12238,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98e       | ✅     | common + config-plugin + diagnostics-plugin — value-free configuration provenance (PR #366)                                                                                  |
 | 98f       | ✅     | common + queue-plugin + diagnostics-plugin — queue attempt, outcome and depth observations ([#365](https://github.com/setu-ts/setu-ts/pull/365))                             |
 | 98g       | ✅     | telemetry-plugin — minimized distributed tracing and correlation ([#369](https://github.com/setu-ts/setu-ts/pull/369); security audit passed on re-audit of `2fbac039`)      |
-| 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                                                          |
+| 98h       | ✅     | auth-plugin — bounded authorization decision explanations ([#376](https://github.com/setu-ts/setu-ts/pull/376); security audit passed on round 5 of `44789a1d`)              |
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
 | 98j       | ⬜     | event dispatch observations — design security review and implementation audit required                                                                                       |
 | 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |

@@ -2,7 +2,12 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as auth from '../../src/index.ts';
 import type { IPrincipal, SessionView } from '@setu-ts/common';
-import type { IRefreshTokenRotation, SessionAuthOptions } from '../../src/index.ts';
+import type {
+  AuthorizationDiagnosticsOptions,
+  IAuthorizationDiagnosticsSource,
+  IRefreshTokenRotation,
+  SessionAuthOptions,
+} from '../../src/index.ts';
 
 /**
  * Barrel exports test.
@@ -93,6 +98,22 @@ describe('barrel exports', () => {
     };
 
     expect(options.toPrincipal({ id: 's1', data: { uid: 'u1' } })).toEqual({ id: 'u1' });
+  });
+
+  it('exports the M98h authorization-diagnostics types (declared against the barrel)', () => {
+    // Compile-time: `AuthorizationDiagnosticsOptions` and
+    // `IAuthorizationDiagnosticsSource` resolve from the barrel. Dropping
+    // either re-export stops this file compiling — a type-only export is
+    // invisible to every runtime assertion.
+    const options: AuthorizationDiagnosticsOptions = {
+      enabled: true,
+      roles: { admin: 'A' },
+      permissions: { 'users:read': 'P' },
+    };
+    const source: IAuthorizationDiagnosticsSource =
+      undefined as unknown as IAuthorizationDiagnosticsSource;
+    void source;
+    expect(options.enabled).toBe(true);
   });
 
   it('does not export internal implementations', () => {

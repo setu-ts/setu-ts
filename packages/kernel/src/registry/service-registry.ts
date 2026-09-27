@@ -112,6 +112,41 @@ export class ServiceRegistry implements IServiceRegistry {
     return this.#parent.peekResolved<T>(token);
   }
 
+  /**
+   * Reports whether `instance` is the CURRENT provider a resolving
+   * {@linkcode ServiceRegistry.get} would select for `token` — WITHOUT ever
+   * executing a factory.
+   *
+   * The lookup precedence is IDENTICAL to `get`'s: own single registration,
+   * then own first multi-provider, then the parent. The comparison is an
+   * identity check against the registration's already-resolved instance. A
+   * registration whose instance has not been constructed yet (a lazy factory
+   * that has not run) answers `false` — it does NOT fall past to the parent,
+   * because the answer "present but never constructed" must not be mistaken
+   * for a foreign instance. Nothing is constructed, no multi-provider list is
+   * enumerated, and the current value is never returned.
+   *
+   * This is the non-resolving identity predicate of
+   * {@linkcode IServiceRegistry.isCurrent}: a consumer can verify it still
+   * owns a known provider without forcing a lazy replacement into existence.
+   *
+   * @typeParam T - The service's interface type
+   * @param token - The capability token to check
+   * @param instance - The instance to compare against the current registration
+   * @returns `true` only when `instance` IS the registration `get` would select
+   * @since 0.8.0
+   */
+  isCurrent<T extends object>(token: CapabilityToken, instance: T): boolean {
+    const own = this.#single.get(token) ?? this.#multi.get(token)?.[0];
+    if (own !== undefined) {
+      return own.instance === instance;
+    }
+    if (this.#parent === undefined) {
+      return false;
+    }
+    return this.#parent.isCurrent(token, instance);
+  }
+
   /** Installs the application-owned callback for startup-time mutations. */
   setObserver(
     observer: (kind: 'override' | 'unregister', token: CapabilityToken) => void,

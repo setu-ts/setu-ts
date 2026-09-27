@@ -66,6 +66,42 @@ All notable changes to this project are documented here. The format follows
   independently authenticated sessions only; identifiers grant no discovery or connection authority,
   and no global timeline is implied — `ageMs` is arrival age at one process.
 
+- **Authorization decision explanations (M98h): opt-in, minimized per-decision explanations through
+  the diagnostics connector.** `AuthPlugin` accepts an `authorizationDiagnostics` option
+  (`AuthorizationDiagnosticsOptions`, exported from `@setu-ts/auth-plugin`) that attaches an
+  internal observer to the first-party `RbacService` — the boolean `IAuthorizationService` surface
+  and every guard's status, body and short-circuit behaviour are unchanged. The observer records,
+  for each `hasAnyRole`/`hasAllPermissions`/single check, only the approved role and permission
+  aliases (raw names never retained), the per-step outcome and the fixed reason vocabulary, and the
+  evaluation count actually performed — a compound that short-circuits reports the steps it really
+  took, never a fabricated full sweep. The plugin always registers one
+  `IAuthorizationDiagnosticsSource` under the new `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS` token:
+  `disabled` without the option, `no-data`/`ready` while it observes the first-party RBAC service,
+  `unsupported` once latched — coverage `rbac-not-configured` when the option is passed without
+  `rbac`, `provider-identity-unavailable` when the registry lacks the identity predicate,
+  `custom-provider` when the capability resolves to a replacement the observer cannot see — and a
+  `collection-failed` answer when the connector's exact validator refuses a source DTO. The source
+  re-verifies its provider at read time through the new optional
+  `IServiceRegistry.isCurrent?(token, instance)` identity predicate — non-resolving, never returning
+  a service — so a replacement registered after startup latches the source to `custom-provider`
+  rather than guessing at decisions it did not observe; a registry without `isCurrent`
+  conservatively disables explanations. New public surface on `@setu-ts/common`:
+  `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`, `IAuthorizationDiagnosticsSource`,
+  `AuthorizationDiagnosticsBatch`, `AuthorizationDecisionObservation`, `AuthorizationDecisionStep`,
+  `AuthorizationDecisionOperation`, `AuthorizationDecisionReason`, `AuthorizationSourceState`, and
+  `AuthorizationCoverage`. New connector surface: `GET /v1/authorization?after=N&limit=N`
+  (authenticated like every operation; a cursor beyond the source's sequence refused
+  `invalid-request`; `collection-failed`/`unsupported` answered as typed 200 batches, never error
+  text), the status manifest's `authorization` key now `true`, and
+  `IDiagnosticsClient.authorization(after, limit?)` as a required member that answers a frozen typed
+  `unsupported` batch without a request when the negotiated manifest lacks the inspector. Principal
+  identifiers, role and permission values, request paths and error text never reach collector state;
+  a decision whose requested rule lacks an approved alias is dropped (`droppedUnapproved`), while an
+  unapproved granting role is only omitted from `viaRoleAlias`; a compound's alias list is
+  de-duplicated, so a request repeating a rule never exceeds 128 aliases; the option is validated
+  when `AuthPlugin(...)` is called, with or without `rbac`; explanations are session-local and grant
+  no discovery or connection authority.
+
 - **Configuration provenance (M98e): value-free provenance for approved keys, served through the
   diagnostics connector.** `ConfigPlugin` and `loadConfig` accept a `diagnostics` option
   (`ConfigDiagnosticsOptions`, exported from `@setu-ts/config-plugin`) that records — during the one

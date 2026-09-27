@@ -14,6 +14,7 @@
  */
 
 import type {
+  AuthorizationDiagnosticsBatch,
   CacheDiagnosticsResponse,
   ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
@@ -34,6 +35,7 @@ import {
 } from '../security/authentication.ts';
 import type { DiagnosticsClientOptions, IDiagnosticsClient } from '../interfaces/index.ts';
 import {
+  AUTHORIZATION_PATH,
   CACHE_TARGET,
   CONFIG_TARGET,
   HEALTH_TARGET,
@@ -51,6 +53,7 @@ import {
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
 import { isCacheResponseProjection } from '../protocol/cache-protocol.ts';
 import { isTraceBatchProjection } from '../protocol/trace-protocol.ts';
+import { isAuthorizationBatchProjection } from '../protocol/authorization-protocol.ts';
 
 /**
  * The fixed request deadline, in milliseconds.
@@ -78,7 +81,7 @@ export const CLIENT_ERRORS = {
   sessionId: 'Diagnostics client: sessionId must be exactly 32 lowercase hex characters.',
   sessionKey: 'Diagnostics client: sessionKey must be exactly 32 bytes.',
   arguments:
-    'Diagnostics client: read(), queues() and traces() require a non-negative safe-integer cursor and a limit from 1 to 128.',
+    'Diagnostics client: read(), queues(), traces() and authorization() require a non-negative safe-integer cursor and a limit from 1 to 128.',
   closed: 'Diagnostics client: the client is closed.',
   pairingFailed:
     'Diagnostics client: pairing failed terminally; relaunch the application and create a new session.',
@@ -685,6 +688,58 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
           (parsed.records.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
             parsed.records[0].sequence <= after ||
             parsed.lost !== parsed.records[0].sequence - after - 1
+          ))
+        ) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return deepFreeze(parsed);
+      });
+    },
+
+    async authorization(after: number, limit?: number): Promise<AuthorizationDiagnosticsBatch> {
+      return await enqueue(async () => {
+        checkUsable();
+        const effectiveLimit = validatePagedArgs(after, limit);
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the authorization inspector —
+        // a legacy or older server — is answered locally with a frozen typed
+        // `unsupported` batch echoing the cursor, and no addon request is
+        // sent. Support is never inferred from a generic protocol error. The
+        // client cannot name the server's reason, so the coverage is the
+        // fixed `unknown`, the same way the trace client answers locally.
+        if (inspectors !== null && inspectors.authorization === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            coverage: 'unknown',
+            decisions: [],
+            next: after,
+            lost: 0,
+            closed: false,
+            droppedUnapproved: 0,
+          });
+        }
+        const result = await exchange(
+          `${AUTHORIZATION_PATH}?after=${after}&limit=${effectiveLimit}`,
+        );
+        const parsed = parseBody(result.bodyText);
+        // The exact DTO validator, the body's own instance binding, and the
+        // cursor contract relative to THIS request: an empty page echoes the
+        // cursor, and a returned page starts past it.
+        if (
+          !isAuthorizationBatchProjection(parsed) || parsed.instanceId !== bound ||
+          parsed.decisions.length > effectiveLimit ||
+          (parsed.decisions.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
+            parsed.decisions[0].sequence <= after ||
+            parsed.lost !== parsed.decisions[0].sequence - after - 1
           ))
         ) {
           throw new Error(CLIENT_ERRORS.connection);

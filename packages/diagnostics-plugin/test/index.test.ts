@@ -24,4 +24,13 @@ describe('Diagnostics plugin — public surface', () => {
       client.health();
     expect(typeof probe).toBe('function');
   });
+
+  it('exposes the client interface with the M98h authorization() member', () => {
+    // Type-level: a client instance must carry authorization(after, limit?)
+    // returning the authorization batch DTO. This is the public contract M98h
+    // adds, beside the M98g traces() member.
+    const probe = (client: IDiagnosticsClient): ReturnType<IDiagnosticsClient['authorization']> =>
+      client.authorization(0, 128);
+    expect(typeof probe).toBe('function');
+  });
 });

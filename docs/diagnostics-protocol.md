@@ -24,16 +24,17 @@ verified.
 
 ## Operations
 
-| Target                           | Answer                                                                                                                                                                           |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/status`                 | `{ version: 1, instanceId, expiresInMs, inspectors }` — binds the session to the application instance on the first exchange; `inspectors` is the M98d inspector manifest (below) |
-| `GET /v1/snapshot`               | M98a's compact final snapshot JSON (not an envelope)                                                                                                                             |
-| `GET /v1/events?after=N&limit=N` | M98a's frozen event batch; `after` is a canonical non-negative decimal, `limit` is 1–128, in exactly this order                                                                  |
-| `GET /v1/health`                 | M98d's minimized health-observation snapshot (below)                                                                                                                             |
-| `GET /v1/config`                 | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
-| `GET /v1/queues?after=N&limit=N` | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
-| `GET /v1/cache`                  | M98i's cache operation counters across every cache source (below)                                                                                                                |
-| `GET /v1/traces?after=N&limit=N` | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
+| Target                                  | Answer                                                                                                                                                                           |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /v1/status`                        | `{ version: 1, instanceId, expiresInMs, inspectors }` — binds the session to the application instance on the first exchange; `inspectors` is the M98d inspector manifest (below) |
+| `GET /v1/snapshot`                      | M98a's compact final snapshot JSON (not an envelope)                                                                                                                             |
+| `GET /v1/events?after=N&limit=N`        | M98a's frozen event batch; `after` is a canonical non-negative decimal, `limit` is 1–128, in exactly this order                                                                  |
+| `GET /v1/health`                        | M98d's minimized health-observation snapshot (below)                                                                                                                             |
+| `GET /v1/config`                        | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
+| `GET /v1/queues?after=N&limit=N`        | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
+| `GET /v1/cache`                         | M98i's cache operation counters across every cache source (below)                                                                                                                |
+| `GET /v1/traces?after=N&limit=N`        | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
+| `GET /v1/authorization?after=N&limit=N` | M98h's authorization-decision-explanation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
 duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
@@ -164,11 +165,11 @@ design security review, R7).
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
 `health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g)
-and `cache: true` (M98i) and leaves the rest (`authorization`, `events`, `scheduler`, `realtime`,
-`storage`, `outboundHttp`) reserved and `false`. A client that reads a legacy M98b three-field
-status body (no `inspectors`) resolves the manifest to all-`false`, so its `health()`,
-`configuration()`, `queues()`, `traces()` and `cache()` answer a typed `unsupported` without sending
-the request.
+and `cache: true` (M98i) and `authorization: true` (M98h), and leaves the rest (`events`,
+`scheduler`, `realtime`, `storage`, `outboundHttp`) reserved and `false`. A client that reads a
+legacy M98b three-field status body (no `inspectors`) resolves the manifest to all-`false`, so its
+`health()`, `configuration()`, `queues()`, `traces()`, `cache()` and `authorization()` answer a
+typed `unsupported` without sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -418,21 +419,63 @@ identifiers grant no discovery or connection authority. With no trace source reg
 'unsupported'` with `coverage: 'unknown'`; a client whose negotiated manifest has
 `traces: false` answers that frozen batch, echoing its cursor, without sending the request.
 
+## Authorization decision explanations (M98h)
+
+`GET /v1/authorization?after=N&limit=N` pages minimized authorization-decision explanations from the
+AuthPlugin's source — the ONE source registered under `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS` (the
+kernel admits a single provider; the plugin registers it even when observation was not opted into,
+answering `disabled`). When the application passed the plugin's `authorizationDiagnostics` option,
+an internal observer attached to the first-party `RbacService` reduces every evaluated check to the
+approved field set BEFORE anything is retained: only application-approved role and permission
+aliases (the M98d alias shape: 1–64 UTF-8 bytes, no control character, unique; at most 128 entries
+per map), the fixed reason vocabulary, and the evaluation count actually performed. A compound that
+short-circuits reports the steps it really took — a step list of at most 16 with the TRUE count in
+`stepsEvaluated` and `stepsTruncated` `true` exactly when the evaluation ran more than 16 steps —
+never a fabricated full sweep; a decision that evaluated exactly 16 steps is complete and reports
+`false`. A compound's `ruleAliases` is the set of DISTINCT requested rules in first-requested order
+(so at most 128), while `stepsEvaluated` counts every evaluated occurrence — a request repeating a
+rule is evaluated once per repeat, so `stepsEvaluated` may exceed `ruleAliases.length`. Unevaluated
+compound branches have no step at all, and a step never carries a rule name that was not approved.
+Principal identifiers, role and permission VALUES, request paths, raw rules, credentials, claims,
+resources and error text never enter the record. A decision whose requested rule lacks an approved
+alias is dropped BEFORE buffering and counted in the saturating `droppedUnapproved` counter; partial
+rule lists are never emitted. An unapproved GRANTING role never drops a decision — it is simply
+omitted, so the decision carries no `viaRoleAlias`.
+
+The batch carries `state` (`disabled` / `no-data` / `ready`; `unsupported` with `coverage`
+(`rbac-not-configured` — no RBAC configured, `provider-identity-unavailable` — the registry lacks
+the optional non-resolving `isCurrent` identity predicate, `custom-provider` — the current
+`CAPABILITIES.AUTHORIZATION` provider is not the exact `RbacService` instance the plugin created, or
+`unknown` when the responder cannot name a reason); `collection-failed` is the connector's answer
+when the source threw or failed the exact validator), `decisions` under M98a's cursor contract
+(exclusive `after`, per-batch `lost` from ring eviction, an empty page echoes its cursor, a cursor
+beyond the source's sequence throws the fixed `RangeError` — surfaced as `invalid-request`),
+`closed`, and `droppedUnapproved`. The source re-verifies its provider at read time through the
+registry's optional `isCurrent?(token, instance)` — non-resolving, never instantiating a lazy
+factory — and LATCHES `unsupported` terminal: it detaches, clears retained state, and never resumes
+even if startup code later restores the old registration. A direct custom-service decision is never
+guessed from booleans or status. With no source registered the batch is `state: 'unsupported'` with
+`coverage: 'unknown'`; a client whose negotiated manifest has `authorization: false` answers that
+frozen batch, echoing its cursor, without sending the request.
+
 ## Bounds (fixed, not configurable)
 
-| Bound                           | Value                                  |
-| ------------------------------- | -------------------------------------- |
-| Simultaneous connector handlers | 8 (1 reserved against unpaired floods) |
-| Unpaired lanes                  | 7 of the 8 slots                       |
-| Authentication (verify) lane    | 4                                      |
-| Anonymous refusal budget        | 5/s, burst 10                          |
-| Session budget (post-verify)    | 20/s, burst 40                         |
-| Parsed header bytes             | 8 KiB                                  |
-| Response body                   | 256 KiB                                |
-| Events per read                 | 128                                    |
-| Queue sources read              | 16                                     |
-| Queue merge ring                | 1,024 events                           |
-| Client request deadline         | 5 seconds                              |
+| Bound                            | Value                                        |
+| -------------------------------- | -------------------------------------------- |
+| Simultaneous connector handlers  | 8 (1 reserved against unpaired floods)       |
+| Unpaired lanes                   | 7 of the 8 slots                             |
+| Authentication (verify) lane     | 4                                            |
+| Anonymous refusal budget         | 5/s, burst 10                                |
+| Session budget (post-verify)     | 20/s, burst 40                               |
+| Parsed header bytes              | 8 KiB                                        |
+| Response body                    | 256 KiB                                      |
+| Events per read                  | 128                                          |
+| Queue sources read               | 16                                           |
+| Queue merge ring                 | 1,024 events                                 |
+| Authorization alias map entries  | 128 per map                                  |
+| Authorization steps per decision | 16 retained (true count in `stepsEvaluated`) |
+| Authorization decision ring      | 1,024 decisions                              |
+| Client request deadline          | 5 seconds                                    |
 
 ## Revocation
 

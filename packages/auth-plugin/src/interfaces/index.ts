@@ -82,6 +82,37 @@ export interface SessionAuthOptions {
 }
 
 /**
+ * Authorization decision-explanation options (M98h).
+ *
+ * Opt-in observation of the first-party RBAC evaluation. `enabled` must be
+ * `true`; the option is validated at construction, so a malformed option —
+ * including `enabled: false` from a caller the literal type cannot reach —
+ * refuses before any application exists, with a fixed, value-free message.
+ *
+ * `roles` and `permissions` are exact-name → display-alias maps for the rules
+ * the explanations may name. Every alias and the optional `policyRevision`
+ * carry M98d's shape rule verbatim: non-empty UTF-8, 1–64 bytes, no control
+ * character, unique within its map. Up to 128 entries per map. A decision
+ * whose requested rules are not ALL approved is dropped before buffering and
+ * counted in the batch's `droppedUnapproved` — partial rule lists are never
+ * emitted, because a position in a partial list still identifies the rule.
+ * A granting principal role is reported only when it has an approved role
+ * alias.
+ *
+ * @since 0.8.0
+ */
+export interface AuthorizationDiagnosticsOptions {
+  /** Observation is explicit; must be `true`. */
+  readonly enabled: boolean;
+  /** Exact role name → approved display alias. At most 128 entries. */
+  readonly roles: Readonly<Record<string, string>>;
+  /** Exact permission name → approved display alias. At most 128 entries. */
+  readonly permissions: Readonly<Record<string, string>>;
+  /** Approved alias for the policy revision, present only when configured. */
+  readonly policyRevision?: string;
+}
+
+/**
  * Auth plugin configuration options.
  *
  * @since 0.1.0
@@ -98,6 +129,16 @@ export interface AuthPluginOptions {
    * only and does not provide the authorization capability.
    */
   readonly rbac?: RbacConfig;
+  /**
+   * Authorization decision-explanation observation (M98h). When present, the
+   * plugin attaches a collector to its own `RbacService` and registers an
+   * `IAuthorizationDiagnosticsSource` under
+   * `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`. When absent, the same token is
+   * still registered with a `disabled`-answering source. The boolean
+   * `IAuthorizationService` remains authoritative and unchanged; a diagnostic
+   * failure can never alter an allow/deny or a guard's short-circuit order.
+   */
+  readonly authorizationDiagnostics?: AuthorizationDiagnosticsOptions;
   /**
    * Session authentication configuration. When present, the plugin appends an
    * internal session strategy after the API-key strategy and requires the

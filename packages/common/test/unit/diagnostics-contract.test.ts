@@ -3,12 +3,19 @@ import { expect } from '@std/expect';
 
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
+  AuthorizationCoverage,
+  AuthorizationDecisionObservation,
+  AuthorizationDecisionReason,
+  AuthorizationDecisionStep,
+  AuthorizationDiagnosticsBatch,
+  AuthorizationSourceState,
   ConfigDiagnosticsSnapshot,
   ConfigProvenanceEntry,
   DiagnosticsBatch,
   DiagnosticsEvent,
   HealthDiagnosticsObservation,
   HealthDiagnosticsSnapshot,
+  IAuthorizationDiagnosticsSource,
   IConfigDiagnosticsSource,
   IDiagnosticsSource,
   IHealthDiagnosticsSource,
@@ -404,5 +411,88 @@ describe('M98g trace contracts', () => {
     ];
     expect(coverage).toHaveLength(4);
     expect(states).toHaveLength(5);
+  });
+});
+
+describe('M98h authorization contracts', () => {
+  const INSTANCE = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+
+  it('a consumer compiles against the authorization source surface and the exact DTO', () => {
+    const source: IAuthorizationDiagnosticsSource = {
+      read(instanceId: string, after: number, limit?: number): AuthorizationDiagnosticsBatch {
+        const step: AuthorizationDecisionStep = {
+          ruleAlias: 'A',
+          reason: 'direct-role',
+        };
+        const decision: AuthorizationDecisionObservation = {
+          sequence: after + 1,
+          id: 'd1',
+          operation: 'role',
+          result: true,
+          ruleAliases: ['A'],
+          steps: [step],
+          stepsEvaluated: 1,
+          stepsTruncated: false,
+          reason: 'direct-role',
+          ageMs: 1,
+          policyRevision: 'rev-1',
+        };
+        const decisions = limit === 0 ? [] : [decision];
+        return {
+          version: 1,
+          instanceId,
+          state: decisions.length > 0 ? 'ready' : 'no-data',
+          decisions,
+          next: decisions.length > 0 ? after + 1 : after,
+          lost: 0,
+          closed: false,
+          droppedUnapproved: 0,
+        };
+      },
+    };
+    const batch = source.read(INSTANCE, 0, 128);
+    expect(batch.version).toBe(1);
+    expect(batch.instanceId).toBe(INSTANCE);
+    expect(batch.state).toBe('ready');
+    expect(batch.decisions[0]!.ruleAliases).toEqual(['A']);
+    expect(batch.decisions[0]!.steps[0]!.reason).toBe('direct-role');
+    expect(batch.decisions[0]!.policyRevision).toBe('rev-1');
+    expect(batch.next).toBe(1);
+    expect(batch.lost).toBe(0);
+    expect(batch.droppedUnapproved).toBe(0);
+  });
+
+  it('coverage vocabulary names every unavailability reason', () => {
+    const coverage: AuthorizationCoverage[] = [
+      'rbac-not-configured',
+      'provider-identity-unavailable',
+      'custom-provider',
+      'unknown',
+    ];
+    const states: AuthorizationSourceState[] = [
+      'disabled',
+      'no-data',
+      'ready',
+      'unsupported',
+      'collection-failed',
+    ];
+    const reasons: AuthorizationDecisionReason[] = [
+      'direct-role',
+      'inherited-role',
+      'direct-permission',
+      'direct-wildcard',
+      'role-permission',
+      'role-wildcard',
+      'not-held',
+      'compound-satisfied',
+      'compound-unsatisfied',
+    ];
+    expect(coverage).toHaveLength(4);
+    expect(states).toHaveLength(5);
+    expect(reasons).toHaveLength(9);
+  });
+
+  it('registers under the eager authorization-diagnostics capability token', () => {
+    expect(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS).toBe('authorization-diagnostics');
   });
 });

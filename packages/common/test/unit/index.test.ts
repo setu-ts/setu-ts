@@ -45,6 +45,13 @@ import type {
   WrapOptions,
 } from '../../src/index.ts';
 import type {
+  AuthorizationCoverage,
+  AuthorizationDecisionObservation,
+  AuthorizationDecisionReason,
+  AuthorizationDecisionStep,
+  AuthorizationDiagnosticsBatch,
+  AuthorizationSourceState,
+  IAuthorizationDiagnosticsSource,
   ITraceDiagnosticsSource,
   TraceCoverage,
   TraceDiagnosticsBatch,
@@ -230,5 +237,27 @@ describe('@setu-ts/common barrel — M98g trace observation contracts', () => {
         source !== null
       }`;
     expect(consumer.length).toBe(10);
+  });
+});
+
+describe('@setu-ts/common barrel — M98h authorization observation contracts', () => {
+  it('exports the authorization-diagnostics token', () => {
+    expect(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS).toBe('authorization-diagnostics');
+  });
+
+  it('compiles against the authorization DTO, source and vocabulary surface', () => {
+    const consumer = (
+      observation: AuthorizationDecisionObservation,
+      batch: AuthorizationDiagnosticsBatch,
+      source: IAuthorizationDiagnosticsSource,
+      coverage: AuthorizationCoverage,
+      state: AuthorizationSourceState,
+      reason: AuthorizationDecisionReason,
+      step: AuthorizationDecisionStep,
+    ): string =>
+      `${observation.sequence}${batch.version}${coverage}${state}${reason}${step.ruleAlias}${
+        source !== null
+      }`;
+    expect(consumer.length).toBe(7);
   });
 });
