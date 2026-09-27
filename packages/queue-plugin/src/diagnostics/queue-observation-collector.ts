@@ -588,14 +588,12 @@ export class QueueObservationCollector implements IQueueDiagnosticsSource, Queue
    * Follows the M98a cursor contract exactly: a cursor parked behind an
    * eviction receives the oldest retained attempts with the skipped
    * sequences reported as `lost`, `after: 0` is not special-cased, and a
-   * closed source answers an empty closed batch rather than a range refusal.
+   * closed source answers an empty closed batch for any cursor it could have
+   * issued. `close()` never rewinds the sequence, so a cursor beyond it is
+   * refused exactly as it is while open — never echoed back as `next`.
    */
   read(after: number, limit?: number): QueueDiagnosticsSourceBatch {
-    const effective = validateQueueReadArgs(
-      after,
-      limit,
-      this.#closed ? Number.MAX_SAFE_INTEGER : this.#sequence,
-    );
+    const effective = validateQueueReadArgs(after, limit, this.#sequence);
     const now = this.#clock.hrtime();
     const common = {
       version: 1 as const,

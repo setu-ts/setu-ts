@@ -374,6 +374,15 @@ All notable changes to this project are documented here. The format follows
   cursor beyond the reader's sequence let the reader's `RangeError` escape and answered
   `503 unavailable`; it now answers `400 invalid-request`, as `/v1/queues` and `/v1/traces` already
   did. No released version carries either defect.
+- **`kernel`, `queue-plugin`, `telemetry-plugin` — a stopped diagnostics reader no longer echoes an
+  invented cursor.** After shutdown, `IApplication.diagnostics.read()`, the queue diagnostics source
+  and the trace diagnostics source accepted ANY non-negative safe integer as `after` and returned it
+  verbatim as `next` — `read(500)` on a reader that had issued one event answered `next: 500` —
+  contradicting their own contracts, which refuse a cursor beyond the current sequence. Shutdown
+  never rewinds a sequence counter, so every cursor a reader could have been issued is still at or
+  below it: a closed reader now applies the same refusal it applies while running, and still answers
+  an empty `closed: true` batch for every cursor it did issue. No released version carries the
+  defect; all three readers are new in this release.
 - **`diagnostics-plugin` — the native client binds every post-pairing response to the paired
   instance.** Pairing compared the status body's `instanceId` with its authenticated header, but
   later exchanges only verified the MAC — and the `x-setu-instance` header is an INPUT to that MAC,
