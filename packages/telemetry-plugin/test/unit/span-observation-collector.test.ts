@@ -227,4 +227,12 @@ describe('SpanObservationCollector — close', () => {
     collector.close();
     expect(collector.read('i', 1).closed).toBe(true);
   });
+
+  it('refuses a cursor beyond the last sequence after close instead of echoing it', () => {
+    const collector = collectorFor(fakeClock());
+    collector.retain(candidate());
+    collector.close();
+    expect(() => collector.read('i', 2)).toThrow(RangeError);
+    expect(() => collector.read('i', Number.MAX_SAFE_INTEGER)).toThrow(RangeError);
+  });
 });
