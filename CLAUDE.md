@@ -5341,7 +5341,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   every truncated compound over 16 rules, fixed in `a858afce`); round 3 found a Low (a request
   repeating one rule more than 128 times bricked the inspector until eviction, fixed in `e9730627`
   by de-duplicating aliases); round 4 passed with nothing open. Plan
-  `plans/archive/milestone-98h-authorization-explanations.md` — complete (PR pending).
+  `plans/archive/milestone-98h-authorization-explanations.md` — complete (PR #376).
 - **Next milestone** — **M98j** (`packages/events-plugin` — event dispatch observations; design
   security review and implementation audit required).
 

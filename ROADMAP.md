@@ -10665,15 +10665,16 @@ observations and the `GET /v1/queues` inspector; 98e complete
 `GET /v1/config` inspector; 98g complete ([#369](https://github.com/setu-ts/setu-ts/pull/369)) —
 minimized completed-span trace observations and the `GET /v1/traces` inspector; 98i complete
 ([#374](https://github.com/setu-ts/setu-ts/pull/374)) — cache operation counters and the
-`GET /v1/cache` inspector; 98h complete (PR pending) — authorization decision explanations and the
-`GET /v1/authorization` inspector. These nine are implemented, awaiting publication in the next
-release cycle. **98j–98n are planned**, each with its own implementation plan and mandatory security
-audit. This umbrella records framework work for the separately maintained devtool; adding the later
-letters does not make them prerequisites for publishing 98a–98c or for the devtool's initial D01–D04
-preview, with ONE exception recorded under the release requirements below — M98d's status-shape
-change must precede the first publication of `packages/diagnostics-plugin`, because the shipped
-client refuses a status body it does not expect and that body is otherwise frozen for the lifetime
-of every published client. A roadmap status is not evidence that a security audit has passed.
+`GET /v1/cache` inspector; 98h complete ([#376](https://github.com/setu-ts/setu-ts/pull/376)) —
+authorization decision explanations and the `GET /v1/authorization` inspector. These nine are
+implemented, awaiting publication in the next release cycle. **98j–98n are planned**, each with its
+own implementation plan and mandatory security audit. This umbrella records framework work for the
+separately maintained devtool; adding the later letters does not make them prerequisites for
+publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE exception recorded under
+the release requirements below — M98d's status-shape change must precede the first publication of
+`packages/diagnostics-plugin`, because the shipped client refuses a status body it does not expect
+and that body is otherwise frozen for the lifetime of every published client. A roadmap status is
+not evidence that a security audit has passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -11074,10 +11075,11 @@ source, in the raw signed bytes and in the client DTO.
 
 ### Milestone 98h: Authorization Decision Explanations
 
-**Status:** complete (PR pending) — design security review complete (plan §10); the committed-tree
-implementation security audit passed on round 4 of `e9730627`. **Owner:** `packages/auth-plugin`,
-with a necessary non-resolving registry identity predicate plus shared diagnostic and
-connector/client changes. **Plan:** `plans/archive/milestone-98h-authorization-explanations.md`.
+**Status:** complete ([#376](https://github.com/setu-ts/setu-ts/pull/376)) — design security review
+complete (plan §10); the committed-tree implementation security audit passed on round 5 of
+`44789a1d`. **Owner:** `packages/auth-plugin`, with a necessary non-resolving registry identity
+predicate plus shared diagnostic and connector/client changes. **Plan:**
+`plans/archive/milestone-98h-authorization-explanations.md`.
 
 **Existing foundation:** `IAuthorizationService` returns booleans. The RBAC implementation knows
 direct permissions, wildcard grants and inherited roles internally, but publishes no explanation
@@ -12236,7 +12238,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98e       | ✅     | common + config-plugin + diagnostics-plugin — value-free configuration provenance (PR #366)                                                                                  |
 | 98f       | ✅     | common + queue-plugin + diagnostics-plugin — queue attempt, outcome and depth observations ([#365](https://github.com/setu-ts/setu-ts/pull/365))                             |
 | 98g       | ✅     | telemetry-plugin — minimized distributed tracing and correlation ([#369](https://github.com/setu-ts/setu-ts/pull/369); security audit passed on re-audit of `2fbac039`)      |
-| 98h       | ✅     | auth-plugin — bounded authorization decision explanations (PR pending; security audit passed on round 4 of `e9730627`)                                                       |
+| 98h       | ✅     | auth-plugin — bounded authorization decision explanations ([#376](https://github.com/setu-ts/setu-ts/pull/376); security audit passed on round 5 of `44789a1d`)              |
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
 | 98j       | ⬜     | event dispatch observations — design security review and implementation audit required                                                                                       |
 | 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |
