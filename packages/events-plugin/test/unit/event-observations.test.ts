@@ -879,12 +879,34 @@ describe('Audit fixes (M98j F1, F2)', () => {
       compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus', events: { t: 'users' } }),
       flaky,
     );
-    const held = latched.begin('users', 'publish');
+    // After a latch the in-flight publication's slot ALREADY exists, so a
+    // leak would be an in-place update, not a Map write (audit R2-F1).
+    // Capture the slot object as it is created and fingerprint it instead.
+    const created: Record<string, unknown>[] = [];
+    const original = Map.prototype.set;
+    Map.prototype.set = function (this: Map<unknown, unknown>, key: unknown, value: unknown) {
+      if (value !== null && typeof value === 'object' && 'started' in value) {
+        created.push(value as Record<string, unknown>);
+      }
+      return original.call(this, key, value);
+    };
+    let held: number | null;
+    try {
+      held = latched.begin('users', 'publish');
+    } finally {
+      Map.prototype.set = original;
+    }
+    const slot = created.find((entry) => entry['operation'] === 'publish')!;
+    expect(slot).toBeDefined();
     latched.begin('users', 'handler'); // this read throws and latches
+    const fingerprint = () => JSON.stringify(slot);
+    const beforeLate = fingerprint();
     const writesAfterLatch = countMapWrites(() => {
       expect(latched.end('users', 'publish', held, true, false, 9)).toBeNull();
+      latched.observe('users', 'publish', true, 1, false, 9);
     });
     expect(writesAfterLatch).toBe(0);
+    expect(fingerprint()).toEqual(beforeLate);
     expect(latched.snapshot()).toMatchObject({ state: 'collection-failed', records: [] });
   });
 
