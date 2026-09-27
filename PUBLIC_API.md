@@ -10209,6 +10209,15 @@ a MULTI-provider token: every CachePlugin instance registers one `ICacheDiagnost
 `present`, `absent`, `removed`, `notRemoved`) and the connector's `CacheDiagnosticsResponse`. See
 the diagnostics-connector section for the wire operation.
 
+**Event observation contracts (M98j).** `CAPABILITIES.EVENTS_DIAGNOSTICS` (`'event-diagnostics'`) is
+a MULTI-provider token: every EventsPlugin instance registers one `IEventDiagnosticsSource`
+(`snapshot(): EventDiagnosticsSnapshot` — synchronous, never publishes, invokes a handler or
+enumerates subscriptions). The DTOs are `EventDiagnosticsSnapshot` (`state: EventDiagnosticsState`,
+`alias | null`, `coverage: EventDiagnosticsCoverage`, `records`, `dropped`),
+`EventDiagnosticsRecord` (alias, `EventObservationOperation`, `count`, `started`, `succeeded`,
+`failed`, `noSubscribers`, `lastDurationMs`, `ageMs`) and the connector's
+`EventDiagnosticsResponse`. See the diagnostics-connector section for the wire operation.
+
 **Trace observation contracts (M98g).** `CAPABILITIES.TRACE_DIAGNOSTICS` (`'trace-diagnostics'`) is
 a SINGLE-provider token: the TelemetryPlugin always registers one `ITraceDiagnosticsSource`
 (`read(instanceId, after, limit?): TraceDiagnosticsBatch` — synchronous, requires a non-empty

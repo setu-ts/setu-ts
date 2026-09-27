@@ -415,8 +415,8 @@ parent that completes after its child, the ordinary nesting — join on `parentS
 `unknown` — no edge is fabricated, and capture order is arrival order at one process, never a global
 timeline. Cross-app correlation joins EQUAL trace ids across independently authenticated sessions;
 identifiers grant no discovery or connection authority. With no trace source registered the batch is
-`state:`'unsupported'`with`coverage: 'unknown'`; a client whose negotiated manifest has`traces:
-false` answers that frozen batch, echoing its cursor, without sending the request.
+`state: 'unsupported'` with `coverage: 'unknown'`; a client whose negotiated manifest has
+`traces: false` answers that frozen batch, echoing its cursor, without sending the request.
 
 ## Event dispatch observations (M98j)
 

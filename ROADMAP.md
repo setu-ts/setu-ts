@@ -11142,11 +11142,11 @@ plan: `plans/archive/milestone-98j-event-observations.md`.
       raw errors before buffering.
 - [x] Only the in-process InMemoryEventBus; broker acknowledgements and cross-service delivery
       remain separate messaging work.
-- [ ] Pass recorded design review (approved 2026-09-27, plan §10.1) and committed-tree
-      implementation security audit (audit PENDING — the behavioral tests are delivered: exercise
-      sync/async dispatch, handler rejection, errorHandler throwing, publishBatch, unsubscribe
-      during dispatch, and shutdown while handlers are pending. Assert exact invocation order/count
-      and no second evaluation).
+- [x] Pass recorded design review (approved 2026-09-27, plan §10.1) and committed-tree
+      implementation security audit (passed on round 3, `d458975c` — the behavioral tests are
+      delivered: exercise sync/async dispatch, handler rejection, errorHandler throwing,
+      publishBatch, unsubscribe during dispatch, and shutdown while handlers are pending. Assert
+      exact invocation order/count and no second evaluation).
 
 ### Milestone 98k: Scheduler Execution Observations
 

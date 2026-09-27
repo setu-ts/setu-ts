@@ -308,6 +308,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       return null;
     }
     try {
+      this.#expireIfFull(now);
       const slot = this.#slotFor(alias, operation, false);
       if (slot !== null) {
         slot.started = saturatingNext(slot.started);
@@ -389,11 +390,18 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       return;
     }
     try {
+      this.#expireIfFull(now);
       const slot = this.#slotFor(alias, operation);
       if (slot === null) {
         return;
       }
       slot.count = saturatingNext(slot.count);
+      // A settlement whose start expired with its slot (work in flight longer
+      // than retention) still started once: keep `started >= count` so
+      // `started - count` never goes negative.
+      if (slot.started < slot.count) {
+        slot.started = slot.count;
+      }
       if (succeeded) {
         slot.succeeded = saturatingNext(slot.succeeded);
       } else {
@@ -413,6 +421,17 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       }
     } catch {
       this.#collectionFailed = true;
+    }
+  }
+
+  /**
+   * At capacity, expire stale slots before refusing a new tuple, so a full
+   * table of expired records never counts a live observation as dropped
+   * (the write-path scan is otherwise throttled to once per second).
+   */
+  #expireIfFull(now: number): void {
+    if (this.#slots.size >= MAX_RECORD_SLOTS) {
+      this.#expire(now);
     }
   }
 

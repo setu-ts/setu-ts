@@ -699,7 +699,6 @@ function readEventProjection(
   }
   const entries: Record<string, unknown>[] = [];
   const seenAliases = new Set<string>();
-  let aggregate: EventDiagnosticsResponse['state'] = 'disabled';
   // Aggregate priority: ready wins; otherwise the first of
   // collection-failed → stale → no-data → disabled found among the sources.
   const priority: readonly EventDiagnosticsResponse['state'][] = [
@@ -742,12 +741,10 @@ function readEventProjection(
     }
     entries.push(projectEventSource(`s${index + 1}`, snapshot));
   }
-  if (!readySeen) {
-    aggregate = (priority.find((state) => perSourceStates.includes(state)) ??
+  const aggregate: EventDiagnosticsResponse['state'] = readySeen
+    ? 'ready'
+    : (priority.find((state) => perSourceStates.includes(state)) ??
       'disabled') as EventDiagnosticsResponse['state'];
-  } else {
-    aggregate = 'ready';
-  }
   const projected: Record<string, unknown> = {
     version: 1,
     instanceId,

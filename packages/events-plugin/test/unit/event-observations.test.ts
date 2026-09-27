@@ -974,3 +974,34 @@ describe('Audit fixes (M98j F1, F2)', () => {
     });
   }
 });
+
+describe('Review fixes (PR #375)', () => {
+  it('expires stale slots before refusing a new tuple at capacity', () => {
+    const clock = new MutableClock();
+    const events: Record<string, string> = {};
+    for (let index = 0; index < 33; index++) events[`t${index}`] = `a${index}`;
+    const observer = collector(clock, events);
+    for (let index = 0; index < 32; index++) {
+      observer.observe(`a${index}`, 'publish', true, 1);
+      observer.observe(`a${index}`, 'handler', true, 1);
+    }
+    clock.advance(60_001);
+    // The table is full of expired slots, so it expires them before refusing.
+    observer.observe('a32', 'publish', true, 1);
+    const snapshot = observer.snapshot();
+    expect(snapshot.dropped).toBe(0);
+    expect(snapshot.records.map((r) => r.alias)).toEqual(['a32']);
+  });
+
+  it('keeps started >= count when a settlement outlives its slot', () => {
+    const clock = new MutableClock();
+    const observer = collector(clock);
+    const startedAt = observer.begin('users', 'handler');
+    clock.advance(60_001);
+    observer.snapshot(); // expires the in-flight slot
+    observer.end('users', 'handler', startedAt, true);
+    const record = observer.snapshot().records.find((r) => r.operation === 'handler')!;
+    expect(record.count).toBe(1);
+    expect(record.started).toBeGreaterThanOrEqual(record.count);
+  });
+});

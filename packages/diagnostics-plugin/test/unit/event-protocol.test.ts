@@ -180,8 +180,10 @@ describe('projectEventSource and isEventResponseProjection (M98j wire validation
     };
     const sources = Array.from(
       { length: 17 },
-      (_, index) => projectEventSource(`e${index + 1}`, validSnapshot()),
+      (_, index) => projectEventSource(`s${index + 1}`, validSnapshot()),
     );
+    // Every entry is individually valid, so only the 17-source bound refuses.
+    expect(isEventResponseProjection({ ...base, sources: sources.slice(0, 16) })).toBe(true);
     expect(isEventResponseProjection({ ...base, sources })).toBe(false);
     const bad = projectEventSource('s1', validSnapshot());
     (bad.snapshot as Record<string, unknown>)['records'] = [
