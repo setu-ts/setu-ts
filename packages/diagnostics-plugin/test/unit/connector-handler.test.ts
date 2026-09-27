@@ -1976,6 +1976,54 @@ describe('Connector handler — authorization explanations (M98h)', () => {
     ).toBe(true);
   });
 
+  it('serves a truncated compound decision whose complete rule set exceeds 16, not collection-failed', async () => {
+    // Plan §3.3: a hasAnyRole over 20 requested rules short-circuits at step 20
+    // and is retained with its FULL 20-alias ruleAliases list (the complete
+    // requested set, bounded by the 128 approved-rule ceiling), 16 steps and
+    // stepsTruncated: true. The connector must sign it, not refuse the whole
+    // batch as collection-failed (the audit finding).
+    const steps = Array.from({ length: 16 }, (_value, index) => ({
+      ruleAlias: `r${index}`,
+      reason: index === 15 ? 'direct-role' : 'not-held',
+    }));
+    const ruleAliases = Array.from({ length: 20 }, (_value, index) => `r${index}`);
+    const source: IAuthorizationDiagnosticsSource = {
+      read: (instanceId, after) =>
+        ({
+          version: 1,
+          instanceId,
+          state: 'ready',
+          decisions: [{
+            sequence: after + 1,
+            id: 'd1',
+            operation: 'any-role',
+            result: true,
+            ruleAliases,
+            steps,
+            stepsEvaluated: 20,
+            stepsTruncated: true,
+            reason: 'compound-satisfied',
+            ageMs: 4,
+          }],
+          next: after + 1,
+          lost: 0,
+          closed: false,
+          droppedUnapproved: 0,
+        }) as never,
+    };
+    const harness = await authorizationHarness(source);
+    const view = await sendAuthorization(harness, 'after=0&limit=128');
+    expect(view.status).toEqual(200);
+    expect(view.body.state).toEqual('ready');
+    expect(view.body.coverage).toBeUndefined();
+    const decision = (view.body.decisions as Array<Record<string, unknown>>)[0]!;
+    expect(decision.ruleAliases).toHaveLength(20);
+    expect(decision.steps).toHaveLength(16);
+    expect(decision.stepsEvaluated).toEqual(20);
+    expect(decision.stepsTruncated).toEqual(true);
+    expect(isAuthorizationBatchProjection(view.body)).toBe(true);
+  });
+
   it('answers a typed unsupported batch when no authorization source is registered', async () => {
     const harness = await authorizationHarness(null);
     const view = await sendAuthorization(harness, 'after=7&limit=16');

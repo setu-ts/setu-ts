@@ -30,6 +30,16 @@ const MAX_AUTHORIZATION_DECISIONS = 128;
 /** The evaluated-step budget per decision — the same fixed sixteen the collector enforces. */
 const MAX_AUTHORIZATION_STEPS = 16;
 
+/**
+ * The complete requested-rule set a decision carries. `ruleAliases` is the
+ * COMPLETE requested rule list (plan §3.3: every one approved, or the whole
+ * decision was dropped), bounded by the collector's approved-map ceiling —
+ * NOT by the 16-step retention budget, which bounds `steps` only. A truncated
+ * compound over 16 requested rules must pass the wire with its full alias
+ * list and `stepsTruncated: true`, not be refused wholesale.
+ */
+const MAX_AUTHORIZATION_RULE_ALIASES = 128;
+
 const SOURCE_STATES: ReadonlySet<string> = new Set<AuthorizationSourceState>([
   'disabled',
   'no-data',
@@ -232,15 +242,19 @@ function readDecision(value: unknown): ValidatedAuthorizationDecision | null {
   ) {
     return null;
   }
-  const rawRuleAliases = copyBounded(value.ruleAliases, MAX_AUTHORIZATION_STEPS);
+  const rawRuleAliases = copyBounded(value.ruleAliases, MAX_AUTHORIZATION_RULE_ALIASES);
   if (
     rawRuleAliases === null || rawRuleAliases.length === 0 ||
+    rawRuleAliases.length > MAX_AUTHORIZATION_RULE_ALIASES ||
     !rawRuleAliases.every(isDisplayAlias)
   ) {
     return null;
   }
   const rawSteps = copyBounded(value.steps, MAX_AUTHORIZATION_STEPS);
-  if (rawSteps === null || rawSteps.length > MAX_AUTHORIZATION_STEPS) {
+  if (
+    rawSteps === null ||
+    rawSteps.length > MAX_AUTHORIZATION_STEPS
+  ) {
     return null;
   }
   const steps: ValidatedAuthorizationStep[] = [];
@@ -518,7 +532,7 @@ function isDecisionProjection(value: unknown): boolean {
   const ruleAliases = value.ruleAliases;
   if (
     !Array.isArray(ruleAliases) || ruleAliases.length === 0 ||
-    ruleAliases.length > MAX_AUTHORIZATION_STEPS ||
+    ruleAliases.length > MAX_AUTHORIZATION_RULE_ALIASES ||
     !ruleAliases.every(isDisplayAlias)
   ) {
     return false;

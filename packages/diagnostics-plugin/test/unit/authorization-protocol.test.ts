@@ -300,6 +300,63 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
     expect(validated!.decisions[0]!.stepsEvaluated).toBe(20);
   });
 
+  it('accepts a truncated compound whose complete rule set exceeds the 16-step budget', () => {
+    // Plan §3.3: ruleAliases is the COMPLETE requested rule set (bounded by the
+    // approved-map ceiling of 128), not by the 16-step retention budget that
+    // bounds steps. A hasAnyRole over 20 requested roles that short-circuits at
+    // step 20 is retained with its full 20-alias list and stepsTruncated: true
+    // — it must pass the wire, not poison the batch as collection-failed.
+    const steps = Array.from({ length: 16 }, (_value, index) => ({
+      ruleAlias: `r${index}`,
+      reason: index === 15 ? 'direct-role' : 'not-held',
+    }));
+    const ruleAliases = Array.from({ length: 20 }, (_value, index) => `r${index}`);
+    const truncated = sourceBatch(0, {
+      decisions: [
+        compoundDecision(1, steps, {
+          ruleAliases,
+          result: true,
+          reason: 'compound-satisfied',
+          stepsEvaluated: 20,
+          stepsTruncated: true,
+        }),
+      ],
+      next: 1,
+      lost: 0,
+    });
+    const validated = readAuthorizationSourceBatch(truncated, INSTANCE, 0, 128);
+    expect(validated).not.toBeNull();
+    expect(validated!.decisions[0]!.ruleAliases).toHaveLength(20);
+    expect(validated!.decisions[0]!.steps).toHaveLength(16);
+    expect(validated!.decisions[0]!.stepsTruncated).toBe(true);
+    expect(validated!.decisions[0]!.stepsEvaluated).toBe(20);
+    // The projection validator (run by the connector before signing and by the
+    // client before parsing) accepts the same decision.
+    const projected = projectAuthorizationBatch(validated!, INSTANCE);
+    expect(isAuthorizationBatchProjection(projected)).toBe(true);
+    const projectedDecisions = projected.decisions as Array<Record<string, unknown>>;
+    expect(projectedDecisions[0]!.ruleAliases).toHaveLength(20);
+  });
+
+  it('refuses a decision whose rule-alias list exceeds the 128 approved-rule ceiling', () => {
+    const steps = Array.from({ length: 16 }, (_value, index) => ({
+      ruleAlias: `r${index}`,
+      reason: 'not-held',
+    }));
+    const overCeiling = sourceBatch(0, {
+      decisions: [
+        compoundDecision(1, steps, {
+          ruleAliases: Array.from({ length: 129 }, (_value, index) => `r${index}`),
+          stepsEvaluated: 20,
+          stepsTruncated: true,
+        }),
+      ],
+      next: 1,
+      lost: 0,
+    });
+    expect(readAuthorizationSourceBatch(overCeiling, INSTANCE, 0, 128)).toBeNull();
+  });
+
   it('refuses a step with a viaRoleAlias outside the display shape', () => {
     const badVia = sourceBatch(0);
     decisionsOf(badVia)[0]!.steps = [
