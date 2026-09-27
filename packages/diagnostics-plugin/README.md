@@ -221,6 +221,12 @@ the approved file, and inside an expanded reference's resolution are asserted ab
 layers, as are the raw key names and the configured path. `droppedEntries` counts only budget
 omissions — a count of unapproved keys would disclose that they exist, so there is none.
 
+The M98i cache inspector (`GET /v1/cache`, `client.cache()`) serves every CachePlugin instance's
+operation counters — per fixed operation, under each instance's approved alias — from at most 16
+multi-provider sources resolved at bootstrap (more refuses startup). Keys, prefixes, values, URLs,
+factory results and errors never reach any layer; the e2e canary plants each and asserts its absence
+in the source snapshot, the raw signed bytes and the client DTO.
+
 The M98g trace inspector (`GET /v1/traces?after=N&limit=N`, `client.traces(after, limit?)`) serves
 the TelemetryPlugin's completed, sampled spans under the same rules: only approved operation
 aliases, W3C-validated identifiers, at most eight link identifier pairs, kind, outcome, duration and

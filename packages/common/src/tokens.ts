@@ -151,6 +151,14 @@ export const CAPABILITIES = {
    * A read never starts, exports or flushes a span.
    */
   TRACE_DIAGNOSTICS: 'trace-diagnostics',
+  /**
+   * Minimized cache operation counters (M98i) — an `ICacheDiagnosticsSource`
+   * every CachePlugin instance registers under this token with
+   * `{ multi: true }`, without claiming it in `provides`, so named cache
+   * instances never collide. The DiagnosticsPlugin reads every source to serve
+   * `GET /v1/cache`. A read never performs a cache operation.
+   */
+  CACHE_DIAGNOSTICS: 'cache-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

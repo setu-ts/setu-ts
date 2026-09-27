@@ -5295,6 +5295,27 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   independent re-audit of `2fbac039` passed with no finding open (5 new negative controls; all 13
   round-1 controls and 10 probes re-run green). Plan
   `plans/archive/milestone-98g-distributed-tracing.md` — complete (PR #369).
+- **Milestone 98i** (`packages/cache-plugin` + `packages/common` + `packages/diagnostics-plugin` —
+  cache operation counters): `CachePlugin({ diagnostics: { enabled: true, alias } })` counts every
+  backend call its OWN `CacheService` makes (`get`/`set`/`delete`/`has`/`clear`, `getOrSet` as its
+  internal calls) with succeeded/failed plus hits/misses, present/absent and removed/notRemoved; no
+  eviction is ever inferred, and keys, prefixes, values, Redis URLs, factory results and errors are
+  classified away before the collector. Every instance registers an `ICacheDiagnosticsSource` under
+  the new multi-provider `CAPABILITIES.CACHE_DIAGNOSTICS`; the connector serves `GET /v1/cache` (at
+  most 16 sources, more refuses startup; copy-once reader of own data properties; duplicate aliases
+  or an over-budget body collapse to `collection-failed`) and the client gains `cache()`. **The
+  overhead target was measured, not assumed.** The first in-process benchmark carried an ~11% A/A
+  bias (a second-constructed instance runs slower), so the fair harness runs each configuration in a
+  fresh process against real Redis 7. Timing one call in eight and a private-field attachment
+  brought the enabled cost to ~5% at 50 concurrent calls, which the maintainer accepted; the
+  disabled path matches pre-M98i. **The audit found a defect in that optimisation**: observing
+  settlement on a side branch of the caller's own promise marked it handled, so a fire-and-forget
+  cache call whose backend rejected stopped surfacing as an unhandled rejection whenever diagnostics
+  were on — fixed by returning a derived promise, with a test asserting one unhandled report in both
+  modes. The first audit failed only because §10 listed what a design review must cover rather than
+  recording one; the maintainer then had it recorded (adding a DNS-rebinding attacker, whose raw-
+  socket probe proved the exact-`Host` check sufficient on its own, since a rebound same-origin GET
+  may omit `Origin`). Audit passed on re-audit of `aab0bd78` — complete (PR #374)
 - **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
   security review and implementation audit required).
 

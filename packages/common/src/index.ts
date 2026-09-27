@@ -346,8 +346,13 @@ export { TELEMETRY_CONTEXT_OPAQUE } from './services/telemetry.ts';
 // kernel's optional `IApplication.diagnostics` reader serves — plus the
 // minimized health-observation (M98d), value-free configuration provenance
 // (M98e), queue attempt, outcome and depth observation (M98f), and
-// completed-span trace observation (M98g) inspector contracts
+// completed-span trace observation (M98g) and cache operation counter (M98i)
+// inspector contracts
 export type {
+  CacheDiagnosticsOperation,
+  CacheDiagnosticsRecord,
+  CacheDiagnosticsResponse,
+  CacheDiagnosticsSnapshot,
   ConfigDiagnosticsSnapshot,
   ConfigProvenanceEntry,
   ConfigProvenanceOrigin,
@@ -368,6 +373,7 @@ export type {
   HealthDiagnosticsObservation,
   HealthDiagnosticsSnapshot,
   HealthObservationState,
+  ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
   IDiagnosticsSource,
   IHealthDiagnosticsSource,
