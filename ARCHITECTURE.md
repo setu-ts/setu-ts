@@ -2611,6 +2611,23 @@ root, or unknown — and no global clock is implied: `ageMs` is arrival age at o
 stays authoritative: unsampled spans never complete through a processor, and the batch reports the
 configured sampler so partial traces stay visible as partial.
 
+Cache observations (M98i) follow the queue pattern's multi-provider registration without its merge
+ring: each CachePlugin instance attaches a bounded collector to its OWN `CacheService` through a
+private field set by an internal, non-barrel attach function (the exported constructor is unchanged,
+and an unattached service does one field read beyond the pre-M98i path) and registers an
+`ICacheDiagnosticsSource` under `CAPABILITIES.CACHE_DIAGNOSTICS` with `{ multi: true }`. Only a
+fixed operation name, a primitive outcome code and at most two monotonic readings cross into the
+collector — the wrapper classifies a result (`=== null` for `get`, `=== true` for `has`/`delete`)
+before calling it, and a rejection is recorded without the error being read. The connector resolves
+the sources once at bootstrap (refusing more than 16), reads each synchronously only after
+authentication, and copies only own data properties of plain objects, so a hostile replacement
+source cannot run a getter or smuggle a field. Coverage is `owned-instance`: direct store calls and
+replacement services are not represented, and no eviction is inferred from misses. The caller
+receives a promise derived from the backend's, which re-rejects with the ORIGINAL reason, so an
+unhandled backend rejection stays unhandled with diagnostics on (a side branch on the caller's own
+promise would have marked it handled and hidden it). Only one call in eight per operation is timed
+with a start reading — the per-call cost is one clock read plus one promise reaction.
+
 ### Event Observation Boundary (Milestone 98j)
 
 Event observations apply the pattern to the events plugin, whose structural differences are the

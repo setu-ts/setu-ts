@@ -75,6 +75,8 @@ export const STATUS_TARGET = '/v1/status';
 export const SNAPSHOT_TARGET = '/v1/snapshot';
 export const HEALTH_TARGET = '/v1/health';
 export const CONFIG_TARGET = '/v1/config';
+/** The cache observations target (M98i); it carries no query. */
+export const CACHE_TARGET = '/v1/cache';
 const EVENTS_PATH = '/v1/events';
 
 /**
@@ -128,6 +130,7 @@ export interface ParsedTarget {
     | 'events'
     | 'health'
     | 'config'
+    | 'cache'
     | 'queues'
     | 'traces'
     | 'event';
@@ -164,6 +167,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === CONFIG_TARGET && search === '') {
     return { op: 'config', canonicalTarget: CONFIG_TARGET, after: 0, limit: 0 };
+  }
+  if (path === CACHE_TARGET && search === '') {
+    return { op: 'cache', canonicalTarget: CACHE_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENT_PATH && search === '') {
     return { op: 'event', canonicalTarget: EVENT_PATH, after: 0, limit: 0 };
@@ -404,9 +410,9 @@ export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number]
 
 /**
  * The inspector manifest this connector serves: `health` (M98d),
- * `configuration` (M98e), `queues` (M98f), `traces` (M98g) and `events`
- * (M98j) are implemented; the rest are reserved and false until their own
- * connector operation ships.
+ * `configuration` (M98e), `queues` (M98f), `traces` (M98g), `cache` (M98i)
+ * and `events` (M98j) are implemented; the rest are reserved and false until
+ * their own connector operation ships.
  *
  * @returns The fixed manifest
  * @internal
@@ -418,7 +424,7 @@ export function currentInspectorsManifest(): InspectorsManifest {
     queues: true,
     traces: true,
     authorization: false,
-    cache: false,
+    cache: true,
     events: true,
     scheduler: false,
     realtime: false,

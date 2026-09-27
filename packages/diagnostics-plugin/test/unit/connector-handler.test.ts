@@ -12,6 +12,7 @@ import type {
   ConfigDiagnosticsSnapshot,
   EventDiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
+  ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
   IEventDiagnosticsSource,
   IResponse,
@@ -109,6 +110,7 @@ async function buildHarness(options?: {
   snapshot?: Record<string, unknown>;
   batch?: Record<string, unknown>;
   configSource?: IConfigDiagnosticsSource | null;
+  cacheSources?: readonly ICacheDiagnosticsSource[];
 }): Promise<HandlerHarness> {
   const clock = new MutableClock();
   // The 15-minute default TTL: what the fixture's frozen-clock status body
@@ -131,6 +133,7 @@ async function buildHarness(options?: {
     clock,
     healthSource: null,
     configSource: options?.configSource ?? null,
+    cacheSources: options?.cacheSources ?? [],
   });
   return { handler, clock, source, session, key };
 }
@@ -579,6 +582,7 @@ describe('Connector handler — authentication and binding', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
     clock.advance(1_000);
@@ -783,6 +787,7 @@ describe('Connector handler — projection hardening', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     // The throwing path is BELOW the handler's try — the connector-handler
     // module catches nothing inside; the runtime listener owns the 503 arm.
@@ -857,6 +862,7 @@ describe('Connector handler — health operation (M98d)', () => {
       clock,
       healthSource: { snapshot: () => healthSnapshot },
       configSource: null,
+      cacheSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -898,6 +904,7 @@ describe('Connector handler — health operation (M98d)', () => {
         },
       },
       configSource: null,
+      cacheSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -945,6 +952,7 @@ describe('Connector handler — health operation (M98d)', () => {
       clock,
       healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
       configSource: null,
+      cacheSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -1261,6 +1269,7 @@ describe('Connector handler — remaining structural arms', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     // Forty full-burst honest statuses without any elapsed time exhaust the
     // session's fixed burst budget. Sequence 1 binds (empty instance);
@@ -1306,6 +1315,7 @@ describe('Connector handler — remaining structural arms', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     // The request CLAIMS port 5959 (its Host and URL match the handler) but
     // the MAC was signed for 4919: authentication must refuse it.
@@ -1691,6 +1701,7 @@ describe('Connector handler — queue observations (M98f)', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     return { handler, key, clock };
   }
@@ -1835,6 +1846,7 @@ describe('Connector handler — trace observations (M98g)', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     return { handler, key, clock };
   }

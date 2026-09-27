@@ -194,6 +194,9 @@ package fits the plugin architecture.
 | `AuditEntry`                       | interface |
 | `BehaviorLike`                     | interface |
 | `BulkheadPolicy`                   | interface |
+| `CacheDiagnosticsRecord`           | interface |
+| `CacheDiagnosticsResponse`         | interface |
+| `CacheDiagnosticsSnapshot`         | interface |
 | `CachedProbeOptions`               | interface |
 | `CircuitBreakerPolicy`             | interface |
 | `ClassProvider`                    | interface |
@@ -240,6 +243,7 @@ package fits the plugin architecture.
 | `IAuthorizationService`            | interface |
 | `IAuthService`                     | interface |
 | `IAuthStrategy`                    | interface |
+| `ICacheDiagnosticsSource`          | interface |
 | `ICacheStore`                      | interface |
 | `ICircuitBreaker`                  | interface |
 | `ICliApi`                          | interface |
@@ -417,6 +421,7 @@ package fits the plugin architecture.
 | `WrapOptions`                      | interface |
 | `AuthorizationFailure`             | type      |
 | `BackoffStrategy`                  | type      |
+| `CacheDiagnosticsOperation`        | type      |
 | `CapabilityToken`                  | type      |
 | `ChannelSendResult`                | type      |
 | `CircuitState`                     | type      |

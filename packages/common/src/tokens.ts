@@ -152,6 +152,14 @@ export const CAPABILITIES = {
    */
   TRACE_DIAGNOSTICS: 'trace-diagnostics',
   /**
+   * Minimized cache operation counters (M98i) — an `ICacheDiagnosticsSource`
+   * every CachePlugin instance registers under this token with
+   * `{ multi: true }`, without claiming it in `provides`, so named cache
+   * instances never collide. The DiagnosticsPlugin reads every source to serve
+   * `GET /v1/cache`. A read never performs a cache operation.
+   */
+  CACHE_DIAGNOSTICS: 'cache-diagnostics',
+  /**
    * Minimized event-dispatch observations (M98j) — an
    * `IEventDiagnosticsSource` every EventsPlugin instance registers under
    * this token with `{ multi: true }`, without claiming it in `provides`, so

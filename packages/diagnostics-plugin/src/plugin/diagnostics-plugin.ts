@@ -14,6 +14,7 @@
  */
 
 import type {
+  ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
   IEventDiagnosticsSource,
   IHealthDiagnosticsSource,
@@ -31,6 +32,7 @@ import { DiagnosticsSessionState } from '../security/session.ts';
 import { createConnectorHandler } from '../transport/connector-handler.ts';
 import { ConnectorLimits } from '../transport/limits.ts';
 import { QueueObservationMerger } from '../transport/queue-merger.ts';
+import { MAX_CACHE_SOURCES } from '../protocol/cache-protocol.ts';
 
 /**
  * The default session lifetime: 15 minutes.
@@ -58,6 +60,9 @@ export const PLUGIN_ERRORS = {
   invalidSessionId: 'DiagnosticsPlugin: sessionId must be exactly 32 lowercase hex characters.',
   invalidSessionKey: 'DiagnosticsPlugin: sessionKey must be exactly 32 bytes.',
   invalidTtl: 'DiagnosticsPlugin: ttlMs must be an integer from 1 to 3600000.',
+  tooManyCacheSources:
+    'DiagnosticsPlugin: more than 16 cache-diagnostics sources are registered; ' +
+    'the connector reads at most 16.',
   missingDiagnostics:
     'DiagnosticsPlugin: the application was not created with kernel diagnostics enabled. ' +
     'Pass diagnostics: {} to createApplication to use the connector.',
@@ -250,6 +255,18 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
         const queueSources = ctx.services.has(CAPABILITIES.QUEUE_DIAGNOSTICS)
           ? ctx.services.getAll<IQueueDiagnosticsSource>(CAPABILITIES.QUEUE_DIAGNOSTICS)
           : [];
+        // The cache-diagnostics sources (M98i), read ONCE here for the same
+        // reason. Registration is only collected — no snapshot is taken until
+        // an authenticated request — and more than 16 refuses by a fixed,
+        // value-free configuration error rather than silently dropping one.
+        const cacheSources = ctx.services.has(CAPABILITIES.CACHE_DIAGNOSTICS)
+          ? ctx.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS)
+          : [];
+        if (cacheSources.length > MAX_CACHE_SOURCES) {
+          active.revoke();
+          session = null;
+          throw new Error(PLUGIN_ERRORS.tooManyCacheSources);
+        }
         const merger = new QueueObservationMerger(queueSources, ctx.runtime);
         queueMerger = merger;
         // The event-diagnostics sources (M98j), read ONCE here: every plugin
@@ -269,6 +286,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           clock: ctx.runtime,
           healthSource,
           configSource,
+          cacheSources,
           queues: merger,
           traces: traceSource,
           eventSources,

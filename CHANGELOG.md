@@ -39,6 +39,29 @@ All notable changes to this project are documented here. The format follows
   key now `true`, and `IDiagnosticsClient.events()` as a required member that answers a frozen typed
   `unsupported` response without a request when the negotiated manifest lacks the inspector.
 
+- **Cache operation counters (M98i): opt-in, minimized cache observations through the diagnostics
+  connector.** `CachePlugin` accepts `diagnostics: { enabled: true, alias }` (the new exported
+  `CacheDiagnosticsOptions`, validated when `CachePlugin(...)` is called); the instance's own
+  `CacheService` then counts each backend `get`/`set`/`delete`/`has`/`clear` call — `getOrSet`
+  counted as its internal calls — with explicit `succeeded`/`failed` outcomes and `hits`/`misses`,
+  `present`/`absent`, `removed`/`notRemoved` detail counters. No eviction is ever inferred; keys,
+  prefixes, values, URLs, factory results and errors are never captured. Every CachePlugin instance
+  registers an `ICacheDiagnosticsSource` under the new multi-provider
+  `CAPABILITIES.CACHE_DIAGNOSTICS` (`disabled` without the option, with nothing attached to the
+  service). New public surface on `@setu-ts/common`: `CAPABILITIES.CACHE_DIAGNOSTICS`,
+  `ICacheDiagnosticsSource`, `CacheDiagnosticsSnapshot`, `CacheDiagnosticsRecord`,
+  `CacheDiagnosticsResponse`, `CacheDiagnosticsOperation`. New connector surface: `GET /v1/cache`
+  and the REQUIRED `IDiagnosticsClient.cache()`; the status manifest now reports `cache: true`, and
+  the connector refuses to start with more than 16 cache sources. Enabled calls read the monotonic
+  clock once (twice on a timed one-in-eight sample, which `lastDurationMs` reports) and settle
+  through one derived promise that re-rejects with the original reason, so an unhandled backend
+  rejection stays unhandled. Measured against a real Redis 7: within run-to-run noise with one call
+  in flight, and about 5% of throughput at 50 concurrent calls; against an in-memory `MemoryStore`,
+  whose own call is about 100 ns, enabled calls take about twice as long. Disabled calls are
+  unchanged. Results, errors, rejection reasons, unhandled-rejection reporting and relative ordering
+  are unchanged either way; with diagnostics on, the returned promise is a derived one rather than
+  the backend's own.
+
 - **Distributed tracing observations (M98g): opt-in, minimized completed-span observations through
   the diagnostics connector.** `TelemetryPlugin` accepts a `diagnostics` option
   (`TraceDiagnosticsOptions`) that appends an internal span processor AFTER the exporter processor
