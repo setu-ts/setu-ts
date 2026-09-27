@@ -484,7 +484,8 @@ export class AuthorizationObservationCollector
    * Follows the M98a cursor contract exactly: `after` is exclusive, a cursor
    * parked behind an eviction receives the oldest retained decisions with the
    * skipped sequences reported as `lost`, `after: 0` is not special-cased, and
-   * a closed source answers an empty closed batch rather than a range refusal.
+   * a closed source answers an empty closed batch for every cursor it issued
+   * and refuses one beyond its sequence, exactly as while running.
    */
   read(instanceId: string, after: number, limit?: number): AuthorizationDiagnosticsBatch {
     if (typeof instanceId !== 'string' || instanceId === '') {
@@ -515,8 +516,11 @@ export class AuthorizationObservationCollector
         droppedUnapproved: this.#droppedUnapproved,
       });
     }
-    const lastSequence = this.#closed ? Number.MAX_SAFE_INTEGER : this.#sequence;
-    if (after > lastSequence) {
+    // Close never rewinds the sequence, so every cursor this source could
+    // have issued is still at or below it: a closed source applies the same
+    // refusal as a running one (the #372 fix to the kernel, queue and trace
+    // readers).
+    if (after > this.#sequence) {
       throw new RangeError(COLLECTOR_ERRORS.beyondSequence);
     }
     if (this.#closed) {
@@ -589,7 +593,6 @@ export class AuthorizationObservationCollector
     this.#closed = true;
     detachAuthorizationObserver(this.#rbac);
     this.#decisions.length = 0;
-    this.#sequence = 0;
   }
 }
 

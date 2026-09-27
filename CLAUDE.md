@@ -5337,10 +5337,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   silently accepted without `rbac`, the no-option state answering `unsupported`, an empty compound
   (`requireAnyRole([])`) that turned every later read into `collection-failed` with no way to page
   past it, and a wire validator that let a compound present a partial trace as complete. The
-  security audit ran four rounds, each in a fresh context: round 1 found a Medium (the wire refused
+  security audit ran five rounds, each in a fresh context: round 1 found a Medium (the wire refused
   every truncated compound over 16 rules, fixed in `a858afce`); round 3 found a Low (a request
   repeating one rule more than 128 times bricked the inspector until eviction, fixed in `e9730627`
-  by de-duplicating aliases); round 4 passed with nothing open. Plan
+  by de-duplicating aliases); round 4 passed with nothing open, and round 5 re-audited the merge
+  with `main` (M98i) and passed on `44789a1d`. PR review then caught `close()` rewinding the
+  sequence, so a closed source echoed an invented cursor as `next` — the defect #372 had just fixed
+  in the kernel, queue and trace readers — now refused as while running. Plan
   `plans/archive/milestone-98h-authorization-explanations.md` — complete (PR #376).
 - **Next milestone** — **M98j** (`packages/events-plugin` — event dispatch observations; design
   security review and implementation audit required).

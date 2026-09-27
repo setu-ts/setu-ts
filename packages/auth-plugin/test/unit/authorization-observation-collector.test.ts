@@ -399,18 +399,20 @@ describe('AuthorizationObservationCollector (M98h)', () => {
     attachAuthorizationObserver(rbac, collector);
     rbac.hasRole(admin, 'admin');
     collector.close();
-    // A closed source clears the ring and echoes the cursor: no decisions,
-    // no refusal, for any cursor.
-    const batch = collector.read('instance', 0);
-    expect(batch.state).toBe('no-data');
-    expect(batch.closed).toBe(true);
-    expect(batch.decisions).toHaveLength(0);
-    expect(batch.next).toBe(0);
-    expect(batch.lost).toBe(0);
-    const later = collector.read('instance', 5);
-    expect(later.closed).toBe(true);
-    expect(later.decisions).toHaveLength(0);
-    expect(later.next).toBe(5);
+    // A closed source clears the ring and echoes every cursor it issued:
+    // no decisions, no refusal.
+    for (const cursor of [0, 1]) {
+      const batch = collector.read('instance', cursor);
+      expect(batch.state).toBe('no-data');
+      expect(batch.closed).toBe(true);
+      expect(batch.decisions).toHaveLength(0);
+      expect(batch.next).toBe(cursor);
+      expect(batch.lost).toBe(0);
+    }
+    // A cursor it never issued is refused exactly as while running — a
+    // closed source must not echo an invented cursor back as `next`.
+    expect(() => collector.read('instance', 5)).toThrow(RangeError);
+    expect(() => collector.read('instance', 2)).toThrow('beyond the retained sequence');
   });
 
   it('refuses malformed read arguments with fixed RangeErrors', () => {
