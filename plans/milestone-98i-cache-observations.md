@@ -1,8 +1,9 @@
 # Milestone 98i — Cache Observations
 
 > **Status:** Implementation on `feat/m98i-cache-observations`; plan reviewed and verified by the
-> maintainer before implementation. Design security assessment below requires recorded review before
-> implementation; no implementation or completed security audit is claimed.
+> maintainer before implementation. The design security review is recorded in §10 (written after
+> implementation at the maintainer's direction). The committed-tree security audit is pending; no
+> completed audit is claimed.
 
 ## 0. Objective & scope
 
@@ -191,8 +192,9 @@ the call untouched matched disabled (~356k). The remaining cost is the collector
 plus the one promise reaction every settlement observation needs; replacing the collector's `Map`s
 with fixed slots made no measurable difference and was not kept. The disabled path is
 indistinguishable from pre-M98i in every workload. **Status: the ≤5% target is met for serial Redis
-and not for 50-concurrent Redis (-6.2%) or the in-memory store; the residual is the stated cost of
-observing each settlement, recorded in the CHANGELOG for the maintainer's acceptance.**
+and not for 50-concurrent Redis (-6.2%) or the in-memory store; the residual is the cost of
+observing each settlement. Accepted by the maintainer on 2026-09-27 ("6% is acceptable"), and
+recorded in §10's approved budgets.**
 
 ### 3.5 Scope and isolation
 
@@ -316,12 +318,95 @@ No database inspector, persistent history, raw payloads, admin controls, replay,
 billing integration. Future adapter-specific visibility requires separately planned contracts and
 audits; it is not implied by completing this milestone.
 
-## 10. Required security reviews and acceptance evidence
+## 10. Design security review
 
-**Design gate — pending recorded review before implementation.** Review this exact dataflow: real
-producer -> primitive-only observation -> bounded source -> authenticated fixed route -> exact
-projector -> validating native client. Confirm field allowlist, instance/data scope, budgets,
-retention and negative tests. Resolve security-boundary findings in this plan first.
+**Recorded 2026-09-27, after implementation, at the maintainer's direction.** The maintainer
+reviewed and verified this plan before implementation began, but that review was not written down,
+and the committed-tree audit (correctly) refused to treat the requirement list that stood here as a
+completed review. This section records the review's substance. It was written after the code
+existed, so it is checked against the plan's §3 decisions — the design the maintainer reviewed —
+rather than reverse-engineered from the implementation; where the implementation departed from §3,
+the departure is named below and assessed in its own right.
+
+**Purpose it serves.** M98 is the groundwork for the Setu-TS devtool: a developer inspects a running
+application on their own machine without the devtool gaining access to live services, application
+data, credentials, or any mutation control (ROADMAP M98 objective). For the cache inspector that
+means the devtool may learn HOW the owned cache is behaving — per operation, how often, whether it
+hit or failed, how long it took — and never WHAT it holds.
+
+**Reviewed flow:** application code → the plugin's own `CacheService` → backend call → the wrapper
+classifies the settled result into a primitive outcome (`=== null` for `get`, `=== true` for
+`has`/`delete`, fulfilled/rejected otherwise) → bounded per-instance collector (fixed operation,
+outcome code, monotonic readings only) → frozen `ICacheDiagnosticsSource` snapshot under the
+multi-provider `CAPABILITIES.CACHE_DIAGNOSTICS` → connector resolves at most 16 sources once at
+bootstrap → authenticated `GET /v1/cache` (every M98b control: MAC over canonical fields, sequence
+replay refusal, loopback authority, Origin refusal, session expiry and revocation, instance binding)
+→ copy-once projector with per-source isolation → exact validator → signed frame ≤ 256 KiB → native
+client re-validates and binds the instance. Minimization happens at the wrapper, BEFORE the
+collector: no key, prefix, value, TTL, factory result or error value ever reaches collector state.
+
+**Assets.**
+
+| Asset                              | Why it is sensitive                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
+| Cache keys                         | Commonly embed user ids, emails, session ids, tenant ids, resource names.           |
+| Cached values and factory results  | Application data: sessions, tokens, rendered pages, query results.                  |
+| Key prefixes                       | Reveal tenancy and application topology.                                            |
+| Redis URLs and injected clients    | Carry hosts and credentials.                                                        |
+| Backend errors                     | May quote hosts, commands, keys and driver diagnostics.                             |
+| Operation counts and timings       | Low sensitivity; reveal activity levels, aggregated across every tenant of the app. |
+| The session key and signed channel | Owned by M98b; this letter adds a route behind it and must not weaken it.           |
+
+**Attackers and their reach.**
+
+| Attacker                                                     | Must not be able to                                                                                                     |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| An unpaired local process, or a browser tab on the host      | Read any cache observation, cause a source read, or obtain an unsigned response.                                        |
+| The paired devtool (trusted reader of the minimized DTO)     | Obtain any asset above except counts/timings, or perform any cache operation.                                           |
+| A third-party in-process plugin registering a hostile source | Put an unvalidated field, control character or oversized list into the signed frame, or break other sources' reporting. |
+| Application traffic with attacker-chosen keys                | Grow collector or connector state.                                                                                      |
+| A failing or hung cache backend                              | Change any application result, error, ordering or promise identity, or leak its error text.                             |
+
+**Out of the threat model (unchanged from M98b):** a privileged local sniffer (loopback carries no
+encryption), remote access, and shared multi-tenant production use. A third-party source runs with
+application privileges and is not sandboxed: it can hang the event loop with a synchronous loop,
+which no validator can prevent. The reader's job is to keep its OUTPUT from crossing into the signed
+frame, not to contain its code.
+
+**Approved budgets.** At most five records per built-in source (one approved alias × five fixed
+operations — bounded by construction, so `dropped` stays `0`); a 64-record ceiling per source on the
+contract, enforced by the connector for third-party sources; at most 16 sources, and more refuses
+startup with a fixed error; 60-second retention and 30-second staleness; every counter saturates at
+`Number.MAX_SAFE_INTEGER`; no timer, queue, I/O or allocation per key; a 256 KiB response,
+collapsing to a fixed `collection-failed` rather than truncating. Overhead: the disabled path is
+unchanged from pre-M98i; enabled costs one clock read per call (two on a timed one-in-eight sample)
+plus one settlement reaction, measured at about 6% of throughput at 50 concurrent real-Redis calls
+and **accepted by the maintainer on 2026-09-27** in place of §3.4's 5% target.
+
+| Finding                                                                        | Resolution                                                                                                                                                                                            |
+| ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keys, values or errors could enter capture.                                    | The wrapper classifies before the collector; the collector's API accepts only an operation, an outcome code and clock readings. A rejection is recorded without reading the error.                    |
+| Per-key labels would grow with attacker-chosen keys and disclose them.         | No per-key label exists; one alias per instance, fixed and validated when `CachePlugin(...)` is called.                                                                                               |
+| An alias could carry a secret or forge terminal output.                        | Aliases are explicit and approving one authorizes its disclosure; 1–64 UTF-8 bytes, no C0/C1 control character, validated on the plugin, the connector and the client.                                |
+| Observation could change application semantics.                                | Settlement is observed on a side branch; the caller receives the backend's own promise, value and rejection reason, with no extra tick. Enabled, disabled and failing observers are compared by test. |
+| A failing observer could break the cache.                                      | Every collector entry point catches its own failures and latches a value-free `collection-failed`; application results are unaffected.                                                                |
+| A hostile third-party source could smuggle fields or run code during the read. | Copy-once reader: plain objects of own DATA properties only (a getter is never invoked), lists by index, exact keys and enums, per-source isolation to a fixed failed snapshot.                       |
+| Two sources claiming one alias would make the report ambiguous.                | Duplicate non-null aliases collapse the whole response to `collection-failed` with no sources.                                                                                                        |
+| Named instances collide on one token.                                          | Eager multi-provider registration, never claimed in `provides`.                                                                                                                                       |
+| A replacement service could be mislabeled as observed.                         | Coverage is `owned-instance`: a source describes only the service its plugin created.                                                                                                                 |
+| Evictions inferred from misses would be fabricated.                            | No eviction counter exists in any layer.                                                                                                                                                              |
+| A source could be read before authentication.                                  | Sources are read only inside the authenticated dispatch, after the shared M98b gate.                                                                                                                  |
+| An older connector cannot serve the route.                                     | The negotiated manifest answers a local `unsupported` without a request.                                                                                                                              |
+| Counts aggregate every tenant's activity.                                      | Documented: enable on an approved development dataset; no tenant selector or per-user identifier is added.                                                                                            |
+
+**Implementation departures from §3, assessed.** (1) The attachment is a private `CacheService`
+field set through a non-barrel internal function rather than a `WeakMap` — equivalent isolation (no
+public way to read or replace a collector), less hot-path work. (2) Only one call in eight per
+operation is timed, so `lastDurationMs` reports the most recent TIMED call — this narrows what is
+measured and discloses nothing new. (3) Settlement is observed on a side branch rather than by
+wrapping the promise — strictly less intrusive. None widens the boundary.
+
+**Approved by:** the maintainer, 2026-09-27 — PENDING confirmation of this recorded text.
 
 **Implementation gate — pending committed-tree audit before completion/publication.** Record commit,
 reviewed files, tested adapters/runtimes, findings and dispositions in the implementation PR. Test
