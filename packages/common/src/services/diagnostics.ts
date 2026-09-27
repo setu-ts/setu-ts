@@ -1231,3 +1231,142 @@ export interface ITraceDiagnosticsSource {
    */
   read(instanceId: string, after: number, limit?: number): TraceDiagnosticsBatch;
 }
+
+/**
+ * The fixed cache backend operations a cache diagnostics source counts
+ * (M98i). `getOrSet` is not an operation of its own: its internal `get` and
+ * `set` backend calls are counted as those operations.
+ *
+ * @since 0.8.0
+ */
+export type CacheDiagnosticsOperation = 'get' | 'set' | 'delete' | 'has' | 'clear';
+
+/**
+ * Cumulative counters for one (source alias, operation) pair (M98i).
+ *
+ * Every settled backend call increments `count` and exactly one of
+ * `succeeded` (fulfilled) or `failed` (rejected, or threw synchronously).
+ * The detail counters increment only on a SUCCESSFUL call of their matching
+ * operation: `hits`/`misses` for `get` (non-null / `null` result),
+ * `present`/`absent` for `has`, `removed`/`notRemoved` for `delete`. `set`
+ * and `clear` carry only the outcome counters; every non-applicable counter
+ * is `0`. Every counter saturates independently at
+ * `Number.MAX_SAFE_INTEGER`. No eviction count exists: a miss is never
+ * reported as an eviction. `lastDurationMs` is the integer duration of the
+ * most recently settled call on the runtime's monotonic clock and `ageMs`
+ * the elapsed time since it settled. Keys, prefixes, values, factory
+ * results and errors are never carried.
+ *
+ * @since 0.8.0
+ */
+export interface CacheDiagnosticsRecord {
+  /** The configured source alias (always equal to the snapshot's alias). */
+  readonly alias: string;
+  /** The backend operation these counters describe. */
+  readonly operation: CacheDiagnosticsOperation;
+  /** Settled calls observed. */
+  readonly count: number;
+  /** Integer ms of the last settled call; `null` when not measured. */
+  readonly lastDurationMs: number | null;
+  /** Monotonic ms since the last settled call. */
+  readonly ageMs: number;
+  /** Fulfilled calls. */
+  readonly succeeded: number;
+  /** Rejected (or synchronously throwing) calls. */
+  readonly failed: number;
+  /** Successful `get` calls answering a non-null value. */
+  readonly hits: number;
+  /** Successful `get` calls answering `null`. */
+  readonly misses: number;
+  /** Successful `has` calls answering `true`. */
+  readonly present: number;
+  /** Successful `has` calls answering `false`. */
+  readonly absent: number;
+  /** Successful `delete` calls answering `true`. */
+  readonly removed: number;
+  /** Successful `delete` calls answering `false`. */
+  readonly notRemoved: number;
+}
+
+/**
+ * One cache source's snapshot (M98i): the counters its owned `CacheService`
+ * observed.
+ *
+ * `coverage` is always `owned-instance`: the source describes the
+ * `CacheService` its own plugin created, never whatever is currently
+ * registered under the cache token, never direct store calls, and never a
+ * replacement service. `alias` is `null` exactly when the plugin was not
+ * opted into observation (`state: 'disabled'`). `dropped` counts
+ * observations for which no record slot was available (saturating). A
+ * collection failure clears `records` and reports `collection-failed`.
+ *
+ * @since 0.8.0
+ */
+export interface CacheDiagnosticsSnapshot {
+  /** The source's own availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** The configured display alias, or `null` when disabled. */
+  readonly alias: string | null;
+  /** Always `owned-instance`: only the plugin's own service is observed. */
+  readonly coverage: 'owned-instance';
+  /** Retained counters, one per observed operation. */
+  readonly records: readonly CacheDiagnosticsRecord[];
+  /** Observations that found no free record slot (saturating). */
+  readonly dropped: number;
+}
+
+/**
+ * Read-only cache diagnostics source — the surface every CachePlugin
+ * instance registers under {@linkcode CAPABILITIES.CACHE_DIAGNOSTICS} as a
+ * MULTI provider (M98i), so named cache instances stay independently
+ * observable. The DiagnosticsPlugin reads every source to serve
+ * `GET /v1/cache`.
+ *
+ * Synchronous by contract: `snapshot()` returns already-counted, frozen data
+ * and never performs a cache operation, resolves the cache capability, or
+ * probes a backend.
+ *
+ * @example
+ * ```typescript
+ * const sources = ctx.services.getAll<ICacheDiagnosticsSource>(
+ *   CAPABILITIES.CACHE_DIAGNOSTICS,
+ * );
+ * const snapshots = sources.map((source) => source.snapshot());
+ * ```
+ * @since 0.8.0
+ */
+export interface ICacheDiagnosticsSource {
+  /**
+   * Returns the source's current counters.
+   *
+   * @returns A deeply frozen {@linkcode CacheDiagnosticsSnapshot}
+   */
+  snapshot(): CacheDiagnosticsSnapshot;
+}
+
+/**
+ * The cache diagnostics response the connector serves for `GET /v1/cache`
+ * (M98i).
+ *
+ * `sources` lists every registered cache source in registration order under
+ * a session-local `sourceId` (`s1`…`s16`). `state` is `unsupported` when no
+ * source is registered; otherwise `ready` if any source is ready, then
+ * `collection-failed`, `stale`, `no-data`, `disabled` in that priority.
+ *
+ * @since 0.8.0
+ */
+export interface CacheDiagnosticsResponse {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the response was read for. */
+  readonly instanceId: string;
+  /** The aggregate availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** One snapshot per registered source, in registration order. */
+  readonly sources: readonly {
+    /** The session-local source identifier. */
+    readonly sourceId: string;
+    /** The source's snapshot. */
+    readonly snapshot: CacheDiagnosticsSnapshot;
+  }[];
+}

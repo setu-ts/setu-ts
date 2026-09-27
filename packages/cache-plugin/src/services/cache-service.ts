@@ -7,6 +7,7 @@
 import type { ICacheStore } from '@setu-ts/common';
 import type { CacheStore } from '../stores/cache-store.ts';
 import { cacheCoalescer } from './coalescer.ts';
+import { observeCacheCall } from '../diagnostics/cache-observations.ts';
 
 /**
  * Service layer that delegates to a backend `CacheStore` while applying:
@@ -14,6 +15,10 @@ import { cacheCoalescer } from './coalescer.ts';
  *   `has`). The prefix is also passed to the backend at construction so that
  *   `clear()` can scope to it.
  * - **Default TTL**: Used when `set()` is called without `ttlSeconds`.
+ *
+ * When its CachePlugin was opted into diagnostics (M98i), each backend call
+ * is additionally counted — `getOrSet`'s internal `get` and `set` included.
+ * A service constructed directly carries no collector and runs unobserved.
  *
  * @since 0.1.0
  */
@@ -35,12 +40,16 @@ export class CacheService implements ICacheStore {
   }
 
   get<T>(key: string): Promise<T | null> {
-    return this.#backend.get<T>(`${this.#prefix}${key}`);
+    return observeCacheCall(this, 'get', () => this.#backend.get<T>(`${this.#prefix}${key}`));
   }
 
   set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
     const ttl = ttlSeconds ?? this.#defaultTtl;
-    return this.#backend.set<T>(`${this.#prefix}${key}`, value, ttl);
+    return observeCacheCall(
+      this,
+      'set',
+      () => this.#backend.set<T>(`${this.#prefix}${key}`, value, ttl),
+    );
   }
 
   /**
@@ -93,11 +102,11 @@ export class CacheService implements ICacheStore {
   }
 
   delete(key: string): Promise<boolean> {
-    return this.#backend.delete(`${this.#prefix}${key}`);
+    return observeCacheCall(this, 'delete', () => this.#backend.delete(`${this.#prefix}${key}`));
   }
 
   has(key: string): Promise<boolean> {
-    return this.#backend.has(`${this.#prefix}${key}`);
+    return observeCacheCall(this, 'has', () => this.#backend.has(`${this.#prefix}${key}`));
   }
 
   /**
@@ -106,6 +115,6 @@ export class CacheService implements ICacheStore {
    * since `clear()` takes no key argument.
    */
   clear(): Promise<void> {
-    return this.#backend.clear();
+    return observeCacheCall(this, 'clear', () => this.#backend.clear());
   }
 }

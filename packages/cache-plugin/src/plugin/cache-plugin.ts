@@ -7,7 +7,13 @@
  *
  * @module
  */
-import type { ICacheStore, IPlugin, IPluginContext, IRuntimeServices } from '@setu-ts/common';
+import type {
+  ICacheDiagnosticsSource,
+  ICacheStore,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+} from '@setu-ts/common';
 import {
   CAPABILITIES,
   createCachedProbe,
@@ -21,6 +27,13 @@ import { MemoryStore } from '../stores/memory-store.ts';
 import { RedisStore } from '../stores/redis-store.ts';
 import { NoopStore } from '../stores/noop-store.ts';
 import { CacheService } from '../services/cache-service.ts';
+import {
+  attachCacheCollector,
+  CacheObservationCollector,
+  compileCacheDiagnosticsAlias,
+  createCacheDiagnosticsSource,
+  detachCacheCollector,
+} from '../diagnostics/cache-observations.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /** Default store backend when none is specified. */
@@ -62,6 +75,10 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
   const storeType = options?.store ?? DEFAULT_STORE;
   const instanceName = options?.name ?? 'default';
   const storeOptions = buildStoreOptions(options?.options);
+  // M98i: validated here, before any application exists.
+  const diagnosticsAlias = options?.diagnostics === undefined
+    ? null
+    : compileCacheDiagnosticsAlias(options.diagnostics);
 
   // Derive token: default → 'cache', named → 'cache.<name>'
   const token = instanceName === 'default'
@@ -109,6 +126,23 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
       // Register the cache service under the derived token.
       ctx.services.register<ICacheStore>(token, service);
 
+      // M98i: EVERY instance contributes one cache-diagnostics source as a
+      // multi provider (never claimed in `provides`, so named instances never
+      // collide). It describes THIS service only — a later replacement of the
+      // cache token is outside its coverage. Opted out, the source is inert
+      // and nothing is attached to the service.
+      const collector = diagnosticsAlias === null
+        ? null
+        : new CacheObservationCollector(diagnosticsAlias, ctx.runtime.hrtime.bind(ctx.runtime));
+      if (collector !== null) {
+        attachCacheCollector(service, collector);
+      }
+      ctx.services.register<ICacheDiagnosticsSource>(
+        CAPABILITIES.CACHE_DIAGNOSTICS,
+        createCacheDiagnosticsSource(collector),
+        { multi: true },
+      );
+
       // Register health indicator. M90b: reports BOTH signals. `isReady()`
       // is lifecycle (never started / shut down → `down`); the cached probe
       // is reachability (the backend answers right now). A ready backend
@@ -139,6 +173,9 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
 
       // Register shutdown hook.
       ctx.lifecycle.onClose(async () => {
+        // Detach first so no late call is observed, then clear.
+        detachCacheCollector(service);
+        collector?.close();
         await backend.disconnect();
       });
     },

@@ -63,6 +63,9 @@ export type { CachePluginOptions } from './interfaces/index.ts';
 /** Structural shape of an ioredis-compatible client. */
 export type { IRedisClient } from './interfaces/index.ts';
 
+/** Opt-in cache operation counters for the local diagnostics connector (M98i). */
+export type { CacheDiagnosticsOptions } from './interfaces/index.ts';
+
 /** Options for the transparent response-caching middleware. */
 export type { CacheMiddlewareOptions } from './interfaces/index.ts';
 
