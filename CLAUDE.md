@@ -5332,7 +5332,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   measured on real instances: −1.2% (Node), −3.4% (Bun), −11.8% (Deno) on a publish-only route,
   accepted by the maintainer. The independent audit failed round 1 on three Lows (a late settlement
   re-creating state after close, `event.type` read twice, an overstated review row) and round 2 on a
-  regression test that could not fail; round 3 passed on `d458975c` — complete (PR pending).
+  regression test that could not fail; round 3 passed on `d458975c` — complete (PR #375).
 - **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
   security review and implementation audit required).
 
