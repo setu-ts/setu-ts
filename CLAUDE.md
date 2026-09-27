@@ -5361,7 +5361,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   measured on real instances: −1.2% (Node), −3.4% (Bun), −11.8% (Deno) on a publish-only route,
   accepted by the maintainer. The independent audit failed round 1 on three Lows (a late settlement
   re-creating state after close, `event.type` read twice, an overstated review row) and round 2 on a
-  regression test that could not fail; round 3 passed on `d458975c` — complete (PR #375).
+  regression test that could not fail; round 3 passed on `d458975c`. PR review then reopened it:
+  rounds 4–7 found capacity-time expiry defects, an orphaned slot, readings moving backwards, and
+  `lastDurationMs` describing a different settlement than `ageMs`, all fixed with failing-first
+  tests. Round 7 was the last at the maintainer's direction; its fixes and the merge with `main`
+  (M98h) are verified by tests and gates, and the per-event `begin` token (~50 ns per publish,
+  against the design review's no-allocation budget) was accepted — complete (PR #375).
 - **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
   design security review and implementation audit required).
 

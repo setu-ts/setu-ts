@@ -10667,14 +10667,15 @@ minimized completed-span trace observations and the `GET /v1/traces` inspector; 
 ([#374](https://github.com/setu-ts/setu-ts/pull/374)) — cache operation counters and the
 `GET /v1/cache` inspector; 98h complete ([#376](https://github.com/setu-ts/setu-ts/pull/376)) —
 authorization decision explanations and the `GET /v1/authorization` inspector. These nine are
-implemented, awaiting publication in the next release cycle. **98j–98n are planned**, each with its
-own implementation plan and mandatory security audit. This umbrella records framework work for the
-separately maintained devtool; adding the later letters does not make them prerequisites for
-publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE exception recorded under
-the release requirements below — M98d's status-shape change must precede the first publication of
-`packages/diagnostics-plugin`, because the shipped client refuses a status body it does not expect
-and that body is otherwise frozen for the lifetime of every published client. A roadmap status is
-not evidence that a security audit has passed.
+implemented, awaiting publication in the next release cycle. 98j is complete
+([#375](https://github.com/setu-ts/setu-ts/pull/375)) — event dispatch observations. **98k–98n are
+planned**, each with its own implementation plan and mandatory security audit. This umbrella records
+framework work for the separately maintained devtool; adding the later letters does not make them
+prerequisites for publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE
+exception recorded under the release requirements below — M98d's status-shape change must precede
+the first publication of `packages/diagnostics-plugin`, because the shipped client refuses a status
+body it does not expect and that body is otherwise frozen for the lifetime of every published
+client. A roadmap status is not evidence that a security audit has passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
