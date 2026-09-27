@@ -10782,6 +10782,10 @@ reads; no new capability token is needed.
 
 ### Milestone 98b: Authenticated Local Diagnostics Connector
 
+> **Design security review:** shipped without one and completed retroactively in
+> [`docs/diagnostics-security-review.md`](docs/diagnostics-security-review.md), derived from this
+> milestone's committed design rather than its code.
+
 **Packages:** `packages/runtime`, `packages/common` for the listener contract/token, and new
 `packages/diagnostics-plugin`. Depends on M98a. Runtime owns the loopback listener; the connector
 plugin only supplies its authenticated request handler and never creates a server or imports a
