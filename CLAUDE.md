@@ -5317,26 +5317,22 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   socket probe proved the exact-`Host` check sufficient on its own, since a rebound same-origin GET
   may omit `Origin`). Audit passed on re-audit of `aab0bd78` — complete (PR #374)
 - **Milestone 98j** (`packages/events-plugin` + `packages/common` + `packages/diagnostics-plugin` —
-  event dispatch observations): `EventsPlugin({ diagnostics })` (`EventsDiagnosticsOptions`)
-  attaches a bounded collector to the EXISTING dispatch path through a module-private WeakMap — no
-  extra subscription, no dispatch change — counting publish entries (including no-subscriber
-  publications) and each existing handler's await separately over a 64-slot (alias, operation) table
-  with 60-second retention, a 30-second stale threshold and saturating counters. Only exact event
-  types in the configured `events` map are observed, replaced by approved aliases; payloads, event
-  ids, aggregate ids, handler names, unapproved types and error text never enter a record. A thrown
-  `errorHandler` keeps its exact propagation; async completion is not handler completion;
-  `publishBatch` counts its constituents. Every instance registers a multi-provider source under the
-  new `CAPABILITIES.EVENTS_DIAGNOSTICS` without claiming the token; the connector serves
-  `GET /v1/event` (snapshot op, ≤16 sources, per-source value-free `collection-failed`, duplicate
-  aliases answered with a fixed no-source response) with `events: true` in the manifest, and the
-  client gains `events()`. `close` detaches the observer first, then clears the bus. Plan
-  `plans/milestone-98j-event-observations.md` — **implemented, NOT complete**: verification and code
-  review found and fixed two dispatch-parity defects (an async `errorHandler` throw was absorbed
-  only when observed; a failing clock could reject `publish`), a `started` counter that duplicated
-  `count`, and three connector deviations (over-budget body, source bound, `s<N>` ids). The design
-  security review, recorded after implementation, found the snapshot reader invoking getters (now
-  the shared own-data reader) and is approved, including measured overhead of −1.2% (Node), −3.4%
-  (Bun) and −11.8% (Deno) on a publish-only route. The independent committed-tree audit is pending.
+  event dispatch observations): `EventsPlugin({ diagnostics })` attaches a bounded collector to the
+  EXISTING dispatch path through a module-private WeakMap — no extra subscription and no change to
+  results, ordering, rejections or `errorHandler` calls — counting each approved alias's
+  publications and handler runs (`started` at start, so `started - count` is in-flight work) over 64
+  slots with 60 s retention; payloads, ids, handler names, unapproved types and errors never enter a
+  record. Every instance registers a multi-provider source under the new
+  `CAPABILITIES.EVENTS_DIAGNOSTICS`; the connector serves `GET /v1/event` (more than 16 sources
+  refuse startup, positional `s<N>` ids, own-data-only source reads shared with M98i, duplicate
+  aliases or an over-budget body collapse to `collection-failed`) and the client gains `events()`.
+  Verification and code review found an async `errorHandler` throw absorbed only when observed, a
+  clock failure able to reject `publish`, and three connector deviations from the plan; the design
+  review, recorded after implementation, found the source reader invoking getters. Overhead was
+  measured on real instances: −1.2% (Node), −3.4% (Bun), −11.8% (Deno) on a publish-only route,
+  accepted by the maintainer. The independent audit failed round 1 on three Lows (a late settlement
+  re-creating state after close, `event.type` read twice, an overstated review row) and round 2 on a
+  regression test that could not fail; round 3 passed on `d458975c` — complete (PR pending).
 - **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
   security review and implementation audit required).
 

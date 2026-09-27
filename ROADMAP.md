@@ -11126,10 +11126,9 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
 
 ### Milestone 98j: Event Dispatch Observations
 
-**Status:** Implemented on `feat/m98j-event-observations`; the design security review is recorded
-and approved (plan §10.1); the independent committed-tree security audit is still PENDING, so the
-milestone is not complete. Owner: `packages/events-plugin`. Canonical plan:
-`plans/milestone-98j-event-observations.md`.
+**Status:** Complete. Design security review approved (plan §10.1); independent committed-tree
+security audit passed on round 3 (`d458975c`, plan §12). Owner: `packages/events-plugin`. Canonical
+plan: `plans/archive/milestone-98j-event-observations.md`.
 
 - [x] Instrument publish entry and each existing handler await, without subscribing an extra handler
       or changing dispatch. Count publications, handler starts, successes and failures separately.
@@ -12230,7 +12229,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                                                     |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                                                         |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                                                           |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98g and 98i complete, 98h and 98j–98n planned with security audit gates)                                                 |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98g, 98i and 98j complete, 98h and 98k–98n planned with security audit gates)                                            |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                                                   |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))                                    |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                                                |
@@ -12240,7 +12239,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98g       | ✅     | telemetry-plugin — minimized distributed tracing and correlation ([#369](https://github.com/setu-ts/setu-ts/pull/369); security audit passed on re-audit of `2fbac039`)      |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                                                          |
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
-| 98j       | ⬜     | event dispatch observations — implemented; design security review and implementation audit pending                                                                           |
+| 98j       | ✅     | events-plugin + common + diagnostics-plugin — event dispatch observations (PR pending; security audit passed on round 3, `d458975c`)                                         |
 | 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |
 | 98l       | ⬜     | realtime lifecycle observations — design security review and implementation audit required                                                                                   |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                    |

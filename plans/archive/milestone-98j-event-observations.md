@@ -3,8 +3,8 @@
 > **Status:** Implemented on `feat/m98j-event-observations`; verification and code review done
 > (2026-09-27), with every finding fixed on this branch. The design security review is recorded and
 > approved (§10.1). The independent committed-tree security audit PASSED on round 3 (`d458975c`,
-> §12). The post-approval amendment to §10.1's third-party attacker row awaits maintainer
-> confirmation.
+> §12). The post-approval amendment to §10.1's third-party attacker row is confirmed by the
+> maintainer. Complete.
 
 ## 0. Objective & scope
 
@@ -408,7 +408,7 @@ async `errorHandler` and a throwing clock.
 row originally said a hostile source "must not … break other sources' reporting". The approved
 duplicate-alias and over-budget collapses (findings table, same section) do exactly that, by design,
 so the row overstated the guarantee (audit round 1, F3); it now states the two collapses as the
-exceptions. No behaviour changed.
+exceptions. No behaviour changed. **Confirmed by the maintainer, 2026-09-27.**
 
 **Approved by:** the maintainer, 2026-09-27 — recorded text accepted, including the measured
 overhead (Deno −11.8% on the publish-only route, above §3.4's 5% target, accepted as the cost of an
