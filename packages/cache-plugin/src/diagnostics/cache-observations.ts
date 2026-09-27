@@ -149,8 +149,15 @@ interface MutableRecord {
 /** The fixed operation order records are reported in. */
 const OPERATIONS: readonly CacheDiagnosticsOperation[] = ['get', 'set', 'delete', 'has', 'clear'];
 
-/** Saturating increment. */
-function bump(value: number): number {
+/**
+ * Saturating increment: every counter clamps independently at
+ * `Number.MAX_SAFE_INTEGER`.
+ *
+ * @param value - The current counter
+ * @returns The incremented, clamped counter
+ * @internal
+ */
+export function bump(value: number): number {
   return value >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value + 1;
 }
 
