@@ -6,6 +6,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import * as barrel from '../../src/index.ts';
+import type { TraceDiagnosticsOptions } from '../../src/index.ts';
 
 describe('barrel exports', () => {
   it('should export TelemetryPlugin as a function', () => {
@@ -79,5 +80,18 @@ describe('barrel exports', () => {
 
   it('should export InstrumentationsConfig type', () => {
     expect(barrel).toBeDefined();
+  });
+
+  // --- Milestone 98g ---
+
+  it('should export TraceDiagnosticsOptions type (compile-time pinned)', () => {
+    // Declared against the BARREL, so dropping the re-export is a TS2305 in
+    // `deno check` — a runtime assertion cannot see a type-only export.
+    const options: TraceDiagnosticsOptions = {
+      enabled: true,
+      serviceAlias: 'orders',
+      operations: { 'GET /orders': 'list-orders' },
+    };
+    expect(options.enabled).toBe(true);
   });
 });

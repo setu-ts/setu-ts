@@ -352,6 +352,14 @@ describe('DiagnosticsPlugin — enabled is an acknowledgement, not a toggle', ()
   });
 });
 
+describe('DiagnosticsPlugin — trace source (M98g)', () => {
+  it('declares the trace source as an OPTIONAL dependency, never a required one', () => {
+    const plugin = DiagnosticsPlugin(OPTIONS);
+    expect(plugin.optionalDependencies).toContain(CAPABILITIES.TRACE_DIAGNOSTICS);
+    expect(plugin.dependencies ?? []).not.toContain(CAPABILITIES.TRACE_DIAGNOSTICS);
+  });
+});
+
 describe('DiagnosticsPlugin — queue sources (M98f)', () => {
   it('declares the queue source optionally and resolves every source at BOOTSTRAP', async () => {
     const plugin = DiagnosticsPlugin(OPTIONS);

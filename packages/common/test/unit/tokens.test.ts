@@ -56,3 +56,9 @@ describe('CAPABILITIES', () => {
     expect(CAPABILITIES.SSE).toBe('sse');
   });
 });
+
+describe('CAPABILITIES — M98g trace diagnostics', () => {
+  it('exposes the eager trace-diagnostics token in kebab-case', () => {
+    expect(CAPABILITIES.TRACE_DIAGNOSTICS).toBe('trace-diagnostics');
+  });
+});

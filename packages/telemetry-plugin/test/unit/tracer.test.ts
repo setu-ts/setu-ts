@@ -14,7 +14,12 @@ import {
 import type { TracerHost } from '../../src/interfaces/index.ts';
 import { createFakeTracerHost } from '../fixtures/fake-tracer-host.ts';
 import { TELEMETRY_CONTEXT_OPAQUE } from '@setu-ts/common';
-import type { TelemetryContext } from '@setu-ts/common';
+import type { IRuntimeServices, TelemetryContext } from '@setu-ts/common';
+import {
+  compileTraceDiagnosticsPolicy,
+  SpanObservationCollector,
+} from '../../src/diagnostics/span-observation-collector.ts';
+import { DiagnosticSpanProcessor } from '../../src/diagnostics/diagnostic-span-processor.ts';
 
 describe('loadOtelTracerProvider', () => {
   it('should throw when exporter is otlp but endpoint is missing', async () => {
@@ -1135,5 +1140,115 @@ describe('buildTracerHost (via fake modules)', () => {
     });
 
     expect(capturedProcessorKind).toBe('simple');
+  });
+});
+
+describe('buildTracerHost — M98g diagnostic processor composition', () => {
+  function capturingResources(): OtelResourcesModule {
+    return { resourceFromAttributes: (attrs: Record<string, string>) => attrs };
+  }
+
+  function capturingSdkModule(captured: { spanProcessors?: unknown[] }): OtelSdkModule {
+    const base: OtelSdkModule = {
+      BasicTracerProvider: class {
+        constructor(config: { resource: unknown; spanProcessors: unknown[]; sampler: unknown }) {
+          captured.spanProcessors = config.spanProcessors;
+        }
+        getTracer() {
+          return {
+            startSpan() {
+              return {};
+            },
+          };
+        }
+        async forceFlush() {}
+        async shutdown() {}
+      } as unknown as OtelSdkModule['BasicTracerProvider'],
+      SimpleSpanProcessor: class {} as unknown as OtelSdkModule['SimpleSpanProcessor'],
+      BatchSpanProcessor: class {} as unknown as OtelSdkModule['BatchSpanProcessor'],
+      TraceIdRatioBasedSampler: class {} as unknown as OtelSdkModule['TraceIdRatioBasedSampler'],
+      AlwaysOnSampler: class {} as unknown as OtelSdkModule['AlwaysOnSampler'],
+    };
+    return base;
+  }
+
+  function collectorFor(sampler: { kind: 'always-on' } | { kind: 'traceidratio'; ratio: number }) {
+    const policy = compileTraceDiagnosticsPolicy({
+      enabled: true,
+      serviceAlias: 'orders',
+      operations: { 'POST /orders': 'create-order' },
+    });
+    const availability = {
+      coverage: 'completed-sampled-spans' as const,
+      instrumentation: () => [],
+      sampler,
+    };
+    return {
+      policy,
+      collector: new SpanObservationCollector(
+        availability,
+        { hrtime: () => 0 } as unknown as Pick<IRuntimeServices, 'hrtime'>,
+      ),
+    };
+  }
+
+  it('installs ONLY the exporter processor when diagnostics are absent', async () => {
+    const captured: { spanProcessors?: unknown[] } = {};
+    const host = await buildTracerHost({
+      sdkMod: capturingSdkModule(captured),
+      resourcesMod: capturingResources(),
+      pluginOptions: { serviceName: 'test', exporter: 'console' },
+      consoleExporterCtor: class {} as never,
+    });
+    expect(host).toBeDefined();
+    expect(captured.spanProcessors).toHaveLength(1);
+  });
+
+  it('appends the diagnostic processor AFTER the exporter processor exactly once', async () => {
+    const captured: { spanProcessors?: unknown[] } = {};
+    const { policy, collector } = collectorFor({ kind: 'always-on' });
+    const exporterProcessor = new (class {})();
+    const sdkMod = capturingSdkModule(captured);
+    const exporterProcessorClass = sdkMod.SimpleSpanProcessor as unknown as new (
+      exporter: unknown,
+    ) => unknown;
+    const host = await buildTracerHost({
+      sdkMod,
+      resourcesMod: capturingResources(),
+      pluginOptions: { serviceName: 'test', exporter: 'console' },
+      consoleExporterCtor: class {} as never,
+      diagnostics: { policy, collector },
+    });
+    expect(host).toBeDefined();
+    expect(captured.spanProcessors).toHaveLength(2);
+    expect(captured.spanProcessors![1]).toBeInstanceOf(DiagnosticSpanProcessor);
+    // The exporter processor stays FIRST: the diagnostic processor observes
+    // completions without ever wrapping or displacing it.
+    expect(captured.spanProcessors![0]).toBeInstanceOf(exporterProcessorClass);
+    expect(captured.spanProcessors![0]).not.toBeInstanceOf(DiagnosticSpanProcessor);
+    void exporterProcessor;
+  });
+
+  it('leaves sampler construction unchanged when diagnostics are enabled', async () => {
+    const capturedRatio: number[] = [];
+    const sdkMod = capturingSdkModule({});
+    sdkMod.TraceIdRatioBasedSampler = class {
+      constructor(ratio: number) {
+        capturedRatio.push(ratio);
+      }
+    } as unknown as OtelSdkModule['TraceIdRatioBasedSampler'];
+    const { policy, collector } = collectorFor({ kind: 'traceidratio', ratio: 0.5 });
+    await buildTracerHost({
+      sdkMod,
+      resourcesMod: capturingResources(),
+      pluginOptions: {
+        serviceName: 'test',
+        exporter: 'console',
+        sampling: { type: 'traceidratio', ratio: 0.5 },
+      },
+      consoleExporterCtor: class {} as never,
+      diagnostics: { policy, collector },
+    });
+    expect(capturedRatio).toEqual([0.5]);
   });
 });

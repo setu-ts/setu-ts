@@ -74,6 +74,16 @@ The generated `createApp()` is `async`, and emits no hello-world route (an exact
 outranks the SSR catch-all under the M70g specificity rule, so it would shadow the application's own
 index route).
 
+It also shows the project's two middleware layers side by side, which a new reader otherwise has no
+way to tell apart. `setu generate middleware` writes **kernel** middleware, which runs for every
+request the application serves — health probes and API routes as well as SSR pages. React Router's
+own route `middleware` export runs only for the SSR routes it is attached to and reads React
+Router's context. The scaffold ships a worked example of the second:
+`app/middleware/require-user.server.ts` redirects a visitor who is not signed in to `/login` and
+puts the signed-in user on the context for the loader, and `/products` attaches it. The generated
+`README.md` carries a table comparing the two, and a kernel middleware generated into a project that
+installs `react-router-plugin` points at the route-level alternative in its own JSDoc.
+
 The frontend build runs on npm even when the server runs on Deno. Deno and Workers targets get a
 standalone `package.json` for Vite and React Router; Node and Bun get those dev dependencies merged
 into the manifest they already have.

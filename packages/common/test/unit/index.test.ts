@@ -44,6 +44,18 @@ import type {
   RetryPolicy,
   WrapOptions,
 } from '../../src/index.ts';
+import type {
+  ITraceDiagnosticsSource,
+  TraceCoverage,
+  TraceDiagnosticsBatch,
+  TraceInstrumentationKind,
+  TraceLinkRelationship,
+  TraceObservation,
+  TraceOutcome,
+  TraceParentVisibility,
+  TraceSamplerDescription,
+  TraceSourceState,
+} from '../../src/index.ts';
 
 describe('@setu-ts/common barrel', () => {
   it('should export the capability token constants', () => {
@@ -191,5 +203,32 @@ describe('@setu-ts/common barrel', () => {
 
     expect(typeof HTTP_STATUS_HINT).toBe('symbol');
     expect(httpStatusHintOf(branded)).toEqual(hint);
+  });
+});
+
+describe('@setu-ts/common barrel — M98g trace observation contracts', () => {
+  it('exports the trace-diagnostics token', () => {
+    expect(CAPABILITIES.TRACE_DIAGNOSTICS).toBe('trace-diagnostics');
+  });
+
+  it('compiles against the trace DTO, source and vocabulary surface', () => {
+    // Static type surface: this function body type-checks only when every
+    // name is exported from the barrel, and runs to prove the import lives.
+    const consumer = (
+      observation: TraceObservation,
+      batch: TraceDiagnosticsBatch,
+      source: ITraceDiagnosticsSource,
+      coverage: TraceCoverage,
+      state: TraceSourceState,
+      kind: TraceInstrumentationKind,
+      sampler: TraceSamplerDescription,
+      link: TraceLinkRelationship,
+      outcome: TraceOutcome,
+      visibility: TraceParentVisibility,
+    ): string =>
+      `${observation.sequence}${batch.version}${coverage}${state}${kind}${sampler.kind}${link.spanId}${outcome}${visibility}${
+        source !== null
+      }`;
+    expect(consumer.length).toBe(10);
   });
 });

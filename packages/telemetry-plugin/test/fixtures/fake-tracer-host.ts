@@ -31,6 +31,9 @@ export interface RecordedSpan {
   context: SpanContext;
 }
 
+/** The OTel `SpanStatusCode` enum, read back to the framework name. */
+const STATUS_BY_CODE: Readonly<Record<number, SpanStatus>> = { 0: 'unset', 1: 'ok', 2: 'error' };
+
 /**
  * Creates a fake TracerHost that records all operations.
  *
@@ -84,8 +87,14 @@ export function createFakeTracerHost(): FakeTracerHost {
           }
           return this;
         },
-        setStatus(status) {
-          this._recorded.status = status;
+        // OTel's `Span.setStatus` takes `{ code }` (SpanStatusCode UNSET=0,
+        // OK=1, ERROR=2) and reads `status.code` — it never accepts a bare
+        // string. Recording the framework name back from the CODE is what makes
+        // this double honor that contract: a caller handing it the string
+        // `'ok'` records `null`, exactly as the real span ends with status `{}`.
+        setStatus(status: unknown) {
+          const code = (status as { code?: unknown } | null)?.code;
+          this._recorded.status = typeof code === 'number' ? (STATUS_BY_CODE[code] ?? null) : null;
         },
         recordException(error) {
           this._recorded.exceptions.push(error);

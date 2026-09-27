@@ -221,6 +221,16 @@ the approved file, and inside an expanded reference's resolution are asserted ab
 layers, as are the raw key names and the configured path. `droppedEntries` counts only budget
 omissions — a count of unapproved keys would disclose that they exist, so there is none.
 
+The M98g trace inspector (`GET /v1/traces?after=N&limit=N`, `client.traces(after, limit?)`) serves
+the TelemetryPlugin's completed, sampled spans under the same rules: only approved operation
+aliases, W3C-validated identifiers, at most eight link identifier pairs, kind, outcome, duration and
+monotonic age. Span names, attributes, events, resource labels, tracestate, baggage, exceptions and
+status messages never reach any layer — the e2e canary plants a hostile span name and a hostile
+attribute and asserts their absence in the batch, the raw signed bytes and the client DTO.
+Correlation joins EQUAL trace ids across independently authenticated sessions; an identifier grants
+no discovery or connection authority, `parentVisibility` never fabricates an edge, and `ageMs` is
+arrival age at one process, never a global timeline.
+
 ## Exports
 
 | Export                     | Kind      |

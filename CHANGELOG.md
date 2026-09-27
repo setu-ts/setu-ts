@@ -8,6 +8,41 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Distributed tracing observations (M98g): opt-in, minimized completed-span observations through
+  the diagnostics connector.** `TelemetryPlugin` accepts a `diagnostics` option
+  (`TraceDiagnosticsOptions`) that appends an internal span processor AFTER the exporter processor
+  in the same provider constructor — the exporter path is unchanged (measured: the exporter still
+  receives every span), the processor never exports, never throws into OTel, and observes only
+  finished SAMPLED spans whose exact raw name appears in the configured `operations` map, each
+  replaced by its approved alias before anything is retained. A record carries the service and
+  operation aliases, W3C-validated trace/span/parent identifiers (all-zero rejected; `parentSpanId`
+  present exactly when the parent is locally meaningful), at most eight validated link identifier
+  pairs, kind, outcome (`ok`/`error`/`unset`), monotonic `durationMs`/`ageMs` and `parentVisibility`
+  (`observed` / `remote-or-unobserved` / `root` / `unknown` — an identifier relationship only, never
+  a fabricated edge). Span names, attributes, events, resource labels, tracestate, baggage,
+  exceptions and status messages never reach collector state, and kind/status values outside the
+  fixed mapping drop the record — kinds follow the `@opentelemetry/api` `SpanKind` enum
+  (`INTERNAL = 0` … `CONSUMER = 4`), and a span created with no kind arrives as `0`. The plugin
+  ALWAYS registers one `ITraceDiagnosticsSource` under the new `CAPABILITIES.TRACE_DIAGNOSTICS`
+  token (claimed in `provides`): `disabled` without the option, `unsupported` with the coverage
+  reason (`custom-provider` / `noop-no-provider`) when the stack cannot supply completed spans,
+  `no-data`/`ready` when it can, and a `collection-failed` answer when the connector's exact
+  validator refuses a source DTO. The batch reports coverage, instrumentation coverage (only
+  families whose registry outcome said enabled), the configured sampler description, M98a's cursor
+  contract over a 1,024-record ring with exact per-batch `lost`, and a saturating `droppedSpans`
+  counter. New public surface on `@setu-ts/common`: `CAPABILITIES.TRACE_DIAGNOSTICS`,
+  `ITraceDiagnosticsSource`, `TraceDiagnosticsBatch`, `TraceObservation`, `TraceLinkRelationship`,
+  `TraceSamplerDescription`, `TraceSourceState`, `TraceCoverage`, `TraceInstrumentationKind`,
+  `TraceOutcome`, `TraceParentVisibility`. New connector surface: `GET /v1/traces?after=N&limit=N`
+  (authenticated like every operation; a cursor beyond the source's sequence refused
+  `invalid-request`, as `/v1/queues` refuses one beyond its merge sequence;
+  `collection-failed`/`unsupported` answered as typed 200 batches, never error text), the status
+  manifest's `traces` key now `true`, and `IDiagnosticsClient.traces(after, limit?)` as a required
+  member that answers a frozen typed `unsupported` batch without a request when the negotiated
+  manifest lacks the inspector. Cross-application correlation joins EQUAL trace ids across
+  independently authenticated sessions only; identifiers grant no discovery or connection authority,
+  and no global timeline is implied — `ageMs` is arrival age at one process.
+
 - **Configuration provenance (M98e): value-free provenance for approved keys, served through the
   diagnostics connector.** `ConfigPlugin` and `loadConfig` accept a `diagnostics` option
   (`ConfigDiagnosticsOptions`, exported from `@setu-ts/config-plugin`) that records — during the one
@@ -273,6 +308,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`cli` — `setu new --template full-stack` now demonstrates React Router route middleware, and
+  explains both middleware layers.** A generated full-stack project has two: kernel middleware
+  (`setu generate middleware`), which runs for every request, and React Router's route `middleware`
+  export, which runs only for the SSR routes it is attached to. The scaffold carried no example of
+  the second, so where a route middleware goes and how it hands a loader a value had to be learned
+  from React Router's documentation. It now emits `app/middleware/require-user.server.ts` and
+  `app/models/user.ts`, a `currentUserContext` key and `getCurrentUser` accessor, and a README
+  section comparing the two layers. **Generated behaviour changes:** `/products` in a newly
+  scaffolded project now redirects a visitor who is not signed in to `/login` (existing projects are
+  unaffected). A kernel middleware generated into a project that installs `react-router-plugin`
+  names the route-level alternative in its JSDoc, and every generated middleware's priority comment
+  now lists tenant resolution (40) and request logging (100), which it omitted, and explains
+  short-circuiting before `await next()` rather than after it, where returning early no longer stops
+  anything.
 - **`cli` — the `--di` refusal names the `--style` axis (M99e).** The retired `--di` flag's message
   now directs the caller to `--style class-based` (with `--template rest` or `microservice`) rather
   than only to `--template class-based`, and the broker refusal's "use `--template microservice`"
@@ -314,6 +363,62 @@ All notable changes to this project are documented here. The format follows
   provider. Nothing changes for the five built-in providers, which all return promises.
 
 ### Fixed
+
+- **`kernel`, `queue-plugin`, `telemetry-plugin` — a stopped diagnostics reader no longer echoes an
+  invented cursor.** After shutdown, `IApplication.diagnostics.read()`, the queue diagnostics source
+  and the trace diagnostics source accepted ANY non-negative safe integer as `after` and returned it
+  verbatim as `next` — `read(500)` on a reader that had issued one event answered `next: 500` —
+  contradicting their own contracts, which refuse a cursor beyond the current sequence. Shutdown
+  never rewinds a sequence counter, so every cursor a reader could have been issued is still at or
+  below it: a closed reader now applies the same refusal it applies while running, and still answers
+  an empty `closed: true` batch for every cursor it did issue. No released version carries the
+  defect; all three readers are new in this release.
+- **`diagnostics-plugin` — the native client binds every post-pairing response to the paired
+  instance.** Pairing compared the status body's `instanceId` with its authenticated header, but
+  later exchanges only verified the MAC — and the `x-setu-instance` header is an INPUT to that MAC,
+  so a peer holding the session key could sign a snapshot under a different identity (header B /
+  body A, header A / body B, or both) and `snapshot()` and `read()` accepted all three. The shared
+  exchange now refuses any signed response whose header differs from the instance the request
+  presented, which covers every operation including the four inspector reads, and `snapshot()` /
+  `read()` require the body `instanceId` to equal the paired instance (a `null` body identity, valid
+  for the in-process reader before the runtime assigns one, is refused on a paired network session).
+  A refusal is the existing fixed connection error and, like any post-pairing verification failure,
+  not terminal. Legacy/current status negotiation and terminal initial pairing are unchanged. The
+  client has not yet been published, so no released version carries the defect.
+- **`diagnostics-plugin` — the native client validates the full core DTO and freezes what it
+  returns.** The core snapshot and batch validators checked little more than primitive types: any
+  string passed as `state`, a node or edge record could carry any fields, and an event needed only a
+  numeric `sequence` and string `operationId`/`stage`. They now enforce the M98a contract — only
+  defined keys, fixed vocabularies, per-kind node fields, prefixed unique node ids, bounded
+  control-free labels, edges between present nodes, canonical operation ids, non-negative (or
+  `null`) timings, validated trace identifiers, consecutive sequences, and the 1,024/4,096/128
+  bounds — and `read()` now checks the cursor contract it sent, as `queues()` and `traces()` already
+  did. `snapshot()` and `read()` also returned the parsed JSON unfrozen while their documentation
+  promised frozen data; both now deep-freeze it. An in-process `instanceId: null` remains valid; a
+  middleware `priority` and an event `statusCode` stay unranged finite numbers because the
+  application sets both; a refusal is the fixed connection error.
+- **`kernel` — diagnostics omit a non-finite middleware priority or response status.** Both were
+  recorded verbatim, so `priority: NaN` (what `Number(env.X)` yields for an unset variable) or
+  `status(NaN)` put `NaN` in a field `common` types as `number`, and the connector serialized it as
+  `null`. A non-finite value is now omitted from the node or event; every finite value is still
+  recorded as the application set it.
+- **`kernel` — a retried start no longer reuses diagnostics event sequence numbers.** A failed start
+  cleared the event ring and restarted numbering at 1, so after the kernel-supported correction
+  (`unregister` + `start()`) a reader's cursor from the failed attempt was refused as "beyond the
+  current sequence" or silently skipped the retry's first events. The discarded records are now
+  treated like an eviction: numbering continues, and a reader's `lost` counts them; the
+  `DiagnosticsBatch.lost` JSDoc now says so.
+- **`telemetry-plugin` — exported spans now carry the span kind and status OpenTelemetry defines.**
+  `TelemetryService` mapped the framework's `SpanKind` onto the OTLP WIRE numbering rather than the
+  `@opentelemetry/api` enum a span holds in memory, so every `server` span was exported as `CLIENT`,
+  `client` as `PRODUCER`, `producer` as `CONSUMER`, and `consumer` as an out-of-range kind. And
+  `ISpan.setStatus('ok' | 'error')` handed OTel the bare string, while OTel's `Span.setStatus` reads
+  `status.code` — so every span's status was exported as `{}`: an errored request or a thrown
+  handler never reached Datadog, New Relic or Application Insights as an error. Both are corrected
+  (kinds `0`–`4`, status `{ code: 0 | 1 | 2 }`), verified against the real locked SDK. **Behavior
+  change for dashboards:** server spans that were filed under CLIENT now appear as SERVER, and error
+  rates computed from span status become non-zero where requests actually failed. The same defect
+  made the M98g diagnostic processor drop every span that set a status — every HTTP server span.
 
 - **`queue-plugin` — a job whose thrown value cannot be described is no longer left stuck.** With a
   logger registered, `QueueService` converted a non-`Error` thrown by a processor with

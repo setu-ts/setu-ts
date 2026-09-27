@@ -199,6 +199,7 @@ export interface AppLoadContext {
 
 const contextKeysModule = `import { contextKeyFor } from '@setu-ts/react-router-plugin';
 import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
+import type { CurrentUser } from '~/models/user.ts';
 
 /**
  * Context keys this application adds to every SSR request.
@@ -245,13 +246,25 @@ export const loggerContext = contextKeyFor<ILogger | null>('app.logger', null);
  * plugin rather than by a module-level map here.
  */
 export const secretsContext = contextKeyFor<ISecretManager | null>('app.secrets', null);
+
+/**
+ * The signed-in user, on the routes the \`requireUser\` route middleware guards.
+ *
+ * Unlike the keys above, \`setu.config.ts\` does not set this one: React Router
+ * route middleware does, after reading the session — see
+ * \`app/middleware/require-user.server.ts\`. It stays \`null\` on every route that
+ * middleware does not guard.
+ */
+export const currentUserContext = contextKeyFor<CurrentUser | null>('app.current-user', null);
 `;
 
 const servicesAccessModule =
   `import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
 import type { AppLoadContext } from '~/lib/load-context.ts';
+import type { CurrentUser } from '~/models/user.ts';
 import {
   csrfContext,
+  currentUserContext,
   loggerContext,
   secretsContext,
   sessionContext,
@@ -307,6 +320,24 @@ export function getSession(context: AppLoadContext): ISession {
 export function getCsrfToken(context: AppLoadContext): string {
   return requireValue(context.get(csrfContext), 'CSRF token');
 }
+
+/**
+ * Resolves the signed-in user the \`requireUser\` route middleware put on the context.
+ *
+ * Throws on a route that middleware does not guard. That is deliberate: a loader
+ * that needs a user should be unreachable without one, and a missing
+ * \`export const middleware\` is a wiring mistake worth failing loudly on.
+ */
+export function getCurrentUser(context: AppLoadContext): CurrentUser {
+  const user = context.get(currentUserContext);
+  if (user === null) {
+    throw new Error(
+      'No signed-in user on this request. Guard the route with ' +
+        '\`export const middleware = [requireUser];\` from ~/middleware/require-user.server.ts.',
+    );
+  }
+  return user;
+}
 `;
 
 const utilsModule = `/**
@@ -361,6 +392,68 @@ export interface Product {
 export function formatPrice(product: Product): string {
   return \`$\${(product.priceCents / 100).toFixed(2)}\`;
 }
+`;
+
+const userModel =
+  `/** The signed-in user, as the application sees it. Plain data, safe for client code. */
+export interface CurrentUser {
+  /** The address the user signed in with. */
+  readonly email: string;
+}
+`;
+
+/**
+ * The worked React Router route middleware.
+ *
+ * The scaffold has TWO middleware layers and a new reader has no way to tell them
+ * apart: `setu generate middleware` writes the kernel layer, which runs for every
+ * request the application serves, while React Router's own `middleware` export
+ * runs only for the SSR routes it is attached to and sees the loader context —
+ * which is where the session-derived user lives. Before this module the scaffold
+ * shipped no example of the second layer at all, so where to put one, and how to
+ * hand a value to a loader through it, had to be learned from React Router's docs.
+ */
+const requireUserMiddleware = `import { type MiddlewareFunction, redirect } from 'react-router';
+
+import { currentUserContext, sessionContext } from '~/lib/context-keys.server.ts';
+
+/**
+ * React Router route middleware: only a signed-in user gets past it.
+ *
+ * This project has two middleware layers, and this is the second one:
+ *
+ * - **Kernel middleware** (\`setu generate middleware <name>\`, in \`src/middleware/\`)
+ *   runs for EVERY request the application serves — health probes, API routes,
+ *   static files and SSR pages alike — and works on the kernel request context.
+ *   Use it for cross-cutting concerns: headers, auditing, rate limits.
+ * - **Route middleware** (this module) runs only for the SSR routes it is attached
+ *   to, for both the document request and the client-side navigation's data
+ *   request. It reads and writes React Router's context, so it can read the
+ *   session and hand a loader a value. Use it for page-level rules.
+ *
+ * Attach it by exporting a \`middleware\` array from a route module:
+ *
+ * \`\`\`ts
+ * export const middleware = [requireUser];
+ * \`\`\`
+ *
+ * Exported from a LAYOUT module (\`app/components/layouts/AppLayout.tsx\`) it guards
+ * every route in that group. This scaffold attaches it to \`/products\` alone,
+ * because the same layout also serves the public landing page at \`/\`.
+ *
+ * The \`.server.ts\` suffix is safe here: React Router strips the \`middleware\`
+ * export — and the imports only it uses — from the browser bundle.
+ */
+export const requireUser: MiddlewareFunction<Response> = ({ context }, next) => {
+  const email = context.get(sessionContext)?.get<string>('userEmail');
+  if (email === undefined || email === '') {
+    // A thrown redirect ends the chain: no loader and no later middleware runs.
+    throw redirect('/login');
+  }
+  // Loaders below this middleware read it with getCurrentUser(context).
+  context.set(currentUserContext, { email });
+  return next();
+};
 `;
 
 const productsService = `import type { AppLoadContext } from '~/lib/load-context.ts';
@@ -509,7 +602,7 @@ export default function IndexRoute() {
       <ul>
         <li>
           <Link to='/products'>Products</Link>{' '}
-          — rows read through the database capability by a loader.
+          — rows read by a loader, behind a route middleware that sends you to sign in first.
         </li>
         <li>
           <Link to='/login'>Sign in</Link>{' '}
@@ -524,8 +617,17 @@ export default function IndexRoute() {
 const productsRoute = `import { useLoaderData } from 'react-router';
 
 import type { AppLoadContext } from '~/lib/load-context.ts';
+import { getCurrentUser } from '~/config/services.server.ts';
 import { buildProductsView } from '~/features/products/products.server.ts';
+import { requireUser } from '~/middleware/require-user.server.ts';
 import { formatPrice } from '~/models/product.ts';
+
+/**
+ * Route middleware: runs before the loader, and sends a visitor who is not
+ * signed in to /login. See \`app/middleware/require-user.server.ts\` for how this
+ * layer differs from the kernel middleware \`setu generate middleware\` writes.
+ */
+export const middleware = [requireUser];
 
 /**
  * Loads the view on the server.
@@ -536,15 +638,19 @@ import { formatPrice } from '~/models/product.ts';
  * framework package into a module that also ships to the browser.
  */
 export async function loader({ context }: { context: AppLoadContext }) {
-  return await buildProductsView(context);
+  // Set by the route middleware above; never null here, because the middleware
+  // redirects before the loader runs when there is no user.
+  const user = getCurrentUser(context);
+  return { ...(await buildProductsView(context)), signedInAs: user.email };
 }
 
 export default function ProductsRoute() {
-  const { products, total } = useLoaderData<typeof loader>();
+  const { products, total, signedInAs } = useLoaderData<typeof loader>();
 
   return (
     <section>
       <h1>Products ({total})</h1>
+      <p>Signed in as {signedInAs}</p>
       <ul>
         {products.map((product) => (
           <li key={product.id}>
@@ -643,6 +749,8 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
   { path: 'app/lib/nav-utils.ts', contents: navUtilsModule },
   { path: 'app/config/services.server.ts', contents: servicesAccessModule },
   { path: 'app/models/product.ts', contents: productModel },
+  { path: 'app/models/user.ts', contents: userModel },
+  { path: 'app/middleware/require-user.server.ts', contents: requireUserMiddleware },
   { path: 'app/services/products.server.ts', contents: productsService },
   { path: 'app/features/products/products.server.ts', contents: productsFeature },
   { path: 'app/components/layouts/AppLayout.tsx', contents: appLayout },
@@ -651,3 +759,25 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
   { path: 'app/routes/_app/products._index.tsx', contents: productsRoute },
   { path: 'app/routes/_auth/login.tsx', contents: loginRoute },
 ];
+
+/**
+ * The full-stack README section on where middleware goes.
+ *
+ * A generated project has two middleware layers that look alike and are not
+ * interchangeable, and the generic README said nothing about either. Formatted as
+ * `deno fmt` formats it, since the scaffold must pass its own `fmt --check`.
+ */
+export const FULL_STACK_README_SECTION = `## Middleware
+
+This project has two middleware layers. Pick by what the code needs to see.
+
+| Layer              | Runs for                                                          | Sees                                          | Add it with                                           |
+| ------------------ | ----------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------- |
+| Kernel             | every request: health probes, API routes, static files, SSR pages | the kernel request context (\`ctx\`)            | \`setu generate middleware <name>\` (\`src/middleware/\`) |
+| React Router route | only the SSR routes it is attached to                             | React Router's context, including the session | \`export const middleware = [...]\` in a route module   |
+
+Use kernel middleware for cross-cutting concerns such as headers, auditing and rate limits. Use
+route middleware for page-level rules: \`app/middleware/require-user.server.ts\` redirects a visitor
+who is not signed in to \`/login\`, and puts the signed-in user on the context for the loader.
+\`/products\` attaches it; export it from a layout module to guard every route in that group.
+`;

@@ -142,6 +142,15 @@ export const CAPABILITIES = {
    * batch. A read never reserves, settles or counts a job.
    */
   QUEUE_DIAGNOSTICS: 'queue-diagnostics',
+  /**
+   * Minimized distributed-tracing observations (M98g) — an
+   * `ITraceDiagnosticsSource` the TelemetryPlugin always registers under
+   * this token (a `disabled` or `unsupported`-answering one when observation
+   * was not opted into or the tracing stack cannot supply completed spans).
+   * The DiagnosticsPlugin consumes it optionally to serve `GET /v1/traces`.
+   * A read never starts, exports or flushes a span.
+   */
+  TRACE_DIAGNOSTICS: 'trace-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

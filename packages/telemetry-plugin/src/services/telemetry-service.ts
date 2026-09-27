@@ -26,23 +26,45 @@ import { normalizeTraceFlags } from '../tracing/trace-flags.ts';
 interface SpanHandle {
   setAttribute(key: string, value: SpanAttributeValue): void;
   setAttributes(attributes: Record<string, SpanAttributeValue>): void;
-  setStatus(status: SpanStatus): void;
+  /** OTel's `Span.setStatus` takes a `{ code }` object, never a string. */
+  setStatus(status: { readonly code: number }): void;
   recordException(error: Error): void;
   end(): void;
   spanContext?(): SpanContext;
 }
 
 /**
- * Maps framework `SpanKind` to the numeric OTel `SpanKind` values.
+ * Maps framework `SpanKind` to the numeric `@opentelemetry/api` `SpanKind`
+ * enum — `INTERNAL = 0, SERVER = 1, CLIENT = 2, PRODUCER = 3, CONSUMER = 4`
+ * (`api/build/esm/trace/span_kind.d.ts`). These are the API values a span
+ * carries in memory; the OTLP exporter adds one when it encodes the wire
+ * `SPAN_KIND_*` enum. Using the wire numbering here (a previous revision did)
+ * exported every server span as CLIENT and every consumer span as an
+ * out-of-range kind.
  *
  * @internal
  */
 const SPAN_KIND_MAP: Record<SpanKind, number> = {
   internal: 0,
-  server: 2,
-  client: 3,
-  producer: 4,
-  consumer: 5,
+  server: 1,
+  client: 2,
+  producer: 3,
+  consumer: 4,
+};
+
+/**
+ * Maps framework `SpanStatus` to the `@opentelemetry/api` `SpanStatusCode`
+ * enum — `UNSET = 0, OK = 1, ERROR = 2`. OTel's `Span.setStatus` reads
+ * `status.code` off an object; handing it the bare string (a previous
+ * revision did) left every span's status `{}` — an error the exporter never
+ * saw as one.
+ *
+ * @internal
+ */
+const SPAN_STATUS_CODE: Record<SpanStatus, number> = {
+  unset: 0,
+  ok: 1,
+  error: 2,
 };
 
 /**
@@ -78,7 +100,7 @@ class OtelSpan implements ISpan {
   }
 
   setStatus(status: SpanStatus): void {
-    this.#span.setStatus(status);
+    this.#span.setStatus({ code: SPAN_STATUS_CODE[status] });
   }
 
   recordException(error: Error): void {

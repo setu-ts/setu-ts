@@ -328,6 +328,13 @@ describe('QueueObservationCollector — the M98a cursor contract', () => {
     expect(closed.next).toBe(3);
     expect(closed.state).toBe('no-data');
   });
+
+  it('refuses a cursor beyond the sequence after close instead of echoing it', () => {
+    const target = fill(3);
+    target.close();
+    expect(() => target.read(4)).toThrow(RangeError);
+    expect(() => target.read(Number.MAX_SAFE_INTEGER)).toThrow(RangeError);
+  });
 });
 
 /** A controllable depth reader. */

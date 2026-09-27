@@ -13,12 +13,16 @@ import type {
   IPlugin,
   IRedactionService,
   ITelemetryService,
+  ITraceDiagnosticsSource,
   MiddlewareFunction,
   TelemetryContext,
+  TraceCoverage,
+  TraceInstrumentationKind,
+  TraceSamplerDescription,
 } from '@setu-ts/common';
 import { CAPABILITIES, createRedactionService } from '@setu-ts/common';
 import type { RedactionPolicy } from '@setu-ts/common';
-import type { TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
+import type { SamplingConfig, TelemetryPluginOptions, TracerHost } from '../interfaces/index.ts';
 import { NoopTelemetryService, TelemetryService } from '../services/telemetry-service.ts';
 import { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';
 import { contextToTraceparent, extractContextFromHeaders } from '@setu-ts/common';
@@ -26,7 +30,12 @@ import {
   buildInstrumentationRegistry,
   type InstrumentationReporter,
 } from '../instrumentation/instrumentation-registry.ts';
-import type { ContextActivationReporter } from '../tracing/tracer.ts';
+import type { BuildTracerHostOptions, ContextActivationReporter } from '../tracing/tracer.ts';
+import {
+  compileTraceDiagnosticsPolicy,
+  createInactiveTraceSource,
+  SpanObservationCollector,
+} from '../diagnostics/span-observation-collector.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -37,6 +46,47 @@ import denoJson from '../../deno.json' with { type: 'json' };
 const MIDDLEWARE_PRIORITY = {
   TELEMETRY: 30,
 } as const;
+
+/**
+ * The fixed reporting order for instrumentation coverage (M98g): the trace
+ * source reports enabled kinds in this order regardless of the order the
+ * registry happened to enable them.
+ *
+ * @internal
+ */
+const TRACE_INSTRUMENTATION_ORDER: readonly TraceInstrumentationKind[] = [
+  'http',
+  'fetch',
+  'ioredis',
+  'amqplib',
+  'kafkajs',
+];
+
+/**
+ * Resolves the sampler description the trace source reports (M98g), matching
+ * what the built-in provider constructs from the same configuration. A
+ * non-`'traceidratio'` configuration is the provider's always-on sampler. A
+ * ratio is reported projected onto the sampler's documented `[0, 1]` domain
+ * — the value the provider actually bounds with; a non-finite ratio cannot
+ * be described and is reported as `unknown` rather than improvised.
+ *
+ * @param sampling - The configured sampling options
+ * @returns The sampler description
+ * @internal
+ */
+function resolveTraceSampler(sampling: SamplingConfig | undefined): TraceSamplerDescription {
+  if (sampling?.type !== 'traceidratio') {
+    return { kind: 'always-on' };
+  }
+  const configured = sampling.ratio ?? 1.0;
+  if (typeof configured !== 'number' || !Number.isFinite(configured)) {
+    return { kind: 'unknown' };
+  }
+  return {
+    kind: 'traceidratio',
+    ratio: Math.min(Math.max(configured, 0), 1),
+  };
+}
 
 /**
  * Builds the instrumentation-outcome reporter. `ctx.logger` is read **at call
@@ -134,11 +184,31 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
   const middlewareEnabled = options.middleware !== false;
   const queryParameters = options.queryParameters ?? 'omit';
   const redaction = resolveRedaction(options.redaction);
+  // M98g — the trace-observation policy is compiled ONCE at construction, so
+  // an invalid option refuses before any application exists.
+  const tracePolicy = options.diagnostics === undefined
+    ? null
+    : compileTraceDiagnosticsPolicy(options.diagnostics);
+  // The tracing stack's coverage is fixed by the configuration: a custom
+  // provider factory owns its own provider the plugin cannot read; noop mode
+  // builds none; otherwise every completed SAMPLED span of the built-in
+  // provider reaches the diagnostic processor.
+  const traceCoverage: TraceCoverage = options.tracerProviderFactory !== undefined
+    ? 'custom-provider'
+    : options.exporter === undefined
+    ? 'noop-no-provider'
+    : 'completed-sampled-spans';
+  // The sampler description answers only where the plugin builds the
+  // provider: a custom host owns its own sampler and noop mode builds none,
+  // so both report `unknown` rather than a configuration that never applied.
+  const traceSampler: TraceSamplerDescription = traceCoverage === 'completed-sampled-spans'
+    ? resolveTraceSampler(options.sampling)
+    : { kind: 'unknown' };
 
   return {
     name: 'telemetry-plugin',
     version: denoJson.version,
-    provides: [CAPABILITIES.TELEMETRY],
+    provides: [CAPABILITIES.TELEMETRY, CAPABILITIES.TRACE_DIAGNOSTICS],
     // Optional edge on the logger capability: the kernel resolver orders the
     // provider (e.g. LoggerPlugin) before this plugin so the outcome reporter's
     // call-time read of ctx.logger finds it in the standard configuration.
@@ -150,15 +220,35 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
       let service: ITelemetryService;
       let tracerHost: TracerHost | undefined;
       let instrumentationHandle: { shutdown(): Promise<void> } | null = null;
+      // M98g — which Node-only instrumentations actually enabled is learned
+      // from the registry outcomes and read through this set at READ time
+      // (the M52b capture-too-early lesson), never guessed at construction.
+      const enabledInstrumentations = new Set<TraceInstrumentationKind>();
+      const traceAvailability = {
+        coverage: traceCoverage,
+        instrumentation: () =>
+          TRACE_INSTRUMENTATION_ORDER.filter((kind) => enabledInstrumentations.has(kind)),
+        sampler: traceSampler,
+      };
+      let traceCollector: SpanObservationCollector | null = null;
 
       if (options.exporter) {
         // Real OTel mode
         if (options.tracerProviderFactory) {
           tracerHost = await options.tracerProviderFactory();
         } else {
+          // The active collector exists only on the built-in provider with
+          // the diagnostics option; the tracer appends its processor after
+          // the exporter processor in the same provider constructor.
+          if (tracePolicy !== null) {
+            traceCollector = new SpanObservationCollector(traceAvailability, ctx.runtime);
+          }
           tracerHost = await loadOtelTracerProvider(
             options,
             createActivationReporter(ctx),
+            tracePolicy !== null && traceCollector !== null
+              ? { policy: tracePolicy, collector: traceCollector }
+              : undefined,
           );
         }
         service = new TelemetryService(tracerHost);
@@ -169,15 +259,24 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
         // Awaiting ensures all lazy loads complete BEFORE onShutdown is registered,
         // eliminating the shutdown-ordering race for the lazy path.
         if (options.instrumentations && tracerHost.otelProvider) {
+          const baseReporter = createInstrumentationReporter(ctx);
           instrumentationHandle = await buildInstrumentationRegistry(
             options.instrumentations,
             ctx.runtime,
             tracerHost.otelProvider,
-            createInstrumentationReporter(ctx),
+            (outcome) => {
+              if (outcome.enabled) {
+                enabledInstrumentations.add(outcome.kind);
+              }
+              baseReporter(outcome);
+            },
           );
         }
 
         // Register shutdown hook: disable instrumentations first, then shut down the provider.
+        // Provider shutdown also shuts down the M98g diagnostic processor,
+        // which closes the trace collector AFTER the connector session's
+        // own onStopping revocation has run.
         ctx.lifecycle.onShutdown(async () => {
           if (instrumentationHandle) {
             await instrumentationHandle.shutdown();
@@ -193,6 +292,19 @@ export function TelemetryPlugin(options: TelemetryPluginOptions = {}): IPlugin {
 
       // Register the service
       ctx.services.register<ITelemetryService>(CAPABILITIES.TELEMETRY, service);
+
+      // M98g — ALWAYS register a trace-diagnostics source under the eager
+      // token: the active collector when observation is enabled on the
+      // built-in provider; an `unsupported`-answering source when the option
+      // is present but the stack cannot supply completed spans (custom host,
+      // noop mode); a `disabled`-answering one when the option is absent.
+      const traceSource: ITraceDiagnosticsSource = traceCollector !== null
+        ? traceCollector
+        : createInactiveTraceSource(
+          tracePolicy !== null ? 'unsupported' : 'disabled',
+          traceAvailability,
+        );
+      ctx.services.register<ITraceDiagnosticsSource>(CAPABILITIES.TRACE_DIAGNOSTICS, traceSource);
 
       // Register middleware if enabled
       if (middlewareEnabled) {
@@ -265,9 +377,10 @@ export function createNoopTracerHost(): TracerHost {
 async function loadOtelTracerProvider(
   options: TelemetryPluginOptions,
   reportActivation?: ContextActivationReporter,
+  diagnostics?: BuildTracerHostOptions['diagnostics'],
 ): Promise<TracerHost> {
   const { loadOtelTracerProvider: loader } = await import('../tracing/tracer.ts');
-  return loader(options, reportActivation);
+  return loader(options, reportActivation, diagnostics);
 }
 
 export { telemetryMiddleware } from '../middleware/telemetry-middleware.ts';

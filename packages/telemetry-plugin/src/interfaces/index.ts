@@ -160,6 +160,70 @@ export interface TelemetryPluginOptions {
   redaction?: RedactionPolicy | IRedactionService;
   /** Query-string handling for `http.url`; defaults to `'omit'`. */
   queryParameters?: 'omit' | 'redact';
+  /**
+   * Opt-in minimized completed-span observations for the local diagnostics
+   * connector (M98g). Absent, the plugin still registers an
+   * `ITraceDiagnosticsSource`, but it answers `disabled` and observes
+   * nothing. Present with the built-in OTel provider, an additional span
+   * processor retains bounded, minimized records for approved operations
+   * only; the exporter and its processor are untouched.
+   *
+   * @since 0.8.0
+   */
+  diagnostics?: TraceDiagnosticsOptions;
+}
+
+/**
+ * The opt-in trace-observation policy (M98g).
+ *
+ * Span names and tracing relationships are treated as sensitive: only the
+ * exact raw span names listed in {@linkcode operations} are observed, each
+ * under its approved display alias, and a span whose name is outside the
+ * map is counted and dropped before anything is retained. Span attributes,
+ * events, resource labels, tracestate, baggage and exception data are
+ * structurally unreachable — the processor reads only the fixed field set
+ * the design approves.
+ *
+ * "Safe" is a SHAPE, not secret detection: `serviceAlias` and every alias in
+ * `operations` are strings of `1`–`64` UTF-8 bytes containing no control
+ * character, and operation aliases are unique. Approving an exact alias IS
+ * authorizing its disclosure.
+ *
+ * @example
+ * ```typescript
+ * TelemetryPlugin({
+ *   serviceName: 'orders',
+ *   exporter: 'otlp',
+ *   endpoint: 'http://otel:4318/v1/traces',
+ *   diagnostics: {
+ *     enabled: true,
+ *     serviceAlias: 'orders',
+ *     operations: { 'POST /orders': 'create-order', 'process-job': 'process-job' },
+ *   },
+ * });
+ * ```
+ * @since 0.8.0
+ */
+export interface TraceDiagnosticsOptions {
+  /**
+   * The explicit opt-in, and deliberately the LITERAL `true` rather than a
+   * `boolean`: this is an acknowledgement, not a toggle. A JavaScript or
+   * configuration-driven caller passing `enabled: false` is refused at
+   * construction rather than silently opted in.
+   */
+  readonly enabled: true;
+  /**
+   * The approved display alias for this service. Never derived from the OTel
+   * resource `service.name`, which the application may have set to anything.
+   */
+  readonly serviceAlias: string;
+  /**
+   * Exact raw span name → approved display alias. Only spans whose name
+   * appears here are observed; the alias replaces the name before anything
+   * is retained. At most 128 operations, each alias unique and of the safe
+   * alias shape.
+   */
+  readonly operations: Readonly<Record<string, string>>;
 }
 
 /**

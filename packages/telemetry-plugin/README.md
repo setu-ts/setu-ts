@@ -105,29 +105,46 @@ it at an OpenTelemetry Collector — see
 and the reference config in
 [docker/otel-collector/](https://github.com/setu-ts/setu-ts/tree/main/docker/otel-collector).
 
+## Trace diagnostics (M98g)
+
+`TelemetryPlugin({ diagnostics })` opts into minimized completed-span observations for the local
+diagnostics connector. With the built-in OTel provider, an internal span processor is appended AFTER
+the exporter processor in the same provider constructor — the exporter path is unchanged, the
+processor never exports and never throws into OTel — and every finished SAMPLED span whose exact raw
+name appears in `operations` is reduced to its approved alias, W3C-validated identifiers,
+relationships, kind, outcome, duration and age before anything is retained. Attributes, events,
+resource labels, tracestate, baggage, exceptions and the raw span name never reach collector state.
+The plugin always registers an `ITraceDiagnosticsSource` under `CAPABILITIES.TRACE_DIAGNOSTICS`:
+without the option it answers `disabled`; with the option under a custom `tracerProviderFactory` or
+without an exporter it answers `unsupported` with the fixed coverage reason. Sampling, context
+activation and export behavior are unchanged. See
+[PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#telemetry-setu-tstelemetry-plugin)
+and `docs/diagnostics-protocol.md`.
+
 ## Exports
 
-| Export                   | Kind      |
-| ------------------------ | --------- |
-| `telemetryMiddleware`    | function  |
-| `TelemetryPlugin`        | function  |
-| `NoopTelemetryService`   | class     |
-| `TELEMETRY_SPAN_KEY`     | const     |
-| `InstrumentationConfig`  | interface |
-| `InstrumentationsConfig` | interface |
-| `ISpan`                  | interface |
-| `ITelemetryService`      | interface |
-| `SamplingConfig`         | interface |
-| `SpanOptions`            | interface |
-| `TelemetryContext`       | interface |
-| `TelemetryPluginOptions` | interface |
-| `TracerHost`             | interface |
-| `InstrumentationKind`    | type      |
-| `SpanAttributeValue`     | type      |
-| `SpanExporterKind`       | type      |
-| `SpanKind`               | type      |
-| `SpanProcessorKind`      | type      |
-| `SpanStatus`             | type      |
+| Export                    | Kind      |
+| ------------------------- | --------- |
+| `telemetryMiddleware`     | function  |
+| `TelemetryPlugin`         | function  |
+| `NoopTelemetryService`    | class     |
+| `TELEMETRY_SPAN_KEY`      | const     |
+| `InstrumentationConfig`   | interface |
+| `InstrumentationsConfig`  | interface |
+| `ISpan`                   | interface |
+| `ITelemetryService`       | interface |
+| `SamplingConfig`          | interface |
+| `SpanOptions`             | interface |
+| `TelemetryContext`        | interface |
+| `TelemetryPluginOptions`  | interface |
+| `TraceDiagnosticsOptions` | interface |
+| `TracerHost`              | interface |
+| `InstrumentationKind`     | type      |
+| `SpanAttributeValue`      | type      |
+| `SpanExporterKind`        | type      |
+| `SpanKind`                | type      |
+| `SpanProcessorKind`       | type      |
+| `SpanStatus`              | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

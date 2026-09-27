@@ -101,7 +101,7 @@ const MICROSERVICE_ONLY: readonly (readonly [schematic: string, name: string])[]
 ];
 
 /**
- * The probe shared by both hosts.
+ * The probe shared by every template host.
  *
  * Every assertion reads through a real request or the real service registry — never the
  * emitted source — so a barrel that compiles but registers nothing fails here.
@@ -417,21 +417,25 @@ describe('generated artifacts are wired — end to end', () => {
     expect(result['pluginToken']).toBe('widget');
   });
 
-  // Both opt-in hosts, because each carries seams the other cannot.
-  // `class-based` is the only one with the decorator families; `microservice` is
+  // `class-based` is the only host with the decorator families; `microservice` is
   // the only one registering `CqrsPlugin` and `EventsPlugin`, so it is the only
   // place the command, query and event handlers are wired at all — and it is
   // FUNCTIONAL since M65, which makes it the proof that the seams work with
-  // neither decorators nor a container.
-  for (const template of ['class-based', 'microservice'] as const) {
+  // neither decorators nor a container. `rest` is the DEFAULT template and carries
+  // neither extra family; it is here because it is what most projects are, and
+  // until it was listed no generated artifact had ever been booted in one.
+  for (const template of ['rest', 'class-based', 'microservice'] as const) {
     it(`serves every wired artifact on --template ${template}`, async () => {
       expect(await run(['new', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
 
       const classBased = template === 'class-based';
-      const wanted = classBased
-        ? [...ARTIFACTS, ...CLASS_BASED_ONLY]
-        : [...ARTIFACTS, ...MICROSERVICE_ONLY];
+      const cqrs = template === 'microservice';
+      const wanted = [
+        ...ARTIFACTS,
+        ...(classBased ? CLASS_BASED_ONLY : []),
+        ...(cqrs ? MICROSERVICE_ONLY : []),
+      ];
       for (const [schematic, name] of wanted) {
         expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
       }
@@ -449,7 +453,7 @@ describe('generated artifacts are wired — end to end', () => {
       await useWorkspacePackages(project);
       const probe = PROBE
         .replace('__CLASS__', classBased ? CLASS_PROBE : '')
-        .replace('__CQRS__', classBased ? '' : CQRS_PROBE);
+        .replace('__CQRS__', cqrs ? CQRS_PROBE : '');
       const result = await bootAndProbe(project, probe);
 
       // The generated route module was called with `app.router` from `createApp()`.
@@ -481,7 +485,8 @@ describe('generated artifacts are wired — end to end', () => {
         // emitting a bare `DiPlugin()`, because `autoRegister` gates the container's
         // only route to the kernel registry.
         expect(result['capabilityInjected']).toBe('config:function');
-      } else {
+      }
+      if (cqrs) {
         // Both buses route to the generated handlers, through the plugin options.
         expect(result['commandResult']).toEqual({ id: 'c-1' });
         expect(result['queryResult']).toEqual({ id: 'q-1' });

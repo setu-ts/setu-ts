@@ -1351,7 +1351,7 @@ ${
 ${PROGRAM_NAME} generate service billing
 ${PROGRAM_NAME} generate --help
 \`\`\`
-`;
+${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
 
   // Deno projects get neither `node_modules/` nor `.wrangler/`: this file is
   // read by a human, and an ignore rule for a directory the target can never

@@ -31,6 +31,7 @@ import {
   bootAndProbe,
   bootWithGeneratedPermissions,
   useWorkspacePackages,
+  withGeneratedServer,
 } from '../fixtures/generated-project.ts';
 
 const runtime = createDenoRuntimeServices();
@@ -692,5 +693,89 @@ describe('a scaffolded full-stack project type-checks its own routes', () => {
     // them and only this glob does.
     const checked = await denoRun(project, ['task', 'check:app']);
     expect(checked.code, checked.output).toBe(0);
+  });
+});
+
+/**
+ * Collects the cookies a response set, as one `Cookie` request header value.
+ *
+ * @param response - The response carrying `Set-Cookie`
+ * @returns The name=value pairs, joined
+ */
+function cookiesOf(response: Response): string {
+  return response.headers.getSetCookie().map((cookie) => cookie.split(';', 1)[0]).join('; ');
+}
+
+describe('a scaffolded full-stack project runs both middleware layers', () => {
+  // A full-stack project has two middleware layers, and before this nothing ran
+  // either one in that template: the seam probe boots every other host with a
+  // generated middleware, but a full-stack project needs a real React Router build
+  // first, and the scaffold shipped no route middleware at all. This drives both
+  // through the generated project's own entry, under its own permissions.
+  it('applies kernel middleware to every request and route middleware to its route', async () => {
+    expect(await run(['new', 'shop', '--template', 'full-stack'])).toBe(0);
+    const project = `${root}/shop`;
+    // The kernel layer, exactly as a developer adds it.
+    expect(await run(['g', 'middleware', 'audit', '--dir', project])).toBe(0);
+    await useWorkspacePackages(project);
+
+    const built = await new Deno.Command(Deno.execPath(), {
+      args: ['task', 'build'],
+      cwd: project,
+      stdout: 'piped',
+      stderr: 'piped',
+    }).output();
+    expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
+
+    const { result, output } = await withGeneratedServer(project, async (origin) => {
+      // `manual`, so the route middleware's redirect is observed rather than followed.
+      const get = (path: string, cookie?: string) =>
+        fetch(`${origin}${path}`, {
+          redirect: 'manual',
+          ...(cookie === undefined ? {} : { headers: { cookie } }),
+        });
+
+      const health = await get('/health');
+      await health.body?.cancel();
+      const landing = await get('/');
+      await landing.body?.cancel();
+      const anonymous = await get('/products');
+      await anonymous.body?.cancel();
+
+      const loginPage = await get('/login');
+      const token = /name="_csrf"\s+value="([^"]+)"/.exec(await loginPage.text())?.[1] ?? '';
+      const submitted = await fetch(`${origin}/login`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+          cookie: cookiesOf(loginPage),
+          'content-type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ _csrf: token, email: 'ada@example.com', password: 'x' }),
+      });
+      await submitted.body?.cancel();
+      const signedIn = await get('/products', cookiesOf(submitted));
+
+      return {
+        audit: [health, landing, anonymous, signedIn].map((r) => r.headers.get('x-audit')),
+        landing: landing.status,
+        anonymous: { status: anonymous.status, location: anonymous.headers.get('location') },
+        submitted: submitted.status,
+        signedIn: { status: signedIn.status, body: await signedIn.text() },
+      };
+    });
+
+    // Kernel layer: on a non-SSR route, an SSR page, a route-middleware redirect and
+    // a rendered page alike — it wraps everything the application serves.
+    expect(result.audit, output).toEqual(['true', 'true', 'true', 'true']);
+    // Route layer: `/` shares the layout but is not guarded…
+    expect(result.landing).toBe(200);
+    // …while `/products` sends an anonymous visitor to sign in, before its loader runs.
+    expect(result.anonymous).toEqual({ status: 302, location: '/login' });
+    expect(result.submitted).toBe(302);
+    // Signed in, the loader reads the user the route middleware put on the context.
+    expect(result.signedIn.status).toBe(200);
+    expect(result.signedIn.body).toContain('Signed in as');
+    expect(result.signedIn.body).toContain('ada@example.com');
   });
 });

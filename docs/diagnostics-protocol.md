@@ -30,6 +30,7 @@ devtool has been verified.
 | `GET /v1/health`                 | M98d's minimized health-observation snapshot (below)                                                                                                                             |
 | `GET /v1/config`                 | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
 | `GET /v1/queues?after=N&limit=N` | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
+| `GET /v1/traces?after=N&limit=N` | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
 duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
@@ -100,7 +101,30 @@ All responses (signed or refusals) carry `Cache-Control: no-store`,
 `Content-Type: application/json`, and `X-Content-Type-Options: nosniff`. Signed responses add
 `X-Setu-Mac` and `X-Setu-Instance`. The client verifies the response MAC over the exact bounded body
 bytes (256 KiB hard ceiling on the STREAM, not `Content-Length`) BEFORE parsing anything, and checks
-the parsed status body's `instanceId` against the authenticated header.
+the parsed status body's `instanceId` against the authenticated header. Once paired, the client
+binds EVERY later response to that identity: a signed response whose `X-Setu-Instance` differs from
+the instance the request presented is refused, and every body that carries an `instanceId` — the
+core snapshot and event batch included — must equal it (a paired network body never carries `null`).
+The MAC alone does not establish this, because the header identity is an input to the MAC: a peer
+holding the session key could otherwise sign a response under any identity. Such a refusal is the
+fixed connection failure, and — like any post-pairing verification failure — it is not terminal.
+
+A verified body is authentic, not necessarily well-formed, so the client then checks it against its
+exact DTO before returning it. For the core snapshot that means only the defined keys, `state` and
+`failureCode` from their fixed vocabularies, at most 1,024 nodes and 4,096 edges, each node carrying
+only its kind's fields under a unique id minted with its kind's prefix (`p`, `c`, `r`, `m`), labels
+of at most 160 UTF-8 bytes with no control character, and every edge joining two nodes in the same
+snapshot, once. For the event batch it means at most 128 events, each with only the defined keys,
+every enum from its vocabulary, canonical `op<N>` and node ids, finite non-negative (or `null`)
+timings, a finite numeric status code and validated W3C identifiers; consecutive sequences with
+`next` equal to the last; and the cursor the request sent honored — an empty page echoes `after`
+with `lost: 0`, and a returned page starts past `after` with `lost` counting exactly the unreadable
+gap — records evicted from the ring, or discarded when a start failed. Every returned result is
+deeply frozen. Two fields are deliberately left as the DTO types them — a plain, unranged `number`:
+a middleware `priority` and an event `statusCode`, which the application sets. Either may be any
+finite number (a status is not necessarily a valid HTTP status), so an application's unusual
+priority or status never turns its own diagnostics into a refusal; the kernel omits a non-finite
+value rather than letting it serialize to `null`, and the client refuses `null`.
 
 Unauthenticated refusals are not signed and use one fixed shape:
 
@@ -123,11 +147,11 @@ No refusal ever echoes supplied input, error causes, or stacks.
 
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
-`health: true` (M98d), `configuration: true` (M98e) and `queues: true` (M98f) and leaves the rest
-(`traces`, `authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`, `outboundHttp`)
-reserved and `false`. A client that reads a legacy M98b three-field status body (no `inspectors`)
-resolves the manifest to all-`false`, so its `health()`, `configuration()` and `queues()` answer a
-typed `unsupported` without sending the request.
+`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f) and `traces: true` (M98g)
+and leaves the rest (`authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`,
+`outboundHttp`) reserved and `false`. A client that reads a legacy M98b three-field status body (no
+`inspectors`) resolves the manifest to all-`false`, so its `health()`, `configuration()`, `queues()`
+and `traces()` answer a typed `unsupported` without sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -308,6 +332,40 @@ values only — never a payload, header, raw id, claim token, credential, queue 
 is untrusted input to the connector: its batch is validated key-by-key (aliases 1–64 UTF-8 bytes
 with no control character) before anything is merged, and the merged frame runs the same exact
 validator the client runs before it is signed.
+
+## Trace observations (M98g)
+
+`GET /v1/traces?after=N&limit=N` pages minimized completed-span observations from the
+TelemetryPlugin's trace source — the ONE source registered under `CAPABILITIES.TRACE_DIAGNOSTICS`
+(the kernel admits a single provider; the plugin registers it even when observation was not opted
+into, answering `disabled`). When the built-in OTel provider is in use AND the application passed
+the plugin's `diagnostics` option, an additional span processor — appended AFTER the exporter
+processor in the same provider constructor — reduces every finished SAMPLED span to the approved
+field set before anything is retained: only exact raw span names listed in the configured
+`operations` map are observed, each replaced by its approved alias; identifiers are validated W3C
+lowercase-hex (all-zero rejected); at most eight validated link identifier pairs are carried; kind,
+outcome, duration and monotonic age are the only other fields. Span attributes, events, resource
+labels, tracestate, baggage, exception data, status messages and the raw span name never enter the
+record.
+
+The batch carries `state` (`disabled` / `unsupported` / `no-data` / `ready`; `collection-failed` is
+the connector's answer when the source threw or failed the exact validator), `coverage` (what
+completed-span population the stack makes observable: `completed-sampled-spans`, `custom-provider`,
+`noop-no-provider`, or `unknown` when the responder cannot describe one), `instrumentation` (the
+Node-only auto-instrumentation families whose registry outcome reported enabled), `sampler` (the
+configured description, or `unknown`), `records` under M98a's cursor contract (exclusive `after`,
+per-batch `lost` from ring eviction, an empty page echoes its cursor, a cursor beyond the source's
+sequence throws the fixed `RangeError` — surfaced as `invalid-request`), and a saturating
+`droppedSpans` counter for spans refused before the ring. Parent relationships are IDENTIFIER
+relationships only: `parentVisibility` names `observed` (the parent had already completed and been
+retained in the same process when the child completed), `remote-or-unobserved` (including a local
+parent that completes after its child, the ordinary nesting — join on `parentSpanId`), `root`, or
+`unknown` — no edge is fabricated, and capture order is arrival order at one process, never a global
+timeline. Cross-app correlation joins EQUAL trace ids across independently authenticated sessions;
+identifiers grant no discovery or connection authority. With no trace source registered the batch is
+`state:
+'unsupported'` with `coverage: 'unknown'`; a client whose negotiated manifest has
+`traces: false` answers that frozen batch, echoing its cursor, without sending the request.
 
 ## Bounds (fixed, not configurable)
 

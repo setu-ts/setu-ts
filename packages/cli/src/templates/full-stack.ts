@@ -21,7 +21,7 @@ import {
   seamsFor,
 } from './seam.ts';
 import { renderConfigOptions } from './env-file.ts';
-import { FULL_STACK_APP_FILES } from './full-stack-app-files.ts';
+import { FULL_STACK_APP_FILES, FULL_STACK_README_SECTION } from './full-stack-app-files.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
   buildFullStackBuildFiles,
@@ -190,6 +190,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   ],
   extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
+    readmeSection: FULL_STACK_README_SECTION,
     envFilePath: '.env',
     // `fullStackArgs` emits `config.getOrThrow<string>('SESSION_SECRET')`, so
     // without this the template scaffolds a project that throws at startup.

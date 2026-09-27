@@ -19,6 +19,7 @@ import type {
   DiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
   QueueDiagnosticsBatch,
+  TraceDiagnosticsBatch,
 } from '@setu-ts/common';
 
 import {
@@ -43,8 +44,10 @@ import {
   QUEUES_PATH,
   SNAPSHOT_TARGET,
   STATUS_TARGET,
+  TRACES_PATH,
 } from '../protocol/protocol.ts';
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
+import { isTraceBatchProjection } from '../protocol/trace-protocol.ts';
 
 /**
  * The fixed request deadline, in milliseconds.
@@ -72,7 +75,7 @@ export const CLIENT_ERRORS = {
   sessionId: 'Diagnostics client: sessionId must be exactly 32 lowercase hex characters.',
   sessionKey: 'Diagnostics client: sessionKey must be exactly 32 bytes.',
   arguments:
-    'Diagnostics client: read() and queues() require a non-negative safe-integer cursor and a limit from 1 to 128.',
+    'Diagnostics client: read(), queues() and traces() require a non-negative safe-integer cursor and a limit from 1 to 128.',
   closed: 'Diagnostics client: the client is closed.',
   pairingFailed:
     'Diagnostics client: pairing failed terminally; relaunch the application and create a new session.',
@@ -355,6 +358,16 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       if (!verified) {
         throw new Error(CLIENT_ERRORS.connection);
       }
+      // Paired-instance binding, at the ONE boundary every operation shares.
+      // The MAC proves the peer holds the session key; it does not prove the
+      // peer answered as the instance this session paired with, because the
+      // header identity is an input to the MAC rather than a constant of it.
+      // Once paired, the request presented `instance`, and a signed response
+      // naming any other identity is refused. The unpaired status exchange
+      // presents '' and is bound against its own body in `exchangeAndBind`.
+      if (instance !== '' && responseInstance !== instance) {
+        throw new Error(CLIENT_ERRORS.connection);
+      }
       return {
         status: response.status,
         bodyBytes,
@@ -413,10 +426,17 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         }
         const result = await exchange(SNAPSHOT_TARGET);
         const parsed = parseBody(result.bodyText);
-        if (!isSnapshotProjection(parsed)) {
+        // The body's own identity must be the paired one. The DTO type admits
+        // `null` for an in-process reader before the runtime assigns an
+        // identity; a paired network session always has one, so `null` (and
+        // an absent field, which the validator already refuses) is refused.
+        if (!isSnapshotProjection(parsed) || parsed.instanceId !== instanceId) {
           throw new Error(CLIENT_ERRORS.connection);
         }
-        return parsed;
+        // The parsed value is a fresh object graph owned by nobody else;
+        // deep-freezing it (nodes and edges too) is what makes the documented
+        // "frozen" true, as the addon paths already do.
+        return deepFreeze(parsed);
       });
     },
 
@@ -431,10 +451,22 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         const target = `/v1/events?after=${after}&limit=${effectiveLimit}`;
         const result = await exchange(target);
         const parsed = parseBody(result.bodyText);
-        if (!isBatchProjection(parsed)) {
+        // The same body binding as `snapshot()`: a paired batch carries the
+        // paired identity, never `null` and never another instance's. Then the
+        // cursor contract relative to THIS request, as `queues()` and
+        // `traces()` check it: an empty page echoes the cursor, and a returned
+        // page starts past it with `lost` counting exactly the gap.
+        if (
+          !isBatchProjection(parsed) || parsed.instanceId !== instanceId ||
+          parsed.events.length > effectiveLimit ||
+          (parsed.events.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
+            parsed.events[0].sequence <= after ||
+            parsed.lost !== parsed.events[0].sequence - after - 1
+          ))
+        ) {
           throw new Error(CLIENT_ERRORS.connection);
         }
-        return parsed;
+        return deepFreeze(parsed);
       });
     },
 
@@ -567,6 +599,56 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
           (parsed.events.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
             parsed.events[0].sequence <= after ||
             parsed.lost !== parsed.events[0].sequence - after - 1
+          ))
+        ) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return deepFreeze(parsed);
+      });
+    },
+
+    async traces(after: number, limit?: number): Promise<TraceDiagnosticsBatch> {
+      return await enqueue(async () => {
+        checkUsable();
+        const effectiveLimit = validatePagedArgs(after, limit);
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the trace inspector — a
+        // legacy or older server — is answered locally with a frozen typed
+        // `unsupported` batch echoing the cursor, and no addon request is
+        // sent. Support is never inferred from a generic protocol error.
+        if (inspectors !== null && inspectors.traces === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            coverage: 'unknown',
+            instrumentation: [],
+            sampler: { kind: 'unknown' },
+            records: [],
+            next: after,
+            lost: 0,
+            closed: false,
+            droppedSpans: 0,
+          });
+        }
+        const result = await exchange(`${TRACES_PATH}?after=${after}&limit=${effectiveLimit}`);
+        const parsed = parseBody(result.bodyText);
+        // The exact DTO validator, the body's own instance binding, and the
+        // cursor contract relative to THIS request: an empty page echoes the
+        // cursor, and a returned page starts past it.
+        if (
+          !isTraceBatchProjection(parsed) || parsed.instanceId !== bound ||
+          parsed.records.length > effectiveLimit ||
+          (parsed.records.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
+            parsed.records[0].sequence <= after ||
+            parsed.lost !== parsed.records[0].sequence - after - 1
           ))
         ) {
           throw new Error(CLIENT_ERRORS.connection);
