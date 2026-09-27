@@ -10663,9 +10663,10 @@ and per-member credential handoff; 98d complete
 observations and the `GET /v1/queues` inspector; 98e complete
 ([#366](https://github.com/setu-ts/setu-ts/pull/366)) — value-free configuration provenance and the
 `GET /v1/config` inspector; 98g complete ([#369](https://github.com/setu-ts/setu-ts/pull/369)) —
-minimized completed-span trace observations and the `GET /v1/traces` inspector. These seven are
-implemented, awaiting publication in the next release cycle. **98h–98n are planned**, each with its
-own implementation plan and mandatory security audit. This umbrella records framework work for the
+minimized completed-span trace observations and the `GET /v1/traces` inspector; 98i complete (PR
+pending) — cache operation counters and the `GET /v1/cache` inspector. These eight are implemented,
+awaiting publication in the next release cycle. **98h and 98j–98n are planned**, each with its own
+implementation plan and mandatory security audit. This umbrella records framework work for the
 separately maintained devtool; adding the later letters does not make them prerequisites for
 publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE exception recorded under
 the release requirements below — M98d's status-shape change must precede the first publication of
@@ -11101,8 +11102,8 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
 
 ### Milestone 98i: Cache Observations
 
-**Status:** Implemented on `feat/m98i-cache-observations`; committed-tree security audit pending.
-Owner: `packages/cache-plugin`. Canonical plan: `plans/milestone-98i-cache-observations.md`.
+**Status:** Complete — security audit passed on re-audit of `aab0bd78`. Owner:
+`packages/cache-plugin`. Canonical plan: `plans/archive/milestone-98i-cache-observations.md`.
 
 - [x] Instrument actual CacheService backend calls once. get records hit only for a non-null result;
       null is miss, and rejection is failure. has records present/absent separately from get hit
@@ -11116,10 +11117,12 @@ Owner: `packages/cache-plugin`. Canonical plan: `plans/milestone-98i-cache-obser
 - [x] Exclude keys, prefixes, values, Redis URLs, factory results, raw errors before buffering.
 - [x] Only calls through the owned CacheService; direct store calls and replacement services are
       outside coverage.
-- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
-      audit. Compare TTL, prefix, concurrent getOrSet factory counts, null semantics and original
-      rejection identity with observation enabled, disabled and failing. Assert evictions are
-      unsupported rather than fabricated.
+- [x] Pass recorded pre-implementation design review and committed-tree implementation security
+      audit. (The maintainer reviewed the plan before implementation; the review was recorded in
+      plan §10 afterwards, at the maintainer's direction. The audit passed on re-audit of
+      `aab0bd78`.) Compare TTL, prefix, concurrent getOrSet factory counts, null semantics and
+      original rejection identity with observation enabled, disabled and failing. Assert evictions
+      are unsupported rather than fabricated.
 
 ### Milestone 98j: Event Dispatch Observations
 
@@ -12233,7 +12236,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98f       | ✅     | common + queue-plugin + diagnostics-plugin — queue attempt, outcome and depth observations ([#365](https://github.com/setu-ts/setu-ts/pull/365))                        |
 | 98g       | ✅     | telemetry-plugin — minimized distributed tracing and correlation ([#369](https://github.com/setu-ts/setu-ts/pull/369); security audit passed on re-audit of `2fbac039`) |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                                                     |
-| 98i       | ⬜     | cache observations — design security review and implementation audit required                                                                                           |
+| 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters (PR pending; security audit passed on re-audit of `aab0bd78`)                                     |
 | 98j       | ⬜     | event dispatch observations — design security review and implementation audit required                                                                                  |
 | 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                             |
 | 98l       | ⬜     | realtime lifecycle observations — design security review and implementation audit required                                                                              |

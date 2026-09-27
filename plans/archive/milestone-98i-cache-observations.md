@@ -2,8 +2,8 @@
 
 > **Status:** Implementation on `feat/m98i-cache-observations`; plan reviewed and verified by the
 > maintainer before implementation. The design security review is recorded in §10 (written after
-> implementation at the maintainer's direction). The committed-tree security audit is pending; no
-> completed audit is claimed.
+> implementation at the maintainer's direction). The committed-tree security audit PASSED on
+> re-audit of `aab0bd78` (independent agent, after fixing its finding F2); record in the PR.
 
 ## 0. Objective & scope
 
@@ -421,7 +421,8 @@ promise and was reverted: it hid unhandled rejections (audit F2). None widens th
 **Amended after approval (2026-09-27), flagged for the maintainer:** the backend-attacker row above
 originally listed "promise identity" among what must not change. The F2 correction returns a derived
 promise when diagnostics are on, so identity does change; identity is not a security property, and
-the row now names what is — unhandled-rejection reporting — instead.
+the row now names what is — unhandled-rejection reporting — instead. **Confirmed by the maintainer,
+2026-09-27.**
 
 **Added at the maintainer's request (2026-09-27):** the DNS-rebinding attacker above. The audit must
 probe it on a RAW socket (the Fetch API cannot set `Host`): a request whose `Host` is
