@@ -2,8 +2,9 @@
 
 > **Status:** Implemented on `feat/m98j-event-observations`; verification and code review done
 > (2026-09-27), with every finding fixed on this branch. The design security review is recorded and
-> approved (§10.1). The independent committed-tree security audit (§10) is PENDING; the milestone is
-> not complete until it is recorded.
+> approved (§10.1). The independent committed-tree security audit PASSED on round 3 (`d458975c`,
+> §12). The post-approval amendment to §10.1's third-party attacker row awaits maintainer
+> confirmation.
 
 ## 0. Objective & scope
 
@@ -488,4 +489,13 @@ tree (`.verify-98j/audit2/AUDIT-98j-round2.md`).
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **R2-F1 (Low)** — the latch half of the F1 regression test could not fail: it counted `Map.set` calls, but after a latch the in-flight slot already exists, so the pre-fix leak was an in-place update. Removing `#collectionFailed` from both guards left the suite green. | Fixed: the test captures the slot object when `begin` creates it and asserts its fingerprint is unchanged by a late `end`/`observe`. Verified to fail with only the latch half of the guard removed. |
 
-**Round 3 — re-audit of the R2-F1 fix: pending.**
+**Round 3 — `d458975c`, verdict PASSED**, by a third freshly spawned independent agent (no
+implementation, fix or earlier-round involvement), Deno 2.9.6. The range is test and plan only (no
+`src` change), so round 2's probe results stand on byte-identical source; P11 re-ran clean and the
+package suite passed (19 / 114 steps). With only the latch half of the guard removed from both sites
+the committed test fails on its fingerprint assertion (actual `count: 2`, expected `0`), and the
+same assertion fails against the real `12b412d7` collector; removing it from `end` alone still
+passes because `end` delegates to the guarded `observe` (defense in depth, as round 2 recorded). The
+F1-whole and F2 reverts still fail the committed test, and the `Map.prototype.set` patch is restored
+in `finally` on both the passing and failing paths. 6 negative controls. **No finding open.** Record
+outside the tree (`.verify-98j/audit3/AUDIT-98j-round3.md`).
