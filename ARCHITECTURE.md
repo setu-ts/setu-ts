@@ -2611,6 +2611,31 @@ root, or unknown — and no global clock is implied: `ageMs` is arrival age at o
 stays authoritative: unsampled spans never complete through a processor, and the batch reports the
 configured sampler so partial traces stay visible as partial.
 
+### Event Observation Boundary (Milestone 98j)
+
+Event observations apply the pattern to the events plugin, whose structural differences are the
+observation SEAM and the hot path. The seam is the existing dispatch: a module-private WeakMap
+attaches the collector to the bus during plugin registration — no extra subscription (which would
+change dispatch and count itself), no wrapper around the bus, and no exported attachment helper. The
+collector accepts only the fixed operation (`publish`/`handler`), an already-approved alias, and
+primitive outcomes with measured durations; event payloads, event ids, aggregate ids and handler
+identities are structurally unreachable from its signature. Publication and each existing handler's
+await are counted separately — async completion is not handler completion — `publishBatch` counts
+its constituent publishes, and a thrown `errorHandler` keeps its exact propagation while the
+observation still lands.
+
+The hot path pays one failing WeakMap probe when detached; when attached it derives nothing per
+event: the exact-type lookup happens first (an unapproved type costs one probe and no clock read),
+then the alias replacement happens before anything is retained. Retention is the shared shape — 64
+slots keyed (alias, operation), 60-second expiry checked during update and read, 30-second stale
+threshold, saturating counters — and a clock or observer failure latches `collection-failed` and
+stops capture without changing the application's error. Every EventsPlugin instance contributes one
+`IEventDiagnosticsSource` under `CAPABILITIES.EVENTS_DIAGNOSTICS` with `{ multi: true }` and never
+claims the token (the M98f contribution pattern); `close` detaches the observer FIRST, then clears
+the bus, so a late observation after shutdown is discarded rather than resurrecting state. The
+connector reads every source at bootstrap (at most 16, `e<N>` position ids), isolates a failing
+source as `collection-failed`, and answers duplicate aliases with a fixed no-source response.
+
 ---
 
 ## 15. Performance Philosophy

@@ -3109,6 +3109,11 @@ interface IEventBus {
 - **`IEventHandler`** — Class-based event handler interface with a `handle(event)` method.
 - **`subscribeHandler`** — Function that adapts an `IEventHandler` instance to the `EventHandler`
   signature and subscribes it to the bus; returns an `Unsubscribe` function.
+- **`EventsDiagnosticsOptions`** — The plugin's opt-in event-dispatch observation option
+  (`diagnostics`), typed as `{ enabled: true, alias: string, events: Record<string, string> }`. The
+  collector behind the bus observes ONLY the exact event types the `events` map lists, replacing
+  each with its approved alias; payloads, event ids, aggregate ids and unapproved types are never
+  retained. See "Event dispatch observations (M98j)" in the diagnostics section.
 
 **Re-exports from `@setu-ts/common`:** `IEventBus`, `IDomainEvent`, `EventHandler`, `Unsubscribe`.
 
@@ -4193,6 +4198,29 @@ whose negotiated manifest has `traces: false` answers that frozen batch, echoing
 sending the request. `IDiagnosticsClient.traces` is a new REQUIRED member — additive for callers; a
 structural implementation of `IDiagnosticsClient` must add it (the package has not yet been
 published).
+
+**Event dispatch observations (M98j).** The connector serves `GET /v1/event` — a SNAPSHOT operation
+with no query, unlike the paged `/v1/events` — read through
+`client.events(): Promise<EventDiagnosticsResponse>`. The EventsPlugin ALWAYS registers one
+`IEventDiagnosticsSource` under `CAPABILITIES.EVENTS_DIAGNOSTICS` as a multi provider (it is an
+optional dependency of the connector, not a claimed capability, and never appears in the plugin's
+`provides`): without the plugin's `diagnostics` option it answers `disabled`; with the option the
+collector behind the bus reduces each dispatch to counters BEFORE anything is retained. Only event
+types whose exact raw name appears in `EventsDiagnosticsOptions.events` are observed, each replaced
+by its approved alias (1–64 UTF-8 bytes, no controls, unique, at most 64 entries, own-property
+lookup); records aggregate per (alias, operation) — `publish` (every publication, including
+no-subscriber ones) and `handler` (each existing handler's await; async publication completion is
+not handler completion) — over at most 64 slots with 60-second retention, a 30-second stale
+threshold and saturating counters. Event payloads, event ids, aggregate ids, handler names,
+unapproved type names and error text never enter a record. At bootstrap the connector reads every
+registered source in registration order (at most 16), assigns session-local `sourceId` values `e1`…,
+answers a throwing or validator-refusing source with its own value-free `collection-failed`
+snapshot, and answers duplicate non-null aliases with a fixed collection-failed response listing NO
+sources; the aggregate `state` is `ready` if any source is ready, otherwise `collection-failed`,
+`stale`, `no-data`, `disabled`. A client whose negotiated manifest has `events: false` answers a
+frozen `unsupported` response without sending the request. `IDiagnosticsClient.events` is a new
+REQUIRED member — additive for callers; a structural implementation of `IDiagnosticsClient` must add
+it (the package has not yet been published).
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
