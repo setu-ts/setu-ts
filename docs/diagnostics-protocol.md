@@ -147,9 +147,14 @@ Unauthenticated refusals are not signed and use one fixed shape:
 | `unavailable`         | 503    | internal failure or an over-limit result         |
 | `rate-limited`        | 429    | refusal budget exhausted or session budget spent |
 
-No refusal ever echoes supplied input, error causes, or stacks. Before the MAC verifies, every
-authentication failure is the same `unauthorized`; `expired` is answered only to a request whose MAC
-verified, so an unauthenticated prober cannot learn whether a session is live or has ended.
+No refusal ever echoes supplied input, error causes, or stacks. A wrong key, a wrong instance and a
+replay are all the same `unauthorized` (a replay is refused by the post-MAC sequence gate);
+`expired` is answered only to a request whose MAC verified, so an unauthenticated prober cannot
+learn whether a session is live or has ended. One admission exception: a session-ID mismatch is
+refused before MAC verification and debits the anonymous refusal budget, so once that budget is
+exhausted a wrong session ID answers `rate-limited` while the matching session ID with an invalid
+MAC answers `unauthorized`. That confirms only a candidate session ID; it reveals nothing about
+whether the session is live or has ended (see the design security review, R7).
 
 ## Health observations (M98d)
 
