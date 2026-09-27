@@ -69,14 +69,27 @@ must never be used to verify a signature, whatever its `kid`.
   duplicate `issuer`, an empty `audience`, an algorithm outside the five supported, and a
   non-`https` key or discovery URL whose host is not loopback.
 - **Why:** Every refusal is a configuration that would silently weaken verification.
+- **Known gap, named rather than hidden:** without RFC 9068 `typ: at+jwt` enforcement (out of scope,
+  §0), a provider's ID token whose `aud` is the configured `audience` verifies as an access token.
+  That happens when an API reuses its own client id as its audience. The README tells applications
+  to give the API its own audience (resource identifier) distinct from any sign-in client id, and
+  `toPrincipal` receives the full claims, so an application can refuse ID-token-only claims itself.
 - **Test home:** `trusted-issuer-options.test.ts`.
 
 ### 3.3 Discovery
 
-- **Decision:** `discovery: true` fetches `<issuer>/.well-known/openid-configuration` once, requires
-  the document's `issuer` to equal the configured one exactly (OpenID Connect Discovery §4.3 — a
-  mismatch means a spoofed or misrouted document) and reads `jwks_uri`, which must pass the same
-  https-or-loopback rule. Failure is a refresh failure (§3.5), not a startup error.
+- **Decision:** `discovery: true` fetches `<issuer>/.well-known/openid-configuration`, built after
+  removing ONE terminating `/` from the issuer (OIDC Discovery §4 — Auth0 issuers end in `/`, and a
+  naive join yields `…//.well-known`), requires the document's `issuer` to equal the configured one
+  exactly (OpenID Connect Discovery §4.3 — a mismatch means a spoofed or misrouted document) and
+  reads `jwks_uri`, which must pass the same https-or-loopback rule. Failure is a refresh failure
+  (§3.5), not a startup error, retried under the same `minRefreshIntervalMs` cooldown as a key-set
+  fetch; a successful document is cached for the key-set TTL. The whole document is kept (not only
+  `jwks_uri`), because 100c reads `authorization_endpoint`, `token_endpoint` and
+  `end_session_endpoint` from the same cache.
+- **Multi-tenant Entra ID is NOT supported:** its `common`/`organizations` discovery documents carry
+  `issuer: …/{tenantid}/v2.0`, a template that cannot equal a configured issuer. A single-tenant
+  Entra issuer works; the README says which.
 - **Test home:** `discovery.test.ts`.
 
 ### 3.4 Key selection and algorithm checks — before any key is used
@@ -84,22 +97,33 @@ must never be used to verify a signature, whatever its `kid`.
 - **Decision:** Per token: the header `alg` must be in the issuer's allowlist (default all five);
   `none` and every `HS*` are refused unconditionally, before key lookup, because an issuer key set
   is asymmetric and accepting an HMAC `alg` against a public key is the algorithm-confusion attack.
-  Candidate keys are those whose `kty` matches the `alg`, whose `use` is absent or `sig`, whose
-  `alg` (when present) equals the token's, and whose `key_ops` (when present) include `verify`. With
-  a `kid` the candidate must match it; without a `kid` there must be exactly one candidate. ECDSA
-  signatures are the raw `r‖s` form, which is what Web Crypto's `ECDSA` verify expects, so no DER
-  conversion is needed.
+  Candidate keys are those whose `kty` matches the `alg` AND whose `crv` matches it for EC and OKP
+  keys (ES256 ↔ P-256, ES384 ↔ P-384, EdDSA ↔ Ed25519 — without the `crv` check an ES256 token would
+  be verified against a P-384 key, which Web Crypto accepts once the key is imported by its own
+  curve), whose `use` is absent or `sig`, whose `alg` (when present) equals the token's, and whose
+  `key_ops` (when present) include `verify`. With a `kid` the candidate must match it; without a
+  `kid` there must be exactly one candidate. ECDSA signatures are the raw `r‖s` form, which is what
+  Web Crypto's `ECDSA` verify expects, so no DER conversion is needed. PS256 verifies with
+  `{ name: 'RSA-PSS', saltLength: 32 }` (RFC 7518 §3.5: salt length equals the hash length). The
+  `EdDSA` allowlist entry also admits the fully-specified `alg: 'Ed25519'` (RFC 9864), since
+  providers are moving to that spelling; both require an `OKP`/`Ed25519` key.
 - **Test home:** `key-selection.test.ts` — includes a Keycloak-shaped set with an `enc` key sharing
-  a `kid` pattern, and an `HS256` token signed with the public key's bytes as the secret.
+  a `kid` pattern, an `HS256` token signed with the public key's bytes as the secret, an ES256 token
+  whose only candidate is a P-384 key (refused), a PS256 round trip, and an `alg: 'Ed25519'` token.
 
 ### 3.5 Key-set cache, rotation and bounds
 
-- **Decision:** One cache entry per issuer, timed on `runtime.hrtime()` (monotonic). Default TTL 10
-  minutes. An unknown `kid` triggers at most one refetch per `minRefreshIntervalMs` (default 60 s),
-  so a stream of forged `kid`s cannot turn requests into outbound fetches. Concurrent misses share
-  one in-flight fetch. On fetch failure the last good set is kept. Each fetch is bounded by
-  `fetchTimeoutMs` (default 5 s, via `AbortSignal` and `runtime` timers), a 64 KiB response limit
-  and a 64-key limit; exceeding one of them is a refresh failure.
+- **Decision:** One cache entry per issuer, timed on `runtime.hrtime()` (monotonic). The three
+  timings are per-issuer options under `TrustedIssuer.keySet` — `ttlMs` (default 10 minutes),
+  `minRefreshIntervalMs` (default 60 s), `fetchTimeoutMs` (default 5 s) — each validated as a finite
+  positive number at construction (the M90a `NaN` lesson). They are options rather than constants
+  because the Keycloak rotation e2e must shorten the cooldown to run in seconds. An unknown `kid`
+  triggers at most one refetch per `minRefreshIntervalMs`, so a stream of forged `kid`s cannot turn
+  requests into outbound fetches. Concurrent misses share one in-flight fetch. On fetch failure the
+  last good set is kept. Each fetch is bounded by `fetchTimeoutMs` (via `AbortSignal` and `runtime`
+  timers), a 64 KiB response limit and a 64-key limit; exceeding one of them is a refresh failure.
+  The byte limit is enforced BY THE SEAM while reading (§3.8), not after — a limit checked on a
+  finished `string` has already buffered the oversized body it exists to refuse.
 - **Why:** A key set that expires hard during a provider outage would sign every user out.
 - **Test home:** `key-set-cache.test.ts` with a fake clock and a fake HTTP seam.
 
@@ -123,10 +147,11 @@ must never be used to verify a signature, whatever its `kid`.
 ### 3.8 HTTP seam
 
 - **Decision:** `AuthPluginOptions.http?: IAuthHttp` —
-  `get(url, { signal }) → { status, body:
-  string }` — defaulting to `createDefaultAuthHttp()` over
-  `fetch` (internal seam, unit-tested directly). 100c reuses it for its token endpoint by adding
-  `post`.
+  `get(url, { signal, maxBytes }) → { status, body: string }` — defaulting to
+  `createDefaultAuthHttp()` over `fetch` (internal seam, unit-tested directly). The default reads
+  the body stream, cancels it and rejects with a size error the moment the running total passes
+  `maxBytes` (the M90a `maxBodyBytes` shape — cancel, never abandon), and never calls `text()`. 100c
+  reuses it for its token endpoint by adding `post`.
 - **Test home:** `auth-http.test.ts`.
 
 ## 4. Exported surface — every symbol names its consumer
@@ -140,14 +165,15 @@ must never be used to verify a signature, whatever its `kid`.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                            | Consumer                    | Behavior (per implementation)                |
-| --------------------------------- | --------------------------- | -------------------------------------------- |
-| `issuers`                         | `register()` chain assembly | Builds the `issuers` strategy (§3.1).        |
-| `TrustedIssuer.audience`          | claim validation            | Required; must be contained in `aud` (§3.6). |
-| `TrustedIssuer.algorithms`        | key selection               | Allowlist, default all five (§3.4).          |
-| `TrustedIssuer.clockToleranceSec` | claim validation            | Default 30 (§3.6).                           |
-| `TrustedIssuer.toPrincipal`       | strategy                    | Maps verified claims; `null` → anonymous.    |
-| `http`                            | key-set fetcher             | Replaces the default `fetch` seam (§3.8).    |
+| Option                            | Consumer                    | Behavior (per implementation)                             |
+| --------------------------------- | --------------------------- | --------------------------------------------------------- |
+| `issuers`                         | `register()` chain assembly | Builds the `issuers` strategy (§3.1).                     |
+| `TrustedIssuer.audience`          | claim validation            | Required; must be contained in `aud` (§3.6).              |
+| `TrustedIssuer.algorithms`        | key selection               | Allowlist, default all five (§3.4).                       |
+| `TrustedIssuer.clockToleranceSec` | claim validation            | Default 30 (§3.6).                                        |
+| `TrustedIssuer.keySet`            | key-set cache               | `ttlMs`, `minRefreshIntervalMs`, `fetchTimeoutMs` (§3.5). |
+| `TrustedIssuer.toPrincipal`       | strategy                    | Maps verified claims; `null` → anonymous.                 |
+| `http`                            | key-set fetcher             | Replaces the default `fetch` seam (§3.8).                 |
 
 ## 5. Implementation files
 
@@ -170,9 +196,9 @@ must never be used to verify a signature, whatever its `kid`.
 | `test/unit/issuer-strategy.test.ts`               | `issuer-strategy.ts` | Routes by `iss`; unknown issuer → null; a self-issued JWT still authenticates first; malformed token → null.                                                                                                                |
 | `test/unit/key-selection.test.ts`                 | `key-selection.ts`   | Real-crypto round trip per algorithm; `none`/`HS256` refused; `enc` key ignored; `kid`-less multi-key refused.                                                                                                              |
 | `test/unit/key-set-cache.test.ts`                 | `key-set-cache.ts`   | TTL on a fake monotonic clock; refetch cooldown; coalescing; last-good on failure; size and key-count limits.                                                                                                               |
-| `test/unit/discovery.test.ts`                     | `key-set-cache.ts`   | Issuer mismatch refused; non-https refused; loopback allowed.                                                                                                                                                               |
+| `test/unit/discovery.test.ts`                     | `key-set-cache.ts`   | Issuer mismatch refused; non-https refused; loopback allowed; a trailing-`/` issuer builds one `/.well-known` path; failed discovery retried only after the cooldown.                                                       |
 | `test/unit/claims.test.ts`                        | `issuer-strategy.ts` | `aud` array/string; `exp` required; skew both sides; future `iat`.                                                                                                                                                          |
-| `test/unit/auth-http.test.ts`                     | `auth-http.ts`       | Default seam: status, body, abort on timeout.                                                                                                                                                                               |
+| `test/unit/auth-http.test.ts`                     | `auth-http.ts`       | Default seam: status, body, abort on timeout; a body past `maxBytes` rejects and the source stream is cancelled (a never-ending fake stream would hang otherwise).                                                          |
 | `test/unit/trusted-issuer-options.test.ts`        | `auth-plugin.ts`     | Every §3.2 refusal by name.                                                                                                                                                                                                 |
 | `test/integration/issuers-health.test.ts`         | `auth-plugin.ts`     | Real kernel app: `up`, `degraded` stale/unfetched, never `down`; no fetch during a probe.                                                                                                                                   |
 | `test/e2e/keycloak-issuer-real.test.ts` (guarded) | all                  | Real Keycloak realm (committed import JSON): a client-credentials token authenticates; a token for another client's audience does not; key rotation via the admin API is picked up. `ignore:` when `KEYCLOAK_URL` is unset. |
@@ -190,6 +216,8 @@ deno task publish:check && deno task release:verify <version>
 
 ## 8. Risks & mitigations
 
+- Multi-tenant Entra ID (`{tenantid}` issuer template) → refused by exact issuer matching; stated in
+  the README (§3.3). Supporting it is an additive `issuer` pattern with its own design review.
 - A provider publishing an algorithm outside the five → its tokens are refused, not mis-verified;
   the refusal is logged with the algorithm so the operator can see it.
 - The Keycloak suite skips silently if CI drops the container → the service, port and variable are
@@ -214,7 +242,9 @@ checks → `toPrincipal`.
 | Token for another API at the same provider.              | `audience` required and checked (§3.2, §3.6).               |
 | Spoofed discovery document.                              | `issuer` equality and https-or-loopback (§3.3).             |
 | Forged `kid` flood causing outbound fetches.             | One refetch per cooldown, coalesced (§3.5).                 |
-| Oversized key-set response.                              | 64 KiB and 64-key bounds (§3.5).                            |
+| Oversized key-set response.                              | 64 KiB enforced while streaming; 64-key bound (§3.5, §3.8). |
+| Curve substitution (ES256 against a P-384 key).          | `crv` must match the `alg` (§3.4).                          |
+| Provider ID token presented as an access token.          | Named gap; distinct API audience documented (§3.2).         |
 | Token material in logs.                                  | Fixed reason codes only (§3.6).                             |
 
 The implementation audit re-runs each row as a negative control against the committed tree,

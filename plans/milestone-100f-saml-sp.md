@@ -27,25 +27,28 @@ every other method.
 | Session cookie `SameSite`            | `packages/session-plugin/src/options.ts:46,204`                                                      | Default `'lax'`: NOT sent on the IdP's cross-site POST to the ACS. The session cannot carry the pending request, unlike 100c's GET callback.                                                                                                                                                 |
 | Lazy `npm:` import rules             | CLAUDE.md "A lazily-loaded optional dep must ACTUALLY load"; `scripts/npm-specifier-audit.ts` (M70e) | The specifier must be a literal `import('npm:…')`; a guarded real-import test is required.                                                                                                                                                                                                   |
 | `@node-saml/node-saml@5.1.0` (probe) | installed; `npm audit`: 0 advisories                                                                 | Verified an RSA-SHA256, exclusive-c14n signed assertion on Deno 2.9.6, Node 24.18, Bun 1.4.2 and workerd; refused a tampered NameID, an unsigned assertion, and an unsigned assertion placed BEFORE a signed one (signature wrapping: "Invalid signature: multiple assertions") on all four. |
+| node-saml options (source, 5.1.0)    | `lib/saml.js:85,89,92`, `lib/types.d.ts:22-26,68`                                                    | `wantAuthnResponseSigned` defaults to `true`; `validateInResponseTo` defaults to `'never'`; request ids live in `options.cacheProvider` (`saveAsync`/`getAsync`/`removeAsync`), an in-memory provider when none is given; the IdP certificate option is `idpCert: string \| string[]`.       |
 | workerd bundling (probe)             | `wrangler dev`, compatibility date 2025-09-01                                                        | node-saml and samlify both FAIL to bundle without `nodejs_compat` (`Could not resolve "crypto"`, `"fs"`, `"path"`); with the flag node-saml verified as above.                                                                                                                               |
 | `samlify@2.13.1` (probe)             | same                                                                                                 | Imports on all four runtimes (workerd with `nodejs_compat`); verification not probed.                                                                                                                                                                                                        |
 | Keycloak 26.4 (probe)                | `quay.io/keycloak/keycloak:26.4 start-dev`                                                           | Serves an IdP descriptor at `/realms/<realm>/protocol/saml/descriptor`.                                                                                                                                                                                                                      |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                        | Resolution (picked side)                                                                              | Doc deliverable (same PR)                             |
-| -- | --------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| C1 | `docs/plugins.md:56` lists `ioredis` as `auth-plugin`'s only npm driver.                                        | The `saml` arm adds `@node-saml/node-saml`, loaded lazily, and needs `nodejs_compat` on Workers.      | Update that row and the README's runtime note.        |
-| C2 | `ROADMAP.md` M100 section says the library choice would be decided by a signature-wrapping corpus and runtimes. | Decided here by the §1 probes; the full corpus runs as a committed test (§6), not as a pre-condition. | Update the 100f paragraph to name the chosen library. |
+| #  | Conflict                                                                                                                               | Resolution (picked side)                                                                         | Doc deliverable (same PR)                                                    |
+| -- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| C1 | `docs/plugins.md:56` lists `ioredis` as `auth-plugin`'s only npm driver.                                                               | The `saml` arm adds `@node-saml/node-saml`, loaded lazily, and needs `nodejs_compat` on Workers. | Update that row and the README's runtime note.                               |
+| C2 | The M100 ROADMAP section was drafted to decide the library by a signature-wrapping corpus; the opening commit already names node-saml. | Decided by the §1 probes; the full corpus runs as a committed test (§6), not as a pre-condition. | None — the ROADMAP paragraph already names the library; checked, not edited. |
 
 ## 3. Design decisions
 
 ### 3.1 Library: `@node-saml/node-saml`, inject-or-lazy
 
-- **Decision:** `import('npm:@node-saml/node-saml@^5')` on first use of a `saml` provider, cached;
-  or an application-supplied module through `saml.module` (the §12.2 inject-or-lazy pattern). A load
-  failure throws `SamlRuntimeLoadError` at `register()`, naming the specifier and, on Workers,
-  `nodejs_compat`.
+- **Decision:** `import('npm:@node-saml/node-saml@^5')` is awaited in `register()` (which becomes
+  async, as M44's did) whenever a `saml` provider is configured, and cached; or an
+  application-supplied module through `saml.module` (the §12.2 inject-or-lazy pattern). A load
+  failure throws `SamlRuntimeLoadError` from `register()`, naming the specifier and, on Workers,
+  `nodejs_compat` — at startup, never at the first login, which is why the import is not deferred to
+  first use.
 - **Why:** A hand-written XML signature verifier is the most common source of SAML bypasses; the
   probe showed node-saml refusing a signature-wrapping arrangement on all four runtimes, with no
   open advisories. samlify was not verified end to end, so it is not chosen.
@@ -57,9 +60,18 @@ every other method.
   `SamlProvider = { kind: 'saml', name, entityId, idp: { entityId, ssoUrl, certs },
   acsUrl, toPrincipal(profile), failureRedirect? }`
   joins the `SignInProvider` union. `certs` accepts several PEM certificates so a rotation can
-  overlap. `acsUrl` must end with the provider's ACS path. The library is configured with
-  `wantAssertionsSigned: true`, `audience = entityId`, `idpIssuer = idp.entityId`,
-  `validateInResponseTo: 'always'`, and a clock skew of 60 s.
+  overlap, and is passed as `idpCert`. `acsUrl` must end with the provider's ACS path. The library
+  is configured with `wantAssertionsSigned: true`, `wantAuthnResponseSigned: false`,
+  `audience = entityId`, `idpIssuer = idp.entityId`, `validateInResponseTo: 'always'`,
+  `acceptedClockSkewMs: 60_000`, and `cacheProvider` = an adapter over the provider's
+  `ISamlRequestStore` (§3.4).
+- **Every security option is set explicitly, never inherited.** Two node-saml defaults would
+  otherwise decide behaviour (§1): `validateInResponseTo` defaults to `'never'`, which would accept
+  unsolicited responses; and `wantAuthnResponseSigned` defaults to `true`, which refuses every IdP
+  that signs only the assertion (common — Entra ID's default). The assertion signature is what
+  authenticates the user, so `wantAssertionsSigned: true` with the response signature optional is
+  the standard SP posture, and the wrapping and tampering cases in §6 run under exactly this
+  configuration. `saml-options.test.ts` asserts each option handed to the library field by field.
 - **Test home:** `saml-options.test.ts`.
 
 ### 3.3 Routes
@@ -78,9 +90,19 @@ every other method.
   `__Host-setu-saml` — `SameSite=None; Secure; HttpOnly; Path=/; Max-Age=600` — holding `binding`,
   32 random bytes. At the ACS the `InResponseTo` entry is consumed (single use), and the cookie's
   value must equal its `binding`; the cookie is then cleared.
+- **One store, not two.** node-saml validates `InResponseTo` against its own `cacheProvider` (§1),
+  in memory unless given one. The plugin passes an adapter over `ISamlRequestStore` as that
+  `cacheProvider`, so the request id the library checks and the pending entry the plugin consumes
+  are the same record. Leaving the library's default in place would create a second, per-process
+  store: several replicas would then fail even with a shared `ISamlRequestStore`, because the
+  library's check runs first on whichever replica receives the POST.
+- **One binding cookie per browser.** A second login started in another tab overwrites the cookie,
+  so the first tab's response is refused (fails closed). Accepted and stated in the README; the
+  failure is a retry, never a wrong sign-in.
 - **Why:** Without the binding, an attacker could start a login, obtain a valid response for their
   own account, and make the victim's browser post it — the SAML form of login CSRF.
-- **Test home:** `saml-pending.test.ts`.
+- **Test home:** `saml-pending.test.ts` (includes a store shared by two plugin instances standing in
+  for replicas: a login started on one completes on the other).
 
 ### 3.5 Assertion checks and replay
 
@@ -97,6 +119,27 @@ every other method.
 - **Decision:** `toPrincipal(profile)` maps the NameID and attributes; `null` → 403. Then
   `signIn(ctx, principal, { methods: ['fed'] })` — which regenerates the session and may answer
   `second-factor-required` (100d) — and a redirect to the stored `returnTo`.
+- **The ACS runs on a NEW session.** The `Lax` session cookie does not accompany the IdP's POST, so
+  the session middleware loads an empty session and `signIn` writes into that; its cookie then
+  replaces the browser's previous one. Whatever the previous session held is gone, and on the store
+  strategy its entry is orphaned until its own expiry rather than revoked, because the ACS never
+  learns its id. The README states this; applications must not keep state across a SAML sign-in in
+  the session. (100c's callback is a top-level GET and keeps the session.)
+
+### 3.7 CSRF composition at the ACS
+
+- **Decision:** No code change in the two CSRF middlewares; documented configuration plus a test.
+  The ACS receives a cross-site `POST` carrying no form token, so the session plugin's
+  `csrfFormMiddleware` answers `403` unless the ACS path is in `CsrfFormOptions.exclude`, and
+  `http-security-plugin`'s Origin check answers `403` unless the IdP origin is in `trustedOrigins`.
+  The ACS's own defences — the signed assertion, the single-use `InResponseTo`, and the binding
+  cookie (§3.4) — are what protect it, which is why exempting it is sound. The README states both
+  settings, and that `trustedOrigins` admits the IdP's origin on EVERY route (acceptable, since the
+  IdP is already trusted to assert identity).
+- **Why a test:** two documented features of one application answering `403` when composed is the
+  M90h X33-2 defect class; the test pins the documented configuration working and the failure
+  without it.
+- **Test home:** `saml-csrf-composition.test.ts`.
 - **Test home:** `saml-acs.test.ts`; the Keycloak e2e.
 
 ## 4. Exported surface — every symbol names its consumer
@@ -140,6 +183,7 @@ every other method.
 | `test/unit/memory-saml-request-store.test.ts`         | `saml-request-store.ts`          | Single-use consume; assertion-id replay refused; expiry.                                                                                                                                                                                               |
 | `test/integration/saml-acs.test.ts`                   | `routes.ts`, `binding-cookie.ts` | Real kernel app + test IdP: valid → signed in; tampered, unsigned, wrapped (evil-first and evil-last), wrong audience, expired, unsolicited, replayed assertion, missing or mismatched binding cookie → refused; library message absent from the body. |
 | `test/integration/saml-routes.test.ts`                | `routes.ts`                      | AuthnRequest redirect parameters; metadata document fields.                                                                                                                                                                                            |
+| `test/integration/saml-csrf-composition.test.ts`      | `routes.ts`                      | Real `SessionPlugin({ csrf })` + `HttpSecurityPlugin({ csrf })`: ACS 403 without the documented `exclude`/`trustedOrigins`, signed in with them; the pre-existing session's data is absent afterwards (§3.6).                                          |
 | `test/integration/saml-real-import.test.ts` (guarded) | `loader.ts`                      | The real `npm:@node-saml/node-saml` import verifies a test-IdP response.                                                                                                                                                                               |
 | `test/e2e/keycloak-saml-real.test.ts` (guarded)       | all                              | Cookie-jar flow against Keycloak: login → IdP form → credentials → POST to ACS → protected route returns the user. `ignore:` without `KEYCLOAK_URL`.                                                                                                   |
 
@@ -184,6 +228,9 @@ principal → `signIn` → redirect to a validated `returnTo`.
 | Library error text reaching the client.          | Fixed detail; message logged at `debug` only (§3.5).                          |
 | Weakening the session cookie to `SameSite=None`. | Not required; stated in the README (§8).                                      |
 | Session fixation.                                | `signIn` regenerates (100c §3.1).                                             |
+| Unsafe library defaults.                         | Every security option set explicitly and asserted (§3.2).                     |
+| Replicas disagreeing about a pending request.    | node-saml's `cacheProvider` is the plugin's store (§3.4).                     |
+| CSRF exemption for the ACS.                      | Justified by the ACS's own defences; documented and tested (§3.7).            |
 
 The implementation audit posts a captured valid response twice, from a browser without the binding
 cookie, with the assertion wrapped after an unsigned copy, and with `InResponseTo` from another

@@ -43,19 +43,28 @@ produce a signed-in session for a user who has enrolled.
 ### 3.1 Widen `IAuthSessionService`
 
 - **Decision:** Add `pending(ctx): PendingSignIn | null` and
-  `completeSecondFactor(ctx, method: SecondFactorMethod): Promise<SignInOutcome>`, with
+  `completeSecondFactor(ctx, proof: SecondFactorProof): Promise<SignInOutcome>`, where
+  `SecondFactorProof = { method: SecondFactorMethod; principalId: string }`, with
   `SecondFactorMethod = 'otp' | 'hwk' | 'swk'`, and widen `SignInOutcome` to
   `{ status: 'signed-in' } | { status: 'second-factor-required' }`. `signIn` asks
   `signIn.mfa.required(principal, methods)`; when it answers `true` and `methods` holds no second
   factor, it stores `{ principal, methods, at }` under `__setu_auth_pending_mfa` (NOT the signed-in
   key), regenerates the session and resolves `second-factor-required`. `completeSecondFactor` moves
-  the pending record to the signed-in key with the method appended, regenerates again, and throws
-  when nothing is pending or the record is older than `pendingTtlMs` (default 5 minutes).
+  the pending record to the signed-in key with the method appended, regenerates again, and rejects
+  when nothing is pending, when the record is older than `pendingTtlMs` (default 5 minutes), or when
+  `proof.principalId` is not the pending principal's id.
+- **Why the proof carries the principal id.** Verification (`TotpService.verify`, 100e's ceremony)
+  and promotion are separate calls, so without the id nothing ties the factor that was checked to
+  the sign-in being promoted. An application that read the principal id from its own form could
+  verify an attacker's OWN code and then promote the victim's pending sign-in — a complete
+  second-factor bypass for anyone holding the victim's password. With the id in the proof, the
+  service refuses the mismatch whatever the application did.
 - **Why:** Holding the principal back is what makes the password alone insufficient; routes guarded
   only by `requireAuth()` stay closed during the pending state.
 - **Breaking:** new required members on a `common` interface (only in-repo implementor: 100c's
   service), and a widened result union — CHANGELOG'd.
-- **Test home:** `auth-session-mfa.test.ts`.
+- **Test home:** `auth-session-mfa.test.ts` (includes a code verified for principal B completing a
+  sign-in pending for principal A → rejected, A stays pending).
 
 ### 3.2 `TotpService` — application-instantiated
 
@@ -68,8 +77,9 @@ produce a signed-in session for a user who has enrolled.
   - `verify(principalId, code)` → `'ok' | 'invalid' | 'locked' | 'not-enrolled'`;
   - `generateRecoveryCodes(principalId)` → ten codes, returned once;
   - `verifyRecoveryCode(principalId, code)` → `'ok' | 'invalid' | 'locked'`;
-  - `disable(principalId)`. The application calls `verify` and then
-    `completeSecondFactor(ctx, 'otp')`.
+  - `disable(principalId)`. The application reads `pending(ctx)`, calls
+    `verify(pending.principal.id, code)` and then
+    `completeSecondFactor(ctx, { method: 'otp', principalId: pending.principal.id })`.
 - **Why:** The code form is application UI; the service owns every rule that must not vary.
 - **Test home:** `totp-service.test.ts`.
 
@@ -84,11 +94,17 @@ produce a signed-in session for a user who has enrolled.
 
 ### 3.4 Lockout per account, not per session
 
-- **Decision:** Each invalid code or recovery code calls `store.recordFailure(principalId, now)`,
-  which returns the failures inside the last 15 minutes; at 5, `verify` answers `locked` until the
-  window passes, without computing a code. Success clears failures.
+- **Decision:** Every `verify` and `verifyRecoveryCode` call first calls
+  `store.reserveAttempt(principalId, now, { limit: 5, windowMs: 900_000 })`, which ATOMICALLY counts
+  the attempt and answers whether it is within the limit; over the limit, `verify` answers `locked`
+  without computing a code. Success calls `clearAttempts`. Attempts are counted BEFORE the code is
+  checked, not failures after it: a read-the-count-then-record-a-failure pair lets N concurrent
+  guesses all read a count under the limit, so a burst would bypass the lockout.
+- **Named cost:** anyone holding a user's password can lock that user's second factor for 15
+  minutes. That is the standard trade-off for a six-digit code and the README states it.
 - **Why:** Six digits are brute-forceable; counting per session is bypassed by opening new sessions.
-- **Test home:** `totp-lockout.test.ts`.
+- **Test home:** `totp-lockout.test.ts` (twenty concurrent wrong codes → exactly five computed, the
+  rest `locked`).
 
 ### 3.5 Recovery codes
 
@@ -96,16 +112,17 @@ produce a signed-in session for a user who has enrolled.
   PBKDF2, because each code is already high-entropy random and a slow hash across ten candidates
   would cost seconds per attempt for no gain. A code is consumed through
   `store.consumeRecoveryCode(principalId, index)`, atomic, so two concurrent uses cannot both
-  succeed. A recovery code completes the second factor with method `'otp'`.
+  succeed. A recovery code completes the second factor with method `'otp'`: RFC 8176 registers no
+  recovery-code value, so a policy cannot tell the two apart, and the README says so.
 - **Test home:** `recovery-codes.test.ts`.
 
 ### 3.6 `ITotpStore` port
 
-- **Decision:** `getEnrolment`, `saveEnrolment`, `deleteEnrolment`, `claimStep`, `recordFailure`,
-  `clearFailures`, `saveRecoveryCodes`, `consumeRecoveryCode`, all async; `MemoryTotpStore` exported
+- **Decision:** `getEnrolment`, `saveEnrolment`, `deleteEnrolment`, `claimStep`, `reserveAttempt`,
+  `clearAttempts`, `saveRecoveryCodes`, `consumeRecoveryCode`, all async; `MemoryTotpStore` exported
   as the default for tests and single-process development. The secret is stored as given; the README
   states that a production store should encrypt it at rest.
-- **Test home:** `memory-totp-store.test.ts`, including concurrent `claimStep` and
+- **Test home:** `memory-totp-store.test.ts`, including concurrent `claimStep`, `reserveAttempt` and
   `consumeRecoveryCode`.
 
 ### 3.7 `requireMfa()` guard
@@ -113,19 +130,29 @@ produce a signed-in session for a user who has enrolled.
 - **Decision:** No principal → `authentication-required` (401). A principal whose `claims.amr` holds
   none of `otp`/`hwk`/`swk` → new failure `second-factor-required` (403, detail "Second factor
   required"). Branded authenticated for M57 OpenAPI derivation.
+- **Whose `amr` the guard trusts, stated rather than implied.** The `auth-session` strategy
+  OVERWRITES `amr` from its own record (100c §3.2), so a session principal cannot smuggle one in.
+  Every other strategy's claims come from something the application controls: the JWT strategy
+  copies claims from tokens the application itself signed, and 100b's `toPrincipal` decides what an
+  outside issuer's claims become. So a self-issued JWT carrying `amr: ['otp']` passes the guard —
+  deliberately, and pinned by a test — and a provider's own `amr` (Entra's `mfa`, for instance)
+  passes only if `toPrincipal` maps it to one of the three values. The README states both.
+- **Federated sign-ins and MFA:** a `fed` sign-in never holds a second-factor method, but
+  `mfa.required(principal, methods)` receives the principal `toPrincipal` built, so an application
+  whose provider already enforced MFA can answer `false` from the provider's claims.
 - **Test home:** `require-mfa.test.ts`.
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol (package)                        | Kind        | Consumer / real code path that READS it                 |
-| ------------------------------------------------ | ----------- | ------------------------------------------------------- |
-| `PendingSignIn`, `SecondFactorMethod` (`common`) | types       | `IAuthSessionService.pending` / `completeSecondFactor`. |
-| `AuthorizationFailure` member (`common`)         | type        | `requireMfa()`; applications mapping failures.          |
-| `TotpService` (`auth-plugin`)                    | class       | Applications' enrolment and code forms.                 |
-| `ITotpStore`, `MemoryTotpStore` (`auth-plugin`)  | type, class | `TotpService` constructor.                              |
-| `TotpVerifyResult` (`auth-plugin`)               | type        | `verify` / `verifyRecoveryCode` results.                |
-| `requireMfa` (`auth-plugin`)                     | function    | Route guards.                                           |
-| `MfaOptions` (`auth-plugin`)                     | type        | `SignInConfig.mfa`.                                     |
+| Exported symbol (package)                                             | Kind        | Consumer / real code path that READS it                 |
+| --------------------------------------------------------------------- | ----------- | ------------------------------------------------------- |
+| `PendingSignIn`, `SecondFactorMethod`, `SecondFactorProof` (`common`) | types       | `IAuthSessionService.pending` / `completeSecondFactor`. |
+| `AuthorizationFailure` member (`common`)                              | type        | `requireMfa()`; applications mapping failures.          |
+| `TotpService` (`auth-plugin`)                                         | class       | Applications' enrolment and code forms.                 |
+| `ITotpStore`, `MemoryTotpStore` (`auth-plugin`)                       | type, class | `TotpService` constructor.                              |
+| `TotpVerifyResult` (`auth-plugin`)                                    | type        | `verify` / `verifyRecoveryCode` results.                |
+| `requireMfa` (`auth-plugin`)                                          | function    | Route guards.                                           |
+| `MfaOptions` (`auth-plugin`)                                          | type        | `SignInConfig.mfa`.                                     |
 
 ### 4.1 Options — every option names its consumer
 
@@ -160,7 +187,7 @@ produce a signed-in session for a user who has enrolled.
 | `test/unit/recovery-codes.test.ts`          | `totp-service.ts`         | Ten codes; single use; digests stored, never plaintext.                                                                                                                                                                             |
 | `test/unit/memory-totp-store.test.ts`       | `totp-store.ts`           | Concurrent `claimStep` and `consumeRecoveryCode` yield exactly one success.                                                                                                                                                         |
 | `test/integration/auth-session-mfa.test.ts` | `auth-session-service.ts` | Real kernel app: password sign-in with MFA required → `second-factor-required`, `requireAuth` route still 401; after a valid code → signed in with `amr: ['pwd','otp']`; session id changed at both steps; expired pending refused. |
-| `test/integration/require-mfa.test.ts`      | `guards/index.ts`         | 401 anonymous; 403 `second-factor-required` without the factor; 200 with it; Problem Details shape asserted field by field.                                                                                                         |
+| `test/integration/require-mfa.test.ts`      | `guards/index.ts`         | 401 anonymous; 403 `second-factor-required` without the factor; 200 with it; a self-issued JWT with `amr: ['otp']` → 200 (pinned); Problem Details shape asserted field by field.                                                   |
 | `common/test/unit/barrel-exports.test.ts`   | `common` barrel           | New types exported.                                                                                                                                                                                                                 |
 
 ## 7. Verification gates
@@ -192,16 +219,20 @@ deno task publish:check && deno task release:verify <version>
 (lockout check, window, constant-time compare, step claim) → `completeSecondFactor` → regenerate →
 signed in with `amr`.
 
-| Finding                                       | Resolution in this plan                                |
-| --------------------------------------------- | ------------------------------------------------------ |
-| Password alone yields a session.              | Pending record is not a principal (§3.1).              |
-| Code brute force across sessions.             | Per-account lockout in the store (§3.4).               |
-| Code replay within its window.                | Monotonic `claimStep` (§3.3).                          |
-| Timing leak on code comparison.               | Constant-time compare (§3.3).                          |
-| Recovery code double-spend under concurrency. | Atomic consume by index (§3.5, §3.6).                  |
-| Session fixation across the two steps.        | Regenerate at both steps (§3.1).                       |
-| A 403 disclosing policy.                      | New failure names only the required action (§3.7, C1). |
+| Finding                                       | Resolution in this plan                                  |
+| --------------------------------------------- | -------------------------------------------------------- |
+| Password alone yields a session.              | Pending record is not a principal (§3.1).                |
+| Code brute force across sessions.             | Per-account lockout in the store (§3.4).                 |
+| Lockout bypassed by concurrent guesses.       | Attempt reserved atomically before checking (§3.4).      |
+| Attacker's own factor promoting a victim.     | Proof carries the principal id; mismatch refused (§3.1). |
+| `amr` forged through another strategy.        | Trust boundary stated; session `amr` overwritten (§3.7). |
+| Code replay within its window.                | Monotonic `claimStep` (§3.3).                            |
+| Timing leak on code comparison.               | Constant-time compare (§3.3).                            |
+| Recovery code double-spend under concurrency. | Atomic consume by index (§3.5, §3.6).                    |
+| Session fixation across the two steps.        | Regenerate at both steps (§3.1).                         |
+| A 403 disclosing policy.                      | New failure names only the required action (§3.7, C1).   |
 
 The implementation audit submits the same code twice, a code from the previous window after a newer
-one was accepted, six wrong codes from six fresh sessions, and a recovery code from two concurrent
-requests.
+one was accepted, six wrong codes from six fresh sessions, twenty wrong codes concurrently, a code
+verified for one user completing another user's pending sign-in, and a recovery code from two
+concurrent requests.

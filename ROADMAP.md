@@ -11863,8 +11863,9 @@ throws at construction without a secret or a key pair. An application that authe
 through a session, an outside provider, a passkey or a SAML assertion would therefore have to invent
 a signing secret it never uses. `jwt` becomes optional, following the M68 `rbac` precedent exactly:
 absent, `provides` omits `CAPABILITIES.JWT` and the JWT strategy is not in the chain. An
-`AuthPlugin` with no strategy at all is refused at construction by name, since it could authenticate
-nothing. Source-compatible for every caller, since omitting `jwt` was previously impossible.
+`AuthPlugin` with no strategy at all is refused at `register()` by name — not at construction,
+because caller-supplied strategies are only known there — since it could authenticate nothing.
+Source-compatible for every caller, since omitting `jwt` was previously impossible.
 
 **2. Nothing registers `authMiddleware()`.** Neither `AuthPlugin` nor the starters' `auth` arm adds
 it, so a principal reaches `ctx.request.user` — and `react-router-plugin`'s `userContext` — only
@@ -11942,7 +11943,7 @@ The relying-party case: a user clicks "Sign in with Google" and comes back signe
 - Provider access and refresh tokens are NOT stored by default; storing them is an explicit option,
   because persisting third-party credentials is a liability the application should opt into.
 - RP-initiated logout where the provider advertises `end_session_endpoint`.
-- **Real-provider proof, not a fake:** a Keycloak container in CI serves OIDC discovery, keys,
+- **Real-provider proof, not a fake:** the Keycloak container 100b adds to CI also serves
   authorization and token endpoints, so the whole flow runs against a real authorization server (the
   M53 real-backend thesis). Pinned in `test/apps-gate.test.ts` so it cannot silently skip.
 
@@ -11971,8 +11972,10 @@ The relying-party case: a user clicks "Sign in with Google" and comes back signe
 **Package(s):** `packages/auth-plugin`
 
 - Registration and authentication ceremonies: the plugin generates options, the browser calls
-  `navigator.credentials`, the plugin verifies the response. Challenges are held in the session,
-  single-use, with an expiry.
+  `navigator.credentials`, the plugin verifies the response. Challenges are held in the session with
+  an expiry, and each is also claimed once in the credential store — on the default cookie session
+  an older cookie still carries a consumed challenge, and a synced passkey's counter is always `0`,
+  so the session alone cannot stop a replayed assertion.
 - Verification of `clientDataJSON` (`type`, challenge, origin against an allowlist) and
   `authenticatorData` (RP ID hash, user-present and user-verified flags, signature counter) and the
   signature over ES256, RS256 and EdDSA, subject to 100b's Ed25519 probe.

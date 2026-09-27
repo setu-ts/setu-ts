@@ -21,30 +21,30 @@ unless the application also remembers a hand-written `app.middleware.add(...)` l
 
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference                      | Source (file:line)                                                                                           | Verified surface / fact                                                                                                                                                                  |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AuthPluginOptions.jwt`        | `packages/auth-plugin/src/interfaces/index.ts:91`                                                            | `readonly jwt: JwtOptions` — required, documented "Required."                                                                                                                            |
-| Construction check             | `packages/auth-plugin/src/plugin/auth-plugin.ts:49`                                                          | Throws unless `jwt.secret` or both `jwt.privateKey`/`jwt.publicKey` are set; `options.jwt` is dereferenced unconditionally at `:49`, `:55`, `:87-100`, `:116-123`.                       |
-| `provides`                     | `packages/auth-plugin/src/plugin/auth-plugin.ts:60`                                                          | `CAPABILITIES.JWT` and `CAPABILITIES.AUTH` always; `AUTHORIZATION` only when `rbac` is set — the conditional-provides precedent this plan follows.                                       |
-| Strategy chain                 | `packages/auth-plugin/src/plugin/auth-plugin.ts:106-167`                                                     | JWT strategy pushed unconditionally ("always present"), then api-key, session, caller strategies; duplicate names throw.                                                                 |
-| `authMiddleware`               | `packages/auth-plugin/src/middleware/auth-middleware.ts`                                                     | Resolves `CAPABILITIES.AUTH` per request, calls `authenticate`, writes through `replacePrincipal` when non-null, ALWAYS calls `next()`; a strategy throw is swallowed and `next()` runs. |
-| `replacePrincipal`             | `packages/common/src/request-identity.ts:161`                                                                | The M71 explicit-replacement escape: a second write replaces rather than throwing, so running the middleware twice cannot fail a request.                                                |
-| Plugin middleware registration | `packages/common/src/plugin.ts:503`                                                                          | `IPluginContext.middleware: IMiddlewareApi` — `add(fn, { priority, name })`.                                                                                                             |
-| Self-registering neighbours    | `session-plugin/src/plugin/session-plugin.ts:121-127`                                                        | `SessionPlugin` adds its session middleware at 260 and form CSRF at 275 from `register()`; `metrics-plugin.ts:85`, `telemetry-plugin.ts:213`, `multi-tenancy-plugin.ts:278` do the same. |
-| Starters compose separately    | `starters/rest-starter/src/app.ts`, `microservice-starter/src/app.ts:63`, `full-stack-starter/src/app.ts:84` | Each calls `createApplication` itself and adds only `errorHandler`; none adds `authMiddleware`.                                                                                          |
-| Starter `auth` arm             | `packages/starters/rest-starter/src/options.ts:114-120`                                                      | JSDoc: "supply `jwt` alone for a JWT-only application" — true today, and the only guidance on the arm.                                                                                   |
-| `userContext` bridge           | `packages/react-router-plugin/src/handler/load-context.ts:30`                                                | `context.set(userContext, ctx.request.user)` — so SSR routes see a principal only if the auth middleware ran before the catch-all.                                                       |
-| Session strategy               | `packages/auth-plugin/src/strategies/session-strategy.ts`                                                    | Reads through `ISessionService.fromHeaders`; does not need the session middleware to have run, so its position relative to 260 is not load-bearing for correctness.                      |
+| Reference                      | Source (file:line)                                                                                           | Verified surface / fact                                                                                                                                                                                                          |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthPluginOptions.jwt`        | `packages/auth-plugin/src/interfaces/index.ts:91`                                                            | `readonly jwt: JwtOptions` — required, documented "Required."                                                                                                                                                                    |
+| Construction check             | `packages/auth-plugin/src/plugin/auth-plugin.ts:49`                                                          | Throws unless `jwt.secret` or both `jwt.privateKey`/`jwt.publicKey` are set; `options.jwt` is dereferenced unconditionally at `:49`, `:55`, `:87-100`, `:116-123`.                                                               |
+| `provides`                     | `packages/auth-plugin/src/plugin/auth-plugin.ts:60`                                                          | `CAPABILITIES.JWT` and `CAPABILITIES.AUTH` always; `AUTHORIZATION` only when `rbac` is set — the conditional-provides precedent this plan follows.                                                                               |
+| Strategy chain                 | `packages/auth-plugin/src/plugin/auth-plugin.ts:106-167`                                                     | JWT strategy pushed unconditionally ("always present"), then api-key, session, caller strategies; duplicate names throw.                                                                                                         |
+| `authMiddleware`               | `packages/auth-plugin/src/middleware/auth-middleware.ts`                                                     | Resolves `CAPABILITIES.AUTH` per request, calls `authenticate`, writes through `replacePrincipal` when non-null, ALWAYS calls `next()`; a strategy throw is swallowed and `next()` runs.                                         |
+| `replacePrincipal`             | `packages/common/src/request-identity.ts:161`                                                                | The M71 explicit-replacement escape: a second write replaces rather than throwing, so running the middleware twice cannot fail a request.                                                                                        |
+| Plugin middleware registration | `packages/common/src/plugin.ts:503`                                                                          | `IPluginContext.middleware: IMiddlewareApi` — `add(fn, { priority, name })`.                                                                                                                                                     |
+| Self-registering neighbours    | `session-plugin/src/plugin/session-plugin.ts:121-127`                                                        | `SessionPlugin` adds its session middleware at 260 and form CSRF at 275 from `register()`; `metrics-plugin.ts:85`, `telemetry-plugin.ts:213`, `multi-tenancy-plugin.ts:278` and `http-security-plugin.ts` (120–270) do the same. |
+| Starters compose separately    | `starters/rest-starter/src/app.ts`, `microservice-starter/src/app.ts:63`, `full-stack-starter/src/app.ts:84` | Each calls `createApplication` itself and adds only `errorHandler`; none adds `authMiddleware`.                                                                                                                                  |
+| Starter `auth` arm             | `packages/starters/rest-starter/src/options.ts:114-120`                                                      | JSDoc: "supply `jwt` alone for a JWT-only application" — true today, and the only guidance on the arm.                                                                                                                           |
+| `userContext` bridge           | `packages/react-router-plugin/src/handler/load-context.ts:30`                                                | `context.set(userContext, ctx.request.user)` — so SSR routes see a principal only if the auth middleware ran before the catch-all.                                                                                               |
+| Session strategy               | `packages/auth-plugin/src/strategies/session-strategy.ts`                                                    | Reads through `ISessionService.fromHeaders`; does not need the session middleware to have run, so its position relative to 260 is not load-bearing for correctness.                                                              |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                                                                                               | Resolution (picked side)                                         | Doc deliverable (same PR)                                                                                                                          |
-| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C1 | `ARCHITECTURE.md` §10 says "no first-party middleware registers itself globally at the number this table names — the application (or a starter) adds it". Source contradicts it TODAY: session (260), CSRF form (275), metrics (20), telemetry (30) and tenant (40) all self-register. | Source wins. After this milestone auth (300) self-registers too. | Rewrite that paragraph to name which rows are self-registered and which the application adds (error handler).                                      |
-| C2 | `docs/plugin-architecture.md` "Middleware Priorities" lists `authMiddleware` at **25** (and validation at 35, cache at 15), while `ARCHITECTURE.md` §10 and every example use **300**.                                                                                                 | 300 (source, ARCHITECTURE, READMEs).                             | Correct the guide's table against the same values `packages/cli/test/integration/middleware-bands.test.ts`-style checks read from source.          |
-| C3 | `AuthPluginOptions.jwt` is documented "Required." in source, README and `PUBLIC_API.md`; the starter arm says "supply `jwt` alone for a JWT-only application".                                                                                                                         | `jwt` becomes optional.                                          | Update `interfaces/index.ts` JSDoc, `packages/auth-plugin/README.md`, `PUBLIC_API.md` (AuthPlugin section), `rest-starter/src/options.ts:114-120`. |
-| C4 | Five doc sites instruct `app.middleware.add(authMiddleware(), { priority: 300 })` (`auth-plugin/src/index.ts:24`, `plugin/auth-plugin.ts:44`, `middleware/auth-middleware.ts:25`, `auth-plugin/README.md:74`, `PUBLIC_API.md:2401`).                                                   | The call becomes unnecessary and double-runs.                    | Remove it from every example; add the opt-out example to the README and `PUBLIC_API.md`.                                                           |
-| C5 | `docs/plugins.md:405` names `CAPABILITIES.AUTHENTICATION`, which does not exist; the constant is `CAPABILITIES.AUTH` (`'authentication'`, `packages/common/src/tokens.ts:57`).                                                                                                         | Source wins.                                                     | Correct the guide line.                                                                                                                            |
+| #  | Conflict                                                                                                                                                                                                                                                                                                        | Resolution (picked side)                                         | Doc deliverable (same PR)                                                                                                                                                                                                                 |
+| -- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1 | `ARCHITECTURE.md` §10 says "no first-party middleware registers itself globally at the number this table names — the application (or a starter) adds it". Source contradicts it TODAY: session (260), CSRF form (275), metrics (20), telemetry (30), tenant (40) and http-security (120–270) all self-register. | Source wins. After this milestone auth (300) self-registers too. | Rewrite that paragraph to name which rows are self-registered and which the application adds (error handler).                                                                                                                             |
+| C2 | `docs/plugin-architecture.md` "Middleware Priorities" lists `authMiddleware` at **25** (and validation at 35, cache at 15), while `ARCHITECTURE.md` §10 and every example use **300**.                                                                                                                          | 300 (source, ARCHITECTURE, READMEs).                             | Correct the guide's table against the values the plugins register in source (metrics 20, telemetry 30, tenant 40, http-security 120–270, session 260/275, auth 300). No test reads this guide, so the table is checked by hand in review. |
+| C3 | `AuthPluginOptions.jwt` is documented "Required." in source, README and `PUBLIC_API.md`; the starter arm says "supply `jwt` alone for a JWT-only application".                                                                                                                                                  | `jwt` becomes optional.                                          | Update `interfaces/index.ts` JSDoc, `packages/auth-plugin/README.md`, `PUBLIC_API.md` (AuthPlugin section), `rest-starter/src/options.ts:114-120`.                                                                                        |
+| C4 | Five doc sites instruct `app.middleware.add(authMiddleware(), { priority: 300 })` (`auth-plugin/src/index.ts:24`, `plugin/auth-plugin.ts:44`, `middleware/auth-middleware.ts:25`, `auth-plugin/README.md:74`, `PUBLIC_API.md:2401`).                                                                            | The call becomes unnecessary and double-runs.                    | Remove it from every example; add the opt-out example to the README and `PUBLIC_API.md`.                                                                                                                                                  |
+| C5 | `docs/plugins.md:405` names `CAPABILITIES.AUTHENTICATION`, which does not exist; the constant is `CAPABILITIES.AUTH` (`'authentication'`, `packages/common/src/tokens.ts:57`).                                                                                                                                  | Source wins.                                                     | Correct the guide line.                                                                                                                                                                                                                   |
 
 ## 3. Design decisions
 
@@ -63,7 +63,9 @@ unless the application also remembers a hand-written `app.middleware.add(...)` l
 
 - **Decision:** After the chain is assembled in `register()`, zero strategies throws
   `AuthPluginConfigurationError` naming `jwt`, `apiKey`, `session` and `strategies`. It is thrown at
-  `register()`, not construction, because caller strategies are only known there.
+  `register()`, not construction, because caller strategies are only known there. Each later letter
+  that adds a chain member (100b `issuers`, 100c `signIn`) extends the message and its test, so the
+  refusal always names every way to configure a strategy.
 - **Why:** A plugin that can authenticate nothing is a configuration mistake whose only symptom
   would be every request answering `401`. `local` alone is refused too: it verifies credentials for
   a login form but cannot recognise the next request.
@@ -71,16 +73,30 @@ unless the application also remembers a hand-written `app.middleware.add(...)` l
 
 ### 3.3 The plugin registers `authMiddleware()`
 
-- **Decision:** New option `middleware?: false | { readonly priority?: number }`. Default: the
-  plugin calls `ctx.middleware.add(authMiddleware(), { priority: 300, name: 'auth' })` in
-  `register()`. `false` registers nothing (for an application attaching it per route). A supplied
-  priority must be a finite integer, else construction throws.
+- **Decision:** New option
+  `middleware?: false | { readonly priority?: number; readonly exclude?: readonly PathPattern[] }`.
+  Default: the plugin calls
+  `ctx.middleware.add(authMiddleware(), { priority: AUTH_MIDDLEWARE_PRIORITY, name: 'auth' })` in
+  `register()`, where `AUTH_MIDDLEWARE_PRIORITY = 300` is a module constant (the `session-plugin`
+  `MIDDLEWARE_PRIORITY` precedent), not a literal repeated at each site. `false` registers nothing
+  (for an application attaching it per route). A supplied priority must be a finite integer, else
+  construction throws. `exclude` skips the strategy chain for matching paths through
+  `createPathMatcher` (`common`, M90a).
+- **`exclude` defaults to NOTHING, deliberately unlike the rate limiter.** Running globally means
+  every Kubernetes probe and metrics scrape now runs the chain, and an `apiKey.validate` or a
+  store-strategy session read costs a backend lookup per probe. But the rate limiter's operational
+  default (`DEFAULT_RATE_LIMIT_EXCLUDED_PATHS`) cannot be reused here: an application that guards
+  `/metrics` with `requireAuth()` would then get a permanent `401` there, with no error anywhere —
+  the silent failure this letter exists to remove. The README shows
+  `exclude: DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` as the recommended setting for applications with
+  backend-backed strategies and unguarded operational routes.
 - **Why:** Three reasons from §1 — the starters compose separately, neighbours self-register, and
   the middleware never rejects. Fixing it in the starters would leave every non-starter composition
   broken.
 - **Test home:** `test/integration/auth-middleware-registration.test.ts` drives a real kernel
   application with NO hand-written add and asserts `ctx.request.user` is populated; the opt-out case
-  asserts it is not.
+  asserts it is not; an excluded path invokes no strategy (a recording strategy counts calls) and
+  the default excludes nothing (`/metrics` behind `requireAuth()` answers 200 with credentials).
 
 ### 3.4 Double registration is harmless and documented
 
@@ -103,10 +119,11 @@ unless the application also remembers a hand-written `app.middleware.add(...)` l
 
 ### 4.1 Options — every option names its consumer
 
-| Option       | Consumer                              | Behavior (per implementation)                                              |
-| ------------ | ------------------------------------- | -------------------------------------------------------------------------- |
-| `jwt`        | `AuthPlugin` factory and `register()` | Absent → no JWT service, capability or strategy (§3.1).                    |
-| `middleware` | `register()` → `ctx.middleware.add`   | Default adds at 300; `{ priority }` moves it; `false` adds nothing (§3.3). |
+| Option               | Consumer                              | Behavior (per implementation)                                              |
+| -------------------- | ------------------------------------- | -------------------------------------------------------------------------- |
+| `jwt`                | `AuthPlugin` factory and `register()` | Absent → no JWT service, capability or strategy (§3.1).                    |
+| `middleware`         | `register()` → `ctx.middleware.add`   | Default adds at 300; `{ priority }` moves it; `false` adds nothing (§3.3). |
+| `middleware.exclude` | the registered middleware             | Matching paths skip the chain; default none (§3.3).                        |
 
 ## 5. Implementation files
 
@@ -172,6 +189,7 @@ remembered to cover" to "every request", and a JWT-less configuration becomes le
 | Global authentication could reject requests that used to pass.                | `authMiddleware` never rejects; guards decide. Asserted by the opt-out/duplicate tests.              |
 | A misconfigured plugin could silently authenticate nobody.                    | Empty chain refused at `register()` (§3.2).                                                          |
 | Priority lower than the session could hide a session principal.               | Session strategy reads headers directly, so order is not a correctness dependency; default 300 kept. |
+| An excluded path could silently disable a guard on it.                        | `exclude` defaults to none; a guarded operational route keeps working (§3.3).                        |
 | Removing `jwt` could leave `RefreshTokenService` issuing unverifiable tokens. | `RefreshTokenOptions.jwt` is required; it cannot be constructed without an `IJwtService`.            |
 
 The implementation audit verifies that with `jwt` absent no JWT is accepted from an `Authorization`
