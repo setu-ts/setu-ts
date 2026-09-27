@@ -74,9 +74,10 @@ All notable changes to this project are documented here. The format follows
   `unsupported` batch without a request when the negotiated manifest lacks the inspector. Principal
   identifiers, role and permission values, request paths and error text never reach collector state;
   a decision whose requested rule lacks an approved alias is dropped (`droppedUnapproved`), while an
-  unapproved granting role is only omitted from `viaRoleAlias`; the option is validated when
-  `AuthPlugin(...)` is called, with or without `rbac`; explanations are session-local and grant no
-  discovery or connection authority.
+  unapproved granting role is only omitted from `viaRoleAlias`; a compound's alias list is
+  de-duplicated, so a request repeating a rule never exceeds 128 aliases; the option is validated
+  when `AuthPlugin(...)` is called, with or without `rbac`; explanations are session-local and grant
+  no discovery or connection authority.
 
 - **Configuration provenance (M98e): value-free provenance for approved keys, served through the
   diagnostics connector.** `ConfigPlugin` and `loadConfig` accept a `diagnostics` option

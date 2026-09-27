@@ -369,14 +369,22 @@ export class AuthorizationObservationCollector
     if (this.#latched !== null) {
       return;
     }
+    // The DISTINCT requested rules, in first-requested order. Aliases are
+    // unique within a map of at most 128 entries, so the list can never
+    // exceed the wire's 128-alias bound however many duplicates the caller
+    // passed — a duplicated request must not poison every later read.
     const ruleAliases: string[] = [];
+    const seen = new Set<string>();
     for (const role of requested) {
       const alias = this.#policy.roleAlias.get(role);
       if (alias === undefined) {
         this.#drop();
         return;
       }
-      ruleAliases.push(alias);
+      if (!seen.has(alias)) {
+        seen.add(alias);
+        ruleAliases.push(alias);
+      }
     }
     const steps: AuthorizationDecisionStep[] = [];
     for (const step of evaluated) {
@@ -420,14 +428,22 @@ export class AuthorizationObservationCollector
     if (this.#latched !== null) {
       return;
     }
+    // The DISTINCT requested rules, in first-requested order. Aliases are
+    // unique within a map of at most 128 entries, so the list can never
+    // exceed the wire's 128-alias bound however many duplicates the caller
+    // passed — a duplicated request must not poison every later read.
     const ruleAliases: string[] = [];
+    const seen = new Set<string>();
     for (const permission of requested) {
       const alias = this.#policy.permissionAlias.get(permission);
       if (alias === undefined) {
         this.#drop();
         return;
       }
-      ruleAliases.push(alias);
+      if (!seen.has(alias)) {
+        seen.add(alias);
+        ruleAliases.push(alias);
+      }
     }
     const steps: AuthorizationDecisionStep[] = [];
     for (const step of evaluated) {

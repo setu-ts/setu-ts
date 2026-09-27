@@ -1285,7 +1285,8 @@ export interface AuthorizationDecisionStep {
  * is never a replay. `id` is an opaque, per-source sequential `d<N>` identifier
  * carrying no rule or principal identity. `result` is the authoritative
  * decision the service returned. `ruleAliases` is the COMPLETE requested rule
- * set — every one of them approved, or the whole decision was dropped before
+ * set, de-duplicated in first-requested order (so at most 128 entries) —
+ * every one of them approved, or the whole decision was dropped before
  * buffering — while `steps` holds at most 16 EVALUATED steps: a single check
  * carries exactly one, a compound carries one per input actually evaluated,
  * and unevaluated compound branches have no step at all. `stepsEvaluated` is
@@ -1308,7 +1309,7 @@ export interface AuthorizationDecisionObservation {
   readonly operation: AuthorizationDecisionOperation;
   /** The authoritative decision the service returned. */
   readonly result: boolean;
-  /** The complete requested rule set, every entry an approved alias. */
+  /** The complete set of distinct requested rules, every entry an approved alias. */
   readonly ruleAliases: readonly string[];
   /** Evaluated steps, at most 16; one per input actually evaluated. */
   readonly steps: readonly AuthorizationDecisionStep[];

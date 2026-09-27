@@ -32,9 +32,11 @@ const MAX_AUTHORIZATION_STEPS = 16;
 
 /**
  * The complete requested-rule set a decision carries. `ruleAliases` is the
- * COMPLETE requested rule list (plan §3.3: every one approved, or the whole
- * decision was dropped), bounded by the collector's approved-map ceiling —
- * NOT by the 16-step retention budget, which bounds `steps` only. A truncated
+ * COMPLETE set of DISTINCT requested rules (plan §3.3: every one approved, or
+ * the whole decision was dropped). The collector de-duplicates it, and
+ * aliases are unique within a map of at most 128 entries, so it is bounded by
+ * that approved-map ceiling however many duplicates a caller passed — NOT by
+ * the 16-step retention budget, which bounds `steps` only. A truncated
  * compound over 16 requested rules must pass the wire with its full alias
  * list and `stepsTruncated: true`, not be refused wholesale.
  */
@@ -120,7 +122,9 @@ function copyBounded(value: unknown, max: number): unknown[] | null {
  * `permission`) names exactly one rule and evaluated exactly one step. A
  * compound may name NO rule — `hasAnyRole(principal, [])` is a real,
  * unsatisfied decision with zero steps, and refusing it would turn every
- * later read into `collection-failed` — and otherwise evaluates at most as many steps as it requested, retains
+ * later read into `collection-failed`. A compound's evaluated count is NOT
+ * bounded by its distinct rule count: a request repeating a rule evaluates it
+ * once per occurrence. It retains
  * `min(evaluated, 16)` of them, and is `stepsTruncated` EXACTLY when it
  * evaluated more than 16 — so a partial step list can never be presented as
  * the complete explanation, and a complete one never claims truncation.
@@ -142,7 +146,7 @@ function isConsistentStepCount(
   if (operation === 'role' || operation === 'permission') {
     return ruleCount === 1 && stepCount === 1 && stepsEvaluated === 1 && !stepsTruncated;
   }
-  return stepsEvaluated <= ruleCount &&
+  return (ruleCount > 0 || stepsEvaluated === 0) &&
     stepCount === Math.min(stepsEvaluated, MAX_AUTHORIZATION_STEPS) &&
     stepsTruncated === (stepsEvaluated > MAX_AUTHORIZATION_STEPS);
 }

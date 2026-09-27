@@ -330,8 +330,8 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
         }),
       ],
       [
-        'a compound that evaluated more steps than it requested rules',
-        compoundDecision(1, sixteen, { stepsEvaluated: 20, stepsTruncated: true }),
+        'a compound that names no rule yet claims evaluated steps',
+        compoundDecision(1, [], { ruleAliases: [], stepsEvaluated: 1 }),
       ],
       [
         'an evaluated count above 16 with truncation denied',
@@ -355,6 +355,27 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
       });
       const validated = readAuthorizationSourceBatch(batch, INSTANCE, 0, 128);
       expect(validated!.decisions[0]!.stepsEvaluated).toBe(0);
+      expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE)))
+        .toBe(true);
+    });
+
+    it('accepts a compound whose repeated rule evaluated more steps than distinct rules', () => {
+      // `requireAnyRole(['a', 'a', …])` evaluates each occurrence while the
+      // collector names the rule once (Finding #2, round 3).
+      const repeated = Array.from({ length: 16 }, () => ({ ruleAlias: 'A', reason: 'not-held' }));
+      const batch = sourceBatch(0, {
+        decisions: [
+          compoundDecision(1, repeated, {
+            ruleAliases: ['A'],
+            stepsEvaluated: 129,
+            stepsTruncated: true,
+          }),
+        ],
+        next: 1,
+        lost: 0,
+      });
+      const validated = readAuthorizationSourceBatch(batch, INSTANCE, 0, 128);
+      expect(validated).not.toBeNull();
       expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE)))
         .toBe(true);
     });

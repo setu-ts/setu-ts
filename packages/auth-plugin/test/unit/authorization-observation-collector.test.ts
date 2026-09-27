@@ -142,6 +142,28 @@ describe('compileAuthorizationDiagnosticsOptions (M98h)', () => {
 });
 
 describe('AuthorizationObservationCollector (M98h)', () => {
+  it('de-duplicates a repeated request so its alias list never exceeds the approved ceiling', () => {
+    // Round-3 Finding #2: 129 copies of one approved rule used to produce a
+    // 129-alias list the wire refuses, turning every later read into
+    // collection-failed.
+    const { collector, rbac } = makeCollector();
+    attachAuthorizationObserver(rbac, collector);
+    expect(rbac.hasAnyRole(nobody, Array.from({ length: 129 }, () => 'admin'))).toBe(false);
+    expect(
+      rbac.hasAllPermissions(admin, [
+        ...Array.from({ length: 130 }, () => 'posts.read'),
+        'posts.write',
+        'posts.read',
+      ]),
+    ).toBe(true);
+    const [anyRole, allPermissions] = collector.read('instance', 0).decisions;
+    expect(anyRole!.ruleAliases).toEqual(['A']);
+    expect([anyRole!.stepsEvaluated, anyRole!.stepsTruncated, anyRole!.steps.length])
+      .toEqual([129, true, 16]);
+    expect(allPermissions!.ruleAliases).toEqual(['R', 'W']);
+    expect(allPermissions!.stepsEvaluated).toBe(132);
+  });
+
   it('retains an approved role check with its alias, reason and policy revision', () => {
     const { collector, rbac } = makeCollector();
     attachAuthorizationObserver(rbac, collector);

@@ -82,6 +82,10 @@ async function startAuthorizationApplication(): Promise<App> {
           ctx.middleware.add(authMiddleware(), { name: 'auth', priority: 100 });
           const ok = (reqCtx: IRequestContext) => reqCtx.response.json({ ok: true });
           ctx.router.get('/admin', { middleware: [requireRole('admin')], handler: ok });
+          ctx.router.get('/repeated', {
+            middleware: [requireAnyRole(Array.from({ length: 129 }, () => 'admin'))],
+            handler: ok,
+          });
           ctx.router.get('/any-role', {
             middleware: [requireAnyRole(['admin', 'user'])],
             handler: ok,
@@ -163,6 +167,27 @@ describe('Authorization decision explanations (M98h) — end to end', () => {
       expect(serialized.includes(CLAIM_CANARY)).toBe(false);
       expect(serialized.includes(PATH_CANARY)).toBe(false);
       expect(serialized.includes('Bearer')).toBe(false);
+    } finally {
+      client.close();
+      await app.stop();
+    }
+  });
+
+  it('a request repeating one rule past 128 times stays readable (round-3 Finding #2)', async () => {
+    const { app, client, jwt, httpPort } = await startAuthorizationApplication();
+    try {
+      const token = await jwt.sign({ sub: 'plain-user', roles: ['user'] });
+      const denied = await fetch(`http://127.0.0.1:${httpPort}/repeated`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      await denied.body?.cancel();
+      expect(denied.status).toBe(403);
+      const first = await client.authorization(0);
+      expect(first.state).toBe('ready');
+      expect(first.decisions).toHaveLength(1);
+      expect(first.decisions[0]!.ruleAliases).toEqual(['A']);
+      expect(first.decisions[0]!.stepsEvaluated).toBe(129);
+      expect((await client.authorization(0)).state).toBe('ready');
     } finally {
       client.close();
       await app.stop();
