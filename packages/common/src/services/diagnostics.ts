@@ -1392,10 +1392,12 @@ export type EventObservationOperation = 'publish' | 'handler';
  * observed. This is the owning plugin's answer, distinct from
  * `unsupported`. `no-data` — observation is active and no approved alias
  * has been observed yet. `ready` — at least one retained record is fresh.
- * `stale` — records exist but every one is older than the retention window.
- * `collection-failed` is a CONNECTOR-side answer only (the registered source
- * threw or answered a shape that failed validation); a source never reports
- * it about itself.
+ * `stale` — records exist but every one is older than the 30-second stale
+ * threshold (records are dropped at the 60-second retention window).
+ * `collection-failed` — either the source latched it itself (its monotonic
+ * clock or bookkeeping failed; capture stops until the source is recreated)
+ * or the connector substituted it for a source that threw or answered a
+ * shape that failed validation.
  *
  * @since 0.8.0
  */
@@ -1428,7 +1430,10 @@ export type EventDiagnosticsCoverage = 'owned-instance';
  * applies only to `publish`). `count` counts settled observations, not
  * in-flight calls. `lastDurationMs` is the integer millisecond duration of
  * the most recently settled observation, or `null` before the first one.
- * `ageMs` is monotonic time since that settlement. Handler identities and
+ * `ageMs` is monotonic time since that settlement (since the most recent
+ * start while nothing has settled yet). `started` is counted when a boundary
+ * begins, so `started - count` is the number still in flight — a hung
+ * handler is visible before it settles. Handler identities and
  * names are excluded by construction: handlers of one approved event type
  * aggregate under the type's single approved alias.
  *
@@ -1441,7 +1446,7 @@ export interface EventDiagnosticsRecord {
   readonly operation: EventObservationOperation;
   /** Settled observations counted since the source was created. */
   readonly count: number;
-  /** Handler invocations started (included in `count`). */
+  /** Boundaries started, counted at the start; `started - count` are in flight. */
   readonly started: number;
   /** Observations that completed normally. */
   readonly succeeded: number;
@@ -1487,7 +1492,7 @@ export interface EventDiagnosticsSnapshot {
  * `ready` when any source is `ready`, else the first of
  * `collection-failed`/`stale`/`no-data`/`disabled` found among the sources;
  * per-source states stay visible in {@linkcode sources}. `sourceId` is a
- * connector-assigned opaque `e<N>` identifier in registration order.
+ * session-local positional identifier `s1`…`s16` in registration order.
  *
  * @since 0.8.0
  */
@@ -1500,7 +1505,7 @@ export interface EventDiagnosticsResponse {
   readonly state: DiagnosticsInspectorState;
   /** One entry per registered source, in registration order. */
   readonly sources: readonly {
-    /** Connector-assigned opaque `e<N>` source identifier. */
+    /** Session-local positional `s<N>` source identifier. */
     readonly sourceId: string;
     /** The source's snapshot, or a value-free `collection-failed` one. */
     readonly snapshot: EventDiagnosticsSnapshot;

@@ -2030,6 +2030,7 @@ describe('Connector handler — event observation operation (M98j)', () => {
       queues: new QueueObservationMerger([], clock),
       traces: null,
       eventSources: sources,
+      cacheSources: [],
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
       healthSource: null,
@@ -2075,7 +2076,7 @@ describe('Connector handler — event observation operation (M98j)', () => {
     expect(isEventResponseProjection(view.body)).toBe(true);
     const sources = view.body.sources as { sourceId: string; snapshot: { alias: string } }[];
     expect(sources.length).toEqual(1);
-    expect(sources[0]!.sourceId).toEqual('e1');
+    expect(sources[0]!.sourceId).toEqual('s1');
     expect(sources[0]!.snapshot.alias).toEqual('bus');
     // The response MAC covers the exact served bytes.
     const mac = view.headers.get('x-setu-mac')!;
@@ -2092,6 +2093,62 @@ describe('Connector handler — event observation operation (M98j)', () => {
         digest,
       ]),
     ).toBe(true);
+  });
+
+  it('collapses an over-budget body to the fixed collection-failed response, never a 503', async () => {
+    const big = (index: number) => {
+      const alias = String(index).padEnd(64, '"');
+      return eventSource({
+        state: 'ready',
+        alias,
+        coverage: 'owned-instance',
+        dropped: 0,
+        records: Array.from({ length: 64 }, (_, slot) => ({
+          alias: `${slot}`.padEnd(64, '"'),
+          operation: slot % 2 === 0 ? 'publish' : 'handler',
+          count: Number.MAX_SAFE_INTEGER,
+          started: Number.MAX_SAFE_INTEGER,
+          succeeded: Number.MAX_SAFE_INTEGER,
+          failed: Number.MAX_SAFE_INTEGER,
+          noSubscribers: Number.MAX_SAFE_INTEGER,
+          lastDurationMs: Number.MAX_SAFE_INTEGER,
+          ageMs: Number.MAX_SAFE_INTEGER,
+        })),
+      });
+    };
+    const harness = await eventHarness(Array.from({ length: 16 }, (_, index) => big(index)));
+    const view = await sendEvent(harness);
+    expect(view.status).toEqual(200);
+    expect(view.body).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'collection-failed',
+      sources: [],
+    });
+  });
+
+  it('reads each snapshot field once, so a flipping alias getter cannot reach the wire', async () => {
+    let aliasReads = 0;
+    const flipping = {
+      state: 'ready',
+      get alias() {
+        aliasReads += 1;
+        return aliasReads === 1 ? 'bus' : 'bad\u0007alias';
+      },
+      coverage: 'owned-instance',
+      records: [],
+      dropped: 0,
+    };
+    const harness = await eventHarness([
+      eventSource(flipping),
+      eventSource(eventSnapshot('other')),
+    ]);
+    const view = await sendEvent(harness);
+    expect(view.status).toEqual(200);
+    const sources = view.body.sources as { sourceId: string; snapshot: { alias: string } }[];
+    expect(sources.map((entry) => entry.sourceId)).toEqual(['s1', 's2']);
+    expect(sources[0]!.snapshot.alias).toEqual('bus');
+    expect(aliasReads).toEqual(1);
   });
 
   it('answers a typed unsupported response when no event source is registered', async () => {

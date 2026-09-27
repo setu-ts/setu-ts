@@ -132,9 +132,22 @@ describe('projectEventSource and isEventResponseProjection (M98j wire validation
       version: 1,
       instanceId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301',
       state: 'ready',
-      sources: [projectEventSource('e1', validSnapshot())],
+      sources: [projectEventSource('s1', validSnapshot())],
     };
     expect(isEventResponseProjection(projected)).toBe(true);
+  });
+
+  it('requires positional s<N> source ids', () => {
+    const response = (ids: string[]) => ({
+      version: 1,
+      instanceId: 'i',
+      state: 'ready',
+      sources: ids.map((id) => projectEventSource(id, validSnapshot())),
+    });
+    expect(isEventResponseProjection(response(['s1', 's2']))).toBe(true);
+    expect(isEventResponseProjection(response(['s2']))).toBe(false);
+    expect(isEventResponseProjection(response(['s1', 's1']))).toBe(false);
+    expect(isEventResponseProjection(response(['e1']))).toBe(false);
   });
 
   it('refuses key drift, a bad version, a bad state, or a hostile sourceId', () => {
@@ -170,7 +183,7 @@ describe('projectEventSource and isEventResponseProjection (M98j wire validation
       (_, index) => projectEventSource(`e${index + 1}`, validSnapshot()),
     );
     expect(isEventResponseProjection({ ...base, sources })).toBe(false);
-    const bad = projectEventSource('e1', validSnapshot());
+    const bad = projectEventSource('s1', validSnapshot());
     (bad.snapshot as Record<string, unknown>)['records'] = [
       { ...validSnapshot().records[0]!, count: 'many' },
     ];

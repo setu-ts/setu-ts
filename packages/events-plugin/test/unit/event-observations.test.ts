@@ -154,11 +154,17 @@ describe('EventObservationCollector (M98j bounded capture)', () => {
   it('aggregates observations per (alias, operation) and reports ready', () => {
     const clock = new MutableClock();
     const observer = collector(clock);
-    observer.observe('users', 'publish', true, true, 2);
-    clock.advance(5);
-    observer.observe('users', 'handler', true, true, 1);
-    clock.advance(5);
-    observer.observe('users', 'handler', true, false, 3);
+    const publishAt = observer.begin('users', 'publish');
+    clock.advance(2);
+    observer.end('users', 'publish', publishAt, true);
+    clock.advance(3);
+    const firstAt = observer.begin('users', 'handler');
+    clock.advance(1);
+    observer.end('users', 'handler', firstAt, true);
+    clock.advance(1);
+    const secondAt = observer.begin('users', 'handler');
+    clock.advance(3);
+    observer.end('users', 'handler', secondAt, false);
     const snapshot = observer.snapshot();
     expect(snapshot.state).toBe('ready');
     expect(snapshot.alias).toBe('bus');
@@ -175,7 +181,7 @@ describe('EventObservationCollector (M98j bounded capture)', () => {
       failed: 0,
       noSubscribers: 0,
       lastDurationMs: 2,
-      ageMs: 10,
+      ageMs: 8,
     });
     expect(byOperation['handler']).toEqual({
       alias: 'users',
@@ -194,7 +200,7 @@ describe('EventObservationCollector (M98j bounded capture)', () => {
   it('counts a no-subscriber publication as succeeded with noSubscribers', () => {
     const clock = new MutableClock();
     const observer = collector(clock);
-    observer.observe('users', 'publish', true, true, 0, true);
+    observer.observe('users', 'publish', true, 0, true);
     const [record] = observer.snapshot().records;
     expect(record!.noSubscribers).toBe(1);
     expect(record!.succeeded).toBe(1);
@@ -204,7 +210,7 @@ describe('EventObservationCollector (M98j bounded capture)', () => {
   it('expires records after 60s without an observation and clears their counters', () => {
     const clock = new MutableClock();
     const observer = collector(clock);
-    observer.observe('users', 'publish', true, true, 1);
+    observer.observe('users', 'publish', true, 1);
     clock.advance(EVENT_COLLECTOR_LIMITS.retentionMs + 1);
     const snapshot = observer.snapshot();
     expect(snapshot.records).toEqual([]);
@@ -214,7 +220,7 @@ describe('EventObservationCollector (M98j bounded capture)', () => {
   it('reports stale when every retained record is older than 30s', () => {
     const clock = new MutableClock();
     const observer = collector(clock);
-    observer.observe('users', 'publish', true, true, 1);
+    observer.observe('users', 'publish', true, 1);
     clock.advance(EVENT_COLLECTOR_LIMITS.staleMs + 1);
     const snapshot = observer.snapshot();
     expect(snapshot.records.length).toBe(1);
@@ -233,22 +239,22 @@ describe('EventObservationCollector (M98j bounded capture)', () => {
       events: { t: 'alias' },
     });
     const observer = new EventObservationCollector(policy, throwingRuntime);
-    observer.observe('alias', 'publish', true, true, 1);
+    observer.observe('alias', 'publish', true, 1);
     const snapshot = observer.snapshot();
     expect(snapshot.state).toBe('collection-failed');
     expect(snapshot.records).toEqual([]);
     expect(snapshot.alias).toBe('bus');
     // A latched source stays failed: no capture resumes.
-    observer.observe('alias', 'publish', true, true, 1);
+    observer.observe('alias', 'publish', true, 1);
     expect(observer.snapshot().records).toEqual([]);
   });
 
   it('ignores every call after close and answers disabled with a null alias', () => {
     const clock = new MutableClock();
     const observer = collector(clock);
-    observer.observe('users', 'publish', true, true, 1);
+    observer.observe('users', 'publish', true, 1);
     observer.close();
-    observer.observe('users', 'publish', true, true, 1);
+    observer.observe('users', 'publish', true, 1);
     const snapshot = observer.snapshot();
     expect(snapshot.state).toBe('disabled');
     expect(snapshot.alias).toBeNull();
@@ -264,15 +270,15 @@ describe('EventObservationCollector (M98j bounded capture)', () => {
     }
     const observer = collector(clock, events);
     for (let index = 0; index < 33; index++) {
-      observer.observe(`alias${index}`, 'publish', true, true, 1);
-      observer.observe(`alias${index}`, 'handler', true, true, 1);
+      observer.observe(`alias${index}`, 'publish', true, 1);
+      observer.observe(`alias${index}`, 'handler', true, 1);
     }
     const snapshot = observer.snapshot();
     expect(snapshot.records.length).toBe(EVENT_COLLECTOR_LIMITS.recordSlots);
     expect(snapshot.dropped).toBe(2);
     // Existing tuples keep updating after the drop.
     const before = snapshot.records.find((record) => record.alias === 'alias0')!.count;
-    observer.observe('alias0', 'publish', true, true, 1);
+    observer.observe('alias0', 'publish', true, 1);
     const after = observer.snapshot().records.find((record) => record.alias === 'alias0')!.count;
     expect(after).toBe(before + 1);
   });
@@ -280,8 +286,8 @@ describe('EventObservationCollector (M98j bounded capture)', () => {
   it('clamps negative and fractional durations to non-negative integers', () => {
     const clock = new MutableClock();
     const observer = collector(clock);
-    observer.observe('users', 'publish', true, true, -5);
-    observer.observe('users', 'handler', true, true, 2.9);
+    observer.observe('users', 'publish', true, -5);
+    observer.observe('users', 'handler', true, 2.9);
     const records = observer.snapshot().records;
     expect(records.find((record) => record.operation === 'publish')!.lastDurationMs).toBe(0);
     expect(records.find((record) => record.operation === 'handler')!.lastDurationMs).toBe(2);
@@ -296,10 +302,12 @@ describe('InMemoryEventBus with an attached observer (M98j)', () => {
     attachEventObserver(bus, observer);
     const order: string[] = [];
     const unsubscribe = bus.subscribe('user-created', async () => {
+      await Promise.resolve();
       clock.advance(1);
       order.push('first');
     });
     bus.subscribe('user-created', async () => {
+      await Promise.resolve();
       clock.advance(1);
       order.push('second');
     });
@@ -563,5 +571,238 @@ describe('EventsPlugin diagnostics registration (M98j)', () => {
         } as unknown as EventsDiagnosticsOptions,
       })
     ).toThrow(EVENT_COLLECTOR_ERRORS.notEnabled);
+  });
+});
+
+/** Counts unhandled rejections while `run` executes, suppressing each. */
+async function countUnhandled(run: () => Promise<void>): Promise<number> {
+  let unhandled = 0;
+  const listener = (event: PromiseRejectionEvent) => {
+    unhandled++;
+    event.preventDefault();
+  };
+  globalThis.addEventListener('unhandledrejection', listener);
+  try {
+    await run();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  } finally {
+    globalThis.removeEventListener('unhandledrejection', listener);
+  }
+  return unhandled;
+}
+
+const EVENT = { type: 'user-created', id: 'e', occurredOn: new Date(0), data: 'SECRET' };
+
+describe('Observation never changes dispatch (M98j review fixes)', () => {
+  it('counts a start before settlement, so an in-flight handler is visible', async () => {
+    const clock = new MutableClock();
+    const observer = collector(clock);
+    const bus = new InMemoryEventBus({ async: true, errorHandler: () => {} });
+    attachEventObserver(bus, observer);
+    let release!: () => void;
+    bus.subscribe('user-created', () => new Promise<void>((resolve) => (release = resolve)));
+    await bus.publish(EVENT);
+    const inFlight = observer.snapshot().records.find((r) => r.operation === 'handler')!;
+    expect(inFlight.started).toBe(1);
+    expect(inFlight.count).toBe(0);
+    expect(inFlight.lastDurationMs).toBeNull();
+    release();
+    await bus.whenIdle();
+    const settled = observer.snapshot().records.find((r) => r.operation === 'handler')!;
+    expect(settled.started).toBe(1);
+    expect(settled.count).toBe(1);
+  });
+
+  it('expires a never-settled slot after the retention window', () => {
+    const clock = new MutableClock();
+    const observer = collector(clock);
+    observer.begin('users', 'handler');
+    clock.advance(60_001);
+    expect(observer.snapshot().records).toEqual([]);
+  });
+
+  for (const async of [false, true]) {
+    it(`a throwing clock changes nothing about dispatch (async: ${async})`, async () => {
+      for (let failAt = 1; failAt <= 6; failAt++) {
+        let reads = 0;
+        const runtime = {
+          hrtime: () => {
+            reads++;
+            if (reads >= failAt) throw new Error('clock gone');
+            return reads;
+          },
+        } as unknown as IRuntimeServices;
+        const observer = new EventObservationCollector(
+          compileEventsDiagnosticsPolicy({
+            enabled: true,
+            alias: 'bus',
+            events: { 'user-created': 'users' },
+          }),
+          runtime,
+        );
+        const seen: unknown[] = [];
+        const bus = new InMemoryEventBus({ async, errorHandler: (error) => void seen.push(error) });
+        attachEventObserver(bus, observer);
+        const ran: string[] = [];
+        bus.subscribe('user-created', () => void ran.push('a'));
+        bus.subscribe('user-created', () => void ran.push('b'));
+        await bus.publish(EVENT);
+        await bus.whenIdle();
+        expect(ran).toEqual(['a', 'b']);
+        expect(seen).toEqual([]);
+        expect(observer.snapshot().state).toBe('collection-failed');
+      }
+    });
+  }
+
+  it('a throwing clock never rejects a no-subscriber publish', async () => {
+    const runtime = {
+      hrtime: () => {
+        throw new Error('clock gone');
+      },
+    } as unknown as IRuntimeServices;
+    const observer = new EventObservationCollector(
+      compileEventsDiagnosticsPolicy({
+        enabled: true,
+        alias: 'bus',
+        events: { 'user-created': 'users' },
+      }),
+      runtime,
+    );
+    const bus = new InMemoryEventBus({ async: false, errorHandler: () => {} });
+    attachEventObserver(bus, observer);
+    await bus.publish(EVENT);
+    expect(observer.snapshot().state).toBe('collection-failed');
+  });
+
+  it('an async errorHandler throw stays unhandled and rejects whenIdle, observed or not', async () => {
+    const outcome = async (observed: boolean) => {
+      const bus = new InMemoryEventBus({
+        async: true,
+        errorHandler: () => {
+          throw new Error('errorHandler threw');
+        },
+      });
+      const observer = collector(new MutableClock());
+      if (observed) attachEventObserver(bus, observer);
+      bus.subscribe('user-created', () => {
+        throw new Error('handler');
+      });
+      let idle = 'resolved';
+      const unhandled = await countUnhandled(async () => {
+        await bus.publish(EVENT);
+        await bus.whenIdle().catch(() => (idle = 'rejected'));
+      });
+      return { unhandled, idle, observer };
+    };
+    const plain = await outcome(false);
+    const observed = await outcome(true);
+    expect(observed.idle).toBe(plain.idle);
+    expect(observed.idle).toBe('rejected');
+    const unobservedOnly = await countUnhandled(async () => {
+      const bus = new InMemoryEventBus({
+        async: true,
+        errorHandler: () => {
+          throw new Error('x');
+        },
+      });
+      bus.subscribe('user-created', () => {
+        throw new Error('h');
+      });
+      await bus.publish(EVENT);
+    });
+    const observedOnly = await countUnhandled(async () => {
+      const bus = new InMemoryEventBus({
+        async: true,
+        errorHandler: () => {
+          throw new Error('x');
+        },
+      });
+      attachEventObserver(bus, collector(new MutableClock()));
+      bus.subscribe('user-created', () => {
+        throw new Error('h');
+      });
+      await bus.publish(EVENT);
+    });
+    expect(unobservedOnly).toBe(1);
+    expect(observedOnly).toBe(unobservedOnly);
+    const publish = observed.observer.snapshot().records.find((r) => r.operation === 'publish')!;
+    expect(publish.failed).toBe(1);
+  });
+
+  it('unsubscribing during dispatch runs the same handlers observed as unobserved', async () => {
+    const run = async (observed: boolean) => {
+      const bus = new InMemoryEventBus({ async: false, errorHandler: () => {} });
+      if (observed) attachEventObserver(bus, collector(new MutableClock()));
+      const order: string[] = [];
+      let dropSecond = () => {};
+      bus.subscribe('user-created', () => {
+        order.push('first');
+        dropSecond();
+      });
+      dropSecond = bus.subscribe('user-created', () => void order.push('second'));
+      bus.subscribe('user-created', () => void order.push('third'));
+      await bus.publish(EVENT);
+      return order;
+    };
+    expect(await run(true)).toEqual(await run(false));
+  });
+
+  it('reaches the 64-slot capacity with a valid policy and counts drops', async () => {
+    const events: Record<string, string> = {};
+    for (let index = 0; index < 40; index++) events[`t${index}`] = `a${index}`;
+    const observer = collector(new MutableClock(), events);
+    const bus = new InMemoryEventBus({ async: false, errorHandler: () => {} });
+    attachEventObserver(bus, observer);
+    for (let index = 0; index < 40; index++) {
+      bus.subscribe(`t${index}`, () => {});
+      await bus.publish({ ...EVENT, type: `t${index}` });
+    }
+    const snapshot = observer.snapshot();
+    expect(snapshot.records.length).toBe(64);
+    expect(snapshot.dropped).toBeGreaterThan(0);
+  });
+
+  it('shutdown with a pending handler discards its late settlement', async () => {
+    let closeHook: (() => Promise<void>) | undefined;
+    let registered: IEventDiagnosticsSource | undefined;
+    let bus: InMemoryEventBus | undefined;
+    const ctx = {
+      services: {
+        has: () => false,
+        get: <T>() => undefined as T,
+        register: (key: string, value: unknown) => {
+          if (key === CAPABILITIES.EVENTS_DIAGNOSTICS) {
+            registered = value as IEventDiagnosticsSource;
+          }
+          if (key === CAPABILITIES.EVENTS) bus = value as InMemoryEventBus;
+        },
+      },
+      lifecycle: {
+        onInit: () => {},
+        onClose: (hook: () => Promise<void>) => void (closeHook = hook),
+      },
+      health: { register: () => {} },
+      runtime: clockRuntime(new MutableClock()),
+      logger: undefined,
+    } as unknown as Parameters<ReturnType<typeof EventsPlugin>['register']>[0];
+    const plugin = EventsPlugin({
+      async: true,
+      diagnostics: { enabled: true, alias: 'bus', events: { 'user-created': 'users' } },
+    });
+    await plugin.register(ctx);
+    let release!: () => void;
+    bus!.subscribe('user-created', () => new Promise<void>((resolve) => (release = resolve)));
+    await bus!.publish(EVENT);
+    await closeHook!();
+    release();
+    await bus!.whenIdle();
+    expect(registered!.snapshot()).toEqual({
+      state: 'disabled',
+      alias: null,
+      coverage: 'owned-instance',
+      records: [],
+      dropped: 0,
+    });
   });
 });

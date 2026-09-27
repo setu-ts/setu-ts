@@ -20,7 +20,6 @@ import type {
   EventDiagnosticsSnapshot,
   EventDiagnosticsState,
   EventObservationOperation,
-  IEventDiagnosticsSource,
 } from '@setu-ts/common';
 
 import { hasExactKeys, isDisplayAlias, isRecord } from './protocol.ts';
@@ -28,8 +27,21 @@ import { hasExactKeys, isDisplayAlias, isRecord } from './protocol.ts';
 /** The per-source record-slot budget — the same fixed 64 the collector enforces. */
 const MAX_EVENT_RECORDS = 64;
 
-/** The connector's fixed 16-source bound. */
-const MAX_EVENT_SOURCES = 16;
+/**
+ * The connector's fixed 16-source bound; more registered sources refuse
+ * startup (the M98i cache precedent) rather than being silently dropped.
+ *
+ * @internal
+ */
+export const MAX_EVENT_SOURCES = 16;
+
+/**
+ * The fixed response byte budget; an over-budget body collapses to the
+ * fixed `collection-failed` response rather than a refusal.
+ *
+ * @internal
+ */
+export const MAX_EVENT_RESPONSE_BYTES = 256 * 1024;
 
 const SOURCE_STATES: ReadonlySet<string> = new Set<EventDiagnosticsState>([
   'disabled',
@@ -175,27 +187,28 @@ export function readEventSourceSnapshot(
     ) {
       return null;
     }
-    const state = value.state;
+    // Every field is read EXACTLY once into a local; the checks and the copy
+    // both use the locals, so a getter answering differently on a second
+    // read never reaches the copy.
+    const { state, alias, coverage, dropped } = value;
     if (!isOneOf(state, SOURCE_STATES)) {
       return null;
     }
     // An enabled source always knows its approved alias; `disabled` (the
     // inert source) carries `null`. A `collection-failed` read cannot vouch
-    // for the alias — the connector's own value-free answer carries `null` —
-    // so both `null` and a display alias are admitted there and nothing
-    // else.
+    // for the alias, so both `null` and a display alias are admitted there.
     if (state === 'disabled') {
-      if (value.alias !== null) {
+      if (alias !== null) {
         return null;
       }
     } else if (state === 'collection-failed') {
-      if (value.alias !== null && !isDisplayAlias(value.alias)) {
+      if (alias !== null && !isDisplayAlias(alias)) {
         return null;
       }
-    } else if (!isDisplayAlias(value.alias)) {
+    } else if (!isDisplayAlias(alias)) {
       return null;
     }
-    if (value.coverage !== 'owned-instance' || !isCount(value.dropped)) {
+    if (coverage !== 'owned-instance' || !isCount(dropped)) {
       return null;
     }
     const rawRecords = copyBounded(value.records, MAX_EVENT_RECORDS);
@@ -217,10 +230,10 @@ export function readEventSourceSnapshot(
     }
     return {
       state: state as EventDiagnosticsState,
-      alias: value.alias as string | null,
+      alias: alias as string | null,
       coverage: 'owned-instance',
       records,
-      dropped: value.dropped,
+      dropped,
     };
   } catch {
     return null;
@@ -247,7 +260,7 @@ export function collectionFailedEventSnapshot(): EventDiagnosticsSnapshot {
  * Projects a validated per-source entry into the serialization-ready record
  * — field by field, never a spread.
  *
- * @param sourceId - The connector-assigned `e<N>` identifier
+ * @param sourceId - The connector-assigned `s<N>` identifier
  * @param snapshot - The validated snapshot
  * @returns The projected entry
  * @internal
@@ -285,15 +298,16 @@ const RESPONSE_KEYS: readonly string[] = [
   'sources',
 ];
 const SOURCE_ENTRY_KEYS: readonly string[] = ['sourceId', 'snapshot'];
-/** An opaque source id: the `e` prefix, then a canonical positive decimal. */
-const SOURCE_ID = /^e[1-9][0-9]{0,15}$/;
-
-/** Validates one projected per-source entry against the exact M98j DTO. */
-function isSourceEntryProjection(value: unknown): boolean {
+/**
+ * Validates one projected per-source entry against the exact M98j DTO. The
+ * session-local id is positional: entry `index` must be `s<index + 1>`
+ * (the M98i cache precedent).
+ */
+function isSourceEntryProjection(value: unknown, index: number): boolean {
   if (!isRecord(value) || !hasExactKeys(value, SOURCE_ENTRY_KEYS)) {
     return false;
   }
-  if (typeof value.sourceId !== 'string' || !SOURCE_ID.test(value.sourceId)) {
+  if (value.sourceId !== `s${index + 1}`) {
     return false;
   }
   const snapshot = value.snapshot;
@@ -340,7 +354,7 @@ function isSourceEntryProjection(value: unknown): boolean {
  * Reports whether a value is a well-formed M98j event response projection:
  * EXACTLY the four response keys, version `1`, a non-empty instance string,
  * a fixed inspector state, and at most 16 per-source entries each carrying a
- * canonical `e<N>` id and a well-formed snapshot.
+ * positional `s<N>` id and a well-formed snapshot.
  *
  * ONE validator for both sides of the wire: the connector runs it over its
  * own field-by-field projection before signing (nothing unvalidated is
@@ -365,8 +379,7 @@ export function isEventResponseProjection(value: unknown): value is EventDiagnos
   ) {
     return false;
   }
-  return (value.sources as unknown[]).every(isSourceEntryProjection);
+  return (value.sources as unknown[]).every((entry, index) =>
+    isSourceEntryProjection(entry, index)
+  );
 }
-
-/** The event source read seam, stated once for the connector's deps. */
-export type EventSourceReader = IEventDiagnosticsSource | null;

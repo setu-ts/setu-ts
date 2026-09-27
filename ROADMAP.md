@@ -11126,8 +11126,9 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
 
 ### Milestone 98j: Event Dispatch Observations
 
-**Status:** Complete. Owner: `packages/events-plugin`. Canonical plan:
-`plans/milestone-98j-event-observations.md`.
+**Status:** Implemented on `feat/m98j-event-observations`; the recorded design security review and
+the independent committed-tree security audit are still PENDING, so the milestone is not complete.
+Owner: `packages/events-plugin`. Canonical plan: `plans/milestone-98j-event-observations.md`.
 
 - [x] Instrument publish entry and each existing handler await, without subscribing an extra handler
       or changing dispatch. Count publications, handler starts, successes and failures separately.
@@ -11141,10 +11142,10 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
       raw errors before buffering.
 - [x] Only the in-process InMemoryEventBus; broker acknowledgements and cross-service delivery
       remain separate messaging work.
-- [x] Pass recorded pre-implementation design review and committed-tree implementation security
-      audit. Exercise sync/async dispatch, handler rejection, errorHandler throwing, publishBatch,
-      unsubscribe during dispatch, and shutdown while handlers are pending. Assert exact invocation
-      order/count and no second evaluation.
+- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+      audit (PENDING — the behavioral tests are delivered: exercise sync/async dispatch, handler
+      rejection, errorHandler throwing, publishBatch, unsubscribe during dispatch, and shutdown
+      while handlers are pending. Assert exact invocation order/count and no second evaluation).
 
 ### Milestone 98k: Scheduler Execution Observations
 
@@ -12237,7 +12238,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98g       | ✅     | telemetry-plugin — minimized distributed tracing and correlation ([#369](https://github.com/setu-ts/setu-ts/pull/369); security audit passed on re-audit of `2fbac039`)      |
 | 98h       | ⬜     | auth-plugin — bounded authorization decision explanations; design security review and implementation audit required                                                          |
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
-| 98j       | ⬜     | event dispatch observations — design security review and implementation audit required                                                                                       |
+| 98j       | ⬜     | event dispatch observations — implemented; design security review and implementation audit pending                                                                           |
 | 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |
 | 98l       | ⬜     | realtime lifecycle observations — design security review and implementation audit required                                                                                   |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                    |

@@ -1,8 +1,9 @@
 # Milestone 98j — Event Dispatch Observations
 
-> **Status:** Implemented and verified (2026-09-27). Design security assessment recorded below
-> before implementation; implementation security audit passed on the committed tree (all gates,
-> per-file coverage ≥90%, forbidden-construct grep clean, e2e canaries absent at source/wire/DTO).
+> **Status:** Implemented on `feat/m98j-event-observations`; verification and code review done
+> (2026-09-27), with every finding fixed on this branch. **Both security gates in §10 remain
+> PENDING**: no design security review was recorded before implementation, and no independent
+> committed-tree audit has run. The milestone is not complete until both are recorded.
 
 ## 0. Objective & scope
 
@@ -282,3 +283,25 @@ local probes and browser origins, credentials/replay/session lifetime, source-re
 resource exhaustion. Review connection/frame integrity failures separately from optional collection
 failure: authentication must never degrade into a usable unsigned response. The devtool separately
 must pass safe rendering, secret-free logs/export and credential-storage acceptance tests.
+
+## 11. Verification and code review record (2026-09-27)
+
+Run by a context that did not implement the milestone, on `7a705283`, then fixed on this branch.
+This is NOT the §10 security audit.
+
+| Finding                                                                                                                                          | Disposition                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `deno task lint` failed (two `require-await` in the unit test).                                                                                  | Fixed.                                                                                                                                                                   |
+| Plan header, ROADMAP and CLAUDE.md claimed both §10 gates passed; §10 still read "pending".                                                      | Corrected: all three now state the gates are pending.                                                                                                                    |
+| Async mode + throwing `errorHandler`: the observed bus absorbed the rejection (§3.1 violated).                                                   | Fixed: the rejection is rethrown, so it stays unhandled and `whenIdle()` rejects exactly as unobserved; parity test driven both ways.                                    |
+| The bus read the clock unguarded, so a failing clock rejected `publish` (§3.4 violated).                                                         | Fixed: the collector's `begin`/`end` own every clock read and never throw; a failing clock latches `collection-failed`. Tested at every read position, sync and async.   |
+| `started` was counted at settlement, duplicating `count`.                                                                                        | Fixed: `begin` counts the start, so `started - count` is in-flight work; a never-settled slot ages out through `lastSeenAtMs`.                                           |
+| An over-budget body answered a 503 refusal (§3.3 says fixed `collection-failed`).                                                                | Fixed: collapses to the fixed collection-failed response.                                                                                                                |
+| More than 16 sources were silently truncated (§3.2 says refuse); ids were `e<N>` not `s<N>`.                                                     | Fixed: startup refuses the 17th with a fixed error (the M98i rule); ids are positional `s1`…`s16`, validated positionally on both sides.                                 |
+| Doc inaccuracies (capacity "unreachable", `collection-failed` "connector-only", stale/retention, CHANGELOG "handler rejection rejects publish"). | Fixed in source JSDoc, `common`, CHANGELOG, PUBLIC_API and the protocol doc.                                                                                             |
+| Dead surface: collector `generation`; `EventSourceReader` type.                                                                                  | Deleted.                                                                                                                                                                 |
+| `alias`/`dropped` read twice by the snapshot validator.                                                                                          | Fixed: every field read once; a flipping-getter test pins it.                                                                                                            |
+| `/v1/event` beside `/v1/events`.                                                                                                                 | Kept (this plan names the route, and M98i's `/v1/cache` set the singular-snapshot pattern); the one-letter distinction is now stated in PUBLIC_API and the protocol doc. |
+| Missing tests: unsubscribe during dispatch, async `errorHandler` throw, shutdown with a pending handler.                                         | Added.                                                                                                                                                                   |
+| `IDiagnosticsClient.events` is a new required member.                                                                                            | CHANGELOG now marks it breaking for implementors.                                                                                                                        |
+| Branch conflicted with `main` (M98i).                                                                                                            | Merged `main`; the status fixture was re-signed for the combined manifest.                                                                                               |

@@ -11,33 +11,43 @@ All notable changes to this project are documented here. The format follows
 - **Event dispatch observations (M98j): opt-in, minimized event-dispatch observations through the
   diagnostics connector.** `EventsPlugin` accepts a `diagnostics` option
   (`EventsDiagnosticsOptions`, exported from `@setu-ts/events-plugin`) that attaches an internal
-  observer to the EXISTING dispatch path — no behavioral change to the bus (handler rejection still
-  rejects `publish`, an `errorHandler` throw still fails the publish the same way, async mode still
-  resolves before handlers settle). Only event types whose EXACT raw name appears in the configured
-  `events` map are observed, each replaced by its approved alias before anything is retained; event
-  payloads, event ids, aggregate ids, and unapproved type names never reach collector state. A
-  record aggregates per (alias, operation) over a 64-slot bounded table with 60-second retention
-  (re-checked on every update and read, never a timer), a 30-second stale threshold, saturating
-  counters, clamped integer durations, and a saturating `dropped` overflow counter. Both the
-  `publish` entry (including no-subscriber publications) and each existing handler's await are
-  instrumented; a handler rejection counts `handler: failed` and a thrown `errorHandler` fails the
-  publish without changing propagation. The plugin ALWAYS registers one `IEventDiagnosticsSource`
-  under the new `CAPABILITIES.EVENTS_DIAGNOSTICS` token WITHOUT claiming it in `provides` (it is an
-  optional dependency, not a contract): `disabled` without the option, `no-data` before the first
-  approved publication, `stale` when every record has aged past the threshold, `ready` once a fresh
-  record exists, and `collection-failed` (latching for the process lifetime) when the clock fails or
-  the connector's exact validator refuses a source DTO; `close` detaches the observer FIRST, then
-  clears the bus, and discards any observation arriving after the collector closed. New public
-  surface on `@setu-ts/common`: `CAPABILITIES.EVENTS_DIAGNOSTICS`, `IEventDiagnosticsSource`,
-  `EventDiagnosticsSnapshot`, `EventDiagnosticsRecord`, `EventDiagnosticsResponse`,
-  `EventDiagnosticsState`, `EventObservationOperation`, `EventDiagnosticsCoverage`. New connector
-  surface: `GET /v1/event` (authenticated like every operation; a snapshot operation — no query —
-  distinct from the paged `/v1/events`; at most 16 sources read, a hostile/throwing source answered
-  by that source's own value-free `collection-failed` snapshot, duplicate aliases answered by a
-  fixed collection-failed response with NO sources, `collection-failed`/`unsupported`/`no-data`/
-  `stale`/`disabled` answered as typed 200 bodies, never error text), the status manifest's `events`
-  key now `true`, and `IDiagnosticsClient.events()` as a required member that answers a frozen typed
-  `unsupported` response without a request when the negotiated manifest lacks the inspector.
+  observer to the EXISTING dispatch path without changing it: a handler rejection still reaches
+  `errorHandler` and never rejects `publish`, a thrown `errorHandler` propagates exactly as before
+  (sync mode: `publish` rejects; async mode: the dispatch promise rejects unhandled and `whenIdle()`
+  rejects), async mode still resolves before handlers settle, and a failing clock latches the source
+  `collection-failed` without ever rejecting a publish or reaching `errorHandler`. Only event types
+  whose EXACT raw name appears in the configured `events` map are observed, each replaced by its
+  approved alias before anything is retained; event payloads, event ids, aggregate ids, and
+  unapproved type names never reach collector state. A record aggregates per (alias, operation) over
+  a 64-slot bounded table with 60-second retention (re-checked on every update and read, never a
+  timer), a 30-second stale threshold, saturating counters, clamped integer durations, and a
+  saturating `dropped` overflow counter (each alias can occupy two slots, so more than 32 active
+  aliases can overflow). `started` is counted when a boundary begins and `count` when it settles, so
+  `started - count` shows work still in flight. Both the `publish` entry (including no-subscriber
+  publications) and each existing handler's await are instrumented; a handler rejection counts
+  `handler: failed` and a thrown `errorHandler` fails the publish without changing propagation. The
+  plugin ALWAYS registers one `IEventDiagnosticsSource` under the new
+  `CAPABILITIES.EVENTS_DIAGNOSTICS` token WITHOUT claiming it in `provides` (it is an optional
+  dependency, not a contract): `disabled` without the option, `no-data` before the first approved
+  publication, `stale` when every record has aged past the threshold, `ready` once a fresh record
+  exists, and `collection-failed` — latched by the source until it is recreated when its clock
+  fails, or substituted by the connector for a source whose DTO fails the exact validator; `close`
+  detaches the observer FIRST, then clears the bus, and discards any observation arriving after the
+  collector closed. New public surface on `@setu-ts/common`: `CAPABILITIES.EVENTS_DIAGNOSTICS`,
+  `IEventDiagnosticsSource`, `EventDiagnosticsSnapshot`, `EventDiagnosticsRecord`,
+  `EventDiagnosticsResponse`, `EventDiagnosticsState`, `EventObservationOperation`,
+  `EventDiagnosticsCoverage`. New connector surface: `GET /v1/event` (authenticated like every
+  operation; a snapshot operation — no query — distinct from the paged kernel-event `/v1/events`;
+  positional `s<N>` source ids; more than 16 sources refuses startup with a fixed configuration
+  error; an over-budget body collapses to the fixed collection-failed response with no sources; a
+  hostile/throwing source answered by that source's own value-free `collection-failed` snapshot,
+  duplicate aliases answered by a fixed collection-failed response with NO sources,
+  `collection-failed`/`unsupported`/`no-data`/ `stale`/`disabled` answered as typed 200 bodies,
+  never error text), the status manifest's `events` key now `true`, and
+  `IDiagnosticsClient.events()` that answers a frozen typed `unsupported` response without a request
+  when the negotiated manifest lacks the inspector. **Breaking for implementors:** `events()` is a
+  REQUIRED member of `IDiagnosticsClient`, so a hand-written client must add it (answering
+  `unsupported` is a valid implementation).
 
 - **Cache operation counters (M98i): opt-in, minimized cache observations through the diagnostics
   connector.** `CachePlugin` accepts `diagnostics: { enabled: true, alias }` (the new exported

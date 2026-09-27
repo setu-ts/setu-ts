@@ -33,6 +33,7 @@ import { createConnectorHandler } from '../transport/connector-handler.ts';
 import { ConnectorLimits } from '../transport/limits.ts';
 import { QueueObservationMerger } from '../transport/queue-merger.ts';
 import { MAX_CACHE_SOURCES } from '../protocol/cache-protocol.ts';
+import { MAX_EVENT_SOURCES } from '../protocol/event-protocol.ts';
 
 /**
  * The default session lifetime: 15 minutes.
@@ -60,6 +61,9 @@ export const PLUGIN_ERRORS = {
   invalidSessionId: 'DiagnosticsPlugin: sessionId must be exactly 32 lowercase hex characters.',
   invalidSessionKey: 'DiagnosticsPlugin: sessionKey must be exactly 32 bytes.',
   invalidTtl: 'DiagnosticsPlugin: ttlMs must be an integer from 1 to 3600000.',
+  tooManyEventSources:
+    'DiagnosticsPlugin: more than 16 event-diagnostics sources are registered; ' +
+    'the connector reads at most 16.',
   tooManyCacheSources:
     'DiagnosticsPlugin: more than 16 cache-diagnostics sources are registered; ' +
     'the connector reads at most 16.',
@@ -273,10 +277,16 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
         // has registered by bootstrap, so an events plugin ordered after this
         // one is still included. Each EventsPlugin instance contributes its
         // own multi-provider source; none means the connector answers a
-        // typed `unsupported` response. Only the first 16 are ever read.
+        // typed `unsupported` response. More than 16 refuses by a fixed,
+        // value-free configuration error rather than silently dropping one.
         const eventSources = ctx.services.has(CAPABILITIES.EVENTS_DIAGNOSTICS)
           ? ctx.services.getAll<IEventDiagnosticsSource>(CAPABILITIES.EVENTS_DIAGNOSTICS)
           : [];
+        if (eventSources.length > MAX_EVENT_SOURCES) {
+          active.revoke();
+          session = null;
+          throw new Error(PLUGIN_ERRORS.tooManyEventSources);
+        }
         const handler = createConnectorHandler({
           port: options.port,
           subtle: ctx.runtime.subtle,

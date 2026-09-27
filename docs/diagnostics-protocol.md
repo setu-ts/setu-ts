@@ -422,7 +422,9 @@ false` answers that frozen batch, echoing its cursor, without sending the reques
 
 `GET /v1/event` serves the events plugin's aggregated dispatch-observation snapshot — a SNAPSHOT
 operation with no query, projected field-by-field from every source registered under the multi token
-`CAPABILITIES.EVENTS_DIAGNOSTICS` (at most 16 are read; the 17th is never consulted):
+`CAPABILITIES.EVENTS_DIAGNOSTICS` (more than 16 refuses connector startup with a fixed configuration
+error, the M98i cache rule). Note the path is one letter from the paged kernel-event stream
+`/v1/events`; the manifest key `events` names THIS inspector:
 
 ```json
 {
@@ -431,7 +433,7 @@ operation with no query, projected field-by-field from every source registered u
   "state": "ready",
   "sources": [
     {
-      "sourceId": "e1",
+      "sourceId": "s1",
       "snapshot": {
         "state": "ready",
         "alias": "dev-bus",
@@ -441,8 +443,8 @@ operation with no query, projected field-by-field from every source registered u
             "alias": "users",
             "operation": "publish",
             "count": 3,
-            "started": 0,
-            "succeeded": 0,
+            "started": 3,
+            "succeeded": 3,
             "failed": 0,
             "noSubscribers": 1,
             "lastDurationMs": 2,
@@ -468,9 +470,12 @@ ids, handler names, unapproved type names and error text never enter the record,
 events plugin registered — the connector's answer), `disabled`, `no-data`, `stale`, `ready`, and
 `collection-failed` — per source when that source throws (its snapshot is answered value-free) or
 fails the exact validator, and for the WHOLE response (with NO sources listed) when two sources
-report the same alias. The aggregate `state` is the strongest across sources: `ready` beats
-everything, then `collection-failed`, `stale`, `no-data`, `disabled`. A client whose negotiated
-manifest has `events: false` answers a frozen `unsupported` response without sending the request.
+report the same alias or when the body would exceed the 256 KiB budget. `sourceId` is positional
+(`s1`…`s16`). `started` is counted when a boundary begins and `count` when it settles, so
+`started - count` is work still in flight. The aggregate `state` is the strongest across sources:
+`ready` beats everything, then `collection-failed`, `stale`, `no-data`, `disabled`. A client whose
+negotiated manifest has `events: false` answers a frozen `unsupported` response without sending the
+request.
 
 ## Bounds (fixed, not configurable)
 

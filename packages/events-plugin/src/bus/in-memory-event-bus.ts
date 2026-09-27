@@ -81,9 +81,8 @@ export class InMemoryEventBus implements IEventBus {
       // A no-subscriber publication is still a publication: observed as
       // succeeded with `noSubscribers`, then the unchanged early return.
       if (handlers.length === 0) {
-        const publishStartedAt = observer.clock.hrtime();
-        const settledAt = observer.clock.hrtime();
-        observer.observe(alias, 'publish', true, true, settledAt - publishStartedAt, true);
+        const startedAt = observer.begin(alias, 'publish');
+        observer.end(alias, 'publish', startedAt, true, true);
         return;
       }
       await this.#dispatchObserved(observer, alias, event, handlers);
@@ -132,35 +131,42 @@ export class InMemoryEventBus implements IEventBus {
     event: IDomainEvent,
     handlers: EventHandler[],
   ): Promise<void> {
-    const publishStartedAt = observer.clock.hrtime();
+    // Every collector call below is non-throwing by contract (a failing
+    // clock latches `collection-failed` inside the collector), so no
+    // observation can change a result, reject a publish, or reach the
+    // application's errorHandler.
+    const publishStartedAt = observer.begin(alias, 'publish');
     const dispatch = async () => {
       for (const handler of handlers) {
-        const handlerStartedAt = observer.clock.hrtime();
+        const handlerStartedAt = observer.begin(alias, 'handler');
+        let failed = false;
+        let error: unknown;
         try {
           await handler(event);
-          const handlerSettledAt = observer.clock.hrtime();
-          observer.observe(alias, 'handler', true, true, handlerSettledAt - handlerStartedAt);
         } catch (err) {
-          const handlerSettledAt = observer.clock.hrtime();
-          observer.observe(alias, 'handler', true, false, handlerSettledAt - handlerStartedAt);
-          this.errorHandler(err, event);
+          failed = true;
+          error = err;
+        }
+        observer.end(alias, 'handler', handlerStartedAt, !failed);
+        if (failed) {
+          this.errorHandler(error, event);
         }
       }
     };
 
     if (this.async) {
+      // Same settlement shape as the unobserved bus: the fulfilled branch
+      // deletes the pending entry; a rejection (a thrown errorHandler) is
+      // RETHROWN, so `p` still rejects — it stays unhandled and `whenIdle()`
+      // still rejects, exactly as without diagnostics.
       const p = dispatch().then(
         () => {
           this.pending.delete(p);
-          const settledAt = observer.clock.hrtime();
-          observer.observe(alias, 'publish', true, true, settledAt - publishStartedAt);
+          observer.end(alias, 'publish', publishStartedAt, true);
         },
-        () => {
-          // The errorHandler threw asynchronously: a failed publish, and the
-          // rejection is absorbed exactly as the unobserved bus absorbs it.
-          this.pending.delete(p);
-          const settledAt = observer.clock.hrtime();
-          observer.observe(alias, 'publish', true, false, settledAt - publishStartedAt);
+        (err: unknown) => {
+          observer.end(alias, 'publish', publishStartedAt, false);
+          throw err;
         },
       );
       this.pending.add(p);
@@ -170,12 +176,10 @@ export class InMemoryEventBus implements IEventBus {
     try {
       await dispatch();
     } catch (err) {
-      const settledAt = observer.clock.hrtime();
-      observer.observe(alias, 'publish', true, false, settledAt - publishStartedAt);
+      observer.end(alias, 'publish', publishStartedAt, false);
       throw err;
     }
-    const settledAt = observer.clock.hrtime();
-    observer.observe(alias, 'publish', true, true, settledAt - publishStartedAt);
+    observer.end(alias, 'publish', publishStartedAt, true);
   }
 
   /**

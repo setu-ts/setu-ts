@@ -343,6 +343,7 @@ async function harness(cacheSources: readonly ICacheDiagnosticsSource[]) {
     healthSource: null,
     configSource: null,
     cacheSources,
+    eventSources: [],
   });
   session.bindInstance(TEST_INSTANCE_ID);
   return { handler, key, clock, session };

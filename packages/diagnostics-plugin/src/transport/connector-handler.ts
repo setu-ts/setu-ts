@@ -40,6 +40,7 @@ import { buildCacheResponse, isCacheResponseProjection } from '../protocol/cache
 import {
   collectionFailedEventSnapshot,
   isEventResponseProjection,
+  MAX_EVENT_RESPONSE_BYTES,
   projectEventSource,
   readEventSourceSnapshot,
 } from '../protocol/event-protocol.ts';
@@ -235,7 +236,7 @@ export interface ConnectorHandlerDeps {
   /**
    * The event-diagnostics sources (M98j), read ONCE at bootstrap from
    * `CAPABILITIES.EVENTS_DIAGNOSTICS` (a MULTI token) after every plugin has
-   * registered. At most the first 16 are ever read; an empty list answers a
+   * registered. At most 16 (more refuses startup); an empty list answers a
    * typed `unsupported` response for `GET /v1/event`. A read never
    * publishes an event or invokes a handler.
    */
@@ -643,12 +644,6 @@ function readTraceProjection(
 }
 
 /**
- * The connector's fixed 16-source bound for the event operation (M98j).
- * @internal
- */
-const MAX_EVENT_SOURCES = 16;
-
-/**
  * The outcome of reading the event sources: either a validated projection
  * ready to sign, or the read failed outright (answered as
  * `collection-failed` with NO sources, per the plan's duplicate-alias rule).
@@ -702,7 +697,6 @@ function readEventProjection(
       ? { kind: 'projected', projected }
       : { kind: 'failed' };
   }
-  const admitted = sources.slice(0, MAX_EVENT_SOURCES);
   const entries: Record<string, unknown>[] = [];
   const seenAliases = new Set<string>();
   let aggregate: EventDiagnosticsResponse['state'] = 'disabled';
@@ -716,8 +710,8 @@ function readEventProjection(
   ];
   let readySeen = false;
   const perSourceStates: string[] = [];
-  for (let index = 0; index < admitted.length; index++) {
-    const source = admitted[index];
+  for (let index = 0; index < sources.length; index++) {
+    const source = sources[index];
     let snapshot: EventDiagnosticsSnapshot | null = null;
     try {
       snapshot = readEventSourceSnapshot(source.snapshot());
@@ -746,7 +740,7 @@ function readEventProjection(
     if (snapshot.state === 'ready') {
       readySeen = true;
     }
-    entries.push(projectEventSource(`e${index + 1}`, snapshot));
+    entries.push(projectEventSource(`s${index + 1}`, snapshot));
   }
   if (!readySeen) {
     aggregate = (priority.find((state) => perSourceStates.includes(state)) ??
@@ -760,6 +754,13 @@ function readEventProjection(
     state: aggregate,
     sources: entries,
   };
+  // The fixed byte budget, measured on the compact JSON actually signed. An
+  // over-budget body collapses to the fixed collection-failed response —
+  // never a partial document and never a refusal the client would treat as
+  // a connection failure (the M98i cache precedent).
+  if (ENCODER.encode(JSON.stringify(projected)).byteLength > MAX_EVENT_RESPONSE_BYTES) {
+    return { kind: 'failed' };
+  }
   return isEventResponseProjection(projected)
     ? { kind: 'projected', projected }
     : { kind: 'failed' };

@@ -2650,8 +2650,9 @@ stops capture without changing the application's error. Every EventsPlugin insta
 `IEventDiagnosticsSource` under `CAPABILITIES.EVENTS_DIAGNOSTICS` with `{ multi: true }` and never
 claims the token (the M98f contribution pattern); `close` detaches the observer FIRST, then clears
 the bus, so a late observation after shutdown is discarded rather than resurrecting state. The
-connector reads every source at bootstrap (at most 16, `e<N>` position ids), isolates a failing
-source as `collection-failed`, and answers duplicate aliases with a fixed no-source response.
+connector reads every source at bootstrap (more than 16 refuses startup; `s<N>` position ids; an
+over-budget body collapses to `collection-failed`), isolates a failing source as
+`collection-failed`, and answers duplicate aliases with a fixed no-source response.
 
 ---
 

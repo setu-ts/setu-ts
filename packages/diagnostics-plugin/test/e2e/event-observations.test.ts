@@ -18,7 +18,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IEventBus, IEventDiagnosticsSource } from '@setu-ts/common';
+import type { IEventBus, IEventDiagnosticsSource, IPlugin } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -26,6 +26,8 @@ import { EventsPlugin } from '@setu-ts/events-plugin';
 
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { requestMacFields, signFields } from '../../src/security/authentication.ts';
+import { PLUGIN_ERRORS } from '../../src/plugin/diagnostics-plugin.ts';
+import { MAX_EVENT_SOURCES } from '../../src/protocol/event-protocol.ts';
 import { importTestKey, TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
 
 const PAYLOAD_CANARY = 'event-payload-canary-SYNTHETIC-0001';
@@ -144,7 +146,7 @@ describe('Event observations e2e (M98j canary)', () => {
       expect(response.version).toEqual(1);
       expect(response.state).toEqual('ready');
       expect(response.sources.length).toEqual(1);
-      expect(response.sources[0]!.sourceId).toEqual('e1');
+      expect(response.sources[0]!.sourceId).toEqual('s1');
       const snapshot = response.sources[0]!.snapshot;
       expect(snapshot.state).toEqual('ready');
       expect(snapshot.alias).toEqual('dev-bus');
@@ -350,5 +352,60 @@ describe('Event observations e2e — M98b refusals for /v1/event', () => {
     } finally {
       await app.stop();
     }
+  });
+});
+
+describe('DiagnosticsPlugin — event source bound (M98j)', () => {
+  function sources(count: number): IPlugin {
+    return {
+      name: 'fake-event-sources',
+      version: '0.0.0',
+      register(ctx) {
+        for (let index = 0; index < count; index++) {
+          ctx.services.register<IEventDiagnosticsSource>(
+            CAPABILITIES.EVENTS_DIAGNOSTICS,
+            {
+              snapshot: () => ({
+                state: 'disabled',
+                alias: null,
+                coverage: 'owned-instance',
+                records: [],
+                dropped: 0,
+              }),
+            },
+            { multi: true },
+          );
+        }
+      },
+    };
+  }
+
+  function boot(count: number) {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DiagnosticsPlugin({
+          enabled: true,
+          port: freePort(),
+          sessionId: TEST_SESSION_ID,
+          sessionKey: TEST_KEY_BYTES,
+        }),
+        sources(count),
+      ],
+      diagnostics: {},
+    });
+    return { app, started: app.start() };
+  }
+
+  it('starts with exactly 16 sources', async () => {
+    const { app, started } = boot(MAX_EVENT_SOURCES);
+    await started;
+    await app.stop();
+  });
+
+  it('refuses a 17th source with a fixed, value-free configuration error', async () => {
+    const { app, started } = boot(MAX_EVENT_SOURCES + 1);
+    await expect(started).rejects.toThrow(PLUGIN_ERRORS.tooManyEventSources);
+    await app.stop().catch(() => {});
   });
 });

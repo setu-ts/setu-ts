@@ -207,6 +207,8 @@ interface ObservationSlot {
   noSubscribers: number;
   lastDurationMs: number | null;
   lastSettledAtMs: number | null;
+  /** Last start or settlement; drives expiry, so a never-settled slot ages out too. */
+  lastSeenAtMs: number;
 }
 
 /**
@@ -245,8 +247,6 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
   /** (alias, operation) → aggregate slot, insertion-ordered for stable reads. */
   readonly #slots = new Map<string, ObservationSlot>();
   #dropped = 0;
-  /** Bumped on close so a handle issued before it can never touch new state. */
-  #generation = 0;
   #closed = false;
   /**
    * Latched when an observer or clock read throws: observation stops until
@@ -260,11 +260,6 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     this.#clock = clock;
   }
 
-  /** The monotonic clock read seam the bus's hot path uses. */
-  get clock(): IRuntimeServices {
-    return this.#clock;
-  }
-
   /**
    * The approved alias for an exact event type, or `undefined` when the type
    * is not approved. Own-map lookup only — the collector never sees a type
@@ -275,71 +270,99 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
   }
 
   /**
-   * Records one settled observation for an already-approved alias. Only
-   * framework-owned primitives cross this seam: the alias (approved), the
-   * fixed operation, the outcome, a duration in milliseconds and whether the
-   * publication found no subscriber. An event object, its type or a thrown
-   * value can never reach the collector.
+   * Records that one dispatch boundary STARTED for an already-approved alias
+   * and returns the monotonic start reading the matching {@linkcode end}
+   * measures from. `started` is counted here, at the start, so an in-flight
+   * (or hung) handler is visible as `started > count` before it settles.
    *
-   * Every failure inside — a clock read throwing, an overflow of the slot
-   * budget — is contained: the application's dispatch result and timing are
-   * never changed by observation.
+   * Never throws: a failing clock latches `collection-failed` and returns
+   * `null`, so observation can never change the application's result.
+   *
+   * @param alias - The already-approved alias
+   * @param operation - Which dispatch boundary started
+   * @returns The start reading, or `null` when nothing is being captured
+   */
+  begin(alias: string, operation: EventObservationOperation): number | null {
+    const now = this.#read();
+    if (now === null) {
+      return null;
+    }
+    try {
+      const slot = this.#slotFor(alias, operation);
+      if (slot !== null) {
+        slot.started = saturatingNext(slot.started);
+        slot.lastSeenAtMs = now;
+      }
+      return now;
+    } catch {
+      this.#collectionFailed = true;
+      return null;
+    }
+  }
+
+  /**
+   * Records that a boundary {@linkcode begin} opened has SETTLED. Only
+   * framework-owned primitives cross this seam: the approved alias, the
+   * fixed operation, the outcome and whether a publication found no
+   * subscriber — never an event object, its type or a thrown value.
+   *
+   * Never throws. A `null` start (the clock had already failed) records
+   * nothing.
    *
    * @param alias - The already-approved alias
    * @param operation - Which dispatch boundary settled
-   * @param started - Whether an invocation started (always `true` today;
-   * carried so the counter arithmetic stays honest if the seam widens)
+   * @param startedAt - The reading {@linkcode begin} returned
+   * @param succeeded - Whether the boundary completed normally
+   * @param noSubscribers - For `publish`, whether no handler was subscribed
+   */
+  end(
+    alias: string,
+    operation: EventObservationOperation,
+    startedAt: number | null,
+    succeeded: boolean,
+    noSubscribers = false,
+  ): void {
+    if (startedAt === null) {
+      return;
+    }
+    const now = this.#read();
+    if (now === null) {
+      return;
+    }
+    this.observe(alias, operation, succeeded, now - startedAt, noSubscribers, now);
+  }
+
+  /**
+   * Records one settled observation with an already-measured duration. The
+   * settle half of {@linkcode end}; it does not count a start. Every failure
+   * inside is contained — observation never changes the application's
+   * dispatch result or timing.
+   *
+   * @param alias - The already-approved alias
+   * @param operation - Which dispatch boundary settled
    * @param succeeded - Whether the observation completed normally
    * @param durationMs - The measured duration; clamped
    * @param noSubscribers - For `publish`, whether no handler was subscribed
+   * @param at - The settlement reading; read from the clock when omitted
    */
   observe(
     alias: string,
     operation: EventObservationOperation,
-    started: boolean,
     succeeded: boolean,
     durationMs: number,
     noSubscribers = false,
+    at?: number,
   ): void {
-    if (this.#closed || this.#collectionFailed) {
-      return;
-    }
-    let now: number;
-    try {
-      now = this.#clock.hrtime();
-    } catch {
-      this.#collectionFailed = true;
+    const now = at ?? this.#read();
+    if (now === null) {
       return;
     }
     try {
-      const key = `${operation}\u0000${alias}`;
-      let slot = this.#slots.get(key);
-      if (slot === undefined) {
-        if (this.#slots.size >= MAX_RECORD_SLOTS) {
-          // At capacity: ignore the NEW tuple and count the drop. Existing
-          // tuples keep updating. With a validated policy the map can hold at
-          // most one publish + one handler slot per approved alias, so this
-          // is defense in depth, not a reachable path.
-          this.#dropped = saturatingNext(this.#dropped);
-          return;
-        }
-        slot = {
-          alias,
-          operation,
-          count: 0,
-          started: 0,
-          succeeded: 0,
-          failed: 0,
-          noSubscribers: 0,
-          lastDurationMs: null,
-          lastSettledAtMs: null,
-        };
-        this.#slots.set(key, slot);
+      const slot = this.#slotFor(alias, operation);
+      if (slot === null) {
+        return;
       }
       slot.count = saturatingNext(slot.count);
-      if (started) {
-        slot.started = saturatingNext(slot.started);
-      }
       if (succeeded) {
         slot.succeeded = saturatingNext(slot.succeeded);
       } else {
@@ -350,22 +373,66 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       }
       slot.lastDurationMs = clampDuration(durationMs);
       slot.lastSettledAtMs = now;
+      slot.lastSeenAtMs = now;
       this.#expire(now);
     } catch {
-      // Latch collection-failed and stop capture: never change the
-      // application's error or result.
       this.#collectionFailed = true;
     }
   }
 
+  /** Reads the clock once; a failure latches `collection-failed`. */
+  #read(): number | null {
+    if (this.#closed || this.#collectionFailed) {
+      return null;
+    }
+    try {
+      return this.#clock.hrtime();
+    } catch {
+      this.#collectionFailed = true;
+      return null;
+    }
+  }
+
   /**
-   * Drops slots whose last observation is older than the retention window,
+   * The slot for (alias, operation), created on first use. At capacity the
+   * NEW tuple is ignored and `dropped` counted; existing tuples keep
+   * updating. Reachable with a valid policy: each approved alias can occupy
+   * two slots (publish + handler), so more than 32 active aliases fill the
+   * 64 slots.
+   */
+  #slotFor(alias: string, operation: EventObservationOperation): ObservationSlot | null {
+    const key = `${operation}\u0000${alias}`;
+    let slot = this.#slots.get(key);
+    if (slot === undefined) {
+      if (this.#slots.size >= MAX_RECORD_SLOTS) {
+        this.#dropped = saturatingNext(this.#dropped);
+        return null;
+      }
+      slot = {
+        alias,
+        operation,
+        count: 0,
+        started: 0,
+        succeeded: 0,
+        failed: 0,
+        noSubscribers: 0,
+        lastDurationMs: null,
+        lastSettledAtMs: null,
+        lastSeenAtMs: 0,
+      };
+      this.#slots.set(key, slot);
+    }
+    return slot;
+  }
+
+  /**
+   * Drops slots whose last start or settlement is older than the retention window,
    * clearing their counters. Checked during update and read — never by a
    * background timer.
    */
   #expire(now: number): void {
     for (const [key, slot] of this.#slots) {
-      if (slot.lastSettledAtMs !== null && now - slot.lastSettledAtMs > RETENTION_MS) {
+      if (now - slot.lastSeenAtMs > RETENTION_MS) {
         this.#slots.delete(key);
       }
     }
@@ -401,7 +468,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     this.#expire(now);
     const records: EventDiagnosticsRecord[] = [];
     for (const slot of this.#slots.values()) {
-      const ageMs = slot.lastSettledAtMs === null ? 0 : Math.max(0, now - slot.lastSettledAtMs);
+      const ageMs = Math.max(0, now - (slot.lastSettledAtMs ?? slot.lastSeenAtMs));
       records.push({
         alias: slot.alias,
         operation: slot.operation,
@@ -437,12 +504,6 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       return;
     }
     this.#closed = true;
-    this.#generation += 1;
     this.#slots.clear();
-  }
-
-  /** The generation at close; guards handles issued before it. */
-  get generation(): number {
-    return this.#generation;
   }
 }

@@ -5330,7 +5330,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `GET /v1/event` (snapshot op, ≤16 sources, per-source value-free `collection-failed`, duplicate
   aliases answered with a fixed no-source response) with `events: true` in the manifest, and the
   client gains `events()`. `close` detaches the observer first, then clears the bus. Plan
-  `plans/milestone-98j-event-observations.md` — complete on `feat/m98j-event-observations`.
+  `plans/milestone-98j-event-observations.md` — **implemented, NOT complete**: verification and code
+  review found and fixed two dispatch-parity defects (an async `errorHandler` throw was absorbed
+  only when observed; a failing clock could reject `publish`), a `started` counter that duplicated
+  `count`, and three connector deviations (over-budget body, source bound, `s<N>` ids). The recorded
+  design security review and the independent committed-tree audit are still pending.
 - **Next milestone** — **M98h** (`packages/auth-plugin` — authorization explanations; design
   security review and implementation audit required).
 
