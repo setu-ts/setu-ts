@@ -5295,26 +5295,55 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   independent re-audit of `2fbac039` passed with no finding open (5 new negative controls; all 13
   round-1 controls and 10 probes re-run green). Plan
   `plans/archive/milestone-98g-distributed-tracing.md` — complete (PR #369).
-- **Milestone 98h** (`packages/auth-plugin` + `packages/common` + `packages/diagnostics-plugin` —
-  authorization decision explanations): IN PROGRESS. `AuthPlugin({ authorizationDiagnostics })`
-  attaches a package-private observer (WeakMap-keyed by the `RbacService` instance) to the
-  first-party RBAC evaluator — the boolean `IAuthorizationService` surface and every guard's status,
-  body and short-circuit behaviour are unchanged. A decision carries only approved rule aliases, the
-  fixed reason vocabulary, the true evaluated count (a compound over 16 steps is retained with
-  `stepsTruncated: true` and the first 16 steps), and `ageMs`; a decision whose requested rule lacks
-  an approved alias is dropped before buffering (`droppedUnapproved`), while an unapproved granting
-  role is only omitted from `viaRoleAlias`. The plugin always registers
-  `IAuthorizationDiagnosticsSource` under the eager `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`
-  (`disabled` without the option; `unsupported` latched terminal with coverage `rbac-not-configured`
-  / `provider-identity-unavailable` / `custom-provider`), re-verifying its provider at read time
-  through the new OPTIONAL non-resolving `IServiceRegistry.isCurrent?(token, instance)` identity
-  predicate — a replacement provider is never guessed from booleans. The connector serves
-  `GET /v1/authorization?after=N&limit=N` and the client `authorization()`; the status manifest
-  reports `authorization: true`. Plan `plans/milestone-98h-authorization-explanations.md` — design
-  security review complete (plan §10); the committed-tree implementation security audit is still
-  required.
-- **Next milestone** — **M98i** (`packages/cache-plugin` — cache observations; design security
-  review and implementation audit required).
+- **Milestone 98i** (`packages/cache-plugin` + `packages/common` + `packages/diagnostics-plugin` —
+  cache operation counters): `CachePlugin({ diagnostics: { enabled: true, alias } })` counts every
+  backend call its OWN `CacheService` makes (`get`/`set`/`delete`/`has`/`clear`, `getOrSet` as its
+  internal calls) with succeeded/failed plus hits/misses, present/absent and removed/notRemoved; no
+  eviction is ever inferred, and keys, prefixes, values, Redis URLs, factory results and errors are
+  classified away before the collector. Every instance registers an `ICacheDiagnosticsSource` under
+  the new multi-provider `CAPABILITIES.CACHE_DIAGNOSTICS`; the connector serves `GET /v1/cache` (at
+  most 16 sources, more refuses startup; copy-once reader of own data properties; duplicate aliases
+  or an over-budget body collapse to `collection-failed`) and the client gains `cache()`. **The
+  overhead target was measured, not assumed.** The first in-process benchmark carried an ~11% A/A
+  bias (a second-constructed instance runs slower), so the fair harness runs each configuration in a
+  fresh process against real Redis 7. Timing one call in eight and a private-field attachment
+  brought the enabled cost to ~5% at 50 concurrent calls, which the maintainer accepted; the
+  disabled path matches pre-M98i. **The audit found a defect in that optimisation**: observing
+  settlement on a side branch of the caller's own promise marked it handled, so a fire-and-forget
+  cache call whose backend rejected stopped surfacing as an unhandled rejection whenever diagnostics
+  were on — fixed by returning a derived promise, with a test asserting one unhandled report in both
+  modes. The first audit failed only because §10 listed what a design review must cover rather than
+  recording one; the maintainer then had it recorded (adding a DNS-rebinding attacker, whose raw-
+  socket probe proved the exact-`Host` check sufficient on its own, since a rebound same-origin GET
+  may omit `Origin`). Audit passed on re-audit of `aab0bd78` — complete (PR #374)
+- **Milestone 98h** (`packages/auth-plugin` + `packages/common` + `packages/kernel` +
+  `packages/diagnostics-plugin` — authorization decision explanations):
+  `AuthPlugin({ authorizationDiagnostics })` attaches a package-private observer (WeakMap-keyed by
+  the `RbacService` instance) to the first-party RBAC evaluator; the boolean `IAuthorizationService`
+  and every guard's status, body and short-circuit order are unchanged, and with no observer the
+  evaluator builds nothing. A decision carries only approved rule aliases (the distinct requested
+  set, first-requested order, at most 128), the fixed reason vocabulary, the true evaluated count (a
+  compound over 16 steps is retained with `stepsTruncated: true` and its first 16 steps) and
+  `ageMs`. A requested rule without an approved alias drops the decision (`droppedUnapproved`); an
+  unapproved GRANTING role is only omitted from `viaRoleAlias`. The option is validated when
+  `AuthPlugin(...)` is called, with or without `rbac`. The plugin always registers
+  `IAuthorizationDiagnosticsSource` under the eager `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`:
+  `disabled` without the option; `unsupported` latched terminal with `rbac-not-configured` /
+  `provider-identity-unavailable` / `custom-provider`. The provider is re-verified at every capture
+  and read through the new OPTIONAL non-resolving `IServiceRegistry.isCurrent?(token, instance)`,
+  implemented by the kernel `ServiceRegistry`, so a replacement is never explained from booleans.
+  The connector serves `GET /v1/authorization?after=N&limit=N`, the client `authorization()`, and
+  the status manifest reports `authorization: true`. Code review fixed a malformed option being
+  silently accepted without `rbac`, the no-option state answering `unsupported`, an empty compound
+  (`requireAnyRole([])`) that turned every later read into `collection-failed` with no way to page
+  past it, and a wire validator that let a compound present a partial trace as complete. The
+  security audit ran four rounds, each in a fresh context: round 1 found a Medium (the wire refused
+  every truncated compound over 16 rules, fixed in `a858afce`); round 3 found a Low (a request
+  repeating one rule more than 128 times bricked the inspector until eviction, fixed in `e9730627`
+  by de-duplicating aliases); round 4 passed with nothing open. Plan
+  `plans/archive/milestone-98h-authorization-explanations.md` — complete (PR pending).
+- **Next milestone** — **M98j** (`packages/events-plugin` — event dispatch observations; design
+  security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

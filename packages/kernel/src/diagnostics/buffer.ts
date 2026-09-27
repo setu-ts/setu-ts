@@ -134,7 +134,9 @@ export function validateReadCursor(
 /**
  * Bounded event ring. Sequences are allocated ONLY on a successful store, so
  * the numbering is dense and a reader's `lost` count means exactly one thing:
- * records evicted between its cursor and the oldest retained record.
+ * records between its cursor and the oldest retained record that are gone —
+ * evicted when the ring is full, or discarded by {@linkcode clear}, which
+ * never reuses a sequence number.
  *
  * @since 0.8.0
  */
@@ -149,7 +151,10 @@ export class DiagnosticsEventRing {
     return this.#lastSequence;
   }
 
-  /** Oldest retained sequence number (1 when nothing has been evicted). */
+  /**
+   * Oldest retained sequence number: 1 while nothing has been evicted or
+   * cleared, and `lastSequence + 1` (nothing retained) right after a clear.
+   */
   get firstSequence(): number {
     return this.#firstSequence;
   }
@@ -216,13 +221,21 @@ export class DiagnosticsEventRing {
   }
 
   /**
-   * Discards every retained event and resets the sequence bookkeeping. Used
-   * only by the teardown path: a failed startup or a final shutdown must not
-   * leave collected metadata recoverable through a read.
+   * Discards every retained event. Used only by the teardown path: a failed
+   * startup or a final shutdown must not leave collected metadata recoverable
+   * through a read.
+   *
+   * The sequence counter is deliberately NOT reset: the discarded range is
+   * treated exactly like an eviction. A failed start can be corrected and
+   * retried on the same instance, and restarting at 1 would REUSE sequence
+   * numbers a reader already holds — a cursor past the new last sequence would
+   * then be refused as "beyond the current sequence", and one inside the new
+   * range would silently skip the retry's first events. Keeping the numbering
+   * monotonic means the retry's first event is `lastSequence + 1`, and a
+   * reader's `lost` counts the discarded records honestly.
    */
   clear(): void {
     this.#slots.fill(undefined);
-    this.#firstSequence = 1;
-    this.#lastSequence = 0;
+    this.#firstSequence = this.#lastSequence + 1;
   }
 }

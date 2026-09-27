@@ -187,13 +187,14 @@ describe('Protocol — status body and fixed errors', () => {
     });
   });
 
-  it('serves the fixed inspector manifest with health, configuration, queues, traces and authorization true and the rest false', () => {
+  it('serves the fixed inspector manifest with health, configuration, queues, traces, cache and authorization true and the rest false', () => {
     const manifest = currentInspectorsManifest();
     const implemented: readonly string[] = [
       'health',
       'configuration',
       'queues',
       'traces',
+      'cache',
       'authorization',
     ];
     for (const key of INSPECTOR_KEYS) {

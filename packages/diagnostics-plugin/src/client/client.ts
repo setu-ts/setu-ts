@@ -15,6 +15,7 @@
 
 import type {
   AuthorizationDiagnosticsBatch,
+  CacheDiagnosticsResponse,
   ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
   DiagnosticsSnapshot,
@@ -35,6 +36,7 @@ import {
 import type { DiagnosticsClientOptions, IDiagnosticsClient } from '../interfaces/index.ts';
 import {
   AUTHORIZATION_PATH,
+  CACHE_TARGET,
   CONFIG_TARGET,
   HEALTH_TARGET,
   type InspectorsManifest,
@@ -49,6 +51,7 @@ import {
   TRACES_PATH,
 } from '../protocol/protocol.ts';
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
+import { isCacheResponseProjection } from '../protocol/cache-protocol.ts';
 import { isTraceBatchProjection } from '../protocol/trace-protocol.ts';
 import { isAuthorizationBatchProjection } from '../protocol/authorization-protocol.ts';
 
@@ -361,6 +364,16 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       if (!verified) {
         throw new Error(CLIENT_ERRORS.connection);
       }
+      // Paired-instance binding, at the ONE boundary every operation shares.
+      // The MAC proves the peer holds the session key; it does not prove the
+      // peer answered as the instance this session paired with, because the
+      // header identity is an input to the MAC rather than a constant of it.
+      // Once paired, the request presented `instance`, and a signed response
+      // naming any other identity is refused. The unpaired status exchange
+      // presents '' and is bound against its own body in `exchangeAndBind`.
+      if (instance !== '' && responseInstance !== instance) {
+        throw new Error(CLIENT_ERRORS.connection);
+      }
       return {
         status: response.status,
         bodyBytes,
@@ -419,10 +432,17 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         }
         const result = await exchange(SNAPSHOT_TARGET);
         const parsed = parseBody(result.bodyText);
-        if (!isSnapshotProjection(parsed)) {
+        // The body's own identity must be the paired one. The DTO type admits
+        // `null` for an in-process reader before the runtime assigns an
+        // identity; a paired network session always has one, so `null` (and
+        // an absent field, which the validator already refuses) is refused.
+        if (!isSnapshotProjection(parsed) || parsed.instanceId !== instanceId) {
           throw new Error(CLIENT_ERRORS.connection);
         }
-        return parsed;
+        // The parsed value is a fresh object graph owned by nobody else;
+        // deep-freezing it (nodes and edges too) is what makes the documented
+        // "frozen" true, as the addon paths already do.
+        return deepFreeze(parsed);
       });
     },
 
@@ -437,10 +457,22 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         const target = `/v1/events?after=${after}&limit=${effectiveLimit}`;
         const result = await exchange(target);
         const parsed = parseBody(result.bodyText);
-        if (!isBatchProjection(parsed)) {
+        // The same body binding as `snapshot()`: a paired batch carries the
+        // paired identity, never `null` and never another instance's. Then the
+        // cursor contract relative to THIS request, as `queues()` and
+        // `traces()` check it: an empty page echoes the cursor, and a returned
+        // page starts past it with `lost` counting exactly the gap.
+        if (
+          !isBatchProjection(parsed) || parsed.instanceId !== instanceId ||
+          parsed.events.length > effectiveLimit ||
+          (parsed.events.length === 0 ? parsed.next !== after || parsed.lost !== 0 : (
+            parsed.events[0].sequence <= after ||
+            parsed.lost !== parsed.events[0].sequence - after - 1
+          ))
+        ) {
           throw new Error(CLIENT_ERRORS.connection);
         }
-        return parsed;
+        return deepFreeze(parsed);
       });
     },
 
@@ -528,6 +560,39 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // The parsed value is a fresh object graph owned by nobody else;
         // deep-freezing it (entries AND their alias arrays) is what makes the
         // documented "deeply frozen" true.
+        return deepFreeze(parsed);
+      });
+    },
+
+    async cache(): Promise<CacheDiagnosticsResponse> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the cache inspector — a
+        // legacy or pre-M98i server — answers a local typed `unsupported`
+        // response and sends no request.
+        if (inspectors !== null && inspectors.cache === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            sources: [],
+          });
+        }
+        const result = await exchange(CACHE_TARGET);
+        const parsed = parseBody(result.bodyText);
+        // The same exact validator the connector ran before signing, plus
+        // the body's own instance binding.
+        if (!isCacheResponseProjection(parsed) || parsed.instanceId !== bound) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
         return deepFreeze(parsed);
       });
     },

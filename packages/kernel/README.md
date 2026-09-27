@@ -51,7 +51,8 @@ const snapshot = app.diagnostics!.snapshot(); // bounded composition view
 let cursor = 0;
 const poll = setInterval(() => {
   // Poll non-destructively: each read returns the events after `cursor`
-  // (up to 128) and reports evicted records as `lost`. Other readers polling
+  // (up to 128) and reports evicted records — and any discarded by a failed
+  // start — as `lost`. Other readers polling
   // at their own cursors are unaffected — reads never consume.
   const batch = app.diagnostics!.read(cursor, 128);
   cursor = batch.next;

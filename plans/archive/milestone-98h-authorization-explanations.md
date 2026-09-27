@@ -1,7 +1,7 @@
 # Milestone 98h — Authorization Decision Explanations
 
-> **Status:** Planning on `docs/m98-capability-diagnostics`. Implementation and fixes belong on
-> `feat/m98h-authorization-explanations`; `main` remains protected.
+> **Status:** Complete (archived). Implemented on `feat/m98h-authorization-explanations`; `main`
+> remains protected.
 
 ## 0. Objective & scope
 

@@ -12,6 +12,7 @@ import type {
   ConfigDiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
   IAuthorizationDiagnosticsSource,
+  ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
   IResponse,
   ITraceDiagnosticsSource,
@@ -108,6 +109,7 @@ async function buildHarness(options?: {
   snapshot?: Record<string, unknown>;
   batch?: Record<string, unknown>;
   configSource?: IConfigDiagnosticsSource | null;
+  cacheSources?: readonly ICacheDiagnosticsSource[];
 }): Promise<HandlerHarness> {
   const clock = new MutableClock();
   // The 15-minute default TTL: what the fixture's frozen-clock status body
@@ -130,6 +132,7 @@ async function buildHarness(options?: {
     clock,
     healthSource: null,
     configSource: options?.configSource ?? null,
+    cacheSources: options?.cacheSources ?? [],
   });
   return { handler, clock, source, session, key };
 }
@@ -578,11 +581,102 @@ describe('Connector handler — authentication and binding', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
     clock.advance(1_000);
     const expired = await handler(await statusRequest(key, 2));
     expect(inspect(expired).body).toEqual({ version: 1, error: 'expired' });
+  });
+});
+
+describe('Connector handler — raw target and events cursor (M98b audit)', () => {
+  it('refuses a URL alias of a canonical target even when signed over the canonical form', async () => {
+    const { handler, key, source } = await buildHarness();
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
+    const snapshotsAfterPairing = source.snapshotCalls;
+    // Each alias normalizes to a canonical target under `new URL`: dot
+    // segments resolve, an empty query and a fragment drop. The signature
+    // covers the canonical form, so only the raw-target check can refuse it.
+    const aliases: readonly (readonly [string, string])[] = [
+      ['/v1/./snapshot', '/v1/snapshot'],
+      ['/v1/x/../snapshot', '/v1/snapshot'],
+      ['/v1/snapshot?', '/v1/snapshot'],
+      ['/v1/events?after=0&limit=1#frag', '/v1/events?after=0&limit=1'],
+    ];
+    let sequence = 2;
+    for (const [raw, canonical] of aliases) {
+      const mac = await signRequest(crypto.subtle, key, canonical, sequence, TEST_INSTANCE_ID);
+      const response = await handler(
+        fakeRequest({
+          url: `http://${HOST}${raw}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': String(sequence),
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      );
+      expect(inspect(response).status).toEqual(400);
+      expect(inspect(response).body).toEqual({ version: 1, error: 'invalid-request' });
+      sequence += 1;
+    }
+    expect(source.snapshotCalls).toEqual(snapshotsAfterPairing);
+    expect(source.readCalls).toEqual(0);
+    // Positive control: the canonical form is served on the same session.
+    const mac = await signRequest(crypto.subtle, key, '/v1/snapshot', sequence, TEST_INSTANCE_ID);
+    const served = await handler(
+      fakeRequest({
+        url: `http://${HOST}/v1/snapshot`,
+        headers: {
+          host: HOST,
+          'x-setu-session': 'a'.repeat(32),
+          'x-setu-sequence': String(sequence),
+          'x-setu-instance': TEST_INSTANCE_ID,
+          'x-setu-mac': mac,
+        },
+      }),
+    );
+    expect(inspect(served).status).toEqual(200);
+  });
+
+  it('answers invalid-request for an events cursor the reader refuses, and rethrows anything else', async () => {
+    const { handler, key, source } = await buildHarness();
+    expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
+    const sendEvents = async (sequence: number) => {
+      const target = '/v1/events?after=9&limit=1';
+      const mac = await signRequest(crypto.subtle, key, target, sequence, TEST_INSTANCE_ID);
+      return await handler(
+        fakeRequest({
+          url: `http://${HOST}${target}`,
+          headers: {
+            host: HOST,
+            'x-setu-session': 'a'.repeat(32),
+            'x-setu-sequence': String(sequence),
+            'x-setu-instance': TEST_INSTANCE_ID,
+            'x-setu-mac': mac,
+          },
+        }),
+      );
+    };
+    // The M98a reader's documented refusal of a cursor beyond its sequence.
+    Object.assign(source, {
+      read: (): never => {
+        throw new RangeError('Invalid diagnostics cursor: beyond the current sequence.');
+      },
+    });
+    const refused = inspect(await sendEvents(2));
+    expect(refused.status).toEqual(400);
+    expect(refused.body).toEqual({ version: 1, error: 'invalid-request' });
+    // Any other failure is not a caller error and is not reported as one.
+    Object.assign(source, {
+      read: (): never => {
+        throw new TypeError('reader failure');
+      },
+    });
+    await expect(sendEvents(3)).rejects.toThrow('reader failure');
   });
 });
 
@@ -692,6 +786,7 @@ describe('Connector handler — projection hardening', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     // The throwing path is BELOW the handler's try — the connector-handler
     // module catches nothing inside; the runtime listener owns the 503 arm.
@@ -766,6 +861,7 @@ describe('Connector handler — health operation (M98d)', () => {
       clock,
       healthSource: { snapshot: () => healthSnapshot },
       configSource: null,
+      cacheSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -807,6 +903,7 @@ describe('Connector handler — health operation (M98d)', () => {
         },
       },
       configSource: null,
+      cacheSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -854,6 +951,7 @@ describe('Connector handler — health operation (M98d)', () => {
       clock,
       healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
       configSource: null,
+      cacheSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -1170,6 +1268,7 @@ describe('Connector handler — remaining structural arms', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     // Forty full-burst honest statuses without any elapsed time exhaust the
     // session's fixed burst budget. Sequence 1 binds (empty instance);
@@ -1215,6 +1314,7 @@ describe('Connector handler — remaining structural arms', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     // The request CLAIMS port 5959 (its Host and URL match the handler) but
     // the MAC was signed for 4919: authentication must refuse it.
@@ -1600,6 +1700,7 @@ describe('Connector handler — queue observations (M98f)', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     return { handler, key, clock };
   }
@@ -1744,6 +1845,7 @@ describe('Connector handler — trace observations (M98g)', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     return { handler, key, clock };
   }
@@ -1921,6 +2023,7 @@ describe('Connector handler — authorization explanations (M98h)', () => {
       clock,
       healthSource: null,
       configSource: null,
+      cacheSources: [],
     });
     return { handler, key, clock };
   }

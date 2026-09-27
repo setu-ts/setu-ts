@@ -52,6 +52,38 @@ export interface CachePluginOptions {
   name?: string;
   /** Store-specific options. */
   options?: CacheStoreOptions;
+  /**
+   * Opt-in cache operation counters for the local diagnostics connector
+   * (M98i). Absent (the default) registers an inert `disabled` source under
+   * `CAPABILITIES.CACHE_DIAGNOSTICS` and observes nothing: no collector and
+   * no clock read on any cache call. Validated when `CachePlugin(...)` is
+   * called, with fixed messages that never echo a supplied value.
+   *
+   * @since 0.8.0
+   */
+  diagnostics?: CacheDiagnosticsOptions;
+}
+
+/**
+ * The opt-in cache-observation policy (M98i).
+ *
+ * Only calls through THIS plugin instance's own `CacheService` are counted,
+ * per fixed operation, under the one approved alias. Keys, prefixes, values,
+ * Redis URLs, factory results and errors are never captured, and no per-key
+ * label exists. "Safe" is a SHAPE, not secret detection: the alias is a
+ * string of `1`–`64` UTF-8 bytes containing no control character, and
+ * approving it IS authorizing its disclosure — never derive it from a key.
+ *
+ * @since 0.8.0
+ */
+export interface CacheDiagnosticsOptions {
+  /**
+   * The explicit opt-in, deliberately the LITERAL `true`: `enabled: false`
+   * (or any other value) is refused; omit `diagnostics` instead.
+   */
+  readonly enabled: true;
+  /** The display alias for this cache instance; unique across cache sources. */
+  readonly alias: string;
 }
 
 /**

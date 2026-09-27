@@ -86,15 +86,33 @@ function fakeServer(
     healthBody?: Record<string, unknown>;
     /** The body to serve for `/v1/config`; defaults to a ready snapshot. */
     configBody?: Record<string, unknown>;
+    /** The body to serve for `/v1/cache`; defaults to a one-source ready response. */
+    cacheBody?: Record<string, unknown>;
     /** The body to serve for `/v1/queues`; defaults to a one-event batch. */
     queuesBody?: (after: number) => Record<string, unknown>;
     /** The body to serve for `/v1/traces`; defaults to a one-record batch. */
     tracesBody?: (after: number) => Record<string, unknown>;
     /** The body to serve for `/v1/authorization`; defaults to a one-decision batch. */
     authorizationBody?: (after: number) => Record<string, unknown>;
+    /** The body to serve for `/v1/snapshot`; defaults to `minimalSnapshot()`. */
+    snapshotBody?: () => Record<string, unknown>;
+    /** The body to serve for `/v1/events`; defaults to `minimalBatch()`. */
+    eventsBody?: (after: number) => Record<string, unknown>;
+    /**
+     * Per-response identity override, applied BEFORE signing so the hostile
+     * response carries a valid MAC. `path` is the target's pathname and
+     * `call` counts that pathname's requests from 1. `header` replaces the
+     * signed `x-setu-instance`; `body` replaces the body's `instanceId`
+     * (`null` serves JSON null, `'omit'` removes the field).
+     */
+    identity?: (path: string, call: number) => {
+      header?: string;
+      body?: string | null | 'omit';
+    };
   } = {},
 ): { fetch: typeof fetch; requests: RecordedRequest[] } {
   const requests: RecordedRequest[] = [];
+  const calls = new Map<string, number>();
   const key = importSessionKey(subtle, TEST_KEY_BYTES);
   const encoder = new TextEncoder();
   const fetchImpl = async (input: string | URL | Request): Promise<Response> => {
@@ -140,7 +158,7 @@ function fakeServer(
         }
         bodyText = JSON.stringify(body);
       } else if (target === '/v1/snapshot') {
-        bodyText = JSON.stringify(minimalSnapshot());
+        bodyText = JSON.stringify(overrides.snapshotBody?.() ?? minimalSnapshot());
       } else if (target === '/v1/health') {
         bodyText = JSON.stringify(
           overrides.healthBody ?? {
@@ -181,6 +199,8 @@ function fakeServer(
             droppedEntries: 0,
           },
         );
+      } else if (target === '/v1/cache') {
+        bodyText = JSON.stringify(overrides.cacheBody ?? cacheResponseBody());
       } else if (url.pathname === '/v1/queues') {
         const after = Number(url.searchParams.get('after'));
         bodyText = JSON.stringify((overrides.queuesBody ?? queueBatchBody)(after));
@@ -193,7 +213,8 @@ function fakeServer(
           (overrides.authorizationBody ?? authorizationBatchBody)(after),
         );
       } else {
-        bodyText = JSON.stringify(minimalBatch());
+        const after = Number(url.searchParams.get('after'));
+        bodyText = JSON.stringify(overrides.eventsBody?.(after) ?? minimalBatch());
       }
       // Signed, therefore authentic — and not JSON. Deliberately NOT applied
       // to `/v1/status`: the pairing path has always guarded its parse, so a
@@ -203,6 +224,20 @@ function fakeServer(
       if (overrides.malformedBody && target !== '/v1/status') {
         bodyText = '{"version":1,"nodes":[';
       }
+      const call = (calls.get(url.pathname) ?? 0) + 1;
+      calls.set(url.pathname, call);
+      const identity = overrides.identity?.(url.pathname, call) ?? {};
+      if (identity.body !== undefined) {
+        const record = JSON.parse(bodyText) as Record<string, unknown>;
+        if (identity.body === 'omit') {
+          delete record.instanceId;
+        } else {
+          record.instanceId = identity.body;
+        }
+        bodyText = JSON.stringify(record);
+      }
+      const headerInstance = identity.header ??
+        (overrides.wrongInstance ? '0'.repeat(36) : TEST_INSTANCE_ID);
       // An oversized body the server SIGNS, and which is otherwise a valid
       // snapshot projection. Both halves are load-bearing: serving unsigned
       // bytes would be refused by MAC verification, and serving invalid JSON
@@ -221,7 +256,7 @@ function fakeServer(
       const digest = await sha256Hex(subtle, bodyBytes);
       const responseFields = responseMacFields(
         session,
-        overrides.wrongInstance ? '0'.repeat(36) : TEST_INSTANCE_ID,
+        headerInstance,
         sequence,
         target,
         '200',
@@ -231,7 +266,7 @@ function fakeServer(
         'content-type': 'application/json',
         'cache-control': 'no-store',
         'x-content-type-options': 'nosniff',
-        'x-setu-instance': overrides.wrongInstance ? '0'.repeat(36) : TEST_INSTANCE_ID,
+        'x-setu-instance': headerInstance,
         'x-setu-mac': overrides.dropMac
           ? 'z'.repeat(64)
           : await signFields(subtle, imported, responseFields),
@@ -484,11 +519,13 @@ describe('Client — pairing and reads', () => {
 
   it('reads events after binding and enforces the argument bounds', async () => {
     const { client, requests } = buildClient();
-    const batch = await client.read(4, 16);
+    // The fake serves sequence 1, which is past cursor 0 — a batch starting
+    // at or before the cursor is refused (see the cursor-contract suite).
+    const batch = await client.read(0, 16);
     expect(batch.version).toEqual(1);
     expect(batch.next).toEqual(1);
     // Status, then the canonical events target in exact order.
-    expect(requests[1].target).toEqual('/v1/events?after=4&limit=16');
+    expect(requests[1].target).toEqual('/v1/events?after=0&limit=16');
     await expect(client.read(-1)).rejects.toThrow(CLIENT_ERRORS.arguments);
     await expect(client.read(0, 0)).rejects.toThrow(CLIENT_ERRORS.arguments);
     await expect(client.read(0, 129)).rejects.toThrow(CLIENT_ERRORS.arguments);
@@ -700,6 +737,104 @@ describe('Client — health negotiation (M98d)', () => {
     expect(Object.isFrozen(health.observations[0])).toBe(true);
     client.close();
   });
+});
+
+/** A ready one-source cache response (M98i). */
+function cacheResponseBody(): Record<string, unknown> {
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    sources: [{
+      sourceId: 's1',
+      snapshot: {
+        state: 'ready',
+        alias: 'primary',
+        coverage: 'owned-instance',
+        records: [{
+          alias: 'primary',
+          operation: 'get',
+          count: 2,
+          lastDurationMs: 1,
+          ageMs: 3,
+          succeeded: 1,
+          failed: 1,
+          hits: 1,
+          misses: 0,
+          present: 0,
+          absent: 0,
+          removed: 0,
+          notRemoved: 0,
+        }],
+        dropped: 0,
+      },
+    }],
+  };
+}
+
+describe('Client — cache negotiation (M98i)', () => {
+  it('reads the cache response through the signed exchange and deep-freezes it', async () => {
+    const { client, requests } = buildClient();
+    const response = await client.cache();
+    expect(response.state).toEqual('ready');
+    expect(response.sources[0]!.snapshot.records[0]).toMatchObject({ succeeded: 1, failed: 1 });
+    expect(requests.map((r) => r.target)).toEqual(['/v1/status', '/v1/cache']);
+    expect(Object.isFrozen(response.sources[0]!.snapshot.records[0])).toBe(true);
+    client.close();
+  });
+
+  it('answers unsupported WITHOUT a request when the manifest cache key is false', async () => {
+    const noCache = { ...currentInspectorsManifest(), cache: false };
+    const { client, requests } = buildClient({ server: { statusInspectors: noCache } });
+    const response = await client.cache();
+    expect(response).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'unsupported',
+      sources: [],
+    });
+    expect(Object.isFrozen(response)).toBe(true);
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  it('never probes the route when paired against the legacy status body', async () => {
+    const { client, requests } = buildClient({ server: { legacyStatus: true } });
+    expect((await client.cache()).state).toEqual('unsupported');
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  const hostile: ReadonlyArray<[string, (body: Record<string, unknown>) => void]> = [
+    ['a missing outcome field', (b) => {
+      const record = ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!;
+      delete record.failed;
+    }],
+    ['an extra record field', (b) => {
+      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!.key = 'canary-key';
+    }],
+    ['an invalid operation', (b) => {
+      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!.operation = 'evict';
+    }],
+    ['a wrong aggregate state', (b) => {
+      b.state = 'no-data';
+    }],
+    ['a different instance', (b) => {
+      b.instanceId = '00000000-0000-4000-8000-000000000000';
+    }],
+  ];
+  for (const [name, mutate] of hostile) {
+    it(`refuses a correctly signed body carrying ${name}`, async () => {
+      const body = cacheResponseBody();
+      mutate(body);
+      const { client } = buildClient({ server: { cacheBody: body } });
+      await expect(client.cache()).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
 });
 
 describe('Client — configuration negotiation (M98e)', () => {
@@ -1191,6 +1326,349 @@ describe('Client — authorization observations (M98h)', () => {
     await expect(client.authorization(-1)).rejects.toThrow(CLIENT_ERRORS.arguments);
     await expect(client.authorization(0, 0)).rejects.toThrow(CLIENT_ERRORS.arguments);
     expect(requests.every((request) => !request.target.startsWith('/v1/authorization'))).toBe(true);
+    client.close();
+  });
+});
+
+/**
+ * A second valid instance UUID, distinct from the pairing identity. Every
+ * hostile response below is CORRECTLY SIGNED with the session key — these
+ * are not bad MACs — so only the paired-instance binding can refuse them.
+ */
+const OTHER_INSTANCE_ID = '9b2c1f7e-5a3d-4e8b-8c61-2f0d7a4b9e15';
+
+/**
+ * The header/body identity mismatches a key holder can sign. Each must be
+ * refused once the session has paired with {@linkcode TEST_INSTANCE_ID}.
+ */
+const HOSTILE_IDENTITIES: ReadonlyArray<{
+  readonly label: string;
+  readonly header?: string;
+  readonly body?: string | null | 'omit';
+}> = [
+  { label: 'header B, body A', header: OTHER_INSTANCE_ID },
+  { label: 'header A, body B', body: OTHER_INSTANCE_ID },
+  { label: 'header B, body B', header: OTHER_INSTANCE_ID, body: OTHER_INSTANCE_ID },
+];
+
+/**
+ * Every network operation the client sends after pairing, with the target
+ * path the fake server sees. Iterated by the header-binding table so an
+ * operation added later without a row is a visible omission.
+ */
+const PAIRED_OPERATIONS: ReadonlyArray<{
+  readonly name: string;
+  readonly path: string;
+  readonly call: (client: ReturnType<typeof createDiagnosticsClient>) => Promise<unknown>;
+}> = [
+  { name: 'snapshot()', path: '/v1/snapshot', call: (c) => c.snapshot() },
+  { name: 'read()', path: '/v1/events', call: (c) => c.read(0, 4) },
+  { name: 'health()', path: '/v1/health', call: (c) => c.health() },
+  { name: 'configuration()', path: '/v1/config', call: (c) => c.configuration() },
+  { name: 'queues()', path: '/v1/queues', call: (c) => c.queues(0, 4) },
+  { name: 'traces()', path: '/v1/traces', call: (c) => c.traces(0, 4) },
+];
+
+describe('Client — paired-instance binding (correctly signed hostile responses)', () => {
+  it('pins OTHER_INSTANCE_ID as a distinct, valid identity', () => {
+    // Vacuity guard: a hostile identity equal to the paired one would make
+    // every refusal below pass for the wrong reason.
+    expect(OTHER_INSTANCE_ID).not.toBe(TEST_INSTANCE_ID);
+    expect(OTHER_INSTANCE_ID).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  for (
+    const variant of [
+      { label: 'header B, body A', header: OTHER_INSTANCE_ID },
+      { label: 'header A, body B', body: OTHER_INSTANCE_ID },
+    ]
+  ) {
+    it(`fails initial status pairing terminally for ${variant.label}`, async () => {
+      const { client, requests } = buildClient({
+        server: { identity: (path) => (path === '/v1/status' ? variant : {}) },
+      });
+      await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
+      await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.pairingFailed);
+      // Only the failed status exchange reached the server.
+      expect(requests.map((r) => r.target)).toEqual(['/v1/status']);
+      client.close();
+    });
+  }
+
+  it('accepts honest A/A responses for every paired operation', async () => {
+    const { client } = buildClient();
+    for (const op of PAIRED_OPERATIONS) {
+      await op.call(client);
+    }
+    client.close();
+  });
+
+  for (const variant of HOSTILE_IDENTITIES) {
+    it(`refuses the first snapshot after pairing for ${variant.label}`, async () => {
+      const { client, requests } = buildClient({
+        server: { identity: (path) => (path === '/v1/snapshot' ? variant : {}) },
+      });
+      await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
+      // The status exchange paired honestly; the refusal is the snapshot's.
+      expect(requests.map((r) => r.target)).toEqual(['/v1/status', '/v1/snapshot']);
+      client.close();
+    });
+
+    it(`refuses a subsequent snapshot for ${variant.label}`, async () => {
+      const { client } = buildClient({
+        server: {
+          identity: (path, call) => (path === '/v1/snapshot' && call === 2 ? variant : {}),
+        },
+      });
+      expect((await client.snapshot()).instanceId).toBe(TEST_INSTANCE_ID);
+      await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
+      // A post-pairing identity refusal is a connection failure like any
+      // other verification failure — not terminal: an honest next exchange
+      // still succeeds under the SAME paired identity.
+      expect((await client.snapshot()).instanceId).toBe(TEST_INSTANCE_ID);
+      client.close();
+    });
+
+    it(`refuses the first and a subsequent event read for ${variant.label}`, async () => {
+      const first = buildClient({
+        server: { identity: (path) => (path === '/v1/events' ? variant : {}) },
+      });
+      await expect(first.client.read(0, 4)).rejects.toThrow(CLIENT_ERRORS.connection);
+      first.client.close();
+
+      const later = buildClient({
+        server: {
+          identity: (path, call) => (path === '/v1/events' && call === 2 ? variant : {}),
+        },
+      });
+      expect((await later.client.read(0, 4)).instanceId).toBe(TEST_INSTANCE_ID);
+      await expect(later.client.read(0, 4)).rejects.toThrow(CLIENT_ERRORS.connection);
+      later.client.close();
+    });
+  }
+
+  for (const body of [null, 'omit'] as const) {
+    const label = body === null ? 'a null' : 'a missing';
+    it(`refuses ${label} body identity on a paired snapshot and event read`, async () => {
+      const { client } = buildClient({
+        server: {
+          identity: (path) => path === '/v1/snapshot' || path === '/v1/events' ? { body } : {},
+        },
+      });
+      await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
+      await expect(client.read(0, 4)).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
+
+  for (const op of PAIRED_OPERATIONS) {
+    it(`binds the signed response header for ${op.name}`, async () => {
+      // Body identity stays A: only the header differs, so a body check
+      // alone cannot refuse it.
+      const { client, requests } = buildClient({
+        server: { identity: (path) => (path === op.path ? { header: OTHER_INSTANCE_ID } : {}) },
+      });
+      await expect(op.call(client)).rejects.toThrow(CLIENT_ERRORS.connection);
+      expect(requests.some((r) => r.target.startsWith(op.path))).toBe(true);
+      client.close();
+    });
+
+    it(`binds the body identity for ${op.name}`, async () => {
+      const { client } = buildClient({
+        server: { identity: (path) => (path === op.path ? { body: OTHER_INSTANCE_ID } : {}) },
+      });
+      await expect(op.call(client)).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
+
+  it('keeps legacy status negotiation: honest core reads pass, a foreign header is refused', async () => {
+    const honest = buildClient({ server: { legacyStatus: true } });
+    expect((await honest.client.snapshot()).instanceId).toBe(TEST_INSTANCE_ID);
+    expect((await honest.client.read(0, 4)).instanceId).toBe(TEST_INSTANCE_ID);
+    // Addons stay local `unsupported` answers under a legacy manifest.
+    expect((await honest.client.health()).state).toBe('unsupported');
+    honest.client.close();
+
+    const hostile = buildClient({
+      server: {
+        legacyStatus: true,
+        identity: (path) => (path === '/v1/snapshot' ? { header: OTHER_INSTANCE_ID } : {}),
+      },
+    });
+    await expect(hostile.client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
+    hostile.client.close();
+  });
+});
+
+/**
+ * A one-event core batch past `after`, carrying the paired identity.
+ *
+ * @param after - The requested cursor
+ * @param count - How many consecutive events to return
+ * @returns The batch body
+ */
+function coreBatchAfter(after: number, count = 1): Record<string, unknown> {
+  const events = Array.from({ length: count }, (_, i) => ({
+    sequence: after + 1 + i,
+    operationId: `op${after + 1 + i}`,
+    parentOperationId: null,
+    kind: 'request',
+    stage: 'request',
+    nodeId: null,
+    outcome: 'ok',
+    atMs: 1,
+    durationMs: 2,
+  }));
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    events,
+    next: count === 0 ? after : after + count,
+    lost: 0,
+    closed: false,
+  };
+}
+
+describe('Client — core DTO validation over correctly signed bodies (F02)', () => {
+  // Each body is SIGNED by the fake server, so MAC verification passes and
+  // only the DTO validator can refuse it.
+  const hostileSnapshots: ReadonlyArray<readonly [string, () => Record<string, unknown>]> = [
+    ['an unknown state', () => ({ ...minimalSnapshot(), state: 'exploded' })],
+    ['an extra top-level field', () => ({ ...minimalSnapshot(), secrets: ['x'] })],
+    ["a node carrying another kind's field", () => ({
+      ...minimalSnapshot(),
+      nodes: [{ id: 'p1', kind: 'plugin', method: 'GET' }, {
+        id: 'c1',
+        kind: 'capability',
+      }],
+    })],
+    ['a dangling edge', () => ({
+      ...minimalSnapshot(),
+      edges: [{ from: 'p1', to: 'c9', kind: 'owns' }],
+    })],
+    ['a control character in a label', () => ({
+      ...minimalSnapshot(),
+      nodes: [{ id: 'p1', kind: 'plugin', label: '\u001b[2Jcatalog' }, {
+        id: 'c1',
+        kind: 'capability',
+      }],
+    })],
+  ];
+
+  for (const [label, body] of hostileSnapshots) {
+    it(`refuses a signed snapshot with ${label}`, async () => {
+      const { client, requests } = buildClient({ server: { snapshotBody: body } });
+      await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
+      expect(requests.map((r) => r.target)).toEqual(['/v1/status', '/v1/snapshot']);
+      client.close();
+    });
+  }
+
+  const hostileBatches: ReadonlyArray<
+    readonly [string, (after: number) => Record<string, unknown>]
+  > = [
+    ['an event field outside the contract', (after) => {
+      const batch = coreBatchAfter(after);
+      (batch.events as Record<string, unknown>[])[0].message = 'boom';
+      return batch;
+    }],
+    ['an unknown event stage', (after) => {
+      const batch = coreBatchAfter(after);
+      (batch.events as Record<string, unknown>[])[0].stage = 'sql';
+      return batch;
+    }],
+    ['non-consecutive sequences', (after) => {
+      const batch = coreBatchAfter(after, 2);
+      (batch.events as Record<string, unknown>[])[1].sequence = after + 5;
+      batch.next = after + 5;
+      return batch;
+    }],
+    ['a next that is not the last returned sequence', (after) => ({
+      ...coreBatchAfter(after),
+      next: after + 7,
+    })],
+  ];
+
+  for (const [label, body] of hostileBatches) {
+    it(`refuses a signed batch with ${label}`, async () => {
+      const { client } = buildClient({ server: { eventsBody: body } });
+      await expect(client.read(3, 8)).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
+});
+
+describe('Client — read() cursor contract relative to the request (F02)', () => {
+  it('accepts a page past the cursor, an empty page echoing it, and an honest eviction gap', async () => {
+    // Vacuity guard for the refusals below: each is one change from these.
+    const page = buildClient({ server: { eventsBody: (after) => coreBatchAfter(after, 3) } });
+    const batch = await page.client.read(3, 8);
+    expect(batch.events.map((e) => e.sequence)).toEqual([4, 5, 6]);
+    page.client.close();
+
+    const empty = buildClient({ server: { eventsBody: (after) => coreBatchAfter(after, 0) } });
+    expect((await empty.client.read(9, 8)).next).toBe(9);
+    empty.client.close();
+
+    const evicted = buildClient({
+      server: { eventsBody: (after) => ({ ...coreBatchAfter(after + 4), lost: 4 }) },
+    });
+    expect((await evicted.client.read(3, 8)).lost).toBe(4);
+    evicted.client.close();
+  });
+
+  const cases: ReadonlyArray<readonly [string, (after: number) => Record<string, unknown>]> = [
+    ['a page starting at the cursor (a replayed event)', (after) => coreBatchAfter(after - 1)],
+    ['a page starting before the cursor', () => coreBatchAfter(0)],
+    ['more events than the requested limit', (after) => coreBatchAfter(after, 9)],
+    ['an empty page that moves the cursor', (after) => ({ ...coreBatchAfter(after, 0), next: 99 })],
+    ['an empty page reporting loss', (after) => ({ ...coreBatchAfter(after, 0), lost: 2 })],
+    ['a lost count that disagrees with the gap', (after) => ({
+      ...coreBatchAfter(after + 4),
+      lost: 1,
+    })],
+  ];
+
+  for (const [label, body] of cases) {
+    it(`refuses ${label}`, async () => {
+      const { client } = buildClient({ server: { eventsBody: body } });
+      await expect(client.read(3, 8)).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
+});
+
+describe('Client — core results are deeply frozen (F03)', () => {
+  it('freezes the snapshot, its nodes, and its edges', async () => {
+    const { client } = buildClient();
+    const snapshot = await client.snapshot();
+    expect(Object.isFrozen(snapshot)).toBe(true);
+    expect(Object.isFrozen(snapshot.nodes)).toBe(true);
+    expect(Object.isFrozen(snapshot.edges)).toBe(true);
+    expect(snapshot.nodes.length).toBeGreaterThan(0);
+    expect(snapshot.edges.length).toBeGreaterThan(0);
+    expect(snapshot.nodes.every((node) => Object.isFrozen(node))).toBe(true);
+    expect(snapshot.edges.every((edge) => Object.isFrozen(edge))).toBe(true);
+    // A strict-mode write throws rather than silently changing the result.
+    expect(() => {
+      (snapshot as { state: string }).state = 'closed';
+    }).toThrow(TypeError);
+    client.close();
+  });
+
+  it('freezes the batch and every event', async () => {
+    const { client } = buildClient({
+      server: { eventsBody: (after) => coreBatchAfter(after, 2) },
+    });
+    const batch = await client.read(0, 8);
+    expect(Object.isFrozen(batch)).toBe(true);
+    expect(Object.isFrozen(batch.events)).toBe(true);
+    expect(batch.events.length).toBe(2);
+    expect(batch.events.every((event) => Object.isFrozen(event))).toBe(true);
+    expect(() => {
+      (batch.events as unknown[]).push({});
+    }).toThrow(TypeError);
     client.close();
   });
 });

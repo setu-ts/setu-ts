@@ -5,9 +5,11 @@ native client (`createDiagnosticsClient`). This document is the specification th
 under `packages/diagnostics-plugin/test/fixtures/` pin, and the starting point for the separately
 maintained devtool's implementation.
 
-This protocol required security review before implementation acceptance; shipping standard
-primitives is not that review, and this document makes no claim that the separately maintained
-devtool has been verified.
+The design security review for this protocol — its assets, attackers, approved budgets, design
+findings and the obligations a committed-tree audit must meet — is
+[`diagnostics-security-review.md`](./diagnostics-security-review.md). Standard primitives are not
+that review, and this document makes no claim that the separately maintained devtool has been
+verified.
 
 ## Transport
 
@@ -30,6 +32,7 @@ devtool has been verified.
 | `GET /v1/health`                        | M98d's minimized health-observation snapshot (below)                                                                                                                             |
 | `GET /v1/config`                        | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
 | `GET /v1/queues?after=N&limit=N`        | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
+| `GET /v1/cache`                         | M98i's cache operation counters across every cache source (below)                                                                                                                |
 | `GET /v1/traces?after=N&limit=N`        | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 | `GET /v1/authorization?after=N&limit=N` | M98h's authorization-decision-explanation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 
@@ -86,6 +89,10 @@ response
 Verification uses `subtle.verify`, never string equality. Request and response domain separation
 (the second line) prevents reflection.
 
+Every field's grammar excludes the line feed, which is what makes newline-joining an unambiguous
+encoding: two different field sequences can never produce the same MAC input. A new operation must
+keep that property for its canonical target.
+
 ## Replay, expiry, and binding
 
 - Sequence numbers are strictly monotonic per session; the server atomically advances its highest
@@ -102,7 +109,30 @@ All responses (signed or refusals) carry `Cache-Control: no-store`,
 `Content-Type: application/json`, and `X-Content-Type-Options: nosniff`. Signed responses add
 `X-Setu-Mac` and `X-Setu-Instance`. The client verifies the response MAC over the exact bounded body
 bytes (256 KiB hard ceiling on the STREAM, not `Content-Length`) BEFORE parsing anything, and checks
-the parsed status body's `instanceId` against the authenticated header.
+the parsed status body's `instanceId` against the authenticated header. Once paired, the client
+binds EVERY later response to that identity: a signed response whose `X-Setu-Instance` differs from
+the instance the request presented is refused, and every body that carries an `instanceId` — the
+core snapshot and event batch included — must equal it (a paired network body never carries `null`).
+The MAC alone does not establish this, because the header identity is an input to the MAC: a peer
+holding the session key could otherwise sign a response under any identity. Such a refusal is the
+fixed connection failure, and — like any post-pairing verification failure — it is not terminal.
+
+A verified body is authentic, not necessarily well-formed, so the client then checks it against its
+exact DTO before returning it. For the core snapshot that means only the defined keys, `state` and
+`failureCode` from their fixed vocabularies, at most 1,024 nodes and 4,096 edges, each node carrying
+only its kind's fields under a unique id minted with its kind's prefix (`p`, `c`, `r`, `m`), labels
+of at most 160 UTF-8 bytes with no control character, and every edge joining two nodes in the same
+snapshot, once. For the event batch it means at most 128 events, each with only the defined keys,
+every enum from its vocabulary, canonical `op<N>` and node ids, finite non-negative (or `null`)
+timings, a finite numeric status code and validated W3C identifiers; consecutive sequences with
+`next` equal to the last; and the cursor the request sent honored — an empty page echoes `after`
+with `lost: 0`, and a returned page starts past `after` with `lost` counting exactly the unreadable
+gap — records evicted from the ring, or discarded when a start failed. Every returned result is
+deeply frozen. Two fields are deliberately left as the DTO types them — a plain, unranged `number`:
+a middleware `priority` and an event `statusCode`, which the application sets. Either may be any
+finite number (a status is not necessarily a valid HTTP status), so an application's unusual
+priority or status never turns its own diagnostics into a refusal; the kernel omits a non-finite
+value rather than letting it serialize to `null`, and the client refuses `null`.
 
 Unauthenticated refusals are not signed and use one fixed shape:
 
@@ -119,18 +149,27 @@ Unauthenticated refusals are not signed and use one fixed shape:
 | `unavailable`         | 503    | internal failure or an over-limit result         |
 | `rate-limited`        | 429    | refusal budget exhausted or session budget spent |
 
-No refusal ever echoes supplied input, error causes, or stacks.
+No refusal ever echoes supplied input, error causes, or stacks. A wrong key, a wrong instance and a
+replay are all the same `unauthorized` while the session is live (a replay is refused by the
+post-MAC sequence gate). Once the session has expired, a replay whose MAC verifies is answered
+`expired`, like any other MAC-valid request. `expired` is answered only to a request whose MAC
+verified, so an unauthenticated prober cannot learn whether a session is live or has ended. One
+admission exception: a session-ID mismatch is refused before MAC verification and debits the
+anonymous refusal budget, so once that budget is exhausted a wrong session ID answers `rate-limited`
+while the matching session ID with an invalid MAC answers `unauthorized`. That confirms only a
+candidate session ID; it reveals nothing about whether the session is live or has ended (see the
+design security review, R7).
 
 ## Health observations (M98d)
 
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
 `health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g)
-and `authorization: true` (M98h), and leaves the rest (`cache`, `events`, `scheduler`, `realtime`,
-`storage`, `outboundHttp`) reserved and `false`. A client that reads a legacy M98b three-field
-status body (no `inspectors`) resolves the manifest to all-`false`, so its `health()`,
-`configuration()`, `queues()`, `traces()` and `authorization()` answer a typed `unsupported` without
-sending the request.
+and `cache: true` (M98i) and `authorization: true` (M98h), and leaves the rest (`events`,
+`scheduler`, `realtime`, `storage`, `outboundHttp`) reserved and `false`. A client that reads a
+legacy M98b three-field status body (no `inspectors`) resolves the manifest to all-`false`, so its
+`health()`, `configuration()`, `queues()`, `traces()`, `cache()` and `authorization()` answer a
+typed `unsupported` without sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -311,6 +350,40 @@ values only — never a payload, header, raw id, claim token, credential, queue 
 is untrusted input to the connector: its batch is validated key-by-key (aliases 1–64 UTF-8 bytes
 with no control character) before anything is merged, and the merged frame runs the same exact
 validator the client runs before it is signed.
+
+## Cache observations (M98i)
+
+`GET /v1/cache` (no query) answers
+`{ version: 1, instanceId, state, sources: [{ sourceId, snapshot }] }` over every
+`ICacheDiagnosticsSource` registered under `CAPABILITIES.CACHE_DIAGNOSTICS`. Every CachePlugin
+instance registers one as a multi provider (never in `provides`); the connector resolves them ONCE
+at bootstrap, in registration order, and REFUSES to start with more than 16 (a fixed, value-free
+configuration error, never a silent drop). Sources are read only after the request authenticated;
+`sourceId` is the session-local `s1`…`s16`.
+
+A snapshot is exactly `{ state, alias, coverage: 'owned-instance', records, dropped }`; `alias` is
+`null` when the plugin was not opted in (`state: 'disabled'`). A record is exactly
+`{ alias, operation, count, lastDurationMs, ageMs, succeeded, failed, hits, misses, present, absent,
+removed, notRemoved }`
+for one of the five backend operations `get`, `set`, `delete`, `has`, `clear` (a `getOrSet` is
+counted as its internal `get`/`set` calls). Every settled call increments `count` and exactly one of
+`succeeded`/`failed`; the detail counters count only successful calls of their operation. There is
+no eviction counter — a miss is never reported as an eviction.
+
+Each source is untrusted input: only a plain object (`Object.prototype` or `null` prototype) of own
+DATA properties is admitted, each field read once through its descriptor (a getter is never
+invoked), lists read by index, at most 64 records, exact keys and enums, unique operations,
+non-negative safe-integer counters. A source that throws or fails any check is reported as a fixed
+`{ state: 'collection-failed', alias: null, records: [], dropped: 0 }` — no error text. Duplicate
+non-null aliases across sources, or a response over 256 KiB, collapse the whole response to
+`{ state: 'collection-failed', sources: [] }`; a partial document is never produced. The aggregate
+`state` is `unsupported` with no source, otherwise the first of `ready`, `collection-failed`,
+`stale`, `no-data`, `disabled` present. The client runs the same validator; a manifest with
+`cache: false` answers a local typed `unsupported` response without a request.
+
+Keys, prefixes, values, Redis URLs, factory results and errors never reach the collector, the wire,
+or the client. Only calls through the plugin's OWN `CacheService` are counted: direct store calls
+and a replacement service registered later are outside coverage.
 
 ## Trace observations (M98g)
 

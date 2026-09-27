@@ -124,14 +124,31 @@ describe('DiagnosticsEventRing', () => {
     expect(ring.at(1)?.sequence).toBe(1);
   });
 
-  it('clear() discards every retained event and resets bookkeeping', () => {
+  it('clear() discards every retained event but never reuses a sequence number', () => {
     const ring = new DiagnosticsEventRing();
     for (let i = 1; i <= 10; i++) {
       ring.store(i, event(i));
     }
     ring.clear();
+    // Discarded like an eviction: nothing is readable, the counter stands.
+    expect(ring.lastSequence).toBe(10);
+    expect(ring.firstSequence).toBe(11);
+    for (let i = 1; i <= 10; i++) {
+      expect(ring.at(i)).toBeUndefined();
+    }
+    // The next event continues the numbering rather than restarting at 1.
+    expect(ring.allocateSequence()).toBe(11);
+    ring.store(11, event(11));
+    expect(ring.at(11)?.sequence).toBe(11);
+    expect(ring.at(1)).toBeUndefined();
+    expect(ring.firstSequence).toBe(11);
+  });
+
+  it('clear() on an empty ring leaves it empty and starting at 1', () => {
+    const ring = new DiagnosticsEventRing();
+    ring.clear();
     expect(ring.lastSequence).toBe(0);
     expect(ring.firstSequence).toBe(1);
-    expect(ring.at(5)).toBeUndefined();
+    expect(ring.allocateSequence()).toBe(1);
   });
 });

@@ -15,9 +15,11 @@
 import type {
   AuthorizationDiagnosticsBatch,
   ConfigDiagnosticsSnapshot,
+  DiagnosticsBatch,
   HandlerResult,
   HealthDiagnosticsSnapshot,
   IAuthorizationDiagnosticsSource,
+  ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
   IDiagnosticsSource,
   IHealthDiagnosticsSource,
@@ -33,6 +35,7 @@ import type { DiagnosticsSessionState } from '../security/session.ts';
 import type { ConnectorLimits, LimitsClock } from './limits.ts';
 import type { IQueueMerger } from './queue-merger.ts';
 import { isQueueBatchProjection, projectQueueBatch } from '../protocol/queue-protocol.ts';
+import { buildCacheResponse, isCacheResponseProjection } from '../protocol/cache-protocol.ts';
 import {
   isAuthorizationBatchProjection,
   projectAuthorizationBatch,
@@ -204,6 +207,14 @@ export interface ConnectorHandlerDeps {
    * configuration value.
    */
   readonly configSource: IConfigDiagnosticsSource | null;
+  /**
+   * Every cache-diagnostics source (M98i), resolved ONCE from
+   * `CAPABILITIES.CACHE_DIAGNOSTICS` at bootstrap, in registration order and
+   * at most 16. Empty when no CachePlugin is registered: the connector then
+   * answers a typed `unsupported` response for `GET /v1/cache`. A read calls
+   * only each source's synchronous `snapshot()` — never a cache operation.
+   */
+  readonly cacheSources: readonly ICacheDiagnosticsSource[];
   /**
    * The queue-observation merger (M98f) over every queue-diagnostics source
    * registered when the connector bootstrapped. With no source registered it
@@ -843,6 +854,15 @@ export function createConnectorHandler(
       if (target === null) {
         return rawRefusal(deps.limits, 'invalid-request');
       }
+      // `new URL` normalizes: it resolves dot segments and drops an empty
+      // query and a fragment, so `/v1/./snapshot`, `/v1/snapshot?` and
+      // `/v1/events?after=0&limit=1#x` all parse to a canonical target. The
+      // runtime hands over the request-target as the client sent it, so the
+      // raw URL must BE the canonical one — an alias is refused, never
+      // silently served as the operation it normalizes to.
+      if (request.url !== `http://${authority}${target.canonicalTarget}`) {
+        return rawRefusal(deps.limits, 'invalid-request');
+      }
       if (parsed.sessionId !== deps.session.sessionId) {
         return rawRefusal(deps.limits, 'unauthorized');
       }
@@ -919,7 +939,18 @@ export function createConnectorHandler(
         }
         projected = projectSnapshot(snapshot);
       } else if (target.op === 'events') {
-        const batch = deps.source.read(target.after, target.limit);
+        let batch: DiagnosticsBatch;
+        try {
+          batch = deps.source.read(target.after, target.limit);
+        } catch (error) {
+          // The reader's documented refusal of a cursor beyond its sequence
+          // (the parser has already bounded both parameters) is a caller
+          // error, answered as the queue and trace operations answer it.
+          if (error instanceof RangeError) {
+            return refusalResponse('invalid-request');
+          }
+          throw error;
+        }
         if (batch.version !== 1) {
           return refusalResponse('unsupported-version');
         }
@@ -946,6 +977,18 @@ export function createConnectorHandler(
           return refusalResponse(outcome.code);
         }
         projected = outcome.projected;
+      } else if (target.op === 'cache') {
+        // The cache operation (M98i). Every session and request check above
+        // ran before any source is read. Each source read is isolated, and
+        // the wire validator — the SAME one the client runs — checks the
+        // built response before anything is signed. The cross-instance
+        // check above already proved the presented (non-null) instance IS
+        // the session's bound one.
+        const candidate = buildCacheResponse(parsed.instance as string, deps.cacheSources);
+        if (!isCacheResponseProjection(candidate)) {
+          return refusalResponse('unavailable');
+        }
+        projected = candidate;
       } else if (target.op === 'queues') {
         // The queue operation (M98f). Every session and request check above
         // ran before any source is read: the merger drains the sources only
