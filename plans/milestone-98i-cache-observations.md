@@ -415,7 +415,8 @@ session, must be refused with no source read — proving the `Host` check holds 
 and MAC layers — with the identical request under `Host: 127.0.0.1:<port>` served as the positive
 control. The negative control reverts the `Host` check and observes that request served.
 
-**Approved by:** the maintainer, 2026-09-27 — PENDING confirmation of this recorded text.
+**Approved by:** the maintainer, 2026-09-27 — recorded text confirmed, including the DNS-rebinding
+attacker.
 
 **Implementation gate — pending committed-tree audit before completion/publication.** Record commit,
 reviewed files, tested adapters/runtimes, findings and dispositions in the implementation PR. Test
