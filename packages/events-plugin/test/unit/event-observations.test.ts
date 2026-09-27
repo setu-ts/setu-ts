@@ -890,7 +890,7 @@ describe('Audit fixes (M98j F1, F2)', () => {
       }
       return original.call(this, key, value);
     };
-    let held: number | null;
+    let held: ReturnType<EventObservationCollector['begin']>;
     try {
       held = latched.begin('users', 'publish');
     } finally {
@@ -991,6 +991,34 @@ describe('Review fixes (PR #375)', () => {
     const snapshot = observer.snapshot();
     expect(snapshot.dropped).toBe(0);
     expect(snapshot.records.map((r) => r.alias)).toEqual(['a32']);
+  });
+
+  it("a settlement whose slot expired never erases a replacement slot's in-flight work", () => {
+    const clock = new MutableClock();
+    const observer = collector(clock);
+    const a = observer.begin('users', 'handler'); // A starts
+    clock.advance(60_001);
+    observer.snapshot(); // A's slot expires while A is still running
+    const b = observer.begin('users', 'handler'); // B starts in a replacement slot
+    observer.end('users', 'handler', a, false); // A settles (failed) while B is pending
+    const pending = observer.snapshot().records.find((r) => r.operation === 'handler')!;
+    // A is fully accounted (a start, a settlement, its failure) and B is
+    // still visible in flight.
+    expect(pending).toMatchObject({ started: 2, count: 1, succeeded: 0, failed: 1 });
+    observer.end('users', 'handler', b, true);
+    const settled = observer.snapshot().records.find((r) => r.operation === 'handler')!;
+    expect(settled).toMatchObject({ started: 2, count: 2, succeeded: 1, failed: 1 });
+  });
+
+  it('a no-subscriber publish whose slot expired is still counted as one', () => {
+    const clock = new MutableClock();
+    const observer = collector(clock);
+    const a = observer.begin('users', 'publish');
+    clock.advance(60_001);
+    observer.snapshot();
+    observer.end('users', 'publish', a, true, true);
+    const record = observer.snapshot().records.find((r) => r.operation === 'publish')!;
+    expect(record).toMatchObject({ started: 1, count: 1, succeeded: 1, noSubscribers: 1 });
   });
 
   it('keeps started >= count when a settlement outlives its slot', () => {

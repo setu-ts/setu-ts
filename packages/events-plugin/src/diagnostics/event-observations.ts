@@ -214,6 +214,23 @@ interface ObservationSlot {
 }
 
 /**
+ * What {@linkcode EventObservationCollector.begin} hands back and
+ * {@linkcode EventObservationCollector.end} consumes: the start reading and
+ * the slot the start was counted in (`null` when it was refused at
+ * capacity). Carrying the slot is what lets a settlement tell "my start is
+ * in this slot" from "my slot expired and was replaced" — a replacement
+ * slot never absorbs a start it did not count. Opaque to the bus.
+ *
+ * @internal
+ */
+export interface ObservationStart {
+  /** The monotonic start reading. */
+  readonly at: number;
+  /** The slot `started` was counted in, or `null` when refused at capacity. */
+  readonly slot: object | null;
+}
+
+/**
  * The inert, disabled event-diagnostics source, registered when the events
  * plugin's `diagnostics` option is absent. It observes nothing — no slots, no
  * clock reads — and answers a deeply frozen `disabled` snapshot with a `null`
@@ -298,7 +315,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     alias: string,
     operation: EventObservationOperation,
     at?: number | null,
-  ): number | null {
+  ): ObservationStart | null {
     const now = at === undefined
       ? this.#read()
       : this.#closed || this.#collectionFailed
@@ -314,7 +331,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
         slot.started = saturatingNext(slot.started);
         slot.lastSeenAtMs = now;
       }
-      return now;
+      return { at: now, slot };
     } catch {
       this.#collectionFailed = true;
       return null;
@@ -332,7 +349,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
    *
    * @param alias - The already-approved alias
    * @param operation - Which dispatch boundary settled
-   * @param startedAt - The reading {@linkcode begin} returned
+   * @param started - The start {@linkcode begin} returned
    * @param succeeded - Whether the boundary completed normally
    * @param noSubscribers - For `publish`, whether no handler was subscribed
    * @param at - A settlement reading the caller already holds, reused
@@ -343,21 +360,21 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
   end(
     alias: string,
     operation: EventObservationOperation,
-    startedAt: number | null,
+    started: ObservationStart | null,
     succeeded: boolean,
     noSubscribers = false,
     at?: number | null,
   ): number | null {
     // A caller-held reading must not bypass the lifecycle: after close() or
     // a latched failure nothing is recorded (audit F1).
-    if (startedAt === null || this.#closed || this.#collectionFailed) {
+    if (started === null || this.#closed || this.#collectionFailed) {
       return null;
     }
     const now = at === undefined ? this.#read() : at;
     if (now === null) {
       return null;
     }
-    this.observe(alias, operation, succeeded, now - startedAt, noSubscribers, now);
+    this.#settle(alias, operation, succeeded, now - started.at, noSubscribers, now, started.slot);
     return this.#closed || this.#collectionFailed ? null : now;
   }
 
@@ -382,6 +399,27 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     noSubscribers = false,
     at?: number,
   ): void {
+    this.#settle(alias, operation, succeeded, durationMs, noSubscribers, at, undefined);
+  }
+
+  /**
+   * The one settlement path. `origin` is the slot the matching start was
+   * counted in (from {@linkcode ObservationStart}); when the slot now being
+   * updated is a DIFFERENT one — the original expired and was replaced, or
+   * the start was refused at capacity — this settlement's start is counted
+   * here too, so the replacement's in-flight figure (`started - count`)
+   * describes only its own work and never goes negative. `undefined`
+   * (a bare {@linkcode observe}) counts no start.
+   */
+  #settle(
+    alias: string,
+    operation: EventObservationOperation,
+    succeeded: boolean,
+    durationMs: number,
+    noSubscribers: boolean,
+    at: number | undefined,
+    origin: object | null | undefined,
+  ): void {
     if (this.#closed || this.#collectionFailed) {
       return;
     }
@@ -395,13 +433,10 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       if (slot === null) {
         return;
       }
-      slot.count = saturatingNext(slot.count);
-      // A settlement whose start expired with its slot (work in flight longer
-      // than retention) still started once: keep `started >= count` so
-      // `started - count` never goes negative.
-      if (slot.started < slot.count) {
-        slot.started = slot.count;
+      if (origin !== undefined && origin !== slot) {
+        slot.started = saturatingNext(slot.started);
       }
+      slot.count = saturatingNext(slot.count);
       if (succeeded) {
         slot.succeeded = saturatingNext(slot.succeeded);
       } else {

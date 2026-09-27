@@ -87,7 +87,7 @@ export class InMemoryEventBus implements IEventBus {
       if (handlers.length === 0) {
         // One clock read: the settlement reuses the start reading.
         const startedAt = observer.begin(alias, 'publish');
-        observer.end(alias, 'publish', startedAt, true, true, startedAt);
+        observer.end(alias, 'publish', startedAt, true, true, startedAt?.at ?? null);
         return;
       }
       await this.#dispatchObserved(observer, alias, event, handlers);
@@ -144,7 +144,7 @@ export class InMemoryEventBus implements IEventBus {
     // the previous boundary settled at, and the publish settles at the last
     // handler's settlement — 1 + handlers reads per publication.
     const publishStartedAt = observer.begin(alias, 'publish');
-    let last: number | null = publishStartedAt;
+    let last: number | null = publishStartedAt?.at ?? null;
     const dispatch = async () => {
       for (const handler of handlers) {
         const handlerStartedAt = observer.begin(alias, 'handler', last);
