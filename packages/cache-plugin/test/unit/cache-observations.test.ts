@@ -268,8 +268,8 @@ describe('observeCacheCall — transparency', () => {
     expect(clock.reads).toBe(0);
   });
 
-  it('preserves TTL, prefix, getOrSet coalescing and factory counts when enabled', async () => {
-    const run = async (enabled: boolean) => {
+  it('preserves TTL, prefix, getOrSet coalescing and factory counts enabled, disabled and failing', async () => {
+    const run = async (mode: 'disabled' | 'enabled' | 'failing') => {
       const calls: string[] = [];
       const inner = new MemoryStore('');
       const spy = {
@@ -283,8 +283,11 @@ describe('observeCacheCall — transparency', () => {
         },
       } as unknown as CacheStore;
       const service = new CacheService(spy, 'pre:', 30);
-      if (enabled) {
-        attachCacheCollector(service, new CacheObservationCollector('a', new Clock().read));
+      if (mode !== 'disabled') {
+        const clock = new Clock();
+        // `failing`: the observer's clock throws on every read.
+        clock.fail = mode === 'failing';
+        attachCacheCollector(service, new CacheObservationCollector('a', clock.read));
       }
       let factoryRuns = 0;
       const factory = async () => {
@@ -301,14 +304,51 @@ describe('observeCacheCall — transparency', () => {
       const rejected = await service.getOrSet('z', () => Promise.reject(failure)).catch((e) => e);
       return { calls, factoryRuns, results, rejected, failure };
     };
-    const off = await run(false);
-    const on = await run(true);
-    expect(on.calls).toEqual(off.calls);
-    expect(on.calls).toContain('set:pre:k:30');
-    expect(on.factoryRuns).toBe(1);
+    const off = await run('disabled');
+    expect(off.calls).toContain('set:pre:k:30');
     expect(off.factoryRuns).toBe(1);
-    expect(on.results).toEqual(off.results);
-    expect(on.rejected).toBe(on.failure);
+    for (const mode of ['enabled', 'failing'] as const) {
+      const other = await run(mode);
+      expect(other.calls).toEqual(off.calls);
+      expect(other.factoryRuns).toBe(1);
+      expect(other.results).toEqual(off.results);
+      expect(other.rejected).toBe(other.failure);
+    }
+  });
+
+  it('keeps the settlement order of interleaved calls identical enabled and disabled', async () => {
+    const run = async (enabled: boolean) => {
+      // Each backend call resolves when its gate is released; gates are
+      // released in a fixed, non-FIFO order.
+      const gates: (() => void)[] = [];
+      const gated = <T>(value: T) => new Promise<T>((resolve) => gates.push(() => resolve(value)));
+      const backend = {
+        ...scriptedBackend('resolve', null),
+        get: () => gated('v'),
+        set: () => gated(undefined),
+        has: () => gated(true),
+        delete: () => gated(false),
+      } as unknown as CacheStore;
+      const service = new CacheService(backend, '');
+      if (enabled) {
+        attachCacheCollector(service, new CacheObservationCollector('a', new Clock().read));
+      }
+      const order: string[] = [];
+      const calls = [
+        service.get('a').then(() => order.push('get')),
+        service.set('a', 1).then(() => order.push('set')),
+        service.has('a').then(() => order.push('has')),
+        service.delete('a').then(() => order.push('delete')),
+      ];
+      for (const index of [2, 0, 3, 1]) {
+        gates[index]!();
+      }
+      await Promise.all(calls);
+      return order;
+    };
+    const off = await run(false);
+    expect(off).toEqual(['has', 'get', 'delete', 'set']);
+    expect(await run(true)).toEqual(off);
   });
 
   it('keeps results and errors unchanged when the observer itself fails', async () => {

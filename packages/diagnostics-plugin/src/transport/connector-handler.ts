@@ -813,12 +813,10 @@ export function createConnectorHandler(
         // The cache operation (M98i). Every session and request check above
         // ran before any source is read. Each source read is isolated, and
         // the wire validator — the SAME one the client runs — checks the
-        // built response before anything is signed.
-        const boundInstance = deps.session.instanceId;
-        if (boundInstance === null) {
-          return refusalResponse('unauthorized');
-        }
-        const candidate = buildCacheResponse(boundInstance, deps.cacheSources);
+        // built response before anything is signed. The cross-instance
+        // check above already proved the presented (non-null) instance IS
+        // the session's bound one.
+        const candidate = buildCacheResponse(parsed.instance as string, deps.cacheSources);
         if (!isCacheResponseProjection(candidate)) {
           return refusalResponse('unavailable');
         }

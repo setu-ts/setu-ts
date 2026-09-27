@@ -345,24 +345,37 @@ async function harness(cacheSources: readonly ICacheDiagnosticsSource[]) {
     cacheSources,
   });
   session.bindInstance(TEST_INSTANCE_ID);
-  return { handler, key };
+  return { handler, key, clock, session };
 }
 
-/** Sends a signed `/v1/cache` request, optionally with a wrong MAC. */
+/** One `/v1/cache` request's overridable parts. */
+interface CacheRequestParts {
+  readonly method?: string;
+  readonly sessionId?: string;
+  readonly sequence?: number;
+  readonly instance?: string;
+  readonly mac?: string;
+}
+
+/** Sends a signed `/v1/cache` request; each part may be overridden. */
 async function request(
   handler: (request: ReturnType<typeof fakeRequest>) => Promise<IResponse>,
   key: CryptoKey,
-  mac?: string,
+  parts: CacheRequestParts = {},
 ): Promise<IResponse> {
-  const signed = mac ?? await signRequest(crypto.subtle, key, '/v1/cache', 1, TEST_INSTANCE_ID);
+  const sequence = parts.sequence ?? 1;
+  const instance = parts.instance ?? TEST_INSTANCE_ID;
+  const mac = parts.mac ??
+    await signRequest(crypto.subtle, key, '/v1/cache', sequence, instance);
   return await handler(fakeRequest({
+    ...(parts.method !== undefined ? { method: parts.method } : {}),
     url: `http://${HOST}/v1/cache`,
     headers: {
       host: HOST,
-      'x-setu-session': TEST_SESSION_ID,
-      'x-setu-sequence': '1',
-      'x-setu-instance': TEST_INSTANCE_ID,
-      'x-setu-mac': signed,
+      'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
+      'x-setu-sequence': String(sequence),
+      'x-setu-instance': instance,
+      'x-setu-mac': mac,
     },
   }));
 }
@@ -390,10 +403,70 @@ describe('connector — GET /v1/cache', () => {
   it('reads no source when the request fails authentication', async () => {
     const s = source(ready());
     const { handler, key } = await harness([s]);
-    const view = inspect(await request(handler, key, 'f'.repeat(64)));
+    const view = inspect(await request(handler, key, { mac: 'f'.repeat(64) }));
     expect(view.status).toBe(401);
     expect(s.calls).toBe(0);
   });
+
+  const OTHER_INSTANCE = '00000000-0000-4000-8000-000000000000';
+  // Every refusal the shared gate answers must precede the source read: each
+  // row is sent against a fresh harness and must leave `calls` at 0.
+  const refusals: ReadonlyArray<{
+    readonly name: string;
+    readonly status: number;
+    readonly send: (h: Awaited<ReturnType<typeof harness>>) => Promise<IResponse>;
+  }> = [
+    {
+      name: 'a replayed sequence',
+      status: 401,
+      send: async (h) => {
+        expect((await request(h.handler, h.key)).snapshot().status).toBe(200);
+        return await request(h.handler, h.key);
+      },
+    },
+    {
+      name: 'a request bound to another instance',
+      status: 401,
+      send: (h) => request(h.handler, h.key, { instance: OTHER_INSTANCE }),
+    },
+    {
+      name: 'an unpaired session id',
+      status: 401,
+      send: (h) => request(h.handler, h.key, { sessionId: 'c'.repeat(32) }),
+    },
+    {
+      name: 'an expired session',
+      status: 401,
+      send: (h) => {
+        h.clock.advance(900_001);
+        return request(h.handler, h.key);
+      },
+    },
+    {
+      name: 'a revoked session',
+      status: 401,
+      send: (h) => {
+        h.session.revoke();
+        return request(h.handler, h.key);
+      },
+    },
+    {
+      name: 'a mutation method',
+      status: 400,
+      send: (h) => request(h.handler, h.key, { method: 'POST' }),
+    },
+  ];
+  for (const refusal of refusals) {
+    it(`refuses ${refusal.name} without reading any source`, async () => {
+      const s = source(ready());
+      const h = await harness([s]);
+      const view = inspect(await refusal.send(h));
+      expect(view.status).toBe(refusal.status);
+      expect(view.body).not.toHaveProperty('sources');
+      // The replay row reads once for its first, legitimate request.
+      expect(s.calls).toBe(refusal.name === 'a replayed sequence' ? 1 : 0);
+    });
+  }
 
   it('keeps a throwing source value-free on the wire', async () => {
     const { handler, key } = await harness([source(new Error('canary-throw-SYNTHETIC'))]);

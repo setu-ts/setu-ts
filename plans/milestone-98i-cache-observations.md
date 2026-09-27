@@ -134,15 +134,18 @@ Aliases are explicit non-secret labels, unique, 1–64 UTF-8 bytes, without cont
 aliases by truncating or hashing sensitive values. Only one configured alias per source is
 supported; no event/job maps or dynamic mapping callbacks are accepted.
 
-Each source admits at most 64 record slots keyed by approved alias and fixed operation. At capacity,
-ignore new tuples and increment saturating dropped; existing tuples continue updating. Records
-expire after 60 seconds without an observation, checked during update/read; clear their counters on
-expiry. age >30 seconds means stale; any fresh record means ready; no records means no-data. No
-background timer and no per-request diagnostic queue. On close mark closed before clearing; late
-results cannot repopulate state, and snapshot returns disabled. Each observed call retains only
-primitive timing/alias state, no additional wait on external work, body copy or diagnostic I/O.
-Promise observation may add a microtask; tests must preserve application ordering guarantees without
-claiming identical promise identity or a literally zero-cost enabled path.
+Each source's records are keyed by approved alias and fixed operation. **As implemented** the
+built-in collector has exactly one alias and five operations, so it holds at most five records by
+construction and can never run out of slots: its `dropped` is always `0`. The 64-record bound and
+`dropped` remain on the source CONTRACT, which the connector validates for any (third-party) source
+whose slot set is not fixed. Records expire after 60 seconds without an observation, checked during
+update/read; clear their counters on expiry. age >30 seconds means stale; any fresh record means
+ready; no records means no-data. No background timer and no per-request diagnostic queue. On close
+mark closed before clearing; late results cannot repopulate state, and snapshot returns disabled.
+Each observed call retains only primitive timing/alias state, no additional wait on external work,
+body copy or diagnostic I/O. Promise observation may add a microtask; tests must preserve
+application ordering guarantees without claiming identical promise identity or a literally zero-cost
+enabled path.
 
 Use runtime.hrtime for plugin durations; SDK uses the injected monotonic now. Clamp negative deltas.
 Catch observer and clock failures without changing application errors or results; latch
@@ -150,6 +153,18 @@ collection-failed and stop capture until source recreation. No diagnostic error 
 Benchmark disabled/enabled on the same workload; require zero extra backend calls and no growing
 memory after steady state. Target <=5% median throughput regression at 10,000 warmed operations;
 record five runs and investigate failures before completion rather than claiming a universal bound.
+
+**Measured, and the target is NOT met (recorded here for the maintainer's decision).** Five paired
+runs of 10,000 warmed `set`+`get` pairs against `MemoryStore` gave an enabled/disabled time ratio of
+2.08–2.71 (median 2.45). Diagnosis by elimination: with the collector's clock replaced by a
+constant, the ratio is ~1.5 — the one promise hop `observeCacheCall` adds to observe settlement —
+and the remainder is the two `performance.now()` reads per call. A `MemoryStore` call costs a
+fraction of a microsecond, so no instrumentation that measures a per-call duration can stay within
+5% of it; against a network backend the same fixed cost is a small fraction of each round trip, but
+that was not measured (no Redis was available). Zero extra backend calls is met (the
+enabled/disabled/failing comparison test asserts identical backend call sequences) and memory is
+bounded (five records). The CHANGELOG states the measured cost. Remaining options are the
+maintainer's: accept the stated cost, measure against real Redis, or drop/sample `lastDurationMs`.
 
 ### 3.5 Scope and isolation
 
@@ -169,6 +184,7 @@ unsupported. No tenant selectors, per-user identifiers, resource lookups or cont
 | `IDiagnosticsClient.cache`       | client method              | Devtool inspector.                                         |
 | `CacheDiagnosticsOptions`        | owning package option type | Application opt-in and collector construction.             |
 | `CAPABILITIES.CACHE_DIAGNOSTICS` | common token               | Owning plugin multi-registration and connector resolution. |
+| `CacheDiagnosticsOperation`      | common type                | `CacheDiagnosticsRecord.operation`; the validator's enum.  |
 
 Collectors, attachment helpers and projectors remain internal. No general observer/event-bus API.
 
