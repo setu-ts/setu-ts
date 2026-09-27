@@ -1330,9 +1330,10 @@ export interface AuthorizationDecisionObservation {
  * Availability of the authorization-diagnostics inspector (M98h), from the
  * AuthPlugin's own source.
  *
- * `disabled` — the AuthPlugin configured RBAC but the application did not pass
- * the `diagnostics` option: no collector or ring exists. This is the owning
- * plugin's answer, distinct from `unsupported`.
+ * `disabled` — the application did not pass the AuthPlugin's
+ * `authorizationDiagnostics` option (whether or not RBAC is configured): no
+ * collector or ring exists. This is the owning plugin's answer, distinct from
+ * `unsupported`.
  * `no-data` — observation is active and nothing has been retained yet.
  * `ready` — observation is active and at least one decision has been retained.
  * `unsupported` — observation cannot explain enforcement: the coverage names
@@ -1354,8 +1355,9 @@ export type AuthorizationSourceState =
 /**
  * Why the authorization inspector cannot explain enforcement (M98h).
  *
- * `rbac-not-configured` — the AuthPlugin registered no authorization service
- * (no `rbac` option), so there is no first-party RBAC to observe.
+ * `rbac-not-configured` — observation was opted into but the AuthPlugin
+ * registered no authorization service (no `rbac` option), so there is no
+ * first-party RBAC to observe.
  * `provider-identity-unavailable` — the registry lacks the optional
  * `isCurrent` identity predicate, so the source cannot verify it is still the
  * authoritative provider without resolving a replacement factory.
@@ -1386,7 +1388,9 @@ export type AuthorizationCoverage =
  * `next` is the last returned sequence — or the requested cursor when nothing
  * was returned, so polling an idle application re-sends the same cursor.
  * `droppedUnapproved` counts decisions dropped BEFORE buffering because a
- * requested or granting rule lacked an approved alias (saturating); those
+ * requested rule lacked an approved alias (saturating) — an unapproved
+ * GRANTING role never drops a decision, it is only omitted as a
+ * `viaRoleAlias`; those
  * consume no sequence, so they appear in neither `lost` nor the ring. No
  * absolute time is carried: `ageMs` describes arrival at this process only.
  *

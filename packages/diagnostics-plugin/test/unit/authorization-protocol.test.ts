@@ -290,7 +290,13 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
       reason: 'not-held',
     }));
     const truncated = sourceBatch(0, {
-      decisions: [compoundDecision(1, steps, { stepsEvaluated: 20, stepsTruncated: true })],
+      decisions: [
+        compoundDecision(1, steps, {
+          ruleAliases: Array.from({ length: 20 }, (_value, index) => `r${index}`),
+          stepsEvaluated: 20,
+          stepsTruncated: true,
+        }),
+      ],
       next: 1,
       lost: 0,
     });
@@ -298,6 +304,104 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
     expect(validated).not.toBeNull();
     expect(validated!.decisions[0]!.stepsTruncated).toBe(true);
     expect(validated!.decisions[0]!.stepsEvaluated).toBe(20);
+  });
+
+  describe('step-count invariants — a partial trace can never pass as complete', () => {
+    const sixteen = Array.from({ length: 16 }, (_value, index) => ({
+      ruleAlias: `r${index}`,
+      reason: 'not-held',
+    }));
+    const twenty = Array.from({ length: 20 }, (_value, index) => `r${index}`);
+    const cases: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+      [
+        'an untruncated compound that evaluated more steps than it retains',
+        compoundDecision(1, sixteen.slice(0, 2), { ruleAliases: twenty, stepsEvaluated: 5 }),
+      ],
+      [
+        'a compound claiming truncation at 16 or fewer evaluated steps',
+        compoundDecision(1, sixteen, { stepsEvaluated: 16, stepsTruncated: true }),
+      ],
+      [
+        'a truncated compound retaining fewer than 16 steps',
+        compoundDecision(1, sixteen.slice(0, 10), {
+          ruleAliases: twenty,
+          stepsEvaluated: 20,
+          stepsTruncated: true,
+        }),
+      ],
+      [
+        'a compound that evaluated more steps than it requested rules',
+        compoundDecision(1, sixteen, { stepsEvaluated: 20, stepsTruncated: true }),
+      ],
+      [
+        'an evaluated count above 16 with truncation denied',
+        compoundDecision(1, sixteen, { ruleAliases: twenty, stepsEvaluated: 20 }),
+      ],
+      ['a single check naming two rules', decision(1, { ruleAliases: ['A', 'B'] })],
+    ];
+    for (const [label, bad] of cases) {
+      it(`refuses ${label} on both validators`, () => {
+        const batch = sourceBatch(0, { decisions: [bad], next: 1, lost: 0 });
+        expect(readAuthorizationSourceBatch(batch, INSTANCE, 0, 128)).toBeNull();
+        expect(isAuthorizationBatchProjection({ ...batch })).toBe(false);
+      });
+    }
+
+    it('accepts an empty compound (hasAnyRole over no roles) with zero steps', () => {
+      const batch = sourceBatch(0, {
+        decisions: [compoundDecision(1, [], { ruleAliases: [] })],
+        next: 1,
+        lost: 0,
+      });
+      const validated = readAuthorizationSourceBatch(batch, INSTANCE, 0, 128);
+      expect(validated!.decisions[0]!.stepsEvaluated).toBe(0);
+      expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE)))
+        .toBe(true);
+    });
+
+    it('refuses a single check naming no rule', () => {
+      const batch = sourceBatch(0, {
+        decisions: [decision(1, { ruleAliases: [] })],
+        next: 1,
+        lost: 0,
+      });
+      expect(readAuthorizationSourceBatch(batch, INSTANCE, 0, 128)).toBeNull();
+      expect(isAuthorizationBatchProjection({ ...batch })).toBe(false);
+    });
+
+    it('accepts a complete compound that evaluated exactly 16 steps', () => {
+      const batch = sourceBatch(0, {
+        decisions: [compoundDecision(1, sixteen, { ruleAliases: twenty, stepsEvaluated: 16 })],
+        next: 1,
+        lost: 0,
+      });
+      const validated = readAuthorizationSourceBatch(batch, INSTANCE, 0, 128);
+      expect(validated!.decisions[0]!.stepsTruncated).toBe(false);
+      expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE)))
+        .toBe(true);
+    });
+  });
+
+  it('reads result and coverage exactly once, so a flipping getter cannot reach the copy', () => {
+    let resultReads = 0;
+    const flippingDecision = decision(1);
+    Object.defineProperty(flippingDecision, 'result', {
+      enumerable: true,
+      get: () => (resultReads++ === 0 ? true : 'CANARY'),
+    });
+    const withFlip = sourceBatch(0, { decisions: [flippingDecision], next: 1, lost: 0 });
+    const validated = readAuthorizationSourceBatch(withFlip, INSTANCE, 0, 128);
+    expect(validated!.decisions[0]!.result).toBe(true);
+    expect(resultReads).toBe(1);
+
+    let coverageReads = 0;
+    const unsupported = sourceBatch(5, { state: 'unsupported' });
+    Object.defineProperty(unsupported, 'coverage', {
+      enumerable: true,
+      get: () => (coverageReads++ === 0 ? 'unknown' : 'CANARY'),
+    });
+    expect(readAuthorizationSourceBatch(unsupported, INSTANCE, 5, 128)!.coverage).toBe('unknown');
+    expect(coverageReads).toBe(1);
   });
 
   it('accepts a truncated compound whose complete rule set exceeds the 16-step budget', () => {

@@ -361,9 +361,10 @@ short-circuits reports the steps it really took — a step list of at most 16 wi
 never a fabricated full sweep; a decision that evaluated exactly 16 steps is complete and reports
 `false`. Unevaluated compound branches have no step at all, and a step never carries a rule name
 that was not approved. Principal identifiers, role and permission VALUES, request paths, raw rules,
-credentials, claims, resources and error text never enter the record. A decision whose requested or
-granting rule lacks an approved alias is dropped BEFORE buffering and counted in the saturating
-`droppedUnapproved` counter; partial rule lists are never emitted.
+credentials, claims, resources and error text never enter the record. A decision whose requested
+rule lacks an approved alias is dropped BEFORE buffering and counted in the saturating
+`droppedUnapproved` counter; partial rule lists are never emitted. An unapproved GRANTING role never
+drops a decision — it is simply omitted, so the decision carries no `viaRoleAlias`.
 
 The batch carries `state` (`disabled` / `no-data` / `ready`; `unsupported` with `coverage`
 (`rbac-not-configured` — no RBAC configured, `provider-identity-unavailable` — the registry lacks

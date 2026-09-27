@@ -208,9 +208,9 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       // single source — the AuthPlugin always registers exactly one, and the
       // kernel admits one provider of the token. Absent means no auth plugin
       // at all, and the connector answers a typed `unsupported` batch. An
-      // auth plugin without RBAC or without the observation option still
-      // registers a source, which answers `unsupported` or `disabled`
-      // respectively. A read never evaluates a role, permission or wildcard,
+      // auth plugin without the observation option still registers a
+      // source, which answers `disabled`; with the option but without RBAC
+      // it answers `unsupported`. A read never evaluates a role, permission or wildcard,
       // and neither fails startup.
       const authorizationSource: IAuthorizationDiagnosticsSource | null =
         ctx.services.has(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS)

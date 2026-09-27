@@ -4201,20 +4201,21 @@ text are never retained), the per-step outcome, the fixed reason vocabulary, the
 actually performed — a compound that short-circuits reports the steps it really took, never a
 fabricated full sweep — `stepsTruncated` (a compound over 16 steps is RETAINED with its real result
 and the true `stepsEvaluated`, its step list holding only the first 16), and `ageMs`. A decision
-whose requested or granting rule lacks an approved alias is dropped before buffering and counted in
-a saturating `droppedUnapproved`; partial rule lists are never emitted. The source re-verifies its
-provider at read time through the new optional `IServiceRegistry.isCurrent?(token, instance)`
-identity predicate — non-resolving, never returning a service, never instantiating a lazy factory —
-and LATCHES `unsupported` terminal: `coverage:
-'provider-identity-unavailable'` when the registry
-lacks the predicate, `coverage: 'custom-provider'` when the current `CAPABILITIES.AUTHORIZATION`
-provider is not the exact `RbacService` instance the plugin created. A direct custom-service
-decision is never guessed from booleans or status; latching clears retained state and never resumes.
-A source that throws or fails the exact validator answers `collection-failed`; a client whose
-negotiated manifest has `authorization: false` answers the frozen `unsupported` batch, echoing its
-cursor, without sending the request. `IDiagnosticsClient.authorization` is a new REQUIRED member —
-additive for callers; a structural implementation of `IDiagnosticsClient` must add it (the package
-has not yet been published). `IServiceRegistry.isCurrent` is OPTIONAL so third-party registry-shaped
+whose requested rule lacks an approved alias is dropped before buffering and counted in a saturating
+`droppedUnapproved`; partial rule lists are never emitted. An unapproved granting role never drops a
+decision — it is omitted, leaving no `viaRoleAlias`. The source re-verifies its provider at read
+time through the new optional `IServiceRegistry.isCurrent?(token, instance)` identity predicate —
+non-resolving, never returning a service, never instantiating a lazy factory — and LATCHES
+`unsupported` terminal: `coverage:
+'provider-identity-unavailable'` when the registry lacks the
+predicate, `coverage: 'custom-provider'` when the current `CAPABILITIES.AUTHORIZATION` provider is
+not the exact `RbacService` instance the plugin created. A direct custom-service decision is never
+guessed from booleans or status; latching clears retained state and never resumes. A source that
+throws or fails the exact validator answers `collection-failed`; a client whose negotiated manifest
+has `authorization: false` answers the frozen `unsupported` batch, echoing its cursor, without
+sending the request. `IDiagnosticsClient.authorization` is a new REQUIRED member — additive for
+callers; a structural implementation of `IDiagnosticsClient` must add it (the package has not yet
+been published). `IServiceRegistry.isCurrent` is OPTIONAL so third-party registry-shaped
 implementations keep compiling; its absence conservatively disables explanations rather than falling
 back to a resolving `get`.
 

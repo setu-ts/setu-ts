@@ -144,9 +144,10 @@ export class RbacService implements IAuthorizationService {
    */
   hasRole(principal: IPrincipal, role: string): boolean {
     const outcome = this.evaluateRole(principal, role);
-    this.#emit(() =>
-      this.#observer()?.onRole(role, outcome.result, outcome.reason, outcome.viaRole)
-    );
+    const observer = authorizationObserverOf(this);
+    if (observer !== undefined) {
+      this.#emit(() => observer.onRole(role, outcome.result, outcome.reason, outcome.viaRole));
+    }
     return outcome.result;
   }
 
@@ -157,9 +158,12 @@ export class RbacService implements IAuthorizationService {
    */
   hasPermission(principal: IPrincipal, permission: string): boolean {
     const outcome = this.evaluatePermission(principal, permission);
-    this.#emit(() =>
-      this.#observer()?.onPermission(permission, outcome.result, outcome.reason, outcome.viaRole)
-    );
+    const observer = authorizationObserverOf(this);
+    if (observer !== undefined) {
+      this.#emit(() =>
+        observer.onPermission(permission, outcome.result, outcome.reason, outcome.viaRole)
+      );
+    }
     return outcome.result;
   }
 
@@ -169,13 +173,16 @@ export class RbacService implements IAuthorizationService {
   hasAnyRole(principal: IPrincipal, roles: readonly string[]): boolean {
     // Loop the private evaluator directly — never the public `hasRole` — so a
     // compound decision does not nest a duplicate single-check record under
-    // it, and the short-circuit order is preserved exactly.
+    // it, and the short-circuit order is preserved exactly. With no observer
+    // attached, no step list is built and nothing is emitted.
+    const observer = authorizationObserverOf(this);
     const evaluated: RoleStepEval[] = [];
     let evaluatedCount = 0;
+    let result = false;
     for (const role of roles) {
       const outcome = this.evaluateRole(principal, role);
       evaluatedCount += 1;
-      if (evaluated.length < MAX_RETAINED_STEPS) {
+      if (observer !== undefined && evaluated.length < MAX_RETAINED_STEPS) {
         evaluated.push({
           role,
           result: outcome.result,
@@ -184,15 +191,17 @@ export class RbacService implements IAuthorizationService {
         });
       }
       if (outcome.result) {
-        // The TRUE count, not the retained list's length: a grant past step 16
-        // short-circuits with a full list, and the decision is retained with
-        // stepsTruncated rather than dropped (plan §3.3).
-        this.#emit(() => this.#observer()?.onAnyRole(roles, evaluated, evaluatedCount, true));
-        return true;
+        result = true;
+        break;
       }
     }
-    this.#emit(() => this.#observer()?.onAnyRole(roles, evaluated, evaluatedCount, false));
-    return false;
+    if (observer !== undefined) {
+      // The TRUE count, not the retained list's length: a grant past step 16
+      // short-circuits with a full list, and the decision is retained with
+      // stepsTruncated rather than dropped (plan §3.3).
+      this.#emit(() => observer.onAnyRole(roles, evaluated, evaluatedCount, result));
+    }
+    return result;
   }
 
   /**
@@ -201,13 +210,16 @@ export class RbacService implements IAuthorizationService {
   hasAllPermissions(principal: IPrincipal, permissions: readonly string[]): boolean {
     // Loop the private evaluator directly — never the public `hasPermission` —
     // so a compound decision does not nest a duplicate single-check record
-    // under it, and the short-circuit order is preserved exactly.
+    // under it, and the short-circuit order is preserved exactly. With no
+    // observer attached, no step list is built and nothing is emitted.
+    const observer = authorizationObserverOf(this);
     const evaluated: PermissionStepEval[] = [];
     let evaluatedCount = 0;
+    let result = true;
     for (const permission of permissions) {
       const outcome = this.evaluatePermission(principal, permission);
       evaluatedCount += 1;
-      if (evaluated.length < MAX_RETAINED_STEPS) {
+      if (observer !== undefined && evaluated.length < MAX_RETAINED_STEPS) {
         evaluated.push({
           permission,
           result: outcome.result,
@@ -216,19 +228,17 @@ export class RbacService implements IAuthorizationService {
         });
       }
       if (!outcome.result) {
-        // The TRUE count, not the retained list's length: a failure past step
-        // 16 short-circuits with a full list, and the decision is retained
-        // with stepsTruncated rather than dropped (plan §3.3).
-        this.#emit(() =>
-          this.#observer()?.onAllPermissions(permissions, evaluated, evaluatedCount, false)
-        );
-        return false;
+        result = false;
+        break;
       }
     }
-    this.#emit(() =>
-      this.#observer()?.onAllPermissions(permissions, evaluated, evaluatedCount, true)
-    );
-    return true;
+    if (observer !== undefined) {
+      // The TRUE count, not the retained list's length: a failure past step
+      // 16 short-circuits with a full list, and the decision is retained with
+      // stepsTruncated rather than dropped (plan §3.3).
+      this.#emit(() => observer.onAllPermissions(permissions, evaluated, evaluatedCount, result));
+    }
+    return result;
   }
 
   /**
@@ -287,11 +297,6 @@ export class RbacService implements IAuthorizationService {
     }
 
     return { result: false, reason: 'not-held', viaRole: null };
-  }
-
-  /** The attached observer, or `undefined` when none is attached. */
-  #observer() {
-    return authorizationObserverOf(this);
   }
 
   /**

@@ -7,6 +7,7 @@ import { expect } from '@std/expect';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
+  IAuthorizationDiagnosticsSource,
   IAuthService,
   IAuthStrategy,
   IJwtService,
@@ -115,8 +116,42 @@ describe('AuthPlugin', () => {
     expect(registered.has(CAPABILITIES.AUTH)).toBe(true);
     expect(registered.has(CAPABILITIES.AUTHORIZATION)).toBe(false);
     // The authorization-diagnostics source is always registered, even without
-    // RBAC — it answers `unsupported` (rbac-not-configured).
+    // RBAC — without the observation option it answers `disabled`.
     expect(registered.has(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS)).toBe(true);
+    const source = registered.get(
+      CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+    ) as IAuthorizationDiagnosticsSource;
+    expect(source.read('instance', 0).state).toBe('disabled');
+  });
+
+  it('answers unsupported (rbac-not-configured) when the option is present without RBAC', async () => {
+    const plugin = AuthPlugin({
+      jwt: { secret: 'test-secret' },
+      authorizationDiagnostics: { enabled: true, roles: {}, permissions: {} },
+    });
+    const { ctx, registered } = createFakeContext();
+    await plugin.register!(ctx);
+    const source = registered.get(
+      CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+    ) as IAuthorizationDiagnosticsSource;
+    const batch = source.read('instance', 0);
+    expect(batch.state).toBe('unsupported');
+    expect(batch.coverage).toBe('rbac-not-configured');
+  });
+
+  it('refuses a malformed authorizationDiagnostics option at construction, with or without RBAC', () => {
+    const malformed = { enabled: false, roles: {}, permissions: {} };
+    expect(() =>
+      AuthPlugin({ jwt: { secret: 'test-secret' }, authorizationDiagnostics: malformed })
+    )
+      .toThrow('Authorization diagnostics: enabled must be the literal true.');
+    expect(() =>
+      AuthPlugin({
+        jwt: { secret: 'test-secret' },
+        rbac: { roles: {} },
+        authorizationDiagnostics: malformed,
+      })
+    ).toThrow('Authorization diagnostics: enabled must be the literal true.');
   });
 
   it('returns a plugin with correct name and version', () => {

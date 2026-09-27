@@ -102,7 +102,10 @@ itself remains optional and is not required for authorization explanations.
 
 - **Decision:** Add eager `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS` (`authorization-diagnostics`) and
   `IAuthorizationDiagnosticsSource`. AuthPlugin always registers a source. It reports `disabled`
-  without the option, `no-data` with active observed RBAC, `unsupported` with fixed coverage
+  without the option (whether or not RBAC is configured; the option — named
+  `authorizationDiagnostics` on `AuthPluginOptions` — is validated when `AuthPlugin(...)` is
+  called), `no-data`/`ready` with active observed RBAC (nothing retained yet / at least one
+  decision), and, when the option is present, `unsupported` with fixed coverage
   `rbac-not-configured`, `unsupported` with coverage `provider-identity-unavailable` when the
   registry lacks the optional identity predicate, and `unsupported` with coverage `custom-provider`
   when the current `CAPABILITIES.AUTHORIZATION` provider is not the exact RbacService instance the
@@ -209,12 +212,12 @@ Private evaluator results, WeakMap observer, collector, raw maps and projectors 
 
 ### 4.1 Options — every option names its consumer
 
-| Option                       | Consumer            | Behavior (per implementation)                                         |
-| ---------------------------- | ------------------- | --------------------------------------------------------------------- |
-| `diagnostics.enabled: true`  | AuthPlugin          | Attaches collector only to authoritative first-party RBAC.            |
-| `diagnostics.roles`          | evaluator projector | Approves/replaces requested and granting role names.                  |
-| `diagnostics.permissions`    | evaluator projector | Approves/replaces requested permission names.                         |
-| `diagnostics.policyRevision` | collector           | Adds one safe revision alias; never derives or hashes policy content. |
+| Option                                    | Consumer            | Behavior (per implementation)                                         |
+| ----------------------------------------- | ------------------- | --------------------------------------------------------------------- |
+| `authorizationDiagnostics.enabled: true`  | AuthPlugin          | Attaches collector only to authoritative first-party RBAC.            |
+| `authorizationDiagnostics.roles`          | evaluator projector | Approves/replaces requested and granting role names.                  |
+| `authorizationDiagnostics.permissions`    | evaluator projector | Approves/replaces requested permission names.                         |
+| `authorizationDiagnostics.policyRevision` | collector           | Adds one safe revision alias; never derives or hashes policy content. |
 
 ## 5. Implementation files
 

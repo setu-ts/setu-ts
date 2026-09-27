@@ -115,6 +115,38 @@ function copyBounded(value: unknown, max: number): unknown[] | null {
   return copy;
 }
 
+/**
+ * The step-count invariants of one decision. A single check (`role` /
+ * `permission`) names exactly one rule and evaluated exactly one step. A
+ * compound may name NO rule — `hasAnyRole(principal, [])` is a real,
+ * unsatisfied decision with zero steps, and refusing it would turn every
+ * later read into `collection-failed` — and otherwise evaluates at most as many steps as it requested, retains
+ * `min(evaluated, 16)` of them, and is `stepsTruncated` EXACTLY when it
+ * evaluated more than 16 — so a partial step list can never be presented as
+ * the complete explanation, and a complete one never claims truncation.
+ *
+ * @param operation - The validated operation
+ * @param ruleCount - The number of requested rule aliases
+ * @param stepCount - The number of retained steps
+ * @param stepsEvaluated - The claimed evaluated count
+ * @param stepsTruncated - The claimed truncation flag
+ * @returns `true` when the counts are mutually consistent
+ */
+function isConsistentStepCount(
+  operation: string,
+  ruleCount: number,
+  stepCount: number,
+  stepsEvaluated: number,
+  stepsTruncated: boolean,
+): boolean {
+  if (operation === 'role' || operation === 'permission') {
+    return ruleCount === 1 && stepCount === 1 && stepsEvaluated === 1 && !stepsTruncated;
+  }
+  return stepsEvaluated <= ruleCount &&
+    stepCount === Math.min(stepsEvaluated, MAX_AUTHORIZATION_STEPS) &&
+    stepsTruncated === (stepsEvaluated > MAX_AUTHORIZATION_STEPS);
+}
+
 /** Membership in a fixed vocabulary. */
 function isOneOf(value: unknown, vocabulary: ReadonlySet<string>): value is string {
   return typeof value === 'string' && vocabulary.has(value);
@@ -236,15 +268,16 @@ function readDecision(value: unknown): ValidatedAuthorizationDecision | null {
   }
   const operation = value.operation;
   const reason = value.reason;
+  const result = value.result;
   if (
     !isOneOf(operation, OPERATIONS) || !isOneOf(reason, REASONS) ||
-    typeof value.result !== 'boolean'
+    typeof result !== 'boolean'
   ) {
     return null;
   }
   const rawRuleAliases = copyBounded(value.ruleAliases, MAX_AUTHORIZATION_RULE_ALIASES);
   if (
-    rawRuleAliases === null || rawRuleAliases.length === 0 ||
+    rawRuleAliases === null ||
     rawRuleAliases.length > MAX_AUTHORIZATION_RULE_ALIASES ||
     !rawRuleAliases.every(isDisplayAlias)
   ) {
@@ -282,13 +315,14 @@ function readDecision(value: unknown): ValidatedAuthorizationDecision | null {
   ) {
     return null;
   }
-  // A compound decision evaluates at least as many steps as it retains, and a
-  // truncated one strictly more; a single decision evaluates exactly one.
   if (
-    (operation === 'role' || operation === 'permission')
-      ? (stepsEvaluated !== 1 || steps.length !== 1 || stepsTruncated)
-      : (stepsEvaluated < steps.length ||
-        (stepsTruncated && stepsEvaluated <= MAX_AUTHORIZATION_STEPS))
+    !isConsistentStepCount(
+      operation,
+      rawRuleAliases.length,
+      steps.length,
+      stepsEvaluated,
+      stepsTruncated,
+    )
   ) {
     return null;
   }
@@ -296,7 +330,7 @@ function readDecision(value: unknown): ValidatedAuthorizationDecision | null {
     sequence,
     id,
     operation: operation as AuthorizationDecisionOperation,
-    result: value.result,
+    result,
     ruleAliases: rawRuleAliases as string[],
     steps,
     stepsEvaluated,
@@ -355,11 +389,9 @@ export function readAuthorizationSourceBatch(
     if (!hasExactKeys(value, batchKeys)) {
       return null;
     }
-    if (state === 'unsupported') {
-      const coverage = value.coverage;
-      if (!isOneOf(coverage, COVERAGE)) {
-        return null;
-      }
+    const coverage = hasCoverage ? value.coverage : null;
+    if (hasCoverage && !isOneOf(coverage, COVERAGE)) {
+      return null;
     }
     const { next, lost, closed, droppedUnapproved } = value;
     const rawDecisions = copyBounded(value.decisions, limit);
@@ -395,7 +427,7 @@ export function readAuthorizationSourceBatch(
     }
     return {
       state: state as AuthorizationSourceState,
-      coverage: hasCoverage ? (value.coverage as AuthorizationCoverage) : null,
+      coverage: coverage as AuthorizationCoverage | null,
       decisions,
       next,
       lost,
@@ -531,7 +563,7 @@ function isDecisionProjection(value: unknown): boolean {
   }
   const ruleAliases = value.ruleAliases;
   if (
-    !Array.isArray(ruleAliases) || ruleAliases.length === 0 ||
+    !Array.isArray(ruleAliases) ||
     ruleAliases.length > MAX_AUTHORIZATION_RULE_ALIASES ||
     !ruleAliases.every(isDisplayAlias)
   ) {
@@ -554,15 +586,13 @@ function isDecisionProjection(value: unknown): boolean {
   ) {
     return false;
   }
-  if (
-    (operation === 'role' || operation === 'permission')
-      ? (stepsEvaluated !== 1 || steps.length !== 1 || stepsTruncated)
-      : (stepsEvaluated < steps.length ||
-        (stepsTruncated && stepsEvaluated <= MAX_AUTHORIZATION_STEPS))
-  ) {
-    return false;
-  }
-  return true;
+  return isConsistentStepCount(
+    operation,
+    ruleAliases.length,
+    steps.length,
+    stepsEvaluated,
+    stepsTruncated,
+  );
 }
 
 /**

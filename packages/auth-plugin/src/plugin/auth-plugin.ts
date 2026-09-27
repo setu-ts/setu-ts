@@ -66,6 +66,14 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
 
   const algorithm = options.jwt.algorithm ?? (options.jwt.secret ? 'HS256' : 'RS256');
 
+  // Authorization decision explanations (M98h): the option is validated HERE,
+  // at construction, whether or not RBAC is configured — a malformed option
+  // refuses before any application exists rather than at `start()`, and is
+  // never silently accepted by a JWT-only registration.
+  const authorizationPolicy = options.authorizationDiagnostics === undefined
+    ? null
+    : compileAuthorizationDiagnosticsOptions(options.authorizationDiagnostics);
+
   return {
     name: 'auth-plugin',
     version: denoJson.version,
@@ -196,32 +204,32 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       ctx.services.register(CAPABILITIES.AUTH, authService);
 
       // Authorization decision explanations (M98h). The AuthPlugin ALWAYS
-      // registers a source under CAPABILITIES.AUTHORIZATION_DIAGNOSTICS: an
-      // active collector when RBAC and the observation option are both
-      // present, a `disabled`-answering source without the option, and an
-      // `unsupported`-answering source when RBAC itself is absent. The
-      // boolean IAuthorizationService remains authoritative and unchanged; a
-      // diagnostic failure can never alter an allow/deny or a guard's
-      // short-circuit order.
+      // registers a source under CAPABILITIES.AUTHORIZATION_DIAGNOSTICS: a
+      // `disabled`-answering source without the option (whether or not RBAC
+      // is configured — the owning plugin's answer that observation was never
+      // opted into), an `unsupported` (`rbac-not-configured`) source when the
+      // option is present but RBAC is absent, and an active collector when
+      // both are present. The boolean IAuthorizationService remains
+      // authoritative and unchanged; a diagnostic failure can never alter an
+      // allow/deny or a guard's short-circuit order.
+      const rbacService = options.rbac === undefined ? null : new RbacService(options.rbac);
+      if (rbacService !== null) {
+        ctx.services.register(CAPABILITIES.AUTHORIZATION, rbacService);
+      }
       let authorizationSource: IAuthorizationDiagnosticsSource;
-      if (options.rbac === undefined) {
+      if (authorizationPolicy === null) {
+        authorizationSource = createDisabledAuthorizationSource();
+      } else if (rbacService === null) {
         authorizationSource = createUnsupportedAuthorizationSource('rbac-not-configured');
       } else {
-        const rbacService = new RbacService(options.rbac);
-        ctx.services.register(CAPABILITIES.AUTHORIZATION, rbacService);
-        if (options.authorizationDiagnostics === undefined) {
-          authorizationSource = createDisabledAuthorizationSource();
-        } else {
-          const policy = compileAuthorizationDiagnosticsOptions(options.authorizationDiagnostics);
-          const collector = new AuthorizationObservationCollector(
-            policy,
-            runtime,
-            ctx.services,
-            rbacService,
-          );
-          attachAuthorizationObserver(rbacService, collector);
-          authorizationSource = collector;
-        }
+        const collector = new AuthorizationObservationCollector(
+          authorizationPolicy,
+          runtime,
+          ctx.services,
+          rbacService,
+        );
+        attachAuthorizationObserver(rbacService, collector);
+        authorizationSource = collector;
       }
       ctx.services.register(
         CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,

@@ -11,7 +11,8 @@
  * boolean result remain present, so suppressing every record cannot make it
  * pass. It also proves a CUSTOM replacement of the authorization provider
  * latches the source to `unsupported` (custom-provider), and that a
- * JWT-only application (no RBAC) answers `unsupported` (rbac-not-configured).
+ * JWT-only application (no RBAC) that opted into observation answers
+ * `unsupported` (rbac-not-configured).
  *
  * @module
  */
@@ -168,7 +169,7 @@ describe('Authorization decision explanations (M98h) — end to end', () => {
     }
   });
 
-  it('a JWT-only application (no RBAC) answers unsupported with rbac-not-configured', async () => {
+  it('a JWT-only application (no RBAC) that opted in answers unsupported with rbac-not-configured', async () => {
     const httpPort = freePort();
     const connectorPort = freePort();
     const app = createApplication({
@@ -180,7 +181,10 @@ describe('Authorization decision explanations (M98h) — end to end', () => {
           sessionId: TEST_SESSION_ID,
           sessionKey: TEST_KEY_BYTES,
         }),
-        AuthPlugin({ jwt: { secret: 'jwt-only-e2e-secret' } }),
+        AuthPlugin({
+          jwt: { secret: 'jwt-only-e2e-secret' },
+          authorizationDiagnostics: { enabled: true, roles: {}, permissions: {} },
+        }),
       ],
       diagnostics: {},
     });

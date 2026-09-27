@@ -224,9 +224,9 @@ export interface ConnectorHandlerDeps {
    * `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS` during registration. `null` when
    * the application did not register the AuthPlugin at all: the connector
    * then answers a typed `unsupported` batch for `GET /v1/authorization` and
-   * never evaluates a role, permission or wildcard. An AuthPlugin without RBAC
-   * or without the option still registers a source, which answers
-   * `unsupported` or `disabled` respectively.
+   * never evaluates a role, permission or wildcard. An AuthPlugin without the
+   * option still registers a source, which answers `disabled`; one with the
+   * option but without RBAC answers `unsupported`.
    */
   readonly authorization: IAuthorizationDiagnosticsSource | null;
 }

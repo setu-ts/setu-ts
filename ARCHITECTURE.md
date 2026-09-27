@@ -2623,14 +2623,17 @@ evaluation must be refactored so that the SAME code path that produces the boole
 guarded decision observation, and the refactor is proven by the guards' byte-identical status/body
 and short-circuit behaviour. The observer is stored in a package-private `WeakMap` keyed by the
 `RbacService` instance and attached only when the `authorizationDiagnostics` option is passed, so a
-JWT-only registration and a registration with RBAC but no option are both unobserved with zero
-runtime cost. Minimization is structural: the evaluator hands the observer an approved alias (or
-nothing), the fixed reason, and the step it just ran — its signatures cannot accept a principal, a
-request, a raw rule name, a credential or an error. A compound that short-circuits emits exactly the
-steps it evaluated (at most 16 retained, the true count in `stepsEvaluated`, `stepsTruncated` `true`
-when more ran), never a fabricated full sweep; a decision whose requested or granting rule lacks an
+JWT-only registration and a registration with RBAC but no option are both unobserved: the evaluator
+builds no step list and invokes nothing when no observer is attached. Minimization is structural:
+the evaluator hands the observer only the requested rule names, the fixed reason, the granting role
+name and the step it just ran — its signatures cannot accept a principal, a request, a credential or
+an error — and the collector replaces every name with its approved alias before anything is
+retained, so a raw rule name never reaches the ring. A compound that short-circuits emits exactly
+the steps it evaluated (at most 16 retained, the true count in `stepsEvaluated`, `stepsTruncated`
+`true` when more ran), never a fabricated full sweep; a decision whose requested rule lacks an
 approved alias is dropped BEFORE buffering and counted in a saturating `droppedUnapproved` counter,
-so partial rule lists are never emitted.
+so partial rule lists are never emitted; an unapproved granting role is omitted from `viaRoleAlias`
+rather than dropping the decision.
 
 The second is the TRUST boundary. The `CAPABILITIES.AUTHORIZATION` provider is replaceable — an
 application may register its own `IAuthorizationService` after the AuthPlugin, and the guards will
