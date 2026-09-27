@@ -272,6 +272,14 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
   readonly #byAlias = new Map<string, { publish?: ObservationSlot; handler?: ObservationSlot }>();
   /** Monotonic reading of the last write-path expiry scan. */
   #lastExpireAt = Number.NEGATIVE_INFINITY;
+  /**
+   * A lower bound on the earliest instant any retained slot can expire
+   * (`lastSeenAtMs + RETENTION_MS`). `lastSeenAtMs` only moves forward, so a
+   * bound computed at the last walk stays a valid lower bound; a walk at
+   * capacity runs only once `now` passes it, which is what keeps the
+   * capacity path from walking all 64 slots on every refused tuple.
+   */
+  #earliestExpiryAt = Number.POSITIVE_INFINITY;
   #dropped = 0;
   #closed = false;
   /**
@@ -325,8 +333,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       return null;
     }
     try {
-      this.#expireIfFull(now);
-      const slot = this.#slotFor(alias, operation, false);
+      const slot = this.#slotFor(alias, operation, now, false);
       if (slot !== null) {
         slot.started = saturatingNext(slot.started);
         slot.lastSeenAtMs = now;
@@ -428,8 +435,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       return;
     }
     try {
-      this.#expireIfFull(now);
-      const slot = this.#slotFor(alias, operation);
+      const slot = this.#slotFor(alias, operation, now);
       if (slot === null) {
         return;
       }
@@ -459,17 +465,6 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
     }
   }
 
-  /**
-   * At capacity, expire stale slots before refusing a new tuple, so a full
-   * table of expired records never counts a live observation as dropped
-   * (the write-path scan is otherwise throttled to once per second).
-   */
-  #expireIfFull(now: number): void {
-    if (this.#slots.size >= MAX_RECORD_SLOTS) {
-      this.#expire(now);
-    }
-  }
-
   /** Reads the clock once; a failure latches `collection-failed`. */
   #read(): number | null {
     if (this.#closed || this.#collectionFailed) {
@@ -493,11 +488,19 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
   #slotFor(
     alias: string,
     operation: EventObservationOperation,
+    now: number,
     countDrop = true,
   ): ObservationSlot | null {
     const pair = this.#byAlias.get(alias);
     let slot = pair?.[operation];
     if (slot === undefined) {
+      // Only a NEW tuple at a full table can be refused, so only here is it
+      // worth reclaiming expired slots first — and only once some slot can
+      // actually have expired, so an at-capacity table of live slots pays
+      // no walk (the approved once-per-second write-path budget holds).
+      if (this.#slots.size >= MAX_RECORD_SLOTS && now > this.#earliestExpiryAt) {
+        this.#expire(now);
+      }
       if (this.#slots.size >= MAX_RECORD_SLOTS) {
         // A refused start and its settlement are one ignored observation:
         // only the settlement counts the drop.
@@ -516,8 +519,9 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
         noSubscribers: 0,
         lastDurationMs: null,
         lastSettledAtMs: null,
-        lastSeenAtMs: 0,
+        lastSeenAtMs: now,
       };
+      this.#earliestExpiryAt = Math.min(this.#earliestExpiryAt, now + RETENTION_MS);
       this.#slots.set(`${operation}\u0000${alias}`, slot);
       if (pair === undefined) {
         this.#byAlias.set(alias, { [operation]: slot });
@@ -535,8 +539,11 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
    */
   #expire(now: number): void {
     this.#lastExpireAt = now;
+    let earliest = Number.POSITIVE_INFINITY;
     for (const [key, slot] of this.#slots) {
-      if (now - slot.lastSeenAtMs > RETENTION_MS) {
+      if (now - slot.lastSeenAtMs <= RETENTION_MS) {
+        earliest = Math.min(earliest, slot.lastSeenAtMs + RETENTION_MS);
+      } else {
         this.#slots.delete(key);
         const pair = this.#byAlias.get(slot.alias);
         if (pair !== undefined) {
@@ -547,6 +554,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
         }
       }
     }
+    this.#earliestExpiryAt = earliest;
   }
 
   /** {@inheritDoc IEventDiagnosticsSource.snapshot} */

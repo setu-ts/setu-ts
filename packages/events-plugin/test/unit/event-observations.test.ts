@@ -1033,3 +1033,59 @@ describe('Review fixes (PR #375)', () => {
     expect(record.started).toBeGreaterThanOrEqual(record.count);
   });
 });
+
+describe('Round-4 audit fixes (R4-F1, R4-F2)', () => {
+  function fullTable(clock: MutableClock) {
+    const events: Record<string, string> = {};
+    for (let index = 0; index < 33; index++) events[`t${index}`] = `a${index}`;
+    const observer = collector(clock, events);
+    for (let index = 0; index < 32; index++) {
+      observer.observe(`a${index}`, 'publish', true, 1);
+      observer.observe(`a${index}`, 'handler', true, 1);
+    }
+    return observer;
+  }
+
+  it('R4-F2: a start at a full table of expired slots is visible in flight', () => {
+    const clock = new MutableClock();
+    const observer = fullTable(clock);
+    clock.advance(60_001);
+    const started = observer.begin('a32', 'handler');
+    const inFlight = observer.snapshot().records;
+    expect(inFlight.map((r) => [r.alias, r.started, r.count])).toEqual([['a32', 1, 0]]);
+    observer.end('a32', 'handler', started, true);
+    expect(observer.snapshot().dropped).toBe(0);
+  });
+
+  it('R4-F1: a full table of LIVE slots is not walked on every observation', () => {
+    const clock = new MutableClock();
+    const observer = fullTable(clock);
+    // Age the whole table out and refill it, so the expiry bound has to be
+    // RECOMPUTED by a walk rather than left at its first value.
+    clock.advance(60_001);
+    expect(observer.snapshot().records).toEqual([]);
+    for (let index = 0; index < 32; index++) {
+      observer.observe(`a${index}`, 'publish', true, 1);
+      observer.observe(`a${index}`, 'handler', true, 1);
+    }
+    let walks = 0;
+    const iterator = Map.prototype[Symbol.iterator];
+    // #expire iterates #slots with for..of; count iterations of 64-entry maps.
+    Map.prototype[Symbol.iterator] = function (this: Map<unknown, unknown>) {
+      if (this.size === 64) walks++;
+      return iterator.call(this);
+    };
+    try {
+      for (let index = 0; index < 100; index++) {
+        clock.advance(1); // within the 1 s throttle and retention
+        const token = observer.begin('a0', 'publish'); // existing tuple
+        observer.end('a0', 'publish', token, true);
+        observer.observe('a32', 'publish', true, 1); // new tuple, refused, nothing expirable
+      }
+    } finally {
+      Map.prototype[Symbol.iterator] = iterator;
+    }
+    expect(walks).toBe(0);
+    expect(observer.snapshot().dropped).toBe(100);
+  });
+});
