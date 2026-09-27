@@ -288,7 +288,7 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
       return null;
     }
     try {
-      const slot = this.#slotFor(alias, operation);
+      const slot = this.#slotFor(alias, operation, false);
       if (slot !== null) {
         slot.started = saturatingNext(slot.started);
         slot.lastSeenAtMs = now;
@@ -400,12 +400,20 @@ export class EventObservationCollector implements IEventDiagnosticsSource {
    * two slots (publish + handler), so more than 32 active aliases fill the
    * 64 slots.
    */
-  #slotFor(alias: string, operation: EventObservationOperation): ObservationSlot | null {
+  #slotFor(
+    alias: string,
+    operation: EventObservationOperation,
+    countDrop = true,
+  ): ObservationSlot | null {
     const key = `${operation}\u0000${alias}`;
     let slot = this.#slots.get(key);
     if (slot === undefined) {
       if (this.#slots.size >= MAX_RECORD_SLOTS) {
-        this.#dropped = saturatingNext(this.#dropped);
+        // A refused start and its settlement are one ignored observation:
+        // only the settlement counts the drop.
+        if (countDrop) {
+          this.#dropped = saturatingNext(this.#dropped);
+        }
         return null;
       }
       slot = {

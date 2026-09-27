@@ -760,7 +760,8 @@ describe('Observation never changes dispatch (M98j review fixes)', () => {
     }
     const snapshot = observer.snapshot();
     expect(snapshot.records.length).toBe(64);
-    expect(snapshot.dropped).toBeGreaterThan(0);
+    // 40 aliases × 2 operations = 80 tuples; 16 settle-time observations are refused.
+    expect(snapshot.dropped).toBe(16);
   });
 
   it('shutdown with a pending handler discards its late settlement', async () => {
