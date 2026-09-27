@@ -337,17 +337,40 @@ queue, I/O or per-event allocation; at most 16 sources (a 17th refuses startup w
 a 256 KiB response that collapses to a fixed `collection-failed` with no sources rather than
 truncating or refusing. The disabled path is one `WeakMap.get` per publish.
 
-**Overhead — measured; §3.4's ≤5% target is NOT met, and the maintainer must accept or reject it
-before approving.** Harness: one process per configuration (the M98i A/A-bias lesson), a sync bus
-with one handler, 10,000 warm-up publications then 20 × 10,000, median reported, five paired runs.
-Enabled costs about **0.25–0.4 µs per publication** absolute. Against a no-op handler (disabled ≈
-1.1–1.5 ms per 10,000) that is 3–4× the bus's own cost; against a handler doing a small JSON
-serialization and a `Map` write (disabled ≈ 12.9–14.1 ms, enabled ≈ 16.3–17.5 ms) it is about
-**+20–30%**. Clock reads dominate (~62 ns each on this machine, measured); an interim version
-reading four per publication cost ~5×, and threading readings between boundaries halved that. A
-timing sample (M98i's one-in-eight) was rejected: an unsampled call would not advance the record's
-activity reading, so a slow-moving alias could expire from retention while in use. The cost is paid
-only when `diagnostics` is enabled, on the development instance the inspector exists for.
+**Overhead — measured on real instances on Deno, Node and Bun; §3.4's ≤5% target is met on Node and
+Bun and NOT met on Deno, so the maintainer must accept or reject it before approving.**
+
+_Application level (the number to judge)._ A real kernel application per process — `RuntimePlugin`
+
+- `EventsPlugin` — serving `GET /json`, which publishes one approved event to two handlers and
+  returns JSON; Node and Bun run the same branch source bundled with `deno bundle`, and each runtime
+  was confirmed to detect itself and (when enabled) to record the publications. Three configurations
+  per runtime — `none` (the route does not publish), `off` (publishes, diagnostics absent), `on`
+  (publishes, diagnostics enabled) — alternated within each of 9 passes (order reversed on even
+  passes), server pinned to cores 8–15 and bombardier to 16–31, 64 connections, 15 s warm-up then a
+  20 s window, non-2xx hard-failing. Medians over 9 passes:
+
+| Runtime | `off` rps | `on` rps | Paired median on/off | Passes with on ≥ off | p50 off → on | p99 off → on   |
+| ------- | --------- | -------- | -------------------- | -------------------- | ------------ | -------------- |
+| Deno    | 209,393   | 186,032  | **−11.8%**           | 1 / 9                | 290 → 316 µs | 466 → 517 µs   |
+| Node    | 106,947   | 106,011  | **−1.2%**            | 2 / 9                | 548 → 565 µs | 1015 → 1039 µs |
+| Bun     | 191,951   | 185,353  | **−3.4%**            | 2 / 9                | 294 → 311 µs | 737 → 751 µs   |
+
+Per-pass spread was 7–25% (above the harness's 15% quotable threshold for Deno `none`/`off`, Node
+`off` and Bun `off`), so the Node and Bun deltas sit inside the noise while the Deno regression is
+consistent — 8 of 9 passes negative, −3% to −17%. For scale, publishing at all (`off` vs `none`)
+cost −1.1% on Deno, −6.8% on Node and −8.2% on Bun. This route does almost nothing but publish, so
+it is close to the worst case an application can present; a handler doing real I/O would dilute all
+of these.
+
+_Bus in isolation (for context)._ A microbenchmark of the bus alone (one process per configuration,
+20 × 10,000 publications, five paired runs, Deno) puts enabled at about 0.25–0.4 µs per publication:
+3–4× a no-op handler's bus cost and about +20–30% against a handler doing a small JSON write. Clock
+reads dominate (~62 ns each, measured); an interim version reading four per publication cost ~5×,
+and threading readings between boundaries halved that. A timing sample (M98i's one-in-eight) was
+rejected: an unsampled call would not advance the record's activity reading, so a slow-moving alias
+could expire from retention while in use. The cost is paid only when `diagnostics` is enabled, on
+the development instance the inspector exists for.
 
 | Finding                                                                                       | Resolution                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
