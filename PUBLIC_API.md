@@ -4168,23 +4168,24 @@ the kernel omits a non-finite value rather than letting it serialize to `null`.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
 `{ health: true, configuration: true, queues: true, traces: true, authorization: true,
-cache: true, scheduler: true, events: false, realtime: false, storage: false,
+cache: true, scheduler: true, events: true, realtime: true, storage: false,
 outboundHttp: false }`
-(`configuration` is `true` since M98e, `queues` since M98f, `traces` since M98g, `cache` since M98i
-and `authorization` since M98h, all below) — and the connector serves a first inspector operation,
-`GET /v1/health`. The client reads it through `client.health(): Promise<HealthDiagnosticsSnapshot>`.
-The connector resolves the optional health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at
-registration: an absent source answers a typed `unsupported` snapshot (no indicator runs, startup
-never fails), a registered-but-disabled source answers `disabled`, and a throwing source answers a
-value-free `collection-failed` snapshot — as does a source whose projected DTO fails the exact
-validator (an unknown enum, a non-finite or negative measurement, an oversized alias, more than 64
-observations, a malformed shape), so nothing unvalidated is ever signed — none of which changes the
-application's readiness. The snapshot is the health plugin's minimized DTO (approved alias,
-framework status, outcome state, monotonic timing only — no indicator `data`, no error text, no
-absolute time), projected field-by-field and bounded by the same 256 KiB response ceiling as every
-other operation. A client paired against a legacy M98b status body (no manifest) resolves all
-inspectors to `false` and its `health()` answers `unsupported` without sending the request. The full
-wire shape is in `docs/diagnostics-protocol.md`.
+(`configuration` is `true` since M98e, `queues` since M98f, `traces` since M98g, `cache` since M98i,
+`authorization` since M98h, `events` since M98j, `scheduler` since M98k and `realtime` since M98l,
+all below) — and the connector serves a first inspector operation, `GET /v1/health`. The client
+reads it through `client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector resolves the
+optional health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent
+source answers a typed `unsupported` snapshot (no indicator runs, startup never fails), a
+registered-but-disabled source answers `disabled`, and a throwing source answers a value-free
+`collection-failed` snapshot — as does a source whose projected DTO fails the exact validator (an
+unknown enum, a non-finite or negative measurement, an oversized alias, more than 64 observations, a
+malformed shape), so nothing unvalidated is ever signed — none of which changes the application's
+readiness. The snapshot is the health plugin's minimized DTO (approved alias, framework status,
+outcome state, monotonic timing only — no indicator `data`, no error text, no absolute time),
+projected field-by-field and bounded by the same 256 KiB response ceiling as every other operation.
+A client paired against a legacy M98b status body (no manifest) resolves all inspectors to `false`
+and its `health()` answers `unsupported` without sending the request. The full wire shape is in
+`docs/diagnostics-protocol.md`.
 
 **Queue observations (M98f).** The connector serves `GET /v1/queues?after=<N>&limit=<N>` (the same
 canonical query grammar as `/v1/events`), read through
@@ -10341,9 +10342,10 @@ acquires a lock, invokes a handler, or reads the job registry). The DTOs are
 counters `started`, `succeeded`, `failed`, `contended`, `lockFailed`, `retryAttempts`,
 `lastLatenessMs`) and the connector's `SchedulerDiagnosticsResponse`. Lateness is
 `max(0, actualStart - intendedFire)`; a skipped local fire is never a globally missed execution and
-no missed counter exists. See the diagnostics-connector section for the wire operation. **Event
-observation contracts (M98j).** `CAPABILITIES.EVENTS_DIAGNOSTICS` (`'event-diagnostics'`) is a
-MULTI-provider token: every EventsPlugin instance registers one `IEventDiagnosticsSource`
+no missed counter exists. See the diagnostics-connector section for the wire operation.
+
+**Event observation contracts (M98j).** `CAPABILITIES.EVENTS_DIAGNOSTICS` (`'event-diagnostics'`) is
+a MULTI-provider token: every EventsPlugin instance registers one `IEventDiagnosticsSource`
 (`snapshot(): EventDiagnosticsSnapshot` — synchronous, never publishes, invokes a handler or
 enumerates subscriptions). The DTOs are `EventDiagnosticsSnapshot` (`state: EventDiagnosticsState`,
 `alias | null`, `coverage: EventDiagnosticsCoverage`, `records`, `dropped`),

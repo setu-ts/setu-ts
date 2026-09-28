@@ -10,7 +10,7 @@
       "target": "/v1/status",
       "sequence": "1",
       "instance": "",
-      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\n12ebb15b8d3b8b8fd43e625fcbf8d170d47f0e3dca948cd0f9f85ec929062e4c",
+      "macInput": "setu-diagnostics-v1\nrequest\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\n1\nGET\n127.0.0.1:4919\n/v1/status",
       "mac": "b929e0753d28002706df18e2e3b2fed3221279a89784f5dae25e0c846a2bc20c"
     },
     "response": {

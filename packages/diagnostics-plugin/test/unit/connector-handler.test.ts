@@ -29,7 +29,13 @@ import { ConnectorLimits } from '../../src/transport/limits.ts';
 import { QueueObservationMerger } from '../../src/transport/queue-merger.ts';
 import type { IQueueMerger } from '../../src/transport/queue-merger.ts';
 import { isQueueBatchProjection } from '../../src/protocol/queue-protocol.ts';
-import { responseMacFields, sha256Hex, verifyFields } from '../../src/security/authentication.ts';
+import {
+  canonicalBytes,
+  requestMacFields,
+  responseMacFields,
+  sha256Hex,
+  verifyFields,
+} from '../../src/security/authentication.ts';
 import {
   createTestSession,
   fakeRequest,
@@ -1182,6 +1188,48 @@ describe('Connector handler — fixture vectors', () => {
     // whose digest the fixture response MAC covers.
     expect(view.bodyText).toEqual(fixture.statusExchange.response.body);
     expect(view.headers.get('x-setu-mac')).toEqual(fixture.statusExchange.response.mac);
+  });
+
+  it('pins each recorded macInput to the canonical MAC fields it documents', async () => {
+    // The fixture records every `macInput` beside its MAC as documentation of
+    // the canonical string. The exchange test above never reads those strings,
+    // so a regenerated fixture once shipped the RESPONSE input under the
+    // request (review of PR #379). Pin both against the production
+    // canonicalization, and the request string against the fixture MAC.
+    const request = fixture.statusExchange.request;
+    const response = fixture.statusExchange.response;
+    const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+    expect(request.macInput).toEqual(
+      decode(canonicalBytes(requestMacFields(
+        fixture.sessionId,
+        request.instance,
+        request.sequence,
+        fixture.authority,
+        request.target,
+      ))),
+    );
+    expect(response.macInput).toEqual(
+      decode(canonicalBytes(responseMacFields(
+        fixture.sessionId,
+        fixture.instanceId,
+        request.sequence,
+        request.target,
+        String(response.status),
+        response.bodySha256,
+      ))),
+    );
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(fixture.keyHex.match(/../g)!.map((pair) => parseInt(pair, 16))),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const sign = async (input: string) =>
+      [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(input)))]
+        .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    expect(await sign(request.macInput)).toEqual(request.mac);
+    expect(await sign(response.macInput)).toEqual(response.mac);
   });
 
   it('refuses every fixture-rejected target', async () => {
