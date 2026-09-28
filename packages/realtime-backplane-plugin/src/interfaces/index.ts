@@ -79,9 +79,15 @@ export interface IRedisModule {
    * Constructs a client.
    *
    * @param url - The Redis connection URL
+   * @param options - Client options the transport sets. `commandTimeout` is
+   * the `ioredis` per-command timeout in milliseconds, present only when
+   * {@linkcode RedisBackplaneOptions.commandTimeoutMs} is not `0`. Optional
+   * so an existing caller and a module that ignores it both still type-check;
+   * such a module's clients are unbounded. Passed by the transport since
+   * 0.8.0.
    * @returns The client
    */
-  create(url: string): IRedisBackplaneClient;
+  create(url: string, options?: { readonly commandTimeout?: number }): IRedisBackplaneClient;
 }
 
 /**
@@ -183,7 +189,37 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
   readonly url?: string;
   /** A module exposing an `ioredis`-compatible constructor, for testing. */
   readonly module?: IRedisModule;
+  /**
+   * Bounds every command on the two connections this transport builds, in
+   * milliseconds, through the `ioredis` `commandTimeout` option. Defaults to
+   * {@linkcode DEFAULT_REDIS_COMMAND_TIMEOUT_MS}; `0` disables the bound.
+   *
+   * Without it, a connection that stays open while the server stops answering
+   * (a paused or partitioned host that sends no reset) never settles a
+   * publish: the caller's promise hangs, the WebSocket and SSE consumers never
+   * log the failure, and an observed publish is never recorded. A
+   * disconnected server is unaffected — `ioredis` already rejects its queued
+   * commands when `maxRetriesPerRequest` exhausts (about 10 s on its default
+   * backoff), which is below the default, so a short partition is still
+   * buffered and delivered late.
+   *
+   * Read only on the lazy `npm:ioredis` path: an injected `client` /
+   * `subscriber` pair keeps whatever timeout it was constructed with.
+   *
+   * @throws {RangeError} At construction, when not a finite number `>= 0`
+   * @since 0.8.0
+   */
+  readonly commandTimeoutMs?: number;
 }
+
+/**
+ * The default {@linkcode RedisBackplaneOptions.commandTimeoutMs}: above the
+ * roughly 10 s `ioredis` spends retrying a disconnected server, so it bounds
+ * only a connection that is open but silent.
+ *
+ * @since 0.8.0
+ */
+export const DEFAULT_REDIS_COMMAND_TIMEOUT_MS = 15_000;
 
 /**
  * Options for the `'custom'` arm — a caller-supplied transport.

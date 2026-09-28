@@ -89,6 +89,7 @@ without a `subscriber` throws at construction rather than failing at the first p
 | `url`                   | `'redis'`          | —                        | Connection URL, used only on the lazy-load path                                                                                                |
 | `client` / `subscriber` | `'redis'`          | —                        | Injected client pair; required together                                                                                                        |
 | `module`                | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                |
+| `commandTimeoutMs`      | `'redis'`          | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be a finite number `>= 0`. See Limitations                 |
 | `instance`              | `'custom'`         | —                        | The transport to register, used as-is                                                                                                          |
 | `localNotice`           | `'memory'`         | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it |
 | `diagnostics`           | all but `'custom'` | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                 |
@@ -132,10 +133,19 @@ worth knowing. On `'redis'`, ioredis's own defaults govern what a partition does
 - **A longer partition: the buffered commands reject** when ioredis's `maxRetriesPerRequest` budget
   (default 20 retries, ~11 s on the default backoff) exhausts, and both consumers log one `warn` per
   dropped frame.
+- **A silent connection: the publish rejects after `commandTimeoutMs`** (default 15 s). A host that
+  stops answering without closing the socket — paused, or partitioned with no reset — triggers no
+  reconnect, so no retry budget applies; before this bound such a publish never settled, so neither
+  consumer logged it and an observed publish was never recorded. The default sits above the ~11 s
+  retry budget, so the two partition cases above behave as described; lowering it below that budget
+  makes a dropped connection reject sooner too.
+- **A publish before `connect()` or after `close()` rejects** rather than resolving, so a frame sent
+  nowhere reads as a failure. It resolved without sending before 0.8.0.
 
-Frames are never persisted or replayed beyond that buffer, and neither ioredis default is reachable
-through this plugin's options — an application that needs different behaviour constructs its own
-`client`/`subscriber` pair and injects it.
+Frames are never persisted or replayed beyond that buffer. `commandTimeoutMs` is the only ioredis
+setting reachable through this plugin's options, and applies only on the lazy path — an application
+that needs different behaviour, or injects its own `client`/`subscriber` pair, configures those
+clients directly.
 
 ## Documentation
 
@@ -162,35 +172,36 @@ serving — never `down`. A transport that cannot probe reports `up` with `reach
 
 ## Exports
 
-| Export                           | Kind      |
-| -------------------------------- | --------- |
-| `adaptRedisModule`               | function  |
-| `createBackplane`                | function  |
-| `decodeFrameData`                | function  |
-| `encodeFrameData`                | function  |
-| `isRealtimeFrame`                | function  |
-| `loadRedisModule`                | function  |
-| `RealtimeBackplanePlugin`        | function  |
-| `MemoryBackplane`                | class     |
-| `MessagingBackplane`             | class     |
-| `RedisBackplane`                 | class     |
-| `RedisModuleError`               | class     |
-| `CAPABILITIES`                   | const     |
-| `DEFAULT_TOPIC`                  | const     |
-| `BackplaneCommonOptions`         | interface |
-| `CustomBackplaneOptions`         | interface |
-| `EncodedPayload`                 | interface |
-| `IRealtimeBackplane`             | interface |
-| `IRedisBackplaneClient`          | interface |
-| `IRedisModule`                   | interface |
-| `MemoryBackplaneOptions`         | interface |
-| `MessagingBackplaneOptions`      | interface |
-| `RealtimeDiagnosticsOptions`     | interface |
-| `RealtimeFrame`                  | interface |
-| `RedisBackplaneOptions`          | interface |
-| `RealtimeBackplanePluginOptions` | type      |
-| `RealtimeFrameHandler`           | type      |
-| `RealtimeFrameKind`              | type      |
+| Export                             | Kind      |
+| ---------------------------------- | --------- |
+| `adaptRedisModule`                 | function  |
+| `createBackplane`                  | function  |
+| `decodeFrameData`                  | function  |
+| `encodeFrameData`                  | function  |
+| `isRealtimeFrame`                  | function  |
+| `loadRedisModule`                  | function  |
+| `RealtimeBackplanePlugin`          | function  |
+| `MemoryBackplane`                  | class     |
+| `MessagingBackplane`               | class     |
+| `RedisBackplane`                   | class     |
+| `RedisModuleError`                 | class     |
+| `CAPABILITIES`                     | const     |
+| `DEFAULT_REDIS_COMMAND_TIMEOUT_MS` | const     |
+| `DEFAULT_TOPIC`                    | const     |
+| `BackplaneCommonOptions`           | interface |
+| `CustomBackplaneOptions`           | interface |
+| `EncodedPayload`                   | interface |
+| `IRealtimeBackplane`               | interface |
+| `IRedisBackplaneClient`            | interface |
+| `IRedisModule`                     | interface |
+| `MemoryBackplaneOptions`           | interface |
+| `MessagingBackplaneOptions`        | interface |
+| `RealtimeDiagnosticsOptions`       | interface |
+| `RealtimeFrame`                    | interface |
+| `RedisBackplaneOptions`            | interface |
+| `RealtimeBackplanePluginOptions`   | type      |
+| `RealtimeFrameHandler`             | type      |
+| `RealtimeFrameKind`                | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

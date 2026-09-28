@@ -77,8 +77,13 @@ class FakeBroker implements IMessageBroker {
 /** A redis client fake: a publisher that records, a subscriber that emits. */
 class FakeRedis implements IRedisBackplaneClient {
   readonly published: string[] = [];
+  /** When set, `publish` rejects with it — as ioredis does on a command timeout. */
+  fail: Error | undefined;
   #listener: ((channel: string, message: string) => void) | undefined;
   publish(_channel: string, message: string): Promise<number> {
+    if (this.fail !== undefined) {
+      return Promise.reject(this.fail);
+    }
     this.published.push(message);
     return Promise.resolve(1);
   }
@@ -372,6 +377,38 @@ describe('RealtimeBackplanePlugin realtime observations (M98l)', () => {
       expect(record(snapshot, 'backplane-publish')?.succeeded).toBe(1);
       expect(record(snapshot, 'backplane-receive')?.count).toBe(1);
       expect(client.published).toHaveLength(1);
+    });
+
+    it('a publish the connection rejects is failed and rejects with the ORIGINAL reason', async () => {
+      const client = new FakeRedis();
+      const harness = await setup({
+        transport: 'redis',
+        client,
+        subscriber: new FakeRedis(),
+        diagnostics: ENABLED,
+      });
+      // The shape ioredis produces when `commandTimeout` bounds a silent
+      // connection, or when `maxRetriesPerRequest` exhausts on a dropped one.
+      const timedOut = new Error('Command timed out');
+      client.fail = timedOut;
+      const outcome = harness.backplane.publish(frame());
+      await expect(outcome).rejects.toBe(timedOut);
+      const publish = record(harness.source.snapshot(), 'backplane-publish');
+      expect(publish?.failed).toBe(1);
+      expect(publish?.succeeded).toBe(0);
+    });
+
+    it('a publish after the plugin closes rejects rather than resolving', async () => {
+      // A consumer still holding the transport after shutdown must learn the
+      // frame went nowhere; it used to resolve as if it had been sent.
+      const harness = await setup({
+        transport: 'redis',
+        client: new FakeRedis(),
+        subscriber: new FakeRedis(),
+        diagnostics: ENABLED,
+      });
+      await harness.closeHooks[0]?.();
+      await expect(harness.backplane.publish(frame())).rejects.toThrow('not connected');
     });
   });
 

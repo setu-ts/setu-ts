@@ -447,6 +447,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`realtime-backplane-plugin` — a Redis publish on a failed connection is reported, not lost.** A
+  connection that stays open while the server answers nothing — a paused or partitioned host that
+  sends no reset — triggers no ioredis reconnect, so no retry budget applied and `publish()` never
+  settled: the WebSocket and SSE consumers never logged the dropped frame, the promises accumulated,
+  and an observed publish (M98l) was never recorded. Measured against a paused real Redis 7: still
+  pending after 20 s. The two connections the lazy path builds now carry an ioredis
+  `commandTimeout`, from the new `RedisBackplaneOptions.commandTimeoutMs` (default
+  `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`, 15 s; `0` disables; a non-finite or negative value throws
+  `RangeError` at construction). The default sits above ioredis's ~11 s retry budget, so a dropped
+  connection still buffers and rejects as documented. An injected `client`/`subscriber` pair is
+  unaffected and keeps its own timeout. `IRedisModule.create` gains an optional second `options`
+  argument carrying it; existing callers and modules still type-check. **Behaviour change:**
+  `RedisBackplane.publish()` before `connect()` or after `close()` now REJECTS ("the redis transport
+  is not connected") instead of resolving without sending, so a frame sent nowhere reads as a
+  failure — it previously counted as a successful publication when observed.
 - **`cli` — `setu new --template full-stack` now demonstrates React Router route middleware, and
   explains both middleware layers.** A generated full-stack project has two: kernel middleware
   (`setu generate middleware`), which runs for every request, and React Router's route `middleware`

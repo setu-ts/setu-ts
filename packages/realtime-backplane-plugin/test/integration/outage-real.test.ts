@@ -18,6 +18,15 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import type {
+  IRealtimeBackplane,
+  IRealtimeDiagnosticsSource,
+  RealtimeDiagnosticsSnapshot,
+} from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { RealtimeBackplanePlugin } from '../../src/index.ts';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 
 // ── Docker stop/start helpers ───────────────────────────────────────────────
@@ -111,6 +120,106 @@ describe('REAL Redis backplane outage (§3.7)', () => {
     } finally {
       await backplane.close();
       await new Deno.Command('docker', { args: ['start', containerId] }).output();
+    }
+  });
+});
+
+// ── A publish on a failed connection is reported, not lost ────────────────────
+
+const REDIS_URL = Deno.env.get('REDIS_URL');
+/** Short enough to keep the suite fast; the default is 15 s. */
+const COMMAND_TIMEOUT_MS = 1_500;
+
+function publishRecord(source: IRealtimeDiagnosticsSource) {
+  const snapshot: RealtimeDiagnosticsSnapshot = source.snapshot();
+  return snapshot.records.find((entry) => entry.operation === 'backplane-publish');
+}
+
+/** Settles `promise` or reports that it was still pending after `ms`. */
+function settleWithin(promise: Promise<void>, ms: number): Promise<string> {
+  const outcome = promise.then(
+    () => 'resolved',
+    (error: unknown) => `rejected: ${error instanceof Error ? error.message : String(error)}`,
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const pending = new Promise<string>((resolve) => {
+    timer = setTimeout(() => resolve(`still pending after ${ms} ms`), ms);
+  });
+  return Promise.race([outcome, pending]).finally(() => clearTimeout(timer));
+}
+
+describe('REAL Redis backplane: a publish on a failed connection', () => {
+  it('rejects, is recorded failed, and publishing recovers — silent and dropped connections', {
+    ignore: REDIS_URL === undefined,
+  }, async () => {
+    const port = new URL(REDIS_URL!).port === '' ? 6379 : Number(new URL(REDIS_URL!).port);
+    const containerId = await containerIdForPort(port);
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        RealtimeBackplanePlugin({
+          transport: 'redis',
+          url: toIpv4(REDIS_URL!),
+          topic: `outage-publish-${crypto.randomUUID()}`,
+          commandTimeoutMs: COMMAND_TIMEOUT_MS,
+          diagnostics: { enabled: true, alias: 'fanout' },
+        }),
+      ],
+    });
+    await app.start();
+    const backplane = app.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE);
+    const [source] = app.services.getAll<IRealtimeDiagnosticsSource>(
+      CAPABILITIES.REALTIME_DIAGNOSTICS,
+    );
+    const frame = { kind: 'ws-room' as const, origin: 'x', name: 'lobby', data: 'hi' };
+    let paused = false;
+    try {
+      await backplane.publish(frame);
+      expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 0 });
+
+      // (1) SILENT: the socket stays open while the server answers nothing — a
+      // paused or partitioned host that sends no reset. Before the command
+      // timeout this publish never settled, so no consumer logged it and no
+      // observation was ever recorded.
+      await docker(['pause', containerId]);
+      paused = true;
+      const silent = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
+      expect(silent).toBe('rejected: Command timed out');
+      expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 1 });
+      expect(publishRecord(source!)!.lastDurationMs).toBeGreaterThanOrEqual(
+        COMMAND_TIMEOUT_MS - 50,
+      );
+      await docker(['unpause', containerId]);
+      paused = false;
+      await waitTrue(
+        () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
+        'publish after unpause',
+        30_000,
+      );
+
+      // (2) DROPPED: the server is stopped, so the connection closes and ioredis
+      // reconnects. A publish is queued, then rejected — here by the command
+      // timeout, which starts when the command is queued.
+      const before = publishRecord(source!)!;
+      await docker(['stop', containerId]);
+      const dropped = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
+      expect(dropped).toBe('rejected: Command timed out');
+      expect(publishRecord(source!)).toMatchObject({ failed: before.failed + 1 });
+
+      // Restarted, the same connections carry the next publish.
+      await docker(['start', containerId]);
+      await waitTrue(
+        () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
+        'publish after restart',
+        30_000,
+      );
+      expect(publishRecord(source!)!.succeeded).toBeGreaterThan(before.succeeded);
+    } finally {
+      if (paused) {
+        await new Deno.Command('docker', { args: ['unpause', containerId] }).output();
+      }
+      await new Deno.Command('docker', { args: ['start', containerId] }).output();
+      await app.stop();
     }
   });
 });

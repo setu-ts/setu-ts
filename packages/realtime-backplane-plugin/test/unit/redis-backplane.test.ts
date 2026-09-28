@@ -9,6 +9,7 @@ import { expect } from '@std/expect';
 import type { RealtimeFrame } from '@setu-ts/common';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 import type { IRedisBackplaneClient, IRedisModule } from '../../src/interfaces/index.ts';
+import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../../src/interfaces/index.ts';
 
 /**
  * A client fake honoring the real Redis behavior that matters here: a
@@ -233,6 +234,61 @@ describe('RedisBackplane', () => {
     await backplane.close();
   });
 
+  it('bounds both built clients with the default command timeout', async () => {
+    const options: Array<{ readonly commandTimeout?: number } | undefined> = [];
+    const module: IRedisModule = {
+      create: (_url, clientOptions): IRedisBackplaneClient => {
+        options.push(clientOptions);
+        return new FakeRedisClient();
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+
+    await backplane.connect();
+
+    expect(options).toEqual([
+      { commandTimeout: DEFAULT_REDIS_COMMAND_TIMEOUT_MS },
+      { commandTimeout: DEFAULT_REDIS_COMMAND_TIMEOUT_MS },
+    ]);
+    await backplane.close();
+  });
+
+  it('forwards a configured command timeout, and 0 leaves the clients unbounded', async () => {
+    for (const [commandTimeoutMs, expected] of [[250, { commandTimeout: 250 }], [0, {}]] as const) {
+      const options: Array<{ readonly commandTimeout?: number } | undefined> = [];
+      const module: IRedisModule = {
+        create: (_url, clientOptions): IRedisBackplaneClient => {
+          options.push(clientOptions);
+          return new FakeRedisClient();
+        },
+      };
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs },
+        'node-a',
+        'realtime',
+      );
+      await backplane.connect();
+      expect(options).toEqual([expected, expected]);
+      await backplane.close();
+    }
+  });
+
+  it('refuses a command timeout that is not a finite number >= 0', () => {
+    for (const commandTimeoutMs of [Number.NaN, -1, Number.POSITIVE_INFINITY, '5' as never]) {
+      expect(() =>
+        new RedisBackplane(
+          { transport: 'redis', url: 'redis://localhost:6379', commandTimeoutMs },
+          'node-a',
+          'realtime',
+        )
+      ).toThrow(RangeError);
+    }
+  });
+
   it('builds both clients from the module when none are injected', async () => {
     const built: string[] = [];
     const clients: FakeRedisClient[] = [];
@@ -306,13 +362,32 @@ describe('RedisBackplane', () => {
     await backplane.close();
   });
 
-  it('publishing before connect is a no-op rather than a throw', async () => {
+  it('rejects a publish before connect rather than reporting it sent', async () => {
+    const client = new FakeRedisClient();
     const backplane = new RedisBackplane(
-      { transport: 'redis', client: new FakeRedisClient(), subscriber: new FakeRedisClient() },
+      { transport: 'redis', client, subscriber: new FakeRedisClient() },
       'node-a',
       'realtime',
     );
+    // Resolving here would tell the WebSocket and SSE consumers — and an
+    // observed publish — that a frame reached Redis when nothing was sent.
+    await expect(backplane.publish(FRAME)).rejects.toThrow('the redis transport is not connected');
+    expect(client.published).toEqual([]);
+  });
+
+  it('rejects a publish after close', async () => {
+    const client = new FakeRedisClient();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber: new FakeRedisClient() },
+      'node-a',
+      'realtime',
+    );
+    await backplane.connect();
     await backplane.publish(FRAME);
+    await backplane.close();
+
+    await expect(backplane.publish(FRAME)).rejects.toThrow('the redis transport is not connected');
+    expect(client.published.length).toBe(1);
   });
 });
 
@@ -396,7 +471,7 @@ describe('RedisBackplane connect', () => {
     expect(clients.map((c) => c.quitCount)).toEqual([1, 1]);
     expect(clients[1]?.listenerCount).toBe(0);
     // A half-built attempt must not read as a connection.
-    await backplane.publish(FRAME);
+    await expect(backplane.publish(FRAME)).rejects.toThrow('the redis transport is not connected');
     expect(clients[0]?.published).toEqual([]);
   });
 
@@ -541,8 +616,9 @@ describe('RedisBackplane close racing an open', () => {
     expect(clients[1]?.subscribed).toEqual([]);
     expect(clients[1]?.listenerCount).toBe(0);
 
-    // The backplane is closed, not connected: publishing reaches nothing.
-    await backplane.publish(FRAME);
+    // The backplane is closed, not connected: publishing reaches nothing, and
+    // says so.
+    await expect(backplane.publish(FRAME)).rejects.toThrow('the redis transport is not connected');
     expect(clients[0]?.published).toEqual([]);
   });
 

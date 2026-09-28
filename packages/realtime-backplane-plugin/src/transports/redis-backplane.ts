@@ -7,6 +7,7 @@
 
 import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 import type { IRedisBackplaneClient, RedisBackplaneOptions } from '../interfaces/index.ts';
+import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../interfaces/index.ts';
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { dispatchFrame } from './dispatch.ts';
 import { isRealtimeFrame } from './messaging-backplane.ts';
@@ -35,6 +36,8 @@ export class RedisBackplane implements IRealtimeBackplane {
   readonly origin: string;
   readonly #topic: string;
   readonly #options: RedisBackplaneOptions;
+  /** The resolved per-command timeout; `0` means unbounded. */
+  readonly #commandTimeoutMs: number;
   readonly #handlers = new Set<RealtimeFrameHandler>();
   /** Errors thrown by subscribers during delivery, oldest first. */
   readonly #handlerErrors: Error[] = [];
@@ -73,6 +76,7 @@ export class RedisBackplane implements IRealtimeBackplane {
    * @param topic - The Redis channel every instance shares
    * @throws {Error} When exactly one of `client` and `subscriber` is injected,
    * or when neither those nor a `url` is configured
+   * @throws {RangeError} When `commandTimeoutMs` is not a finite number `>= 0`
    */
   constructor(options: RedisBackplaneOptions, origin: string, topic: string) {
     const hasClient = options.client !== undefined;
@@ -92,7 +96,21 @@ export class RedisBackplane implements IRealtimeBackplane {
       );
     }
 
+    const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_REDIS_COMMAND_TIMEOUT_MS;
+    // `NaN` (what `Number(env.X)` yields for an unset variable) would otherwise
+    // reach ioredis and silently disable the bound this option exists for.
+    if (
+      typeof commandTimeoutMs !== 'number' || !Number.isFinite(commandTimeoutMs) ||
+      commandTimeoutMs < 0
+    ) {
+      throw new RangeError(
+        'realtime-backplane: options.commandTimeoutMs must be a finite number >= 0 ' +
+          `(0 disables the bound); received ${String(commandTimeoutMs)}`,
+      );
+    }
+
     this.#options = options;
+    this.#commandTimeoutMs = commandTimeoutMs;
     this.origin = origin;
     this.#topic = topic;
   }
@@ -156,9 +174,12 @@ export class RedisBackplane implements IRealtimeBackplane {
       const module = this.#options.module ?? await loadRedisModule();
       const url = this.#options.url as string;
       owned = true;
-      publisher = module.create(url);
+      const clientOptions = this.#commandTimeoutMs === 0
+        ? {}
+        : { commandTimeout: this.#commandTimeoutMs };
+      publisher = module.create(url, clientOptions);
       try {
-        subscriber = module.create(url);
+        subscriber = module.create(url, clientOptions);
       } catch (error) {
         // The publisher is already live and no field references it yet, so this
         // is the only chance to close it.
@@ -286,10 +307,26 @@ export class RedisBackplane implements IRealtimeBackplane {
       : observer.observePublish(() => this.#publish(frame));
   }
 
-  /** The publication itself, always on the publishing connection. */
+  /**
+   * The publication itself, always on the publishing connection.
+   *
+   * Rejects when there is no connection — before `connect()` or after
+   * `close()` — rather than resolving: a publish that reached nothing is a
+   * failure the WebSocket and SSE consumers log and an observed publish
+   * records, never a success.
+   *
+   * @throws {Error} When the transport is not connected
+   */
   async #publish(frame: RealtimeFrame): Promise<void> {
+    const publisher = this.#publisher;
+    if (publisher === undefined) {
+      throw new Error(
+        'realtime-backplane: the redis transport is not connected (publish before ' +
+          'connect() or after close()); the frame was not sent',
+      );
+    }
     // Always the publisher: the subscriber connection would reject this.
-    await this.#publisher?.publish(this.#topic, JSON.stringify(frame));
+    await publisher.publish(this.#topic, JSON.stringify(frame));
   }
 
   subscribe(handler: RealtimeFrameHandler): Promise<() => void> {

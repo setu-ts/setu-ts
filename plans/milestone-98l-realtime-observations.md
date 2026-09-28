@@ -607,6 +607,23 @@ drops it before it is counted; B records one receive, one send and the live gaug
 origin and topic canaries are absent from every signed response. With the origin filter removed from
 `RedisBackplane` the test fails (A records two receives) and passes once restored; it passed three
 further runs, and reports `ignored`, not passed, without `REDIS_URL`. The existing guarded Redis
-suites in the backplane, websocket and SSE packages also passed against the same server. Not
-exercised live: a publish that REJECTS on a real Redis — ioredis queues commands while disconnected
-rather than rejecting — which stays covered by the fake-broker tests.
+suites in the backplane, websocket and SSE packages also passed against the same server.
+
+**A publish on a failed connection, against a real Redis (2026-09-28).** The note above originally
+closed "not exercised live: a publish that REJECTS — ioredis queues commands while disconnected
+rather than rejecting". Measured, that was half right and hid a defect. A STOPPED server does
+reject: the queued publish failed with `MaxRetriesPerRequestError` after 10.1 s and was recorded
+`failed`, which is the ~11 s budget the README already documents — the earlier attempt had not
+waited long enough. A PAUSED server (the socket stays open, nothing answers, no reset) never
+triggers a reconnect, so no retry budget applies: the publish was still pending after 20 s, the
+WebSocket/SSE `.catch` never logged it, and the observation was never recorded — pre-existing since
+M47, and invisible to M98l's counters. Separately, a publish after `close()` resolved without
+sending and was counted `succeeded`. Fixed: the lazy path now builds both connections with an
+ioredis `commandTimeout` (`RedisBackplaneOptions.commandTimeoutMs`, default
+`DEFAULT_REDIS_COMMAND_TIMEOUT_MS` = 15 s, above the retry budget so the documented partition
+behaviour is unchanged; `0` disables; non-finite or negative refused at construction), and a publish
+with no connection rejects. `outage-real.test.ts` now pauses and then stops the real server, asserts
+each publish rejects with `Command timed out`, is recorded `failed` with the measured duration, and
+that publishing recovers afterwards. Negative controls, both observed failing and restored: with the
+timeout not forwarded to the constructor the paused case reports "still pending after 6000 ms"; with
+the no-connection publish restored to a silent return, six unit steps fail.

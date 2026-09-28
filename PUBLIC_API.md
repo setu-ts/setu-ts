@@ -3483,6 +3483,7 @@ Discriminated on `transport`.
 | `url`                   | `'redis'`          | —                        | Connection URL, read only on the lazy `npm:ioredis@5.x` path                                                                                                                                                                                                                                               |
 | `client` / `subscriber` | `'redis'`          | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                                                                                    |
 | `module`                | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                                                                                            |
+| `commandTimeoutMs`      | `'redis'`          | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a non-finite or negative value throws `RangeError` at construction. Ignored for an injected pair                                        |
 | `instance`              | `'custom'`         | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                                                                                           |
 | `localNotice`           | `'memory'`         | `true`                   | Logs one `info` line at `register()` when the resolved transport is the process-local `'memory'`, naming `'redis'`/`'messaging'` as the cross-process choices. `false` suppresses it, matching the consumers' `scalingNotice` opt-out shape                                                                |
 | `diagnostics`           | all but `'custom'` | omitted                  | M98l opt-in: `{ enabled: true, alias }` counts publications (resolved or rejected, with the last duration) and arriving frames that reached local handlers, for the diagnostics connector's `GET /v1/realtime`. A `'custom'` transport is never observed. Absent, the plugin registers a `disabled` source |
@@ -3515,6 +3516,7 @@ knows its own transport.
 | `loadRedisModule`                                                                                                                  | function          | Real lazy `import('npm:ioredis@5.x')`                                                  |
 | `RedisModuleError`                                                                                                                 | class             | Thrown when `ioredis` cannot be loaded or recognized                                   |
 | `DEFAULT_TOPIC`                                                                                                                    | const             | `'setu-ts.realtime'`                                                                   |
+| `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`                                                                                                 | const             | `15000`, the default `commandTimeoutMs`                                                |
 | `IRedisBackplaneClient`                                                                                                            | interface         | Structural facade for an injected Redis client                                         |
 | `IRedisModule`                                                                                                                     | interface         | Structural facade for the `ioredis` module                                             |
 | `RealtimeBackplanePluginOptions`                                                                                                   | type              | Discriminated union of the four transport arms                                         |
@@ -3549,8 +3551,12 @@ knows its own transport.
   replayed. On `'redis'` a SHORT partition buffers rather than drops: ioredis's default
   `enableOfflineQueue: true` holds publishes issued while disconnected and flushes them on
   reconnect, so frames arrive LATE (measured ~6 s) until the `maxRetriesPerRequest` budget (default
-  20, ~11 s) exhausts and the buffered commands reject with a `warn` per frame. Neither ioredis
-  default is configurable through this plugin; inject a `client`/`subscriber` pair to change it.
+  20, ~11 s) exhausts and the buffered commands reject with a `warn` per frame. A connection that
+  stays open while the server answers nothing (paused, or partitioned with no reset) triggers no
+  reconnect; its publish rejects after `commandTimeoutMs` (default 15 s, above that budget) rather
+  than never settling. A publish before `connect()` or after `close()` rejects rather than
+  resolving. Beyond `commandTimeoutMs`, ioredis defaults are not configurable through this plugin;
+  inject a `client`/`subscriber` pair to change them.
 - **`RoomBroadcastOptions.except` is honored cluster-wide.** It names a live connection object,
   which means nothing in another process — but connection IDs come from `runtime.uuid()` and are
   therefore globally unique, so `RealtimeFrame.exceptId` carries the ID and every replica skips the
