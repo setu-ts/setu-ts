@@ -88,6 +88,8 @@ function fakeServer(
     configBody?: Record<string, unknown>;
     /** The body to serve for `/v1/cache`; defaults to a one-source ready response. */
     cacheBody?: Record<string, unknown>;
+    /** The body to serve for `/v1/realtime`; defaults to a three-source response. */
+    realtimeBody?: Record<string, unknown>;
     /** The body to serve for `/v1/queues`; defaults to a one-event batch. */
     queuesBody?: (after: number) => Record<string, unknown>;
     /** The body to serve for `/v1/traces`; defaults to a one-record batch. */
@@ -201,6 +203,8 @@ function fakeServer(
         );
       } else if (target === '/v1/cache') {
         bodyText = JSON.stringify(overrides.cacheBody ?? cacheResponseBody());
+      } else if (target === '/v1/realtime') {
+        bodyText = JSON.stringify(overrides.realtimeBody ?? realtimeResponseBody());
       } else if (url.pathname === '/v1/queues') {
         const after = Number(url.searchParams.get('after'));
         bodyText = JSON.stringify((overrides.queuesBody ?? queueBatchBody)(after));
@@ -771,6 +775,143 @@ function cacheResponseBody(): Record<string, unknown> {
     }],
   };
 }
+
+/** A three-source realtime response: websocket, sse and backplane, each well formed. */
+function realtimeResponseBody(): Record<string, unknown> {
+  const counts = { count: 2, ageMs: 5, succeeded: 1, failed: 1 };
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    sources: [
+      {
+        sourceId: 's1',
+        snapshot: {
+          state: 'ready',
+          alias: 'chat',
+          sourceKind: 'websocket',
+          coverage: 'owned-instance',
+          gauges: { state: 'available', openConnections: 3, groups: 1 },
+          records: [{
+            alias: 'chat',
+            operation: 'close',
+            lastDurationMs: null,
+            backpressureCloses: null,
+            ...counts,
+          }],
+          dropped: 0,
+        },
+      },
+      {
+        sourceId: 's2',
+        snapshot: {
+          state: 'ready',
+          alias: 'feed',
+          sourceKind: 'sse',
+          coverage: 'owned-instance',
+          gauges: { state: 'available', openConnections: 0, groups: 0 },
+          records: [{
+            alias: 'feed',
+            operation: 'close',
+            lastDurationMs: null,
+            backpressureCloses: 1,
+            ...counts,
+          }],
+          dropped: 0,
+        },
+      },
+      {
+        sourceId: 's3',
+        snapshot: {
+          state: 'ready',
+          alias: 'fanout',
+          sourceKind: 'backplane',
+          coverage: 'owned-instance',
+          gauges: { state: 'unsupported', openConnections: null, groups: null },
+          records: [{
+            alias: 'fanout',
+            operation: 'backplane-publish',
+            lastDurationMs: 4,
+            backpressureCloses: null,
+            ...counts,
+          }],
+          dropped: 0,
+        },
+      },
+    ],
+  };
+}
+
+/** The mutable snapshot of source `index` in a realtime body. */
+function realtimeSnapshot(body: Record<string, unknown>, index: number): Record<string, unknown> {
+  return (body.sources as { snapshot: Record<string, unknown> }[])[index]!.snapshot;
+}
+
+describe('Client — realtime negotiation (M98l)', () => {
+  it('reads the realtime response through the signed exchange and deep-freezes it', async () => {
+    const { client, requests } = buildClient();
+    const response = await client.realtime();
+    expect(response).toEqual(realtimeResponseBody());
+    expect(requests.map((r) => r.target)).toEqual(['/v1/status', '/v1/realtime']);
+    expect(Object.isFrozen(response.sources[0]!.snapshot.gauges)).toBe(true);
+    expect(Object.isFrozen(response.sources[2]!.snapshot.records[0])).toBe(true);
+    client.close();
+  });
+
+  it('answers unsupported WITHOUT a request when the manifest realtime key is false', async () => {
+    const noRealtime = { ...currentInspectorsManifest(), realtime: false };
+    const { client, requests } = buildClient({ server: { statusInspectors: noRealtime } });
+    expect(await client.realtime()).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'unsupported',
+      sources: [],
+    });
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  it('never probes the route when paired against the legacy status body', async () => {
+    const { client, requests } = buildClient({ server: { legacyStatus: true } });
+    expect((await client.realtime()).state).toEqual('unsupported');
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  const hostile: ReadonlyArray<[string, (body: Record<string, unknown>) => void]> = [
+    ['numeric backplane gauges', (b) => {
+      realtimeSnapshot(b, 2).gauges = { state: 'available', openConnections: 1, groups: 1 };
+    }],
+    ['null gauges on an available websocket source', (b) => {
+      realtimeSnapshot(b, 0).gauges = { state: 'available', openConnections: null, groups: 0 };
+    }],
+    ['a backpressure count on a websocket close', (b) => {
+      (realtimeSnapshot(b, 0).records as Record<string, unknown>[])[0]!.backpressureCloses = 0;
+    }],
+    ['a backplane operation on an sse source', (b) => {
+      (realtimeSnapshot(b, 1).records as Record<string, unknown>[])[0]!.operation =
+        'backplane-receive';
+    }],
+    ['an unknown kind carrying records', (b) => {
+      realtimeSnapshot(b, 0).sourceKind = 'unknown';
+    }],
+    ['an extra record field', (b) => {
+      (realtimeSnapshot(b, 0).records as Record<string, unknown>[])[0]!.room = 'canary-room';
+    }],
+    ['a different instance', (b) => {
+      b.instanceId = '00000000-0000-4000-8000-000000000000';
+    }],
+  ];
+  for (const [name, mutate] of hostile) {
+    it(`refuses a correctly signed body carrying ${name}`, async () => {
+      const body = realtimeResponseBody();
+      mutate(body);
+      const { client } = buildClient({ server: { realtimeBody: body } });
+      await expect(client.realtime()).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
+});
 
 describe('Client — cache negotiation (M98i)', () => {
   it('reads the cache response through the signed exchange and deep-freezes it', async () => {
