@@ -5,7 +5,11 @@
  * @since 0.2.0
  */
 
-import type { IRealtimeBackplane, RealtimeDiagnosticsOptions } from '@setu-ts/common';
+import type {
+  ConnectionErrorReporter,
+  IRealtimeBackplane,
+  RealtimeDiagnosticsOptions,
+} from '@setu-ts/common';
 
 /**
  * The `ioredis`-shaped client surface the Redis transport uses.
@@ -223,6 +227,20 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
    * @since 0.8.0
    */
   readonly commandTimeoutMs?: number;
+  /**
+   * Receives the connection errors (`ioredis` `'error'` events) of the two
+   * connections this transport BUILDS, instead of `ioredis` printing each
+   * reconnect failure to the console. Defaults, through
+   * `RealtimeBackplanePlugin`, to one backed by the application's logger;
+   * supply your own to route them elsewhere.
+   *
+   * Read only on the lazy `npm:ioredis` path: an injected `client` /
+   * `subscriber` pair belongs to the caller and gets no listener, since one
+   * would silence the caller's own `'error'` handling.
+   *
+   * @since 0.8.0
+   */
+  readonly connectionErrorReporter?: ConnectionErrorReporter;
 }
 
 /**

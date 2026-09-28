@@ -103,6 +103,11 @@ Without `distributedLock`, a process-local `MemoryLock` is used — fine for a s
 **every replica will run every job**. Set `{ enabled: true, storage: 'redis' }` to use `RedisLock`
 (over `npm:ioredis`, lazily imported or injected) so only one replica executes each firing.
 
+Connection errors of the `ioredis` client the lock builds go to the application logger — the first
+error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead of
+`ioredis` printing every reconnect failure to `console.error`. An injected client gets no listener:
+it belongs to the caller.
+
 Behaviours run inside that lock. A replica that does not acquire it runs neither the behaviour chain
 nor the job handler; a behaviour throw follows the job's existing retry policy. With no behaviours,
 the handler receives its original job directly and no chain is allocated.

@@ -1,4 +1,5 @@
-import { createCachedProbe } from '@setu-ts/common';
+import { attachConnectionErrorReporter, createCachedProbe } from '@setu-ts/common';
+import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type {
   ISubscription,
   MessageHandler,
@@ -66,12 +67,15 @@ export function validateClient(client: unknown): client is IRedisStreamsClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
+ * @param reporter - Receives the BUILT client's connection errors; never
+ *   attached to an injected client, which belongs to the caller
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
 async function resolveClient(
   url: string,
-  injectedClient?: IRedisStreamsClient,
+  injectedClient: IRedisStreamsClient | undefined,
+  reporter: ConnectionErrorReporter | undefined,
 ): Promise<IRedisStreamsClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -83,7 +87,11 @@ async function resolveClient(
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
-  return createLazyRedisClient(RedisCtor, url);
+  const client = createLazyRedisClient(RedisCtor, url);
+  if (reporter !== undefined) {
+    attachConnectionErrorReporter(client, reporter);
+  }
+  return client;
 }
 
 /**
@@ -111,6 +119,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   #pollIntervalMs: number;
   #blockSizeMs: number;
   #logger?: { error: (msg: string) => void };
+  #reporter: ConnectionErrorReporter | undefined;
   #client: IRedisStreamsClient | null = null;
   #ready = false;
   #activeSubscriptions: Map<string, ActiveSubscription>;
@@ -143,6 +152,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     if (options?.logger) {
       this.#logger = options.logger;
     }
+    this.#reporter = options?.connectionErrorReporter;
     this.#activeSubscriptions = new Map();
     this.#pollIntervals = new Map();
     this.#rr = new RequestReplyCore({
@@ -185,7 +195,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
-    this.#client = await resolveClient(this.#url, this.#injectedClient);
+    this.#client = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
     if (typeof this.#client.connect === 'function') {
       await this.#client.connect();
     }

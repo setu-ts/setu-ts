@@ -8,6 +8,7 @@
  */
 
 import type {
+  ConnectionErrorReporter,
   IIngressBehavior,
   RegistryFactory,
   RetryOptions,
@@ -382,4 +383,13 @@ export interface RedisLockOptions {
   url: string;
   /** Injected ioredis-compatible client. */
   client?: IRedisLockClient;
+  /**
+   * Receives the connection errors (`ioredis` `'error'` events) of the client
+   * the lock BUILDS, instead of `ioredis` printing each reconnect failure to
+   * the console. Never attached to an injected `client`, which belongs to the
+   * caller. `SchedulerPlugin` supplies one backed by its logger.
+   *
+   * @since 0.8.0
+   */
+  connectionErrorReporter?: ConnectionErrorReporter;
 }

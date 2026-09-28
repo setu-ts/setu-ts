@@ -16,6 +16,7 @@ import type {
 import {
   CAPABILITIES,
   compileRealtimeDiagnosticsAlias,
+  createConnectionErrorReporter,
   createRealtimeObservationCollector,
   PLUGIN_PRIORITY,
 } from '@setu-ts/common';
@@ -94,7 +95,20 @@ export function RealtimeBackplanePlugin(
         );
       }
 
-      const backplane = createBackplane(options, ctx.services, ctx.runtime.uuid());
+      // The redis arm's built connections report reconnect failures to the
+      // logger (read at call time) unless the caller routed them elsewhere,
+      // rather than through ioredis's own console fallback.
+      const resolved: RealtimeBackplanePluginOptions =
+        options.transport === 'redis' && options.connectionErrorReporter === undefined
+          ? {
+            ...options,
+            connectionErrorReporter: createConnectionErrorReporter({
+              source: 'realtime-backplane-plugin: redis transport',
+              logger: () => ctx.logger,
+            }),
+          }
+          : options;
+      const backplane = createBackplane(resolved, ctx.services, ctx.runtime.uuid());
 
       // Awaited, so the subscription is live before the first request and
       // before either consumer plugin registers its handler.

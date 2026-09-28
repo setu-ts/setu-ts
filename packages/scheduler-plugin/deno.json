@@ -2,5 +2,19 @@
   "name": "@setu-ts/scheduler-plugin",
   "version": "0.7.0",
   "license": "MIT",
-  "exports": "./src/index.ts"
+  "exports": "./src/index.ts",
+  "test": {
+    "permissions": {
+      "read": true,
+      "import": true,
+      "env": true,
+      "net": [
+        "127.0.0.1:6379",
+        "localhost:6379"
+      ],
+      "run": [
+        "docker"
+      ]
+    }
+  }
 }

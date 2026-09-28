@@ -5,6 +5,7 @@
  * @since 0.2.0
  */
 
+import { attachConnectionErrorReporter } from '@setu-ts/common';
 import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 import type { IRedisBackplaneClient, RedisBackplaneOptions } from '../interfaces/index.ts';
 import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../interfaces/index.ts';
@@ -187,7 +188,11 @@ export class RedisBackplane implements IRealtimeBackplane {
       const clientOptions = this.#commandTimeoutMs === 0
         ? {}
         : { commandTimeout: this.#commandTimeoutMs };
+      const reporter = this.#options.connectionErrorReporter;
       publisher = module.create(url, clientOptions);
+      if (reporter !== undefined) {
+        attachConnectionErrorReporter(publisher, reporter);
+      }
       try {
         subscriber = module.create(url, clientOptions);
       } catch (error) {
@@ -195,6 +200,11 @@ export class RedisBackplane implements IRealtimeBackplane {
         // is the only chance to close it.
         await this.#discard([publisher]);
         throw error;
+      }
+      // One reporter for both: the pair fails together, so an outage's
+      // identical errors from the two connections de-duplicate into one warn.
+      if (reporter !== undefined) {
+        attachConnectionErrorReporter(subscriber, reporter);
       }
     }
 

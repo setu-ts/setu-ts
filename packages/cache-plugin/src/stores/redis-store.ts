@@ -6,6 +6,8 @@
  *
  * @module
  */
+import { attachConnectionErrorReporter } from '@setu-ts/common';
+import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { CacheStore } from './cache-store.ts';
 import type { IRedisClient } from '../interfaces/index.ts';
 
@@ -57,12 +59,15 @@ export function validateClient(client: unknown): client is IRedisClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
+ * @param reporter - Receives the BUILT client's connection errors; never
+ *   attached to an injected client, which belongs to the caller
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
 async function resolveClient(
   url: string,
-  injectedClient?: IRedisClient,
+  injectedClient: IRedisClient | undefined,
+  reporter: ConnectionErrorReporter | undefined,
 ): Promise<IRedisClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -74,7 +79,11 @@ async function resolveClient(
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
-  return createLazyRedisClient(RedisCtor, url);
+  const client = createLazyRedisClient(RedisCtor, url);
+  if (reporter !== undefined) {
+    attachConnectionErrorReporter(client, reporter);
+  }
+  return client;
 }
 
 /**
@@ -91,6 +100,7 @@ export class RedisStore implements CacheStore {
   #url: string;
   #injectedClient: IRedisClient | undefined;
   #prefix: string;
+  #reporter: ConnectionErrorReporter | undefined;
   #ready = false;
 
   /**
@@ -100,18 +110,27 @@ export class RedisStore implements CacheStore {
    * @param options - Redis connection and client options
    * @param options.url - Redis connection URL (default `redis://localhost:6379`)
    * @param options.client - Injected ioredis-compatible client (bypasses lazy import)
+   * @param options.connectionErrorReporter - Receives the connection errors
+   *   (`ioredis` `'error'` events) of the client this store BUILDS, instead of
+   *   `ioredis` printing each one to the console. Never attached to an
+   *   injected `client`. `CachePlugin` supplies one backed by its logger.
    */
   constructor(
     prefix: string,
-    options?: { url?: string | undefined; client?: IRedisClient | undefined },
+    options?: {
+      url?: string | undefined;
+      client?: IRedisClient | undefined;
+      connectionErrorReporter?: ConnectionErrorReporter | undefined;
+    },
   ) {
     this.#prefix = prefix;
     this.#url = options?.url ?? 'redis://localhost:6379';
     this.#injectedClient = options?.client;
+    this.#reporter = options?.connectionErrorReporter;
   }
 
   async connect(): Promise<void> {
-    this.#client = await resolveClient(this.#url, this.#injectedClient);
+    this.#client = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
     // Only call connect() if the client exposes it (lazy ioredis clients do).
     if (typeof this.#client.connect === 'function') {
       await this.#client.connect();

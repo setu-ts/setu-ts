@@ -109,6 +109,7 @@ package fits the plugin architecture.
 | Export                               | Kind      |
 | ------------------------------------ | --------- |
 | `assertRealPathContained`            | function  |
+| `attachConnectionErrorReporter`      | function  |
 | `brandErrorResponder`                | function  |
 | `causeMessage`                       | function  |
 | `compileRealtimeDiagnosticsAlias`    | function  |
@@ -117,6 +118,7 @@ package fits the plugin architecture.
 | `contextToTraceparent`               | function  |
 | `createCachedProbe`                  | function  |
 | `createCapabilityToken`              | function  |
+| `createConnectionErrorReporter`      | function  |
 | `createMaskRedactor`                 | function  |
 | `createPathMatcher`                  | function  |
 | `createRealtimeObservationCollector` | function  |
@@ -207,6 +209,8 @@ package fits the plugin architecture.
 | `ClassProvider`                      | interface |
 | `ConfigDiagnosticsSnapshot`          | interface |
 | `ConfigProvenanceEntry`              | interface |
+| `ConnectionErrorReporter`            | interface |
+| `ConnectionErrorReporterOptions`     | interface |
 | `CookieAttributes`                   | interface |
 | `CqrsCommand`                        | interface |
 | `CqrsQuery`                          | interface |
@@ -452,6 +456,7 @@ package fits the plugin architecture.
 | `Component`                          | type      |
 | `ConfigProvenanceOrigin`             | type      |
 | `ConfigSchemaEffect`                 | type      |
+| `ConnectionErrorLogger`              | type      |
 | `Constructor`                        | type      |
 | `CursorValue`                        | type      |
 | `DataClassification`                 | type      |

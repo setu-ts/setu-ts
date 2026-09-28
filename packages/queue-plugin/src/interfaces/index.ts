@@ -6,6 +6,7 @@
 
 import type { Buffer } from 'node:buffer';
 import type {
+  ConnectionErrorReporter,
   IIngressBehavior,
   JobProcessor,
   ProcessOptions,
@@ -413,6 +414,15 @@ export interface RedisQueueOptions {
    * @since 0.3.0
    */
   deadLetterTtlMs?: number;
+  /**
+   * Receives the connection errors (`ioredis` `'error'` events) of the client
+   * the adapter BUILDS, instead of `ioredis` printing each reconnect failure
+   * to the console. Never attached to an injected `client`, which belongs to
+   * the caller. `QueuePlugin` supplies one backed by its logger.
+   *
+   * @since 0.8.0
+   */
+  connectionErrorReporter?: ConnectionErrorReporter;
 }
 
 /**

@@ -22,7 +22,12 @@ import type {
   QueueDepthScope,
   RegistryFactory,
 } from '@setu-ts/common';
-import { CAPABILITIES, createCapabilityToken, resolveRegistryEntry } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  createCapabilityToken,
+  createConnectionErrorReporter,
+  resolveRegistryEntry,
+} from '@setu-ts/common';
 import type {
   QueueAdapterType,
   QueuePluginOptions,
@@ -165,6 +170,12 @@ export function QueuePlugin(options?: QueuePluginOptions): IPlugin {
             ...(options?.deadLetterTtlMs === undefined
               ? {}
               : { deadLetterTtlMs: options.deadLetterTtlMs }),
+            // The built client's reconnect failures go to the logger (read at
+            // call time) rather than ioredis's own console fallback.
+            connectionErrorReporter: createConnectionErrorReporter({
+              source: `${pluginName}: redis adapter`,
+              logger: () => ctx.logger,
+            }),
           });
           break;
         }

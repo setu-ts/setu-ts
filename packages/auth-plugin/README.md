@@ -324,6 +324,12 @@ configured error format. The operational paths `/live`, `/ready`, `/health`, `/m
 prefixes its keys with `'setu:ratelimit:'` by default; set `keyPrefix` per application when several
 share Redis, or `''` to keep pre-M90a keys.
 
+`RedisRateLimitStore` is constructed by the application, so no plugin wires its connection errors.
+Pass `connectionErrorReporter` (built with `createConnectionErrorReporter` from `@setu-ts/common`
+over your logger) and the `'error'` events of the client it builds are logged — first error at
+`warn`, repeats at `debug`, recovery at `info` — rather than printed by `ioredis` to `console.error`
+on every reconnect attempt. An injected `client` never gets a listener.
+
 The default key resolves in this order: the authenticated principal, the client IP published by
 `ipSecurityMiddleware` (see `http-security-plugin`), `IRequest.ip`, and only then one global
 `'anonymous'` bucket — shared by every caller for whom none of the three resolved.

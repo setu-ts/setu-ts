@@ -47,6 +47,11 @@ const profile = await readThroughCache.getOrSet('profile:1', async () => {
 | `options`     | `CacheStoreOptions`             | —           | Store-specific configuration.         |
 | `diagnostics` | `CacheDiagnosticsOptions`       | —           | Opt-in operation counters (M98i).     |
 
+With `store: 'redis'`, connection errors of the `ioredis` client the store builds go to the
+application logger — the first error of an outage at `warn`, identical repeats at `debug`, the
+recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. An
+injected client gets no listener: it belongs to the caller.
+
 A `name` other than `'default'` derives the capability token as `cache.<name>`, so several caches
 can coexist in one application.
 

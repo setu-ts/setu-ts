@@ -8,6 +8,7 @@
  * @module
  */
 import type {
+  ConnectionErrorReporter,
   ICacheDiagnosticsSource,
   ICacheStore,
   IPlugin,
@@ -18,6 +19,7 @@ import {
   CAPABILITIES,
   createCachedProbe,
   createCapabilityToken,
+  createConnectionErrorReporter,
   PLUGIN_PRIORITY,
   resolveProbeTiming,
 } from '@setu-ts/common';
@@ -105,7 +107,16 @@ export function CachePlugin(options?: CachePluginOptions): IPlugin {
       const clock = resolveClock(ctx);
 
       // Create the backend store.
-      const backend = createBackend(storeType, prefix, storeOptions, { clock });
+      const backend = createBackend(storeType, prefix, storeOptions, {
+        clock,
+        // A built ioredis client's connection errors go to the logger — read
+        // at call time, so one registered later is honoured — instead of
+        // ioredis printing each reconnect failure to the console.
+        connectionErrorReporter: createConnectionErrorReporter({
+          source: `${pluginName}: redis store`,
+          logger: () => ctx.logger,
+        }),
+      });
 
       // Connect the backend.
       await backend.connect();
@@ -197,13 +208,17 @@ function createBackend(
   storeType: string,
   prefix: string,
   options: CacheStoreOptions,
-  extra?: { clock?: (() => number) | undefined },
+  extra?: {
+    clock?: (() => number) | undefined;
+    connectionErrorReporter?: ConnectionErrorReporter | undefined;
+  },
 ): CacheStore {
   switch (storeType) {
     case 'redis':
       return new RedisStore(prefix, {
         url: options.url,
         client: options.client,
+        connectionErrorReporter: extra?.connectionErrorReporter,
       });
     case 'noop':
       return new NoopStore(prefix);
