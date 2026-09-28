@@ -405,16 +405,20 @@ is exactly
 `{ alias, operation, count, lastDurationMs, ageMs, started, succeeded, failed,
 contended, lockFailed, retryAttempts, lastLatenessMs }`
 for one of the two observations `fire` and `attempt`, keyed by (job alias, operation) — at most 64
-tuples per source, a NEW tuple at capacity ignored and counted in the saturating `dropped`. On a
-`fire` record the counters describe local timer fires: `started` dispatched, `contended` skipped
-because a fire slot or the overlap mutex was held elsewhere (or a delay's registration slot belonged
-to another replica), `lockFailed` skipped because a lock operation rejected, `succeeded`/`failed`
-the dispatch settlement; `lastLatenessMs` is `max(0, actualStart - intendedFire)` of the last fire,
-and `retryAttempts` is nonapplicable and `0`. On an `attempt` record they describe handler attempts;
-`contended`/`lockFailed`/`lastLatenessMs` are nonapplicable and `0`. `count` counts settled
-observations; every counter saturates at `Number.MAX_SAFE_INTEGER`; records expire after 60 seconds
-without an observation (age >30 s means the snapshot is `stale`). A skipped local fire is never a
-globally missed execution, and no missed counter exists.
+tuples per source. A NEW tuple at capacity first reclaims every expired slot; only when none is free
+is it ignored, counting ONE saturating `dropped` per ignored observation (a refused attempt is one
+drop, not two). On a `fire` record the counters describe local timer fires: `started` dispatched,
+`contended` skipped because a fire slot or the overlap mutex was held elsewhere (or a delay's
+registration slot belonged to another replica), `lockFailed` skipped because a lock operation
+rejected, `succeeded`/`failed` the dispatch settlement; `lastLatenessMs` is
+`max(0, actualStart - intendedFire)` of the last fire, rounded to integer milliseconds (a
+`delay`/`every` time may be fractional), and `retryAttempts` is nonapplicable and `0`. On an
+`attempt` record they describe handler attempts; `contended`/`lockFailed`/`lastLatenessMs` are
+nonapplicable and `0`. `count` counts settled observations, and `started` never falls below it: an
+attempt whose record expired while its handler ran is counted as started in the record that receives
+its settlement; every counter saturates at `Number.MAX_SAFE_INTEGER`; records expire after 60
+seconds without an observation (age >30 s means the snapshot is `stale`). A skipped local fire is
+never a globally missed execution, and no missed counter exists.
 
 Each source is untrusted input: only a plain object (`Object.prototype` or `null` prototype) of own
 DATA properties is admitted, each field read once through its descriptor (a getter is never

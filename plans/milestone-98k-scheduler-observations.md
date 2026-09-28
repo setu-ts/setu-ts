@@ -288,3 +288,52 @@ local probes and browser origins, credentials/replay/session lifetime, source-re
 resource exhaustion. Review connection/frame integrity failures separately from optional collection
 failure: authentication must never degrade into a usable unsigned response. The devtool separately
 must pass safe rendering, secret-free logs/export and credential-storage acceptance tests.
+
+## 11. Verification-review repairs and implementation evidence
+
+A verification and code review of `9c6e7805` found defects that every gate and the per-file bar had
+passed. The fixes are on this branch, and each carries a test that fails without it (all six
+negative controls were observed failing, then reverted):
+
+- **Fractional times collapsed the whole source.** Lateness was stored unrounded, and the wire
+  admits only integer counters, so `delay(name, 20.5)` or `every(name, 100.5)` made the SOURCE
+  `collection-failed` and hid every other job's records (a fractional `every` flickered between
+  `ready` and `collection-failed` indefinitely). Lateness and durations now pass through one
+  `toWireMs` normalization. Guarded by a collector unit test and a real-socket e2e.
+- **Expired slots were not reclaimed at capacity.** Only a read swept expired records, so with more
+  than 32 approved jobs a full table of dead slots refused live work. A NEW tuple at capacity now
+  reclaims expired slots first (the M98j precedent).
+- **A refused attempt counted two drops**, one at its start and one at its settlement; only the
+  settlement counts now.
+- **`started` could fall below `count`** when a record expired while its handler ran. The attempt
+  observer now carries the record its start was counted in, and a settlement landing in a different
+  record counts the start there (the M98j per-start slot token).
+- **Observation-only clock reads were unguarded on the observed path**, contrary to §3.4. The
+  service read `runtime.hrtime()` for dispatch timing between the lock acquire and the `try` whose
+  `finally` releases it, and the executor read it inside the handler's `try`, so a throw after a
+  successful handler would have been treated as a failure and retried. All observation clock reads
+  now go through the collector's guard (`monotonic()` / `elapsedSince()`, and the attempt observer
+  times itself); the executor reads no clock.
+
+**Off / on / failing equivalence (§6).** One scenario — cron, every and a retried delay job, a
+contended fire slot, a held overlap mutex, pause/resume/remove — runs with no collector, a working
+collector, and a collector over a runtime whose `hrtime` always throws (bound exactly as the plugin
+binds it). Handler calls, lock traffic, the next-run time and the pending timer count are asserted
+identical across all three (`packages/scheduler-plugin/test/unit/scheduler-observations.test.ts`).
+
+**Overhead (§3.4).** The service is driven through `every(1)` over the real runtime, with a lock
+that always grants. Each configuration runs in a fresh process, alternating, five runs each. GC is
+forced at the warm-up boundary and at the end.
+
+| Workload                                         | Off (median)       | On (median)     | Extra lock calls | Heap after GC |
+| ------------------------------------------------ | ------------------ | --------------- | ---------------- | ------------- |
+| Real `setTimeout(0)` timers, 10,000 warmed fires | 482 fires/s        | 482 fires/s     | 0 (3 per fire)   | —             |
+| Microtask timers, 100,000 warmed fires, no-op    | ~1.9–2.4 M fires/s | ~0.90 M fires/s | 0 (3 per fire)   | +0–1 KiB      |
+| Same, pre-repair code (`9c6e7805`)               | ~2.4 M fires/s     | ~0.64 M fires/s | 0                | +5–6 KiB      |
+
+Zero extra backend calls and no memory growth hold. The ≤5% throughput target holds against real
+timers, where the enabled path is inside the run-to-run noise. It does NOT hold on the synthetic
+microtask loop: there a no-op handler costs ~0.4 µs per fire, and observation adds ~0.7 µs (six
+monotonic reads, the fire observation and the attempt observer). The repairs made the enabled path
+faster than the implementation under review, not slower. Accepting that cost, or tuning it, is a
+maintainer decision and is recorded here rather than claimed as met.

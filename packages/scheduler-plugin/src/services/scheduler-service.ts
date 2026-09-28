@@ -503,15 +503,20 @@ export class SchedulerService implements IScheduler {
       return;
     }
 
-    // Observed dispatch: clocks are read ONLY here — an unattached service
-    // never reads one (the plan's hot-path rule). The attempt observer is
-    // resolved once per dispatch; an unapproved job gets `undefined` and the
-    // executor allocates nothing.
+    // Observed dispatch: clocks are read ONLY here, and only through the
+    // collector's guard — an unattached service never reads one (the plan's
+    // hot-path rule). The attempt observer is resolved once per dispatch; an
+    // unapproved job gets `undefined` and the executor allocates nothing.
     const observed = collector !== undefined && fireObs !== null;
     const attempts = observed
       ? (collector as SchedulerObservationCollector).attemptObserver(entry.name) ?? undefined
       : undefined;
-    const dispatchStart = observed ? this.#runtime.hrtime() : 0;
+    // Timed through the collector's guarded clock, never the runtime's
+    // directly: a throwing clock latches collection-failed there and cannot
+    // escape between the lock acquire above and the release below.
+    const dispatchStart = observed
+      ? (collector as SchedulerObservationCollector).monotonic()
+      : null;
     try {
       const jobId = this.#runtime.uuid();
       const runOptions = attempts === undefined
@@ -529,7 +534,7 @@ export class SchedulerService implements IScheduler {
         fireObs,
         'dispatched',
         true,
-        observed ? Math.round(Math.max(0, this.#runtime.hrtime() - dispatchStart)) : null,
+        collector?.elapsedSince(dispatchStart) ?? null,
       );
     } catch (error) {
       // Handler exhausted retries — log but do not crash the scheduler loop.
@@ -540,7 +545,7 @@ export class SchedulerService implements IScheduler {
         fireObs,
         'dispatched',
         false,
-        observed ? Math.round(Math.max(0, this.#runtime.hrtime() - dispatchStart)) : null,
+        collector?.elapsedSince(dispatchStart) ?? null,
       );
     } finally {
       try {

@@ -221,16 +221,16 @@ export interface FireObservation {
  * @internal
  */
 export interface SchedulerAttemptObserver {
-  /** One attempt began: its handler was invoked. */
+  /** One attempt began: its handler is about to be invoked. Reads the collector's clock. */
   attemptStarted(): void;
   /**
-   * One attempt settled.
+   * One attempt settled. The duration is measured by the observer itself,
+   * from its own start reading, so the executor reads no clock.
    *
    * @param succeeded - Whether the handler fulfilled
-   * @param durationMs - Integer monotonic ms the attempt took
    * @param isRetry - Whether the attempt was numbered above the first
    */
-  attemptSettled(succeeded: boolean, durationMs: number, isRetry: boolean): void;
+  attemptSettled(succeeded: boolean, isRetry: boolean): void;
 }
 
 /** The mutable counters behind one (job alias, operation) tuple. */
@@ -261,6 +261,25 @@ interface MutableRecord {
  */
 export function bump(value: number): number {
   return value >= Number.MAX_SAFE_INTEGER ? Number.MAX_SAFE_INTEGER : value + 1;
+}
+
+/**
+ * Normalizes a measured millisecond value to the wire's non-negative safe
+ * integer: rounded, clamped at zero and at `Number.MAX_SAFE_INTEGER`, and a
+ * non-finite reading becomes `0`. A fractional reading is ordinary — a
+ * `delay(name, 20.5)` or `every(name, 100.5)` job is armed for a fractional
+ * instant — and the connector refuses any non-integer counter, so an
+ * unrounded value would turn the WHOLE source `collection-failed`.
+ *
+ * @param value - The measured milliseconds
+ * @returns The wire-safe integer milliseconds
+ * @internal
+ */
+export function toWireMs(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+  return Math.min(Math.round(value), Number.MAX_SAFE_INTEGER);
 }
 
 /**
@@ -327,8 +346,7 @@ export class SchedulerObservationCollector {
       return null;
     }
     try {
-      const latenessMs = Math.max(0, this.#wall() - intendedFireMs);
-      return { jobAlias, latenessMs: Number.isFinite(latenessMs) ? latenessMs : 0 };
+      return { jobAlias, latenessMs: toWireMs(this.#wall() - intendedFireMs) };
     } catch {
       this.#fail();
       return null;
@@ -357,7 +375,10 @@ export class SchedulerObservationCollector {
     }
     try {
       const now = this.#mono();
-      const record = this.#tuple(observation.jobAlias, 'fire', now);
+      const record = this.#tuple(observation.jobAlias, 'fire', now, true);
+      if (record === null) {
+        return;
+      }
       record.count = bump(record.count);
       record.lastLatenessMs = observation.latenessMs;
       if (outcome === 'dispatched') {
@@ -368,7 +389,7 @@ export class SchedulerObservationCollector {
           record.failed = bump(record.failed);
         }
         if (dispatchDurationMs !== null) {
-          record.lastDurationMs = dispatchDurationMs;
+          record.lastDurationMs = toWireMs(dispatchDurationMs);
         }
       } else if (outcome === 'contended') {
         record.contended = bump(record.contended);
@@ -382,9 +403,51 @@ export class SchedulerObservationCollector {
   }
 
   /**
+   * One guarded monotonic reading for the service's dispatch timing. The
+   * service never reads the runtime clock itself on the observed path: a
+   * throwing clock here latches `collection-failed` and answers `null`, so
+   * it can neither skip a lock release nor fail a dispatch.
+   *
+   * @returns The reading, or `null` when capture has stopped or the clock threw
+   */
+  monotonic(): number | null {
+    if (this.#failed || this.#closed) {
+      return null;
+    }
+    try {
+      return this.#mono();
+    } catch {
+      this.#fail();
+      return null;
+    }
+  }
+
+  /**
+   * The integer monotonic milliseconds since a {@linkcode monotonic}
+   * reading, through the same guard.
+   *
+   * @param start - The earlier reading, or `null` when none was taken
+   * @returns The elapsed milliseconds, or `null` when not measurable
+   */
+  elapsedSince(start: number | null): number | null {
+    if (start === null) {
+      return null;
+    }
+    const now = this.monotonic();
+    return now === null ? null : toWireMs(now - start);
+  }
+
+  /**
    * Builds the observer the executor calls for one dispatched fire's
    * handler attempts. `null` when the job was not approved — an unobserved
    * dispatch allocates nothing and reads no clock.
+   *
+   * The observer measures each attempt itself, through the collector's
+   * guarded clock, so the executor reads no clock on the observed path. It
+   * also carries the record its start was counted in: when the settlement
+   * lands in a DIFFERENT record — the original expired and was replaced
+   * while the handler ran, or the start was refused at capacity — the
+   * start is counted there too, so `started` never falls below `count`.
    *
    * @param name - The exact job name of the dispatch
    * @returns The observer, or `null` when unobserved
@@ -397,69 +460,79 @@ export class SchedulerObservationCollector {
     if (jobAlias === undefined) {
       return null;
     }
+    // The record the current attempt's start was counted in (`null` when it
+    // was refused at capacity; `undefined` before any start), and the
+    // monotonic reading it started at.
+    let origin: MutableRecord | null | undefined;
+    let startedAt: number | null = null;
     return {
       attemptStarted: () => {
-        this.#attemptStarted(jobAlias);
+        if (this.#failed || this.#closed) {
+          return;
+        }
+        try {
+          const now = this.#mono();
+          startedAt = now;
+          // A refused start is not a drop by itself: its settlement counts
+          // the one ignored observation.
+          origin = this.#tuple(jobAlias, 'attempt', now, false);
+          if (origin !== null) {
+            origin.started = bump(origin.started);
+            origin.lastAt = now;
+          }
+        } catch {
+          this.#fail();
+        }
       },
-      attemptSettled: (succeeded, durationMs, isRetry) => {
-        this.#attemptSettled(jobAlias, succeeded, durationMs, isRetry);
+      attemptSettled: (succeeded, isRetry) => {
+        if (this.#failed || this.#closed) {
+          return;
+        }
+        try {
+          const now = this.#mono();
+          const record = this.#tuple(jobAlias, 'attempt', now, true);
+          if (record !== null) {
+            if (origin !== record) {
+              record.started = bump(record.started);
+            }
+            record.count = bump(record.count);
+            if (succeeded) {
+              record.succeeded = bump(record.succeeded);
+            } else {
+              record.failed = bump(record.failed);
+            }
+            if (isRetry) {
+              record.retryAttempts = bump(record.retryAttempts);
+            }
+            if (startedAt !== null) {
+              record.lastDurationMs = toWireMs(now - startedAt);
+            }
+            record.lastAt = now;
+          }
+          origin = undefined;
+          startedAt = null;
+        } catch {
+          this.#fail();
+        }
       },
     };
   }
 
-  /** Counts one begun attempt on the job's `attempt` tuple. */
-  #attemptStarted(jobAlias: string): void {
-    if (this.#failed || this.#closed) {
-      return;
-    }
-    try {
-      const now = this.#mono();
-      const record = this.#tuple(jobAlias, 'attempt', now);
-      record.started = bump(record.started);
-      record.lastAt = now;
-    } catch {
-      this.#fail();
-    }
-  }
-
   /**
-   * Settles one attempt: counts it, its outcome and its retry number, and
-   * records the measured duration.
+   * Resolves the mutable record for one (job alias, operation) tuple. An
+   * existing tuple past retention is REPLACED by a fresh record (a new
+   * identity, so an attempt observer can tell its start was not counted
+   * there). A NEW tuple with no free slot first reclaims every expired
+   * slot — otherwise slots nobody has read since they expired would refuse
+   * live work — and only then is refused: `null`, counting the saturating
+   * `dropped` when `countDrop`.
    */
-  #attemptSettled(
+  #tuple(
     jobAlias: string,
-    succeeded: boolean,
-    durationMs: number,
-    isRetry: boolean,
-  ): void {
-    if (this.#failed || this.#closed) {
-      return;
-    }
-    try {
-      const now = this.#mono();
-      const record = this.#tuple(jobAlias, 'attempt', now);
-      record.count = bump(record.count);
-      if (succeeded) {
-        record.succeeded = bump(record.succeeded);
-      } else {
-        record.failed = bump(record.failed);
-      }
-      if (isRetry) {
-        record.retryAttempts = bump(record.retryAttempts);
-      }
-      record.lastDurationMs = Math.max(0, Math.round(durationMs));
-      record.lastAt = now;
-    } catch {
-      this.#fail();
-    }
-  }
-
-  /**
-   * Resolves the mutable record for one (job alias, operation) tuple,
-   * creating it when free, expiring a stale entry first, and counting the
-   * saturating `dropped` when no slot exists for a NEW tuple.
-   */
-  #tuple(jobAlias: string, operation: SchedulerDiagnosticsOperation, now: number): MutableRecord {
+    operation: SchedulerDiagnosticsOperation,
+    now: number,
+    countDrop: boolean,
+  ): MutableRecord | null {
     const key = `${jobAlias}\u0000${operation}`;
     const existing = this.#records.get(key);
     if (existing !== undefined) {
@@ -472,14 +545,29 @@ export class SchedulerObservationCollector {
       return existing;
     }
     if (this.#records.size >= SCHEDULER_COLLECTOR_LIMITS.maxRecords) {
-      this.#dropped = bump(this.#dropped);
-      // The tuple is not observed; report an inert record the caller
-      // discards. Settling an UNKNOWN tuple at capacity is a drop.
-      return this.#freshRecord(jobAlias, operation, now);
+      this.#expire(now);
+    }
+    if (this.#records.size >= SCHEDULER_COLLECTOR_LIMITS.maxRecords) {
+      if (countDrop) {
+        this.#dropped = bump(this.#dropped);
+      }
+      return null;
     }
     const record = this.#freshRecord(jobAlias, operation, now);
     this.#records.set(key, record);
     return record;
+  }
+
+  /**
+   * Deletes every record older than the retention window. Checked during
+   * update (at capacity) and read — never by a background timer.
+   */
+  #expire(now: number): void {
+    for (const [key, record] of this.#records) {
+      if (now - record.lastAt > SCHEDULER_COLLECTOR_LIMITS.retentionMs) {
+        this.#records.delete(key);
+      }
+    }
   }
 
   /**
@@ -560,12 +648,8 @@ export class SchedulerObservationCollector {
       }));
     }
     // Records whose slot expired during this read are removed after the
-    // walk, so the map is never mutated mid-iteration.
-    for (const [key, record] of this.#records) {
-      if (now - record.lastAt > SCHEDULER_COLLECTOR_LIMITS.retentionMs) {
-        this.#records.delete(key);
-      }
-    }
+    // walk that built the projection.
+    this.#expire(now);
     let state: 'no-data' | 'ready' | 'stale';
     if (records.length === 0) {
       state = 'no-data';

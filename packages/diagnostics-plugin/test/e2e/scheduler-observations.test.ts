@@ -155,4 +155,60 @@ describe('Scheduler observations e2e (M98k canary)', () => {
       await app.stop();
     }
   });
+
+  it('keeps the source ready when a job is armed for a fractional instant', async () => {
+    // `delay(name, 20.5)` arms a fractional intended fire, so the measured
+    // lateness is always k + 0.5 ms. The wire accepts only integer counters:
+    // unrounded, that one record turned the WHOLE source collection-failed,
+    // hiding the unrelated recurring job beside it.
+    const connectorPort = freePort();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DiagnosticsPlugin({
+          enabled: true,
+          port: connectorPort,
+          sessionId: TEST_SESSION_ID,
+          sessionKey: TEST_KEY_BYTES,
+        }),
+        SchedulerPlugin({
+          jobs: [
+            { trigger: 'delay', name: 'fractional', delayMs: 20.5, handler: () => {} },
+            { trigger: 'every', name: 'recurring', intervalMs: 25, handler: () => {} },
+          ],
+          diagnostics: {
+            enabled: true,
+            alias: 'cron',
+            jobs: { fractional: 'fractional-alias', recurring: 'recurring-alias' },
+          },
+        }),
+      ],
+      diagnostics: {},
+    });
+    await app.start({ port: freePort(), hostname: '127.0.0.1' });
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const client = createDiagnosticsClient({
+        endpoint: `http://127.0.0.1:${connectorPort}`,
+        sessionId: TEST_SESSION_ID,
+        sessionKey: TEST_KEY_BYTES,
+        subtle: crypto.subtle,
+        fetch,
+        timing: { setTimeout, clearTimeout },
+      });
+      const response = await client.scheduler();
+      client.close();
+      expect(response.state).toBe('ready');
+      const records = response.sources[0]!.snapshot.records;
+      const fire = records.find((r) => r.alias === 'fractional-alias' && r.operation === 'fire');
+      expect(fire).toMatchObject({ count: 1, started: 1, succeeded: 1 });
+      expect(Number.isSafeInteger(fire!.lastLatenessMs)).toBe(true);
+      const recurring = records.find((r) =>
+        r.alias === 'recurring-alias' && r.operation === 'fire'
+      );
+      expect(recurring!.started).toBeGreaterThanOrEqual(2);
+    } finally {
+      await app.stop();
+    }
+  });
 });

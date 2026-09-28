@@ -27,6 +27,7 @@ import {
   SCHEDULER_COLLECTOR_LIMITS,
   SCHEDULER_DIAGNOSTICS_ERRORS,
   SchedulerObservationCollector,
+  toWireMs,
 } from '../../src/diagnostics/scheduler-observations.ts';
 import { MemoryLock } from '../../src/lock/memory-lock.ts';
 import type { IDistributedLock } from '../../src/interfaces/index.ts';
@@ -137,7 +138,8 @@ describe('SchedulerObservationCollector', () => {
     collector.fireSettled(obs, 'dispatched', true, 5);
     const attempts = collector.attemptObserver('tick');
     attempts!.attemptStarted();
-    attempts!.attemptSettled(true, 4, false);
+    runtime.advance(4);
+    attempts!.attemptSettled(true, false);
     const fire = recordOf(collector.snapshot(), 'tick-alias', 'fire')!;
     expect(fire).toMatchObject({
       count: 1,
@@ -173,7 +175,7 @@ describe('SchedulerObservationCollector', () => {
     collector.fireSettled(collector.fireBegin('tick', 0), 'dispatched', false, 7);
     const attempts = collector.attemptObserver('tick')!;
     attempts.attemptStarted();
-    attempts.attemptSettled(false, 3, true);
+    attempts.attemptSettled(false, true);
     expect(recordOf(collector.snapshot(), 'tick-alias', 'fire')).toMatchObject({
       count: 3,
       started: 1,
@@ -237,13 +239,121 @@ describe('SchedulerObservationCollector', () => {
       null,
     );
     expect(collector.snapshot().dropped).toBe(0);
-    collector.attemptObserver('j0')!.attemptStarted();
+    // A refused START is not a drop by itself — its settlement counts the
+    // one ignored observation, so an attempt is dropped exactly once.
+    const j0 = collector.attemptObserver('j0')!;
+    j0.attemptStarted();
+    expect(collector.snapshot().dropped).toBe(0);
+    j0.attemptSettled(true, false);
     expect(collector.snapshot().dropped).toBe(1);
     // An existing tuple's SECOND operation is also a drop: the slots are
     // full and every (alias, operation) pair is distinct.
     collector.fireSettled(collector.fireBegin('j1', 0), 'dispatched', true, null);
-    collector.attemptObserver('j1')!.attemptStarted();
+    const j1 = collector.attemptObserver('j1')!;
+    j1.attemptStarted();
+    j1.attemptSettled(false, false);
     expect(collector.snapshot().dropped).toBe(2);
+    expect(collector.snapshot().records).toHaveLength(SCHEDULER_COLLECTOR_LIMITS.maxRecords);
+  });
+
+  it('reclaims expired slots before refusing a NEW tuple at capacity', async () => {
+    const runtime = new FakeRuntime();
+    const jobs = new Map(
+      Array.from({ length: SCHEDULER_COLLECTOR_LIMITS.maxJobs }, (_, i) => [`j${i}`, `a${i}`]),
+    );
+    const collector = new SchedulerObservationCollector(
+      'cron',
+      jobs,
+      runtime.now.bind(runtime),
+      runtime.hrtime.bind(runtime),
+    );
+    for (let i = 0; i < jobs.size; i++) {
+      collector.fireSettled(collector.fireBegin(`j${i}`, 0), 'contended', null, null);
+    }
+    // Every slot expires, and NOTHING reads the source in between — only a
+    // read used to sweep, so the full table of dead slots refused live work.
+    await runtime.advance(SCHEDULER_COLLECTOR_LIMITS.retentionMs + 1);
+    const observer = collector.attemptObserver('j0')!;
+    observer.attemptStarted();
+    observer.attemptSettled(true, false);
+    const snapshot = collector.snapshot();
+    expect(snapshot.dropped).toBe(0);
+    expect(snapshot.records.map((r) => [r.alias, r.operation, r.count, r.started])).toEqual([
+      ['a0', 'attempt', 1, 1],
+    ]);
+  });
+
+  it('keeps started >= count when a record expires while its attempt is in flight', async () => {
+    const { collector, runtime } = observed();
+    const observer = collector.attemptObserver('tick')!;
+    observer.attemptStarted();
+    // The handler outlives retention: the record its start was counted in
+    // is replaced by a fresh one before the settlement lands.
+    await runtime.advance(SCHEDULER_COLLECTOR_LIMITS.retentionMs + 1_000);
+    observer.attemptSettled(true, false);
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toMatchObject({
+      count: 1,
+      started: 1,
+      succeeded: 1,
+      lastDurationMs: SCHEDULER_COLLECTOR_LIMITS.retentionMs + 1_000,
+    });
+  });
+
+  it('counts each start once across retried attempts on one observer', async () => {
+    const { collector, runtime } = observed();
+    const observer = collector.attemptObserver('tick')!;
+    observer.attemptStarted();
+    await runtime.advance(3);
+    observer.attemptSettled(false, false);
+    observer.attemptStarted();
+    await runtime.advance(7);
+    observer.attemptSettled(true, true);
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toMatchObject({
+      count: 2,
+      started: 2,
+      failed: 1,
+      succeeded: 1,
+      retryAttempts: 1,
+      lastDurationMs: 7,
+    });
+  });
+
+  it("rounds a fractional lateness and duration to the wire's integer milliseconds", () => {
+    const { collector, runtime } = observed();
+    const obs = collector.fireBegin('tick', runtime.now() - 0.5);
+    expect(obs).toEqual({ jobAlias: 'tick-alias', latenessMs: 1 });
+    collector.fireSettled(obs, 'dispatched', true, 2.4);
+    const fire = recordOf(collector.snapshot(), 'tick-alias', 'fire')!;
+    expect(fire.lastLatenessMs).toBe(1);
+    expect(fire.lastDurationMs).toBe(2);
+    expect(toWireMs(Number.NaN)).toBe(0);
+    expect(toWireMs(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(toWireMs(-3)).toBe(0);
+    expect(toWireMs(Number.MAX_SAFE_INTEGER * 2)).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('guards its own clock reads for the service and answers null once failed', () => {
+    let fail = false;
+    const runtime = new FakeRuntime();
+    const collector = new SchedulerObservationCollector(
+      'cron',
+      new Map([['tick', 'tick-alias']]),
+      runtime.now.bind(runtime),
+      () => {
+        if (fail) {
+          throw new Error('mono-canary');
+        }
+        return runtime.hrtime();
+      },
+    );
+    expect(collector.elapsedSince(null)).toBeNull();
+    const start = collector.monotonic();
+    expect(start).toBe(runtime.hrtime());
+    expect(collector.elapsedSince(start)).toBe(0);
+    fail = true;
+    expect(collector.monotonic()).toBeNull();
+    expect(collector.snapshot().state).toBe('collection-failed');
+    expect(collector.elapsedSince(start)).toBeNull();
   });
 
   it('saturates the dropped counter', () => {
@@ -584,5 +694,147 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       diagnostics: { enabled: true, alias: 'cron', jobs: {} },
     });
     expect(plugin.provides).toEqual(['scheduler']);
+  });
+});
+
+/** A runtime whose monotonic clock throws — the "failing observer" case. */
+class ThrowingHrtimeRuntime extends FakeRuntime {
+  override hrtime(): number {
+    throw new Error('mono-canary');
+  }
+}
+
+/** What one scheduler scenario did, independent of any observation. */
+interface ScenarioTrace {
+  readonly calls: readonly string[];
+  readonly lockOps: readonly string[];
+  readonly nextRun: number;
+  readonly pendingTimers: number;
+}
+
+/**
+ * Runs one fixed scenario — cron, every and a retried delay job, a contended
+ * fire slot, a held overlap mutex, pause/resume/remove — and records every
+ * handler call and every lock operation. `mode` decides only what is
+ * attached: nothing, a working collector, or a collector over a runtime
+ * whose monotonic clock always throws — bound exactly as the plugin binds
+ * it (`runtime.hrtime`), so any observation-only clock read the scheduler
+ * makes OUTSIDE the collector's guard would throw into scheduling here.
+ */
+async function runScenario(
+  mode: 'off' | 'on' | 'failing',
+): Promise<{
+  trace: ScenarioTrace;
+  collector: SchedulerObservationCollector | null;
+  /** The collector's snapshot right after the contended cron fire (within retention). */
+  midSnapshot: ReturnType<SchedulerObservationCollector['snapshot']> | null;
+}> {
+  const runtime = mode === 'failing' ? new ThrowingHrtimeRuntime() : new FakeRuntime();
+  const inner = new MemoryLock(runtime);
+  const lockOps: string[] = [];
+  let refusedSlot = false;
+  let overlapAcquires = 0;
+  const lock: IDistributedLock = {
+    acquire: async (key, ttlMs) => {
+      // The first cron fire's slot is claimed elsewhere, and the second
+      // overlap-mutex acquire for the every job is held elsewhere.
+      if (!refusedSlot && key.startsWith('scheduler:job:c:')) {
+        refusedSlot = true;
+        lockOps.push(`acquire ${key} -> held`);
+        return null;
+      }
+      if (key === 'scheduler:job:e' && ++overlapAcquires === 2) {
+        lockOps.push(`acquire ${key} -> held`);
+        return null;
+      }
+      const token = await inner.acquire(key, ttlMs);
+      lockOps.push(`acquire ${key} -> ${token === null ? 'held' : 'granted'}`);
+      return token;
+    },
+    release: async (key, token) => {
+      lockOps.push(`release ${key}`);
+      await inner.release(key, token);
+    },
+  };
+  const service = new SchedulerService(runtime, lock);
+  let collector: SchedulerObservationCollector | null = null;
+  if (mode !== 'off') {
+    collector = new SchedulerObservationCollector(
+      'cron',
+      new Map([['c', 'c-alias'], ['e', 'e-alias'], ['d', 'd-alias']]),
+      runtime.now.bind(runtime),
+      runtime.hrtime.bind(runtime),
+    );
+    attachSchedulerCollector(service, collector);
+  }
+  const calls: string[] = [];
+  let flakyCalls = 0;
+  /** One advance that also lets a retry's backoff sleep fire (see the retry test). */
+  const step = async (ms: number) => {
+    const first = runtime.advance(ms);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await runtime.advance(20);
+    await first;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  };
+  await service.connect();
+  await service.cron('c', '* * * * *', (job) => {
+    calls.push(`c#${job.attempts}`);
+  });
+  await service.every('e', 100, (job) => {
+    calls.push(`e#${job.attempts}`);
+  });
+  await service.delay('d', 50, (job) => {
+    calls.push(`d#${job.attempts}`);
+    if (++flakyCalls === 1) {
+      throw new Error('attempt-canary');
+    }
+  }, { retry: { limit: 2, delay: 10, backoff: 'fixed' } });
+  await step(60);
+  await step(100);
+  await service.pause('e');
+  await step(200);
+  await service.resume('e');
+  await step(100);
+  await step(40_000);
+  const midSnapshot = collector?.snapshot() ?? null;
+  await step(60_000);
+  await service.remove('c');
+  await step(60_000);
+  const nextRun = await service.getNextRun('e');
+  const pendingTimers = runtime.getPendingTimerCount();
+  await service.disconnect();
+  return { trace: { calls, lockOps, nextRun, pendingTimers }, collector, midSnapshot };
+}
+
+describe('observation never changes scheduling (off / on / failing)', () => {
+  it('produces the identical handler calls, lock traffic and schedule in every mode', async () => {
+    const off = await runScenario('off');
+    const on = await runScenario('on');
+    const failing = await runScenario('failing');
+    // Positive controls: the scenario exercised what it claims to.
+    expect(off.trace.calls).toContain('d#1');
+    expect(off.trace.calls).toContain('d#2');
+    expect(off.trace.calls).toContain('c#1');
+    expect(off.trace.calls.filter((c) => c.startsWith('e#')).length).toBeGreaterThan(1);
+    expect(off.trace.lockOps.filter((op) => op.endsWith('-> held')).length).toBe(2);
+    // Identical behaviour, whatever is attached.
+    expect(on.trace).toEqual(off.trace);
+    expect(failing.trace).toEqual(off.trace);
+    // The working collector observed it; the failing one latched and stopped.
+    const snapshot = on.midSnapshot!;
+    expect(recordOf(snapshot, 'c-alias', 'fire')).toMatchObject({ contended: 1 });
+    expect(recordOf(snapshot, 'e-alias', 'fire')!.contended).toBe(1);
+    expect(recordOf(snapshot, 'd-alias', 'attempt')).toMatchObject({
+      count: 2,
+      started: 2,
+      failed: 1,
+      succeeded: 1,
+      retryAttempts: 1,
+    });
+    expect(failing.midSnapshot!.state).toBe('collection-failed');
+    expect(failing.collector!.snapshot().state).toBe('collection-failed');
+    // Late fires in the working mode still observed after the long gap.
+    expect(recordOf(on.collector!.snapshot(), 'e-alias', 'fire')!.started).toBeGreaterThan(0);
   });
 });
