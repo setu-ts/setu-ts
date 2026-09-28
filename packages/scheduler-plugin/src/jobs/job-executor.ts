@@ -68,11 +68,34 @@ function invokeHandler<T>(
     settle(false);
     throw error;
   }
-  if (result === undefined || result === null || typeof result.then !== 'function') {
+  if (result === undefined || result === null) {
     settle(true);
     return result;
   }
-  return Promise.resolve(result).then(
+  // Read `then` exactly ONCE, inside a guard. A handler typed
+  // `void | Promise<void>` may still return an object whose `then` getter
+  // throws (or a revoked Proxy). The unobserved path hands that value to
+  // `await`/`Promise.resolve`, which turns the throwing read into a
+  // REJECTION — so this path must too, never a synchronous throw, or
+  // observation would change what a behaviour's `next().catch()` sees and
+  // whether the executor retries.
+  let then: unknown;
+  try {
+    then = (result as { then?: unknown }).then;
+  } catch (error) {
+    settle(false);
+    return Promise.reject(error);
+  }
+  if (typeof then !== 'function') {
+    settle(true);
+    return result;
+  }
+  const thenable = result;
+  return new Promise<void>((resolve, reject) => {
+    // Adopt the thenable through the ONE `then` already read; a throw from
+    // it rejects, exactly as `Promise.resolve` would.
+    Reflect.apply(then, thenable, [resolve, reject]);
+  }).then(
     () => settle(true),
     (error: unknown) => {
       settle(false);

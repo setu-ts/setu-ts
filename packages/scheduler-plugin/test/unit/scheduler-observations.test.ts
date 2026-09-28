@@ -897,6 +897,81 @@ describe('SchedulerPlugin diagnostics wiring', () => {
     );
   }
 
+  /**
+   * Runs one job whose handler returns an object with a THROWING `then`
+   * getter — legal at runtime for a handler typed `void | Promise<void>` —
+   * with diagnostics off or on, optionally under a behaviour that catches
+   * `next()` without awaiting it.
+   */
+  async function hostileThenRun(observed: boolean, catchingBehaviour: boolean) {
+    const counts = { handlerRuns: 0, thenReads: 0, caught: 0 };
+    const hostile = {
+      get then(): unknown {
+        counts.thenReads++;
+        throw new Error('then-canary');
+      },
+    };
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        SchedulerPlugin({
+          ...(catchingBehaviour
+            ? {
+              behaviors: [{
+                handle: (_ctx: unknown, next: () => Promise<void>) => {
+                  next().catch(() => {
+                    counts.caught++;
+                  });
+                },
+              }],
+            }
+            : {}),
+          jobs: [{
+            trigger: 'delay',
+            name: 'hostile',
+            delayMs: 10,
+            retry: { limit: 3, delay: 5, backoff: 'fixed' },
+            handler: () => {
+              counts.handlerRuns++;
+              return hostile as unknown as Promise<void>;
+            },
+          }],
+          ...(observed
+            ? { diagnostics: { enabled: true, alias: 'cron', jobs: { hostile: 'hostile-alias' } } }
+            : {}),
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
+        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+      )[0]!.snapshot();
+      return { counts, attempt: recordOf(snapshot, 'hostile-alias', 'attempt') };
+    } finally {
+      await app.stop();
+    }
+  }
+
+  it('observation never changes a handler whose result has a throwing then (caught next)', async () => {
+    const off = await hostileThenRun(false, true);
+    const on = await hostileThenRun(true, true);
+    // The behaviour catches the rejection, so the dispatch succeeds: one run.
+    expect(off.counts).toEqual({ handlerRuns: 1, thenReads: 1, caught: 1 });
+    expect(on.counts).toEqual(off.counts);
+    expect(on.attempt).toMatchObject({ started: 1, count: 1, failed: 1, succeeded: 0 });
+  });
+
+  it('observation never changes a handler whose result has a throwing then (no behaviour)', async () => {
+    const off = await hostileThenRun(false, false);
+    const on = await hostileThenRun(true, false);
+    // With no behaviour the rejection reaches the executor, which retries.
+    expect(off.counts).toEqual({ handlerRuns: 3, thenReads: 3, caught: 0 });
+    expect(on.counts).toEqual(off.counts);
+    expect(on.attempt).toMatchObject({ started: 3, count: 3, failed: 3, retryAttempts: 2 });
+  });
+
   it('records no attempt when a behaviour refuses by throwing, and retries none', async () => {
     let handlerRuns = 0;
     const app = createApplication({
