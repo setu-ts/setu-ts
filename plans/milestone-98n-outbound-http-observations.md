@@ -2,9 +2,9 @@
 
 > **Status:** Planning. Implementation and fixes: `feat/m98n-outbound-http-observations`. The design
 > security review is recorded in §10.1 (2026-09-29), revised after an independent review round
-> (findings R1–R14, all resolved in this plan), and the registration design in §3.2 was chosen by
-> the maintainer on 2026-09-29. Formal approval of §10.1 is pending; implementation does not start
-> before it. No implementation or committed-tree audit is claimed.
+> (rounds 1 and 2: findings R1–R14 and N1–N7, all resolved in this plan), and the registration
+> design in §3.2 was chosen by the maintainer on 2026-09-29. Formal approval of §10.1 is pending;
+> implementation does not start before it. No implementation or committed-tree audit is claimed.
 
 ## 0. Objective & scope
 
@@ -108,13 +108,20 @@ holder — the M70d defect class — and would keep capture running in productio
   importing `CAPABILITIES`, so its only `common` imports stay type-only (§3.3). A test in
   `packages/sdk/test` imports `CAPABILITIES` from `common` and asserts equality, so the two cannot
   drift. `common` declares the token with JSDoc naming the SDK helper as its producer.
-- **Plugin name.** `outbound-http-diagnostics-<n>`, where `<n>` is a module-level counter
-  incremented per helper. It never equals a capability token (the resolver indexes names as
-  providers, §1), never contains the alias (so a duplicate-name error can never echo one), and two
-  helpers never collide. Registering the SAME plugin object twice throws the kernel's duplicate-name
-  error, which is the intended refusal.
-- **`version`.** Read from the SDK's own `deno.json` by a static JSON import (the M34 `VERSION`
-  precedent), so a release bump adds no new site.
+- **Plugin name.** `outbound-http-diagnostics-<uuid>`, where `<uuid>` is `crypto.randomUUID()` drawn
+  once per helper (a web standard, so the SDK stays portable). A module-level counter was rejected:
+  two copies of the SDK in one process (two versions, a JSR and an npm install, the M64 two-copy
+  case) would each start at 1 and collide at `start()` (probed, round 2 N1). The name never equals a
+  capability token (the resolver indexes names as providers, §1) and never contains the alias, so a
+  duplicate-name error can never echo one.
+- **One application per helper.** `register(ctx)` refuses, with a fixed error, a helper already
+  registered in an application or already closed; otherwise one application's `stop()` would close
+  the source another application still reads (round 2 N5). Registering the same plugin object twice
+  in ONE application is refused by the kernel's duplicate-name check before `register` runs.
+- **`version`.** A string literal equal to the SDK's own `deno.json` version, pinned by a test that
+  reads the manifest. A static JSON import was rejected: it would be the browser-portable SDK's
+  first import attribute (Node ≥ 20.10, attribute-aware bundlers, no older Safari) and bundle the
+  whole manifest (round 2 N3). The literal is a release bump site; `docs/releasing.md` gains it.
 - **Lifecycle.** `onClose` marks the collector closed before clearing (late settlements record
   nothing; `snapshot()` answers `disabled`); the wrapper keeps delegating unchanged. The kernel runs
   every `onClose` hook, including after a failed `start()` (M86). If startup fails before the plugin
@@ -126,18 +133,36 @@ holder — the M70d defect class — and would keep capture running in productio
   wrapper, no collector and no plugin:
 
   ```ts
-  export function createApp(env?: AppEnv, devtool?: DevtoolComposition) {
+  import type { IPlugin } from '@setu-ts/common';
+  import type { KernelDiagnosticsOptions } from '@setu-ts/kernel';
+
+  const PAYMENTS_URL = 'https://payments.internal.example';
+
+  export function createApp(
+    _env?: Readonly<Record<string, unknown>>,
+    devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
+  ) {
     const observed = devtool ? createObservedFetch({ alias: 'payments-api' }) : undefined;
     const payments = createClient({
-      baseUrl: env.PAYMENTS_URL,
+      baseUrl: PAYMENTS_URL,
       ...(observed ? { fetch: observed.fetch } : {}),
     });
+    // … routes use `payments` …
     return createApplication({
-      plugins: [/* … */, ...(observed ? [observed.plugin] : []), ...(devtool?.plugins ?? [])],
+      plugins: [
+        RuntimePlugin(),
+        ...(observed ? [observed.plugin] : []),
+        ...(devtool?.plugins ?? []),
+      ],
       ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
     });
   }
   ```
+
+  The parameter types are the ones `packages/cli/src/templates/project-files.ts:52` emits; the first
+  parameter is NOT read, because `setu commands` passes an inert proxy and the dev entry passes
+  `undefined` (`dev-entry.ts:118`). The same example ships in the SDK README and is compiled by
+  `test/package-readme-fence-compiler.test.ts` (the M70i fence class; round 2 N2).
 
   An application may construct the helper unconditionally; that is its choice and costs one bounded
   record. The README says so. No CLI template change is made in this letter.
@@ -195,9 +220,12 @@ never a partial document. The client runs the SAME validator.
 **Transparency is the controlling rule** — wrapped and unwrapped delegation must be
 indistinguishable to the wrapped fetch and to its caller, on every supported runtime.
 
-- `fetch` is a plain `function` (never an arrow, never `async`) over a rest parameter. It forwards
-  the exact argument list with `Reflect.apply(inner, receiver, args)` and never names, reads,
-  spreads or normalizes `input` or `init`, so an omitted `init` stays omitted.
+- `fetch` is defined with METHOD shorthand (never an arrow, never `async`, never a `function`
+  declaration) over a rest parameter: it has a dynamic `this` and is not constructible, so
+  `new observed.fetch()` throws as `new fetch()` does. Its `length` and `name` differ from the
+  wrapped function's and are documented as such (round 2 N7). It forwards the exact argument list
+  with `Reflect.apply(inner, receiver, args)` and never names, reads, spreads or normalizes `input`
+  or `init`, so an omitted `init` stays omitted.
 - `receiver` is the caller's own `this`, EXCEPT when `this` is the `ObservedFetch` object itself, in
   which case it is `undefined`. The SDK calls `this.#fetch(...)` with the client as receiver
   (`http-client.ts:242`), and that receiver is forwarded unchanged; but a direct
@@ -252,23 +280,26 @@ Options are read once at construction. `alias` is copied as a string; `fetch` is
 reference; `timing` is kept as the OBJECT and `now` is always called as `timing.now()` — never
 copied out, which would re-create the detached-method defect the object form exists to prevent.
 Construction calls `timing.now()` once and refuses with a fixed error if it throws or returns a
-non-finite value, so `{ now: performance.now }` (whose receiver is the options object) fails loudly
-at construction instead of silently latching later. Refusal messages are fixed and never echo the
-alias or any value (the M98l audit-round-3 lesson). Aliases are explicit non-secret labels, 1–64
-UTF-8 bytes, no control characters; never derived from a destination or by truncating or hashing a
-sensitive value. No URL mapping or dynamic alias callback exists. A helper instance represents one
-approved call-site scope.
+non-finite value, so a timing object whose `now` needs another receiver (`{ now: performance.now }`
+throws on Deno and Node, works on Bun) fails loudly at construction instead of silently latching
+later. Refusal messages are fixed and never echo the alias or any value (the M98l audit-round-3
+lesson). Aliases are explicit non-secret labels, 1–64 UTF-8 bytes, no control characters; never
+derived from a destination or by truncating or hashing a sensitive value. No URL mapping or dynamic
+alias callback exists. A helper instance represents one approved call-site scope.
 
 **Retention.** One record per source. The record's `ageMs` is time since its last start or
 settlement. It expires 60 s after its last activity, checked on write and read, never by a timer —
 EXCEPT that a record with attempts in flight (`started > count`) is never expired, so a hung call
 stays visible indefinitely and ages into `stale` after 30 s (freshness: ≤ 30 s `ready`, > 30 s
-`stale`, no record `no-data`). On expiry the counters clear and the generation advances. Each
-attempt captures its start reading and generation in the closures its own derived promise already
-needs; a settlement whose generation is older than the record's is discarded, so no reading moves
-backwards and `count <= started` survives expiry and failure latches. Diagnostic memory is one
-record per helper plus, per pending attempt, the derived promise and its two reactions — O(pending
-attempts), released when the attempt settles; there is no per-call table and no queue.
+`stale`, no record `no-data`). "Indefinitely" includes an abandoned call whose promise never
+settles: it reports a permanent in-flight attempt, stale, which is the honest reading; nothing
+leaks, since the closures are collected with the abandoned promise (round 2 N4). On expiry the
+counters clear and the generation advances. Each attempt captures its start reading and generation
+in the closures its own derived promise already needs; a settlement whose generation is older than
+the record's is discarded, so no reading moves backwards and `count <= started` survives expiry and
+failure latches. Diagnostic memory is one record per helper plus, per pending attempt, the derived
+promise and its two reactions — O(pending attempts), released when the attempt settles; there is no
+per-call table and no queue.
 
 Durations use only `timing.now()` (monotonic); `Date.now()` never appears and `ageMs` uses the same
 clock. Negative deltas clamp to 0. A throwing or non-finite reading after construction, or a
@@ -332,22 +363,23 @@ event-bus API.
 | `packages/diagnostics-plugin/src/interfaces/index.ts`                | Client interface member.                                                         |
 
 Also update PUBLIC_API.md, ARCHITECTURE.md, docs/diagnostics-protocol.md, the SDK and diagnostics
-READMEs, CHANGELOG.md, docs/upgrading.md (the `deno.json` pin), ROADMAP.md (C3–C5) and CLAUDE.md. No
-external dependency is introduced. The SDK's pinned `common` specifier moves with the release that
-publishes the new contracts (the alpha.3 inline-specifier trap: check the SDK's inline specifiers
-too).
+READMEs (the SDK README carries the compiled §3.2 example), CHANGELOG.md, docs/upgrading.md (the
+`deno.json` pin), docs/releasing.md (the plugin version literal as a bump site), ROADMAP.md (C3–C5)
+and CLAUDE.md. No external dependency is introduced. The SDK's pinned `common` specifier moves with
+the release that publishes the new contracts (the alpha.3 inline-specifier trap: check the SDK's
+inline specifiers too).
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                  | src covered                                                                                                                     | Key assertions                                                                                                                                                  |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/test/unit/application-diagnostics-contracts.test.ts`      | `common/src/services/diagnostics.ts`, `tokens.ts`, `index.ts`                                                                   | Token value and grammar; barrel exports pinned at compile time.                                                                                                 |
-| `packages/sdk/test/unit/outbound-http-observations.test.ts`                | `sdk/src/diagnostics/outbound-http-observations.ts`                                                                             | Counting table row by row; invariants; retention incl. in-flight non-expiry and generation discard; saturation; latch; close; alias table shared with `common`. |
-| `packages/sdk/test/unit/observed-fetch-transparency.test.ts`               | `sdk/src/http/observed-fetch.ts`, `default-fetch.ts`, `http-client.ts`                                                          | Proxy-recorded args (zero reads); arity; receiver forwarding and the self-receiver rule; identity; sync throw; thenable; unhandled rejection in a subprocess.   |
-| `packages/sdk/test/unit/observed-fetch-plugin.test.ts`                     | `sdk/src/http/observed-fetch.ts`, `sdk/src/index.ts`                                                                            | Plugin name, version, no `provides`; multi registration; `onClose`; token literal equals `CAPABILITIES`; frozen key sets; construction refusals.                |
-| `packages/sdk/test/unit/type-only-common.test.ts`                          | all of `packages/sdk/src`                                                                                                       | Every `@setu-ts/common` import is `import type`; no dependency edge into `common` carries runtime code (`deno info --json`).                                    |
-| `packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts` | `outbound-http-protocol.ts`, `protocol.ts`, `connector-handler.ts`, `diagnostics-plugin.ts`, `client.ts`, `interfaces/index.ts` | Hostile snapshots; every invariant; budget via seam; duplicate aliases; 0/16/17 sources; manifest; local unsupported.                                           |
-| `packages/diagnostics-plugin/test/e2e/outbound-http-observations.test.ts`  | all producers and the connector                                                                                                 | Real loopback HTTP server → SDK client with observed fetch → signed socket → `client.outboundHttp()`; §3.2 composition with and without `devtool`; canaries.    |
+| Test file                                                                  | src covered                                                                                                                     | Key assertions                                                                                                                                                                                                                      |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/application-diagnostics-contracts.test.ts`      | `common/src/services/diagnostics.ts`, `tokens.ts`, `index.ts`                                                                   | Token value and grammar; barrel exports pinned at compile time.                                                                                                                                                                     |
+| `packages/sdk/test/unit/outbound-http-observations.test.ts`                | `sdk/src/diagnostics/outbound-http-observations.ts`                                                                             | Counting table row by row; invariants; retention incl. in-flight non-expiry and generation discard; saturation; latch; close; alias table shared with `common`.                                                                     |
+| `packages/sdk/test/unit/observed-fetch-transparency.test.ts`               | `sdk/src/http/observed-fetch.ts`, `default-fetch.ts`, `http-client.ts`                                                          | Proxy-recorded args (zero reads); arity; receiver forwarding and the self-receiver rule; identity; sync throw; thenable; unhandled rejection in a subprocess.                                                                       |
+| `packages/sdk/test/unit/observed-fetch-plugin.test.ts`                     | `sdk/src/http/observed-fetch.ts`, `sdk/src/index.ts`                                                                            | Plugin name uniqueness across two module copies, version literal equals `deno.json`, no `provides`; second-app refusal; multi registration; `onClose`; token literal equals `CAPABILITIES`; frozen key sets; construction refusals. |
+| `packages/sdk/test/unit/type-only-common.test.ts`                          | all of `packages/sdk/src`                                                                                                       | Every `@setu-ts/common` import is `import type`; no dependency edge into `common` carries runtime code (`deno info --json`).                                                                                                        |
+| `packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts` | `outbound-http-protocol.ts`, `protocol.ts`, `connector-handler.ts`, `diagnostics-plugin.ts`, `client.ts`, `interfaces/index.ts` | Hostile snapshots; every invariant; budget via seam; duplicate aliases; 0/16/17 sources; manifest; local unsupported.                                                                                                               |
+| `packages/diagnostics-plugin/test/e2e/outbound-http-observations.test.ts`  | all producers and the connector                                                                                                 | Real loopback HTTP server → SDK client with observed fetch → signed socket → `client.outboundHttp()`; §3.2 composition with and without `devtool`; canaries.                                                                        |
 
 ## 7. Verification gates
 
@@ -391,8 +423,9 @@ billing integration.
 **Recorded 2026-09-29, before implementation**, against base commit
 `d6b77e4f826a27e04eb412281203cb664564628c`. Written by Claude in the M98n worktree at the
 maintainer's request, then reviewed by an independent agent that did not write it (probes on Deno,
-Node 24, Bun and real workerd); its findings R1–R14 are resolved below and in §2–§6. It is not the
-committed-tree audit (§10.3). Nothing here is claimed fixed in executable code.
+Node 24, Bun and real workerd); its findings R1–R14 (round 1) and N1–N7 (round 2) are resolved below
+and in §2–§6. It is not the committed-tree audit (§10.3). Nothing here is claimed fixed in
+executable code.
 
 **Purpose it serves.** The devtool may learn HOW the application's explicitly adopted outbound calls
 behave: attempts started and in flight, responses and failures, the last response's status class,
@@ -491,6 +524,19 @@ the absence of the helper. Enabled overhead target ≤ 5 % median (§3.4).
 | R13 | Low    | "Grows no diagnostic state" overstated — each pending call holds a derived promise and two reactions.                                                                                                                    | Restated as O(pending), released on settlement (§3.4, budgets).                                                                                                                                     |
 | R14 | Nit    | `'1xx'` cannot come from a real `fetch`.                                                                                                                                                                                 | Removed; any value outside `200..599` is `'other'` (§3.1).                                                                                                                                          |
 
+**Independent review findings (round 2, at `36ad3c11`) and resolutions.** All R1–R14 resolutions
+were confirmed to hold.
+
+| #  | Sev    | Finding                                                                                                                                                     | Resolution                                                                                                         |
+| -- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| N1 | Medium | A module-level name counter collides across two SDK module copies (probed: both `-1`), so `start()` throws a confusing duplicate-name error.                | `crypto.randomUUID()` per helper; O6 two-copy row (§3.2).                                                          |
+| N2 | Medium | The §3.2 example failed `deno check` (`env` possibly undefined), read a parameter that is an inert proxy or `undefined`, and named types that do not exist. | Rewritten with the generator's inline types and no read of the first parameter; compiled as a README fence (§3.2). |
+| N3 | Low    | A static JSON import of `deno.json` would be the browser SDK's first import attribute (measured on the published CLI tarball).                              | Literal pinned by a test; a release bump site (§3.2).                                                              |
+| N4 | Low    | An abandoned never-settling call pins `started > count` forever.                                                                                            | Documented as the honest reading; no leak (§3.4).                                                                  |
+| N5 | Low    | One plugin in two applications is closed by the first app's `stop()`.                                                                                       | `register` refuses a second application or a closed helper (§3.2); O6 row.                                         |
+| N6 | Nit    | Detached `performance.now` throws on Deno and Node but works on Bun.                                                                                        | O3 expectation per runtime.                                                                                        |
+| N7 | Nit    | A `function` wrapper is constructible where `fetch` is not; `length`/`name` differ.                                                                         | Method shorthand (non-constructible, dynamic `this`); differences documented (§3.3).                               |
+
 The reviewer's confirmations are kept as evidence: the SDK call site and default fetch, the exported
 default timing, the type-only imports, the SSE call's `undefined` receiver, the missing
 `IApplication.onClose`, the reserved manifest key, descriptor-based `copyOwnData`, the derived
@@ -512,21 +558,21 @@ Use the §6 homes. Every row needs an approved-data positive control so a collec
 nothing, or an endpoint refusing everything, fails. For every new control, disable it locally,
 observe its test fail, and restore it. Record commands, exit statuses and observed behavior.
 
-| ID                          | Exercise                                                                                                                                                                                                                                                                                                                   | Pass condition                                                                                                                                                                                                                                                                     |
-| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| O1 — Minimization           | Canaries in URL userinfo, path, query, fragment; mixed-case `Authorization`, `Cookie`, `Set-Cookie`; request and response bodies; a manual-redirect `Location`; `response.url`; an abort reason; a rejection whose `message`/`cause`/`stack` getters record access. Through the SDK, `SseClient` and directly.             | No canary in collector inputs, retained state, snapshot, signed frame, client DTO or any diagnostics-generated log or error; no secret-bearing getter runs. Alias, counts, status class and duration present.                                                                      |
-| O2 — Transparency           | Proxy-recorded `input`/`init`; `this`-recording fetch; one- and two-argument calls; `Request` input; omitted `init`; direct, destructured and SDK-client call sites; omitted `fetch`. On Deno and on real workerd (the `apps/cloudflare` wrangler harness).                                                                | Zero observation-code reads on arguments; arity and arguments identical wrapped vs unwrapped; receiver is the client via the SDK and `undefined` for direct and destructured calls; the platform `fetch` wrapped and called directly succeeds on workerd.                          |
-| O3 — Result fidelity        | Resolved `Response` (identity, `bodyUsed === false`, stream unlocked); object rejection reason; synchronous throw; non-object resolution; thenable; throwing `status` getter; throwing and `NaN` clock after construction; `{ now: performance.now }` and a throwing `now` at construction.                                | Identical value and reason; a sync throw stays sync; one delegation always; post-construction faults latch `collection-failed` without changing results; construction faults refuse with a fixed error. Unhandled-rejection reporting identical wrapped vs unwrapped (subprocess). |
-| O4 — Real traffic           | Real loopback HTTP server: 2xx, 3xx with `redirect: 'follow'` and `'manual'`, 4xx, 5xx, connection refused, abort mid-headers, never-answering server; SDK retries, open breaker, rate-limiter wait; `SseClient`; the core cases repeated on workerd.                                                                      | Classes and failures match the counting table; retries are separate attempts; breaker-refused requests are not attempts; a followed redirect counts once; the hung call shows as `started - count`; no public network contacted.                                                   |
-| O5 — Bounds and time        | Saturation via seam; expiry at 59,999/60,000 ms and stale at 30,000/30,001 ms on a fake clock; a pending call across 60 s; expiry then late settlement; backward clock.                                                                                                                                                    | Saturating counters; exact transitions; a record with in-flight attempts never expires; stale generations discarded; `count <= started` and `responses + failures === count` always; no reading moves backwards; no timer armed.                                                   |
-| O6 — Registration/lifecycle | 0, 16 and 17 helpers; the same plugin registered twice; plugin name against every `CAPABILITIES` value; token literal against `CAPABILITIES`; close before, during and after a pending call; wrapper after close; the alias searched for in every refusal.                                                                 | 17 refuses startup with a fixed error; a double registration throws the kernel duplicate-name error; no name equals a token; a closed source answers `disabled`; no late revival; delegation unchanged; no refusal contains the alias.                                             |
-| O7 — Hostile projection     | Sources returning accessors, custom prototypes, extra and symbol keys, `Proxy` throws, sparse and oversized arrays, invalid enums, `NaN`/negative/fractional/unsafe numbers, each §3.3 invariant violated, `unsupported` from a source, control-character and 65-byte aliases, duplicate aliases; over 256 KiB via a seam. | Own-data copy only; per-source value-free `collection-failed`; duplicate aliases and over-budget collapse the whole response; the client independently rejects each malformed frame.                                                                                               |
-| O8 — Admission/transport    | Raw `Deno.connect` probes (never `fetch`, which strips forbidden headers): unpaired, wrong key, replay, wrong instance, `Origin`, preflight, forwarding headers, wrong and rebound `Host`, noncanonical and encoded target, query, non-GET, body.                                                                          | No rejected request reaches `snapshot()`; no unsigned success; a correctly paired canonical GET succeeds.                                                                                                                                                                          |
-| O9 — Session/compatibility  | Revoke/expire during verify, source read and signing; tampered body/MAC/sequence; concurrent client calls; manifest with `outboundHttp: true`, legacy three-field status, `outboundHttp: false` pairing, no sources.                                                                                                       | Post-await gates discard data; an integrity failure is never masked by a collection failure; `false` answers local `unsupported` with no request; no sources answers `unsupported` with `[]`; other inspectors unaffected.                                                         |
-| O10 — Performance/graph     | Five warmed 10,000-attempt runs, unwrapped vs wrapped, real loopback server; `deno info --json packages/sdk/src/index.ts`.                                                                                                                                                                                                 | Medians recorded; zero extra fetch calls; flat memory; no dependency edge into `common` carries runtime code; no `diagnostics-plugin` or `kernel` import in the SDK graph.                                                                                                         |
-| O11 — Backpressure          | A slow consumer of the response body; many concurrent pending attempts; a slow devtool reader polling during traffic.                                                                                                                                                                                                      | Capture is synchronous and unaffected by body consumption; memory O(pending) and released on settlement; reads never delay delegation.                                                                                                                                             |
-| O12 — Failed startup        | Startup failing before and after `observed.plugin` registers; a later plugin throwing in `register()`.                                                                                                                                                                                                                     | `onClose` runs when the plugin registered; nothing to release when it did not; no timer, listener or socket left behind.                                                                                                                                                           |
-| O13 — Production exposure   | The §3.2 composition booted without the `devtool` parameter, and with it.                                                                                                                                                                                                                                                  | Without: no helper, no plugin, no outbound source, the client uses the unwrapped fetch. With: exactly one source, observed end to end through the connector.                                                                                                                       |
+| ID                          | Exercise                                                                                                                                                                                                                                                                                                                                                                    | Pass condition                                                                                                                                                                                                                                                                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| O1 — Minimization           | Canaries in URL userinfo, path, query, fragment; mixed-case `Authorization`, `Cookie`, `Set-Cookie`; request and response bodies; a manual-redirect `Location`; `response.url`; an abort reason; a rejection whose `message`/`cause`/`stack` getters record access. Through the SDK, `SseClient` and directly.                                                              | No canary in collector inputs, retained state, snapshot, signed frame, client DTO or any diagnostics-generated log or error; no secret-bearing getter runs. Alias, counts, status class and duration present.                                                                                                                              |
+| O2 — Transparency           | Proxy-recorded `input`/`init`; `this`-recording fetch; one- and two-argument calls; `Request` input; omitted `init`; direct, destructured and SDK-client call sites; omitted `fetch`. On Deno and on real workerd (the `apps/cloudflare` wrangler harness).                                                                                                                 | Zero observation-code reads on arguments; arity and arguments identical wrapped vs unwrapped; receiver is the client via the SDK and `undefined` for direct and destructured calls; the platform `fetch` wrapped and called directly succeeds on workerd.                                                                                  |
+| O3 — Result fidelity        | Resolved `Response` (identity, `bodyUsed === false`, stream unlocked); object rejection reason; synchronous throw; non-object resolution; thenable; throwing `status` getter; throwing and `NaN` clock after construction; `{ now: performance.now }` (expected refusal per runtime: Deno and Node refuse, Bun accepts) and a throwing `now` at construction.               | Identical value and reason; a sync throw stays sync; one delegation always; post-construction faults latch `collection-failed` without changing results; construction faults refuse with a fixed error. Unhandled-rejection reporting identical wrapped vs unwrapped (subprocess).                                                         |
+| O4 — Real traffic           | Real loopback HTTP server: 2xx, 3xx with `redirect: 'follow'` and `'manual'`, 4xx, 5xx, connection refused, abort mid-headers, never-answering server; SDK retries, open breaker, rate-limiter wait; `SseClient`; the core cases repeated on workerd.                                                                                                                       | Classes and failures match the counting table; retries are separate attempts; breaker-refused requests are not attempts; a followed redirect counts once; the hung call shows as `started - count`; no public network contacted.                                                                                                           |
+| O5 — Bounds and time        | Saturation via seam; expiry at 59,999/60,000 ms and stale at 30,000/30,001 ms on a fake clock; a pending call across 60 s; expiry then late settlement; backward clock.                                                                                                                                                                                                     | Saturating counters; exact transitions; a record with in-flight attempts never expires; stale generations discarded; `count <= started` and `responses + failures === count` always; no reading moves backwards; no timer armed.                                                                                                           |
+| O6 — Registration/lifecycle | 0, 16 and 17 helpers; two SDK module copies each creating a helper; the same plugin registered twice in one app; one helper registered in a second app, and after close; plugin name against every `CAPABILITIES` value; token literal against `CAPABILITIES`; close before, during and after a pending call; wrapper after close; the alias searched for in every refusal. | 17 refuses startup with a fixed error; two module copies boot cleanly; a double registration throws the kernel duplicate-name error; a second-app or post-close registration refuses with a fixed error; no name equals a token; a closed source answers `disabled`; no late revival; delegation unchanged; no refusal contains the alias. |
+| O7 — Hostile projection     | Sources returning accessors, custom prototypes, extra and symbol keys, `Proxy` throws, sparse and oversized arrays, invalid enums, `NaN`/negative/fractional/unsafe numbers, each §3.3 invariant violated, `unsupported` from a source, control-character and 65-byte aliases, duplicate aliases; over 256 KiB via a seam.                                                  | Own-data copy only; per-source value-free `collection-failed`; duplicate aliases and over-budget collapse the whole response; the client independently rejects each malformed frame.                                                                                                                                                       |
+| O8 — Admission/transport    | Raw `Deno.connect` probes (never `fetch`, which strips forbidden headers): unpaired, wrong key, replay, wrong instance, `Origin`, preflight, forwarding headers, wrong and rebound `Host`, noncanonical and encoded target, query, non-GET, body.                                                                                                                           | No rejected request reaches `snapshot()`; no unsigned success; a correctly paired canonical GET succeeds.                                                                                                                                                                                                                                  |
+| O9 — Session/compatibility  | Revoke/expire during verify, source read and signing; tampered body/MAC/sequence; concurrent client calls; manifest with `outboundHttp: true`, legacy three-field status, `outboundHttp: false` pairing, no sources.                                                                                                                                                        | Post-await gates discard data; an integrity failure is never masked by a collection failure; `false` answers local `unsupported` with no request; no sources answers `unsupported` with `[]`; other inspectors unaffected.                                                                                                                 |
+| O10 — Performance/graph     | Five warmed 10,000-attempt runs, unwrapped vs wrapped, real loopback server; `deno info --json packages/sdk/src/index.ts`.                                                                                                                                                                                                                                                  | Medians recorded; zero extra fetch calls; flat memory; no dependency edge into `common` carries runtime code; no `diagnostics-plugin` or `kernel` import in the SDK graph.                                                                                                                                                                 |
+| O11 — Backpressure          | A slow consumer of the response body; many concurrent pending attempts; a slow devtool reader polling during traffic.                                                                                                                                                                                                                                                       | Capture is synchronous and unaffected by body consumption; memory O(pending) and released on settlement; reads never delay delegation.                                                                                                                                                                                                     |
+| O12 — Failed startup        | Startup failing before and after `observed.plugin` registers; a later plugin throwing in `register()`.                                                                                                                                                                                                                                                                      | `onClose` runs when the plugin registered; nothing to release when it did not; no timer, listener or socket left behind.                                                                                                                                                                                                                   |
+| O13 — Production exposure   | The §3.2 composition booted without the `devtool` parameter, and with it.                                                                                                                                                                                                                                                                                                   | Without: no helper, no plugin, no outbound source, the client uses the unwrapped fetch. With: exactly one source, observed end to end through the connector.                                                                                                                                                                               |
 
 Runtime ledger: the wrapper is exercised on Deno (suite) and on real workerd (O2/O4). Node and Bun
 wrapper behavior is supported only if a real-fetch run on each is recorded; otherwise it is listed
