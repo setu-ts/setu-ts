@@ -200,6 +200,14 @@ attempts that source's own ring evicted before the connector drained them), the 
 and every source's latest depths. With no queue plugin registered the connector answers
 `state: 'unsupported'`.
 
+The M98l realtime inspector is read through
+`client.realtime(): Promise<RealtimeDiagnosticsResponse>`. Each WebSocket, SSE and
+realtime-backplane plugin contributes one source with a fixed `sourceKind`; websocket and sse
+sources carry current `openConnections`/`groups` gauges read from the plugin's own service, a
+backplane reports its gauges as `unsupported`, and a source that cannot be read appears as a
+value-free snapshot of kind `unknown`. With no realtime plugin registered the connector answers
+`state: 'unsupported'`.
+
 The full public surface is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#diagnostics-connector-setu-tsdiagnostics-plugin).
 

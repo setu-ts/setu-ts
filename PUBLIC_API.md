@@ -3192,11 +3192,12 @@ app.router.post('/broadcast', async (ctx) => {
 
 ### Options
 
-| Option          | Type      | Default | Description                                                                                                                                                                                   |
-| --------------- | --------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `heartbeatMs`   | `number`  | omitted | When set, sends `: heartbeat\n\n` at this interval.                                                                                                                                           |
-| `retryMs`       | `number`  | omitted | When set, sends `retry: <ms>\n\n` as the first frame.                                                                                                                                         |
-| `scalingNotice` | `boolean` | `true`  | Logs one `info` line at registration when no realtime backplane is registered, stating that channels broadcast in-process only. `false` silences the message; channel delivery is unaffected. |
+| Option          | Type                         | Default | Description                                                                                                                                                                                                                                                                                                                                                                |
+| --------------- | ---------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `heartbeatMs`   | `number`                     | omitted | When set, sends `: heartbeat\n\n` at this interval.                                                                                                                                                                                                                                                                                                                        |
+| `retryMs`       | `number`                     | omitted | When set, sends `retry: <ms>\n\n` as the first frame.                                                                                                                                                                                                                                                                                                                      |
+| `scalingNotice` | `boolean`                    | `true`  | Logs one `info` line at registration when no realtime backplane is registered, stating that channels broadcast in-process only. `false` silences the message; channel delivery is unaffected.                                                                                                                                                                              |
+| `diagnostics`   | `RealtimeDiagnosticsOptions` | omitted | M98l opt-in: `{ enabled: true, alias }` counts stream opens, closes (backlog-guard closes separately as `backpressureCloses`) and enqueued frames, and reads the live connection and channel counts, for the diagnostics connector's `GET /v1/realtime`. Validated when `SsePlugin(...)` is called. Absent, the plugin registers a `disabled` source and observes nothing. |
 
 Omitting an option disables that behaviour (no timer created).
 
@@ -3233,7 +3234,8 @@ Omitting an option disables that behaviour (no timer created).
 | `SsePlugin`                                                 | function          | Plugin factory — registers `ISseService` under `CAPABILITIES.SSE`   |
 | `SseService`                                                | class             | The `ISseService` implementation                                    |
 | `SseConnection`                                             | class             | A live SSE connection over a `ReadableStream`                       |
-| `SsePluginOptions`                                          | interface         | `heartbeatMs`, `retryMs`, `scalingNotice`                           |
+| `SsePluginOptions`                                          | interface         | `heartbeatMs`, `retryMs`, `scalingNotice`, `diagnostics`            |
+| `RealtimeDiagnosticsOptions`                                | type (re-export)  | From `@setu-ts/common` — the M98l `diagnostics` option              |
 | `ChannelPublisher`                                          | type              | Forwards a local publish to other replicas; supplied by a backplane |
 | `ISseConnection`, `ISseService`, `SseChannel`, `SseMessage` | type (re-export)  | From `@setu-ts/common`                                              |
 | `CAPABILITIES`                                              | const (re-export) | From `@setu-ts/common`                                              |
@@ -3317,16 +3319,17 @@ app.register(WebSocketPlugin({
 
 ### Options
 
-| Option             | Type                                                                 | Default  | Behavior                                                                                                                                                                                                                                                                                                         |
-| ------------------ | -------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxConnections`   | `number`                                                             | `0`      | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                                                                                                                                          |
-| `heartbeatMs`      | `number`                                                             | `0`      | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                                                                                                                                        |
-| `heartbeatPayload` | `string`                                                             | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                                                                                                                                                 |
-| `idleTimeoutMs`    | `number`                                                             | `0`      | Inbound silence after which a connection is closed with `1001`; `0` disables. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert.                                                                                                                      |
-| `maxMessageBytes`  | `number`                                                             | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009` and never reaches `onMessage`.                                                                                                                                                                                                        |
-| `scalingNotice`    | `boolean`                                                            | `true`   | Logs one `info` line at registration when no realtime backplane is registered, stating that rooms broadcast in-process only. `false` silences the message; room delivery is unaffected.                                                                                                                          |
-| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —        | Declarative exact-path `route()` registrations. An entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a `RegistryFactory` resolved at `onInit`.                                                                                                                                           |
-| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Plugin-level chain around every route's `onMessage`. It sees `kind: 'websocket'`, the route path, and the frame; a configured chain returns a promise while preserving immediate execution for synchronous behaviours; a deferred `next()` delays the handler. No behaviours keep the direct synchronous invoke. |
+| Option             | Type                                                                 | Default  | Behavior                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------ | -------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maxConnections`   | `number`                                                             | `0`      | Simultaneous open connections across all routes; `0` is unlimited. At the limit, upgrades get HTTP 503.                                                                                                                                                                                                                                                                                                           |
+| `heartbeatMs`      | `number`                                                             | `0`      | Heartbeat interval; `0` disables it and creates no timer.                                                                                                                                                                                                                                                                                                                                                         |
+| `heartbeatPayload` | `string`                                                             | `'ping'` | The text frame sent each tick. Read only when `heartbeatMs > 0`.                                                                                                                                                                                                                                                                                                                                                  |
+| `idleTimeoutMs`    | `number`                                                             | `0`      | Inbound silence after which a connection is closed with `1001`; `0` disables. Requires `heartbeatMs > 0` — otherwise `WebSocketPlugin()` throws, so the option can never be silently inert.                                                                                                                                                                                                                       |
+| `maxMessageBytes`  | `number`                                                             | `0`      | Largest inbound frame; `0` is unlimited. A larger frame closes with `1009` and never reaches `onMessage`.                                                                                                                                                                                                                                                                                                         |
+| `scalingNotice`    | `boolean`                                                            | `true`   | Logs one `info` line at registration when no realtime backplane is registered, stating that rooms broadcast in-process only. `false` silences the message; room delivery is unaffected.                                                                                                                                                                                                                           |
+| `routes`           | `readonly WebSocketRouteEntry[]`                                     | —        | Declarative exact-path `route()` registrations. An entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a `RegistryFactory` resolved at `onInit`.                                                                                                                                                                                                                                            |
+| `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Plugin-level chain around every route's `onMessage`. It sees `kind: 'websocket'`, the route path, and the frame; a configured chain returns a promise while preserving immediate execution for synchronous behaviours; a deferred `next()` delays the handler. No behaviours keep the direct synchronous invoke.                                                                                                  |
+| `diagnostics`      | `RealtimeDiagnosticsOptions`                                         | —        | M98l opt-in: `{ enabled: true, alias }` counts connection opens and closes (a failed handshake and an abnormal or errored close as `failed`) and every frame `send` writes or refuses, and reads the live connection and room counts, for the diagnostics connector's `GET /v1/realtime`. Validated when `WebSocketPlugin(...)` is called. Absent, the plugin registers a `disabled` source and observes nothing. |
 
 `WebSocketRouteOptions.guards` is route-scoped: matching-route guards run before the handshake in
 declared order, and the first non-`true` decision refuses. It is distinct from plugin-level frame
@@ -3367,27 +3370,28 @@ ws.route('/ws/chat', {
 
 ### Exports
 
-| Export                      | Kind     | Purpose                                                                |
-| --------------------------- | -------- | ---------------------------------------------------------------------- |
-| `WebSocketPlugin`           | function | Creates the plugin                                                     |
-| `WebSocketService`          | class    | The `IWebSocketService` implementation registered under the token      |
-| `WebSocketConnection`       | class    | The `IWebSocketConnection` implementation                              |
-| `Room`                      | class    | The `WebSocketRoom` implementation                                     |
-| `RoomRegistry`              | class    | Owns live rooms, creating on demand and discarding when empty          |
-| `WsRouteTable`              | class    | Exact-path route table with subprotocol selection                      |
-| `HeartbeatSweeper`          | class    | The interval implementing `heartbeatMs` / `idleTimeoutMs`              |
-| `WebSocketUnavailableError` | class    | Thrown by `route()` when the adapter offers no upgrade seam            |
-| `resolveOptions`            | function | Applies option defaults and rejects a contradictory configuration      |
-| `frameByteLength`           | function | Measures a frame in bytes (text by UTF-8 encoding, not string length)  |
-| `buildContext`              | function | Builds the `WebSocketConnectionContext` from an upgrade request        |
-| `parseRequestedProtocols`   | function | Parses a `Sec-WebSocket-Protocol` header into tokens                   |
-| `selectProtocol`            | function | Picks the subprotocol to echo, or refuses                              |
-| `WebSocketPluginOptions`    | type     | The options above                                                      |
-| `WsRoute`, `WsRouteMatch`   | type     | Route table entry and match result                                     |
-| `HeartbeatOptions`          | type     | Resolved heartbeat configuration                                       |
-| `RoomMembershipListener`    | type     | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates     |
-| `RoomPublisher`             | type     | Forwards a local broadcast to other replicas; supplied by a backplane  |
-| `LocalBroadcastOptions`     | type     | `broadcastLocal` options — adds `exceptId` to exclude by connection ID |
+| Export                       | Kind             | Purpose                                                                |
+| ---------------------------- | ---------------- | ---------------------------------------------------------------------- |
+| `WebSocketPlugin`            | function         | Creates the plugin                                                     |
+| `WebSocketService`           | class            | The `IWebSocketService` implementation registered under the token      |
+| `WebSocketConnection`        | class            | The `IWebSocketConnection` implementation                              |
+| `Room`                       | class            | The `WebSocketRoom` implementation                                     |
+| `RoomRegistry`               | class            | Owns live rooms, creating on demand and discarding when empty          |
+| `WsRouteTable`               | class            | Exact-path route table with subprotocol selection                      |
+| `HeartbeatSweeper`           | class            | The interval implementing `heartbeatMs` / `idleTimeoutMs`              |
+| `WebSocketUnavailableError`  | class            | Thrown by `route()` when the adapter offers no upgrade seam            |
+| `resolveOptions`             | function         | Applies option defaults and rejects a contradictory configuration      |
+| `frameByteLength`            | function         | Measures a frame in bytes (text by UTF-8 encoding, not string length)  |
+| `buildContext`               | function         | Builds the `WebSocketConnectionContext` from an upgrade request        |
+| `parseRequestedProtocols`    | function         | Parses a `Sec-WebSocket-Protocol` header into tokens                   |
+| `selectProtocol`             | function         | Picks the subprotocol to echo, or refuses                              |
+| `WebSocketPluginOptions`     | type             | The options above                                                      |
+| `RealtimeDiagnosticsOptions` | type (re-export) | From `@setu-ts/common` — the M98l `diagnostics` option                 |
+| `WsRoute`, `WsRouteMatch`    | type             | Route table entry and match result                                     |
+| `HeartbeatOptions`           | type             | Resolved heartbeat configuration                                       |
+| `RoomMembershipListener`     | type             | Join/leave callbacks a `RoomRegistry` gives each `Room` it creates     |
+| `RoomPublisher`              | type             | Forwards a local broadcast to other replicas; supplied by a backplane  |
+| `LocalBroadcastOptions`      | type             | `broadcastLocal` options — adds `exceptId` to exclude by connection ID |
 
 ### Notes
 
@@ -3470,17 +3474,19 @@ registers and subscribes.
 
 Discriminated on `transport`.
 
-| Option                  | Applies to       | Default                  | Description                                                                                                                                                                                                                                 |
-| ----------------------- | ---------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `transport`             | all              | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                                                                                                                                                                                            |
-| `topic`                 | all but `memory` | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                                                                |
-| `origin`                | all              | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                                                         |
-| `bus`                   | `'memory'`       | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                                                          |
-| `url`                   | `'redis'`        | —                        | Connection URL, read only on the lazy `npm:ioredis@5.x` path                                                                                                                                                                                |
-| `client` / `subscriber` | `'redis'`        | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                     |
-| `module`                | `'redis'`        | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                             |
-| `instance`              | `'custom'`       | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                            |
-| `localNotice`           | `'memory'`       | `true`                   | Logs one `info` line at `register()` when the resolved transport is the process-local `'memory'`, naming `'redis'`/`'messaging'` as the cross-process choices. `false` suppresses it, matching the consumers' `scalingNotice` opt-out shape |
+| Option                  | Applies to         | Default                  | Description                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------- | ------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `transport`             | all                | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                                                                                                                                                                                                                                                                                                                    |
+| `topic`                 | all but `memory`   | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                                                                                                                                                                                                                        |
+| `origin`                | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                                                                                                                                                                                                                                 |
+| `bus`                   | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                                                                                                                                                                                                                  |
+| `url`                   | `'redis'`          | —                        | Connection URL, read only on the lazy `npm:ioredis@5.x` path                                                                                                                                                                                                                                                                                                        |
+| `client` / `subscriber` | `'redis'`          | —                        | Injected client pair. **Required together** — see Notes                                                                                                                                                                                                                                                                                                             |
+| `module`                | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                                                                                                                                                                                                                     |
+| `commandTimeoutMs`      | `'redis'`          | `15000`                  | Per-command `ioredis` timeout on the two connections the lazy path builds, so a publish on an open-but-silent connection rejects instead of hanging. `0` disables; a value outside `0`–`2147483647` (the largest timer delay — beyond it the timer overflows to 1 ms and every command times out) throws `RangeError` at construction. Ignored for an injected pair |
+| `instance`              | `'custom'`         | —                        | The `IRealtimeBackplane` to register, used as-is                                                                                                                                                                                                                                                                                                                    |
+| `localNotice`           | `'memory'`         | `true`                   | Logs one `info` line at `register()` when the resolved transport is the process-local `'memory'`, naming `'redis'`/`'messaging'` as the cross-process choices. `false` suppresses it, matching the consumers' `scalingNotice` opt-out shape                                                                                                                         |
+| `diagnostics`           | all but `'custom'` | omitted                  | M98l opt-in: `{ enabled: true, alias }` counts publications (resolved or rejected, with the last duration) and arriving frames that reached local handlers, for the diagnostics connector's `GET /v1/realtime`. A `'custom'` transport is never observed. Absent, the plugin registers a `disabled` source                                                          |
 
 Registering the plugin **bare** is not a scaling fix: the default `'memory'` transport is a real bus
 but a single-process one, and before the `localNotice` existed a bare registration also silenced the
@@ -3498,28 +3504,29 @@ knows its own transport.
 
 ### Exports
 
-| Symbol                                                                                               | Kind              | Description                                                   |
-| ---------------------------------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------- |
-| `RealtimeBackplanePlugin`                                                                            | function          | Plugin factory                                                |
-| `createBackplane`                                                                                    | function          | Transport factory dispatching on the `transport` discriminant |
-| `MemoryBackplane`                                                                                    | class             | In-process transport                                          |
-| `MessagingBackplane`                                                                                 | class             | Transport over `CAPABILITIES.MESSAGING`                       |
-| `RedisBackplane`                                                                                     | class             | Redis pub/sub transport                                       |
-| `isRealtimeFrame`                                                                                    | function          | Guard narrowing arriving broker traffic to a `RealtimeFrame`  |
-| `adaptRedisModule`                                                                                   | function          | Narrows an `ioredis` module to `IRedisModule`                 |
-| `loadRedisModule`                                                                                    | function          | Real lazy `import('npm:ioredis@5.x')`                         |
-| `RedisModuleError`                                                                                   | class             | Thrown when `ioredis` cannot be loaded or recognized          |
-| `DEFAULT_TOPIC`                                                                                      | const             | `'setu-ts.realtime'`                                          |
-| `IRedisBackplaneClient`                                                                              | interface         | Structural facade for an injected Redis client                |
-| `IRedisModule`                                                                                       | interface         | Structural facade for the `ioredis` module                    |
-| `RealtimeBackplanePluginOptions`                                                                     | type              | Discriminated union of the four transport arms                |
-| `BackplaneCommonOptions`                                                                             | interface         | `topic` and `origin`, shared by every arm                     |
-| `MemoryBackplaneOptions`                                                                             | interface         | The `'memory'` arm                                            |
-| `MessagingBackplaneOptions`                                                                          | interface         | The `'messaging'` arm                                         |
-| `RedisBackplaneOptions`                                                                              | interface         | The `'redis'` arm                                             |
-| `CustomBackplaneOptions`                                                                             | interface         | The `'custom'` arm                                            |
-| `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload` | type (re-export)  | From `@setu-ts/common`                                        |
-| `encodeFrameData`, `decodeFrameData`, `CAPABILITIES`                                                 | value (re-export) | From `@setu-ts/common`                                        |
+| Symbol                                                                                                                             | Kind              | Description                                                                            |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
+| `RealtimeBackplanePlugin`                                                                                                          | function          | Plugin factory                                                                         |
+| `createBackplane`                                                                                                                  | function          | Transport factory dispatching on the `transport` discriminant                          |
+| `MemoryBackplane`                                                                                                                  | class             | In-process transport                                                                   |
+| `MessagingBackplane`                                                                                                               | class             | Transport over `CAPABILITIES.MESSAGING`                                                |
+| `RedisBackplane`                                                                                                                   | class             | Redis pub/sub transport                                                                |
+| `isRealtimeFrame`                                                                                                                  | function          | Guard narrowing arriving broker traffic to a `RealtimeFrame`                           |
+| `adaptRedisModule`                                                                                                                 | function          | Narrows an `ioredis` module to `IRedisModule`                                          |
+| `loadRedisModule`                                                                                                                  | function          | Real lazy `import('npm:ioredis@5.x')`                                                  |
+| `RedisModuleError`                                                                                                                 | class             | Thrown when `ioredis` cannot be loaded or recognized                                   |
+| `DEFAULT_TOPIC`                                                                                                                    | const             | `'setu-ts.realtime'`                                                                   |
+| `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`                                                                                                 | const             | `15000`, the default `commandTimeoutMs`                                                |
+| `IRedisBackplaneClient`                                                                                                            | interface         | Structural facade for an injected Redis client                                         |
+| `IRedisModule`                                                                                                                     | interface         | Structural facade for the `ioredis` module                                             |
+| `RealtimeBackplanePluginOptions`                                                                                                   | type              | Discriminated union of the four transport arms                                         |
+| `BackplaneCommonOptions`                                                                                                           | interface         | `topic`, `origin`, `localNotice` and `diagnostics`, shared by every arm but `'custom'` |
+| `MemoryBackplaneOptions`                                                                                                           | interface         | The `'memory'` arm                                                                     |
+| `MessagingBackplaneOptions`                                                                                                        | interface         | The `'messaging'` arm                                                                  |
+| `RedisBackplaneOptions`                                                                                                            | interface         | The `'redis'` arm                                                                      |
+| `CustomBackplaneOptions`                                                                                                           | interface         | The `'custom'` arm                                                                     |
+| `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`, `RealtimeDiagnosticsOptions` | type (re-export)  | From `@setu-ts/common`                                                                 |
+| `encodeFrameData`, `decodeFrameData`, `CAPABILITIES`                                                                               | value (re-export) | From `@setu-ts/common`                                                                 |
 
 ### Notes
 
@@ -3544,8 +3551,12 @@ knows its own transport.
   replayed. On `'redis'` a SHORT partition buffers rather than drops: ioredis's default
   `enableOfflineQueue: true` holds publishes issued while disconnected and flushes them on
   reconnect, so frames arrive LATE (measured ~6 s) until the `maxRetriesPerRequest` budget (default
-  20, ~11 s) exhausts and the buffered commands reject with a `warn` per frame. Neither ioredis
-  default is configurable through this plugin; inject a `client`/`subscriber` pair to change it.
+  20, ~11 s) exhausts and the buffered commands reject with a `warn` per frame. A connection that
+  stays open while the server answers nothing (paused, or partitioned with no reset) triggers no
+  reconnect; its publish rejects after `commandTimeoutMs` (default 15 s, above that budget) rather
+  than never settling. A publish before `connect()` or after `close()` rejects rather than
+  resolving. Beyond `commandTimeoutMs`, ioredis defaults are not configurable through this plugin;
+  inject a `client`/`subscriber` pair to change them.
 - **`RoomBroadcastOptions.except` is honored cluster-wide.** It names a live connection object,
   which means nothing in another process — but connection IDs come from `runtime.uuid()` and are
   therefore globally unique, so `RealtimeFrame.exceptId` carries the ID and every replica skips the
@@ -4316,6 +4327,30 @@ ready, otherwise `collection-failed`, `stale`, `no-data`, `disabled`. A client w
 manifest has `events: false` answers a frozen `unsupported` response without sending the request.
 `IDiagnosticsClient.events` is a new REQUIRED member — additive for callers; a structural
 implementation of `IDiagnosticsClient` must add it (the package has not yet been published).
+
+**Realtime lifecycle observations (M98l).** The connector serves `GET /v1/realtime` — a SNAPSHOT
+operation with no query — read through `client.realtime(): Promise<RealtimeDiagnosticsResponse>`.
+The WebSocket, SSE and realtime-backplane plugins each ALWAYS register one
+`IRealtimeDiagnosticsSource` under `CAPABILITIES.REALTIME_DIAGNOSTICS` as a multi provider (never in
+`provides`): without their `diagnostics` option it answers `disabled`, and a `'custom'` backplane is
+never observed. Each snapshot carries a fixed `sourceKind`. A `websocket` or `sse` source counts
+`open`, `close` and `send` at the connection and reads current `gauges` (`openConnections` and
+`groups` — rooms or channels) from the plugin's OWN service on every authenticated read; it is
+`ready` whenever those were read, even after every record expired. A `backplane` source counts
+`backplane-publish` (the transport's `publish()` resolving — never peer delivery — with its
+duration) and `backplane-receive` (after the transport's own shape and origin filters), has
+`unsupported` gauges, and is `no-data`, `ready` or `stale` by record age. `backpressureCloses` is a
+number only on an `sse` `close` record (SSE backlog-guard closes, `0` when none) and `null`
+everywhere else; `lastDurationMs` is a number only on `backplane-publish`. Records expire 60 seconds
+after their last observation. No frame, message, close reason, connection id, room or channel name,
+header, query, principal, `Last-Event-ID` or backplane origin enters a record. The connector reads
+the sources at bootstrap (more than 16 refuses startup), assigns positional `s1`…`s16`, answers a
+throwing or validator-refusing source with a value-free snapshot of kind `unknown`, collapses
+duplicate non-null aliases or an over-budget body to a fixed `collection-failed` response with no
+sources, and refuses any kind/operation, kind/gauge or backpressure combination outside these rules
+— and so does the client. A client whose negotiated manifest has `realtime: false` answers a frozen
+`unsupported` response without sending the request. `IDiagnosticsClient.realtime` is a new REQUIRED
+member — additive for callers; a structural implementation must add it.
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
@@ -10277,6 +10312,28 @@ enumerates subscriptions). The DTOs are `EventDiagnosticsSnapshot` (`state: Even
 `EventDiagnosticsRecord` (alias, `EventObservationOperation`, `count`, `started`, `succeeded`,
 `failed`, `noSubscribers`, `lastDurationMs`, `ageMs`) and the connector's
 `EventDiagnosticsResponse`. See the diagnostics-connector section for the wire operation.
+
+**Realtime observation contracts (M98l).** `CAPABILITIES.REALTIME_DIAGNOSTICS`
+(`'realtime-diagnostics'`) is a MULTI-provider token: the WebSocket, SSE and realtime-backplane
+plugins each register one `IRealtimeDiagnosticsSource` (`snapshot(): RealtimeDiagnosticsSnapshot` —
+synchronous; it never sends, closes, publishes, subscribes, or creates or enumerates a room or
+channel). The DTOs are `RealtimeDiagnosticsSnapshot` (`state`, `alias | null`,
+`sourceKind: RealtimeSourceKind | 'unknown'`, `coverage: 'owned-instance'`,
+`gauges: RealtimeDiagnosticsGauges`, `records`, `dropped`), `RealtimeDiagnosticsGauges`
+(`state: RealtimeGaugeState`, `openConnections | null`, `groups | null`),
+`RealtimeDiagnosticsRecord` (alias, `RealtimeObservationOperation`, `count`, `lastDurationMs`,
+`ageMs`, `succeeded`, `failed`, `backpressureCloses`) and the connector's
+`RealtimeDiagnosticsResponse`. Because the three owning plugins need the identical collector and may
+not import one another, `common` also ships it once: `compileRealtimeDiagnosticsAlias(options)`
+validates a `RealtimeDiagnosticsOptions` (`{ enabled: true, alias }`, alias 1–64 UTF-8 bytes, no
+control character, no other key; fixed messages that never echo a value) and
+`createRealtimeObservationCollector(init: RealtimeObservationCollectorInit)` returns an
+`IRealtimeObservationCollector` (`enabled`, `observe`, `observePublish`, `snapshot`, `close`, and
+the frozen snapshot-only `source` facade a plugin registers). A `null` alias gives an inert
+collector that reads neither the clock nor the gauges. `RealtimeGaugeReading` is the gauge reader's
+return shape. The collector is pure and bounded — no I/O, no timer, no registry access — and a
+failing clock or gauge reader latches `collection-failed` without changing any application result.
+See the diagnostics-connector section for the wire operation.
 
 **Trace observation contracts (M98g).** `CAPABILITIES.TRACE_DIAGNOSTICS` (`'trace-diagnostics'`) is
 a SINGLE-provider token: the TelemetryPlugin always registers one `ITraceDiagnosticsSource`

@@ -9,6 +9,7 @@ import { expect } from '@std/expect';
 import type { RealtimeFrame } from '@setu-ts/common';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 import type { IRedisBackplaneClient, IRedisModule } from '../../src/interfaces/index.ts';
+import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../../src/interfaces/index.ts';
 
 /**
  * A client fake honoring the real Redis behavior that matters here: a
@@ -105,6 +106,18 @@ class FakeRedisClient implements IRedisBackplaneClient {
       return Promise.reject(this.failQuit);
     }
     return Promise.resolve('OK');
+  }
+
+  disconnectCount = 0;
+  /** When set, `disconnect` throws this. */
+  failDisconnect: Error | undefined;
+
+  /** ioredis's synchronous forced close: it stops reconnecting. */
+  disconnect(): void {
+    this.disconnectCount++;
+    if (this.failDisconnect !== undefined) {
+      throw this.failDisconnect;
+    }
   }
 
   /** Simulates a pub/sub message arriving on this connection. */
@@ -233,6 +246,110 @@ describe('RedisBackplane', () => {
     await backplane.close();
   });
 
+  it('bounds both built clients with the default command timeout', async () => {
+    const options: Array<{ readonly commandTimeout?: number } | undefined> = [];
+    const module: IRedisModule = {
+      create: (_url, clientOptions): IRedisBackplaneClient => {
+        options.push(clientOptions);
+        return new FakeRedisClient();
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+
+    await backplane.connect();
+
+    expect(options).toEqual([
+      { commandTimeout: DEFAULT_REDIS_COMMAND_TIMEOUT_MS },
+      { commandTimeout: DEFAULT_REDIS_COMMAND_TIMEOUT_MS },
+    ]);
+    await backplane.close();
+  });
+
+  it('forwards a configured command timeout, and 0 leaves the clients unbounded', async () => {
+    for (const [commandTimeoutMs, expected] of [[250, { commandTimeout: 250 }], [0, {}]] as const) {
+      const options: Array<{ readonly commandTimeout?: number } | undefined> = [];
+      const module: IRedisModule = {
+        create: (_url, clientOptions): IRedisBackplaneClient => {
+          options.push(clientOptions);
+          return new FakeRedisClient();
+        },
+      };
+      const backplane = new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', module, commandTimeoutMs },
+        'node-a',
+        'realtime',
+      );
+      await backplane.connect();
+      expect(options).toEqual([expected, expected]);
+      await backplane.close();
+    }
+  });
+
+  it('accepts the largest timer delay as a command timeout', () => {
+    expect(() =>
+      new RedisBackplane(
+        { transport: 'redis', url: 'redis://localhost:6379', commandTimeoutMs: 2_147_483_647 },
+        'node-a',
+        'realtime',
+      )
+    ).not.toThrow();
+  });
+
+  it('refuses a command timeout outside 0 to 2147483647', () => {
+    // 2^31 overflows the runtime timer, which then fires after 1 ms: measured
+    // against a real Redis, every publish failed with `Command timed out`.
+    for (
+      const commandTimeoutMs of [
+        Number.NaN,
+        -1,
+        Number.POSITIVE_INFINITY,
+        2_147_483_648,
+        3_000_000_000,
+        '5' as never,
+      ]
+    ) {
+      expect(() =>
+        new RedisBackplane(
+          { transport: 'redis', url: 'redis://localhost:6379', commandTimeoutMs },
+          'node-a',
+          'realtime',
+        )
+      ).toThrow(RangeError);
+    }
+  });
+
+  it('refuses a bad command timeout without echoing or converting it', () => {
+    // A mis-assigned secret must not reach the log through the refusal, and a
+    // hostile value's own code must not run inside validation.
+    let converted = 0;
+    const hostile = {
+      toString: () => {
+        converted++;
+        throw new Error('toString ran');
+      },
+    };
+    for (const commandTimeoutMs of ['secret-canary\r\nforged', hostile] as never[]) {
+      let caught: unknown;
+      try {
+        new RedisBackplane(
+          { transport: 'redis', url: 'redis://localhost:6379', commandTimeoutMs },
+          'node-a',
+          'realtime',
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(RangeError);
+      expect((caught as Error).message).not.toContain('secret-canary');
+      expect((caught as Error).message).not.toContain('forged');
+    }
+    expect(converted).toBe(0);
+  });
+
   it('builds both clients from the module when none are injected', async () => {
     const built: string[] = [];
     const clients: FakeRedisClient[] = [];
@@ -306,13 +423,32 @@ describe('RedisBackplane', () => {
     await backplane.close();
   });
 
-  it('publishing before connect is a no-op rather than a throw', async () => {
+  it('rejects a publish before connect rather than reporting it sent', async () => {
+    const client = new FakeRedisClient();
     const backplane = new RedisBackplane(
-      { transport: 'redis', client: new FakeRedisClient(), subscriber: new FakeRedisClient() },
+      { transport: 'redis', client, subscriber: new FakeRedisClient() },
       'node-a',
       'realtime',
     );
+    // Resolving here would tell the WebSocket and SSE consumers — and an
+    // observed publish — that a frame reached Redis when nothing was sent.
+    await expect(backplane.publish(FRAME)).rejects.toThrow('the redis transport is not connected');
+    expect(client.published).toEqual([]);
+  });
+
+  it('rejects a publish after close', async () => {
+    const client = new FakeRedisClient();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber: new FakeRedisClient() },
+      'node-a',
+      'realtime',
+    );
+    await backplane.connect();
     await backplane.publish(FRAME);
+    await backplane.close();
+
+    await expect(backplane.publish(FRAME)).rejects.toThrow('the redis transport is not connected');
+    expect(client.published.length).toBe(1);
   });
 });
 
@@ -396,7 +532,7 @@ describe('RedisBackplane connect', () => {
     expect(clients.map((c) => c.quitCount)).toEqual([1, 1]);
     expect(clients[1]?.listenerCount).toBe(0);
     // A half-built attempt must not read as a connection.
-    await backplane.publish(FRAME);
+    await expect(backplane.publish(FRAME)).rejects.toThrow('the redis transport is not connected');
     expect(clients[0]?.published).toEqual([]);
   });
 
@@ -541,8 +677,9 @@ describe('RedisBackplane close racing an open', () => {
     expect(clients[1]?.subscribed).toEqual([]);
     expect(clients[1]?.listenerCount).toBe(0);
 
-    // The backplane is closed, not connected: publishing reaches nothing.
-    await backplane.publish(FRAME);
+    // The backplane is closed, not connected: publishing reaches nothing, and
+    // says so.
+    await expect(backplane.publish(FRAME)).rejects.toThrow('the redis transport is not connected');
     expect(clients[0]?.published).toEqual([]);
   });
 
@@ -680,5 +817,131 @@ describe('RedisBackplane handler isolation', () => {
     expect(reached).toEqual(['second']);
     expect(backplane.handlerErrors.map((e) => e.message)).toEqual(['consumer blew up']);
     await backplane.close();
+  });
+});
+
+describe('RedisBackplane close during an outage', () => {
+  async function connected() {
+    const client = new FakeRedisClient();
+    const subscriber = new FakeRedisClient();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber },
+      'node-a',
+      'realtime',
+    );
+    await backplane.connect();
+    return { backplane, client, subscriber };
+  }
+
+  it('still quits both connections when UNSUBSCRIBE rejects, then reports it', async () => {
+    const { backplane, client, subscriber } = await connected();
+    const timedOut = new Error('Command timed out');
+    subscriber.failUnsubscribe = timedOut;
+
+    // Stopping at the rejected UNSUBSCRIBE left both real connections
+    // reconnecting after shutdown; every step must still run.
+    await expect(backplane.close()).rejects.toBe(timedOut);
+    expect([subscriber.quitCount, client.quitCount]).toEqual([1, 1]);
+    expect([subscriber.disconnectCount, client.disconnectCount]).toEqual([0, 0]);
+  });
+
+  it('force-disconnects a connection whose QUIT fails and still closes the other', async () => {
+    const { backplane, client, subscriber } = await connected();
+    const subscriberQuit = new Error('subscriber quit timed out');
+    subscriber.failQuit = subscriberQuit;
+    client.failQuit = new Error('publisher quit timed out');
+
+    await expect(backplane.close()).rejects.toBe(subscriberQuit);
+    expect([subscriber.disconnectCount, client.disconnectCount]).toEqual([1, 1]);
+    expect(client.quitCount).toBe(1);
+  });
+
+  it('reports a failing disconnect without skipping the other connection', async () => {
+    const { backplane, client, subscriber } = await connected();
+    subscriber.failQuit = new Error('quit timed out');
+    subscriber.failDisconnect = new Error('disconnect failed');
+
+    await expect(backplane.close()).rejects.toThrow('quit timed out');
+    expect(client.quitCount).toBe(1);
+  });
+
+  it('leaves a client without disconnect as QUIT left it', async () => {
+    const { backplane, client, subscriber } = await connected();
+    Object.assign(subscriber, { disconnect: undefined });
+    subscriber.failQuit = new Error('quit timed out');
+
+    await expect(backplane.close()).rejects.toThrow('quit timed out');
+    expect(client.quitCount).toBe(1);
+  });
+
+  it('resolves when every step succeeds', async () => {
+    const { backplane, client, subscriber } = await connected();
+    await backplane.close();
+    expect([subscriber.quitCount, client.quitCount]).toEqual([1, 1]);
+    expect([subscriber.disconnectCount, client.disconnectCount]).toEqual([0, 0]);
+  });
+});
+
+describe('RedisBackplane rollback of a failed open', () => {
+  it('force-disconnects the connections it built when their rollback QUIT also fails', async () => {
+    // A SUBSCRIBE that timed out is followed by a QUIT that fails the same
+    // way; without the disconnect() fallback those owned connections keep
+    // reconnecting after connect() has already rejected.
+    const clients: FakeRedisClient[] = [];
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = new FakeRedisClient();
+        client.failQuit = new Error('quit timed out');
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+    const subscribeFailure = new Error('Command timed out');
+    const original = module.create;
+    module.create = (url, options) => {
+      const client = original(url, options) as FakeRedisClient;
+      if (clients.length === 2) {
+        client.failSubscribe = subscribeFailure;
+      }
+      return client;
+    };
+
+    // The open's own failure is what the caller sees, not the rollback's.
+    await expect(backplane.connect()).rejects.toBe(subscribeFailure);
+    expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([[1, 1], [1, 1]]);
+  });
+
+  it('force-disconnects the connections when close lands mid-open and their QUIT fails', async () => {
+    const clients: FakeRedisClient[] = [];
+    let release: (() => void) | undefined;
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = new FakeRedisClient();
+        client.failQuit = new Error('quit timed out');
+        if (clients.length === 1) {
+          release = client.holdSubscribe();
+        }
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+
+    const connecting = backplane.connect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await backplane.close();
+    release?.();
+    await connecting;
+
+    expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([[1, 1], [1, 1]]);
   });
 });

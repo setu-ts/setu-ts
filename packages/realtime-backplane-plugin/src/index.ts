@@ -55,7 +55,7 @@ export { adaptRedisModule, loadRedisModule, RedisModuleError } from './transport
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export { DEFAULT_TOPIC } from './interfaces/index.ts';
+export { DEFAULT_REDIS_COMMAND_TIMEOUT_MS, DEFAULT_TOPIC } from './interfaces/index.ts';
 export type {
   BackplaneCommonOptions,
   CustomBackplaneOptions,
@@ -72,6 +72,7 @@ export type {
 export type {
   EncodedPayload,
   IRealtimeBackplane,
+  RealtimeDiagnosticsOptions,
   RealtimeFrame,
   RealtimeFrameHandler,
   RealtimeFrameKind,

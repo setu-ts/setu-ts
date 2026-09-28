@@ -126,11 +126,29 @@ That suppresses the message only. Channel delivery is identical either way.
 
 ## Options
 
-| Option          | Type      | Default  | Description                                                                                    |
-| --------------- | --------- | -------- | ---------------------------------------------------------------------------------------------- |
-| `heartbeatMs`   | `number`  | disabled | Interval for a `: heartbeat` comment frame. Omitted means **no timer at all**.                 |
-| `retryMs`       | `number`  | disabled | Emits a leading `retry: <ms>` advertising the reconnect delay.                                 |
-| `scalingNotice` | `boolean` | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it. |
+| Option          | Type                         | Default  | Description                                                                                    |
+| --------------- | ---------------------------- | -------- | ---------------------------------------------------------------------------------------------- |
+| `heartbeatMs`   | `number`                     | disabled | Interval for a `: heartbeat` comment frame. Omitted means **no timer at all**.                 |
+| `retryMs`       | `number`                     | disabled | Emits a leading `retry: <ms>` advertising the reconnect delay.                                 |
+| `scalingNotice` | `boolean`                    | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it. |
+| `diagnostics`   | `RealtimeDiagnosticsOptions` | omitted  | Opt-in realtime observations (M98l); see below.                                                |
+
+## Diagnostics (M98l)
+
+`SsePlugin({ diagnostics: { enabled: true, alias: 'feed' } })` counts, for the local diagnostics
+connector's `GET /v1/realtime` (`@setu-ts/diagnostics-plugin`), how many streams opened and closed
+and how many frames the connection enqueued or refused — messages, comments and heartbeats alike;
+the initial `retry:` frame is written before the connection is attached and is not counted. A close
+caused by the 1 MiB backlog guard is `failed` and also counted in `backpressureCloses`. On each read
+of a paired devtool the source also reports the service's current `connectionCount` and
+`channelCount`, which never expire the way operation records do. No message, comment, channel name,
+connection id or `Last-Event-ID` is ever captured.
+
+Without the option the plugin registers an inert `disabled` source and nothing is attached, so its
+hot paths read no clock. Observation never changes a result: a refused send still throws the same
+error, and a failing clock or gauge reader latches the source `collection-failed` instead. A
+replacement registered later under the same capability is outside coverage and is never read. Enable
+only on an approved development dataset: counts aggregate every tenant using the instance.
 
 ## Reconnection
 
@@ -174,18 +192,19 @@ checking `Origin` in the authentication band is the stronger form.
 
 ## Exports
 
-| Export             | Kind      |
-| ------------------ | --------- |
-| `SsePlugin`        | function  |
-| `SseConnection`    | class     |
-| `SseService`       | class     |
-| `CAPABILITIES`     | const     |
-| `ISseConnection`   | interface |
-| `ISseService`      | interface |
-| `SseChannel`       | interface |
-| `SseMessage`       | interface |
-| `SsePluginOptions` | interface |
-| `ChannelPublisher` | type      |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `SsePlugin`                  | function  |
+| `SseConnection`              | class     |
+| `SseService`                 | class     |
+| `CAPABILITIES`               | const     |
+| `ISseConnection`             | interface |
+| `ISseService`                | interface |
+| `RealtimeDiagnosticsOptions` | interface |
+| `SseChannel`                 | interface |
+| `SseMessage`                 | interface |
+| `SsePluginOptions`           | interface |
+| `ChannelPublisher`           | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

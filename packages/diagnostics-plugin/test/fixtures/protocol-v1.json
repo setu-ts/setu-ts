@@ -15,10 +15,10 @@
     },
     "response": {
       "status": 200,
-      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000,\"inspectors\":{\"health\":true,\"configuration\":true,\"queues\":true,\"traces\":true,\"authorization\":true,\"cache\":true,\"scheduler\":true,\"events\":true,\"realtime\":false,\"storage\":false,\"outboundHttp\":false}}",
-      "bodySha256": "12ebb15b8d3b8b8fd43e625fcbf8d170d47f0e3dca948cd0f9f85ec929062e4c",
-      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\n12ebb15b8d3b8b8fd43e625fcbf8d170d47f0e3dca948cd0f9f85ec929062e4c",
-      "mac": "cfdcf1fad89dac63aa322b17660d58414747c45affdeda8d6fdf3f8a826c6720"
+      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000,\"inspectors\":{\"health\":true,\"configuration\":true,\"queues\":true,\"traces\":true,\"authorization\":true,\"cache\":true,\"scheduler\":true,\"events\":true,\"realtime\":true,\"storage\":false,\"outboundHttp\":false}}",
+      "bodySha256": "4eda99421a3089dab4e715d1ae0e485f8fb9d7f11cdbf66e9a459c43238fabe5",
+      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\n4eda99421a3089dab4e715d1ae0e485f8fb9d7f11cdbf66e9a459c43238fabe5",
+      "mac": "af4afba93661be4415f3b1e33015817e6499cce26d0cdd4886b842d5df1e109e"
     }
   },
   "rejectedTargets": [
@@ -40,7 +40,10 @@
     "/v1/queues?after=007&limit=1",
     "/v1/queues?after=0&limit=129",
     "/v1/queues?after=0&limit=0",
-    "/v1/queues/"
+    "/v1/queues/",
+    "/v1/realtime/",
+    "/v1/realtime?x=1",
+    "/v1/realtime?after=0&limit=1"
   ],
   "hostileSnapshotDto": {
     "comment": "A hostile/buggy provider result: carries synthetic secrets in fields OUTSIDE the M98a allowlist. The projection must drop every one of them while keeping the allowed metadata, so suppressing everything cannot make the canary test pass vacuously.",

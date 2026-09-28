@@ -129,6 +129,7 @@ async function harness(schedulerSources: readonly ISchedulerDiagnosticsSource[])
     configSource: null,
     cacheSources: [],
     schedulerSources,
+    realtimeSources: [],
     eventSources: [],
   });
   session.bindInstance(TEST_INSTANCE_ID);

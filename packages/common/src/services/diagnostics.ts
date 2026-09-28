@@ -1784,6 +1784,185 @@ export interface IEventDiagnosticsSource {
 }
 
 /**
+ * The kind of realtime component a built-in realtime diagnostics source
+ * observes (M98l). Fixed when the source is constructed and never inferred
+ * from an alias, a source id or registration order.
+ *
+ * @since 0.8.0
+ */
+export type RealtimeSourceKind = 'websocket' | 'sse' | 'backplane';
+
+/**
+ * The fixed operations a realtime diagnostics source counts (M98l).
+ *
+ * A `websocket` or `sse` source counts `open`, `close` and `send`; a
+ * `backplane` source counts `backplane-publish` and `backplane-receive`. Any
+ * other pairing is refused by the connector and the client.
+ *
+ * @since 0.8.0
+ */
+export type RealtimeObservationOperation =
+  | 'open'
+  | 'close'
+  | 'send'
+  | 'backplane-publish'
+  | 'backplane-receive';
+
+/**
+ * Whether a realtime source's current-state gauges were read (M98l).
+ *
+ * `available` — both gauges were read from the owning plugin's own service
+ * and are current non-negative integers (a measured `0` is a real zero).
+ * `unsupported` — the source's kind has no gauges (a backplane).
+ * `disabled` — the source is not observing (not opted in, or closed), and the
+ * gauge reader was not called. `collection-failed` — the read failed. Every
+ * state except `available` carries `null` for both values.
+ *
+ * @since 0.8.0
+ */
+export type RealtimeGaugeState = 'available' | 'unsupported' | 'disabled' | 'collection-failed';
+
+/**
+ * A realtime source's current-state gauges (M98l): the open connections and
+ * the groups (WebSocket rooms or SSE channels) the owning plugin's own
+ * service holds right now. Gauges never expire for lack of traffic; they are
+ * read fresh on every read of an enabled, healthy source.
+ *
+ * @since 0.8.0
+ */
+export interface RealtimeDiagnosticsGauges {
+  /** Whether the values below were read. */
+  readonly state: RealtimeGaugeState;
+  /** Open connections; `null` unless {@linkcode state} is `available`. */
+  readonly openConnections: number | null;
+  /** Rooms or channels held; `null` unless {@linkcode state} is `available`. */
+  readonly groups: number | null;
+}
+
+/**
+ * Cumulative counters for one realtime operation of one source (M98l).
+ *
+ * Every settled observation increments `count` and exactly one of
+ * `succeeded` or `failed`; every counter saturates at
+ * `Number.MAX_SAFE_INTEGER`. `backpressureCloses` is a number only for an
+ * `sse` source's `close` record — the closes its backlog guard caused, a
+ * subset of `failed` — and `null` everywhere else, so a measured zero is
+ * distinguishable from "not supported". `lastDurationMs` is a number only for
+ * `backplane-publish`, the one operation that settles asynchronously; every
+ * other operation is instantaneous and carries `null`. `ageMs` is monotonic
+ * time since the most recent observation. A record expires 60 seconds after
+ * its last observation. No frame, message, name, identifier, close reason or
+ * error is ever carried.
+ *
+ * @since 0.8.0
+ */
+export interface RealtimeDiagnosticsRecord {
+  /** The source's configured alias (always equal to the snapshot's alias). */
+  readonly alias: string;
+  /** The operation these counters describe. */
+  readonly operation: RealtimeObservationOperation;
+  /** Settled observations. */
+  readonly count: number;
+  /** Integer ms of the last `backplane-publish`; `null` for every other operation. */
+  readonly lastDurationMs: number | null;
+  /** Monotonic ms since the most recent observation. */
+  readonly ageMs: number;
+  /** Observations that completed normally. */
+  readonly succeeded: number;
+  /** Observations that failed. */
+  readonly failed: number;
+  /** SSE backlog closes on an `sse` `close` record; `null` everywhere else. */
+  readonly backpressureCloses: number | null;
+}
+
+/**
+ * One realtime source's snapshot (M98l).
+ *
+ * `coverage` is always `owned-instance`: the source describes the service or
+ * transport its own plugin created, never a replacement registered later
+ * and never a `'custom'` backplane transport. `sourceKind` is fixed at
+ * construction; `unknown` appears only in the connector's own value-free
+ * snapshot for a source that threw or failed validation. `alias` is `null`
+ * exactly when the source is not observing (`disabled`) or in that synthetic
+ * snapshot. `dropped` counts observations for which no record slot was
+ * available (saturating); a built-in source has at most three records and
+ * never drops.
+ *
+ * @since 0.8.0
+ */
+export interface RealtimeDiagnosticsSnapshot {
+  /** The source's own availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** The configured display alias, or `null` when disabled. */
+  readonly alias: string | null;
+  /** The observed component's kind, or `unknown` for the connector's synthetic failure. */
+  readonly sourceKind: RealtimeSourceKind | 'unknown';
+  /** Always `owned-instance`: only the plugin's own component is observed. */
+  readonly coverage: 'owned-instance';
+  /** Current-state gauges, outside the expiring records. */
+  readonly gauges: RealtimeDiagnosticsGauges;
+  /** Retained counters, one per observed operation. */
+  readonly records: readonly RealtimeDiagnosticsRecord[];
+  /** Observations that found no free record slot (saturating). */
+  readonly dropped: number;
+}
+
+/**
+ * Read-only realtime diagnostics source — the surface the WebSocket, SSE and
+ * realtime-backplane plugins each register under
+ * {@linkcode CAPABILITIES.REALTIME_DIAGNOSTICS} as a MULTI provider (M98l).
+ * The DiagnosticsPlugin reads every source to serve `GET /v1/realtime`.
+ *
+ * Synchronous by contract: `snapshot()` returns already-counted data plus, for
+ * an enabled websocket or sse source, two size getters of the owning plugin's
+ * own service. It never sends, closes, publishes, subscribes, creates or
+ * enumerates a room or channel, or resolves a service.
+ *
+ * @example
+ * ```typescript
+ * const sources = ctx.services.getAll<IRealtimeDiagnosticsSource>(
+ *   CAPABILITIES.REALTIME_DIAGNOSTICS,
+ * );
+ * const snapshots = sources.map((source) => source.snapshot());
+ * ```
+ * @since 0.8.0
+ */
+export interface IRealtimeDiagnosticsSource {
+  /**
+   * Returns the source's current counters and gauges.
+   *
+   * @returns A deeply frozen {@linkcode RealtimeDiagnosticsSnapshot}
+   */
+  snapshot(): RealtimeDiagnosticsSnapshot;
+}
+
+/**
+ * The realtime diagnostics response the connector serves for
+ * `GET /v1/realtime` (M98l).
+ *
+ * `sources` lists every registered realtime source in registration order
+ * under a session-local `sourceId` (`s1`…`s16`). `state` is `unsupported`
+ * when no source is registered; otherwise `ready` if any source is ready,
+ * then `collection-failed`, `stale`, `no-data`, `disabled` in that priority.
+ *
+ * @since 0.8.0
+ */
+export interface RealtimeDiagnosticsResponse {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the response was read for. */
+  readonly instanceId: string;
+  /** The aggregate availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** One snapshot per registered source, in registration order. */
+  readonly sources: readonly {
+    /** The session-local source identifier. */
+    readonly sourceId: string;
+    /** The source's snapshot. */
+    readonly snapshot: RealtimeDiagnosticsSnapshot;
+  }[];
+}
+/**
  * The fixed scheduler observation an {@linkcode ISchedulerDiagnosticsSource}
  * records (M98k). `fire` is one local timer fire of an approved job —
  * observed whether or not the fire proceeded, so contention and lock

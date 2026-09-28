@@ -81,16 +81,35 @@ without a `subscriber` throws at construction rather than failing at the first p
 
 ## Options
 
-| Option                  | Applies to     | Default                  | Description                                                                                                                                    |
-| ----------------------- | -------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `topic`                 | all but memory | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                   |
-| `origin`                | all            | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                            |
-| `bus`                   | `'memory'`     | `'default'`              | Named in-process bus; separate names stay isolated                                                                                             |
-| `url`                   | `'redis'`      | —                        | Connection URL, used only on the lazy-load path                                                                                                |
-| `client` / `subscriber` | `'redis'`      | —                        | Injected client pair; required together                                                                                                        |
-| `module`                | `'redis'`      | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                |
-| `instance`              | `'custom'`     | —                        | The transport to register, used as-is                                                                                                          |
-| `localNotice`           | `'memory'`     | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it |
+| Option                  | Applies to         | Default                  | Description                                                                                                                                                       |
+| ----------------------- | ------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `topic`                 | all but memory     | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                      |
+| `origin`                | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                               |
+| `bus`                   | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                |
+| `url`                   | `'redis'`          | —                        | Connection URL, used only on the lazy-load path                                                                                                                   |
+| `client` / `subscriber` | `'redis'`          | —                        | Injected client pair; required together                                                                                                                           |
+| `module`                | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                   |
+| `commandTimeoutMs`      | `'redis'`          | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations |
+| `instance`              | `'custom'`         | —                        | The transport to register, used as-is                                                                                                                             |
+| `localNotice`           | `'memory'`         | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                    |
+| `diagnostics`           | all but `'custom'` | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                    |
+
+## Diagnostics (M98l)
+
+`RealtimeBackplanePlugin({ transport: 'redis', url, diagnostics: { enabled: true, alias: 'fanout' } })`
+counts, for the local diagnostics connector's `GET /v1/realtime` (`@setu-ts/diagnostics-plugin`),
+how many publications resolved or rejected (with the duration of the last one) and how many arriving
+frames reached the local handlers. A publication's success means the transport's `publish()`
+resolved — never that a peer received it — and a receive is counted only after the transport's own
+frame-shape and own-origin filters admitted the frame; a receive where any local handler threw is
+`failed`. A backplane reports no gauges. No frame, room or channel name, payload, `exceptId` or
+origin is ever captured. A `'custom'` transport is never observed and its options accept no
+`diagnostics` field.
+
+Without the option the plugin registers an inert `disabled` source and nothing is attached to the
+transport. Observation never changes a result: a rejected publish still rejects with the same
+reason, and a failing clock latches the source `collection-failed` instead. Enable only on an
+approved development dataset: counts aggregate every tenant using the instance.
 
 ## Limitations
 
@@ -114,10 +133,32 @@ worth knowing. On `'redis'`, ioredis's own defaults govern what a partition does
 - **A longer partition: the buffered commands reject** when ioredis's `maxRetriesPerRequest` budget
   (default 20 retries, ~11 s on the default backoff) exhausts, and both consumers log one `warn` per
   dropped frame.
+- **A silent connection: the publish rejects after `commandTimeoutMs`** (default 15 s). A host that
+  stops answering without closing the socket — paused, or partitioned with no reset — triggers no
+  reconnect, so no retry budget applies; before this bound such a publish never settled, so neither
+  consumer logged it and an observed publish was never recorded. The default sits above the ~11 s
+  retry budget, so the two partition cases above behave as described; lowering it below that budget
+  makes a dropped connection reject sooner too.
+- **A publish before `connect()` or after `close()` rejects** rather than resolving, so a frame sent
+  nowhere reads as a failure. It resolved without sending before 0.8.0.
+- **`close()` during an outage still releases both connections.** Each step runs even when an
+  earlier one fails, a connection whose QUIT fails is force-closed through `disconnect()` (without
+  it, ioredis reconnects and re-subscribes once an unreachable server returns), and the first
+  failure is rethrown afterwards, so a shutdown during an outage is reported rather than leaving
+  connections reconnecting behind it. Against a silent server each step waits out the command
+  timeout, so `close()` can take about three of them (≈45 s at the default); lower
+  `commandTimeoutMs` if that exceeds your shutdown grace period.
+- **A timed-out publish may still be sent.** A publish rejected by the command timeout can already
+  be written to, or queued for, the connection, and reach Redis afterwards — measured at the default
+  against a paused server, and with a lowered `commandTimeoutMs` against a stopped one. A caller
+  that retries a rejected publish may therefore deliver that frame twice; consumers that cannot
+  tolerate a duplicate need their own de-duplication. Against a server that refuses connections, the
+  default's retry budget rejects the queued publish first and it is discarded.
 
-Frames are never persisted or replayed beyond that buffer, and neither ioredis default is reachable
-through this plugin's options — an application that needs different behaviour constructs its own
-`client`/`subscriber` pair and injects it.
+Frames are never persisted or replayed beyond that buffer. `commandTimeoutMs` is the only ioredis
+setting reachable through this plugin's options, and applies only on the lazy path — an application
+that needs different behaviour, or injects its own `client`/`subscriber` pair, configures those
+clients directly.
 
 ## Documentation
 
@@ -144,34 +185,36 @@ serving — never `down`. A transport that cannot probe reports `up` with `reach
 
 ## Exports
 
-| Export                           | Kind      |
-| -------------------------------- | --------- |
-| `adaptRedisModule`               | function  |
-| `createBackplane`                | function  |
-| `decodeFrameData`                | function  |
-| `encodeFrameData`                | function  |
-| `isRealtimeFrame`                | function  |
-| `loadRedisModule`                | function  |
-| `RealtimeBackplanePlugin`        | function  |
-| `MemoryBackplane`                | class     |
-| `MessagingBackplane`             | class     |
-| `RedisBackplane`                 | class     |
-| `RedisModuleError`               | class     |
-| `CAPABILITIES`                   | const     |
-| `DEFAULT_TOPIC`                  | const     |
-| `BackplaneCommonOptions`         | interface |
-| `CustomBackplaneOptions`         | interface |
-| `EncodedPayload`                 | interface |
-| `IRealtimeBackplane`             | interface |
-| `IRedisBackplaneClient`          | interface |
-| `IRedisModule`                   | interface |
-| `MemoryBackplaneOptions`         | interface |
-| `MessagingBackplaneOptions`      | interface |
-| `RealtimeFrame`                  | interface |
-| `RedisBackplaneOptions`          | interface |
-| `RealtimeBackplanePluginOptions` | type      |
-| `RealtimeFrameHandler`           | type      |
-| `RealtimeFrameKind`              | type      |
+| Export                             | Kind      |
+| ---------------------------------- | --------- |
+| `adaptRedisModule`                 | function  |
+| `createBackplane`                  | function  |
+| `decodeFrameData`                  | function  |
+| `encodeFrameData`                  | function  |
+| `isRealtimeFrame`                  | function  |
+| `loadRedisModule`                  | function  |
+| `RealtimeBackplanePlugin`          | function  |
+| `MemoryBackplane`                  | class     |
+| `MessagingBackplane`               | class     |
+| `RedisBackplane`                   | class     |
+| `RedisModuleError`                 | class     |
+| `CAPABILITIES`                     | const     |
+| `DEFAULT_REDIS_COMMAND_TIMEOUT_MS` | const     |
+| `DEFAULT_TOPIC`                    | const     |
+| `BackplaneCommonOptions`           | interface |
+| `CustomBackplaneOptions`           | interface |
+| `EncodedPayload`                   | interface |
+| `IRealtimeBackplane`               | interface |
+| `IRedisBackplaneClient`            | interface |
+| `IRedisModule`                     | interface |
+| `MemoryBackplaneOptions`           | interface |
+| `MessagingBackplaneOptions`        | interface |
+| `RealtimeDiagnosticsOptions`       | interface |
+| `RealtimeFrame`                    | interface |
+| `RedisBackplaneOptions`            | interface |
+| `RealtimeBackplanePluginOptions`   | type      |
+| `RealtimeFrameHandler`             | type      |
+| `RealtimeFrameKind`                | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

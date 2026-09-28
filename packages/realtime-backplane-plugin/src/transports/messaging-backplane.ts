@@ -12,6 +12,7 @@ import type {
   RealtimeFrame,
   RealtimeFrameHandler,
 } from '@setu-ts/common';
+import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { dispatchFrame } from './dispatch.ts';
 
 /**
@@ -119,14 +120,26 @@ export class MessagingBackplane implements IRealtimeBackplane {
         // subscription, so one consumer throwing must not starve the other,
         // and this loop runs inside the broker's delivery callback where
         // nothing above would catch a throw.
-        dispatchFrame(this.#handlers, message, (error) => {
+        const delivered = dispatchFrame(this.#handlers, message, (error) => {
           this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
         });
+        // M98l: counted only after the shape and own-origin filters.
+        realtimeObserverOf(this)?.observe('backplane-receive', delivered);
       },
     );
   }
 
-  async publish(frame: RealtimeFrame): Promise<void> {
+  publish(frame: RealtimeFrame): Promise<void> {
+    // M98l: counted as `backplane-publish` when observed. Completion means
+    // the broker accepted the message, never that a peer received it.
+    const observer = realtimeObserverOf(this);
+    return observer === undefined
+      ? this.#publish(frame)
+      : observer.observePublish(() => this.#publish(frame));
+  }
+
+  /** The publication itself: handed to the broker on the shared topic. */
+  async #publish(frame: RealtimeFrame): Promise<void> {
     await this.#broker.publish(this.#topic, frame);
   }
 

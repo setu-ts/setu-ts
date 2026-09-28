@@ -190,6 +190,16 @@ export const CAPABILITIES = {
    * publishes an event or invokes a handler.
    */
   EVENTS_DIAGNOSTICS: 'event-diagnostics',
+  /**
+   * Minimized realtime lifecycle observations (M98l) — an
+   * `IRealtimeDiagnosticsSource` the WebSocket, SSE and realtime-backplane
+   * plugins each register under this token with `{ multi: true }`, without
+   * claiming it in `provides`. The DiagnosticsPlugin reads every source to
+   * serve `GET /v1/realtime`; no registered source means the connector answers
+   * a typed `unsupported` response. A read never sends, closes, publishes,
+   * subscribes, or creates or enumerates a room or channel.
+   */
+  REALTIME_DIAGNOSTICS: 'realtime-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

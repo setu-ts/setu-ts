@@ -36,20 +36,25 @@ export type DispatchErrorReporter = (error: unknown) => void;
  * @param handlers - The subscribed handlers
  * @param frame - The frame to deliver
  * @param onError - Reporter for a throwing handler
+ * @returns `true` when every handler returned, `false` when at least one
+ * threw — the outcome M98l's `backplane-receive` count records
  * @since 0.2.0
  */
 export function dispatchFrame(
   handlers: Iterable<RealtimeFrameHandler>,
   frame: RealtimeFrame,
   onError: DispatchErrorReporter,
-): void {
+): boolean {
+  let delivered = true;
   // Snapshotted so a handler that subscribes or unsubscribes during delivery
   // cannot mutate the collection being iterated.
   for (const handler of [...handlers]) {
     try {
       handler(frame);
     } catch (error) {
+      delivered = false;
       onError(error);
     }
   }
+  return delivered;
 }

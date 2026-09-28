@@ -12,6 +12,7 @@ import type {
   IWebSocketTransport,
   WebSocketReadyState,
 } from '@setu-ts/common';
+import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 
 /**
  * A live WebSocket connection.
@@ -100,6 +101,26 @@ export class WebSocketConnection implements IWebSocketConnection {
   }
 
   send(data: string | Uint8Array): void {
+    // M98l: counted here, at the connection, so a room broadcast, `sendJson`
+    // and a heartbeat are each counted once. Only the outcome crosses into
+    // the collector; the frame and any thrown value do not, and the throw is
+    // rethrown unchanged.
+    const observer = realtimeObserverOf(this);
+    if (observer === undefined) {
+      this.#send(data);
+      return;
+    }
+    try {
+      this.#send(data);
+    } catch (error) {
+      observer.observe('send', false);
+      throw error;
+    }
+    observer.observe('send', true);
+  }
+
+  /** The write itself: refused once closed, then handed to the transport. */
+  #send(data: string | Uint8Array): void {
     if (!this.isOpen) {
       throw new Error(`Cannot send on WebSocket connection ${this.#id}: it is not open`);
     }

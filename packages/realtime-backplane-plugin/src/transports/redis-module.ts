@@ -25,7 +25,8 @@ export class RedisModuleError extends Error {
  * with a fake module and never needs the real driver installed.
  *
  * @param module - The module to adapt, typically `import('npm:ioredis@5.x')`
- * @returns A facade whose `create` builds a client
+ * @returns A facade whose `create` builds a client, forwarding the transport's
+ * client options (the command timeout) to the constructor
  * @throws {RedisModuleError} When the module exposes no constructor
  * @since 0.2.0
  */
@@ -46,9 +47,13 @@ export function adaptRedisModule(module: unknown): IRedisModule {
     );
   }
 
-  const RedisCtor = constructor as new (url: string) => IRedisBackplaneClient;
+  const RedisCtor = constructor as new (
+    url: string,
+    options?: { readonly commandTimeout?: number },
+  ) => IRedisBackplaneClient;
   return {
-    create: (url: string): IRedisBackplaneClient => new RedisCtor(url),
+    create: (url: string, options?: { readonly commandTimeout?: number }): IRedisBackplaneClient =>
+      new RedisCtor(url, options),
   };
 }
 

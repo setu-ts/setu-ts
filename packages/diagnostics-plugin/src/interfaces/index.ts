@@ -18,6 +18,7 @@ import type {
   HealthDiagnosticsSnapshot,
   IPlugin,
   QueueDiagnosticsBatch,
+  RealtimeDiagnosticsResponse,
   SchedulerDiagnosticsResponse,
   TraceDiagnosticsBatch,
 } from '@setu-ts/common';
@@ -335,6 +336,24 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   events(): Promise<EventDiagnosticsResponse>;
+  /**
+   * Reads the minimized realtime lifecycle observations through the signed
+   * protocol (M98l). Performs the `/v1/status` pairing exchange first if the
+   * session has not yet been bound.
+   *
+   * When the negotiated inspector manifest reports the realtime inspector as
+   * unsupported, a frozen typed `unsupported` response with no sources is
+   * returned WITHOUT sending an addon request. Otherwise the authenticated
+   * `/v1/realtime` exchange is performed and its exact contract — including
+   * the kind/operation and kind/gauge combinations — validated. The response
+   * never carries a frame, message, close reason, room or channel name,
+   * connection id, header, principal or backplane origin.
+   *
+   * @returns The deeply frozen realtime response
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  realtime(): Promise<RealtimeDiagnosticsResponse>;
   /**
    * Reads the next bounded page of authorization decision explanations
    * through the signed protocol (M98h). Performs the `/v1/status` pairing

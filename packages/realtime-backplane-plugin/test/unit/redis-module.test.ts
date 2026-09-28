@@ -15,8 +15,10 @@ import {
 /** A stand-in for the ioredis class. */
 class FakeRedis {
   readonly url: string;
-  constructor(url: string) {
+  readonly options: unknown;
+  constructor(url: string, options?: unknown) {
     this.url = url;
+    this.options = options;
   }
 }
 
@@ -25,6 +27,14 @@ describe('adaptRedisModule', () => {
     const module = adaptRedisModule({ default: FakeRedis });
     const client = module.create('redis://localhost:6379') as unknown as FakeRedis;
     expect(client.url).toBe('redis://localhost:6379');
+  });
+
+  it('forwards the client options to the constructor', () => {
+    // The command timeout is how a silent-but-open connection is bounded; a
+    // facade that dropped the second argument would leave publishes unbounded.
+    const module = adaptRedisModule({ default: FakeRedis });
+    const client = module.create('redis://host', { commandTimeout: 250 }) as unknown as FakeRedis;
+    expect(client.options).toEqual({ commandTimeout: 250 });
   });
 
   it('adapts a module exposing a named Redis export', () => {
