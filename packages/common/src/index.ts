@@ -393,6 +393,7 @@ export type {
   IEventDiagnosticsSource,
   IHealthDiagnosticsSource,
   IQueueDiagnosticsSource,
+  IRealtimeDiagnosticsSource,
   ITraceDiagnosticsSource,
   QueueAttemptObservation,
   QueueDepthCoverage,
@@ -409,6 +410,13 @@ export type {
   QueueSourceDepthObservation,
   QueueSourceFailure,
   QueueSourceState,
+  RealtimeDiagnosticsGauges,
+  RealtimeDiagnosticsRecord,
+  RealtimeDiagnosticsResponse,
+  RealtimeDiagnosticsSnapshot,
+  RealtimeGaugeState,
+  RealtimeObservationOperation,
+  RealtimeSourceKind,
   TraceCoverage,
   TraceDiagnosticsBatch,
   TraceInstrumentationKind,
@@ -419,6 +427,18 @@ export type {
   TraceSamplerDescription,
   TraceSourceState,
 } from './services/diagnostics.ts';
+// Realtime lifecycle observations (M98l) — the one collector the WebSocket,
+// SSE and realtime-backplane plugins share, since none may import another
+export {
+  compileRealtimeDiagnosticsAlias,
+  createRealtimeObservationCollector,
+} from './diagnostics/realtime-observations.ts';
+export type {
+  IRealtimeObservationCollector,
+  RealtimeDiagnosticsOptions,
+  RealtimeGaugeReading,
+  RealtimeObservationCollectorInit,
+} from './diagnostics/realtime-observations.ts';
 
 // SSE contracts
 export type { ISseConnection, ISseService, SseChannel, SseMessage } from './services/sse.ts';

@@ -8,6 +8,45 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Realtime lifecycle observations (M98l): opt-in, minimized WebSocket, SSE and backplane
+  observations through the diagnostics connector.** `WebSocketPlugin`, `SsePlugin` and
+  `RealtimeBackplanePlugin` accept a `diagnostics: { enabled: true, alias }` option (the new
+  `RealtimeDiagnosticsOptions`, declared once in `@setu-ts/common` and re-exported by all three;
+  validated when the plugin factory is called, never echoing a value). A WebSocket source counts
+  `open` (a handshake that fails after the upgrade was accepted is a failed open), `close` (a close
+  after a transport error or with code `1006` is `failed`) and every frame `send` writes or refuses
+  — once, at the connection, so a room broadcast or heartbeat is not counted twice. An SSE source
+  counts `open`, `close` and every enqueued frame, and reports closes caused by the 1 MiB backlog
+  guard in `backpressureCloses` (a number only on the SSE `close` record, `0` when none, `null`
+  everywhere else). A backplane source counts `backplane-publish` (the transport's `publish()`
+  resolving — never peer delivery — with its duration) and `backplane-receive` (after the
+  transport's own shape and origin filters), across the memory, redis and messaging transports; a
+  `'custom'` transport is never observed. WebSocket and SSE sources also report current
+  `openConnections` and `groups` gauges, read from the plugin's OWN service on each authenticated
+  read, which never expire with the records, so an idle connection stays visible. No frame, message,
+  close reason, connection id, room or channel name, header, query, principal, `Last-Event-ID` or
+  backplane origin is ever captured. Every instance registers a frozen, snapshot-only
+  `IRealtimeDiagnosticsSource` under the new multi-provider `CAPABILITIES.REALTIME_DIAGNOSTICS`
+  (`disabled` without the option). Observation never changes a result: a refused send throws the
+  same error, a rejected publish rejects with the same reason, and a failing clock or gauge reader
+  latches the source `collection-failed`. New public surface on `@setu-ts/common`:
+  `CAPABILITIES.REALTIME_DIAGNOSTICS`, `IRealtimeDiagnosticsSource`, `RealtimeDiagnosticsSnapshot`,
+  `RealtimeDiagnosticsRecord`, `RealtimeDiagnosticsGauges`, `RealtimeDiagnosticsResponse`,
+  `RealtimeSourceKind`, `RealtimeObservationOperation`, `RealtimeGaugeState`, and — because the
+  three owning plugins need the identical collector and may not import one another — the one shared
+  collector: `compileRealtimeDiagnosticsAlias`, `createRealtimeObservationCollector`,
+  `IRealtimeObservationCollector`, `RealtimeObservationCollectorInit`, `RealtimeGaugeReading` and
+  `RealtimeDiagnosticsOptions`. New connector surface: `GET /v1/realtime` (authenticated like every
+  operation; a snapshot operation with no query; positional `s<N>` source ids; more than 16 sources
+  refuses startup; a throwing or invalid source answered by a value-free snapshot of kind `unknown`;
+  duplicate aliases or an over-budget body collapse to a fixed collection-failed response with no
+  sources; any kind/operation, kind/gauge or backpressure combination outside the contract refused
+  by both the connector and the client), the status manifest's `realtime` key now `true`, and
+  `IDiagnosticsClient.realtime()` that answers a frozen typed `unsupported` response without a
+  request when the negotiated manifest lacks the inspector. **Breaking for implementors:**
+  `realtime()` is a REQUIRED member of `IDiagnosticsClient`, so a hand-written client must add it
+  (answering `unsupported` is a valid implementation).
+
 - **Event dispatch observations (M98j): opt-in, minimized event-dispatch observations through the
   diagnostics connector.** `EventsPlugin` accepts a `diagnostics` option
   (`EventsDiagnosticsOptions`, exported from `@setu-ts/events-plugin`) that attaches an internal
@@ -408,6 +447,31 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`realtime-backplane-plugin` — a Redis publish on a failed connection is reported, not lost.** A
+  connection that stays open while the server answers nothing — a paused or partitioned host that
+  sends no reset — triggers no ioredis reconnect, so no retry budget applied and `publish()` never
+  settled: the WebSocket and SSE consumers never logged the dropped frame, the promises accumulated,
+  and an observed publish (M98l) was never recorded. Measured against a paused real Redis 7: still
+  pending after 20 s. The two connections the lazy path builds now carry an ioredis
+  `commandTimeout`, from the new `RedisBackplaneOptions.commandTimeoutMs` (default
+  `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`, 15 s; `0` disables; a value outside `0`–`2147483647` throws
+  `RangeError` at construction, since a longer delay overflows the runtime timer to 1 ms and every
+  command then times out at once). The default sits above ioredis's ~11 s retry budget, so a dropped
+  connection still buffers and rejects as documented. An injected `client`/`subscriber` pair is
+  unaffected and keeps its own timeout. `IRedisModule.create` gains an optional second `options`
+  argument carrying it; existing callers and modules still type-check. **Behaviour change:**
+  `RedisBackplane.publish()` before `connect()` or after `close()` now REJECTS ("the redis transport
+  is not connected") instead of resolving without sending, so a frame sent nowhere reads as a
+  failure — it previously counted as a successful publication when observed. **`close()` during an
+  outage now releases both connections.** It stopped at the first rejected step — an UNSUBSCRIBE or
+  QUIT that timed out — so both connections kept reconnecting after the application stopped;
+  measured against a real Redis, both reconnected (`ready`) once the server returned. Every step now
+  runs, and a connection whose QUIT fails is force-closed through the new optional
+  `IRedisBackplaneClient.disconnect?()` — which is what stops reconnection while the server is
+  unreachable, since ioredis discards a QUIT that never reached it and would otherwise reconnect and
+  re-subscribe once the server returns — and the first failure is still rethrown after everything is
+  released. Against a silent server `close()` can take up to about three command timeouts (≈45 s at
+  the default) — lower `commandTimeoutMs` if that exceeds a shutdown grace period.
 - **`cli` — `setu new --template full-stack` now demonstrates React Router route middleware, and
   explains both middleware layers.** A generated full-stack project has two: kernel middleware
   (`setu generate middleware`), which runs for every request, and React Router's route `middleware`

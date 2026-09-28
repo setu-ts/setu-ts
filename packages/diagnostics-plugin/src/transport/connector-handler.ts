@@ -26,6 +26,7 @@ import type {
   IDiagnosticsSource,
   IEventDiagnosticsSource,
   IHealthDiagnosticsSource,
+  IRealtimeDiagnosticsSource,
   IRequest,
   IResponse,
   ITraceDiagnosticsSource,
@@ -39,6 +40,10 @@ import type { ConnectorLimits, LimitsClock } from './limits.ts';
 import type { IQueueMerger } from './queue-merger.ts';
 import { isQueueBatchProjection, projectQueueBatch } from '../protocol/queue-protocol.ts';
 import { buildCacheResponse, isCacheResponseProjection } from '../protocol/cache-protocol.ts';
+import {
+  buildRealtimeResponse,
+  isRealtimeResponseProjection,
+} from '../protocol/realtime-protocol.ts';
 import {
   collectionFailedEventSnapshot,
   isEventResponseProjection,
@@ -258,6 +263,15 @@ export interface ConnectorHandlerDeps {
    * option but without RBAC answers `unsupported`.
    */
   readonly authorization: IAuthorizationDiagnosticsSource | null;
+  /**
+   * The realtime-diagnostics sources (M98l), read ONCE at bootstrap from
+   * `CAPABILITIES.REALTIME_DIAGNOSTICS` (a MULTI token) after every plugin
+   * has registered. At most 16 (more refuses startup); an empty list answers
+   * a typed `unsupported` response for `GET /v1/realtime`. A read calls only
+   * each source's synchronous `snapshot()` — never a send, close, publish or
+   * room/channel lookup.
+   */
+  readonly realtimeSources: readonly IRealtimeDiagnosticsSource[];
 }
 
 /**
@@ -1124,6 +1138,18 @@ export function createConnectorHandler(
         // the session's bound one.
         const candidate = buildCacheResponse(parsed.instance as string, deps.cacheSources);
         if (!isCacheResponseProjection(candidate)) {
+          return refusalResponse('unavailable');
+        }
+        projected = candidate;
+      } else if (target.op === 'realtime') {
+        // The realtime operation (M98l). Every session and request check
+        // above ran before any source is read — and so before any gauge
+        // reader runs. Each source read is isolated, and the wire validator —
+        // the SAME one the client runs — checks the built response before
+        // anything is signed. The cross-instance check above already proved
+        // the presented (non-null) instance IS the session's bound one.
+        const candidate = buildRealtimeResponse(parsed.instance as string, deps.realtimeSources);
+        if (!isRealtimeResponseProjection(candidate)) {
           return refusalResponse('unavailable');
         }
         projected = candidate;

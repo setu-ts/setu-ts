@@ -22,6 +22,7 @@ import type {
   EventDiagnosticsResponse,
   HealthDiagnosticsSnapshot,
   QueueDiagnosticsBatch,
+  RealtimeDiagnosticsResponse,
   TraceDiagnosticsBatch,
 } from '@setu-ts/common';
 
@@ -48,6 +49,7 @@ import {
   isSnapshotProjection,
   parseStatusBody,
   QUEUES_PATH,
+  REALTIME_TARGET,
   SNAPSHOT_TARGET,
   STATUS_TARGET,
   TRACES_PATH,
@@ -55,6 +57,7 @@ import {
 import { isEventResponseProjection } from '../protocol/event-protocol.ts';
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
 import { isCacheResponseProjection } from '../protocol/cache-protocol.ts';
+import { isRealtimeResponseProjection } from '../protocol/realtime-protocol.ts';
 import { isTraceBatchProjection } from '../protocol/trace-protocol.ts';
 import { isAuthorizationBatchProjection } from '../protocol/authorization-protocol.ts';
 
@@ -594,6 +597,39 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // The same exact validator the connector ran before signing, plus
         // the body's own instance binding.
         if (!isCacheResponseProjection(parsed) || parsed.instanceId !== bound) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return deepFreeze(parsed);
+      });
+    },
+
+    async realtime(): Promise<RealtimeDiagnosticsResponse> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the realtime inspector — a
+        // legacy or pre-M98l server — answers a local typed `unsupported`
+        // response and sends no request.
+        if (inspectors !== null && inspectors.realtime === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            sources: [],
+          });
+        }
+        const result = await exchange(REALTIME_TARGET);
+        const parsed = parseBody(result.bodyText);
+        // The same exact validator the connector ran before signing, plus
+        // the body's own instance binding.
+        if (!isRealtimeResponseProjection(parsed) || parsed.instanceId !== bound) {
           throw new Error(CLIENT_ERRORS.connection);
         }
         return deepFreeze(parsed);

@@ -7,6 +7,15 @@
 
 import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 import type { IRedisBackplaneClient, RedisBackplaneOptions } from '../interfaces/index.ts';
+import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../interfaces/index.ts';
+
+/**
+ * The largest timer delay the runtimes honour (2^31 - 1 ms). A longer
+ * `commandTimeout` does not mean "wait longer": the timer overflows and is set
+ * to 1 ms, so every command would time out almost at once.
+ */
+const MAX_REDIS_COMMAND_TIMEOUT_MS = 2_147_483_647;
+import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { dispatchFrame } from './dispatch.ts';
 import { isRealtimeFrame } from './messaging-backplane.ts';
 import { loadRedisModule } from './redis-module.ts';
@@ -34,6 +43,8 @@ export class RedisBackplane implements IRealtimeBackplane {
   readonly origin: string;
   readonly #topic: string;
   readonly #options: RedisBackplaneOptions;
+  /** The resolved per-command timeout; `0` means unbounded. */
+  readonly #commandTimeoutMs: number;
   readonly #handlers = new Set<RealtimeFrameHandler>();
   /** Errors thrown by subscribers during delivery, oldest first. */
   readonly #handlerErrors: Error[] = [];
@@ -72,6 +83,8 @@ export class RedisBackplane implements IRealtimeBackplane {
    * @param topic - The Redis channel every instance shares
    * @throws {Error} When exactly one of `client` and `subscriber` is injected,
    * or when neither those nor a `url` is configured
+   * @throws {RangeError} When `commandTimeoutMs` is not a number from `0` to
+   * `2147483647` (the largest timer delay; beyond it the timer overflows to 1 ms)
    */
   constructor(options: RedisBackplaneOptions, origin: string, topic: string) {
     const hasClient = options.client !== undefined;
@@ -91,7 +104,23 @@ export class RedisBackplane implements IRealtimeBackplane {
       );
     }
 
+    const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_REDIS_COMMAND_TIMEOUT_MS;
+    // `NaN` (what `Number(env.X)` yields for an unset variable) would otherwise
+    // reach ioredis and silently disable the bound this option exists for.
+    if (
+      typeof commandTimeoutMs !== 'number' || !Number.isFinite(commandTimeoutMs) ||
+      commandTimeoutMs < 0 || commandTimeoutMs > MAX_REDIS_COMMAND_TIMEOUT_MS
+    ) {
+      // Fixed and value-free: the refused value is never echoed (it may be a
+      // mis-assigned secret) and never converted, so no caller code runs here.
+      throw new RangeError(
+        'realtime-backplane: options.commandTimeoutMs must be a number from 0 to ' +
+          `${MAX_REDIS_COMMAND_TIMEOUT_MS} (0 disables the bound)`,
+      );
+    }
+
     this.#options = options;
+    this.#commandTimeoutMs = commandTimeoutMs;
     this.origin = origin;
     this.#topic = topic;
   }
@@ -155,9 +184,12 @@ export class RedisBackplane implements IRealtimeBackplane {
       const module = this.#options.module ?? await loadRedisModule();
       const url = this.#options.url as string;
       owned = true;
-      publisher = module.create(url);
+      const clientOptions = this.#commandTimeoutMs === 0
+        ? {}
+        : { commandTimeout: this.#commandTimeoutMs };
+      publisher = module.create(url, clientOptions);
       try {
-        subscriber = module.create(url);
+        subscriber = module.create(url, clientOptions);
       } catch (error) {
         // The publisher is already live and no field references it yet, so this
         // is the only chance to close it.
@@ -260,25 +292,52 @@ export class RedisBackplane implements IRealtimeBackplane {
   }
 
   /**
-   * Quits connections abandoned by a failed open.
+   * Closes connections abandoned by a failed or superseded open, through the
+   * same QUIT-then-`disconnect()` path as {@linkcode close}: a SUBSCRIBE that
+   * timed out is usually followed by a QUIT that fails the same way, and
+   * without the fallback those connections would keep reconnecting after
+   * `connect()` had rejected.
    *
    * @param clients - The connections to close
    */
   async #discard(clients: readonly IRedisBackplaneClient[]): Promise<void> {
+    // Best-effort: the open's own failure is what the caller needs to see, so
+    // rollback failures are collected and dropped rather than rethrown.
+    const ignored: unknown[] = [];
     for (const client of clients) {
-      try {
-        await client.quit();
-      } catch {
-        // Best-effort: the open's own failure is what the caller needs to see,
-        // so a rollback quit must not mask it.
-        continue;
-      }
+      await this.#release(client, ignored);
     }
   }
 
-  async publish(frame: RealtimeFrame): Promise<void> {
+  publish(frame: RealtimeFrame): Promise<void> {
+    // M98l: counted as `backplane-publish` when observed. Completion means
+    // `publish()` resolved, never that a peer received the frame.
+    const observer = realtimeObserverOf(this);
+    return observer === undefined
+      ? this.#publish(frame)
+      : observer.observePublish(() => this.#publish(frame));
+  }
+
+  /**
+   * The publication itself, always on the publishing connection.
+   *
+   * Rejects when there is no connection — before `connect()` or after
+   * `close()` — rather than resolving: a publish that reached nothing is a
+   * failure the WebSocket and SSE consumers log and an observed publish
+   * records, never a success.
+   *
+   * @throws {Error} When the transport is not connected
+   */
+  async #publish(frame: RealtimeFrame): Promise<void> {
+    const publisher = this.#publisher;
+    if (publisher === undefined) {
+      throw new Error(
+        'realtime-backplane: the redis transport is not connected (publish before ' +
+          'connect() or after close()); the frame was not sent',
+      );
+    }
     // Always the publisher: the subscriber connection would reject this.
-    await this.#publisher?.publish(this.#topic, JSON.stringify(frame));
+    await publisher.publish(this.#topic, JSON.stringify(frame));
   }
 
   subscribe(handler: RealtimeFrameHandler): Promise<() => void> {
@@ -288,6 +347,14 @@ export class RedisBackplane implements IRealtimeBackplane {
     });
   }
 
+  /**
+   * Leaves the topic and closes both connections. Every step is attempted even
+   * when an earlier one fails; a connection whose QUIT fails is force-closed
+   * through `disconnect()` when the client has one.
+   *
+   * @throws The first failure among UNSUBSCRIBE, QUIT and `disconnect()`,
+   * after every connection has been released
+   */
   async close(): Promise<void> {
     // Invalidate any open still in flight before reading the fields below: it
     // has not published its connections yet, so this is what tells it to retire
@@ -306,15 +373,55 @@ export class RedisBackplane implements IRealtimeBackplane {
     // A closed backplane has no live connections to probe; report unknown.
     delete this.isHealthy;
 
+    // Every step runs even when an earlier one fails. During an outage the
+    // UNSUBSCRIBE and QUIT commands reject (the command timeout, or ioredis's
+    // retry budget), and stopping at the first rejection left BOTH
+    // connections reconnecting forever after the application had stopped.
+    // The first failure is still reported, once everything is released.
+    const failures: unknown[] = [];
     if (subscriber !== undefined) {
       if (listener !== undefined) {
         subscriber.off('message', listener);
       }
-      await subscriber.unsubscribe(this.#topic);
-      await subscriber.quit();
+      try {
+        await subscriber.unsubscribe(this.#topic);
+      } catch (error) {
+        failures.push(error);
+      }
+      await this.#release(subscriber, failures);
     }
     if (publisher !== undefined && publisher !== subscriber) {
-      await publisher.quit();
+      await this.#release(publisher, failures);
+    }
+    if (failures.length > 0) {
+      throw failures[0];
+    }
+  }
+
+  /**
+   * Closes one connection: a graceful QUIT, and when that fails, a forced
+   * `disconnect()`. The fallback is load-bearing: with `ioredis` a QUIT marks
+   * the client as closing only when it is written to a live socket, so while
+   * the server is unreachable the QUIT sits in the offline queue, is discarded
+   * with it, and the client reconnects and re-subscribes once the server
+   * returns (measured after a 25 s outage). Against a silent but connected
+   * server, `disconnect()` also closes the socket at once rather than leaving
+   * it open until the server answers. A client without `disconnect` is left
+   * as QUIT left it.
+   *
+   * @param client - The connection to close
+   * @param failures - Collects the QUIT failure, if any
+   */
+  async #release(client: IRedisBackplaneClient, failures: unknown[]): Promise<void> {
+    try {
+      await client.quit();
+    } catch (error) {
+      failures.push(error);
+      try {
+        client.disconnect?.();
+      } catch (disconnectError) {
+        failures.push(disconnectError);
+      }
     }
   }
 
@@ -340,8 +447,10 @@ export class RedisBackplane implements IRealtimeBackplane {
     // Isolated per handler: this runs inside ioredis's `message` listener,
     // where a throw would be unhandled, and the WebSocket and SSE plugins share
     // this subscription so one must not starve the other.
-    dispatchFrame(this.#handlers, parsed, (error) => {
+    const delivered = dispatchFrame(this.#handlers, parsed, (error) => {
       this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
     });
+    // M98l: counted only after the parse, shape and own-origin filters.
+    realtimeObserverOf(this)?.observe('backplane-receive', delivered);
   }
 }

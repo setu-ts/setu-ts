@@ -62,6 +62,10 @@ export type {
   WebSocketRouteEntry,
 } from './interfaces/index.ts';
 
+// The M98l `diagnostics` option type — declared once in common and shared
+// with the SSE and realtime-backplane plugins.
+export type { RealtimeDiagnosticsOptions } from '@setu-ts/common';
+
 // Re-export the common WebSocket contracts for convenience.
 export type {
   IWebSocketConnection,

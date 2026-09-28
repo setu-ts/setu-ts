@@ -36,6 +36,7 @@ verified.
 | `GET /v1/traces?after=N&limit=N`        | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 | `GET /v1/authorization?after=N&limit=N` | M98h's authorization-decision-explanation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 | `GET /v1/event`                         | M98j's aggregated event-dispatch observation snapshot (below); a SNAPSHOT operation — no query is admitted, exactly like `/v1/health` and `/v1/config`                           |
+| `GET /v1/realtime`                      | M98l's realtime lifecycle observations across every WebSocket, SSE and backplane source (below); a SNAPSHOT operation — no query is admitted                                     |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
 duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
@@ -165,12 +166,13 @@ design security review, R7).
 
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
-`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g)
-and `cache: true` (M98i), `authorization: true` (M98h) and `events: true` (M98j), and leaves the
-rest (`scheduler`, `realtime`, `storage`, `outboundHttp`) reserved and `false`. A client that reads
-a legacy M98b three-field status body (no `inspectors`) resolves the manifest to all-`false`, so its
-`health()`, `configuration()`, `queues()`, `traces()`, `cache()`, `authorization()` and `events()`
-answer a typed `unsupported` without sending the request.
+`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g),
+`cache: true` (M98i), `authorization: true` (M98h), `events: true` (M98j) and `realtime: true`
+(M98l), and leaves the rest (`scheduler`, `storage`, `outboundHttp`) reserved and `false`. A client
+that reads a legacy M98b three-field status body (no `inspectors`) resolves the manifest to
+all-`false`, so its `health()`, `configuration()`, `queues()`, `traces()`, `cache()`,
+`authorization()`, `events()` and `realtime()` answer a typed `unsupported` without sending the
+request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -516,6 +518,75 @@ report the same alias or when the body would exceed the 256 KiB budget. `sourceI
 `ready` beats everything, then `collection-failed`, `stale`, `no-data`, `disabled`. A client whose
 negotiated manifest has `events: false` answers a frozen `unsupported` response without sending the
 request.
+
+## Realtime lifecycle observations (M98l)
+
+`GET /v1/realtime` serves aggregate lifecycle counters and current-state gauges from every source
+registered under the multi token `CAPABILITIES.REALTIME_DIAGNOSTICS` — one per WebSocket, SSE and
+realtime-backplane plugin (more than 16 refuses connector startup with a fixed configuration error).
+It is a SNAPSHOT operation with no query:
+
+```json
+{
+  "version": 1,
+  "instanceId": "<bound instance UUID>",
+  "state": "ready",
+  "sources": [
+    {
+      "sourceId": "s1",
+      "snapshot": {
+        "state": "ready",
+        "alias": "dev-chat",
+        "sourceKind": "websocket",
+        "coverage": "owned-instance",
+        "gauges": { "state": "available", "openConnections": 3, "groups": 1 },
+        "records": [
+          {
+            "alias": "dev-chat",
+            "operation": "send",
+            "count": 42,
+            "lastDurationMs": null,
+            "ageMs": 120,
+            "succeeded": 41,
+            "failed": 1,
+            "backpressureCloses": null
+          }
+        ],
+        "dropped": 0
+      }
+    }
+  ]
+}
+```
+
+`sourceKind` is fixed when the source is built: `websocket` and `sse` count `open`, `close` and
+`send`; `backplane` counts `backplane-publish` and `backplane-receive`. `unknown` appears only in
+the connector's own value-free snapshot for a source that threw or failed validation (`alias: null`,
+collection-failed gauges, no records); no source may claim it. The gauges are current state, read
+fresh from the plugin's OWN service (`connectionCount` and `roomCount`/`channelCount`) on every read
+of an enabled websocket or sse source — never from the registry, so a replacement provider is never
+read — and they never expire: such a source is `ready` whenever its gauges were read, even when
+every record has aged out. A backplane has no gauges (`state: 'unsupported'`, both values `null`)
+and takes its state from record age: `no-data`, then `ready`, then `stale` after 30 seconds.
+`disabled` gauges mean the reader was not called; `collection-failed` gauges mean the read failed
+(or the source is latched after an earlier failure). Both carry `null` values.
+
+`backpressureCloses` is a number only on an `sse` `close` record — the closes the 1 MiB backlog
+guard caused, a subset of `failed`, `0` when none happened — and `null` everywhere else, so a
+measured zero is distinguishable from "not supported". `lastDurationMs` is a number only on
+`backplane-publish`, the one operation that settles asynchronously. A publication's success means
+the transport's `publish()` resolved, never that a peer received it; a receive is counted only after
+the transport's own frame-shape and own-origin filters admitted the frame. Both the connector and
+the client reject a response that pairs a kind with an operation, gauge state or backpressure field
+outside these rules.
+
+No frame, message, comment, close code or reason, connection id, room or channel name, header, query
+string, principal, `Last-Event-ID` or backplane origin ever enters a record. A record expires 60
+seconds after its last observation. Duplicate non-null aliases and an over-budget body collapse the
+whole response to `collection-failed` with no sources; the aggregate `state` follows the shared
+priority (`ready`, `collection-failed`, `stale`, `no-data`, `disabled`; `unsupported` with no
+source). A client whose negotiated manifest has `realtime: false` answers a frozen `unsupported`
+response without sending the request.
 
 ## Bounds (fixed, not configurable)
 

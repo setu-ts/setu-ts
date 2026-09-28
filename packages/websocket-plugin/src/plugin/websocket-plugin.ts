@@ -13,10 +13,21 @@ import type {
   IPlugin,
   IPluginContext,
   IRealtimeBackplane,
+  IRealtimeDiagnosticsSource,
   IWebSocketService,
   RegistryFactory,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY, resolveRegistryEntry } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  compileRealtimeDiagnosticsAlias,
+  createRealtimeObservationCollector,
+  PLUGIN_PRIORITY,
+  resolveRegistryEntry,
+} from '@setu-ts/common';
+import {
+  attachRealtimeObserver,
+  detachRealtimeObserver,
+} from '../diagnostics/realtime-observations.ts';
 import type {
   WebSocketPluginOptions,
   WebSocketRouteDefinition,
@@ -62,6 +73,10 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
   // Resolved eagerly so a contradictory configuration fails at construction,
   // not at the first upgrade.
   const resolved = resolveOptions(options);
+  // M98l: validated here too, before any application exists.
+  const diagnosticsAlias = options?.diagnostics === undefined
+    ? null
+    : compileRealtimeDiagnosticsAlias(options.diagnostics);
 
   // The registration arms are split ONCE, here at plugin construction, so
   // `register` and the `onInit` hook each read a single list (the M70d arm
@@ -139,6 +154,27 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
       );
       ctx.services.register<IWebSocketService>(CAPABILITIES.WEBSOCKET, service);
 
+      // M98l: every instance contributes one realtime source as a MULTI
+      // provider (never claimed in `provides`, so the SSE and backplane
+      // plugins' sources never collide). It describes THIS service only — a
+      // later replacement of the websocket token is outside its coverage, and
+      // the gauge reader closes over this instance rather than resolving the
+      // token. Opted out, the collector is inert and nothing is attached.
+      const collector = createRealtimeObservationCollector({
+        kind: 'websocket',
+        alias: diagnosticsAlias,
+        clock: () => ctx.runtime.hrtime(),
+        gauges: () => ({ openConnections: service.connectionCount, groups: service.roomCount }),
+      });
+      if (collector.enabled) {
+        attachRealtimeObserver(service, collector);
+      }
+      ctx.services.register<IRealtimeDiagnosticsSource>(
+        CAPABILITIES.REALTIME_DIAGNOSTICS,
+        collector.source,
+        { multi: true },
+      );
+
       // Declared route INSTANCES register now, exactly as an imperative
       // `route()` call made before this arm existed.
       for (const definition of routeInstances) {
@@ -176,6 +212,10 @@ export function WebSocketPlugin(options?: WebSocketPluginOptions): IPlugin {
         // shutdown cannot reach a half-torn-down service. The backplane's own
         // transport is closed by the plugin that owns it.
         unsubscribe?.();
+        // M98l: detached first, so the shutdown's own closes are not
+        // observed, then closed — which also releases the gauge reader.
+        detachRealtimeObserver(service);
+        collector.close();
         service.closeAll();
       });
 

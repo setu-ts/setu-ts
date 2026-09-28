@@ -2696,6 +2696,23 @@ connector reads every source at bootstrap (more than 16 refuses startup; `s<N>` 
 over-budget body collapses to `collection-failed`), isolates a failing source as
 `collection-failed`, and answers duplicate aliases with a fixed no-source response.
 
+Realtime observations (M98l) apply the pattern to three packages at once — the WebSocket, SSE and
+realtime-backplane plugins — which is what put their collector in `@setu-ts/common`: the three need
+the identical collector and none may import another (the M47 frame-codec precedent), so
+`createRealtimeObservationCollector` exists once instead of three times. Each plugin attaches it to
+its own component through a package-private WeakMap and registers only its frozen, snapshot-only
+`source` facade — registering the collector would hand every registry reader its `observe` and
+`close`. Capture sits where the outcome is already known: a WebSocket send at
+`WebSocketConnection.send` (so a room broadcast or heartbeat is counted once, at the connection), an
+SSE send at the connection's one enqueue path with its backlog guard reported as a fixed
+`backpressure` category, a backplane publish around each transport's `publish()`, and a receive
+after the transport's own shape and origin filters. Only fixed operations and booleans cross the
+seam. The one structural addition is the gauge: current connection and group counts are not
+operation records and must not expire with them, so each websocket and sse source captures a reader
+over its OWN service's size getters at registration and calls it only inside an authenticated read.
+Nothing resolves the capability on a read, so a replacement provider is never invoked, and `close`
+releases the reader.
+
 ---
 
 ## 15. Performance Philosophy

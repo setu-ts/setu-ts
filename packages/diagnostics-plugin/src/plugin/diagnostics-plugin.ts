@@ -23,6 +23,7 @@ import type {
   ILocalDiagnosticsListenerFactory,
   IPluginContext,
   IQueueDiagnosticsSource,
+  IRealtimeDiagnosticsSource,
   ITraceDiagnosticsSource,
   TimerHandle,
 } from '@setu-ts/common';
@@ -35,6 +36,7 @@ import { ConnectorLimits } from '../transport/limits.ts';
 import { QueueObservationMerger } from '../transport/queue-merger.ts';
 import { MAX_CACHE_SOURCES } from '../protocol/cache-protocol.ts';
 import { MAX_EVENT_SOURCES } from '../protocol/event-protocol.ts';
+import { MAX_REALTIME_SOURCES } from '../protocol/realtime-protocol.ts';
 
 /**
  * The default session lifetime: 15 minutes.
@@ -64,6 +66,9 @@ export const PLUGIN_ERRORS = {
   invalidTtl: 'DiagnosticsPlugin: ttlMs must be an integer from 1 to 3600000.',
   tooManyEventSources:
     'DiagnosticsPlugin: more than 16 event-diagnostics sources are registered; ' +
+    'the connector reads at most 16.',
+  tooManyRealtimeSources:
+    'DiagnosticsPlugin: more than 16 realtime-diagnostics sources are registered; ' +
     'the connector reads at most 16.',
   tooManyCacheSources:
     'DiagnosticsPlugin: more than 16 cache-diagnostics sources are registered; ' +
@@ -305,6 +310,19 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           session = null;
           throw new Error(PLUGIN_ERRORS.tooManyEventSources);
         }
+        // The realtime-diagnostics sources (M98l), read ONCE here for the
+        // same reason: the WebSocket, SSE and realtime-backplane plugins each
+        // contribute one, possibly after this plugin registered. Collected
+        // only — no snapshot, and so no gauge read, before an authenticated
+        // request. More than 16 refuses by a fixed, value-free error.
+        const realtimeSources = ctx.services.has(CAPABILITIES.REALTIME_DIAGNOSTICS)
+          ? ctx.services.getAll<IRealtimeDiagnosticsSource>(CAPABILITIES.REALTIME_DIAGNOSTICS)
+          : [];
+        if (realtimeSources.length > MAX_REALTIME_SOURCES) {
+          active.revoke();
+          session = null;
+          throw new Error(PLUGIN_ERRORS.tooManyRealtimeSources);
+        }
         const handler = createConnectorHandler({
           port: options.port,
           subtle: ctx.runtime.subtle,
@@ -319,6 +337,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           traces: traceSource,
           eventSources,
           authorization: authorizationSource,
+          realtimeSources,
         });
         // The devtool's own startup line. Without it the runtime prints a
         // bare `Listening on http://127.0.0.1:<port>/`, which in an

@@ -11176,29 +11176,32 @@ plan: `plans/archive/milestone-98j-event-observations.md`.
 
 ### Milestone 98l: Realtime Lifecycle Observations
 
-**Status:** Planned. Owner: `packages/websocket-plugin`; SSE and realtime-backplane are explicit
-co-owners. Canonical plan: `plans/milestone-98l-realtime-observations.md`.
+**Status:** Complete. The design security review (plan §10.1) was approved by the maintainer on
+2026-09-28; the committed-tree security audit passed on round 5 (`bec04876`, plan §12). Owner:
+`packages/websocket-plugin`; SSE and realtime-backplane are explicit co-owners. The one collector
+the three share lives in `@setu-ts/common` (maintainer decision, plan §3.1). Canonical plan:
+`plans/archive/milestone-98l-realtime-observations.md`.
 
-- [ ] Each WebSocket/SSE plugin owns a separate source. Capture open/close and local send/enqueue
+- [x] Each WebSocket/SSE plugin owns a separate source. Capture open/close and local send/enqueue
       outcomes at the existing connection code. Read only existing aggregate connection/group
       counts. SSE backlog closes get a fixed backpressure category; websocket native pressure is
       unsupported in this milestone. Backplane sources count publish and receive callbacks without
       inspecting frame fields. Do not enumerate memberships, call room/channel to inspect them, or
       add a network subscription. Transport publish completion is not remote delivery. Count sends
       at the connection boundary only, not again at room broadcast.
-- [ ] Include an explicit websocket/sse/backplane source kind; reserve unknown for synthetic failed
+- [x] Include an explicit websocket/sse/backplane source kind; reserve unknown for synthetic failed
       reads. Backpressure counts are numeric only for SSE close records, null elsewhere.
-- [ ] Keep current connection/group gauges outside expiring operation records. Authenticated reads
+- [x] Keep current connection/group gauges outside expiring operation records. Authenticated reads
       use only the owned framework service's size getters, without creating groups or enumerating
       memberships. Idle connections and group-only changes remain visible; disabled/closed sources
       return explicitly unavailable gauges without invoking the reader.
-- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+- [x] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
       reader and native client method; activate only the reserved `realtime` manifest entry.
-- [ ] Exclude frames, messages, headers, query strings, principals, connection IDs, group names,
+- [x] Exclude frames, messages, headers, query strings, principals, connection IDs, group names,
       close reason text, backplane origin before buffering.
-- [ ] Aggregate local outcomes. No delivery guarantee, message inspection, native websocket backlog
+- [x] Aggregate local outcomes. No delivery guarantee, message inspection, native websocket backlog
       measurement or per-user presence.
-- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+- [x] Pass recorded pre-implementation design review and committed-tree implementation security
       audit. Exercise SSE overflow, client abort, websocket normal/error close, heartbeat, broadcast
       exceptions, backplane rejection and own-origin filtering. Assert identical sends, disconnect
       timing, membership and transport calls. Test opaque source aliases, unsupported versus
@@ -12245,7 +12248,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
 | 98j       | ✅     | events-plugin + common + diagnostics-plugin — event dispatch observations ([#375](https://github.com/setu-ts/setu-ts/pull/375); security audit history in the plan §12)      |
 | 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |
-| 98l       | ⬜     | realtime lifecycle observations — design security review and implementation audit required                                                                                   |
+| 98l       | ✅     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations                                                                         |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                    |
 | 98n       | ⬜     | outbound http attempt observations — design security review and implementation audit required                                                                                |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High, plus the 99e maintainer report)                                                                                   |

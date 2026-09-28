@@ -22,6 +22,10 @@ import type {
 import type { SsePluginOptions } from '../interfaces/index.ts';
 import { SseConnection } from '../connection/sse-connection.ts';
 import { ChannelRegistry } from '../channels/channel-registry.ts';
+import {
+  attachRealtimeObserver,
+  realtimeObserverOf,
+} from '../diagnostics/realtime-observations.ts';
 
 /**
  * Implements {@linkcode IService}.
@@ -130,15 +134,30 @@ export class SseService implements IService {
     // prohibits the I/O a transport's `connect()` performs.
     this.#openBackplane();
 
-    const conn = new SseConnection(
-      ctx,
-      this.#runtime,
-      this.#heartbeatMs,
-      this.#retryMs,
-      () => this.#onClosed(conn),
-    );
+    // M98l: an open is counted once the connection is registered; a
+    // constructor that throws is counted as a failed open and rethrown
+    // unchanged. The connection is attached after construction, so the
+    // initial `retry:` frame it writes while constructing is not counted.
+    const observer = realtimeObserverOf(this);
+    let conn: SseConnection;
+    try {
+      conn = new SseConnection(
+        ctx,
+        this.#runtime,
+        this.#heartbeatMs,
+        this.#retryMs,
+        () => this.#onClosed(conn),
+      );
+    } catch (error) {
+      observer?.observe('open', false);
+      throw error;
+    }
 
     this.#connections.add(conn);
+    if (observer !== undefined) {
+      attachRealtimeObserver(conn, observer);
+      observer.observe('open', true);
+    }
     return conn;
   }
 

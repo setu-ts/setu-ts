@@ -30,6 +30,10 @@ export { SseConnection } from './connection/sse-connection.ts';
 export type { SsePluginOptions } from './interfaces/index.ts';
 export type { ChannelPublisher } from './channels/channel-registry.ts';
 
+// The M98l `diagnostics` option type — declared once in common and shared
+// with the WebSocket and realtime-backplane plugins.
+export type { RealtimeDiagnosticsOptions } from '@setu-ts/common';
+
 // Re-export common SSE contracts for convenience.
 export type { ISseConnection, ISseService, SseChannel, SseMessage } from '@setu-ts/common';
 export { CAPABILITIES } from '@setu-ts/common';

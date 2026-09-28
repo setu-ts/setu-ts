@@ -7,6 +7,7 @@
 
 import type {
   IIngressBehavior,
+  RealtimeDiagnosticsOptions,
   RegistryFactory,
   WebSocketHandlers,
   WebSocketRouteOptions,
@@ -125,6 +126,21 @@ export interface WebSocketPluginOptions {
    * @since 0.3.0
    */
   readonly behaviors?: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[];
+  /**
+   * Opt-in realtime lifecycle observations for the local diagnostics
+   * connector (M98l). Absent (the default) registers an inert `disabled`
+   * source and observes nothing.
+   *
+   * When set, the plugin counts, under the one approved `alias`, how many
+   * connections opened and closed (and how many of each failed) and how many
+   * frames `send` wrote or refused, and reads the service's current
+   * connection and room counts when a paired devtool asks. No frame, message,
+   * close reason, connection id, room name, header, query or principal is
+   * ever observed. Validated when `WebSocketPlugin(...)` is called.
+   *
+   * @since 0.8.0
+   */
+  readonly diagnostics?: RealtimeDiagnosticsOptions;
 }
 
 /**
