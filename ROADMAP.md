@@ -1,3 +1,20 @@
+- [ ] Export `createObservedFetch({ alias, fetch?, timing? })`. `fetch` is optional (default: the
+      SDK's call-time global fetch) and `timing` is an optional monotonic clock OBJECT called as
+      `timing.now()` (default `createDefaultClientTiming()`), probed once at construction (plan C4).
+      Applications pass the returned `fetch` to `ClientOptions.fetch` or call it directly. Call the
+      wrapped fetch exactly once with the caller's arguments unread and return the identical value
+      or rethrow the identical value. Record elapsed time until response headers or rejection,
+      status class and fixed success/failure only. Never read request URLs, headers, bodies, signals
+      or rejection properties. No monkey-patching global fetch. Retries appear as separate attempts;
+      logical request counts, redirect-hop counts and timeout attribution are explicitly
+      unavailable.
+- [ ] The helper also returns a small registration `plugin` (not an HTTP client plugin) that
+      registers its snapshot-only source under a new multi-provider
+      `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` token, read by `DiagnosticsPlugin` at bootstrap (plan
+      C3; maintainer decision 2026-09-29). The plugin closes the helper through its own
+      `ctx.lifecycle.onClose` — `IApplication` has no `onClose` (plan C5). The documented
+      composition builds the helper only when the factory's `devtool` parameter is present.
+
 # Setu-TS Framework — Plugin-First Architecture Roadmap
 
 ## Design Philosophy

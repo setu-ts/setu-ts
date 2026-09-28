@@ -382,7 +382,7 @@ event-bus API.
 
 Also update PUBLIC_API.md, ARCHITECTURE.md, docs/diagnostics-protocol.md, the SDK and diagnostics
 READMEs (the SDK README carries the compiled §3.2 example), CHANGELOG.md, docs/upgrading.md (the
-`deno.json` pin), docs/releasing.md (the plugin version literal as a bump site), ROADMAP.md (C3–C5)
+`deno.json` pin), docs/releasing.md (the plugin version literal as a bump site), ROADMAP.md (C3–C5 — applied during planning, 2026-09-29)
 and CLAUDE.md. No external dependency is introduced. The SDK's pinned `common` specifier moves with
 the release that publishes the new contracts (the alpha.3 inline-specifier trap: check the SDK's
 inline specifiers too).
