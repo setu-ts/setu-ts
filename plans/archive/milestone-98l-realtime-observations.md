@@ -1,8 +1,8 @@
 # Milestone 98l — Realtime Lifecycle Observations
 
-> **Status:** In implementation on `feat/m98l-realtime-observations`. The design security review is
-> recorded in §10.1 (2026-09-28, before implementation) and awaits the maintainer's approval. The
-> committed-tree security audit passed on round 2 (`adde39f5`, §12).
+> **Status:** Complete. The design security review (§10.1, recorded 2026-09-28 before
+> implementation) was approved by the maintainer on 2026-09-28. The committed-tree security audit
+> passed on round 5 (`bec04876`, §12).
 
 ## 0. Objective & scope
 
@@ -420,8 +420,8 @@ audits; it is not implied by completing this milestone.
 **Recorded 2026-09-28, before implementation.** Checked against the §3 decisions as planned,
 including the two recorded on 2026-09-28 (one collector in `common`, §3.1; per-operation meaning,
 §3.6). It was written by the context that is implementing the milestone, at the maintainer's
-direction. It is not the committed-tree audit, which must still run in a fresh context. **Awaiting
-the maintainer's approval.**
+direction. It is not the committed-tree audit, which ran in fresh contexts (§12). **Approved by the
+maintainer on 2026-09-28.**
 
 **Purpose it serves.** M98 lets a developer inspect a running application on their own machine
 without the devtool gaining access to live services, application data, credentials or any mutation
@@ -631,3 +631,34 @@ a longer delay overflows the timer to 1 ms), and a publish with no connection re
 afterwards. Negative controls, both observed failing and restored: with the timeout not forwarded to
 the constructor the paused case reports "still pending after 6000 ms"; with the no-connection
 publish restored to a silent return, six unit steps fail.
+
+**Round 3 — `1d133815`, verdict FAILED on one Low**, by a freshly spawned independent agent. Range
+`adde39f5..1d133815` (the live-Redis test, the `commandTimeoutMs` bound and the unconnected-publish
+rejection, and the `close()` rework). 12 drivers; all round-1/2 drivers and 14 negative controls
+reproduced. Record: `.verify-98l/audit3/AUDIT-98l-round3.md`.
+
+| Finding                                                                                                                                                                                                                                                            | Disposition                                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| **F1 (Low)** — the `commandTimeoutMs` RangeError echoed the refused value through `String()`, writing a mis-assigned secret or a CRLF-forged line verbatim and running the value's own `toString` (a throwing one or a revoked Proxy produced a non-`RangeError`). | Fixed in `38641594`: a fixed, value-free message; a unit test verified to fail with the echo restored. |
+
+Observations O1 (the `disconnect()` role, see round 4) and O2 (`close()` can take about three
+command timeouts against a silent server) were documented in the same commit.
+
+**Round 4 — `38641594`, verdict FAILED on one Low**, by a second fresh agent. F1 confirmed fixed
+(probe H4, 109 checks, 14 hostile values, zero conversions; three reverts each failing it and the
+unit test). Record: `.verify-98l/audit4/AUDIT-98l-round4.md`.
+
+| Finding                                                                                                                                                                                                                                                                                            | Disposition                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **F2 (Low)** — the round-3 doc correction said QUIT alone stops ioredis reconnecting. Measured false: a QUIT queued while the server is unreachable is discarded with the offline queue, and without the `disconnect()` fallback the subscriber reconnected and re-subscribed after a 25 s outage. | Fixed in `bec04876` (documentation only): all four sites restore `disconnect()` as the reconnect stop; the README also notes that a timed-out publish may still be sent (round-4 O6). |
+
+**Round 5 — `bec04876`, verdict PASSED**, by a third fresh agent. The range was documentation only.
+F2 confirmed fixed against the ioredis 5.11.1 source and live: probe M after a 25 s outage leaves 0
+connections at HEAD and 1 re-subscribed subscriber with the fallback removed. A new probe (O) drove
+the timed-out-publish note live. All round-1–4 drivers pass (380/380 plus H4 109/109), the package
+suite passes against a live Redis, and every control was observed failing and restored. **No finding
+open.** Record: `.verify-98l/audit5/AUDIT-98l-round5.md`. Its observation O7 (the note's heading
+implied the default was safe, while a paused server at the default also sends a timed-out publish)
+was applied after it in the closeout commit, which touches documentation only; O8 (two sentences
+slightly understate QUIT for an empty offline queue, erring toward keeping the fallback) and O9 (no
+ioredis `'error'` listener, pre-existing, a separate `fix/…` branch) are recorded, not changed.

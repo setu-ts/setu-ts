@@ -11176,11 +11176,11 @@ plan: `plans/archive/milestone-98j-event-observations.md`.
 
 ### Milestone 98l: Realtime Lifecycle Observations
 
-**Status:** Implemented on `feat/m98l-realtime-observations`; the design security review is recorded
-(plan §10.1) and awaits the maintainer's approval; the committed-tree security audit passed on round
-2 (`adde39f5`, plan §12). Owner: `packages/websocket-plugin`; SSE and realtime-backplane are
-explicit co-owners. The one collector the three share lives in `@setu-ts/common` (maintainer
-decision, plan §3.1). Canonical plan: `plans/milestone-98l-realtime-observations.md`.
+**Status:** Complete. The design security review (plan §10.1) was approved by the maintainer on
+2026-09-28; the committed-tree security audit passed on round 5 (`bec04876`, plan §12). Owner:
+`packages/websocket-plugin`; SSE and realtime-backplane are explicit co-owners. The one collector
+the three share lives in `@setu-ts/common` (maintainer decision, plan §3.1). Canonical plan:
+`plans/archive/milestone-98l-realtime-observations.md`.
 
 - [x] Each WebSocket/SSE plugin owns a separate source. Capture open/close and local send/enqueue
       outcomes at the existing connection code. Read only existing aggregate connection/group
@@ -11201,7 +11201,7 @@ decision, plan §3.1). Canonical plan: `plans/milestone-98l-realtime-observation
       close reason text, backplane origin before buffering.
 - [x] Aggregate local outcomes. No delivery guarantee, message inspection, native websocket backlog
       measurement or per-user presence.
-- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+- [x] Pass recorded pre-implementation design review and committed-tree implementation security
       audit. Exercise SSE overflow, client abort, websocket normal/error close, heartbeat, broadcast
       exceptions, backplane rejection and own-origin filtering. Assert identical sends, disconnect
       timing, membership and transport calls. Test opaque source aliases, unsupported versus
@@ -12248,7 +12248,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
 | 98j       | ✅     | events-plugin + common + diagnostics-plugin — event dispatch observations ([#375](https://github.com/setu-ts/setu-ts/pull/375); security audit history in the plan §12)      |
 | 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |
-| 98l       | ⬜     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations; implemented, design review approval and implementation audit pending   |
+| 98l       | ✅     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations                                                                         |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                    |
 | 98n       | ⬜     | outbound http attempt observations — design security review and implementation audit required                                                                                |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High, plus the 99e maintainer report)                                                                                   |

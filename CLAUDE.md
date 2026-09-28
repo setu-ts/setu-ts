@@ -5367,6 +5367,28 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tests. Round 7 was the last at the maintainer's direction; its fixes and the merge with `main`
   (M98h) are verified by tests and gates, and the per-event `begin` token (~50 ns per publish,
   against the design review's no-allocation budget) was accepted — complete (PR #375).
+- **Milestone 98l** (`packages/websocket-plugin` + `packages/sse-plugin` +
+  `packages/realtime-backplane-plugin` + `packages/common` + `packages/diagnostics-plugin` —
+  realtime lifecycle observations): each plugin accepts `diagnostics: { enabled: true, alias }` and
+  always registers an `IRealtimeDiagnosticsSource` under the new multi-provider
+  `CAPABILITIES.REALTIME_DIAGNOSTICS` (`disabled` without the option). WebSocket and SSE sources
+  count `open`/`close`/`send` once, at the connection (SSE backlog-guard closes in
+  `backpressureCloses`), and report `openConnections`/`groups` gauges read from the plugin's OWN
+  service on each authenticated read; a backplane source counts `backplane-publish` (the transport
+  resolving, never peer delivery) and `backplane-receive` (after the shape and own-origin filters).
+  No frame, name, payload, id, principal or origin is captured. The one collector lives in `common`,
+  attached through package-private WeakMaps; the connector serves `GET /v1/realtime` and the client
+  gains `realtime()`. Driving the Redis backplane against a live Redis after audit round 2 found a
+  pre-existing (M47) defect the observations made visible: a publish on a paused server (socket
+  open, no reply) never settled, so no consumer logged it and nothing was recorded. The lazily built
+  connections now carry an ioredis `commandTimeout` (`RedisBackplaneOptions.commandTimeoutMs`,
+  default 15 s, above the ~11 s retry budget), a publish before `connect()`/after `close()` rejects
+  instead of resolving (a CHANGELOG'd behaviour change), and code review then fixed `close()`
+  stopping at the first rejected step, which left both connections reconnecting after shutdown.
+  Audit rounds 3 and 4 each failed on one Low — the timeout refusal echoed the refused value, and a
+  doc correction claimed QUIT alone stops ioredis reconnecting, which round 4 measured false after a
+  25 s outage — both fixed; round 5 passed on `bec04876`. The design review was approved by the
+  maintainer — complete (PR pending).
 - **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
   design security review and implementation audit required).
 
