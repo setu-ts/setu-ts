@@ -305,6 +305,7 @@ package fits the plugin architecture.
 | `INotifier`                          | interface |
 | `IOpenApiApi`                        | interface |
 | `IOrmAdapter`                        | interface |
+| `IOutboundHttpDiagnosticsSource`     | interface |
 | `IPipelineBehavior`                  | interface |
 | `IPlugin`                            | interface |
 | `IPluginContext`                     | interface |
@@ -364,6 +365,9 @@ package fits the plugin architecture.
 | `NormalizedQuery`                    | interface |
 | `NotificationMessage`                | interface |
 | `Ok`                                 | interface |
+| `OutboundHttpDiagnosticsRecord`      | interface |
+| `OutboundHttpDiagnosticsResponse`    | interface |
+| `OutboundHttpDiagnosticsSnapshot`    | interface |
 | `PageResult`                         | interface |
 | `PickOptions`                        | interface |
 | `ProbeTiming`                        | interface |
@@ -495,6 +499,7 @@ package fits the plugin architecture.
 | `NextFunction`                       | type      |
 | `Option`                             | type      |
 | `OrderDirection`                     | type      |
+| `OutboundHttpStatusClass`            | type      |
 | `PathPattern`                        | type      |
 | `PluginPriority`                     | type      |
 | `Provider`                           | type      |

@@ -26,6 +26,7 @@ import type {
   IDiagnosticsSource,
   IEventDiagnosticsSource,
   IHealthDiagnosticsSource,
+  IOutboundHttpDiagnosticsSource,
   IRealtimeDiagnosticsSource,
   IRequest,
   IResponse,
@@ -44,6 +45,10 @@ import {
   buildRealtimeResponse,
   isRealtimeResponseProjection,
 } from '../protocol/realtime-protocol.ts';
+import {
+  buildOutboundHttpResponse,
+  isOutboundHttpResponseProjection,
+} from '../protocol/outbound-http-protocol.ts';
 import {
   collectionFailedEventSnapshot,
   isEventResponseProjection,
@@ -272,6 +277,13 @@ export interface ConnectorHandlerDeps {
    * room/channel lookup.
    */
   readonly realtimeSources: readonly IRealtimeDiagnosticsSource[];
+  /**
+   * The outbound HTTP diagnostics sources (M98n), read ONCE at bootstrap from
+   * `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` (a MULTI token). Empty answers a
+   * typed `unsupported` response for `GET /v1/outbound-http`. A read calls
+   * only each source's synchronous `snapshot()` and never performs a request.
+   */
+  readonly outboundHttpSources: readonly IOutboundHttpDiagnosticsSource[];
 }
 
 /**
@@ -1138,6 +1150,19 @@ export function createConnectorHandler(
         // the session's bound one.
         const candidate = buildCacheResponse(parsed.instance as string, deps.cacheSources);
         if (!isCacheResponseProjection(candidate)) {
+          return refusalResponse('unavailable');
+        }
+        projected = candidate;
+      } else if (target.op === 'outbound-http') {
+        // The outbound HTTP operation (M98n). Every session and request check
+        // above ran before any source is read; each read is isolated, and the
+        // wire validator — the SAME one the client runs — checks the built
+        // response before anything is signed.
+        const candidate = buildOutboundHttpResponse(
+          parsed.instance as string,
+          deps.outboundHttpSources,
+        );
+        if (!isOutboundHttpResponseProjection(candidate)) {
           return refusalResponse('unavailable');
         }
         projected = candidate;

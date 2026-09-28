@@ -37,6 +37,7 @@ verified.
 | `GET /v1/authorization?after=N&limit=N` | M98h's authorization-decision-explanation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 | `GET /v1/event`                         | M98j's aggregated event-dispatch observation snapshot (below); a SNAPSHOT operation — no query is admitted, exactly like `/v1/health` and `/v1/config`                           |
 | `GET /v1/realtime`                      | M98l's realtime lifecycle observations across every WebSocket, SSE and backplane source (below); a SNAPSHOT operation — no query is admitted                                     |
+| `GET /v1/outbound-http`                 | M98n's outbound HTTP attempt counters across every observed-fetch helper (below); a SNAPSHOT operation — no query is admitted                                                    |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
 duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
@@ -167,12 +168,12 @@ design security review, R7).
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
 `health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g),
-`cache: true` (M98i), `authorization: true` (M98h), `events: true` (M98j) and `realtime: true`
-(M98l), and leaves the rest (`scheduler`, `storage`, `outboundHttp`) reserved and `false`. A client
-that reads a legacy M98b three-field status body (no `inspectors`) resolves the manifest to
+`cache: true` (M98i), `authorization: true` (M98h), `events: true` (M98j), `realtime: true` (M98l)
+and `outboundHttp: true` (M98n), and leaves the rest (`scheduler`, `storage`) reserved and `false`.
+A client that reads a legacy M98b three-field status body (no `inspectors`) resolves the manifest to
 all-`false`, so its `health()`, `configuration()`, `queues()`, `traces()`, `cache()`,
-`authorization()`, `events()` and `realtime()` answer a typed `unsupported` without sending the
-request.
+`authorization()`, `events()`, `realtime()` and `outboundHttp()` answer a typed `unsupported`
+without sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -587,6 +588,57 @@ whole response to `collection-failed` with no sources; the aggregate `state` fol
 priority (`ready`, `collection-failed`, `stale`, `no-data`, `disabled`; `unsupported` with no
 source). A client whose negotiated manifest has `realtime: false` answers a frozen `unsupported`
 response without sending the request.
+
+## Outbound HTTP attempt observations (M98n)
+
+`GET /v1/outbound-http` serves attempt counters from every source registered under the multi token
+`CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` — one per `createObservedFetch` helper whose `plugin` the
+application registered (more than 16 refuses connector startup with a fixed configuration error). It
+is a SNAPSHOT operation with no query:
+
+```json
+{
+  "version": 1,
+  "instanceId": "<bound instance UUID>",
+  "state": "ready",
+  "sources": [
+    {
+      "sourceId": "s1",
+      "snapshot": {
+        "state": "ready",
+        "alias": "payments-api",
+        "coverage": "owned-instance",
+        "records": [
+          {
+            "alias": "payments-api",
+            "operation": "attempt",
+            "started": 12,
+            "count": 11,
+            "responses": 10,
+            "failures": 1,
+            "lastStatusClass": "2xx",
+            "lastDurationMs": 34,
+            "ageMs": 210
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+A source holds at most one record. `started - count` is the attempts in flight;
+`responses + failures === count` and `count <= started` always hold, and an HTTP error status is a
+response, not a failure. `lastStatusClass` is `null` until a response settles and never a raw status
+number (`other` covers everything outside `200..599`); `lastDurationMs` is the last settled
+attempt's integer time to headers, `null` until one settles. The record expires 60 seconds after its
+last start or settlement — never while an attempt is in flight — and is `stale` after 30 seconds.
+`disabled` (`alias: null`), `no-data` and `collection-failed` carry no record; `ready` and `stale`
+carry exactly one. No URL, host, header, cookie, body, signal or error ever enters a record. The
+connector and the client both refuse any snapshot that breaks these rules; duplicate non-null
+aliases and an over-budget body collapse the whole response to `collection-failed` with no sources.
+A client whose negotiated manifest has `outboundHttp: false` answers a frozen `unsupported` response
+without sending the request.
 
 ## Bounds (fixed, not configurable)
 

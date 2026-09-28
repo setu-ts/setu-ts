@@ -346,6 +346,7 @@ async function harness(cacheSources: readonly ICacheDiagnosticsSource[]) {
     cacheSources,
     eventSources: [],
     realtimeSources: [],
+    outboundHttpSources: [],
   });
   session.bindInstance(TEST_INSTANCE_ID);
   return { handler, key, clock, session };

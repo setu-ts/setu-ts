@@ -96,6 +96,14 @@ export const EVENT_PATH = '/v1/event';
 export const REALTIME_TARGET = '/v1/realtime';
 
 /**
+ * The outbound HTTP attempt observations target (M98n); it carries no query
+ * — a snapshot operation, not a paged one.
+ *
+ * @internal
+ */
+export const OUTBOUND_HTTP_TARGET = '/v1/outbound-http';
+
+/**
  * The queue observations path (M98f); its target carries the same canonical
  * `?after=<N>&limit=<N>` query as the events target.
  *
@@ -151,7 +159,8 @@ export interface ParsedTarget {
     | 'traces'
     | 'authorization'
     | 'event'
-    | 'realtime';
+    | 'realtime'
+    | 'outbound-http';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events and queues); `0` for the other ops. */
@@ -194,6 +203,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === REALTIME_TARGET && search === '') {
     return { op: 'realtime', canonicalTarget: REALTIME_TARGET, after: 0, limit: 0 };
+  }
+  if (path === OUTBOUND_HTTP_TARGET && search === '') {
+    return { op: 'outbound-http', canonicalTarget: OUTBOUND_HTTP_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENTS_PATH) {
     return parsePagedTarget('events', path, search);
@@ -435,7 +447,8 @@ export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number]
 /**
  * The inspector manifest this connector serves: `health` (M98d),
  * `configuration` (M98e), `queues` (M98f), `traces` (M98g), `cache` (M98i),
- * `authorization` (M98h), `events` (M98j) and `realtime` (M98l) are
+ * `authorization` (M98h), `events` (M98j), `realtime` (M98l) and
+ * `outboundHttp` (M98n) are
  * implemented; the rest are reserved and false until their own connector
  * operation ships.
  *
@@ -454,7 +467,7 @@ export function currentInspectorsManifest(): InspectorsManifest {
     scheduler: false,
     realtime: true,
     storage: false,
-    outboundHttp: false,
+    outboundHttp: true,
   };
 }
 

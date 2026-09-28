@@ -137,8 +137,12 @@ Until this is done, publish from a workstation with `JSR_TOKEN` set (see below).
   `compat/package.json` dependencies. Do not leave that follow-up unopened: while the entry stands,
   check 1 keeps passing while the package is covered on Deno and nowhere else, which is the exact
   coverage hole that check exists to catch.
+- **Bump the SDK's `SDK_VERSION` literal** in `packages/sdk/src/http/observed-fetch.ts` (M98n). It
+  is the version the observed-fetch registration plugin reports, written as a literal because the
+  browser-portable SDK does not import its own manifest; `observed-fetch-plugin.test.ts` pins it to
+  `packages/sdk/deno.json`, so a missed bump fails the suite rather than shipping.
 - **Grep the source, not only the manifests.** `packages/sdk` writes its `jsr:` specifier inline in
-  four `src/**` files rather than through an import-map alias, and its manifest maps that exact
+  six `src/**` files rather than through an import-map alias, and its manifest maps that exact
   specifier string to a pinned version — so the range in the source and both sides of the mapping
   must move together. A missed source specifier resolves against the previous release instead of the
   one being cut. Grep for the SPECIFIER, not the bare version:

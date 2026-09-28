@@ -8,6 +8,33 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Outbound HTTP attempt observations (M98n): opt-in, minimized fetch-attempt counters through the
+  diagnostics connector.** `@setu-ts/sdk` exports `createObservedFetch({ alias, fetch?, timing? })`,
+  which returns `{ fetch, plugin }`: pass `fetch` to `ClientOptions.fetch`,
+  `SseClientOptions.fetch`, or call it directly, and register `plugin` in exactly one application.
+  The wrapper calls the wrapped fetch exactly once with the caller's own arguments (never read) and
+  receiver (except the helper object itself, which is forwarded as `undefined` — the platform
+  `fetch` throws `Illegal invocation` on workerd otherwise), returns the identical value or rethrows
+  the identical value — a synchronous throw stays synchronous — and records only that an attempt
+  started, whether it resolved or failed, the response's status class (`2xx`–`5xx`, `other`) and its
+  time to headers. No URL, host, header, cookie, body, signal or error is ever read. `plugin`
+  registers a frozen snapshot-only `IOutboundHttpDiagnosticsSource` under the new multi-provider
+  `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` and closes the helper on shutdown; it refuses a second
+  application and reopens for the same application's retried `start()`. A record never expires while
+  an attempt is in flight, so a hung upstream stays visible as `started - count`. New public surface
+  on `@setu-ts/common`: `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`, `IOutboundHttpDiagnosticsSource`,
+  `OutboundHttpDiagnosticsSnapshot`, `OutboundHttpDiagnosticsRecord`,
+  `OutboundHttpDiagnosticsResponse` and `OutboundHttpStatusClass`; on `@setu-ts/sdk`:
+  `createObservedFetch`, `ObservedFetch`, `ObservedFetchOptions`. New connector surface:
+  `GET /v1/outbound-http` (authenticated like every operation; a snapshot operation with no query;
+  more than 16 sources refuses startup; every counting invariant checked by the connector and the
+  client), the status manifest's `outboundHttp` key now `true`, and
+  `IDiagnosticsClient.outboundHttp()`, which answers a frozen typed `unsupported` response without a
+  request when the negotiated manifest lacks the inspector. **Breaking for implementors:**
+  `outboundHttp()` is a REQUIRED member of `IDiagnosticsClient`. The SDK's `common` imports stay
+  type-only: its collector is a deliberate local copy, and a test checks the module graph. The
+  helper needs `crypto.getRandomValues` (Node ≥ 19).
+
 - **Realtime lifecycle observations (M98l): opt-in, minimized WebSocket, SSE and backplane
   observations through the diagnostics connector.** `WebSocketPlugin`, `SsePlugin` and
   `RealtimeBackplanePlugin` accept a `diagnostics: { enabled: true, alias }` option (the new

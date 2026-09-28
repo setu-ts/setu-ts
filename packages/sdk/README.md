@@ -426,6 +426,51 @@ publish or format it has nowhere to go.
 | Two placeholders in one template deriving onto one argument name | Duplicate parameter in the emitted signature                                                                                                                   |
 | Malformed local `$ref`                                           | No component name to resolve                                                                                                                                   |
 
+## Outbound HTTP observations (devtool)
+
+`createObservedFetch` wraps a fetch so the local diagnostics connector can count its attempts: how
+many started and are in flight, how many resolved or failed, the last response's status class and
+its time to headers. It never reads a URL, header, body, signal or error, and it never changes what
+the wrapped fetch receives or returns. Build it only when the application factory receives its
+devtool composition, so a production entry carries no wrapper at all, and register its `plugin` in
+that one application:
+
+```typescript
+import type { IPlugin } from '@setu-ts/common';
+import type { KernelDiagnosticsOptions } from '@setu-ts/kernel';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { createClient, createObservedFetch } from '@setu-ts/sdk';
+
+const PAYMENTS_URL = 'https://payments.internal.example';
+
+export function createApp(
+  _env?: Readonly<Record<string, unknown>>,
+  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
+) {
+  const observed = devtool ? createObservedFetch({ alias: 'payments-api' }) : undefined;
+  const payments = createClient({
+    baseUrl: PAYMENTS_URL,
+    ...(observed ? { fetch: observed.fetch } : {}),
+  });
+  void payments; // routes use `payments`
+  return createApplication({
+    plugins: [
+      RuntimePlugin(),
+      ...(observed ? [observed.plugin] : []),
+      ...(devtool?.plugins ?? []),
+    ],
+    ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
+  });
+}
+```
+
+The alias is disclosed to a paired devtool as written — choose a non-secret label, never a hostname.
+A wrapped fetch should not depend on its receiver (prefer `(input, init) => fetch(input, init)`); a
+direct `observed.fetch(url)` call forwards `undefined`. One helper serves one application:
+registering its `plugin` in a second one throws. The helper needs `crypto.getRandomValues` (Node ≥
+19, Deno, Bun, workerd, browsers).
+
 ## Errors
 
 | Error                    | When thrown                                                 |
@@ -448,6 +493,9 @@ publish or format it has nowhere to go.
 | `ClientResponseInterceptor`   | type        | Response interceptor signature           |
 | `IClientTiming`               | interface   | Timing seam (`now()`, `sleep()`)         |
 | `createDefaultClientTiming`   | factory     | Default timing over `performance.now()`  |
+| `createObservedFetch`         | factory     | Devtool outbound-attempt counters (M98n) |
+| `ObservedFetch`               | interface   | `{ fetch, plugin }` returned by it       |
+| `ObservedFetchOptions`        | interface   | `{ alias, fetch?, timing? }`             |
 | `ClientRateLimitPolicy`       | type        | Sliding-window rate limiter config       |
 | `RetryPolicy`                 | re-export   | From `@setu-ts/common`                   |
 | `CircuitBreakerPolicy`        | re-export   | From `@setu-ts/common`                   |
@@ -486,6 +534,7 @@ publish or format it has nowhere to go.
 | `createBearerAuthInterceptor` | function  |
 | `createClient`                | function  |
 | `createDefaultClientTiming`   | function  |
+| `createObservedFetch`         | function  |
 | `createRealtimeClient`        | function  |
 | `createSseClient`             | function  |
 | `generateOpenApiClient`       | function  |
@@ -503,6 +552,8 @@ publish or format it has nowhere to go.
 | `IRealtimeClient`             | interface |
 | `ISseClient`                  | interface |
 | `IWebSocketTransport`         | interface |
+| `ObservedFetch`               | interface |
+| `ObservedFetchOptions`        | interface |
 | `OpenApiCodegenOptions`       | interface |
 | `RawSseEvent`                 | interface |
 | `RealtimeClientOptions`       | interface |

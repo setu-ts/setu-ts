@@ -4355,6 +4355,21 @@ sources, and refuses any kind/operation, kind/gauge or backpressure combination 
 `unsupported` response without sending the request. `IDiagnosticsClient.realtime` is a new REQUIRED
 member — additive for callers; a structural implementation must add it.
 
+**Outbound HTTP attempt observations (M98n).** The connector serves `GET /v1/outbound-http` — a
+SNAPSHOT operation with no query — read through
+`client.outboundHttp(): Promise<OutboundHttpDiagnosticsResponse>`. Sources come from the SDK's
+`createObservedFetch` helper: its `plugin` registers one `IOutboundHttpDiagnosticsSource` under
+`CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` as a multi provider (never in `provides`). A source holds
+at most one record counting `started`, `count`, `responses` and `failures`, with `lastStatusClass`
+(`'2xx' | '3xx' | '4xx' | '5xx' | 'other'`, `null` until a response), `lastDurationMs` (time to
+headers, `null` until a settlement) and `ageMs`. The connector reads the sources at bootstrap (more
+than 16 refuses startup), assigns `s1`…`s16`, answers a throwing or invalid source with a value-free
+`collection-failed` snapshot, collapses duplicate non-null aliases or an over-budget body to a fixed
+no-source response, and refuses any snapshot breaking `responses + failures === count`,
+`count <= started` or the state rules — and so does the client. A client whose negotiated manifest
+has `outboundHttp: false` answers a frozen `unsupported` response without sending the request.
+`IDiagnosticsClient.outboundHttp` is a new REQUIRED member.
+
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
 (`LocalDiagnosticsListenerOptions { port, handler }` → `ILocalDiagnosticsListener.close()`), binding
@@ -10350,6 +10365,18 @@ return shape. The collector is pure and bounded — no I/O, no timer, no registr
 failing clock or gauge reader latches `collection-failed` without changing any application result.
 See the diagnostics-connector section for the wire operation.
 
+**Outbound HTTP observation contracts (M98n).** `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`
+(`'outbound-http-diagnostics'`) is a MULTI-provider token whose producer is the SDK's
+`createObservedFetch` registration plugin.
+`IOutboundHttpDiagnosticsSource.snapshot():
+OutboundHttpDiagnosticsSnapshot` is synchronous and
+never performs a request. The DTOs are `OutboundHttpDiagnosticsSnapshot` (`state`, `alias | null`,
+`coverage: 'owned-instance'`, at most one record), `OutboundHttpDiagnosticsRecord` (alias,
+`operation: 'attempt'`, `started`, `count`, `responses`, `failures`,
+`lastStatusClass: OutboundHttpStatusClass | null`, `lastDurationMs`, `ageMs`),
+`OutboundHttpStatusClass` and the connector's `OutboundHttpDiagnosticsResponse`. See the
+diagnostics-connector section for the wire operation.
+
 **Trace observation contracts (M98g).** `CAPABILITIES.TRACE_DIAGNOSTICS` (`'trace-diagnostics'`) is
 a SINGLE-provider token: the TelemetryPlugin always registers one `ITraceDiagnosticsSource`
 (`read(instanceId, after, limit?): TraceDiagnosticsBatch` — synchronous, requires a non-empty
@@ -11515,6 +11542,35 @@ function createDefaultClientTiming(): IClientTiming;
 
 `now()` uses `performance.now()` (monotonic); `sleep()` uses `setTimeout` with an abort listener.
 Inject a deterministic implementation in tests.
+
+### createObservedFetch() (M98n)
+
+```typescript
+interface ObservedFetchOptions {
+  readonly alias: string; // 1–64 UTF-8 bytes, no control characters
+  readonly fetch?: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
+  readonly timing?: Pick<IClientTiming, 'now'>;
+}
+interface ObservedFetch {
+  readonly fetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
+  readonly plugin: IPlugin;
+}
+function createObservedFetch(options: ObservedFetchOptions): ObservedFetch;
+```
+
+Opt-in outbound attempt counters for the local diagnostics connector. `fetch` defaults to the SDK's
+call-time `globalThis.fetch`; `timing` defaults to `createDefaultClientTiming()` and is always
+called as `timing.now()`, probed once at construction. The wrapper forwards the caller's arguments
+unread and its receiver unchanged — except the helper object itself, forwarded as `undefined` —
+calls the wrapped fetch exactly once, and returns the identical value or rethrows the identical
+value; a synchronous throw stays synchronous (a deliberate departure from the framework's promise
+rule, so wrapping never changes application behavior). It reads only the resolved value's `status`.
+Register `plugin` in exactly one application: it registers the source under
+`CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`, closes the helper on shutdown, refuses another
+application, and reopens for the same application's retried `start()`. Its name is
+`outbound-http-diagnostics-<32 hex>`, drawn from `crypto.getRandomValues` (required; Node ≥ 19).
+Construct the helper only when a devtool composition is present. Construction refusals are fixed
+messages that never echo a value.
 
 ### ClientRateLimitPolicy
 

@@ -208,6 +208,12 @@ backplane reports its gauges as `unsupported`, and a source that cannot be read 
 value-free snapshot of kind `unknown`. With no realtime plugin registered the connector answers
 `state: 'unsupported'`.
 
+The M98n outbound HTTP inspector is read through
+`client.outboundHttp(): Promise<OutboundHttpDiagnosticsResponse>`. Each `createObservedFetch` helper
+from `@setu-ts/sdk` whose `plugin` the application registered contributes one source counting the
+attempts made through that helper's `fetch` — never a URL, header, body or error. With no helper
+registered the connector answers `state: 'unsupported'`.
+
 The full public surface is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#diagnostics-connector-setu-tsdiagnostics-plugin).
 

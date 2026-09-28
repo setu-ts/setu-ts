@@ -270,7 +270,11 @@ indistinguishable to the wrapped fetch and to its caller, on every supported run
   code and runs in the same job order `await` would give it.
 - Inside `onOk`, `status` is the only property read, inside a guard (side-effect-free on a real
   `Response`, probed). Nothing reads `headers`, `body`, `bodyUsed`, `url`, `redirected` or `type`.
-  Inside `onErr`, the reason is never inspected.
+  Inside `onErr`, the reason is never inspected. **Measured during implementation:** against the
+  unwrapped baseline, the only extra reads on a resolved value are `status` and one `then` — the
+  derived promise resolving with the value, the same thenable check `await` performs (the one added
+  resolution step above), not observation code. A throwing `status` getter or a non-object value is
+  counted as a response of class `'other'` (the §3.1 counting table), not a collection failure.
 - Every collector call is non-throwing, and the collector's inputs are exactly
   `(ok: boolean, statusClass, generation, startReading)` — no parameter through which a URL, header,
   body, signal or error could arrive.

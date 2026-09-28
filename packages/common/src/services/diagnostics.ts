@@ -1962,3 +1962,129 @@ export interface RealtimeDiagnosticsResponse {
     readonly snapshot: RealtimeDiagnosticsSnapshot;
   }[];
 }
+
+/**
+ * The status class of the last response an outbound HTTP diagnostics source
+ * observed (M98n). An integer status in `200..599` maps to its class; every
+ * other value — `0` from an opaque or opaqueredirect response, a `1xx` a
+ * fetch never exposes, a non-integer, an out-of-range number — is `other`, so
+ * a raw status number never reaches the wire.
+ *
+ * @since 0.8.0
+ */
+export type OutboundHttpStatusClass = '2xx' | '3xx' | '4xx' | '5xx' | 'other';
+
+/**
+ * Cumulative attempt counters for one outbound HTTP diagnostics source
+ * (M98n).
+ *
+ * `started` counts delegations begun and `count` counts settled attempts, so
+ * `started - count` is the attempts in flight. Every settled attempt
+ * increments exactly one of `responses` (the fetch resolved — an HTTP error
+ * status is a response) or `failures` (it rejected or threw), so
+ * `responses + failures === count` and `count <= started` always hold.
+ * `lastStatusClass` is `null` until a response settles; `lastDurationMs` is
+ * the integer monotonic time to headers of the last settled attempt, `null`
+ * until one settles; `ageMs` is the time since the last start or settlement.
+ * No URL, host, header, body, signal or error is ever carried.
+ *
+ * @since 0.8.0
+ */
+export interface OutboundHttpDiagnosticsRecord {
+  /** The configured source alias (always equal to the snapshot's alias). */
+  readonly alias: string;
+  /** The one fixed operation this source counts. */
+  readonly operation: 'attempt';
+  /** Delegations begun. */
+  readonly started: number;
+  /** Attempts settled. */
+  readonly count: number;
+  /** Attempts that resolved (any HTTP status). */
+  readonly responses: number;
+  /** Attempts that rejected or threw. */
+  readonly failures: number;
+  /** Status class of the last response; `null` until one settles. */
+  readonly lastStatusClass: OutboundHttpStatusClass | null;
+  /** Integer ms of the last settled attempt; `null` until one settles. */
+  readonly lastDurationMs: number | null;
+  /** Monotonic ms since the last start or settlement. */
+  readonly ageMs: number;
+}
+
+/**
+ * One outbound HTTP diagnostics source's snapshot (M98n): the attempts made
+ * through one `createObservedFetch` helper.
+ *
+ * `coverage` is always `owned-instance`: only calls made through that
+ * helper's `fetch` are observed, never any other fetch in the process. At
+ * most one record exists. `alias` is `null` exactly when the helper is closed
+ * (`state: 'disabled'`). `ready`/`stale` carry one record; `disabled`,
+ * `no-data` and `collection-failed` carry none.
+ *
+ * @since 0.8.0
+ */
+export interface OutboundHttpDiagnosticsSnapshot {
+  /** The source's own availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** The configured display alias, or `null` when closed. */
+  readonly alias: string | null;
+  /** Always `owned-instance`. */
+  readonly coverage: 'owned-instance';
+  /** At most one record. */
+  readonly records: readonly OutboundHttpDiagnosticsRecord[];
+}
+
+/**
+ * Read-only outbound HTTP diagnostics source — what the SDK's
+ * `createObservedFetch` helper registers under
+ * {@linkcode CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS} as a MULTI provider
+ * (M98n). The DiagnosticsPlugin reads every source to serve
+ * `GET /v1/outbound-http`.
+ *
+ * Synchronous by contract: `snapshot()` returns already-counted, frozen data
+ * and never performs a request.
+ *
+ * @example
+ * ```typescript
+ * const sources = ctx.services.getAll<IOutboundHttpDiagnosticsSource>(
+ *   CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS,
+ * );
+ * const snapshots = sources.map((source) => source.snapshot());
+ * ```
+ * @since 0.8.0
+ */
+export interface IOutboundHttpDiagnosticsSource {
+  /**
+   * Returns the source's current counters.
+   *
+   * @returns A deeply frozen {@linkcode OutboundHttpDiagnosticsSnapshot}
+   */
+  snapshot(): OutboundHttpDiagnosticsSnapshot;
+}
+
+/**
+ * The outbound HTTP diagnostics response the connector serves for
+ * `GET /v1/outbound-http` (M98n).
+ *
+ * `sources` lists every registered source in registration order under a
+ * session-local `sourceId` (`s1`…`s16`). `state` is `unsupported` when no
+ * source is registered; otherwise `ready` if any source is ready, then
+ * `collection-failed`, `stale`, `no-data`, `disabled` in that priority.
+ *
+ * @since 0.8.0
+ */
+export interface OutboundHttpDiagnosticsResponse {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the response was read for. */
+  readonly instanceId: string;
+  /** The aggregate availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** One snapshot per registered source, in registration order. */
+  readonly sources: readonly {
+    /** The session-local source identifier. */
+    readonly sourceId: string;
+    /** The source's snapshot. */
+    readonly snapshot: OutboundHttpDiagnosticsSnapshot;
+  }[];
+}
