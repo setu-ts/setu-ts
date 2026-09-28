@@ -18,37 +18,67 @@ import type {
 } from '@setu-ts/common';
 import { composeBehaviorChain } from '@setu-ts/common';
 import { computeBackoffMs } from '../retry/retry-handler.ts';
-import type { SchedulerAttemptObserver } from '../diagnostics/scheduler-observations.ts';
+import type {
+  SchedulerAttemptObserver,
+  SchedulerAttemptSettle,
+} from '../diagnostics/scheduler-observations.ts';
 
 /**
  * The handlers {@linkcode withIngressBehaviors} returned (M98k). Such a
  * function is the behaviour CHAIN, not the application's handler: a
- * behaviour may decline the dispatch without ever calling the handler, so
- * {@linkcode run} must not count invoking the chain as a handler attempt.
+ * behaviour may decline the dispatch, call `next()` more than once, or call
+ * it after its own step returned, so {@linkcode run} must not treat invoking
+ * the chain as a handler attempt. The chain measures the handler itself,
+ * through {@linkcode invokeHandler}.
  */
 const CHAIN_WRAPPED = new WeakSet<object>();
 
 /**
- * Per-attempt hooks {@linkcode run} registers on the `ScheduledJob` it hands
- * an observed chain; the chain's terminal step fires the hook at the moment
- * the application's handler is actually invoked. Only an OBSERVED dispatch
- * registers one, so an unobserved dispatch pays one `WeakMap.get` and no
- * allocation.
+ * The attempt observer's `begin` for each OBSERVED job object, registered by
+ * {@linkcode run}. Every handler invocation for that job — however many the
+ * chain makes, and whenever it makes them — begins and settles its own
+ * attempt. Only an observed dispatch registers one, so an unobserved
+ * dispatch pays one `WeakMap.get` and no allocation.
  */
-const INVOCATION_HOOKS = new WeakMap<object, () => void>();
+const ATTEMPT_BEGINS = new WeakMap<object, () => SchedulerAttemptSettle>();
 
 /**
- * Fires (once) the hook {@linkcode run} registered for this job, if any —
- * called by the chain immediately before it invokes the handler.
+ * Invokes the application's handler — the one place it runs — and, for an
+ * observed job, records that invocation as one attempt, settled by the
+ * handler's OWN result: fulfilled, rejected, or a synchronous throw. The
+ * handler's result and error identity reach the caller unchanged.
  *
- * @param job - The delivered job object
+ * @param handler - The application's handler
+ * @param job - The delivered job
+ * @returns The handler's result
  */
-function noteHandlerInvoked(job: object): void {
-  const hook = INVOCATION_HOOKS.get(job);
-  if (hook !== undefined) {
-    INVOCATION_HOOKS.delete(job);
-    hook();
+function invokeHandler<T>(
+  handler: SchedulerJobHandler<T>,
+  job: ScheduledJob<T>,
+): void | Promise<void> {
+  const begin = ATTEMPT_BEGINS.get(job);
+  if (begin === undefined) {
+    return handler(job);
   }
+  const settle = begin();
+  let result: void | Promise<void>;
+  try {
+    result = handler(job);
+  } catch (error) {
+    settle(false);
+    throw error;
+  }
+  if (result === undefined || result === null || typeof result.then !== 'function') {
+    settle(true);
+    return result;
+  }
+  return Promise.resolve(result).then(
+    () => settle(true),
+    (error: unknown) => {
+      settle(false);
+      throw error;
+    },
+  );
 }
 
 /**
@@ -100,37 +130,24 @@ export async function run<T = unknown>(
       attempts: attempt,
     };
 
-    // M98k: an attempt is the application's handler being INVOKED. For a
-    // behaviour-wrapped handler that happens inside the chain, which may
-    // decline the dispatch, so the start is recorded by the chain's terminal
-    // step rather than here; a declined dispatch then records no attempt at
-    // all (its fire still reports the dispatch's settlement). The observer
-    // measures through the collector's own guarded clock — the executor
+    // M98k: an attempt is one INVOCATION of the application's handler,
+    // begun and settled around that invocation by `invokeHandler` — inside
+    // the behaviour chain when one is configured, so a declined dispatch
+    // records none and a late or repeated `next()` records its own. The
+    // observer measures through the collector's guarded clock; the executor
     // reads no clock, so a throwing clock can never fail or retry a handler
     // that succeeded.
-    let invoked = false;
     if (attempts !== undefined) {
-      const begin = (): void => {
-        invoked = true;
-        attempts.attemptStarted();
-      };
-      if (CHAIN_WRAPPED.has(handler)) {
-        INVOCATION_HOOKS.set(job, begin);
-      } else {
-        begin();
-      }
+      const isRetry = attempt > 1;
+      ATTEMPT_BEGINS.set(job, () => attempts.begin(isRetry));
     }
     try {
-      await handler(job);
-      if (invoked) {
-        attempts?.attemptSettled(true, attempt > 1);
-      }
+      await (attempts === undefined || CHAIN_WRAPPED.has(handler)
+        ? handler(job)
+        : invokeHandler(handler, job));
       return;
     } catch (error) {
       if (attempt < limit) {
-        if (invoked) {
-          attempts?.attemptSettled(false, attempt > 1);
-        }
         const backoffMs = retry !== undefined ? computeBackoffMs(attempt, retry) : 1000;
         logger?.warn(
           `Job '${jobName}' attempt ${attempt} failed, retrying in ${backoffMs}ms`,
@@ -140,9 +157,6 @@ export async function run<T = unknown>(
           runtime.setTimeout(resolve, backoffMs);
         });
       } else {
-        if (invoked) {
-          attempts?.attemptSettled(false, attempt > 1);
-        }
         logger?.error(
           `Job '${jobName}' failed after ${attempt} attempt(s)`,
           { error: error instanceof Error ? error.message : String(error) },
@@ -169,7 +183,9 @@ export async function run<T = unknown>(
  * With an EMPTY behaviour list the original handler is invoked directly with
  * no chain allocated: a synchronous throw propagates synchronously and the
  * handler's own return value is handed back as-is, so the zero-configuration
- * dispatch is byte-identical to the unwrapped call.
+ * dispatch is byte-identical to the unwrapped call. (An OBSERVED dispatch —
+ * M98k diagnostics — returns a promise settling with the handler's own
+ * result and error instead, so the attempt can be settled by it.)
  *
  * @typeParam T - The job payload type
  * @param handler - The handler to wrap
@@ -202,18 +218,14 @@ export function withIngressBehaviors<T>(
     if (behaviors.length === 0) {
       // Zero-configuration dispatch — byte-identical to the pre-chain
       // behaviour: a direct invocation, no envelope, no promise mediation.
-      noteHandlerInvoked(job);
-      return handler(job);
+      return invokeHandler(handler, job);
     }
 
     return composeBehaviorChain<IngressContext<ScheduledJob<T>>, void>(
       { kind: 'scheduler', name: job.name, payload: job, attempt: job.attempts },
       behaviors,
-      () => {
-        // The terminal step: the one place the application's handler runs.
-        noteHandlerInvoked(job);
-        return Promise.resolve(handler(job));
-      },
+      // The terminal step: the one place the application's handler runs.
+      () => Promise.resolve(invokeHandler(handler, job)),
     );
   };
 

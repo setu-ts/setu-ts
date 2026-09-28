@@ -214,24 +214,37 @@ export interface FireObservation {
 }
 
 /**
- * One handler attempt of the executor, observed by the dispatch that started
- * it. The methods the executor calls; every implementation is supplied by
- * the collector and catches its own failures.
+ * Settles the ONE handler invocation {@linkcode SchedulerAttemptObserver.begin}
+ * started. Idempotent: a second call does nothing. Never throws.
+ *
+ * @param succeeded - Whether the handler fulfilled
+ * @internal
+ */
+export type SchedulerAttemptSettle = (succeeded: boolean) => void;
+
+/**
+ * Observes the application handler's invocations for one dispatched fire.
+ * Every implementation is supplied by the collector and catches its own
+ * failures.
  *
  * @internal
  */
 export interface SchedulerAttemptObserver {
-  /** One attempt began: its handler is about to be invoked. Reads the collector's clock. */
-  attemptStarted(): void;
   /**
-   * One attempt settled. The duration is measured by the observer itself,
-   * from its own start reading, so the executor reads no clock.
+   * One handler invocation begins. Called at the invocation itself — inside
+   * the behaviour chain when one is configured — so a behaviour that
+   * declines never begins one, a behaviour that calls `next()` twice begins
+   * two, and one that calls it after its own step has returned still
+   * settles the attempt it began. Reads the collector's clock.
    *
-   * @param succeeded - Whether the handler fulfilled
-   * @param isRetry - Whether the attempt was numbered above the first
+   * @param isRetry - Whether the executor's attempt is numbered above the first
+   * @returns The settlement of exactly this invocation
    */
-  attemptSettled(succeeded: boolean, isRetry: boolean): void;
+  begin(isRetry: boolean): SchedulerAttemptSettle;
 }
+
+/** The settlement a stopped collector hands out: records nothing. */
+const SETTLE_NOTHING: SchedulerAttemptSettle = () => {};
 
 /** The mutable counters behind one (job alias, operation) tuple. */
 interface MutableRecord {
@@ -438,16 +451,19 @@ export class SchedulerObservationCollector {
   }
 
   /**
-   * Builds the observer the executor calls for one dispatched fire's
-   * handler attempts. `null` when the job was not approved — an unobserved
-   * dispatch allocates nothing and reads no clock.
+   * Builds the observer for one dispatched fire's handler invocations.
+   * `null` when the job was not approved — an unobserved dispatch allocates
+   * nothing and reads no clock.
    *
-   * The observer measures each attempt itself, through the collector's
-   * guarded clock, so the executor reads no clock on the observed path. It
-   * also carries the record its start was counted in: when the settlement
-   * lands in a DIFFERENT record — the original expired and was replaced
-   * while the handler ran, or the start was refused at capacity — the
-   * start is counted there too, so `started` never falls below `count`.
+   * Each {@linkcode SchedulerAttemptObserver.begin} measures ONE invocation
+   * through the collector's guarded clock, so the executor reads no clock,
+   * and returns a settlement that carries that invocation's own start
+   * reading and the record its start was counted in. Nothing is shared
+   * between invocations, so concurrent or late ones cannot overwrite each
+   * other. When a settlement lands in a DIFFERENT record — the original
+   * expired and was replaced while the handler ran, or the start was
+   * refused at capacity — the start is counted there too, so `started`
+   * never falls below `count`.
    *
    * @param name - The exact job name of the dispatch
    * @returns The observer, or `null` when unobserved
@@ -460,62 +476,75 @@ export class SchedulerObservationCollector {
     if (jobAlias === undefined) {
       return null;
     }
-    // The record the current attempt's start was counted in (`null` when it
-    // was refused at capacity; `undefined` before any start), and the
-    // monotonic reading it started at.
-    let origin: MutableRecord | null | undefined;
-    let startedAt: number | null = null;
     return {
-      attemptStarted: () => {
-        if (this.#failed || this.#closed) {
-          return;
-        }
-        try {
-          const now = this.#mono();
-          startedAt = now;
-          // A refused start is not a drop by itself: its settlement counts
-          // the one ignored observation.
-          origin = this.#tuple(jobAlias, 'attempt', now, false);
-          if (origin !== null) {
-            origin.started = bump(origin.started);
-            origin.lastAt = now;
-          }
-        } catch {
-          this.#fail();
-        }
-      },
-      attemptSettled: (succeeded, isRetry) => {
-        if (this.#failed || this.#closed) {
-          return;
-        }
-        try {
-          const now = this.#mono();
-          const record = this.#tuple(jobAlias, 'attempt', now, true);
-          if (record !== null) {
-            if (origin !== record) {
-              record.started = bump(record.started);
-            }
-            record.count = bump(record.count);
-            if (succeeded) {
-              record.succeeded = bump(record.succeeded);
-            } else {
-              record.failed = bump(record.failed);
-            }
-            if (isRetry) {
-              record.retryAttempts = bump(record.retryAttempts);
-            }
-            if (startedAt !== null) {
-              record.lastDurationMs = toWireMs(now - startedAt);
-            }
-            record.lastAt = now;
-          }
-          origin = undefined;
-          startedAt = null;
-        } catch {
-          this.#fail();
-        }
-      },
+      begin: (isRetry) => this.#beginAttempt(jobAlias, isRetry),
     };
+  }
+
+  /** Counts one begun invocation and returns its one-shot settlement. */
+  #beginAttempt(jobAlias: string, isRetry: boolean): SchedulerAttemptSettle {
+    if (this.#failed || this.#closed) {
+      return SETTLE_NOTHING;
+    }
+    let startedAt: number;
+    let origin: MutableRecord | null;
+    try {
+      startedAt = this.#mono();
+      // A refused start is not a drop by itself: its settlement counts the
+      // one ignored observation.
+      origin = this.#tuple(jobAlias, 'attempt', startedAt, false);
+      if (origin !== null) {
+        origin.started = bump(origin.started);
+        origin.lastAt = startedAt;
+      }
+    } catch {
+      this.#fail();
+      return SETTLE_NOTHING;
+    }
+    let settled = false;
+    return (succeeded) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      this.#settleAttempt(jobAlias, isRetry, succeeded, startedAt, origin);
+    };
+  }
+
+  /** Counts one settled invocation (see {@linkcode attemptObserver}). */
+  #settleAttempt(
+    jobAlias: string,
+    isRetry: boolean,
+    succeeded: boolean,
+    startedAt: number,
+    origin: MutableRecord | null,
+  ): void {
+    if (this.#failed || this.#closed) {
+      return;
+    }
+    try {
+      const now = this.#mono();
+      const record = this.#tuple(jobAlias, 'attempt', now, true);
+      if (record === null) {
+        return;
+      }
+      if (origin !== record) {
+        record.started = bump(record.started);
+      }
+      record.count = bump(record.count);
+      if (succeeded) {
+        record.succeeded = bump(record.succeeded);
+      } else {
+        record.failed = bump(record.failed);
+      }
+      if (isRetry) {
+        record.retryAttempts = bump(record.retryAttempts);
+      }
+      record.lastDurationMs = toWireMs(now - startedAt);
+      record.lastAt = now;
+    } catch {
+      this.#fail();
+    }
   }
 
   /**

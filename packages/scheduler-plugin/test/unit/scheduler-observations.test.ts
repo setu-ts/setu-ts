@@ -137,9 +137,9 @@ describe('SchedulerObservationCollector', () => {
     expect(obs).toEqual({ jobAlias: 'tick-alias', latenessMs: 30 });
     collector.fireSettled(obs, 'dispatched', true, 5);
     const attempts = collector.attemptObserver('tick');
-    attempts!.attemptStarted();
+    const settle = attempts!.begin(false);
     runtime.advance(4);
-    attempts!.attemptSettled(true, false);
+    settle(true);
     const fire = recordOf(collector.snapshot(), 'tick-alias', 'fire')!;
     expect(fire).toMatchObject({
       count: 1,
@@ -174,8 +174,7 @@ describe('SchedulerObservationCollector', () => {
     collector.fireSettled(collector.fireBegin('tick', 0), 'lock-failed', null, null);
     collector.fireSettled(collector.fireBegin('tick', 0), 'dispatched', false, 7);
     const attempts = collector.attemptObserver('tick')!;
-    attempts.attemptStarted();
-    attempts.attemptSettled(false, true);
+    attempts.begin(true)(false);
     expect(recordOf(collector.snapshot(), 'tick-alias', 'fire')).toMatchObject({
       count: 3,
       started: 1,
@@ -242,16 +241,15 @@ describe('SchedulerObservationCollector', () => {
     // A refused START is not a drop by itself — its settlement counts the
     // one ignored observation, so an attempt is dropped exactly once.
     const j0 = collector.attemptObserver('j0')!;
-    j0.attemptStarted();
+    const settleJ0 = j0.begin(false);
     expect(collector.snapshot().dropped).toBe(0);
-    j0.attemptSettled(true, false);
+    settleJ0(true);
     expect(collector.snapshot().dropped).toBe(1);
     // An existing tuple's SECOND operation is also a drop: the slots are
     // full and every (alias, operation) pair is distinct.
     collector.fireSettled(collector.fireBegin('j1', 0), 'dispatched', true, null);
     const j1 = collector.attemptObserver('j1')!;
-    j1.attemptStarted();
-    j1.attemptSettled(false, false);
+    j1.begin(false)(false);
     expect(collector.snapshot().dropped).toBe(2);
     expect(collector.snapshot().records).toHaveLength(SCHEDULER_COLLECTOR_LIMITS.maxRecords);
   });
@@ -274,8 +272,7 @@ describe('SchedulerObservationCollector', () => {
     // read used to sweep, so the full table of dead slots refused live work.
     await runtime.advance(SCHEDULER_COLLECTOR_LIMITS.retentionMs + 1);
     const observer = collector.attemptObserver('j0')!;
-    observer.attemptStarted();
-    observer.attemptSettled(true, false);
+    observer.begin(false)(true);
     const snapshot = collector.snapshot();
     expect(snapshot.dropped).toBe(0);
     expect(snapshot.records.map((r) => [r.alias, r.operation, r.count, r.started])).toEqual([
@@ -286,11 +283,11 @@ describe('SchedulerObservationCollector', () => {
   it('keeps started >= count when a record expires while its attempt is in flight', async () => {
     const { collector, runtime } = observed();
     const observer = collector.attemptObserver('tick')!;
-    observer.attemptStarted();
+    const settle = observer.begin(false);
     // The handler outlives retention: the record its start was counted in
     // is replaced by a fresh one before the settlement lands.
     await runtime.advance(SCHEDULER_COLLECTOR_LIMITS.retentionMs + 1_000);
-    observer.attemptSettled(true, false);
+    settle(true);
     expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toMatchObject({
       count: 1,
       started: 1,
@@ -299,15 +296,15 @@ describe('SchedulerObservationCollector', () => {
     });
   });
 
-  it('counts each start once across retried attempts on one observer', async () => {
+  it('counts each invocation once across retried attempts on one observer', async () => {
     const { collector, runtime } = observed();
     const observer = collector.attemptObserver('tick')!;
-    observer.attemptStarted();
+    const first = observer.begin(false);
     await runtime.advance(3);
-    observer.attemptSettled(false, false);
-    observer.attemptStarted();
+    first(false);
+    const retry = observer.begin(true);
     await runtime.advance(7);
-    observer.attemptSettled(true, true);
+    retry(true);
     expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toMatchObject({
       count: 2,
       started: 2,
@@ -315,6 +312,29 @@ describe('SchedulerObservationCollector', () => {
       succeeded: 1,
       retryAttempts: 1,
       lastDurationMs: 7,
+    });
+  });
+
+  it('keeps overlapping invocations on one observer independent, each settled once', async () => {
+    const { collector, runtime } = observed();
+    const observer = collector.attemptObserver('tick')!;
+    const slow = observer.begin(false);
+    await runtime.advance(5);
+    const fast = observer.begin(false);
+    await runtime.advance(2);
+    fast(true);
+    await runtime.advance(10);
+    slow(false);
+    // A second call to a settlement is ignored.
+    slow(true);
+    fast(true);
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toMatchObject({
+      count: 2,
+      started: 2,
+      succeeded: 1,
+      failed: 1,
+      // The slow invocation's OWN start: 17 ms, not the fast one's.
+      lastDurationMs: 17,
     });
   });
 
@@ -415,7 +435,7 @@ describe('SchedulerObservationCollector', () => {
     const obs = collector.fireBegin('tick', 0);
     collector.close();
     collector.fireSettled(obs, 'dispatched', true, 1);
-    attempts!.attemptStarted();
+    attempts!.begin(false)(true);
     expect(collector.snapshot()).toEqual({
       state: 'disabled',
       alias: null,
@@ -744,6 +764,138 @@ describe('SchedulerPlugin diagnostics wiring', () => {
       await app.stop();
     }
   });
+
+  it('settles an attempt the handler began after the behaviour step returned', async () => {
+    // A behaviour may call next() LATER — after its own step (and so the
+    // dispatch) has settled. The handler still runs, so its attempt must be
+    // begun AND settled by the handler's own result, not left in flight.
+    let handlerRuns = 0;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        SchedulerPlugin({
+          behaviors: [{
+            handle: (_ctx, next) => {
+              setTimeout(() => void next(), 20);
+            },
+          }],
+          jobs: [{
+            trigger: 'delay',
+            name: 'late',
+            delayMs: 10,
+            handler: () => {
+              handlerRuns++;
+            },
+          }],
+          diagnostics: { enabled: true, alias: 'cron', jobs: { late: 'late-alias' } },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(handlerRuns).toBe(1);
+      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
+        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+      )[0]!.snapshot();
+      expect(recordOf(snapshot, 'late-alias', 'attempt')).toMatchObject({
+        started: 1,
+        count: 1,
+        succeeded: 1,
+        failed: 0,
+      });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('records one attempt per handler invocation when a behaviour calls next() twice', async () => {
+    let handlerRuns = 0;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        SchedulerPlugin({
+          behaviors: [{
+            handle: async (_ctx, next) => {
+              await next();
+              await next();
+            },
+          }],
+          jobs: [{
+            trigger: 'delay',
+            name: 'twice',
+            delayMs: 10,
+            handler: () => {
+              handlerRuns++;
+              if (handlerRuns === 2) {
+                throw new Error('second-canary');
+              }
+            },
+          }],
+          diagnostics: { enabled: true, alias: 'cron', jobs: { twice: 'twice-alias' } },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(handlerRuns).toBe(2);
+      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
+        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+      )[0]!.snapshot();
+      expect(recordOf(snapshot, 'twice-alias', 'attempt')).toMatchObject({
+        started: 2,
+        count: 2,
+        succeeded: 1,
+        failed: 1,
+      });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  for (const chained of [false, true]) {
+    it(
+      `settles an async handler's attempt by its own promise (${
+        chained ? 'behaviour chain' : 'no behaviours'
+      })`,
+      async () => {
+        // The attempt must end when the handler's promise settles — its
+        // rejection is a failure and its duration covers the await — not when
+        // the handler function returned.
+        const app = createApplication({
+          plugins: [
+            RuntimePlugin(),
+            SchedulerPlugin({
+              ...(chained ? { behaviors: [{ handle: (_ctx, next) => next() }] } : {}),
+              jobs: [{
+                trigger: 'delay',
+                name: 'slow',
+                delayMs: 10,
+                handler: async () => {
+                  await new Promise((resolve) => setTimeout(resolve, 40));
+                  throw new Error('async-canary');
+                },
+              }],
+              diagnostics: { enabled: true, alias: 'cron', jobs: { slow: 'slow-alias' } },
+            }),
+          ],
+        });
+        await app.start();
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
+            CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+          )[0]!.snapshot();
+          const attempt = recordOf(snapshot, 'slow-alias', 'attempt')!;
+          expect(attempt).toMatchObject({ started: 1, count: 1, succeeded: 0, failed: 1 });
+          expect(attempt.lastDurationMs).toBeGreaterThanOrEqual(30);
+        } finally {
+          await app.stop();
+        }
+      },
+    );
+  }
 
   it('records no attempt when a behaviour refuses by throwing, and retries none', async () => {
     let handlerRuns = 0;
