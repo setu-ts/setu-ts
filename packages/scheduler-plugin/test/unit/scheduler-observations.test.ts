@@ -8,13 +8,13 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import type { IScheduler, ISchedulerDiagnosticsSource } from '@setu-ts/common';
+import type { IIngressBehavior, IScheduler, ISchedulerDiagnosticsSource } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 import { SchedulerPlugin } from '../../src/index.ts';
-import type { SchedulerDiagnosticsOptions } from '../../src/index.ts';
+import type { SchedulerDiagnosticsOptions, SchedulerPluginOptions } from '../../src/index.ts';
 import { SchedulerService } from '../../src/services/scheduler-service.ts';
 import {
   attachSchedulerCollector,
@@ -970,6 +970,194 @@ describe('SchedulerPlugin diagnostics wiring', () => {
     expect(off.counts).toEqual({ handlerRuns: 3, thenReads: 3, caught: 0 });
     expect(on.counts).toEqual(off.counts);
     expect(on.attempt).toMatchObject({ started: 3, count: 3, failed: 3, retryAttempts: 2 });
+  });
+
+  /**
+   * Runs one scenario app with diagnostics off or on and returns whatever
+   * the scenario recorded plus the job's attempt record. `build` is called
+   * once per run so every run gets fresh state.
+   */
+  async function offOn<S>(
+    build: () => {
+      state: S;
+      options: Omit<SchedulerPluginOptions, 'diagnostics'>;
+      settleMs: number;
+    },
+  ) {
+    const runs: { state: S; attempt: ReturnType<typeof recordOf> }[] = [];
+    for (const observedRun of [false, true]) {
+      const { state, options, settleMs } = build();
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          SchedulerPlugin({
+            ...options,
+            ...(observedRun
+              ? { diagnostics: { enabled: true, alias: 'cron', jobs: { job: 'job-alias' } } }
+              : {}),
+          }),
+        ],
+      });
+      await app.start();
+      try {
+        await new Promise((resolve) => setTimeout(resolve, settleMs));
+        const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
+          CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+        )[0]!.snapshot();
+        runs.push({ state, attempt: recordOf(snapshot, 'job-alias', 'attempt') });
+      } finally {
+        await app.stop();
+      }
+    }
+    return { off: runs[0]!, on: runs[1]! };
+  }
+
+  /** A behaviour that takes next()'s promise, runs code, then catches it. */
+  function catchingLater(log: string[], caught: { n: number }): IIngressBehavior {
+    return {
+      handle: (_ctx, next) => {
+        const pending = next();
+        log.push('after-next');
+        pending.catch(() => {
+          caught.n++;
+        });
+      },
+    };
+  }
+
+  it('adopts a native promise with a throwing constructor exactly as unobserved (J1)', async () => {
+    // `Promise.resolve` reads a native promise's `constructor`; a throwing
+    // read throws SYNCHRONOUSLY out of the chain's last step, so the
+    // behaviour's next() throws and the dispatch fails and retries.
+    const { off, on } = await offOn(() => {
+      const state = { runs: 0, caught: { n: 0 }, log: [] as string[] };
+      const hostile = Promise.resolve();
+      Object.defineProperty(hostile, 'constructor', {
+        get() {
+          throw new Error('constructor-canary');
+        },
+      });
+      return {
+        state,
+        settleMs: 150,
+        options: {
+          behaviors: [catchingLater(state.log, state.caught)],
+          jobs: [{
+            trigger: 'delay',
+            name: 'job',
+            delayMs: 10,
+            retry: { limit: 3, delay: 5, backoff: 'fixed' },
+            handler: () => {
+              state.runs++;
+              return hostile;
+            },
+          }],
+        },
+      };
+    });
+    expect(off.state.runs).toBe(3);
+    expect(on.state).toEqual(off.state);
+    expect(on.attempt).toMatchObject({ started: 3, count: 3, failed: 3 });
+  });
+
+  it("runs a thenable's then after the behaviour's post-next code, as unobserved (J1)", async () => {
+    const { off, on } = await offOn(() => {
+      const state = { log: [] as string[], caught: { n: 0 } };
+      return {
+        state,
+        settleMs: 80,
+        options: {
+          behaviors: [catchingLater(state.log, state.caught)],
+          jobs: [{
+            trigger: 'delay',
+            name: 'job',
+            delayMs: 10,
+            handler: () => {
+              state.log.push('returned');
+              return {
+                then(resolve: () => void) {
+                  state.log.push('then-called');
+                  resolve();
+                },
+              } as unknown as Promise<void>;
+            },
+          }],
+        },
+      };
+    });
+    expect(off.state.log).toEqual(['returned', 'after-next', 'then-called']);
+    expect(on.state).toEqual(off.state);
+    expect(on.attempt).toMatchObject({ started: 1, count: 1, succeeded: 1 });
+  });
+
+  it("reads a native promise's constructor as often as unobserved (J1)", async () => {
+    for (const chained of [false, true]) {
+      const { off, on } = await offOn(() => {
+        const state = { reads: 0 };
+        return {
+          state,
+          settleMs: 80,
+          options: {
+            ...(chained
+              ? { behaviors: [{ handle: (_c, next) => next() } as IIngressBehavior] }
+              : {}),
+            jobs: [{
+              trigger: 'delay',
+              name: 'job',
+              delayMs: 10,
+              handler: () => {
+                const promise = Promise.resolve();
+                Object.defineProperty(promise, 'constructor', {
+                  get() {
+                    state.reads++;
+                    return Object;
+                  },
+                });
+                return promise;
+              },
+            }],
+          },
+        };
+      });
+      expect(on.state).toEqual(off.state);
+      expect(on.attempt).toMatchObject({ started: 1, count: 1, succeeded: 1 });
+    }
+  });
+
+  it("never subscribes through a native promise's own then (J2)", async () => {
+    // `await` subscribes to a native promise internally, never through an
+    // instance `then`. One that never settles must not hold the dispatch —
+    // and so the handler mutex — open only because observation is on.
+    for (const chained of [false, true]) {
+      const { off, on } = await offOn(() => {
+        const state = { runs: 0 };
+        return {
+          state,
+          settleMs: 300,
+          options: {
+            ...(chained
+              ? { behaviors: [{ handle: (_c, next) => next() } as IIngressBehavior] }
+              : {}),
+            jobs: [{
+              trigger: 'every',
+              name: 'job',
+              intervalMs: 20,
+              handler: () => {
+                state.runs++;
+                const promise = Promise.resolve();
+                Object.defineProperty(promise, 'then', { value: () => {} });
+                return promise;
+              },
+            }],
+          },
+        };
+      });
+      expect(off.state.runs).toBeGreaterThan(5);
+      // Timer fires, so allow scheduling jitter — but never a stalled job.
+      expect(Math.abs(on.state.runs - off.state.runs)).toBeLessThanOrEqual(2);
+      expect(on.attempt!.count).toBe(on.attempt!.started);
+      expect(on.attempt!.count).toBeGreaterThan(5);
+    }
   });
 
   it('records no attempt when a behaviour refuses by throwing, and retries none', async () => {

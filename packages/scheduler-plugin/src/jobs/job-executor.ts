@@ -43,65 +43,84 @@ const CHAIN_WRAPPED = new WeakSet<object>();
 const ATTEMPT_BEGINS = new WeakMap<object, () => SchedulerAttemptSettle>();
 
 /**
- * Invokes the application's handler — the one place it runs — and, for an
- * observed job, records that invocation as one attempt, settled by the
- * handler's OWN result: fulfilled, rejected, or a synchronous throw. The
- * handler's result and error identity reach the caller unchanged.
+ * How a call site adopts the handler's result when UNOBSERVED. The observed
+ * path must adopt it with exactly the same operation, or observation would
+ * change what the handler sees: which accessors are read, when a thenable's
+ * `then` runs, whether a malformed value throws synchronously or rejects,
+ * and which `then` a native promise is subscribed through.
+ *
+ * - `'await'` — the value is handed to `await` (the executor's direct
+ *   dispatch, and the zero-behaviour chain dispatch, whose raw result the
+ *   executor awaits).
+ * - `'resolve'` — the value is handed to `Promise.resolve` (the behaviour
+ *   chain's terminal step).
+ */
+type Adoption = 'await' | 'resolve';
+
+/**
+ * Invokes the application's handler — the one place it runs — adopting its
+ * result exactly as the unobserved call site does. For an OBSERVED job it
+ * also records that invocation as one attempt, settled by the adopted
+ * result: fulfilled, rejected, or a synchronous throw from the handler or
+ * from the adoption itself.
+ *
+ * Settlement never subscribes through a result's own `then`: the `'await'`
+ * form is a plain `await` inside an async function, and the `'resolve'`
+ * form attaches through the intrinsic `Promise.prototype.then` to the
+ * promise `Promise.resolve` produced. The caller receives a promise that
+ * settles with the handler's own value or error, so an ignored rejection
+ * is still reported as unhandled — observation never marks it handled.
  *
  * @param handler - The application's handler
  * @param job - The delivered job
- * @returns The handler's result
+ * @param adoption - How the unobserved call site adopts the result
+ * @returns What the unobserved call site would return, or its observed equivalent
  */
 function invokeHandler<T>(
   handler: SchedulerJobHandler<T>,
   job: ScheduledJob<T>,
+  adoption: Adoption,
 ): void | Promise<void> {
   const begin = ATTEMPT_BEGINS.get(job);
   if (begin === undefined) {
-    return handler(job);
+    return adoption === 'await' ? handler(job) : Promise.resolve(handler(job));
   }
   const settle = begin();
-  let result: void | Promise<void>;
+  if (adoption === 'await') {
+    return (async (): Promise<void> => {
+      let result: void | Promise<void>;
+      try {
+        result = handler(job);
+      } catch (error) {
+        settle(false);
+        throw error;
+      }
+      try {
+        await result;
+      } catch (error) {
+        settle(false);
+        throw error;
+      }
+      settle(true);
+    })();
+  }
+  let adopted: Promise<void>;
   try {
-    result = handler(job);
+    adopted = Promise.resolve(handler(job));
   } catch (error) {
+    // A synchronous throw from the handler OR from `Promise.resolve` (a
+    // native promise whose `constructor` read throws) — thrown on, exactly
+    // as the unobserved terminal step throws it.
     settle(false);
     throw error;
   }
-  if (result === undefined || result === null) {
-    settle(true);
-    return result;
-  }
-  // Read `then` exactly ONCE, inside a guard. A handler typed
-  // `void | Promise<void>` may still return an object whose `then` getter
-  // throws (or a revoked Proxy). The unobserved path hands that value to
-  // `await`/`Promise.resolve`, which turns the throwing read into a
-  // REJECTION — so this path must too, never a synchronous throw, or
-  // observation would change what a behaviour's `next().catch()` sees and
-  // whether the executor retries.
-  let then: unknown;
-  try {
-    then = (result as { then?: unknown }).then;
-  } catch (error) {
-    settle(false);
-    return Promise.reject(error);
-  }
-  if (typeof then !== 'function') {
-    settle(true);
-    return result;
-  }
-  const thenable = result;
-  return new Promise<void>((resolve, reject) => {
-    // Adopt the thenable through the ONE `then` already read; a throw from
-    // it rejects, exactly as `Promise.resolve` would.
-    Reflect.apply(then, thenable, [resolve, reject]);
-  }).then(
+  return Reflect.apply(Promise.prototype.then, adopted, [
     () => settle(true),
     (error: unknown) => {
       settle(false);
       throw error;
     },
-  );
+  ]) as Promise<void>;
 }
 
 /**
@@ -167,7 +186,7 @@ export async function run<T = unknown>(
     try {
       await (attempts === undefined || CHAIN_WRAPPED.has(handler)
         ? handler(job)
-        : invokeHandler(handler, job));
+        : invokeHandler(handler, job, 'await'));
       return;
     } catch (error) {
       if (attempt < limit) {
@@ -241,14 +260,14 @@ export function withIngressBehaviors<T>(
     if (behaviors.length === 0) {
       // Zero-configuration dispatch — byte-identical to the pre-chain
       // behaviour: a direct invocation, no envelope, no promise mediation.
-      return invokeHandler(handler, job);
+      return invokeHandler(handler, job, 'await');
     }
 
     return composeBehaviorChain<IngressContext<ScheduledJob<T>>, void>(
       { kind: 'scheduler', name: job.name, payload: job, attempt: job.attempts },
       behaviors,
       // The terminal step: the one place the application's handler runs.
-      () => Promise.resolve(invokeHandler(handler, job)),
+      () => invokeHandler(handler, job, 'resolve') as Promise<void>,
     );
   };
 
