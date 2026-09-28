@@ -5388,7 +5388,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Audit rounds 3 and 4 each failed on one Low — the timeout refusal echoed the refused value, and a
   doc correction claimed QUIT alone stops ioredis reconnecting, which round 4 measured false after a
   25 s outage — both fixed; round 5 passed on `bec04876`. The design review was approved by the
-  maintainer — complete (PR pending).
+  maintainer — complete (PR #377).
 - **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
   design security review and implementation audit required).
 
