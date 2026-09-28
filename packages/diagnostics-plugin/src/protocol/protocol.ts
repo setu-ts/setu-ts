@@ -77,6 +77,12 @@ export const HEALTH_TARGET = '/v1/health';
 export const CONFIG_TARGET = '/v1/config';
 /** The cache observations target (M98i); it carries no query. */
 export const CACHE_TARGET = '/v1/cache';
+/**
+ * The scheduler-observations target (M98k); it carries no query.
+ *
+ * @internal
+ */
+export const SCHEDULER_TARGET = '/v1/scheduler';
 const EVENTS_PATH = '/v1/events';
 
 /**
@@ -131,6 +137,7 @@ export interface ParsedTarget {
     | 'health'
     | 'config'
     | 'cache'
+    | 'scheduler'
     | 'queues'
     | 'traces'
     | 'authorization';
@@ -170,6 +177,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === CACHE_TARGET && search === '') {
     return { op: 'cache', canonicalTarget: CACHE_TARGET, after: 0, limit: 0 };
+  }
+  if (path === SCHEDULER_TARGET && search === '') {
+    return { op: 'scheduler', canonicalTarget: SCHEDULER_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENTS_PATH) {
     return parsePagedTarget('events', path, search);
@@ -260,6 +270,84 @@ function copyOptional(
   if (value !== undefined) {
     target[key] = value;
   }
+}
+
+/**
+ * Copies a source-supplied object's own DATA properties into a fresh plain
+ * record — or `null` when the value is not a plain object (its prototype is
+ * neither `Object.prototype` nor `null`), carries an accessor, or carries a
+ * key outside `keys`. Each property is read exactly once through its
+ * descriptor, so a getter is never invoked. The ONE plain-object copy the
+ * per-inspector protocols (cache M98i, scheduler M98k) share.
+ *
+ * @param value - The source value
+ * @param keys - The exact admitted keys
+ * @returns The copy, or `null`
+ * @internal
+ */
+export function copyPlainObject(
+  value: unknown,
+  keys: readonly string[],
+): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return null;
+  }
+  const own = Reflect.ownKeys(value);
+  if (own.length !== keys.length) {
+    return null;
+  }
+  const copy: Record<string, unknown> = {};
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !('value' in descriptor)) {
+      return null;
+    }
+    copy[key] = descriptor.value;
+  }
+  return copy;
+}
+
+/**
+ * Copies a source-supplied record list: an intrinsic array read by index
+ * (never its own iterator, `map` or `toJSON`), each item copied by
+ * {@linkcode copyPlainObject}. At most `max + 1` items are read, so an
+ * over-budget list refuses without walking an attacker-chosen length.
+ *
+ * @param value - The source list
+ * @param max - The list's budget; over it refuses
+ * @param recordKeys - The exact admitted keys of each record
+ * @returns The copied records, or `null`
+ * @internal
+ */
+export function copyPlainRecords(
+  value: unknown,
+  max: number,
+  recordKeys: readonly string[],
+): Record<string, unknown>[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const length = Math.min(value.length, max + 1);
+  if (length > max) {
+    return null;
+  }
+  const copies: Record<string, unknown>[] = [];
+  for (let index = 0; index < length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, index);
+    if (descriptor === undefined || !('value' in descriptor)) {
+      return null;
+    }
+    const copy = copyPlainObject(descriptor.value, recordKeys);
+    if (copy === null) {
+      return null;
+    }
+    copies.push(copy);
+  }
+  return copies;
 }
 
 /**
@@ -425,8 +513,8 @@ export function currentInspectorsManifest(): InspectorsManifest {
     traces: true,
     authorization: true,
     cache: true,
+    scheduler: true,
     events: false,
-    scheduler: false,
     realtime: false,
     storage: false,
     outboundHttp: false,

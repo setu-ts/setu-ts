@@ -21,6 +21,7 @@ import type {
   DiagnosticsSnapshot,
   HealthDiagnosticsSnapshot,
   QueueDiagnosticsBatch,
+  SchedulerDiagnosticsResponse,
   TraceDiagnosticsBatch,
 } from '@setu-ts/common';
 
@@ -46,12 +47,14 @@ import {
   isSnapshotProjection,
   parseStatusBody,
   QUEUES_PATH,
+  SCHEDULER_TARGET,
   SNAPSHOT_TARGET,
   STATUS_TARGET,
   TRACES_PATH,
 } from '../protocol/protocol.ts';
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
 import { isCacheResponseProjection } from '../protocol/cache-protocol.ts';
+import { isSchedulerResponseProjection } from '../protocol/scheduler-protocol.ts';
 import { isTraceBatchProjection } from '../protocol/trace-protocol.ts';
 import { isAuthorizationBatchProjection } from '../protocol/authorization-protocol.ts';
 
@@ -591,6 +594,39 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // The same exact validator the connector ran before signing, plus
         // the body's own instance binding.
         if (!isCacheResponseProjection(parsed) || parsed.instanceId !== bound) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return deepFreeze(parsed);
+      });
+    },
+
+    async scheduler(): Promise<SchedulerDiagnosticsResponse> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the scheduler inspector — a
+        // legacy or pre-M98k server — answers a local typed `unsupported`
+        // response and sends no request.
+        if (inspectors !== null && inspectors.scheduler === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            sources: [],
+          });
+        }
+        const result = await exchange(SCHEDULER_TARGET);
+        const parsed = parseBody(result.bodyText);
+        // The same exact validator the connector ran before signing, plus
+        // the body's own instance binding.
+        if (!isSchedulerResponseProjection(parsed) || parsed.instanceId !== bound) {
           throw new Error(CLIENT_ERRORS.connection);
         }
         return deepFreeze(parsed);

@@ -32,6 +32,21 @@ import type {
 import { cronNextMs } from '../cron/cron-parser.ts';
 import { JobRegistry } from '../jobs/job-registry.ts';
 import { run } from '../jobs/job-executor.ts';
+import type { FireObservation } from '../diagnostics/scheduler-observations.ts';
+import type { SchedulerObservationCollector } from '../diagnostics/scheduler-observations.ts';
+
+/**
+ * Writes a service's private collector slot; bound in the class's static
+ * block. The M98i pattern: the only writer of the private field, reachable
+ * only through {@linkcode attachSchedulerCollector} /
+ * {@linkcode detachSchedulerCollector} — neither exported from the package
+ * barrel, so application code can never observe or replace a service's
+ * collector.
+ */
+let writeSchedulerCollector: (
+  service: SchedulerService,
+  collector: SchedulerObservationCollector | undefined,
+) => void;
 
 /**
  * Scheduler service implementing IScheduler.
@@ -48,6 +63,20 @@ export class SchedulerService implements IScheduler {
   #ttlMs: number;
   #connected = false;
   #names: Set<string> = new Set();
+
+  /**
+   * The M98k collector, set only by the owning SchedulerPlugin through
+   * {@linkcode attachSchedulerCollector}. `undefined` means unobserved:
+   * every fire then runs the pre-M98k path — the only added work is this
+   * field read; no clock is read and no label is derived.
+   */
+  #collector: SchedulerObservationCollector | undefined = undefined;
+
+  static {
+    writeSchedulerCollector = (service, collector) => {
+      service.#collector = collector;
+    };
+  }
 
   constructor(
     runtime: IRuntimeServices,
@@ -447,7 +476,12 @@ export class SchedulerService implements IScheduler {
    * `acquire`/`release` are all skip-this-fire conditions, never
    * cancel-the-schedule conditions, so this never throws to the caller.
    */
-  async #runWithLock(entry: RegistryEntry<unknown>, lockKey: string): Promise<void> {
+  async #runWithLock(
+    entry: RegistryEntry<unknown>,
+    lockKey: string,
+    fireObs: FireObservation | null,
+  ): Promise<void> {
+    const collector = this.#collector;
     let token: string | null;
     try {
       token = await this.#lock.acquire(lockKey, this.#ttlMs);
@@ -456,6 +490,7 @@ export class SchedulerService implements IScheduler {
       this.#logger?.error(`Job '${entry.name}': could not acquire lock`, {
         error: error instanceof Error ? error.message : String(error),
       });
+      collector?.fireSettled(fireObs, 'lock-failed', null, null);
       return;
     }
 
@@ -464,24 +499,49 @@ export class SchedulerService implements IScheduler {
       // same job is still running there. This is overlap protection, NOT
       // per-fire dedup; that is the slot lock's job (M70l C3).
       this.#logger?.debug(`Job '${entry.name}': lock held elsewhere, skipping this fire`);
+      collector?.fireSettled(fireObs, 'contended', null, null);
       return;
     }
 
+    // Observed dispatch: clocks are read ONLY here — an unattached service
+    // never reads one (the plan's hot-path rule). The attempt observer is
+    // resolved once per dispatch; an unapproved job gets `undefined` and the
+    // executor allocates nothing.
+    const observed = collector !== undefined && fireObs !== null;
+    const attempts = observed
+      ? (collector as SchedulerObservationCollector).attemptObserver(entry.name) ?? undefined
+      : undefined;
+    const dispatchStart = observed ? this.#runtime.hrtime() : 0;
     try {
       const jobId = this.#runtime.uuid();
+      const runOptions = attempts === undefined
+        ? { runtime: this.#runtime, logger: this.#logger }
+        : { runtime: this.#runtime, logger: this.#logger, attempts };
       await run(
         jobId,
         entry.name,
         entry.handler,
         entry.data,
         entry.retry,
-        { runtime: this.#runtime, logger: this.#logger },
+        runOptions,
+      );
+      collector?.fireSettled(
+        fireObs,
+        'dispatched',
+        true,
+        observed ? Math.round(Math.max(0, this.#runtime.hrtime() - dispatchStart)) : null,
       );
     } catch (error) {
       // Handler exhausted retries — log but do not crash the scheduler loop.
       this.#logger?.error(`Job '${entry.name}' failed permanently`, {
         error: error instanceof Error ? error.message : String(error),
       });
+      collector?.fireSettled(
+        fireObs,
+        'dispatched',
+        false,
+        observed ? Math.round(Math.max(0, this.#runtime.hrtime() - dispatchStart)) : null,
+      );
     } finally {
       try {
         await this.#lock.release(lockKey, token);
@@ -497,6 +557,13 @@ export class SchedulerService implements IScheduler {
   async #fire(entry: RegistryEntry<unknown>): Promise<void> {
     // C4 FIX: Capture generation at fire START to detect if pause()+resume() fires during await
     const fireGen = entry.generation ?? 0;
+
+    // M98k: observe the fire at its entry. The attachment check gates every
+    // clock read — an unattached service reads no clock and derives no
+    // label; an unapproved job resolves to `null` after one map lookup.
+    const fireObs = this.#collector === undefined
+      ? null
+      : this.#collector.fireBegin(entry.name, entry.nextRunAtMs);
 
     // The fire-slot lock — per-fire dedup across replicas (X10-2), distinct
     // from the per-handler overlap mutex below. The keying differs by kind
@@ -527,6 +594,7 @@ export class SchedulerService implements IScheduler {
         this.#logger?.debug(
           `Job '${entry.name}': fire slot claimed by another instance, skipping`,
         );
+        this.#collector?.fireSettled(fireObs, 'contended', null, null);
       }
     } else {
       const slotKey = `scheduler:job:${entry.name}:${String(entry.nextRunAtMs)}`;
@@ -541,6 +609,7 @@ export class SchedulerService implements IScheduler {
             `Job '${entry.name}': fire slot already claimed by another instance, skipping`,
           );
           slotClaimed = false;
+          this.#collector?.fireSettled(fireObs, 'contended', null, null);
         }
       } catch (error) {
         // Lock backend unreachable — treat as unclaimed-but-unprovable and skip
@@ -549,6 +618,7 @@ export class SchedulerService implements IScheduler {
           error: error instanceof Error ? error.message : String(error),
         });
         slotClaimed = false;
+        this.#collector?.fireSettled(fireObs, 'lock-failed', null, null);
       }
     }
 
@@ -558,7 +628,7 @@ export class SchedulerService implements IScheduler {
     // NORMAL multi-instance path, and a lock backend blip is transient. Every
     // lock failure below is contained here so the re-arm logic still runs.
     if (slotClaimed) {
-      await this.#runWithLock(entry, lockKey);
+      await this.#runWithLock(entry, lockKey, fireObs);
     }
 
     // One-shot delay jobs are removed after firing, regardless of pause state.
@@ -613,4 +683,31 @@ export class SchedulerService implements IScheduler {
       this.#armTimer(entry);
     }
   }
+}
+
+/**
+ * Attaches the owning plugin's collector to its service (M98k). INTERNAL:
+ * not exported from the package barrel, so application code cannot observe
+ * or replace a service's collector.
+ *
+ * @param service - The plugin-owned service
+ * @param collector - Its collector
+ * @internal
+ */
+export function attachSchedulerCollector(
+  service: SchedulerService,
+  collector: SchedulerObservationCollector,
+): void {
+  writeSchedulerCollector(service, collector);
+}
+
+/**
+ * Detaches a service's collector. The plugin's close hook detaches FIRST
+ * and then clears the collector, so no late fire or attempt is observed.
+ *
+ * @param service - The plugin-owned service
+ * @internal
+ */
+export function detachSchedulerCollector(service: SchedulerService): void {
+  writeSchedulerCollector(service, undefined);
 }

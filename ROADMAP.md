@@ -11151,22 +11151,22 @@ tree. A 403 or skipped handler observed by M98 does not establish which authoriz
 
 ### Milestone 98k: Scheduler Execution Observations
 
-**Status:** Planned. Owner: `packages/scheduler-plugin`. Canonical plan:
-`plans/milestone-98k-scheduler-observations.md`.
+**Status:** Implemented on `feat/m98k-scheduler-observations`. Owner: `packages/scheduler-plugin`.
+Canonical plan: `plans/milestone-98k-scheduler-observations.md`.
 
-- [ ] Observe timer fire, slot-lock and handler-lock outcomes inside SchedulerService, and actual
+- [x] Observe timer fire, slot-lock and handler-lock outcomes inside SchedulerService, and actual
       attempt settlement inside the executor. Use runtime.now only to compare intended epoch fire
       and actual start; use hrtime for duration. Distinguish contention, lock failure, actual
       attempt failure and completion. Record lateness as max(0, actualStart-intendedFire), not an
       absolute schedule. Observation never acquires a lock or invokes a handler. A skipped local
       fire is not a globally missed execution.
-- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+- [x] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
       reader and native client method; activate only the reserved `scheduler` manifest entry.
-- [ ] Exclude job data, raw names, job IDs, cron expressions, lock keys/tokens, exception messages
+- [x] Exclude job data, raw names, job IDs, cron expressions, lock keys/tokens, exception messages
       before buffering.
-- [ ] Local observed execution only; durable history, cluster completeness and job control are
+- [x] Local observed execution only; durable history, cluster completeness and job control are
       excluded.
-- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+- [x] Pass recorded pre-implementation design review and committed-tree implementation security
       audit. Compare fire times, pause/resume/remove, delay/cron/every, retries, slot dedup and
       overlap locks with diagnostics off/on/failing. Prove lock losers do not produce handler
       records.
@@ -12241,7 +12241,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98h       | ✅     | auth-plugin — bounded authorization decision explanations ([#376](https://github.com/setu-ts/setu-ts/pull/376); security audit passed on round 5 of `44789a1d`)              |
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
 | 98j       | ⬜     | event dispatch observations — design security review and implementation audit required                                                                                       |
-| 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |
+| 98k       | ✅     | scheduler execution observations (PR pending)                                                                                                                                |
 | 98l       | ⬜     | realtime lifecycle observations — design security review and implementation audit required                                                                                   |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                    |
 | 98n       | ⬜     | outbound http attempt observations — design security review and implementation audit required                                                                                |

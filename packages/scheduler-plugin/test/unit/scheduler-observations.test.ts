@@ -1,0 +1,588 @@
+/**
+ * Unit tests for the M98k scheduler execution observations: option
+ * validation, the collector's counting, retention, saturation and failure
+ * latch, the fire/attempt capture through a real SchedulerService (lock
+ * losers produce no handler records), and the plugin's multi-provider
+ * source registration and close ordering through a real kernel application.
+ */
+import { describe, it } from '@std/testing/bdd';
+import { expect } from '@std/expect';
+
+import type { IScheduler, ISchedulerDiagnosticsSource } from '@setu-ts/common';
+import { CAPABILITIES } from '@setu-ts/common';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+
+import { SchedulerPlugin } from '../../src/index.ts';
+import type { SchedulerDiagnosticsOptions } from '../../src/index.ts';
+import { SchedulerService } from '../../src/services/scheduler-service.ts';
+import {
+  attachSchedulerCollector,
+  detachSchedulerCollector,
+} from '../../src/services/scheduler-service.ts';
+import {
+  bump,
+  compileSchedulerDiagnostics,
+  createSchedulerDiagnosticsSource,
+  SCHEDULER_COLLECTOR_LIMITS,
+  SCHEDULER_DIAGNOSTICS_ERRORS,
+  SchedulerObservationCollector,
+} from '../../src/diagnostics/scheduler-observations.ts';
+import { MemoryLock } from '../../src/lock/memory-lock.ts';
+import type { IDistributedLock } from '../../src/interfaces/index.ts';
+import { FakeRuntime } from '../fixtures/fake-runtime.ts';
+
+/** Builds an observed service over a controllable runtime and lock. */
+function observed(lock: IDistributedLock = new MemoryLock(new FakeRuntime())) {
+  const runtime = new FakeRuntime();
+  const collector = new SchedulerObservationCollector(
+    'cron',
+    new Map([['tick', 'tick-alias']]),
+    runtime.now.bind(runtime),
+    runtime.hrtime.bind(runtime),
+  );
+  const service = new SchedulerService(runtime, lock);
+  attachSchedulerCollector(service, collector);
+  return { service, collector, runtime, lock };
+}
+
+/** The record for one (job alias, operation) tuple. */
+function recordOf(
+  snapshot: ReturnType<SchedulerObservationCollector['snapshot']>,
+  alias: string,
+  operation: 'fire' | 'attempt',
+) {
+  return snapshot.records.find((r) => r.alias === alias && r.operation === operation);
+}
+
+/** Arms one 100 ms delay job and lets it fire. */
+async function fireDelay(
+  service: SchedulerService,
+  runtime: FakeRuntime,
+  handler: () => void,
+): Promise<void> {
+  await service.connect();
+  await service.delay('tick', 100, handler);
+  await runtime.advance(140);
+}
+
+describe('compileSchedulerDiagnostics', () => {
+  it('accepts the literal-true opt-in and compiles the job approvals', () => {
+    const compiled = compileSchedulerDiagnostics({
+      enabled: true,
+      alias: 'primary',
+      jobs: { 'nightly-sync': 'sync', tick: 'tick-alias' },
+    });
+    expect(compiled.alias).toBe('primary');
+    expect(compiled.jobs.get('nightly-sync')).toBe('sync');
+    expect(compiled.jobs.get('tick')).toBe('tick-alias');
+    expect(
+      compileSchedulerDiagnostics({ enabled: true, alias: 'x'.repeat(64), jobs: {} }).jobs
+        .size,
+    ).toBe(0);
+  });
+
+  it('refuses every invalid shape with a fixed, value-free message', () => {
+    const base = { enabled: true, alias: 'primary', jobs: {} } as const;
+    const cases: readonly [unknown, string][] = [
+      [null, SCHEDULER_DIAGNOSTICS_ERRORS.shape],
+      [[], SCHEDULER_DIAGNOSTICS_ERRORS.shape],
+      ['x', SCHEDULER_DIAGNOSTICS_ERRORS.shape],
+      [{ ...base, extra: 1 }, SCHEDULER_DIAGNOSTICS_ERRORS.shape],
+      [{ ...base, enabled: false }, SCHEDULER_DIAGNOSTICS_ERRORS.enabled],
+      [{ ...base, alias: 7 }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasType],
+      [{ ...base, alias: '' }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasBytes],
+      [{ ...base, alias: 'x'.repeat(65) }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasBytes],
+      [{ ...base, alias: 'a\u001bb' }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasControl],
+      [{ enabled: true, alias: 'a' }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsRequired],
+      [{ ...base, jobs: 'x' }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsShape],
+      [{ ...base, jobs: [] }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsShape],
+      [{ ...base, jobs: new Map() }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsShape],
+      [{ ...base, jobs: { a: 7 } }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsValue],
+      [{ ...base, jobs: { a: '' } }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasBytes],
+      [{ ...base, jobs: { a: 'a\u0085b' } }, SCHEDULER_DIAGNOSTICS_ERRORS.aliasControl],
+      [{ ...base, jobs: { a: 'same', b: 'same' } }, SCHEDULER_DIAGNOSTICS_ERRORS.jobsDuplicate],
+    ];
+    for (const [input, message] of cases) {
+      expect(() => compileSchedulerDiagnostics(input as SchedulerDiagnosticsOptions)).toThrow(
+        message,
+      );
+    }
+    const bigJobs = Object.fromEntries(
+      Array.from({ length: 65 }, (_, i) => [`job-${i}`, `alias-${i}`]),
+    );
+    expect(() => compileSchedulerDiagnostics({ ...base, jobs: bigJobs })).toThrow(
+      SCHEDULER_DIAGNOSTICS_ERRORS.jobsCount,
+    );
+  });
+
+  it('refuses at SchedulerPlugin() construction, before any application exists', () => {
+    expect(() =>
+      SchedulerPlugin({
+        diagnostics: {
+          enabled: false,
+          alias: 'a',
+          jobs: {},
+        } as unknown as SchedulerDiagnosticsOptions,
+      })
+    ).toThrow(SCHEDULER_DIAGNOSTICS_ERRORS.enabled);
+  });
+});
+
+describe('SchedulerObservationCollector', () => {
+  it('counts one settled fire and one settled attempt with their detail counters', () => {
+    const { collector, runtime } = observed();
+    const obs = collector.fireBegin('tick', runtime.now() - 30);
+    expect(obs).toEqual({ jobAlias: 'tick-alias', latenessMs: 30 });
+    collector.fireSettled(obs, 'dispatched', true, 5);
+    const attempts = collector.attemptObserver('tick');
+    attempts!.attemptStarted();
+    attempts!.attemptSettled(true, 4, false);
+    const fire = recordOf(collector.snapshot(), 'tick-alias', 'fire')!;
+    expect(fire).toMatchObject({
+      count: 1,
+      started: 1,
+      succeeded: 1,
+      failed: 0,
+      contended: 0,
+      lockFailed: 0,
+      retryAttempts: 0,
+      lastDurationMs: 5,
+      lastLatenessMs: 30,
+    });
+    expect(fire.operation).toBe('fire');
+    const attempt = recordOf(collector.snapshot(), 'tick-alias', 'attempt')!;
+    expect(attempt).toMatchObject({
+      count: 1,
+      started: 1,
+      succeeded: 1,
+      failed: 0,
+      contended: 0,
+      lockFailed: 0,
+      retryAttempts: 0,
+      lastDurationMs: 4,
+      lastLatenessMs: 0,
+    });
+  });
+
+  it('counts contended and lock-failed fires and failed attempts', () => {
+    const { collector } = observed();
+    const obs = collector.fireBegin('tick', 0);
+    collector.fireSettled(obs, 'contended', null, null);
+    collector.fireSettled(collector.fireBegin('tick', 0), 'lock-failed', null, null);
+    collector.fireSettled(collector.fireBegin('tick', 0), 'dispatched', false, 7);
+    const attempts = collector.attemptObserver('tick')!;
+    attempts.attemptStarted();
+    attempts.attemptSettled(false, 3, true);
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'fire')).toMatchObject({
+      count: 3,
+      started: 1,
+      succeeded: 0,
+      failed: 1,
+      contended: 1,
+      lockFailed: 1,
+    });
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toMatchObject({
+      count: 1,
+      started: 1,
+      failed: 1,
+      retryAttempts: 1,
+    });
+  });
+
+  it('ignores a null observation and reports no-data before anything settled', () => {
+    const { collector } = observed();
+    collector.fireSettled(null, 'dispatched', true, 1);
+    expect(collector.snapshot()).toEqual({
+      state: 'no-data',
+      alias: 'cron',
+      coverage: 'owned-instance',
+      records: [],
+      dropped: 0,
+    });
+  });
+
+  it('expires records without an observation and reports stale before expiry', () => {
+    const { collector, runtime } = observed();
+    collector.fireSettled(collector.fireBegin('tick', 0), 'dispatched', true, 1);
+    runtime.advance(31_000);
+    runtime.clearAllTimers();
+    expect(collector.snapshot().state).toBe('stale');
+    runtime.advance(30_000);
+    expect(collector.snapshot().state).toBe('no-data');
+  });
+
+  it('drops a NEW tuple at capacity while existing tuples keep updating', () => {
+    const runtime = new FakeRuntime();
+    const jobs = new Map(
+      Array.from({ length: SCHEDULER_COLLECTOR_LIMITS.maxJobs }, (_, i) => [`j${i}`, `a${i}`]),
+    );
+    const collector = new SchedulerObservationCollector(
+      'cron',
+      jobs,
+      runtime.now.bind(runtime),
+      runtime.hrtime.bind(runtime),
+    );
+    for (let i = 0; i < jobs.size; i++) {
+      collector.fireSettled(collector.fireBegin(`j${i}`, 0), 'dispatched', true, null);
+    }
+    expect(collector.snapshot().records).toHaveLength(SCHEDULER_COLLECTOR_LIMITS.maxRecords);
+    expect(collector.snapshot().dropped).toBe(0);
+    // An EXISTING tuple (j0's fire) still updates at capacity, but its first
+    // ATTEMPT tuple is new: no slot is free, so it is dropped.
+    collector.fireSettled(
+      collector.fireBegin(`j0`, 0)!,
+      'dispatched',
+      true,
+      null,
+    );
+    expect(collector.snapshot().dropped).toBe(0);
+    collector.attemptObserver('j0')!.attemptStarted();
+    expect(collector.snapshot().dropped).toBe(1);
+    // An existing tuple's SECOND operation is also a drop: the slots are
+    // full and every (alias, operation) pair is distinct.
+    collector.fireSettled(collector.fireBegin('j1', 0), 'dispatched', true, null);
+    collector.attemptObserver('j1')!.attemptStarted();
+    expect(collector.snapshot().dropped).toBe(2);
+  });
+
+  it('saturates the dropped counter', () => {
+    expect(bump(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
+    expect(bump(0)).toBe(1);
+  });
+
+  it('latches collection-failed on a throwing clock and stops capture', () => {
+    const runtime = new FakeRuntime();
+    let failMono = false;
+    const collector = new SchedulerObservationCollector(
+      'cron',
+      new Map([['tick', 'tick-alias']]),
+      runtime.now.bind(runtime),
+      () => {
+        if (failMono) {
+          throw new Error('mono-canary');
+        }
+        return runtime.hrtime();
+      },
+    );
+    collector.fireSettled(collector.fireBegin('tick', 0), 'dispatched', true, 1);
+    failMono = true;
+    // fireBegin reads the WALL clock only, so it still returns an
+    // observation; the MONO failure latches at the settle.
+    collector.fireSettled(collector.fireBegin('tick', 0), 'dispatched', true, 1);
+    expect(collector.fireBegin('tick', 0)).toBeNull();
+    expect(collector.snapshot()).toEqual({
+      state: 'collection-failed',
+      alias: 'cron',
+      coverage: 'owned-instance',
+      records: [],
+      dropped: 0,
+    });
+  });
+
+  it('latches collection-failed when the wall clock throws mid-fire', () => {
+    const runtime = new FakeRuntime();
+    let failWall = false;
+    const collector = new SchedulerObservationCollector(
+      'cron',
+      new Map([['tick', 'tick-alias']]),
+      () => {
+        if (failWall) {
+          throw new Error('wall-canary');
+        }
+        return runtime.now();
+      },
+      runtime.hrtime.bind(runtime),
+    );
+    failWall = true;
+    expect(collector.fireBegin('tick', 0)).toBeNull();
+    expect(collector.snapshot().state).toBe('collection-failed');
+  });
+
+  it('answers disabled after close and ignores late observations', () => {
+    const { collector } = observed();
+    const attempts = collector.attemptObserver('tick');
+    const obs = collector.fireBegin('tick', 0);
+    collector.close();
+    collector.fireSettled(obs, 'dispatched', true, 1);
+    attempts!.attemptStarted();
+    expect(collector.snapshot()).toEqual({
+      state: 'disabled',
+      alias: null,
+      coverage: 'owned-instance',
+      records: [],
+      dropped: 0,
+    });
+  });
+
+  it('serves an inert disabled source when no collector exists', () => {
+    expect(createSchedulerDiagnosticsSource(null).snapshot()).toEqual({
+      state: 'disabled',
+      alias: null,
+      coverage: 'owned-instance',
+      records: [],
+      dropped: 0,
+    });
+  });
+});
+
+describe('observed SchedulerService fires', () => {
+  it('records a successful dispatch with its attempt', async () => {
+    const { service, collector, runtime } = observed();
+    let ran = 0;
+    await fireDelay(service, runtime, () => {
+      ran++;
+    });
+    expect(ran).toBe(1);
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'fire')).toMatchObject({
+      count: 1,
+      started: 1,
+      succeeded: 1,
+      failed: 0,
+      contended: 0,
+      lockFailed: 0,
+      // fireDelay advances 140 ms against a 100 ms delay: 40 ms late.
+      lastLatenessMs: 40,
+    });
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toMatchObject({
+      count: 1,
+      succeeded: 1,
+      failed: 0,
+      retryAttempts: 0,
+    });
+  });
+
+  it('records lateness as max(0, actualStart - intendedFire), never negative', async () => {
+    const { service, collector, runtime } = observed();
+    await service.connect();
+    await service.delay('tick', 100, () => {});
+    // The timer fires 40 ms after the intended instant: lateness is the
+    // positive difference, never an absolute schedule and never negative.
+    await runtime.advance(140);
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'fire')!.lastLatenessMs).toBe(40);
+  });
+
+  it('counts retry attempts and the final failure without throwing', async () => {
+    const { service, collector, runtime } = observed();
+    let calls = 0;
+    await service.connect();
+    await service.delay('tick', 100, () => {
+      calls++;
+      throw new Error('attempt-canary');
+    }, { retry: { limit: 2, delay: 10, backoff: 'fixed' } });
+    // Two-phase advance: the first fires the job; a macrotask lets the fire
+    // chain reach the executor and arm its backoff sleep; the second fires
+    // that sleep. Awaiting the first advance directly would deadlock inside
+    // the FakeRuntime, whose sleep timer only fires on a later advance.
+    const first = runtime.advance(140);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    await runtime.advance(200);
+    await first;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    expect(calls).toBe(2);
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toMatchObject({
+      count: 2,
+      started: 2,
+      succeeded: 0,
+      failed: 2,
+      retryAttempts: 1,
+    });
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'fire')).toMatchObject({
+      started: 1,
+      failed: 1,
+      succeeded: 0,
+    });
+  });
+
+  it('records a contended fire when the fire slot was claimed elsewhere', async () => {
+    const { service, collector, runtime, lock } = observed();
+    await service.connect();
+    await service.every('tick', 100_000, () => {});
+    const intended = await service.getNextRun('tick');
+    expect(await lock.acquire(`scheduler:job:tick:${String(intended)}`, 30_000)).not.toBeNull();
+    await runtime.advance(runtime.getNextTimerDelay()! + 1);
+    const fire = recordOf(collector.snapshot(), 'tick-alias', 'fire');
+    expect(fire).toMatchObject({ count: 1, started: 0, contended: 1, lockFailed: 0 });
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toBeUndefined();
+  });
+
+  it('records a contended fire when the overlap mutex is held elsewhere', async () => {
+    const { service, collector, runtime, lock } = observed();
+    await service.connect();
+    await service.every('tick', 100_000, () => {});
+    expect(await lock.acquire('scheduler:job:tick', 30_000)).not.toBeNull();
+    await runtime.advance(runtime.getNextTimerDelay()! + 1);
+    const fire = recordOf(collector.snapshot(), 'tick-alias', 'fire');
+    expect(fire).toMatchObject({ count: 1, started: 0, contended: 1 });
+    // The overlap-mutex loser ran no handler and produces NO attempt record.
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toBeUndefined();
+  });
+
+  it('records a contended delay whose registration slot belongs to another replica', async () => {
+    const { service, collector, runtime, lock } = observed();
+    expect(await lock.acquire('scheduler:job:tick:once', 60_000)).not.toBeNull();
+    await fireDelay(service, runtime, () => {
+      throw new Error('must-not-run');
+    });
+    const fire = recordOf(collector.snapshot(), 'tick-alias', 'fire');
+    expect(fire).toMatchObject({ count: 1, started: 0, contended: 1 });
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toBeUndefined();
+  });
+
+  it('records a lock-failed fire when the slot acquisition rejects', async () => {
+    const broken: IDistributedLock = {
+      acquire: () => Promise.reject(new Error('lock-canary')),
+      release: () => Promise.resolve(),
+    };
+    const { service, collector, runtime } = observed(broken);
+    // A cron/every fire claims its slot AT FIRE TIME, so a rejecting lock
+    // surfaces there. (A delay's slot is claimed at registration, where the
+    // same rejection marks the entry not-claimed — the contended path.)
+    await service.connect();
+    await service.every('tick', 100_000, () => {});
+    await runtime.advance(runtime.getNextTimerDelay()! + 1);
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'fire')).toMatchObject({
+      count: 1,
+      started: 0,
+      lockFailed: 1,
+      contended: 0,
+    });
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toBeUndefined();
+  });
+
+  it('records a lock-failed fire when the mutex acquisition rejects after the slot is claimed', async () => {
+    const runtime = new FakeRuntime();
+    const mutexThrowing: IDistributedLock = {
+      acquire: (key) =>
+        key === 'scheduler:job:tick'
+          ? Promise.reject(new Error('mutex-canary'))
+          : Promise.resolve(`token-${key.length}`),
+      release: () => Promise.resolve(),
+    };
+    const service = new SchedulerService(runtime, mutexThrowing);
+    const collector = new SchedulerObservationCollector(
+      'cron',
+      new Map([['tick', 'tick-alias']]),
+      runtime.now.bind(runtime),
+      runtime.hrtime.bind(runtime),
+    );
+    attachSchedulerCollector(service, collector);
+    await fireDelay(service, runtime, () => {});
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'fire')).toMatchObject({
+      count: 1,
+      started: 0,
+      lockFailed: 1,
+    });
+    expect(recordOf(collector.snapshot(), 'tick-alias', 'attempt')).toBeUndefined();
+  });
+
+  it('records nothing for an unapproved job beyond the attachment check', async () => {
+    const runtime = new FakeRuntime();
+    const lock = new MemoryLock(runtime);
+    const service = new SchedulerService(runtime, lock);
+    const collector = new SchedulerObservationCollector(
+      'cron',
+      new Map([['tick', 'tick-alias']]),
+      runtime.now.bind(runtime),
+      runtime.hrtime.bind(runtime),
+    );
+    attachSchedulerCollector(service, collector);
+    await service.connect();
+    await service.delay('other-job', 100, () => {});
+    await runtime.advance(140);
+    expect(collector.snapshot().records).toEqual([]);
+    expect(collector.snapshot().state).toBe('no-data');
+  });
+
+  it('stops observing after detach, then close', async () => {
+    const { service, collector, runtime } = observed();
+    await service.connect();
+    await service.delay('tick', 100, () => {});
+    detachSchedulerCollector(service);
+    collector.close();
+    await runtime.advance(140);
+    expect(collector.snapshot().state).toBe('disabled');
+  });
+});
+
+describe('SchedulerPlugin diagnostics wiring', () => {
+  it('registers an inert disabled source by default and a live one when opted in', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        SchedulerPlugin({
+          diagnostics: { enabled: true, alias: 'cron', jobs: { tick: 'tick-alias' } },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      const sources = app.services.getAll<ISchedulerDiagnosticsSource>(
+        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+      );
+      expect(sources).toHaveLength(1);
+      expect(sources[0]!.snapshot().state).toBe('no-data');
+      expect(sources[0]!.snapshot().alias).toBe('cron');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('observes fires and attempts of an app-registered job and closes cleanly', async () => {
+    let handler: (() => void | Promise<void>) | undefined;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        SchedulerPlugin({
+          jobs: [{
+            trigger: 'delay',
+            name: 'tick',
+            delayMs: 30,
+            handler: () => {
+              handler?.();
+            },
+          }],
+          diagnostics: { enabled: true, alias: 'cron', jobs: { tick: 'tick-alias' } },
+        }),
+      ],
+    });
+    // The declared job's handler is opaque to the app; observe through the
+    // source instead and drive one extra imperative fire through the
+    // resolved scheduler.
+    await app.start();
+    try {
+      const scheduler = app.services.get<IScheduler>(CAPABILITIES.SCHEDULER);
+      let ran = false;
+      await scheduler.delay('oneshot', 20, () => {
+        ran = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(ran).toBe(true);
+      const source = app.services.getAll<ISchedulerDiagnosticsSource>(
+        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+      )[0]!;
+      const snapshot = source.snapshot();
+      // `tick` (declared) was approved and fired; `oneshot` was not approved
+      // and is invisible.
+      expect(snapshot.records.some((r) => r.alias === 'tick-alias' && r.operation === 'fire'))
+        .toBe(true);
+      expect(snapshot.records.some((r) => r.alias === 'oneshot')).toBe(false);
+      expect(['ready', 'stale']).toContain(snapshot.state);
+      void handler;
+    } finally {
+      await app.stop();
+    }
+    // After close the source answers disabled: detached first, then cleared.
+    const source = app.services.getAll<ISchedulerDiagnosticsSource>(
+      CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+    )[0]!;
+    expect(source.snapshot().state).toBe('disabled');
+  });
+
+  it('leaves provides unchanged — the diagnostics token is never claimed', () => {
+    const plugin = SchedulerPlugin({
+      diagnostics: { enabled: true, alias: 'cron', jobs: {} },
+    });
+    expect(plugin.provides).toEqual(['scheduler']);
+  });
+});

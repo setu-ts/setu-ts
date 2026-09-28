@@ -11,6 +11,7 @@ export type {
   DistributedLockOptions,
   IDistributedLock,
   IRedisLockClient,
+  SchedulerDiagnosticsOptions,
   SchedulerJobDefinition,
   SchedulerJobEntry,
   SchedulerPluginOptions,

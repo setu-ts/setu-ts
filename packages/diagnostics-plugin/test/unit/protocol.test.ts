@@ -195,6 +195,7 @@ describe('Protocol — status body and fixed errors', () => {
       'queues',
       'traces',
       'cache',
+      'scheduler',
       'authorization',
     ];
     for (const key of INSPECTOR_KEYS) {

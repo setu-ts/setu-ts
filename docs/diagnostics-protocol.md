@@ -33,6 +33,7 @@ verified.
 | `GET /v1/config`                        | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
 | `GET /v1/queues?after=N&limit=N`        | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
 | `GET /v1/cache`                         | M98i's cache operation counters across every cache source (below)                                                                                                                |
+| `GET /v1/scheduler`                     | M98k's scheduler execution observations across every scheduler source (below)                                                                                                    |
 | `GET /v1/traces?after=N&limit=N`        | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 | `GET /v1/authorization?after=N&limit=N` | M98h's authorization-decision-explanation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 
@@ -164,12 +165,12 @@ design security review, R7).
 
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
-`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g)
-and `cache: true` (M98i) and `authorization: true` (M98h), and leaves the rest (`events`,
-`scheduler`, `realtime`, `storage`, `outboundHttp`) reserved and `false`. A client that reads a
-legacy M98b three-field status body (no `inspectors`) resolves the manifest to all-`false`, so its
-`health()`, `configuration()`, `queues()`, `traces()`, `cache()` and `authorization()` answer a
-typed `unsupported` without sending the request.
+`health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g),
+`cache: true` (M98i), `authorization: true` (M98h) and `scheduler: true` (M98k), and leaves the rest
+(`events`, `realtime`, `storage`, `outboundHttp`) reserved and `false`. A client that reads a legacy
+M98b three-field status body (no `inspectors`) resolves the manifest to all-`false`, so its
+`health()`, `configuration()`, `queues()`, `traces()`, `cache()`, `authorization()` and
+`scheduler()` answer a typed `unsupported` without sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -385,6 +386,49 @@ Keys, prefixes, values, Redis URLs, factory results and errors never reach the c
 or the client. Only calls through the plugin's OWN `CacheService` are counted: direct store calls
 and a replacement service registered later are outside coverage.
 
+## Scheduler execution observations (M98k)
+
+`GET /v1/scheduler` (no query) answers
+`{ version: 1, instanceId, state, sources: [{ sourceId, snapshot }] }` over every
+`ISchedulerDiagnosticsSource` registered under `CAPABILITIES.SCHEDULER_DIAGNOSTICS`. Every
+SchedulerPlugin instance registers one as a multi provider (never in `provides`); the connector
+resolves them ONCE at bootstrap, in registration order, and REFUSES to start with more than 16 (a
+fixed, value-free configuration error, never a silent drop). Sources are read only after the request
+authenticated; `sourceId` is the session-local `s1`…`s16`.
+
+A snapshot is exactly `{ state, alias, coverage: 'owned-instance', records, dropped }`; `alias` is
+the configured SOURCE alias, `null` when the plugin was not opted in (`state: 'disabled'`). A record
+is exactly
+`{ alias, operation, count, lastDurationMs, ageMs, started, succeeded, failed,
+contended, lockFailed, retryAttempts, lastLatenessMs }`
+for one of the two observations `fire` and `attempt`, keyed by (job alias, operation) — at most 64
+tuples per source, a NEW tuple at capacity ignored and counted in the saturating `dropped`. On a
+`fire` record the counters describe local timer fires: `started` dispatched, `contended` skipped
+because a fire slot or the overlap mutex was held elsewhere (or a delay's registration slot belonged
+to another replica), `lockFailed` skipped because a lock operation rejected, `succeeded`/`failed`
+the dispatch settlement; `lastLatenessMs` is `max(0, actualStart - intendedFire)` of the last fire,
+and `retryAttempts` is nonapplicable and `0`. On an `attempt` record they describe handler attempts;
+`contended`/`lockFailed`/`lastLatenessMs` are nonapplicable and `0`. `count` counts settled
+observations; every counter saturates at `Number.MAX_SAFE_INTEGER`; records expire after 60 seconds
+without an observation (age >30 s means the snapshot is `stale`). A skipped local fire is never a
+globally missed execution, and no missed counter exists.
+
+Each source is untrusted input: only a plain object (`Object.prototype` or `null` prototype) of own
+DATA properties is admitted, each field read once through its descriptor (a getter is never
+invoked), lists read by index, at most 64 records, exact keys and enums, unique (alias, operation)
+tuples, non-negative safe-integer counters. A source that throws or fails any check is reported as a
+fixed `{ state: 'collection-failed', alias: null, records: [], dropped: 0 }` — no error text.
+Duplicate non-null SOURCE aliases across sources, or a response over 256 KiB, collapse the whole
+response to `{ state: 'collection-failed', sources: [] }`; a partial document is never produced. The
+aggregate `state` is `unsupported` with no source, otherwise the first of `ready`,
+`collection-failed`, `stale`, `no-data`, `disabled` present. The client runs the same validator; a
+manifest with `scheduler: false` answers a local typed `unsupported` response without a request.
+
+Job names, cron expressions, payloads, job ids, lock keys and tokens, and thrown values never reach
+the collector, the wire, or the client. Only fires of and attempts by the plugin's OWN
+`SchedulerService` are observed — a replacement service registered under the scheduler token is
+outside coverage, and a read never acquires a lock, invokes a handler, or reads the job registry.
+
 ## Trace observations (M98g)
 
 `GET /v1/traces?after=N&limit=N` pages minimized completed-span observations from the
@@ -471,6 +515,8 @@ frozen batch, echoing its cursor, without sending the request.
 | Response body                    | 256 KiB                                      |
 | Events per read                  | 128                                          |
 | Queue sources read               | 16                                           |
+| Scheduler sources read           | 16                                           |
+| Scheduler records per source     | 64 (job alias, operation) tuples             |
 | Queue merge ring                 | 1,024 events                                 |
 | Authorization alias map entries  | 128 per map                                  |
 | Authorization steps per decision | 16 retained (true count in `stepsEvaluated`) |

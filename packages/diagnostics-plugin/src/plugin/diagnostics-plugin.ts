@@ -22,6 +22,7 @@ import type {
   ILocalDiagnosticsListenerFactory,
   IPluginContext,
   IQueueDiagnosticsSource,
+  ISchedulerDiagnosticsSource,
   ITraceDiagnosticsSource,
   TimerHandle,
 } from '@setu-ts/common';
@@ -33,6 +34,7 @@ import { createConnectorHandler } from '../transport/connector-handler.ts';
 import { ConnectorLimits } from '../transport/limits.ts';
 import { QueueObservationMerger } from '../transport/queue-merger.ts';
 import { MAX_CACHE_SOURCES } from '../protocol/cache-protocol.ts';
+import { MAX_SCHEDULER_SOURCES } from '../protocol/scheduler-protocol.ts';
 
 /**
  * The default session lifetime: 15 minutes.
@@ -62,6 +64,9 @@ export const PLUGIN_ERRORS = {
   invalidTtl: 'DiagnosticsPlugin: ttlMs must be an integer from 1 to 3600000.',
   tooManyCacheSources:
     'DiagnosticsPlugin: more than 16 cache-diagnostics sources are registered; ' +
+    'the connector reads at most 16.',
+  tooManySchedulerSources:
+    'DiagnosticsPlugin: more than 16 scheduler-diagnostics sources are registered; ' +
     'the connector reads at most 16.',
   missingDiagnostics:
     'DiagnosticsPlugin: the application was not created with kernel diagnostics enabled. ' +
@@ -172,6 +177,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       CAPABILITIES.HEALTH_DIAGNOSTICS,
       CAPABILITIES.CONFIG_DIAGNOSTICS,
       CAPABILITIES.QUEUE_DIAGNOSTICS,
+      CAPABILITIES.SCHEDULER_DIAGNOSTICS,
       CAPABILITIES.TRACE_DIAGNOSTICS,
       CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
     ],
@@ -283,6 +289,19 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           session = null;
           throw new Error(PLUGIN_ERRORS.tooManyCacheSources);
         }
+        // The scheduler-diagnostics sources (M98k), read ONCE here for the
+        // same reason. Registration is only collected — no snapshot is taken
+        // until an authenticated request — and more than 16 refuses by a
+        // fixed, value-free configuration error rather than silently
+        // dropping one.
+        const schedulerSources = ctx.services.has(CAPABILITIES.SCHEDULER_DIAGNOSTICS)
+          ? ctx.services.getAll<ISchedulerDiagnosticsSource>(CAPABILITIES.SCHEDULER_DIAGNOSTICS)
+          : [];
+        if (schedulerSources.length > MAX_SCHEDULER_SOURCES) {
+          active.revoke();
+          session = null;
+          throw new Error(PLUGIN_ERRORS.tooManySchedulerSources);
+        }
         const merger = new QueueObservationMerger(queueSources, ctx.runtime);
         queueMerger = merger;
         const handler = createConnectorHandler({
@@ -295,6 +314,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           healthSource,
           configSource,
           cacheSources,
+          schedulerSources,
           queues: merger,
           traces: traceSource,
           authorization: authorizationSource,

@@ -49,12 +49,13 @@ await scheduler.resume('poll-inbox');
 
 ## Options
 
-| Option            | Type                                                                 | Default  | Description                                                                                                                                        |
-| ----------------- | -------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `timezone`        | `string`                                                             | `'UTC'`  | Only `'UTC'` is supported in this release.                                                                                                         |
-| `distributedLock` | `DistributedLockOptions`                                             | disabled | Multi-instance safety; see below.                                                                                                                  |
-| `jobs`            | `readonly SchedulerJobEntry[]`                                       | —        | Declarative `cron()` / `every()` / `delay()` registrations. `SchedulerJobDefinition` is discriminated by `trigger`; factories resolve at `onInit`. |
-| `behaviors`       | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Chain around every handler. It sees `kind: 'scheduler'`, job name, the delivered job, and its 1-based attempt.                                     |
+| Option            | Type                                                                 | Default  | Description                                                                                                                                                                                     |
+| ----------------- | -------------------------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `timezone`        | `string`                                                             | `'UTC'`  | Only `'UTC'` is supported in this release.                                                                                                                                                      |
+| `distributedLock` | `DistributedLockOptions`                                             | disabled | Multi-instance safety; see below.                                                                                                                                                               |
+| `jobs`            | `readonly SchedulerJobEntry[]`                                       | —        | Declarative `cron()` / `every()` / `delay()` registrations. `SchedulerJobDefinition` is discriminated by `trigger`; factories resolve at `onInit`.                                              |
+| `behaviors`       | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Chain around every handler. It sees `kind: 'scheduler'`, job name, the delivered job, and its 1-based attempt.                                                                                  |
+| `diagnostics`     | `SchedulerDiagnosticsOptions`                                        | —        | Opt-in execution observations (M98k): `{ enabled: true, alias, jobs }`, `jobs` mapping exact job names to approved aliases (at most 64). Absent — an inert `disabled` source, nothing observed. |
 
 Declare jobs where the plugin is composed, instead of resolving the scheduler after `start()`:
 
@@ -106,24 +107,36 @@ Behaviours run inside that lock. A replica that does not acquire it runs neither
 nor the job handler; a behaviour throw follows the job's existing retry policy. With no behaviours,
 the handler receives its original job directly and no chain is allocated.
 
+## Execution observations
+
+`SchedulerPlugin({ diagnostics: { enabled: true, alias, jobs } })` registers one
+`ISchedulerDiagnosticsSource` under `CAPABILITIES.SCHEDULER_DIAGNOSTICS` (as a multi provider, one
+per instance) that the local diagnostics connector reads to serve `GET /v1/scheduler`. Only exact
+job names listed in `jobs` are observed, each under its approved alias; counters distinguish
+contended fires (a lock held elsewhere), lock-failed fires, dispatched fires and handler attempts
+(including retries), plus the wall-clock lateness each fire started late. A skipped local fire is
+never reported as a globally missed execution. Job names, cron expressions, payloads, job ids, lock
+keys and thrown errors are never captured; without the option nothing is observed at all.
+
 ## Exports
 
-| Export                      | Kind      |
-| --------------------------- | --------- |
-| `SchedulerPlugin`           | function  |
-| `SchedulerUnavailableError` | class     |
-| `DistributedLockOptions`    | interface |
-| `IDistributedLock`          | interface |
-| `IRedisLockClient`          | interface |
-| `IScheduler`                | interface |
-| `RetryOptions`              | interface |
-| `ScheduledJob`              | interface |
-| `ScheduleOptions`           | interface |
-| `SchedulerPluginOptions`    | interface |
-| `SchedulerBackoff`          | type      |
-| `SchedulerJobDefinition`    | type      |
-| `SchedulerJobEntry`         | type      |
-| `SchedulerJobHandler`       | type      |
+| Export                        | Kind      |
+| ----------------------------- | --------- |
+| `SchedulerPlugin`             | function  |
+| `SchedulerUnavailableError`   | class     |
+| `DistributedLockOptions`      | interface |
+| `IDistributedLock`            | interface |
+| `IRedisLockClient`            | interface |
+| `IScheduler`                  | interface |
+| `RetryOptions`                | interface |
+| `ScheduledJob`                | interface |
+| `ScheduleOptions`             | interface |
+| `SchedulerDiagnosticsOptions` | interface |
+| `SchedulerPluginOptions`      | interface |
+| `SchedulerBackoff`            | type      |
+| `SchedulerJobDefinition`      | type      |
+| `SchedulerJobEntry`           | type      |
+| `SchedulerJobHandler`         | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

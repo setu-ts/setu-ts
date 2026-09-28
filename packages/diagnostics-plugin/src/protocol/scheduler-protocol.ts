@@ -1,27 +1,27 @@
 /**
- * Cache observation protocol (M98i): the exact, copy-once reading of every
- * registered cache source's snapshot, the aggregate response the connector
- * signs for `GET /v1/cache`, and the ONE validator both sides of the wire
- * run over it.
+ * Scheduler observation protocol (M98k): the exact, copy-once reading of
+ * every registered scheduler source's snapshot, the aggregate response the
+ * connector signs for `GET /v1/scheduler`, and the ONE validator both sides
+ * of the wire run over it.
  *
- * A cache source is a multi-provider contribution any installed plugin can
- * register, so its snapshot is untrusted input: only plain objects carrying
- * own DATA properties are admitted (a getter, a custom prototype or an extra
- * key refuses the source), every field is read once and copied individually,
- * and a throwing proxy trap is caught. A source that fails any check is
- * reported as a fixed `collection-failed` snapshot carrying no records and no
- * error text.
+ * A scheduler source is a multi-provider contribution any installed plugin
+ * can register, so its snapshot is untrusted input: only plain objects
+ * carrying own DATA properties are admitted (a getter, a custom prototype
+ * or an extra key refuses the source), every field is read once and copied
+ * individually, and a throwing proxy trap is caught. A source that fails any
+ * check is reported as a fixed `collection-failed` snapshot carrying no
+ * records and no error text.
  *
  * @module
  */
 
 import type {
-  CacheDiagnosticsOperation,
-  CacheDiagnosticsRecord,
-  CacheDiagnosticsResponse,
-  CacheDiagnosticsSnapshot,
   DiagnosticsInspectorState,
-  ICacheDiagnosticsSource,
+  ISchedulerDiagnosticsSource,
+  SchedulerDiagnosticsOperation,
+  SchedulerDiagnosticsRecord,
+  SchedulerDiagnosticsResponse,
+  SchedulerDiagnosticsSnapshot,
 } from '@setu-ts/common';
 
 import {
@@ -33,25 +33,22 @@ import {
 } from './protocol.ts';
 
 /**
- * The fixed source bound: a connector refuses to start with more cache
+ * The fixed source bound: a connector refuses to start with more scheduler
  * sources than this.
  *
  * @internal
  */
-export const MAX_CACHE_SOURCES = 16;
+export const MAX_SCHEDULER_SOURCES = 16;
 
 /** The fixed per-source record bound. */
-const MAX_CACHE_RECORDS = 64;
+const MAX_SCHEDULER_RECORDS = 64;
 
 /** The fixed response budget, in UTF-8 bytes of the compact JSON. */
-const MAX_CACHE_RESPONSE_BYTES = 256 * 1024;
+const MAX_SCHEDULER_RESPONSE_BYTES = 256 * 1024;
 
-const OPERATIONS: ReadonlySet<string> = new Set<CacheDiagnosticsOperation>([
-  'get',
-  'set',
-  'delete',
-  'has',
-  'clear',
+const OPERATIONS: ReadonlySet<string> = new Set<SchedulerDiagnosticsOperation>([
+  'fire',
+  'attempt',
 ]);
 
 /** States a SOURCE may report about itself (`unsupported` is connector-side only). */
@@ -80,28 +77,26 @@ const RECORD_KEYS: readonly string[] = [
   'count',
   'lastDurationMs',
   'ageMs',
+  'started',
   'succeeded',
   'failed',
-  'hits',
-  'misses',
-  'present',
-  'absent',
-  'removed',
-  'notRemoved',
+  'contended',
+  'lockFailed',
+  'retryAttempts',
+  'lastLatenessMs',
 ];
 
 /** The record fields that are non-negative safe-integer counters. */
 const COUNTER_KEYS = [
   'count',
   'ageMs',
+  'started',
   'succeeded',
   'failed',
-  'hits',
-  'misses',
-  'present',
-  'absent',
-  'removed',
-  'notRemoved',
+  'contended',
+  'lockFailed',
+  'retryAttempts',
+  'lastLatenessMs',
 ] as const;
 
 const RESPONSE_KEYS: readonly string[] = ['version', 'instanceId', 'state', 'sources'];
@@ -121,7 +116,9 @@ function isCounter(value: unknown): value is number {
  * @returns `true` when the snapshot is well formed
  * @internal
  */
-export function isCacheSnapshotProjection(value: unknown): value is CacheDiagnosticsSnapshot {
+export function isSchedulerSnapshotProjection(
+  value: unknown,
+): value is SchedulerDiagnosticsSnapshot {
   if (!isRecord(value) || !hasExactKeys(value, SNAPSHOT_KEYS)) {
     return false;
   }
@@ -140,7 +137,7 @@ export function isCacheSnapshotProjection(value: unknown): value is CacheDiagnos
     return false;
   }
   const records = value.records;
-  if (!Array.isArray(records) || records.length > MAX_CACHE_RECORDS) {
+  if (!Array.isArray(records) || records.length > MAX_SCHEDULER_RECORDS) {
     return false;
   }
   const empty = disabled || value.state === 'collection-failed' || value.state === 'no-data';
@@ -152,31 +149,34 @@ export function isCacheSnapshotProjection(value: unknown): value is CacheDiagnos
   }
   const seen = new Set<string>();
   for (const record of records) {
-    if (!isRecordProjection(record, value.alias as string)) {
+    if (!isRecordProjection(record)) {
       return false;
     }
-    const operation = (record as { operation: string }).operation;
-    if (seen.has(operation)) {
+    const tuple = `${(record as { alias: string }).alias}|${
+      (record as { operation: string }).operation
+    }`;
+    if (seen.has(tuple)) {
       return false;
     }
-    seen.add(operation);
+    seen.add(tuple);
   }
   return true;
 }
 
 /**
- * Validates one record: the exact keys, the fixed operation vocabulary, the
- * snapshot's own alias, and non-negative safe-integer counters.
+ * Validates one record: the exact keys, the fixed operation vocabulary, an
+ * approved display alias (the JOB alias — a different namespace from the
+ * snapshot's SOURCE alias, so the two are never compared), and non-negative
+ * safe-integer counters.
  *
  * @param value - The candidate record
- * @param alias - The owning snapshot's alias
  * @returns `true` when the record is well formed
  */
-function isRecordProjection(value: unknown, alias: string): value is CacheDiagnosticsRecord {
+function isRecordProjection(value: unknown): value is SchedulerDiagnosticsRecord {
   if (!isRecord(value) || !hasExactKeys(value, RECORD_KEYS)) {
     return false;
   }
-  if (value.alias !== alias) {
+  if (!isDisplayAlias(value.alias)) {
     return false;
   }
   if (typeof value.operation !== 'string' || !OPERATIONS.has(value.operation)) {
@@ -212,19 +212,19 @@ function failedSourceSnapshot(): Record<string, unknown> {
  * @param source - The registered source
  * @returns The validated copy, or the fixed failed snapshot
  */
-function readSource(source: ICacheDiagnosticsSource): Record<string, unknown> {
+function readSource(source: ISchedulerDiagnosticsSource): Record<string, unknown> {
   try {
     const raw: unknown = source.snapshot();
     const copy = copyPlainObject(raw, SNAPSHOT_KEYS);
     if (copy === null) {
       return failedSourceSnapshot();
     }
-    const records = copyPlainRecords(copy.records, MAX_CACHE_RECORDS, RECORD_KEYS);
+    const records = copyPlainRecords(copy.records, MAX_SCHEDULER_RECORDS, RECORD_KEYS);
     if (records === null) {
       return failedSourceSnapshot();
     }
     copy.records = records;
-    return isCacheSnapshotProjection(copy) ? copy : failedSourceSnapshot();
+    return isSchedulerSnapshotProjection(copy) ? copy : failedSourceSnapshot();
   } catch {
     return failedSourceSnapshot();
   }
@@ -260,11 +260,11 @@ function failedResponse(instanceId: string): Record<string, unknown> {
 }
 
 /**
- * Builds the signed-ready `GET /v1/cache` response from every registered
+ * Builds the signed-ready `GET /v1/scheduler` response from every registered
  * source. Sources are read only here — after the request authenticated —
- * and each read is isolated. Duplicate non-null aliases collapse the whole
- * response to a fixed `collection-failed` with no sources, and so does a
- * response whose compact JSON would exceed 256 KiB: a partial document is
+ * and each read is isolated. Duplicate non-null SOURCE aliases collapse the
+ * whole response to a fixed `collection-failed` with no sources, and so does
+ * a response whose compact JSON would exceed 256 KiB: a partial document is
  * never produced.
  *
  * @param instanceId - The session's bound instance UUID
@@ -272,15 +272,15 @@ function failedResponse(instanceId: string): Record<string, unknown> {
  * @returns The response record
  * @internal
  */
-export function buildCacheResponse(
+export function buildSchedulerResponse(
   instanceId: string,
-  sources: readonly ICacheDiagnosticsSource[],
+  sources: readonly ISchedulerDiagnosticsSource[],
 ): Record<string, unknown> {
   const entries: Record<string, unknown>[] = [];
   const aliases = new Set<string>();
   const states: string[] = [];
   for (let index = 0; index < sources.length; index++) {
-    const snapshot = readSource(sources[index] as ICacheDiagnosticsSource);
+    const snapshot = readSource(sources[index] as ISchedulerDiagnosticsSource);
     const alias = snapshot.alias;
     if (typeof alias === 'string') {
       if (aliases.has(alias)) {
@@ -297,23 +297,25 @@ export function buildCacheResponse(
     state: aggregateState(states),
     sources: entries,
   };
-  if (ENCODER.encode(JSON.stringify(response)).byteLength > MAX_CACHE_RESPONSE_BYTES) {
+  if (ENCODER.encode(JSON.stringify(response)).byteLength > MAX_SCHEDULER_RESPONSE_BYTES) {
     return failedResponse(instanceId);
   }
   return response;
 }
 
 /**
- * The ONE validator both sides of the wire run over a cache response: the
- * exact keys, sequential `s<N>` source ids within the source bound, every
- * snapshot's exact contract, unique non-null aliases, and an aggregate state
- * consistent with the per-source states.
+ * The ONE validator both sides of the wire run over a scheduler response:
+ * the exact keys, sequential `s<N>` source ids within the source bound,
+ * every snapshot's exact contract, unique non-null SOURCE aliases, and an
+ * aggregate state consistent with the per-source states.
  *
  * @param value - The candidate response
  * @returns `true` when the response is well formed
  * @internal
  */
-export function isCacheResponseProjection(value: unknown): value is CacheDiagnosticsResponse {
+export function isSchedulerResponseProjection(
+  value: unknown,
+): value is SchedulerDiagnosticsResponse {
   if (!isRecord(value) || !hasExactKeys(value, RESPONSE_KEYS)) {
     return false;
   }
@@ -321,7 +323,7 @@ export function isCacheResponseProjection(value: unknown): value is CacheDiagnos
     return false;
   }
   const sources = value.sources;
-  if (!Array.isArray(sources) || sources.length > MAX_CACHE_SOURCES) {
+  if (!Array.isArray(sources) || sources.length > MAX_SCHEDULER_SOURCES) {
     return false;
   }
   const aliases = new Set<string>();
@@ -331,7 +333,7 @@ export function isCacheResponseProjection(value: unknown): value is CacheDiagnos
     if (!isRecord(entry) || !hasExactKeys(entry, ENTRY_KEYS)) {
       return false;
     }
-    if (entry.sourceId !== `s${index + 1}` || !isCacheSnapshotProjection(entry.snapshot)) {
+    if (entry.sourceId !== `s${index + 1}` || !isSchedulerSnapshotProjection(entry.snapshot)) {
       return false;
     }
     const alias = entry.snapshot.alias;

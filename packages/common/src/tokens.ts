@@ -170,6 +170,16 @@ export const CAPABILITIES = {
    * `GET /v1/cache`. A read never performs a cache operation.
    */
   CACHE_DIAGNOSTICS: 'cache-diagnostics',
+  /**
+   * Scheduler execution observations (M98k) — an
+   * `ISchedulerDiagnosticsSource` every SchedulerPlugin instance registers
+   * under this token with `{ multi: true }`, without claiming it in
+   * `provides`, so multiple scheduler instances never collide. The
+   * DiagnosticsPlugin reads every source to serve `GET /v1/scheduler`. A
+   * read never acquires a lock, invokes a handler, or claims cluster
+   * completeness — a skipped local fire is not a globally missed execution.
+   */
+  SCHEDULER_DIAGNOSTICS: 'scheduler-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

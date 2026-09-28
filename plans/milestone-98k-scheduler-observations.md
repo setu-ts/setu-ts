@@ -1,8 +1,8 @@
 # Milestone 98k — Scheduler Execution Observations
 
-> **Status:** Planning. Implementation and fixes: `feat/m98k-scheduler-observations`. Design
-> security assessment below requires recorded review before implementation; no implementation or
-> completed security audit is claimed.
+> **Status:** Implemented on `feat/m98k-scheduler-observations` (maintainer plan review recorded
+> before implementation; the committed-tree implementation security audit runs before the PR
+> merges).
 
 ## 0. Objective & scope
 

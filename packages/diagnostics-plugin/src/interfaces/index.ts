@@ -17,6 +17,7 @@ import type {
   HealthDiagnosticsSnapshot,
   IPlugin,
   QueueDiagnosticsBatch,
+  SchedulerDiagnosticsResponse,
   TraceDiagnosticsBatch,
 } from '@setu-ts/common';
 
@@ -258,6 +259,24 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   cache(): Promise<CacheDiagnosticsResponse>;
+  /**
+   * Reads every registered scheduler source's execution observations through
+   * the signed protocol (M98k). Performs the `/v1/status` pairing exchange
+   * first if the session has not yet been bound.
+   *
+   * When the negotiated inspector manifest reports the scheduler inspector
+   * as unsupported, a frozen typed `unsupported` response with no sources is
+   * returned WITHOUT sending an addon request. Otherwise the authenticated
+   * `/v1/scheduler` exchange is performed and its exact contract validated.
+   * The response never carries a job name, cron expression, payload, lock
+   * key or token, or error text; a fire observation never claims cluster
+   * completeness.
+   *
+   * @returns The deeply frozen scheduler response
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  scheduler(): Promise<SchedulerDiagnosticsResponse>;
   /**
    * Reads the next bounded page of queue attempt observations, plus every
    * queue source's status and latest depths, through the signed protocol

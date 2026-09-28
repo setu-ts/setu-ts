@@ -4137,7 +4137,7 @@ the kernel omits a non-finite value rather than letting it serialize to `null`.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
 `{ health: true, configuration: true, queues: true, traces: true, authorization: true,
-cache: true, events: false, scheduler: false, realtime: false, storage: false,
+cache: true, scheduler: true, events: false, realtime: false, storage: false,
 outboundHttp: false }`
 (`configuration` is `true` since M98e, `queues` since M98f, `traces` since M98g, `cache` since M98i
 and `authorization` since M98h, all below) — and the connector serves a first inspector operation,
@@ -4194,6 +4194,18 @@ no configuration value, value hash, value length, raw key name, or file path is 
 unapproved keys are never observed at all — no counter discloses that they exist. The negotiated
 manifest governs `configuration()` exactly as it governs `health()`: a legacy pairing answers
 `unsupported` without sending the request.
+
+**Scheduler observations (M98k).** The connector serves `GET /v1/scheduler`, read through
+`client.scheduler(): Promise<SchedulerDiagnosticsResponse>`. At bootstrap it resolves every
+`ISchedulerDiagnosticsSource` registered under `CAPABILITIES.SCHEDULER_DIAGNOSTICS` (each
+SchedulerPlugin instance contributes one as a multi provider) and refuses to start with more than
+16. Each authenticated read calls every source's synchronous `snapshot()` once, copies only plain
+own data properties, and isolates a throwing or malformed source as a value-free `collection-failed`
+snapshot; duplicate non-null SOURCE aliases or a body over 256 KiB collapse the response to
+`collection-failed` with no sources. With no source the response is `unsupported`; a client whose
+negotiated manifest has `scheduler: false` answers that locally without a request.
+`IDiagnosticsClient.scheduler` is a new REQUIRED member — additive for callers; a structural
+implementation must add it. The wire shape is in `docs/diagnostics-protocol.md`.
 
 **Cache observations (M98i).** The connector serves `GET /v1/cache`, read through
 `client.cache(): Promise<CacheDiagnosticsResponse>`. At bootstrap it resolves every
@@ -10212,6 +10224,18 @@ a MULTI-provider token: every CachePlugin instance registers one `ICacheDiagnost
 `ageMs`, and the non-negative saturating counters `succeeded`, `failed`, `hits`, `misses`,
 `present`, `absent`, `removed`, `notRemoved`) and the connector's `CacheDiagnosticsResponse`. See
 the diagnostics-connector section for the wire operation.
+
+**Scheduler observation contracts (M98k).** `CAPABILITIES.SCHEDULER_DIAGNOSTICS`
+(`'scheduler-diagnostics'`) is a MULTI-provider token: every SchedulerPlugin instance registers one
+`ISchedulerDiagnosticsSource` (`snapshot(): SchedulerDiagnosticsSnapshot` — synchronous, never
+acquires a lock, invokes a handler, or reads the job registry). The DTOs are
+`SchedulerDiagnosticsSnapshot` (`state`, `alias | null`, `coverage: 'owned-instance'`, `records`,
+`dropped`), `SchedulerDiagnosticsRecord` (the JOB alias, `SchedulerDiagnosticsOperation`
+(`'fire' | 'attempt'`), `count`, `lastDurationMs | null`, `ageMs`, and the non-negative saturating
+counters `started`, `succeeded`, `failed`, `contended`, `lockFailed`, `retryAttempts`,
+`lastLatenessMs`) and the connector's `SchedulerDiagnosticsResponse`. Lateness is
+`max(0, actualStart - intendedFire)`; a skipped local fire is never a globally missed execution and
+no missed counter exists. See the diagnostics-connector section for the wire operation.
 
 **Trace observation contracts (M98g).** `CAPABILITIES.TRACE_DIAGNOSTICS` (`'trace-diagnostics'`) is
 a SINGLE-provider token: the TelemetryPlugin always registers one `ITraceDiagnosticsSource`

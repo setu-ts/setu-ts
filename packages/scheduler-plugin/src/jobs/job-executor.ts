@@ -18,6 +18,7 @@ import type {
 } from '@setu-ts/common';
 import { composeBehaviorChain } from '@setu-ts/common';
 import { computeBackoffMs } from '../retry/retry-handler.ts';
+import type { SchedulerAttemptObserver } from '../diagnostics/scheduler-observations.ts';
 
 /**
  * Options passed to `run()`.
@@ -25,6 +26,12 @@ import { computeBackoffMs } from '../retry/retry-handler.ts';
 interface RunOptions {
   runtime: IRuntimeServices;
   logger?: ILogger | undefined;
+  /**
+   * The M98k attempt observer for an observed dispatch. Absent — the
+   * default — the executor runs exactly the pre-M98k path: no clock is read
+   * and no observation object is allocated.
+   */
+  attempts?: SchedulerAttemptObserver | undefined;
 }
 
 /**
@@ -46,7 +53,7 @@ export async function run<T = unknown>(
   retry: RetryOptions | undefined,
   options: RunOptions,
 ): Promise<void> {
-  const { runtime, logger } = options;
+  const { runtime, logger, attempts } = options;
   const limit = retry?.limit ?? 1;
   let attempt = 0;
 
@@ -62,11 +69,25 @@ export async function run<T = unknown>(
       attempts: attempt,
     };
 
+    // M98k: an observed dispatch reads its monotonic clock ONLY when an
+    // observer was supplied; the settle call reports the measured duration.
+    const attemptStart = attempts === undefined ? 0 : runtime.hrtime();
+    attempts?.attemptStarted();
     try {
       await handler(job);
+      attempts?.attemptSettled(
+        true,
+        Math.round(Math.max(0, runtime.hrtime() - attemptStart)),
+        attempt > 1,
+      );
       return;
     } catch (error) {
       if (attempt < limit) {
+        attempts?.attemptSettled(
+          false,
+          Math.round(Math.max(0, runtime.hrtime() - attemptStart)),
+          attempt > 1,
+        );
         const backoffMs = retry !== undefined ? computeBackoffMs(attempt, retry) : 1000;
         logger?.warn(
           `Job '${jobName}' attempt ${attempt} failed, retrying in ${backoffMs}ms`,
@@ -76,6 +97,11 @@ export async function run<T = unknown>(
           runtime.setTimeout(resolve, backoffMs);
         });
       } else {
+        attempts?.attemptSettled(
+          false,
+          Math.round(Math.max(0, runtime.hrtime() - attemptStart)),
+          attempt > 1,
+        );
         logger?.error(
           `Job '${jobName}' failed after ${attempt} attempt(s)`,
           { error: error instanceof Error ? error.message : String(error) },
