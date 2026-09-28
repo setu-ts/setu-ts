@@ -562,3 +562,25 @@ local probes and browser origins, credentials/replay/session lifetime, source-re
 resource exhaustion. Review connection/frame integrity failures separately from optional collection
 failure: authentication must never degrade into a usable unsigned response. The devtool separately
 must pass safe rendering, secret-free logs/export and credential-storage acceptance tests.
+
+## 12. Security audit record
+
+**Round 1 — `349f1f5a`, verdict FAILED on one Low**, by a freshly spawned independent agent (no
+implementation or fix involvement), Deno. 6 probe drivers, 240 checks, all passing: raw-socket
+authentication, DNS rebinding and read order (16 refusal shapes, zero gauge reads before
+authentication); 19 canaries plus connection ids absent at source, wire, client and console; 45
+hostile source shapes isolated to the `unknown` snapshot with no getter invoked; observed/unobserved
+parity under throwing transport, handler, clock and gauge reader; option refusals and bounded growth
+(1e6 observations, 300 connections, at most 3 records); a replaced capability never read. 14
+negative controls observed failing and restored. Record outside the tree
+(`.verify-98l/audit/AUDIT-98l.md`).
+
+| Finding                                                                                                                                                                                       | Disposition                                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **F1 (Low)** — `docs/diagnostics-protocol.md` said `collection-failed` gauges "mean the reader was not called", but the read that latches the failure DID call it (once; later reads do not). | Fixed: the doc now says `disabled` means not called and `collection-failed` means the read failed or is latched. |
+
+Noted by the audit, not raised: the 256 KiB collapse is unreachable today (at most 3 records per
+source); refusing a source that claims `unknown` has no visible effect, since the output is the same
+placeholder; `isDisplayAlias` admits Unicode format characters such as U+202E (the shared rule since
+M98d). Not tested: runtimes other than Deno, and the Redis backplane against a live Redis (reviewed
+in source only).

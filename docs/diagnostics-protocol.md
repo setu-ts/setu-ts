@@ -568,7 +568,8 @@ of an enabled websocket or sse source — never from the registry, so a replacem
 read — and they never expire: such a source is `ready` whenever its gauges were read, even when
 every record has aged out. A backplane has no gauges (`state: 'unsupported'`, both values `null`)
 and takes its state from record age: `no-data`, then `ready`, then `stale` after 30 seconds.
-`disabled` and `collection-failed` gauges carry `null` values and mean the reader was not called.
+`disabled` gauges mean the reader was not called; `collection-failed` gauges mean the read failed
+(or the source is latched after an earlier failure). Both carry `null` values.
 
 `backpressureCloses` is a number only on an `sse` `close` record — the closes the 1 MiB backlog
 guard caused, a subset of `failed`, `0` when none happened — and `null` everywhere else, so a
