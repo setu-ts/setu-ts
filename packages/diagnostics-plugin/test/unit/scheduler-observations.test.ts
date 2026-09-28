@@ -184,10 +184,10 @@ describe('scheduler protocol — target and manifest', () => {
     const manifest = currentInspectorsManifest();
     expect(manifest.scheduler).toBe(true);
     expect(manifest.health).toBe(true);
-    // M98j shipped first on main, so `events` is activated too; the rest
-    // stay reserved.
+    // M98j and M98l shipped first on main, so `events` and `realtime` are
+    // activated too; the rest stay reserved.
     expect(manifest.events).toBe(true);
-    expect(manifest.realtime).toBe(false);
+    expect(manifest.realtime).toBe(true);
     expect(manifest.storage).toBe(false);
     expect(manifest.outboundHttp).toBe(false);
   });
