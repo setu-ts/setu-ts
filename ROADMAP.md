@@ -12243,10 +12243,8 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98g       | ✅     | telemetry-plugin — minimized distributed tracing and correlation ([#369](https://github.com/setu-ts/setu-ts/pull/369); security audit passed on re-audit of `2fbac039`)      |
 | 98h       | ✅     | auth-plugin — bounded authorization decision explanations ([#376](https://github.com/setu-ts/setu-ts/pull/376); security audit passed on round 5 of `44789a1d`)              |
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
-| 98j       | ⬜     | event dispatch observations — design security review and implementation audit required                                                                                       |
-| 98k       | ✅     | scheduler execution observations (PR pending)                                                                                                                                |
 | 98j       | ✅     | events-plugin + common + diagnostics-plugin — event dispatch observations ([#375](https://github.com/setu-ts/setu-ts/pull/375); security audit history in the plan §12)      |
-| 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |
+| 98k       | ✅     | scheduler-plugin + common + diagnostics-plugin — scheduler execution observations (PR pending)                                                                               |
 | 98l       | ⬜     | realtime lifecycle observations — design security review and implementation audit required                                                                                   |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                    |
 | 98n       | ⬜     | outbound http attempt observations — design security review and implementation audit required                                                                                |

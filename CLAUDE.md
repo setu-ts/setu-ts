@@ -5345,21 +5345,6 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   sequence, so a closed source echoed an invented cursor as `next` — the defect #372 had just fixed
   in the kernel, queue and trace readers — now refused as while running. Plan
   `plans/archive/milestone-98h-authorization-explanations.md` — complete (PR #376).
-- **Milestone 98k** (`packages/scheduler-plugin` + `packages/common` + `packages/diagnostics-plugin`
-  — scheduler execution observations):
-  `SchedulerPlugin({ diagnostics: { enabled: true, alias,
-  jobs } })` records each approved job's
-  local timer fires (contended / lock-failed / dispatched, with wall-clock lateness
-  `max(0, actualStart - intendedFire)`) and each handler attempt (started, succeeded, failed,
-  retries) through a WeakMap-class private-slot collector attached to the plugin's own service —
-  unobserved services read one field and no clock. Multi-provider
-  `CAPABILITIES.SCHEDULER_DIAGNOSTICS`; the connector serves `GET /v1/scheduler` (16-source bound)
-  and the client `scheduler()`; the status manifest flips `scheduler: true`. A skipped local fire is
-  never a globally missed execution; lock losers produce no handler records (proven by test) —
-  complete (PR pending).
-
-- **Next milestone** — **M98j** (`packages/events-plugin` — event dispatch observations; design
-  security review and implementation audit required).
 - **Milestone 98j** (`packages/events-plugin` + `packages/common` + `packages/diagnostics-plugin` —
   event dispatch observations): `EventsPlugin({ diagnostics })` attaches a bounded collector to the
   EXISTING dispatch path through a module-private WeakMap — no extra subscription and no change to
@@ -5382,8 +5367,20 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tests. Round 7 was the last at the maintainer's direction; its fixes and the merge with `main`
   (M98h) are verified by tests and gates, and the per-event `begin` token (~50 ns per publish,
   against the design review's no-allocation budget) was accepted — complete (PR #375).
-- **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
-  design security review and implementation audit required).
+- **Milestone 98k** (`packages/scheduler-plugin` + `packages/common` + `packages/diagnostics-plugin`
+  — scheduler execution observations):
+  `SchedulerPlugin({ diagnostics: { enabled: true, alias,
+  jobs } })` records each approved job's
+  local timer fires (contended / lock-failed / dispatched, with wall-clock lateness
+  `max(0, actualStart - intendedFire)`) and each handler attempt (started, succeeded, failed,
+  retries) through a WeakMap-class private-slot collector attached to the plugin's own service —
+  unobserved services read one field and no clock. Multi-provider
+  `CAPABILITIES.SCHEDULER_DIAGNOSTICS`; the connector serves `GET /v1/scheduler` (16-source bound)
+  and the client `scheduler()`; the status manifest flips `scheduler: true`. A skipped local fire is
+  never a globally missed execution; lock losers produce no handler records (proven by test) —
+  complete (PR pending).
+- **Next milestone** — **M98l** (`packages/websocket-plugin`; SSE and realtime-backplane co-owners —
+  realtime lifecycle observations; design security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
