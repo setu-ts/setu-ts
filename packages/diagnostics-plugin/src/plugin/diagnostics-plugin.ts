@@ -17,6 +17,7 @@ import type {
   IAuthorizationDiagnosticsSource,
   ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
+  IEventDiagnosticsSource,
   IHealthDiagnosticsSource,
   ILocalDiagnosticsListener,
   ILocalDiagnosticsListenerFactory,
@@ -34,6 +35,7 @@ import { createConnectorHandler } from '../transport/connector-handler.ts';
 import { ConnectorLimits } from '../transport/limits.ts';
 import { QueueObservationMerger } from '../transport/queue-merger.ts';
 import { MAX_CACHE_SOURCES } from '../protocol/cache-protocol.ts';
+import { MAX_EVENT_SOURCES } from '../protocol/event-protocol.ts';
 import { MAX_SCHEDULER_SOURCES } from '../protocol/scheduler-protocol.ts';
 
 /**
@@ -62,11 +64,14 @@ export const PLUGIN_ERRORS = {
   invalidSessionId: 'DiagnosticsPlugin: sessionId must be exactly 32 lowercase hex characters.',
   invalidSessionKey: 'DiagnosticsPlugin: sessionKey must be exactly 32 bytes.',
   invalidTtl: 'DiagnosticsPlugin: ttlMs must be an integer from 1 to 3600000.',
-  tooManyCacheSources:
-    'DiagnosticsPlugin: more than 16 cache-diagnostics sources are registered; ' +
-    'the connector reads at most 16.',
   tooManySchedulerSources:
     'DiagnosticsPlugin: more than 16 scheduler-diagnostics sources are registered; ' +
+    'the connector reads at most 16.',
+  tooManyEventSources:
+    'DiagnosticsPlugin: more than 16 event-diagnostics sources are registered; ' +
+    'the connector reads at most 16.',
+  tooManyCacheSources:
+    'DiagnosticsPlugin: more than 16 cache-diagnostics sources are registered; ' +
     'the connector reads at most 16.',
   missingDiagnostics:
     'DiagnosticsPlugin: the application was not created with kernel diagnostics enabled. ' +
@@ -179,6 +184,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       CAPABILITIES.QUEUE_DIAGNOSTICS,
       CAPABILITIES.SCHEDULER_DIAGNOSTICS,
       CAPABILITIES.TRACE_DIAGNOSTICS,
+      CAPABILITIES.EVENTS_DIAGNOSTICS,
       CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
     ],
 
@@ -289,21 +295,37 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           session = null;
           throw new Error(PLUGIN_ERRORS.tooManyCacheSources);
         }
+        const merger = new QueueObservationMerger(queueSources, ctx.runtime);
+        queueMerger = merger;
+        // The event-diagnostics sources (M98j), read ONCE here: every plugin
+        // has registered by bootstrap, so an events plugin ordered after this
+        // one is still included. Each EventsPlugin instance contributes its
+        // own multi-provider source; none means the connector answers a
+        // typed `unsupported` response. More than 16 refuses by a fixed,
+        // value-free configuration error rather than silently dropping one.
+        const eventSources = ctx.services.has(CAPABILITIES.EVENTS_DIAGNOSTICS)
+          ? ctx.services.getAll<IEventDiagnosticsSource>(CAPABILITIES.EVENTS_DIAGNOSTICS)
+          : [];
         // The scheduler-diagnostics sources (M98k), read ONCE here for the
         // same reason. Registration is only collected — no snapshot is taken
         // until an authenticated request — and more than 16 refuses by a
         // fixed, value-free configuration error rather than silently
         // dropping one.
         const schedulerSources = ctx.services.has(CAPABILITIES.SCHEDULER_DIAGNOSTICS)
-          ? ctx.services.getAll<ISchedulerDiagnosticsSource>(CAPABILITIES.SCHEDULER_DIAGNOSTICS)
+          ? ctx.services.getAll<ISchedulerDiagnosticsSource>(
+            CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+          )
           : [];
         if (schedulerSources.length > MAX_SCHEDULER_SOURCES) {
           active.revoke();
           session = null;
           throw new Error(PLUGIN_ERRORS.tooManySchedulerSources);
         }
-        const merger = new QueueObservationMerger(queueSources, ctx.runtime);
-        queueMerger = merger;
+        if (eventSources.length > MAX_EVENT_SOURCES) {
+          active.revoke();
+          session = null;
+          throw new Error(PLUGIN_ERRORS.tooManyEventSources);
+        }
         const handler = createConnectorHandler({
           port: options.port,
           subtle: ctx.runtime.subtle,
@@ -317,6 +339,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           schedulerSources,
           queues: merger,
           traces: traceSource,
+          eventSources,
           authorization: authorizationSource,
         });
         // The devtool's own startup line. Without it the runtime prints a

@@ -25,8 +25,8 @@ import type {
 } from '@setu-ts/common';
 
 import {
-  copyPlainObject,
-  copyPlainRecords,
+  copyOwnData,
+  copyOwnDataList,
   hasExactKeys,
   isDisplayAlias,
   isRecord,
@@ -112,6 +112,16 @@ const ENCODER = new TextEncoder();
 /** A non-negative safe integer. */
 function isCounter(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/**
+ * Copies a source-supplied record list through the shared own-data reader.
+ *
+ * @param value - The source list
+ * @returns The copied records, or `null`
+ */
+function copyRecords(value: unknown): Record<string, unknown>[] | null {
+  return copyOwnDataList(value, MAX_CACHE_RECORDS, RECORD_KEYS);
 }
 
 /**
@@ -215,11 +225,11 @@ function failedSourceSnapshot(): Record<string, unknown> {
 function readSource(source: ICacheDiagnosticsSource): Record<string, unknown> {
   try {
     const raw: unknown = source.snapshot();
-    const copy = copyPlainObject(raw, SNAPSHOT_KEYS);
+    const copy = copyOwnData(raw, SNAPSHOT_KEYS);
     if (copy === null) {
       return failedSourceSnapshot();
     }
-    const records = copyPlainRecords(copy.records, MAX_CACHE_RECORDS, RECORD_KEYS);
+    const records = copyRecords(copy.records);
     if (records === null) {
       return failedSourceSnapshot();
     }

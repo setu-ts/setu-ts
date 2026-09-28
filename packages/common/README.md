@@ -220,6 +220,9 @@ package fits the plugin architecture.
 | `Err`                              | interface |
 | `ErrorResponderTarget`             | interface |
 | `ErrorResponseInit`                | interface |
+| `EventDiagnosticsRecord`           | interface |
+| `EventDiagnosticsResponse`         | interface |
+| `EventDiagnosticsSnapshot`         | interface |
 | `FactoryProvider`                  | interface |
 | `FlagContext`                      | interface |
 | `FormBody`                         | interface |
@@ -264,6 +267,7 @@ package fits the plugin architecture.
 | `IEnvironmentApi`                  | interface |
 | `IErrorResponder`                  | interface |
 | `IEventBus`                        | interface |
+| `IEventDiagnosticsSource`          | interface |
 | `IFeatureFlags`                    | interface |
 | `IFileSystem`                      | interface |
 | `IGauge`                           | interface |
@@ -450,7 +454,10 @@ package fits the plugin architecture.
 | `DiagnosticsNodeKind`              | type      |
 | `DiagnosticsSnapshotState`         | type      |
 | `EntityKey`                        | type      |
+| `EventDiagnosticsCoverage`         | type      |
+| `EventDiagnosticsState`            | type      |
 | `EventHandler`                     | type      |
+| `EventObservationOperation`        | type      |
 | `FilterComparison`                 | type      |
 | `FilterExpression`                 | type      |
 | `FilterOperator`                   | type      |

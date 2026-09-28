@@ -25,8 +25,8 @@ import type {
 } from '@setu-ts/common';
 
 import {
-  copyPlainObject,
-  copyPlainRecords,
+  copyOwnData,
+  copyOwnDataList,
   hasExactKeys,
   isDisplayAlias,
   isRecord,
@@ -215,11 +215,11 @@ function failedSourceSnapshot(): Record<string, unknown> {
 function readSource(source: ISchedulerDiagnosticsSource): Record<string, unknown> {
   try {
     const raw: unknown = source.snapshot();
-    const copy = copyPlainObject(raw, SNAPSHOT_KEYS);
+    const copy = copyOwnData(raw, SNAPSHOT_KEYS);
     if (copy === null) {
       return failedSourceSnapshot();
     }
-    const records = copyPlainRecords(copy.records, MAX_SCHEDULER_RECORDS, RECORD_KEYS);
+    const records = copyOwnDataList(copy.records, MAX_SCHEDULER_RECORDS, RECORD_KEYS);
     if (records === null) {
       return failedSourceSnapshot();
     }

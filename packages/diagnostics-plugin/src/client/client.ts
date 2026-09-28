@@ -19,6 +19,7 @@ import type {
   ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
   DiagnosticsSnapshot,
+  EventDiagnosticsResponse,
   HealthDiagnosticsSnapshot,
   QueueDiagnosticsBatch,
   SchedulerDiagnosticsResponse,
@@ -39,6 +40,7 @@ import {
   AUTHORIZATION_PATH,
   CACHE_TARGET,
   CONFIG_TARGET,
+  EVENT_PATH,
   HEALTH_TARGET,
   type InspectorsManifest,
   isBatchProjection,
@@ -52,6 +54,7 @@ import {
   STATUS_TARGET,
   TRACES_PATH,
 } from '../protocol/protocol.ts';
+import { isEventResponseProjection } from '../protocol/event-protocol.ts';
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
 import { isCacheResponseProjection } from '../protocol/cache-protocol.ts';
 import { isSchedulerResponseProjection } from '../protocol/scheduler-protocol.ts';
@@ -728,6 +731,44 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         ) {
           throw new Error(CLIENT_ERRORS.connection);
         }
+        return deepFreeze(parsed);
+      });
+    },
+
+    async events(): Promise<EventDiagnosticsResponse> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the event inspector — a
+        // legacy or older server — is answered locally with a frozen typed
+        // `unsupported` response WITHOUT sending an addon request. This is
+        // the release-skew path, and it never probes an unknown route or
+        // infers support from a generic protocol error.
+        if (inspectors !== null && inspectors.events === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            sources: [],
+          });
+        }
+        const result = await exchange(EVENT_PATH);
+        const parsed = parseBody(result.bodyText);
+        // The exact DTO validator, plus the body's own instance binding: the
+        // signed body must describe the instance this session paired with.
+        if (!isEventResponseProjection(parsed) || parsed.instanceId !== bound) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // The parsed value is a fresh object graph owned by nobody else;
+        // deep-freezing it (sources AND their records) is what makes the
+        // documented "deeply frozen" true.
         return deepFreeze(parsed);
       });
     },

@@ -1615,6 +1615,175 @@ export interface CacheDiagnosticsResponse {
 }
 
 /**
+ * How one observed dispatch work item completed (M98j). `publish` records
+ * describe the dispatch itself; `handler` records describe one handler
+ * invocation underneath a publication.
+ *
+ * @since 0.8.0
+ */
+export type EventObservationOperation = 'publish' | 'handler';
+
+/**
+ * The event-dispatch inspector's availability state (M98j), from one
+ * EventsPlugin-owned source.
+ *
+ * `disabled` — the EventsPlugin is registered but the application did not
+ * pass the `diagnostics` option: no collector exists and nothing is
+ * observed. This is the owning plugin's answer, distinct from
+ * `unsupported`. `no-data` — observation is active and no approved alias
+ * has been observed yet. `ready` — at least one retained record is fresh.
+ * `stale` — records exist but every one is older than the 30-second stale
+ * threshold (records are dropped at the 60-second retention window).
+ * `collection-failed` — either the source latched it itself (its monotonic
+ * clock or bookkeeping failed; capture stops until the source is recreated)
+ * or the connector substituted it for a source that threw or answered a
+ * shape that failed validation.
+ *
+ * @since 0.8.0
+ */
+export type EventDiagnosticsState =
+  | 'disabled'
+  | 'no-data'
+  | 'ready'
+  | 'stale'
+  | 'collection-failed';
+
+/**
+ * The coverage an event source reports (M98j): always `owned-instance` —
+ * the observations describe only the bus instance the source was attached
+ * to at registration. A custom replacement registered later under the
+ * application capability is outside this source's coverage and is never
+ * mislabeled as observed.
+ *
+ * @since 0.8.0
+ */
+export type EventDiagnosticsCoverage = 'owned-instance';
+
+/**
+ * One aggregated dispatch observation for one approved alias and operation
+ * (M98j).
+ *
+ * `alias` is the display alias the application approved for the exact event
+ * type — never the type itself, which may carry domain naming. Every
+ * counter is a cumulative, non-negative safe integer saturating at
+ * `Number.MAX_SAFE_INTEGER`; nonapplicable counters stay zero (`noSubscribers`
+ * applies only to `publish`). `count` counts settled observations, not
+ * in-flight calls. `lastDurationMs` is the integer millisecond duration of
+ * the most recently settled observation, or `null` before the first one.
+ * `ageMs` is monotonic time since that settlement (since the most recent
+ * start while nothing has settled yet). `started` is counted when a boundary
+ * begins, so `started - count` is the number still in flight — a hung
+ * handler is visible before it settles. Handler identities and
+ * names are excluded by construction: handlers of one approved event type
+ * aggregate under the type's single approved alias.
+ *
+ * @since 0.8.0
+ */
+export interface EventDiagnosticsRecord {
+  /** The approved display alias for the event type. */
+  readonly alias: string;
+  /** Which dispatch boundary the record measures. */
+  readonly operation: EventObservationOperation;
+  /** Settled observations counted since the source was created. */
+  readonly count: number;
+  /** Boundaries started, counted at the start; `started - count` are in flight. */
+  readonly started: number;
+  /** Observations that completed normally. */
+  readonly succeeded: number;
+  /** Observations whose handler threw or whose dispatch rejected. */
+  readonly failed: number;
+  /** Publications that found no subscriber (zero for `handler`). */
+  readonly noSubscribers: number;
+  /** Duration of the most recent settled observation, or `null` before one. */
+  readonly lastDurationMs: number | null;
+  /** Monotonic ms since the most recent settled observation. */
+  readonly ageMs: number;
+}
+
+/**
+ * An immutable, bounded snapshot of one source's event observations (M98j).
+ *
+ * The snapshot is deeply frozen; `records` carries at most one record per
+ * (alias, operation) tuple the approved map produced, within the fixed 64
+ * per-source slots. `dropped` counts tuples ignored at capacity (saturating).
+ * The exact UTF-8 byte length of the compact `JSON.stringify` of this object
+ * is bounded by the connector's response budget.
+ *
+ * @since 0.8.0
+ */
+export interface EventDiagnosticsSnapshot {
+  /** The source's own inspector state. */
+  readonly state: EventDiagnosticsState;
+  /** The configured display alias for this bus instance; `null` when disabled. */
+  readonly alias: string | null;
+  /** Always `owned-instance`: this bus instance only. */
+  readonly coverage: EventDiagnosticsCoverage;
+  /** Retained records, in stable (alias, operation) order. */
+  readonly records: readonly EventDiagnosticsRecord[];
+  /** Tuples ignored at the fixed per-source capacity (saturating). */
+  readonly dropped: number;
+}
+
+/**
+ * The event-dispatch inspector's response as the diagnostics connector
+ * serves `GET /v1/event` (M98j).
+ *
+ * `state` is `unsupported` when no event source is registered, otherwise
+ * `ready` when any source is `ready`, else the first of
+ * `collection-failed`/`stale`/`no-data`/`disabled` found among the sources;
+ * per-source states stay visible in {@linkcode sources}. `sourceId` is a
+ * session-local positional identifier `s1`…`s16` in registration order.
+ *
+ * @since 0.8.0
+ */
+export interface EventDiagnosticsResponse {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the response was read for. */
+  readonly instanceId: string;
+  /** The aggregate inspector state. */
+  readonly state: DiagnosticsInspectorState;
+  /** One entry per registered source, in registration order. */
+  readonly sources: readonly {
+    /** Session-local positional `s<N>` source identifier. */
+    readonly sourceId: string;
+    /** The source's snapshot, or a value-free `collection-failed` one. */
+    readonly snapshot: EventDiagnosticsSnapshot;
+  }[];
+}
+
+/**
+ * Read-only event-dispatch diagnostics source — the surface every
+ * EventsPlugin instance registers under {@linkcode CAPABILITIES.EVENTS_DIAGNOSTICS}
+ * as a MULTI provider, so bus instances stay independently observable. The
+ * DiagnosticsPlugin consumes every registered source to serve
+ * `GET /v1/event`.
+ *
+ * Synchronous by contract: `snapshot()` returns already-captured, frozen
+ * data and never publishes an event, invokes a handler, enumerates
+ * subscriptions, or mutates the bus. A source whose plugin was not
+ * configured for observation answers `disabled` with a `null` alias.
+ *
+ * @example
+ * ```typescript
+ * const sources = ctx.services.getAll<IEventDiagnosticsSource>(
+ *   CAPABILITIES.EVENTS_DIAGNOSTICS,
+ * );
+ * const snapshot = sources[0].snapshot();
+ * ```
+ * @since 0.8.0
+ */
+export interface IEventDiagnosticsSource {
+  /**
+   * Returns the current aggregated dispatch observations of the owned bus
+   * instance.
+   *
+   * @returns A deeply frozen {@linkcode EventDiagnosticsSnapshot}
+   */
+  snapshot(): EventDiagnosticsSnapshot;
+}
+
+/**
  * The fixed scheduler observation an {@linkcode ISchedulerDiagnosticsSource}
  * records (M98k). `fire` is one local timer fire of an approved job —
  * observed whether or not the fire proceeded, so contention and lock

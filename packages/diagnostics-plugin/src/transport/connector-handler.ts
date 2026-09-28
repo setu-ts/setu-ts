@@ -16,12 +16,15 @@ import type {
   AuthorizationDiagnosticsBatch,
   ConfigDiagnosticsSnapshot,
   DiagnosticsBatch,
+  EventDiagnosticsResponse,
+  EventDiagnosticsSnapshot,
   HandlerResult,
   HealthDiagnosticsSnapshot,
   IAuthorizationDiagnosticsSource,
   ICacheDiagnosticsSource,
   IConfigDiagnosticsSource,
   IDiagnosticsSource,
+  IEventDiagnosticsSource,
   IHealthDiagnosticsSource,
   IRequest,
   IResponse,
@@ -41,6 +44,13 @@ import {
   buildSchedulerResponse,
   isSchedulerResponseProjection,
 } from '../protocol/scheduler-protocol.ts';
+import {
+  collectionFailedEventSnapshot,
+  isEventResponseProjection,
+  MAX_EVENT_RESPONSE_BYTES,
+  projectEventSource,
+  readEventSourceSnapshot,
+} from '../protocol/event-protocol.ts';
 import {
   isAuthorizationBatchProjection,
   projectAuthorizationBatch,
@@ -244,6 +254,14 @@ export interface ConnectorHandlerDeps {
    * creates, ends, exports or flushes a span.
    */
   readonly traces: ITraceDiagnosticsSource | null;
+  /**
+   * The event-diagnostics sources (M98j), read ONCE at bootstrap from
+   * `CAPABILITIES.EVENTS_DIAGNOSTICS` (a MULTI token) after every plugin has
+   * registered. At most 16 (more refuses startup); an empty list answers a
+   * typed `unsupported` response for `GET /v1/event`. A read never
+   * publishes an event or invokes a handler.
+   */
+  readonly eventSources: readonly IEventDiagnosticsSource[];
   /**
    * The authorization-diagnostics source (M98h), resolved from
    * `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS` during registration. `null` when
@@ -657,6 +675,126 @@ function readTraceProjection(
 }
 
 /**
+ * The outcome of reading the event sources: either a validated projection
+ * ready to sign, or the read failed outright (answered as
+ * `collection-failed` with NO sources, per the plan's duplicate-alias rule).
+ *
+ * @internal
+ */
+type EventReadOutcome =
+  | { readonly kind: 'projected'; readonly projected: Record<string, unknown> }
+  | { readonly kind: 'failed' };
+
+/**
+ * Reads, validates and projects every registered event-diagnostics source
+ * for the bound instance — the ONE read discipline of the event operation
+ * (M98j), isolating every failure mode to a typed, value-free answer:
+ *
+ * - no registered source → `unsupported` with an empty `sources` list
+ * - a source that throws, or whose snapshot fails the exact DTO validator →
+ *   a value-free per-source `collection-failed` snapshot (never error text)
+ * - duplicate non-null aliases discovered during the read → a fixed
+ *   collection-failed RESPONSE with no sources at all
+ *
+ * Every session and request check has run before any source is called; the
+ * reads are synchronous and never publish an event or invoke a handler.
+ * Each snapshot is validated field-by-field into connector-owned data before
+ * it can reach the projection, and the wire validator — the SAME one the
+ * client runs — runs over the projection before anything is signed.
+ *
+ * @param sources - The registered sources, in registration order
+ * @param instanceId - The session's bound instance UUID
+ * @returns The projection to sign, or the failed outcome
+ * @internal
+ */
+function readEventProjection(
+  sources: readonly IEventDiagnosticsSource[],
+  instanceId: string,
+): EventReadOutcome {
+  if (sources.length === 0) {
+    const response: EventDiagnosticsResponse = {
+      version: 1,
+      instanceId,
+      state: 'unsupported',
+      sources: [],
+    };
+    const projected: Record<string, unknown> = {
+      version: response.version,
+      instanceId: response.instanceId,
+      state: response.state,
+      sources: [],
+    };
+    return isEventResponseProjection(projected)
+      ? { kind: 'projected', projected }
+      : { kind: 'failed' };
+  }
+  const entries: Record<string, unknown>[] = [];
+  const seenAliases = new Set<string>();
+  // Aggregate priority: ready wins; otherwise the first of
+  // collection-failed → stale → no-data → disabled found among the sources.
+  const priority: readonly EventDiagnosticsResponse['state'][] = [
+    'collection-failed',
+    'stale',
+    'no-data',
+    'disabled',
+  ];
+  let readySeen = false;
+  const perSourceStates: string[] = [];
+  for (let index = 0; index < sources.length; index++) {
+    const source = sources[index];
+    let snapshot: EventDiagnosticsSnapshot | null = null;
+    try {
+      snapshot = readEventSourceSnapshot(source.snapshot());
+    } catch {
+      snapshot = null;
+    }
+    if (snapshot === null) {
+      snapshot = readEventSourceSnapshot(collectionFailedEventSnapshot());
+    }
+    if (snapshot === null) {
+      // Unreachable: the connector's own value-free snapshot always
+      // validates. Kept as a hard stop so nothing unvalidated is projected.
+      return { kind: 'failed' };
+    }
+    if (snapshot.alias !== null && seenAliases.has(snapshot.alias)) {
+      // Duplicate non-null aliases: a fixed collection-failed RESPONSE with
+      // NO sources — validation never invokes snapshot at registration, so
+      // this is discovered at read time and refuses the whole read rather
+      // than serving ambiguous data.
+      return { kind: 'failed' };
+    }
+    if (snapshot.alias !== null) {
+      seenAliases.add(snapshot.alias);
+    }
+    perSourceStates.push(snapshot.state);
+    if (snapshot.state === 'ready') {
+      readySeen = true;
+    }
+    entries.push(projectEventSource(`s${index + 1}`, snapshot));
+  }
+  const aggregate: EventDiagnosticsResponse['state'] = readySeen
+    ? 'ready'
+    : (priority.find((state) => perSourceStates.includes(state)) ??
+      'disabled') as EventDiagnosticsResponse['state'];
+  const projected: Record<string, unknown> = {
+    version: 1,
+    instanceId,
+    state: aggregate,
+    sources: entries,
+  };
+  // The fixed byte budget, measured on the compact JSON actually signed. An
+  // over-budget body collapses to the fixed collection-failed response —
+  // never a partial document and never a refusal the client would treat as
+  // a connection failure (the M98i cache precedent).
+  if (ENCODER.encode(JSON.stringify(projected)).byteLength > MAX_EVENT_RESPONSE_BYTES) {
+    return { kind: 'failed' };
+  }
+  return isEventResponseProjection(projected)
+    ? { kind: 'projected', projected }
+    : { kind: 'failed' };
+}
+
+/**
  * A value-free `unsupported` authorization batch: the connector's own answer
  * when no authorization source is registered at all. The connector cannot
  * distinguish a missing RBAC from a missing registry predicate or a replaced
@@ -1049,6 +1187,33 @@ export function createConnectorHandler(
           return refusalResponse(outcome.code);
         }
         projected = outcome.projected;
+      } else if (target.op === 'event') {
+        // The event-dispatch observation operation (M98j). Every session and
+        // request check above ran before any source is called; the reads are
+        // synchronous and never publish an event or invoke a handler. The
+        // instance is bound by the auth path for every non-status target.
+        const boundInstance = deps.session.instanceId;
+        if (boundInstance === null) {
+          return refusalResponse('unauthorized');
+        }
+        const outcome = readEventProjection(deps.eventSources, boundInstance);
+        if (outcome.kind === 'failed') {
+          // A fixed, value-free collection-failed response with NO sources —
+          // duplicate aliases or an internal projection fault never serve a
+          // partial document or error text.
+          const failed: Record<string, unknown> = {
+            version: 1,
+            instanceId: boundInstance,
+            state: 'collection-failed',
+            sources: [],
+          };
+          if (!isEventResponseProjection(failed)) {
+            return refusalResponse('unavailable');
+          }
+          projected = failed;
+        } else {
+          projected = outcome.projected;
+        }
       } else if (target.op === 'authorization') {
         // The authorization operation (M98h). Every session and request
         // check above ran before the source is called; the source is
