@@ -7,7 +7,7 @@
  *
  * @module
  */
-import type { IRuntimeServices } from '@setu-ts/common';
+import type { ConnectionErrorReporter, IRuntimeServices } from '@setu-ts/common';
 import type { IDistributedLock, SchedulerPluginOptions } from '../interfaces/index.ts';
 
 // Re-export the interface as the public-facing name
@@ -31,12 +31,16 @@ export interface ILifecyclableLock extends IDistributedLock {
  *
  * @param options - Plugin options containing lock configuration
  * @param runtime - Runtime services (needed for MemoryLock clock)
+ * @param connectionErrorReporter - Receives a BUILT Redis lock client's
+ *   connection errors; unused for an injected lock or client and for
+ *   `MemoryLock`
  * @returns The resolved lock implementation
  * @throws {Error} If `distributedLock.storage` is not `'redis'` and no lock is injected
  */
 export async function resolveLock(
   options: SchedulerPluginOptions | undefined,
   runtime: IRuntimeServices,
+  connectionErrorReporter?: ConnectionErrorReporter,
 ): Promise<IDistributedLock> {
   const distOpts = options?.distributedLock;
 
@@ -53,6 +57,7 @@ export async function resolveLock(
       ...(distOpts.client !== undefined
         ? { client: distOpts.client as import('../interfaces/index.ts').IRedisLockClient }
         : {}),
+      ...(connectionErrorReporter !== undefined ? { connectionErrorReporter } : {}),
     });
   }
 

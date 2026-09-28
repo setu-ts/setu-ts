@@ -7,7 +7,8 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@setu-ts/common';
+import { attachConnectionErrorReporter } from '@setu-ts/common';
+import type { ConnectionErrorReporter, IRuntimeServices } from '@setu-ts/common';
 import type { RateLimitResult, RateLimitStore } from './rate-limit-store.ts';
 
 /**
@@ -51,10 +52,13 @@ export function validateClient(client: unknown): client is IRateLimitRedisClient
 
 /**
  * Resolve the Redis client: prefer injected client, then lazy-load ioredis.
+ * The reporter is attached only to a client built here — an injected client
+ * belongs to the caller.
  */
 async function resolveClient(
   url: string,
-  injectedClient?: IRateLimitRedisClient,
+  injectedClient: IRateLimitRedisClient | undefined,
+  reporter: ConnectionErrorReporter | undefined,
 ): Promise<IRateLimitRedisClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -66,7 +70,13 @@ async function resolveClient(
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
-  return new RedisCtor(url) as unknown as IRateLimitRedisClient;
+  const client = new RedisCtor(url);
+  // Attached synchronously after construction: this client connects eagerly,
+  // but a connect failure is emitted asynchronously, so none is missed.
+  if (reporter !== undefined) {
+    attachConnectionErrorReporter(client, reporter);
+  }
+  return client as unknown as IRateLimitRedisClient;
 }
 
 /**
@@ -98,6 +108,7 @@ export class RedisRateLimitStore implements RateLimitStore {
   #injectedClient: IRateLimitRedisClient | undefined;
   #runtime: IRuntimeServices;
   #keyPrefix: string;
+  #reporter: ConnectionErrorReporter | undefined;
 
   /**
    * Builds the store. The client is resolved lazily on first use, so
@@ -123,12 +134,25 @@ export class RedisRateLimitStore implements RateLimitStore {
        * @since 0.5.0
        */
       keyPrefix?: string | undefined;
+      /**
+       * Receives the connection errors (`ioredis` `'error'` events) of the
+       * client this store BUILDS, instead of `ioredis` printing each reconnect
+       * failure to the console. Never attached to an injected `client`, which
+       * belongs to the caller. This store is constructed by the application,
+       * so no plugin supplies one: build it with `createConnectionErrorReporter`
+       * from `@setu-ts/common` over your logger. Absent, `ioredis` keeps its
+       * own console fallback.
+       *
+       * @since 0.8.0
+       */
+      connectionErrorReporter?: ConnectionErrorReporter | undefined;
     },
   ) {
     this.#url = options.url ?? 'redis://localhost:6379';
     this.#injectedClient = options.client;
     this.#runtime = options.runtime;
     this.#keyPrefix = options.keyPrefix ?? DEFAULT_RATE_LIMIT_KEY_PREFIX;
+    this.#reporter = options.connectionErrorReporter;
   }
 
   /** Namespaces a generated key. Applied at every Redis call site. */
@@ -143,7 +167,7 @@ export class RedisRateLimitStore implements RateLimitStore {
     if (this.#client !== null) {
       return this.#client;
     }
-    this.#client = await resolveClient(this.#url, this.#injectedClient);
+    this.#client = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
     return this.#client;
   }
 

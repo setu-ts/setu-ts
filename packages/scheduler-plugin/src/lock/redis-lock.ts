@@ -7,6 +7,8 @@
  *
  * @module
  */
+import { attachConnectionErrorReporter } from '@setu-ts/common';
+import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { IDistributedLock, IRedisLockClient, RedisLockOptions } from '../interfaces/index.ts';
 
 /**
@@ -46,12 +48,15 @@ export function validateClient(client: unknown): client is IRedisLockClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
+ * @param reporter - Receives the BUILT client's connection errors; never
+ *   attached to an injected client, which belongs to the caller
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
 async function resolveClient(
   url: string,
-  injectedClient?: IRedisLockClient,
+  injectedClient: IRedisLockClient | undefined,
+  reporter: ConnectionErrorReporter | undefined,
 ): Promise<IRedisLockClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -63,7 +68,13 @@ async function resolveClient(
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
-  return new RedisCtor(url) as unknown as IRedisLockClient;
+  const client = new RedisCtor(url);
+  // Attached synchronously after construction: this client connects eagerly,
+  // but a connect failure is emitted asynchronously, so none is missed.
+  if (reporter !== undefined) {
+    attachConnectionErrorReporter(client, reporter);
+  }
+  return client as unknown as IRedisLockClient;
 }
 
 /**
@@ -88,7 +99,11 @@ export class RedisLock implements IDistributedLock {
     if (this.#connected) {
       return;
     }
-    this.#client = await resolveClient(this.#options.url, this.#options.client);
+    this.#client = await resolveClient(
+      this.#options.url,
+      this.#options.client,
+      this.#options.connectionErrorReporter,
+    );
     this.#connected = true;
   }
 

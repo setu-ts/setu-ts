@@ -7,6 +7,8 @@
  * @module
  */
 
+import { attachConnectionErrorReporter } from '@setu-ts/common';
+import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
 import type {
   IRedisQueueClient,
@@ -67,12 +69,15 @@ export function validateClient(client: unknown): client is IRedisQueueClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
+ * @param reporter - Receives the BUILT client's connection errors; never
+ *   attached to an injected client, which belongs to the caller
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
 async function resolveClient(
   url: string,
-  injectedClient?: IRedisQueueClient,
+  injectedClient: IRedisQueueClient | undefined,
+  reporter: ConnectionErrorReporter | undefined,
 ): Promise<IRedisQueueClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -84,7 +89,11 @@ async function resolveClient(
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
-  return createLazyRedisClient(RedisCtor, url);
+  const client = createLazyRedisClient(RedisCtor, url);
+  if (reporter !== undefined) {
+    attachConnectionErrorReporter(client, reporter);
+  }
+  return client;
 }
 
 /**
@@ -113,6 +122,7 @@ export class RedisQueue implements QueueAdapter {
   #injectedClient: IRedisQueueClient | undefined;
   /** Retention for a dead-lettered job's payload; unbounded when undefined. */
   #deadLetterTtlMs: number | undefined;
+  #reporter: ConnectionErrorReporter | undefined;
   #ready = false;
   /**
    * M70c: present only when the client exposes `ping()`; its absence is
@@ -127,13 +137,14 @@ export class RedisQueue implements QueueAdapter {
     this.#url = options?.url ?? 'redis://localhost:6379';
     this.#injectedClient = options?.client;
     this.#deadLetterTtlMs = options?.deadLetterTtlMs;
+    this.#reporter = options?.connectionErrorReporter;
   }
 
   async connect(): Promise<void> {
     if (this.#ready) {
       return;
     }
-    this.#client = await resolveClient(this.#url, this.#injectedClient);
+    this.#client = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
     if (typeof this.#client.connect === 'function') {
       await this.#client.connect();
     }

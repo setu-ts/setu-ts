@@ -6,7 +6,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { RealtimeFrame } from '@setu-ts/common';
+import type { ConnectionErrorReporter, RealtimeFrame } from '@setu-ts/common';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 import type { IRedisBackplaneClient, IRedisModule } from '../../src/interfaces/index.ts';
 import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../../src/interfaces/index.ts';
@@ -88,9 +88,23 @@ class FakeRedisClient implements IRedisBackplaneClient {
     return Promise.resolve(0);
   }
 
+  /** Listeners for every event other than `message`, by event name. */
+  readonly eventListeners = new Map<string, Array<(value: unknown) => void>>();
+
   on(event: string, listener: (channel: string, message: string) => void): void {
     if (event === 'message') {
       this.#listeners.push(listener);
+      return;
+    }
+    const list = this.eventListeners.get(event) ?? [];
+    list.push(listener as unknown as (value: unknown) => void);
+    this.eventListeners.set(event, list);
+  }
+
+  /** Simulates the client emitting a lifecycle event (`'error'`, `'ready'`). */
+  emitEvent(event: string, value?: unknown): void {
+    for (const listener of this.eventListeners.get(event) ?? []) {
+      listener(value);
     }
   }
 
@@ -943,5 +957,89 @@ describe('RedisBackplane rollback of a failed open', () => {
     await connecting;
 
     expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([[1, 1], [1, 1]]);
+  });
+});
+
+describe('RedisBackplane connection-error reporting', () => {
+  /** A reporter that records what it was told. */
+  function recordingReporter(): ConnectionErrorReporter & { calls: string[] } {
+    const calls: string[] = [];
+    return {
+      calls,
+      report: (error: unknown) => calls.push(`report:${(error as Error).message}`),
+      recovered: () => calls.push('recovered'),
+    };
+  }
+
+  function builtPair(): { module: IRedisModule; clients: FakeRedisClient[] } {
+    const clients: FakeRedisClient[] = [];
+    return {
+      clients,
+      module: {
+        create: (): IRedisBackplaneClient => {
+          const client = new FakeRedisClient();
+          clients.push(client);
+          return client;
+        },
+      },
+    };
+  }
+
+  it("routes both built connections' error and ready events to the reporter", async () => {
+    const { module, clients } = builtPair();
+    const reporter = recordingReporter();
+    const backplane = new RedisBackplane(
+      {
+        transport: 'redis',
+        url: 'redis://localhost:6379',
+        module,
+        connectionErrorReporter: reporter,
+      },
+      'node-a',
+      'realtime',
+    );
+
+    await backplane.connect();
+    const [publisher, subscriber] = clients;
+    publisher.emitEvent('error', new Error('refused'));
+    subscriber.emitEvent('error', new Error('refused'));
+    subscriber.emitEvent('ready');
+
+    expect(publisher.eventListeners.get('error')?.length).toBe(1);
+    expect(subscriber.eventListeners.get('error')?.length).toBe(1);
+    expect(reporter.calls).toEqual(['report:refused', 'report:refused', 'recovered']);
+    await backplane.close();
+  });
+
+  it('attaches nothing to built connections when no reporter is configured', async () => {
+    const { module, clients } = builtPair();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+
+    await backplane.connect();
+
+    for (const client of clients) {
+      expect(client.eventListeners.has('error')).toBe(false);
+    }
+    await backplane.close();
+  });
+
+  it('never attaches to an injected pair, even with a reporter configured', async () => {
+    const client = new FakeRedisClient();
+    const subscriber = new FakeRedisClient();
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber, connectionErrorReporter: recordingReporter() },
+      'node-a',
+      'realtime',
+    );
+
+    await backplane.connect();
+
+    expect(client.eventListeners.has('error')).toBe(false);
+    expect(subscriber.eventListeners.has('error')).toBe(false);
+    await backplane.close();
   });
 });

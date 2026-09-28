@@ -79,20 +79,26 @@ Two connections, deliberately: a Redis connection in subscriber mode refuses eve
 than (un)subscribe, so one connection cannot both publish and subscribe. Injecting a `client`
 without a `subscriber` throws at construction rather than failing at the first publish.
 
+Connection errors of the `ioredis` clients the transport builds go to the application logger — the
+first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead
+of `ioredis` printing every reconnect failure to `console.error`. An injected client gets no
+listener: it belongs to the caller. Set `connectionErrorReporter` to route them elsewhere.
+
 ## Options
 
-| Option                  | Applies to         | Default                  | Description                                                                                                                                                       |
-| ----------------------- | ------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `topic`                 | all but memory     | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                      |
-| `origin`                | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                               |
-| `bus`                   | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                |
-| `url`                   | `'redis'`          | —                        | Connection URL, used only on the lazy-load path                                                                                                                   |
-| `client` / `subscriber` | `'redis'`          | —                        | Injected client pair; required together                                                                                                                           |
-| `module`                | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                   |
-| `commandTimeoutMs`      | `'redis'`          | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations |
-| `instance`              | `'custom'`         | —                        | The transport to register, used as-is                                                                                                                             |
-| `localNotice`           | `'memory'`         | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                    |
-| `diagnostics`           | all but `'custom'` | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                    |
+| Option                    | Applies to         | Default                  | Description                                                                                                                                                       |
+| ------------------------- | ------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `topic`                   | all but memory     | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                      |
+| `origin`                  | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                               |
+| `bus`                     | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                |
+| `url`                     | `'redis'`          | —                        | Connection URL, used only on the lazy-load path                                                                                                                   |
+| `client` / `subscriber`   | `'redis'`          | —                        | Injected client pair; required together                                                                                                                           |
+| `module`                  | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                   |
+| `commandTimeoutMs`        | `'redis'`          | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations |
+| `connectionErrorReporter` | `'redis'`          | logger-backed            | Receives the two built connections' `'error'`/`'ready'` events (see above). Ignored for an injected pair                                                          |
+| `instance`                | `'custom'`         | —                        | The transport to register, used as-is                                                                                                                             |
+| `localNotice`             | `'memory'`         | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                    |
+| `diagnostics`             | all but `'custom'` | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                    |
 
 ## Diagnostics (M98l)
 

@@ -17,7 +17,7 @@ import type {
   ScheduleOptions,
   SchedulerJobHandler,
 } from '@setu-ts/common';
-import { causeMessage, resolveRegistryEntry } from '@setu-ts/common';
+import { causeMessage, createConnectionErrorReporter, resolveRegistryEntry } from '@setu-ts/common';
 import { SchedulerUnavailableError } from '../errors.ts';
 import type {
   IDistributedLock,
@@ -130,7 +130,16 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       }
 
       // Resolve distributed lock
-      const lock = await resolveLock(options, ctx.runtime);
+      // A built Redis lock client's reconnect failures go to the logger (read
+      // at call time) rather than ioredis's own console fallback.
+      const lock = await resolveLock(
+        options,
+        ctx.runtime,
+        createConnectionErrorReporter({
+          source: 'scheduler-plugin: redis lock',
+          logger: () => ctx.logger,
+        }),
+      );
 
       // Connect Redis lock if needed
       if (
