@@ -111,10 +111,11 @@ export class RedisBackplane implements IRealtimeBackplane {
       typeof commandTimeoutMs !== 'number' || !Number.isFinite(commandTimeoutMs) ||
       commandTimeoutMs < 0 || commandTimeoutMs > MAX_REDIS_COMMAND_TIMEOUT_MS
     ) {
+      // Fixed and value-free: the refused value is never echoed (it may be a
+      // mis-assigned secret) and never converted, so no caller code runs here.
       throw new RangeError(
         'realtime-backplane: options.commandTimeoutMs must be a number from 0 to ' +
-          `${MAX_REDIS_COMMAND_TIMEOUT_MS} (0 disables the bound); received ` +
-          String(commandTimeoutMs),
+          `${MAX_REDIS_COMMAND_TIMEOUT_MS} (0 disables the bound)`,
       );
     }
 
@@ -398,7 +399,10 @@ export class RedisBackplane implements IRealtimeBackplane {
 
   /**
    * Closes one connection: a graceful QUIT, and when that fails, a forced
-   * `disconnect()` so the client stops reconnecting. A client without
+   * `disconnect()`. With `ioredis` the QUIT alone already stops reconnection
+   * (it marks the client as closing even when it times out); what
+   * `disconnect()` adds is closing a still-open socket at once rather than
+   * leaving it open until a silent server finally answers. A client without
    * `disconnect` is left as QUIT left it.
    *
    * @param client - The connection to close

@@ -54,10 +54,10 @@ export interface IRedisBackplaneClient {
   /** Closes the connection. */
   quit(): Promise<unknown>;
   /**
-   * Forcibly closes the connection without waiting for the server and stops
-   * reconnecting. Optional; the real `ioredis` client exposes it. `close()`
-   * calls it when `quit()` fails — during an outage — so the connection does
-   * not keep reconnecting after the application has stopped.
+   * Forcibly closes the connection without waiting for the server.
+   * Optional; the real `ioredis` client exposes it. `close()` calls it when
+   * `quit()` fails — during an outage — so a socket to a silent server is
+   * closed at once instead of staying open until the server answers.
    *
    * @since 0.8.0
    */

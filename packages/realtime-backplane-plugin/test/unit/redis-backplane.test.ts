@@ -322,6 +322,34 @@ describe('RedisBackplane', () => {
     }
   });
 
+  it('refuses a bad command timeout without echoing or converting it', () => {
+    // A mis-assigned secret must not reach the log through the refusal, and a
+    // hostile value's own code must not run inside validation.
+    let converted = 0;
+    const hostile = {
+      toString: () => {
+        converted++;
+        throw new Error('toString ran');
+      },
+    };
+    for (const commandTimeoutMs of ['secret-canary\r\nforged', hostile] as never[]) {
+      let caught: unknown;
+      try {
+        new RedisBackplane(
+          { transport: 'redis', url: 'redis://localhost:6379', commandTimeoutMs },
+          'node-a',
+          'realtime',
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(caught).toBeInstanceOf(RangeError);
+      expect((caught as Error).message).not.toContain('secret-canary');
+      expect((caught as Error).message).not.toContain('forged');
+    }
+    expect(converted).toBe(0);
+  });
+
   it('builds both clients from the module when none are injected', async () => {
     const built: string[] = [];
     const clients: FakeRedisClient[] = [];

@@ -466,9 +466,11 @@ All notable changes to this project are documented here. The format follows
   outage now releases both connections.** It stopped at the first rejected step — an UNSUBSCRIBE or
   QUIT that timed out — so both connections kept reconnecting after the application stopped;
   measured against a real Redis, both reconnected (`ready`) once the server returned. Every step now
-  runs, a connection whose QUIT fails is force-closed through the new optional
-  `IRedisBackplaneClient.disconnect?()`, and the first failure is still rethrown after everything is
-  released.
+  runs (which is what stops the reconnection), a connection whose QUIT fails is also force-closed
+  through the new optional `IRedisBackplaneClient.disconnect?()` so a socket to a silent server does
+  not stay open, and the first failure is still rethrown after everything is released. Against a
+  silent server `close()` can take up to about three command timeouts (≈45 s at the default) — lower
+  `commandTimeoutMs` if that exceeds a shutdown grace period.
 - **`cli` — `setu new --template full-stack` now demonstrates React Router route middleware, and
   explains both middleware layers.** A generated full-stack project has two: kernel middleware
   (`setu generate middleware`), which runs for every request, and React Router's route `middleware`
