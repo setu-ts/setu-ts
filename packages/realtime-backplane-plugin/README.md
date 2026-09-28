@@ -142,11 +142,16 @@ worth knowing. On `'redis'`, ioredis's own defaults govern what a partition does
 - **A publish before `connect()` or after `close()` rejects** rather than resolving, so a frame sent
   nowhere reads as a failure. It resolved without sending before 0.8.0.
 - **`close()` during an outage still releases both connections.** Each step runs even when an
-  earlier one fails, a connection whose QUIT fails is also force-closed through `disconnect()`, and
-  the first failure is rethrown afterwards, so a shutdown during an outage is reported rather than
-  leaving connections reconnecting behind it. Against a silent server each step waits out the
-  command timeout, so `close()` can take about three of them (≈45 s at the default); lower
+  earlier one fails, a connection whose QUIT fails is force-closed through `disconnect()` (without
+  it, ioredis reconnects and re-subscribes once an unreachable server returns), and the first
+  failure is rethrown afterwards, so a shutdown during an outage is reported rather than leaving
+  connections reconnecting behind it. Against a silent server each step waits out the command
+  timeout, so `close()` can take about three of them (≈45 s at the default); lower
   `commandTimeoutMs` if that exceeds your shutdown grace period.
+- **Lowering `commandTimeoutMs` below the ~11 s retry budget weakens at-most-once.** A publish can
+  then time out while the connection is down and still be sent from the offline queue when it
+  returns, so a caller that retries a rejected publish may deliver that frame twice. At the default
+  the retry budget rejects a dropped connection's queued publishes first.
 
 Frames are never persisted or replayed beyond that buffer. `commandTimeoutMs` is the only ioredis
 setting reachable through this plugin's options, and applies only on the lazy path — an application

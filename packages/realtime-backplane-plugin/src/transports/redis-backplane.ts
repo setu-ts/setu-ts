@@ -399,11 +399,14 @@ export class RedisBackplane implements IRealtimeBackplane {
 
   /**
    * Closes one connection: a graceful QUIT, and when that fails, a forced
-   * `disconnect()`. With `ioredis` the QUIT alone already stops reconnection
-   * (it marks the client as closing even when it times out); what
-   * `disconnect()` adds is closing a still-open socket at once rather than
-   * leaving it open until a silent server finally answers. A client without
-   * `disconnect` is left as QUIT left it.
+   * `disconnect()`. The fallback is load-bearing: with `ioredis` a QUIT marks
+   * the client as closing only when it is written to a live socket, so while
+   * the server is unreachable the QUIT sits in the offline queue, is discarded
+   * with it, and the client reconnects and re-subscribes once the server
+   * returns (measured after a 25 s outage). Against a silent but connected
+   * server, `disconnect()` also closes the socket at once rather than leaving
+   * it open until the server answers. A client without `disconnect` is left
+   * as QUIT left it.
    *
    * @param client - The connection to close
    * @param failures - Collects the QUIT failure, if any
