@@ -3,8 +3,8 @@
 > **Status:** Planning. Implementation and fixes: `feat/m98n-outbound-http-observations`. The design
 > security review is recorded in §10.1 (2026-09-29), revised after an independent review round
 > (rounds 1–3: findings R1–R14, N1–N7, M1 and L1–L3, all resolved in this plan), and the
-> registration design in §3.2 was chosen by the maintainer on 2026-09-29. Formal approval of §10.1
-> is pending; implementation does not start before it. No implementation or committed-tree audit is
+> registration design in §3.2 was chosen by the maintainer on 2026-09-29. The maintainer approved
+> §10.1 on 2026-09-29; implementation may begin. No implementation or committed-tree audit is
 > claimed.
 
 ## 0. Objective & scope
@@ -382,10 +382,10 @@ event-bus API.
 
 Also update PUBLIC_API.md, ARCHITECTURE.md, docs/diagnostics-protocol.md, the SDK and diagnostics
 READMEs (the SDK README carries the compiled §3.2 example), CHANGELOG.md, docs/upgrading.md (the
-`deno.json` pin), docs/releasing.md (the plugin version literal as a bump site), ROADMAP.md (C3–C5 — applied during planning, 2026-09-29)
-and CLAUDE.md. No external dependency is introduced. The SDK's pinned `common` specifier moves with
-the release that publishes the new contracts (the alpha.3 inline-specifier trap: check the SDK's
-inline specifiers too).
+`deno.json` pin), docs/releasing.md (the plugin version literal as a bump site), ROADMAP.md (C3–C5 —
+applied during planning, 2026-09-29) and CLAUDE.md. No external dependency is introduced. The SDK's
+pinned `common` specifier moves with the release that publishes the new contracts (the alpha.3
+inline-specifier trap: check the SDK's inline specifiers too).
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -578,7 +578,7 @@ paired devtool; a badly chosen alias is disclosed as written; counts aggregate e
 identity is not preserved; an application that constructs the helper unconditionally keeps one
 bounded record in production. No unresolved design alternative is delegated to implementation.
 
-**Approved by:** pending — the maintainer (the §3.2 registration design was approved on 2026-09-29).
+**Approved by:** the maintainer, 2026-09-29 (the §3.2 registration design was chosen the same day).
 
 ### 10.2 Required implementation audit matrix — not yet executed
 
@@ -608,13 +608,13 @@ as untested, not audited. The connector is Deno-only (M98b).
 
 ### 10.3 Completion gate and evidence record
 
-Before implementation: maintainer approval of §10.1. Before completion or publication: the
-independent committed-tree audit per `.roo/skills/security-audit/SKILL.md`, in a context that did
-not implement or fix M98n, covering its defect classes and O1–O13. This design review does not
-satisfy it. Record in the implementation PR the audited commit, reviewed files, runtime coverage,
-O1–O13 results and negative controls, every finding with severity and disposition, and remaining
-limitations. A fix after the audit changes the audited tree: commit it and re-audit the affected
-controls. Unresolved security or correctness findings block completion. Also supply the §7 gates,
-the ANSI-stripped per-file coverage table, the forbidden-construct scan and both publish-gate exit
-statuses on the committed tree. The devtool separately passes its own safe-rendering,
-secret-free-log/export and credential-storage acceptance tests.
+Before implementation: maintainer approval of §10.1 (given 2026-09-29). Before completion or
+publication: the independent committed-tree audit per `.roo/skills/security-audit/SKILL.md`, in a
+context that did not implement or fix M98n, covering its defect classes and O1–O13. This design
+review does not satisfy it. Record in the implementation PR the audited commit, reviewed files,
+runtime coverage, O1–O13 results and negative controls, every finding with severity and disposition,
+and remaining limitations. A fix after the audit changes the audited tree: commit it and re-audit
+the affected controls. Unresolved security or correctness findings block completion. Also supply the
+§7 gates, the ANSI-stripped per-file coverage table, the forbidden-construct scan and both
+publish-gate exit statuses on the committed tree. The devtool separately passes its own
+safe-rendering, secret-free-log/export and credential-storage acceptance tests.
