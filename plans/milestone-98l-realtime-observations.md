@@ -1,8 +1,8 @@
 # Milestone 98l — Realtime Lifecycle Observations
 
 > **Status:** In implementation on `feat/m98l-realtime-observations`. The design security review is
-> recorded in §10.1 (2026-09-28, before implementation) and awaits the maintainer's approval. No
-> completed security audit is claimed.
+> recorded in §10.1 (2026-09-28, before implementation) and awaits the maintainer's approval. The
+> committed-tree security audit passed on round 2 (`adde39f5`, §12).
 
 ## 0. Objective & scope
 
@@ -583,4 +583,14 @@ Noted by the audit, not raised: the 256 KiB collapse is unreachable today (at mo
 source); refusing a source that claims `unknown` has no visible effect, since the output is the same
 placeholder; `isDisplayAlias` admits Unicode format characters such as U+202E (the shared rule since
 M98d). Not tested: runtimes other than Deno, and the Redis backplane against a live Redis (reviewed
-in source only).
+in source only). Devtool rendering and credential storage are outside this milestone's scope.
+
+**Round 2 — `adde39f5`, verdict PASSED**, by a second freshly spawned independent agent (no
+implementation, fix or round-1 involvement). The range `349f1f5a..adde39f5` changed documentation
+only. F1 confirmed fixed against the code: a new probe (12 checks) drives every path to `disabled`
+and `collection-failed` and shows the reader is called zero times for `disabled` and once on the
+failing read, never after. All six round-1 drivers reproduce (240/240) and all 14 negative controls
+were again observed failing and restored. **No finding open.** Record outside the tree
+(`.verify-98l/audit2/AUDIT-98l-round2.md`). Its informational notes were applied after it: this
+record gained the out-of-scope sentence above (O1), and an internal comment in the collector that
+used F1's old phrasing was reworded (O2, comment only, no code change).

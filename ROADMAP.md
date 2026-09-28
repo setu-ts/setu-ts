@@ -11177,10 +11177,10 @@ plan: `plans/archive/milestone-98j-event-observations.md`.
 ### Milestone 98l: Realtime Lifecycle Observations
 
 **Status:** Implemented on `feat/m98l-realtime-observations`; the design security review is recorded
-(plan §10.1) and awaits the maintainer's approval, and the committed-tree security audit has not
-run. Owner: `packages/websocket-plugin`; SSE and realtime-backplane are explicit co-owners. The one
-collector the three share lives in `@setu-ts/common` (maintainer decision, plan §3.1). Canonical
-plan: `plans/milestone-98l-realtime-observations.md`.
+(plan §10.1) and awaits the maintainer's approval; the committed-tree security audit passed on round
+2 (`adde39f5`, plan §12). Owner: `packages/websocket-plugin`; SSE and realtime-backplane are
+explicit co-owners. The one collector the three share lives in `@setu-ts/common` (maintainer
+decision, plan §3.1). Canonical plan: `plans/milestone-98l-realtime-observations.md`.
 
 - [x] Each WebSocket/SSE plugin owns a separate source. Capture open/close and local send/enqueue
       outcomes at the existing connection code. Read only existing aggregate connection/group

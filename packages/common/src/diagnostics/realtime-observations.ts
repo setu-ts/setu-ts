@@ -270,7 +270,7 @@ function isCount(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
-/** The frozen gauges of a source that did not read them. */
+/** The frozen gauges of a source whose values were not obtained. */
 function unreadGauges(
   state: 'unsupported' | 'disabled' | 'collection-failed',
 ): RealtimeDiagnosticsGauges {
