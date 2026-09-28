@@ -1,311 +1,353 @@
 # Milestone 98n — Outbound HTTP Attempt Observations
 
 > **Status:** Planning. Implementation and fixes: `feat/m98n-outbound-http-observations`. The design
-> security review is recorded in §10.1 (2026-09-29) and awaits maintainer approval; implementation
-> does not start before that approval. No implementation or committed-tree audit is claimed.
+> security review is recorded in §10.1 (2026-09-29), revised after an independent review round
+> (findings R1–R14, all resolved in this plan), and the registration design in §3.2 was chosen by
+> the maintainer on 2026-09-29. Formal approval of §10.1 is pending; implementation does not start
+> before it. No implementation or committed-tree audit is claimed.
 
 ## 0. Objective & scope
 
-Provide bounded, opt-in outbound http attempt observations through the authenticated local
+Provide bounded, opt-in outbound HTTP attempt observations through the authenticated local
 connector.
 
-- **In scope:** Explicitly adopted server-side fetch attempts only. Browser SDK collection is not
-  automatically sent to the framework; unrelated fetches and third-party internal calls are
-  invisible. Owner: `packages/sdk`; common and connector changes are necessary consumers.
-- **NOT this milestone:** raw-data inspection, remote access, persistent history, controls or
-  replay.
+- **In scope:** explicitly adopted server-side fetch attempts only — calls made through a fetch the
+  application wrapped with `createObservedFetch`. Unrelated fetches, third-party SDKs' internal
+  clients and browser instances are invisible. Owner: `packages/sdk`; `common` (contracts + one
+  token) and `diagnostics-plugin` (reader, route, client method) are necessary consumers.
+- **NOT this milestone:** raw-data inspection, destinations, remote access, persistent history,
+  controls or replay; CLI scaffolding of the helper (§3.2 documents and tests the composition by
+  hand).
 
-Depends on the M98a/M98b boundaries and M98d's revised eleven-key manifest. No runtime dependency on
-the other inspector providers. Each source states observed-instance coverage, never automatic
-visibility into all application code.
+Depends on the M98a/M98b boundaries and M98d's eleven-key manifest. No runtime dependency on the
+other inspector providers. Each source states observed-instance coverage, never automatic visibility
+into all application code.
 
 ## 1. Contracts verified from SOURCE (not names)
 
-| Reference     | Source (file:line)                                                   | Verified surface / fact                                                                                 |
-| ------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Source seam   | `packages/sdk/src/http/contracts.ts:150`                             | ClientOptions.fetch accepts an injected fetch function; IClientTiming.now supplies a monotonic clock.   |
-| Source seam   | `packages/sdk/src/http/http-client.ts:1`                             | Each retry reaches injected fetch; response interceptors run only after successful response parsing.    |
-| Source seam   | `packages/sdk/src/index.ts:1`                                        | SDK exports client helpers; there is no server http-client-plugin.                                      |
-| Registry      | `packages/common/src/registry.ts:86`                                 | register supports multi; getAll resolves providers; do not resolve application services for inspection. |
-| Connector     | `packages/diagnostics-plugin/src/transport/connector-handler.ts:248` | Existing authenticated dispatch and post-await session checks must govern new operations.               |
-| Compatibility | `packages/diagnostics-plugin/src/protocol/protocol.ts:414`           | The eleven-key manifest is IMPLEMENTED; `outboundHttp` is reserved and `false` (`:457`, `:516`).        |
-| Delegation    | `packages/sdk/src/http/http-client.ts:242`                           | SDK calls `this.#fetch(url.toString(), fetchInit)`: receiver is the client, two args, string input.     |
-| Default fetch | `packages/sdk/src/http/http-client.ts:126`                           | Default resolves `globalThis.fetch` at call time with the global as receiver (the M70e X11-1 fix).      |
-| Clock         | `packages/sdk/src/http/timing.ts:18`                                 | `createDefaultClientTiming()` wraps `performance.now()`; detached `performance.now` throws on Deno.     |
-| SDK imports   | `packages/sdk/src/http/contracts.ts:16`                              | Every SDK import of `common` is `import type` via the inline `jsr:@setu-ts/common@^0.7.0` specifier.    |
-| SSE consumer  | `packages/sdk/src/realtime/sse-client.ts:99`                         | `SseClient` also accepts an injected fetch; an observed fetch there measures connect attempts only.     |
-| App surface   | `packages/common/src/plugin.ts:434`                                  | `IApplication` has NO `onClose` (only `ILifecycleApi`, `:397`, reached from a plugin context).          |
-| Own-data read | `packages/diagnostics-plugin/src/protocol/protocol.ts:1141`          | Shared `copyOwnData`/`copyOwnDataList` used by every inspector projector since M98e.                    |
-| Route grammar | `packages/diagnostics-plugin/src/protocol/protocol.ts:96`            | Targets are exact constants per operation (`REALTIME_TARGET`); no pattern routing.                      |
+| Reference      | Source (file:line)                                                         | Verified surface / fact                                                                                                        |
+| -------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Fetch seam     | `packages/sdk/src/http/contracts.ts:158`                                   | `ClientOptions.fetch?: (input: RequestInfo, init?: RequestInit) => Promise<Response>`; `timing?: IClientTiming` (`:161`).      |
+| Clock          | `packages/sdk/src/http/contracts.ts:116`                                   | `IClientTiming.now()` is a monotonic method.                                                                                   |
+| Delegation     | `packages/sdk/src/http/http-client.ts:242`                                 | SDK calls `this.#fetch(url.toString(), fetchInit)`: receiver is the client, two args, string input.                            |
+| Default fetch  | `packages/sdk/src/http/http-client.ts:126`                                 | Default `(input, init) => globalThis.fetch(input, init)` resolves at call time with the global as receiver (M70e X11-1).       |
+| Retry/breaker  | `packages/sdk/src/http/http-client.ts:197-260`                             | Each retry calls the fetch again; an open breaker and the rate limiter act before any fetch call.                              |
+| Default timing | `packages/sdk/src/http/timing.ts:18`, `packages/sdk/src/index.ts:31`       | `createDefaultClientTiming()` wraps `performance.now()` and is exported. Detached `performance.now` throws on Deno (measured). |
+| SDK imports    | `packages/sdk/src/http/contracts.ts:16`, `packages/sdk/deno.json`          | All four SDK imports of `common` are `import type`; the manifest pins `jsr:@setu-ts/common@0.7.0` exactly.                     |
+| SSE consumer   | `packages/sdk/src/realtime/sse-client.ts:99`                               | `(opts.fetch ?? defaultFetch)(…)`: receiver `undefined`; an observed fetch there measures connect attempts only.               |
+| App surface    | `packages/common/src/plugin.ts:434-491`                                    | `IApplication` has NO `onClose`; `ILifecycleApi.onClose` (`:397`) is reached from `IPluginContext.lifecycle` (`:519`).         |
+| Plugin shape   | `packages/common/src/plugin.ts:560-588`                                    | `IPlugin` is an interface (`name`, `version`, optional `provides`, `register(ctx)`) — a type-only import suffices.             |
+| Registry       | `packages/common/src/registry.ts:99`                                       | `register(token, service, { multi: true })`; registration after `runBootstrap()` throws.                                       |
+| Tokens         | `packages/common/src/tokens.ts:22`, `:172-192`                             | `CapabilityToken = string`; the M98i/j/l diagnostics tokens are multi-provider, registered without `provides`.                 |
+| Resolver       | `packages/kernel/src/registry/plugin-resolver.ts:110-131`                  | Duplicate plugin names throw; a plugin's NAME also enters the provider index, so a name must never equal a capability token.   |
+| Bootstrap read | `packages/diagnostics-plugin/src/plugin/diagnostics-plugin.ts:258-348`     | Sources are collected with `getAll` in `onBootstrap`; exceeding a per-inspector cap refuses startup.                           |
+| Connector      | `packages/diagnostics-plugin/src/transport/connector-handler.ts:1132-1155` | Per-operation dispatch runs after every session and request check; the built response passes the shared wire validator.        |
+| Manifest       | `packages/diagnostics-plugin/src/protocol/protocol.ts:414`, `:457`, `:516` | Eleven-key manifest implemented; `outboundHttp` reserved `false`.                                                              |
+| Own-data read  | `packages/diagnostics-plugin/src/protocol/protocol.ts:1141`, `:1180`       | `copyOwnData`/`copyOwnDataList` read descriptors; no getter is invoked.                                                        |
+| Route grammar  | `packages/diagnostics-plugin/src/protocol/protocol.ts:96`                  | Targets are exact constants per operation.                                                                                     |
+| Devtool param  | `packages/cli/src/templates/project-files.ts:52`, `:423`                   | Every generated factory takes `devtool?: { plugins?, diagnostics? }` second; production entries never pass it.                 |
+| Devtool entry  | `packages/cli/src/devtool/dev-entry.ts:112-120`                            | `DiagnosticsPlugin(...)` is constructed BEFORE `createApp(...)` runs, so an option on it cannot receive app-created sources.   |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                    | Resolution (picked side)                                                                                                                       | Doc deliverable (same PR)                                            |
-| -- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| C1 | Existing public APIs expose application operations, not this source.        | Add dedicated source contracts; retain application method signatures.                                                                          | PUBLIC_API.md, ARCHITECTURE.md, owning package README and CHANGELOG. |
-| C2 | Earlier M98d reserved only five inspectors.                                 | Superseded: the eleven-key manifest shipped in M98d. This letter flips only `outboundHttp` to `true`, in the implementation PR.                | docs/diagnostics-protocol.md during implementation.                  |
-| C3 | ROADMAP and §3.2 said the app registers `close` with application `onClose`. | `IApplication` has no `onClose` (§1). The application calls `observed.close()` after `app.stop()` resolves; state is bounded if it never does. | ROADMAP.md M98n bullet and the SDK README, same PR.                  |
-| C4 | ROADMAP says "explicitly injected fetch and monotonic clock".               | The clock is an optional `timing` OBJECT called as a method, defaulting to `createDefaultClientTiming()` (§3.3, finding D3).                   | ROADMAP.md M98n bullet, same PR.                                     |
+| #  | Conflict                                                                  | Resolution (picked side)                                                                                                                            | Doc deliverable (same PR)                                               |
+| -- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| C1 | Existing public APIs expose application operations, not this source.      | Add dedicated source contracts; retain application method signatures.                                                                               | PUBLIC_API.md, ARCHITECTURE.md, SDK and diagnostics READMEs, CHANGELOG. |
+| C2 | Earlier M98d reserved only five inspectors.                               | Superseded: the eleven-key manifest shipped in M98d. This letter flips only `outboundHttp` to `true`.                                               | docs/diagnostics-protocol.md.                                           |
+| C3 | ROADMAP: no new plugin, no token; the source is handed to the connector.  | The helper returns a small registration plugin (not an HTTP client plugin) and `common` gains one multi-provider token (§3.2; maintainer decision). | ROADMAP.md M98n bullets.                                                |
+| C4 | ROADMAP: "explicitly injected fetch and monotonic clock".                 | `fetch` is optional (defaults to the SDK's call-time global fetch); the clock is an optional `timing` OBJECT called as a method (§3.4).             | ROADMAP.md M98n bullet.                                                 |
+| C5 | ROADMAP: "applications … register helper.close with application onClose". | `IApplication` has no `onClose`; the returned plugin registers the close through its own `ctx.lifecycle.onClose` (§3.2).                            | ROADMAP.md M98n bullet.                                                 |
 
 ## 3. Design decisions
 
 ### 3.1 Authoritative capture seam
 
-**Decision:** Export createObservedFetch with an explicitly injected fetch and monotonic clock.
-Applications pass the returned fetch to ClientOptions.fetch or call it directly. Call the injected
-fetch exactly once with unchanged input/init and return the original Response or throw the original
-rejection. Record elapsed time until response headers or rejection, status class and fixed
-success/failure only. Never read request URLs, headers, bodies, signals or rejection properties. No
-monkey-patching global fetch. Retries appear as separate attempts; logical request counts,
-redirect-hop counts and timeout attribution are explicitly unavailable. No new HTTP client plugin is
-introduced.
+**Decision:** export `createObservedFetch`. It wraps one fetch, and the application passes the
+returned `fetch` to `ClientOptions.fetch`, `SseClientOptions.fetch`, or calls it directly. The
+wrapper calls the wrapped fetch exactly once with the caller's own arguments, returns the identical
+value or rethrows the identical value, and records only: that an attempt started, whether it settled
+as a response or a failure, the response's status class, and the time from start to settlement
+(headers, not body). It never reads the request URL, headers, body or signal, the response's headers
+or body, or any rejection property. No global fetch is patched. Retries appear as separate attempts;
+logical request counts, redirect-hop counts and timeout attribution are explicitly unavailable.
 
-**Why:** Counters describe executed work rather than inventing backend or cluster state. **Test
-home:** owning package `test/unit/outbound-http-observations.test.ts`.
+**Why:** counters describe executed work; nothing about a destination or payload is captured. **Test
+home:** `packages/sdk/test/unit/outbound-http-observations.test.ts` and
+`observed-fetch-transparency.test.ts`.
 
-### 3.2 Source ownership and registration
+**Counting table (fixed before implementation).**
 
-No new capability token. Add
-`DiagnosticsPluginOptions.outboundHttpSources?: readonly IOutboundHttpDiagnosticsSource[]`, at most
-16 explicitly supplied sources. The application creates the helper, supplies its source to
-DiagnosticsPlugin, and calls `observed.close()` after `app.stop()` resolves (`IApplication` has no
-`onClose`, C3). This avoids an SDK dependency on kernel or diagnostic-plugin. DiagnosticsPlugin does
-not own or close external helpers. The option array is copied index by index at plugin construction,
-bounded at 17 reads (the M98e bypass class); a non-object element, a 17th element, or the SAME
-source object supplied twice refuses construction with a fixed value-free error that names no alias.
-Construction reads no property of any source — `snapshot` is invoked only inside an authenticated
-read. A closed helper retains pass-through fetch behavior with capture disabled. SDK common-type
-imports follow its existing versioned JSR convention: the implementation release must publish
-compatible common contracts before the SDK, update its pinned common import, and exercise the public
-dependency graph. No diagnostics-plugin import enters the SDK.
+| Event                                                              | `started` | `count` | `responses` | `failures` | `lastStatusClass` | `lastDurationMs` |
+| ------------------------------------------------------------------ | --------- | ------- | ----------- | ---------- | ----------------- | ---------------- |
+| Delegation begins                                                  | +1        | —       | —           | —          | —                 | —                |
+| Wrapped fetch throws synchronously                                 | —         | +1      | —           | +1         | unchanged         | elapsed (≈0)     |
+| Promise resolves with a value whose `status` is readable           | —         | +1      | +1          | —          | class of status   | elapsed          |
+| Promise resolves; `status` getter throws or value is not an object | —         | +1      | +1          | —          | `'other'`         | elapsed          |
+| Promise rejects (network error, abort, any reason)                 | —         | +1      | —           | +1         | unchanged         | elapsed          |
+| Settlement from an earlier generation (§3.4)                       | —         | —       | —           | —          | —                 | —                |
 
-The connector admits at most 16 sources, refusing excess sources with a fixed value-free
-configuration error. Duplicate non-null aliases discovered during a read yield a fixed
-collection-failed response with no sources; validation does not invoke snapshot at registration.
-Disabled plugin sources need no configured alias: connector assigns session-local `sourceId` values
-`s1` through `s16` by registration order, while alias is null. IDs remain stable until connector
-teardown. Configured aliases must be unique across this inspector. Built-in source reads perform no
-application operation. Third-party source code runs with application privileges and is not sandboxed
-by this interface.
+An HTTP error status is a response, not a failure. `responses + failures === count` and
+`count <= started` always hold. The status class is `'2xx'`–`'5xx'` for an integer in `200..599` and
+`'other'` for everything else (a `0` opaque/opaqueredirect status, a `1xx` a fetch never exposes, a
+non-integer, an out-of-range value), so the wire never carries a raw status number.
+
+### 3.2 Source ownership and registration (maintainer decision, 2026-09-29)
+
+`createObservedFetch` returns `{ fetch, plugin }`. `plugin` is an `IPlugin` (type-only import from
+`common`) whose `register(ctx)` does exactly two things: registers the helper's frozen snapshot-only
+source under the new multi-provider `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` (value
+`'outbound-http-diagnostics'`) with `{ multi: true }` and no `provides` (the M98i/j/l precedent),
+and registers the helper's internal close with `ctx.lifecycle.onClose`. It has no dependencies and
+no routes. `DiagnosticsPlugin` collects every source with `getAll` in `onBootstrap`, exactly as for
+the other inspectors; more than 16 refuses startup with a fixed error. The earlier
+`DiagnosticsPluginOptions.outboundHttpSources` option is CUT: the CLI-generated devtool entry builds
+`DiagnosticsPlugin` before `createApp` runs (§1), so an option could only be fed by a module-level
+holder — the M70d defect class — and would keep capture running in production.
+
+- **Token value in the SDK.** The SDK writes the literal `'outbound-http-diagnostics'` rather than
+  importing `CAPABILITIES`, so its only `common` imports stay type-only (§3.3). A test in
+  `packages/sdk/test` imports `CAPABILITIES` from `common` and asserts equality, so the two cannot
+  drift. `common` declares the token with JSDoc naming the SDK helper as its producer.
+- **Plugin name.** `outbound-http-diagnostics-<n>`, where `<n>` is a module-level counter
+  incremented per helper. It never equals a capability token (the resolver indexes names as
+  providers, §1), never contains the alias (so a duplicate-name error can never echo one), and two
+  helpers never collide. Registering the SAME plugin object twice throws the kernel's duplicate-name
+  error, which is the intended refusal.
+- **`version`.** Read from the SDK's own `deno.json` by a static JSON import (the M34 `VERSION`
+  precedent), so a release bump adds no new site.
+- **Lifecycle.** `onClose` marks the collector closed before clearing (late settlements record
+  nothing; `snapshot()` answers `disabled`); the wrapper keeps delegating unchanged. The kernel runs
+  every `onClose` hook, including after a failed `start()` (M86). If startup fails before the plugin
+  registers, nothing was attached and nothing needs releasing: the collector holds no timer, socket
+  or listener. A helper whose plugin is never registered keeps one bounded record that nothing
+  reads.
+- **Production exposure.** The documented and tested composition constructs the helper only when the
+  factory's `devtool` parameter is present, so a production entry (which never passes one) builds no
+  wrapper, no collector and no plugin:
+
+  ```ts
+  export function createApp(env?: AppEnv, devtool?: DevtoolComposition) {
+    const observed = devtool ? createObservedFetch({ alias: 'payments-api' }) : undefined;
+    const payments = createClient({
+      baseUrl: env.PAYMENTS_URL,
+      ...(observed ? { fetch: observed.fetch } : {}),
+    });
+    return createApplication({
+      plugins: [/* … */, ...(observed ? [observed.plugin] : []), ...(devtool?.plugins ?? [])],
+      ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
+    });
+  }
+  ```
+
+  An application may construct the helper unconditionally; that is its choice and costs one bounded
+  record. The README says so. No CLI template change is made in this letter.
+
+Duplicate non-null aliases discovered during a read yield a fixed `collection-failed` response with
+no sources. The connector assigns session-local `sourceId` values `s1`–`s16` by registration order,
+stable until connector teardown. A third-party plugin may register its own source under the token;
+its code runs with application privileges and is not sandboxed — the reader only keeps its output
+out of the signed frame.
 
 ### 3.3 Exact public projection and reader
 
-Add common `IOutboundHttpDiagnosticsSource`, `OutboundHttpDiagnosticsSnapshot`,
-`OutboundHttpDiagnosticsRecord`, and `OutboundHttpDiagnosticsResponse`.
+`common` adds `IOutboundHttpDiagnosticsSource`, `OutboundHttpDiagnosticsSnapshot`,
+`OutboundHttpDiagnosticsRecord`, `OutboundHttpDiagnosticsResponse`, `OutboundHttpStatusClass` and
+the token.
 
 `IOutboundHttpDiagnosticsSource.snapshot(): OutboundHttpDiagnosticsSnapshot` is synchronous, takes
-no caller-selected resource, and returns a deeply frozen exact-key object:
-`{ state: DiagnosticsInspectorState, alias: string | null, coverage: 'owned-instance', records: readonly OutboundHttpDiagnosticsRecord[], dropped: number }`.
+no caller-selected resource, and returns a deeply frozen exact-key object
+`{ state: DiagnosticsInspectorState, alias: string | null, coverage: 'owned-instance', records: readonly OutboundHttpDiagnosticsRecord[] }`.
+`dropped` is deliberately absent: a source holds one record, so it would always be `0` (dead
+surface).
 
-A record has exactly `alias: string`, `operation: 'attempt'`, `started: number`, `count: number`,
-`lastDurationMs: number | null`, `ageMs: number`, plus `responses`, `failures`, `lastStatusClass`
-('1xx' | '2xx' | '3xx' | '4xx' | '5xx' | 'other' | null); HTTP errors are responses, not fetch
-rejections. `lastStatusClass` is derived from `Number.isInteger(status)` and `100 <= status <= 599`;
-everything else (a status of `0` from an opaque or opaqueredirect response, a non-integer, a value
-outside the range) is `'other'`, so the wire never carries a raw status number. Numbers are finite,
-nonnegative and clamped at Number.MAX_SAFE_INTEGER; durations are integer milliseconds. `started`
-counts delegations begun (the M98j precedent) and `count` counts settled observations, so
-`started - count` is the in-flight attempts — a hung upstream is visible rather than invisible
-(finding D5). Each record carries an internal generation that expiry or a collection failure
-advances; a settlement whose start belongs to an earlier generation is discarded, so `count` never
-exceeds `started` and no reading moves backwards (the M98j review lesson). Counters are cumulative
-within the retention window. Nonapplicable numeric counters are zero. lastDurationMs is null for
-instantaneous lifecycle observations; otherwise it is the last settled duration. Record alias is
-exactly the configured source alias (snapshot.alias); no event/job mapping exists. On failed
-collection the source clears records and exposes only state, approved alias, coverage and dropped.
-Lifecycle-closed and disabled states take precedence over collection-failed. Read only
-framework-owned primitive fields; never pass a business object or an Error to the collector.
+A record has exactly `alias: string`, `operation: 'attempt'`, `started`, `count`, `responses`,
+`failures` (numbers), `lastStatusClass: '2xx' | '3xx' | '4xx' | '5xx' | 'other' | null`,
+`lastDurationMs: number | null`, `ageMs: number`. `lastStatusClass` is `null` until a response
+settles; `lastDurationMs` is `null` until any attempt settles; `ageMs` is time since the record's
+last activity (start or settlement). Numbers are finite, nonnegative integers clamped at
+`Number.MAX_SAFE_INTEGER`; durations are integer milliseconds.
+
+**Snapshot invariants** (enforced by the collector, checked by the connector's validator and again
+by the client): at most ONE record; `record.alias === snapshot.alias`; `operation === 'attempt'`;
+`responses + failures === count`; `count <= started`; `lastStatusClass === null` iff
+`responses === 0`; `lastDurationMs === null` iff `count === 0`. State rules: `disabled` (closed
+helper) and `collection-failed` carry `records: []`; `disabled` has `alias: null`; `ready` and
+`stale` carry exactly one record; `no-data` carries `records: []`; a source may never report
+`unsupported` (connector-side only). `coverage` is always `'owned-instance'`.
 
 `OutboundHttpDiagnosticsResponse` is exactly
 `{ version: 1, instanceId: string, state: DiagnosticsInspectorState, sources: readonly { sourceId: string, snapshot: OutboundHttpDiagnosticsSnapshot }[] }`.
 `IDiagnosticsClient.outboundHttp(): Promise<OutboundHttpDiagnosticsResponse>` reads only
-`GET /v1/outbound-http` through the existing signed, serialized exchange. All authentication,
-origin/authority, replay, expiry, revocation, instance and post-read session checks precede
-returning any data; request authentication must succeed before snapshot is called. Pairing sees
-`outboundHttp: false` as a local typed unsupported response without a request. A supported operation
-with no sources returns unsupported and []. Per-source invalid reads become fixed collection-failed
-snapshots with no records; no error text. Response state is ready if any source is ready, otherwise
-collection-failed, stale, no-data, disabled, unsupported in that priority order. Individual states
-remain visible.
+`GET /v1/outbound-http` through the existing signed, serialized exchange; every authentication,
+origin/authority, replay, expiry, revocation, instance and post-read session check precedes any
+source read. Pairing that sees `outboundHttp: false` answers a local typed `unsupported` with no
+request. A supported operation with no sources answers `unsupported` and `[]`. A source whose read
+throws or fails validation becomes a fixed `collection-failed` snapshot with no records and no error
+text. Response state is `ready` if any source is ready, otherwise `collection-failed`, `stale`,
+`no-data`, `disabled`, in that priority; individual states remain visible.
 
-Projectors accept exact own data properties and reject getters, prototypes with unexpected shape,
-extra keys, invalid enums or oversized arrays. Snapshot and record values are plain objects
-(Object.prototype or null prototype) containing only own data properties; custom prototypes are
-rejected. Proxy traps cannot be sandboxed: catch their failures and never copy unknown fields. Copy
-approved primitives individually. The full response is limited to 256 KiB; on exceeding it return a
-fixed collection-failed response, never a partial JSON document. The client independently validates
-the same contract.
+The projector (`outbound-http-protocol.ts`) copies each snapshot once through
+`copyOwnData`/`copyOwnDataList` — own data properties only, plain prototype, exact keys, no getter
+invoked, `Proxy` trap failures caught — and copies approved primitives individually. The full
+response is limited to 256 KiB; over budget answers a fixed `collection-failed` with no sources,
+never a partial document. The client runs the SAME validator.
 
-`createObservedFetch(options: ObservedFetchOptions): ObservedFetch` returns exactly
-`{ fetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>, source: IOutboundHttpDiagnosticsSource, close(): void }`.
-`ObservedFetchOptions` and `ObservedFetch` are SDK exports consumed by server applications. The
-fetch wrapper catches only to record a primitive failure and rethrows the identical value;
-observation code cannot mask the application result. Construction is explicit opt-in; ordinary
-createClient calls remain unchanged.
+**Transparency is the controlling rule** — wrapped and unwrapped delegation must be
+indistinguishable to the wrapped fetch and to its caller, on every supported runtime.
 
-**Transparency is the controlling rule** (findings D1, D2): wrapped and unwrapped delegation must be
-indistinguishable to the injected fetch and to its caller.
-
-- The wrapper is a plain `function` (never an arrow, never `async`) that forwards its OWN receiver
-  and its exact argument list: `Reflect.apply(inner, this, args)` over a rest parameter. It never
-  names, reads, spreads or normalizes `input` or `init` — so an omitted `init` stays omitted and the
-  SDK's receiver (the client, `http-client.ts:242`) reaches the injected fetch unchanged. The plan's
-  earlier "call with `globalThis` as receiver" is withdrawn: it would silently turn a receiver-bound
-  failure into a success, which is a behavior change, not transparency.
+- `fetch` is a plain `function` (never an arrow, never `async`) over a rest parameter. It forwards
+  the exact argument list with `Reflect.apply(inner, receiver, args)` and never names, reads,
+  spreads or normalizes `input` or `init`, so an omitted `init` stays omitted.
+- `receiver` is the caller's own `this`, EXCEPT when `this` is the `ObservedFetch` object itself, in
+  which case it is `undefined`. The SDK calls `this.#fetch(...)` with the client as receiver
+  (`http-client.ts:242`), and that receiver is forwarded unchanged; but a direct
+  `observed.fetch(url)` would otherwise hand the helper object — and so `plugin` — to the wrapped
+  fetch, and the platform `fetch` throws `Illegal invocation` on workerd with that receiver (probed)
+  where the unwrapped `fetch(url)` works. Deno, Node and Bun ignore the receiver (probed). The
+  README states that a wrapped fetch should not depend on its receiver and recommends
+  `(input, init) => fetch(input, init)`.
+- When `fetch` is omitted, the wrapped function is the SDK's existing call-time global default
+  (`http-client.ts:126`), extracted to one internal `createDefaultFetch()` seam that both
+  `HttpClient` and the helper call — one implementation, and it ignores its receiver.
 - The start reading is taken inside its own `try` BEFORE delegation; a throwing or non-finite clock
-  latches `collection-failed` and delegation still happens exactly once. Observation code never sits
-  between the caller and the one delegation call.
-- A synchronous throw from the injected fetch is recorded as a failure and the SAME value is
-  rethrown synchronously. This deliberately departs from the repository's "a `Promise`-typed
-  function never throws synchronously" rule (M52b/M52c/M70j): that rule governs framework code,
-  while this wrapper must not alter the behavior of application code it wraps. The JSDoc states the
-  departure and its reason.
-- A returned value is adopted exactly as `await` adopts it:
-  `Promise.resolve(result).then(onOk,
-  onErr)`, where `onOk` returns the IDENTICAL `Response` and
-  `onErr` rethrows the IDENTICAL reason. The caller receives the derived promise, never a side
-  branch, so an unhandled rejection is still reported to the host when the caller drops it (the M98i
-  defect: a side branch marks the original handled). The derived promise adds one microtask; promise
-  identity is not preserved and is not claimed.
-- Inside `onOk`, `response.status` is the only property read, inside a guard; a throwing getter
-  latches `collection-failed` and the Response is still returned. Nothing reads `headers`, `body`,
-  `bodyUsed`, `url`, `redirected` or `type`. Inside `onErr`, the reason is never inspected.
-- Every internal collector call is non-throwing, and the collector's inputs are exactly
-  `(ok: boolean, statusClass, startGeneration, startReading)` — no parameter exists through which a
-  URL, header, body, signal or error could arrive.
+  latches `collection-failed` and delegation still happens exactly once. No observation code sits
+  between the caller and the delegation call.
+- A synchronous throw from the wrapped fetch is recorded and the SAME value is rethrown
+  synchronously. This deliberately departs from the repository's "a `Promise`-typed function never
+  throws synchronously" rule (M52b/M52c/M70j): that rule governs framework code, while this wrapper
+  must not change the behavior of the application code it wraps. The JSDoc states the departure.
+- A returned value is adopted as `await` adopts it — `Promise.resolve(result).then(onOk, onErr)` —
+  where `onOk` returns the IDENTICAL value and `onErr` rethrows the IDENTICAL reason. The caller
+  gets the derived promise, never a side branch, so a dropped rejection is still reported exactly
+  once (probed; the M98i defect was a side branch marking the original handled). One added
+  microtask; promise identity is not preserved and not claimed. A thenable's `then` is application
+  code and runs in the same job order `await` would give it.
+- Inside `onOk`, `status` is the only property read, inside a guard (side-effect-free on a real
+  `Response`, probed). Nothing reads `headers`, `body`, `bodyUsed`, `url`, `redirected` or `type`.
+  Inside `onErr`, the reason is never inspected.
+- Every collector call is non-throwing, and the collector's inputs are exactly
+  `(ok: boolean, statusClass, generation, startReading)` — no parameter through which a URL, header,
+  body, signal or error could arrive.
 
-`close` is idempotent; after close the wrapper still delegates exactly as before and records
-nothing. `source` is a frozen facade whose only own key is `snapshot` (the M98l finding: handing the
-collector itself to the connector would let any reader forge counts or call `close`); a test pins
-that single key. The returned `ObservedFetch` object is frozen.
+The returned `ObservedFetch` and the source are frozen; the source's only own key is `snapshot` (the
+M98l finding — the collector itself would let any `getAll` reader forge counts or close it). A test
+pins both key sets.
 
-The collector lives in `packages/sdk/src/diagnostics/`, NOT in `common` beside the M98l realtime
-collector. It has one consumer, so §11.1 duplication does not arise, and keeping it in the SDK
-preserves the SDK's standing property that its only in-repo import is type-level (§1, "SDK
-imports"), which is what lets the SDK run in a browser with no `common` runtime code. A test asserts
-every `@setu-ts/common` import under `packages/sdk/src` is `import type`.
+**Collector placement.** The collector lives in `packages/sdk/src/diagnostics/`, NOT in `common`:
+putting it in `common` would give the SDK its first runtime import of `common` and end its
+type-only, browser-portable property. It is a **deliberate local copy** (the M30b `pemToDer`
+precedent) of three small pieces that also exist in
+`common/src/diagnostics/realtime-observations.ts` — alias validation, the saturating counter and the
+freshness rule. A shared alias test table runs against both implementations so they cannot drift. A
+test asserts every `@setu-ts/common` import under `packages/sdk/src` is `import type`.
 
 ### 3.4 Opt-in, retention and overhead
 
-There is no plugin option: calling `createObservedFetch` IS the opt-in, and not calling it is the
-disabled path (no collector, no clock read, no wrapper). `ObservedFetchOptions` is exactly
-`{ alias: string, fetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>, timing?: Pick<IClientTiming, 'now'> }`.
-The `enabled: true` literal the other letters carry is cut: there it distinguishes a present
-`diagnostics` option from an absent one, while here no absent form exists, so the field would be
-read by nothing (the dead-option rule; finding D4). `timing` is an OBJECT whose `now()` is called as
-a method, defaulting to `createDefaultClientTiming()` — the same shape `ClientOptions.timing` takes,
-so an application passes one object to both. A bare `now: () => number` is rejected as a design: its
-most natural argument, `performance.now`, throws `Illegal invocation` when detached (measured on
-Deno 2.9), which would latch `collection-failed` on the first call and leave a helper that reports
-nothing (the M52c detached-method class; finding D3). A helper instance represents one explicitly
-approved call-site scope; alias is never derived from destination.
+Calling `createObservedFetch` IS the opt-in; not calling it is the disabled path (no wrapper, no
+collector, no clock read, no microtask). `ObservedFetchOptions` is exactly
+`{ alias: string, fetch?: (input: RequestInfo, init?: RequestInit) => Promise<Response>, timing?: Pick<IClientTiming, 'now'> }`.
+There is no `enabled` field: no absent form exists, so it would be read by nothing.
 
-Options are read once at construction and copied to primitives/function references; `fetch` must be
-a function and `timing.now` a function, and a refusal message is fixed and never echoes the alias
-(the M98l audit-round-3 lesson). Aliases are explicit non-secret labels, 1–64 UTF-8 bytes, without
-controls; do not derive aliases by truncating or hashing sensitive values. No URL mapping or dynamic
-alias callback is accepted. Uniqueness across helpers is enforced by the connector at read time.
+Options are read once at construction. `alias` is copied as a string; `fetch` is kept as a function
+reference; `timing` is kept as the OBJECT and `now` is always called as `timing.now()` — never
+copied out, which would re-create the detached-method defect the object form exists to prevent.
+Construction calls `timing.now()` once and refuses with a fixed error if it throws or returns a
+non-finite value, so `{ now: performance.now }` (whose receiver is the options object) fails loudly
+at construction instead of silently latching later. Refusal messages are fixed and never echo the
+alias or any value (the M98l audit-round-3 lesson). Aliases are explicit non-secret labels, 1–64
+UTF-8 bytes, no control characters; never derived from a destination or by truncating or hashing a
+sensitive value. No URL mapping or dynamic alias callback exists. A helper instance represents one
+approved call-site scope.
 
-A source holds exactly ONE record (one alias, one fixed operation), so no capacity refusal exists
-and `dropped` is always `0`; the shared 64-slot contract bound still applies to what the connector
-accepts from any source. The collector retains two readings per call only in the call's own pending
-closure (start reading and generation), which lives exactly as long as the application's own pending
-fetch promise — no per-call table, so a hung upstream grows no diagnostic state. Records expire
-after 60 seconds without an observation, checked during update/read; clear their counters on expiry.
-age >30 seconds means stale; any fresh record means ready; no records means no-data. No background
-timer and no per-request diagnostic queue. On close mark closed before clearing; late results cannot
-repopulate state, and snapshot returns disabled. Each observed call retains only primitive
-timing/alias state, no additional wait on external work, body copy or diagnostic I/O. Promise
-observation may add a microtask; tests must preserve application ordering guarantees without
-claiming identical promise identity or a literally zero-cost enabled path.
+**Retention.** One record per source. The record's `ageMs` is time since its last start or
+settlement. It expires 60 s after its last activity, checked on write and read, never by a timer —
+EXCEPT that a record with attempts in flight (`started > count`) is never expired, so a hung call
+stays visible indefinitely and ages into `stale` after 30 s (freshness: ≤ 30 s `ready`, > 30 s
+`stale`, no record `no-data`). On expiry the counters clear and the generation advances. Each
+attempt captures its start reading and generation in the closures its own derived promise already
+needs; a settlement whose generation is older than the record's is discarded, so no reading moves
+backwards and `count <= started` survives expiry and failure latches. Diagnostic memory is one
+record per helper plus, per pending attempt, the derived promise and its two reactions — O(pending
+attempts), released when the attempt settles; there is no per-call table and no queue.
 
-Durations use only `timing.now()` (monotonic); `Date.now()` and `runtime.now()` never appear, and
-`ageMs` is measured on the same clock. Clamp negative deltas. Catch observer and clock failures (a
-throw, or a non-finite reading) without changing application errors or results; latch
-collection-failed and stop capture until source recreation. The SDK has no logger, so no diagnostic
-error is logged at all. Benchmark disabled (unwrapped) against enabled on the same workload — a real
-local HTTP server on loopback, not a no-op fake, since a no-op transport inflates the ratio (the
-M98l component-level lesson); require zero extra fetch calls and no growing memory after steady
-state. Target <=5% median throughput regression at 10,000 warmed operations; record five runs and
-investigate failures before completion rather than claiming a universal bound.
+Durations use only `timing.now()` (monotonic); `Date.now()` never appears and `ageMs` uses the same
+clock. Negative deltas clamp to 0. A throwing or non-finite reading after construction, or a
+collector fault, latches `collection-failed` (records cleared) until the helper is recreated; the
+application's results are unchanged. The SDK has no logger, so no diagnostic error is logged.
+
+**Overhead.** Benchmark unwrapped against wrapped against a real loopback HTTP server (not a no-op
+fake, which inflates the ratio — M98l). Target ≤ 5 % median throughput regression at 10,000 warmed
+attempts, five runs, zero extra fetch calls, flat memory after steady state; investigate a miss
+before completion rather than claiming a universal bound. Harness outside the tree.
 
 ### 3.5 Scope and isolation
 
 Local pairing authorizes the configured application instance, not a per-tenant login. Counts may
 aggregate tenants in that development instance. Do not advertise tenant isolation from aliases. Only
-enable on an explicitly approved development dataset; shared multi-tenant production use is
-unsupported. No tenant selectors, per-user identifiers, resource lookups or controls are added.
+enable on an approved development dataset; shared multi-tenant production use is unsupported. No
+tenant selectors, per-user identifiers, destinations, resource lookups or controls are added.
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol                                                | Kind             | Consumer / real code path that READS it        |
-| -------------------------------------------------------------- | ---------------- | ---------------------------------------------- |
-| `IOutboundHttpDiagnosticsSource`                               | common interface | Owning source and connector reader.            |
-| `OutboundHttpDiagnosticsSnapshot`                              | common type      | Source, exact projector and client.            |
-| `OutboundHttpDiagnosticsRecord`                                | common type      | Bounded collector and devtool summary.         |
-| `OutboundHttpDiagnosticsResponse`                              | common type      | Connector and native client method.            |
-| `IDiagnosticsClient.outboundHttp`                              | client method    | Devtool inspector.                             |
-| `createObservedFetch`, `ObservedFetch`, `ObservedFetchOptions` | SDK helper/types | Application opt-in and collector construction. |
+| Exported symbol                                                                               | Kind             | Consumer / real code path that READS it                                  |
+| --------------------------------------------------------------------------------------------- | ---------------- | ------------------------------------------------------------------------ |
+| `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`                                                      | common token     | `DiagnosticsPlugin` `getAll` at bootstrap; SDK literal pinned by a test. |
+| `IOutboundHttpDiagnosticsSource`                                                              | common interface | SDK source facade; connector reader.                                     |
+| `OutboundHttpDiagnosticsSnapshot`, `OutboundHttpDiagnosticsRecord`, `OutboundHttpStatusClass` | common types     | SDK collector, projector, client validator.                              |
+| `OutboundHttpDiagnosticsResponse`                                                             | common type      | Connector and native client method.                                      |
+| `IDiagnosticsClient.outboundHttp`                                                             | client method    | Devtool inspector.                                                       |
+| `createObservedFetch`, `ObservedFetch`, `ObservedFetchOptions`                                | SDK helper/types | Application opt-in (§3.2 composition).                                   |
 
-Collectors, attachment helpers and projectors remain internal. No general observer/event-bus API.
+Collector, `createDefaultFetch`, projector and validator remain internal. No general observer or
+event-bus API.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                      | Consumer                     | Behavior (per implementation)                                |
-| --------------------------- | ---------------------------- | ------------------------------------------------------------ |
-| enabled / alias             | Owning collector constructor | Explicit activation and approved display name.               |
-| No additional plugin labels | Construction contract        | No dynamic label extraction.                                 |
-| fetch / now                 | SDK helper                   | Delegate unchanged transport and measure monotonic duration. |
-| outboundHttpSources         | DiagnosticsPlugin            | Explicit maximum-16 source bridge, no auto-discovery.        |
+| Option   | Consumer                          | Behavior                                                                                     |
+| -------- | --------------------------------- | -------------------------------------------------------------------------------------------- |
+| `alias`  | Collector constructor             | Approved display label; validated at construction.                                           |
+| `fetch`  | Wrapper delegation                | The function called once per attempt; defaults to the SDK's call-time global fetch.          |
+| `timing` | Collector (start/settle, `ageMs`) | Monotonic clock object, called as `timing.now()`; defaults to `createDefaultClientTiming()`. |
+
+`DiagnosticsPlugin` gains no option.
 
 ## 5. Implementation files
 
-| File                                                                 | Purpose                                                                                                         |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `packages/common/src/services/diagnostics.ts`                        | Typed contract, export, authenticated projection or reader.                                                     |
-| `packages/common/src/index.ts`                                       | Typed contract, export, authenticated projection or reader.                                                     |
-| `packages/diagnostics-plugin/src/interfaces/index.ts`                | Typed contract, export, authenticated projection or reader.                                                     |
-| `packages/diagnostics-plugin/src/plugin/diagnostics-plugin.ts`       | Typed contract, export, authenticated projection or reader.                                                     |
-| `packages/diagnostics-plugin/src/protocol/protocol.ts`               | Typed contract, export, authenticated projection or reader.                                                     |
-| `packages/diagnostics-plugin/src/protocol/outbound-http-protocol.ts` | Copy-once projector, exact validator and 256 KiB budget (the per-inspector file every letter since M98i ships). |
-| `packages/diagnostics-plugin/src/transport/connector-handler.ts`     | Typed contract, export, authenticated projection or reader.                                                     |
-| `packages/diagnostics-plugin/src/client/client.ts`                   | Typed contract, export, authenticated projection or reader.                                                     |
-| `packages/sdk/src/http/observed-fetch.ts`                            | Opt-in capture, source, options or lifecycle wiring.                                                            |
-| `packages/sdk/src/index.ts`                                          | Opt-in capture, source, options or lifecycle wiring.                                                            |
-| `packages/sdk/src/diagnostics/outbound-http-observations.ts`         | Opt-in capture, source, options or lifecycle wiring.                                                            |
+| File                                                                 | Purpose                                                                          |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `packages/common/src/services/diagnostics.ts`                        | Outbound HTTP source, snapshot, record, status-class and response contracts.     |
+| `packages/common/src/tokens.ts`                                      | `OUTBOUND_HTTP_DIAGNOSTICS` multi-provider token with JSDoc naming its producer. |
+| `packages/common/src/index.ts`                                       | Barrel exports.                                                                  |
+| `packages/sdk/src/http/observed-fetch.ts`                            | `createObservedFetch`, wrapper, registration plugin.                             |
+| `packages/sdk/src/http/default-fetch.ts`                             | Internal `createDefaultFetch()` shared with `HttpClient`.                        |
+| `packages/sdk/src/http/http-client.ts`                               | Uses `createDefaultFetch()` (no behavior change).                                |
+| `packages/sdk/src/diagnostics/outbound-http-observations.ts`         | Bounded collector, generation guard, frozen source facade.                       |
+| `packages/sdk/src/index.ts`                                          | Barrel exports.                                                                  |
+| `packages/sdk/deno.json`                                             | Bump the pinned `common` specifier to the release carrying the new types.        |
+| `packages/diagnostics-plugin/src/plugin/diagnostics-plugin.ts`       | Collect outbound sources at bootstrap; more than 16 refuses startup.             |
+| `packages/diagnostics-plugin/src/protocol/protocol.ts`               | `OUTBOUND_HTTP_TARGET`; manifest `outboundHttp: true`.                           |
+| `packages/diagnostics-plugin/src/protocol/outbound-http-protocol.ts` | Copy-once projector, invariant validator, 256 KiB budget.                        |
+| `packages/diagnostics-plugin/src/transport/connector-handler.ts`     | `GET /v1/outbound-http` dispatch behind the existing gates.                      |
+| `packages/diagnostics-plugin/src/client/client.ts`                   | `outboundHttp()` with local unsupported and the shared validator.                |
+| `packages/diagnostics-plugin/src/interfaces/index.ts`                | Client interface member.                                                         |
 
-Also update PUBLIC_API.md, ARCHITECTURE.md, docs/diagnostics-protocol.md, package READMEs,
-CHANGELOG.md, ROADMAP.md and CLAUDE.md. SDK dependency metadata changes in M98n accompany its common
-contract release; no external dependency is introduced.
+Also update PUBLIC_API.md, ARCHITECTURE.md, docs/diagnostics-protocol.md, the SDK and diagnostics
+READMEs, CHANGELOG.md, docs/upgrading.md (the `deno.json` pin), ROADMAP.md (C3–C5) and CLAUDE.md. No
+external dependency is introduced. The SDK's pinned `common` specifier moves with the release that
+publishes the new contracts (the alpha.3 inline-specifier trap: check the SDK's inline specifiers
+too).
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                  | src covered                                                          | Key assertions (and the signature each call type-checks against)                                                                   |
-| -------------------------------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/test/unit/application-diagnostics-contracts.test.ts`      | `packages/common/src/services/diagnostics.ts`                        | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/common/test/unit/application-diagnostics-contracts.test.ts`      | `packages/common/src/index.ts`                                       | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts` | `packages/diagnostics-plugin/src/interfaces/index.ts`                | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts` | `packages/diagnostics-plugin/src/plugin/diagnostics-plugin.ts`       | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts` | `packages/diagnostics-plugin/src/protocol/protocol.ts`               | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts` | `packages/diagnostics-plugin/src/protocol/outbound-http-protocol.ts` | Hostile snapshots (accessor, index getter, class instance, symbol key, Proxy, `toJSON`), bounds, duplicate alias collapse, budget. |
-| `packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts` | `packages/diagnostics-plugin/src/transport/connector-handler.ts`     | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts` | `packages/diagnostics-plugin/src/client/client.ts`                   | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/sdk/test/unit/outbound-http-observations.test.ts`                | `packages/sdk/src/http/observed-fetch.ts`                            | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/sdk/test/unit/outbound-http-observations.test.ts`                | `packages/sdk/src/index.ts`                                          | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/sdk/test/unit/outbound-http-observations.test.ts`                | `packages/sdk/src/diagnostics/outbound-http-observations.ts`         | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                                            |
-| `packages/diagnostics-plugin/test/e2e/outbound-http-observations.test.ts`  | All owning producers and connector reader                            | Real producer -> source.snapshot() -> signed socket -> client.outboundHttp(); positive controls and canaries.                      |
-| `packages/sdk/test/unit/observed-fetch-transparency.test.ts`               | `packages/sdk/src/http/observed-fetch.ts`                            | §10.2 A2: arity, receiver, identity, sync throw, rejection reason, unhandled rejection in a subprocess.                            |
-| `packages/sdk/test/unit/type-only-common.test.ts`                          | all of `packages/sdk/src`                                            | Every `@setu-ts/common` import is `import type` (§3.3).                                                                            |
-
-Verify exact input/init and Response identity, stream untouched, original synchronous throws and
-promise rejections, abort, SDK retry count and redirects delegated unchanged. Test with real local
-HTTP via SDK injected fetch; no public network test dependency.
-
-Every mapped test calls the §3 signatures. Exercise legacy status and all eleven reserved keys,
-false-key no-request, absent source, source throw, malformed source objects including throwing
-getters, snapshot overrun, duplicate aliases, unpaired/replayed/expired/revoked/cross-instance
-requests and refusal of mutation methods. Custom application replacements remain outside source
-coverage, do not get instantiated by snapshot, and cannot be mislabeled as observed.
+| Test file                                                                  | src covered                                                                                                                     | Key assertions                                                                                                                                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/application-diagnostics-contracts.test.ts`      | `common/src/services/diagnostics.ts`, `tokens.ts`, `index.ts`                                                                   | Token value and grammar; barrel exports pinned at compile time.                                                                                                 |
+| `packages/sdk/test/unit/outbound-http-observations.test.ts`                | `sdk/src/diagnostics/outbound-http-observations.ts`                                                                             | Counting table row by row; invariants; retention incl. in-flight non-expiry and generation discard; saturation; latch; close; alias table shared with `common`. |
+| `packages/sdk/test/unit/observed-fetch-transparency.test.ts`               | `sdk/src/http/observed-fetch.ts`, `default-fetch.ts`, `http-client.ts`                                                          | Proxy-recorded args (zero reads); arity; receiver forwarding and the self-receiver rule; identity; sync throw; thenable; unhandled rejection in a subprocess.   |
+| `packages/sdk/test/unit/observed-fetch-plugin.test.ts`                     | `sdk/src/http/observed-fetch.ts`, `sdk/src/index.ts`                                                                            | Plugin name, version, no `provides`; multi registration; `onClose`; token literal equals `CAPABILITIES`; frozen key sets; construction refusals.                |
+| `packages/sdk/test/unit/type-only-common.test.ts`                          | all of `packages/sdk/src`                                                                                                       | Every `@setu-ts/common` import is `import type`; no dependency edge into `common` carries runtime code (`deno info --json`).                                    |
+| `packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts` | `outbound-http-protocol.ts`, `protocol.ts`, `connector-handler.ts`, `diagnostics-plugin.ts`, `client.ts`, `interfaces/index.ts` | Hostile snapshots; every invariant; budget via seam; duplicate aliases; 0/16/17 sources; manifest; local unsupported.                                           |
+| `packages/diagnostics-plugin/test/e2e/outbound-http-observations.test.ts`  | all producers and the connector                                                                                                 | Real loopback HTTP server → SDK client with observed fetch → signed socket → `client.outboundHttp()`; §3.2 composition with and without `devtool`; canaries.    |
 
 ## 7. Verification gates
 
@@ -320,84 +362,72 @@ deno task test
 deno task test:coverage
 ```
 
-Read the ANSI-stripped per-file table: every changed src file >=90% branch/function/line. On the
-committed implementation run deno task publish:check and deno task release:verify with the actual
-release version. Run dependency audit and the existing applicable guarded real-import and
-runtime/adapter tests. Record both security gates below before marking complete or publishing.
+Read the ANSI-stripped per-file table: every changed `src` file ≥ 90 % branch/function/line. On the
+committed implementation run `deno task publish:check` and `deno task release:verify <version>`.
+Record both security gates (§10) before marking complete or publishing.
 
 ## 8. Risks & mitigations
 
-- Sensitive metadata in otherwise harmless counters: explicit approved aliases and declared scope.
-- Observation distorts semantics: compare exact results, errors, side effects and backend call
-  counts.
-- Sustained input exhausts memory: fixed slots, source limit, retention, saturating counters and
-  wire cap.
-- Partial instrumentation looks complete: owned-instance coverage and explicit exclusions.
+- Sensitive metadata in otherwise harmless counters: explicit approved aliases, no destination
+  capture, declared scope.
+- Observation distorts semantics: the transparency rule and its tests compare results, errors,
+  receivers and call counts.
+- Sustained or hung traffic exhausts memory: one record per helper, O(pending) closures only, 16
+  sources, saturating counters, wire cap.
+- Partial instrumentation looks complete: `owned-instance` coverage and explicit exclusions.
+- Capture left on in production: the documented composition gates on the `devtool` parameter.
 
 ## 9. Out of scope
 
-Explicitly adopted server-side fetch attempts only. Browser SDK collection is not automatically sent
-to the framework; unrelated fetches and third-party internal calls are invisible.
-
-No database inspector, persistent history, raw payloads, admin controls, replay, remote transport or
-billing integration. Future adapter-specific visibility requires separately planned contracts and
-audits; it is not implied by completing this milestone.
+Explicitly adopted server-side fetch attempts only. Browser SDK collection is not sent to the
+framework; unrelated fetches and third-party internal calls are invisible. No destinations,
+persistent history, raw payloads, admin controls, replay, remote transport, CLI scaffolding or
+billing integration.
 
 ## 10. Required security reviews and acceptance evidence
 
 ### 10.1 Design security review
 
 **Recorded 2026-09-29, before implementation**, against base commit
-`d6b77e4f826a27e04eb412281203cb664564628c`, checked against the §3 decisions as amended by this
-review. Written by Claude in the M98n worktree at the maintainer's request. It is not the
-committed-tree audit, which must run in a fresh context (§10.3). Findings D1–D9 below are resolved
-as plan requirements in §2–§6; none is claimed fixed in executable code.
+`d6b77e4f826a27e04eb412281203cb664564628c`. Written by Claude in the M98n worktree at the
+maintainer's request, then reviewed by an independent agent that did not write it (probes on Deno,
+Node 24, Bun and real workerd); its findings R1–R14 are resolved below and in §2–§6. It is not the
+committed-tree audit (§10.3). Nothing here is claimed fixed in executable code.
 
-Reviewed: `packages/sdk/src/http/{contracts,http-client,timing}.ts`,
-`packages/sdk/src/realtime/{sse-contracts,sse-client}.ts`, the SDK manifest and its type-only
-`common` imports, `packages/common/src/plugin.ts` (`IApplication`), the `common` diagnostics
-contracts and the M98l shared collector,
-`packages/diagnostics-plugin/src/protocol/{protocol,cache-protocol}.ts` (manifest keys, exact
-targets, `copyOwnData`), the connector handler's source reads and the plugin's bootstrap source
-collection. Two runtime facts were measured on Deno 2.9 rather than assumed: a detached
-`performance.now` throws `Illegal invocation`, and Deno's `fetch` does not enforce its receiver (an
-object-held `fetch` resolves).
+**Purpose it serves.** The devtool may learn HOW the application's explicitly adopted outbound calls
+behave: attempts started and in flight, responses and failures, the last response's status class,
+the last time to headers, and how long ago the helper was last active. It never learns WHERE a call
+went, WHAT it sent or received, WHO it was for, or WHY it failed.
 
-**Purpose it serves.** The devtool may learn HOW the application's explicitly adopted outbound HTTP
-calls behave: how many attempts started, how many settled as responses and as failures, the status
-CLASS of the last response, the last attempt's time to headers, and how long ago the last attempt
-settled. It never learns WHERE a call went, WHAT it sent or received, WHO it was made for, or WHY it
-failed.
-
-**Reviewed flow:** application code (or the SDK client, `http-client.ts:242`) calls `observed.fetch`
-→ one guarded `timing.now()` read and a `started` increment → exactly one delegation
-`Reflect.apply(inner, receiver, args)` with the caller's own receiver and argument list, neither
-read → a synchronous throw is recorded and rethrown, a returned value is adopted by
-`Promise.resolve` → the derived promise records `(ok, statusClass, generation, start)` on
-settlement, reading `response.status` alone inside a guard, and resolves with the identical
-`Response` or rejects with the identical reason → the one SDK collector (one record, monotonic
-readings, no per-call table) → the frozen snapshot-only `source` facade → supplied by the
-application in `DiagnosticsPluginOptions.outboundHttpSources` (copied at construction, bounded, no
-property read) → authenticated `GET /v1/outbound-http` behind every M98b control (exact `Host`
-authority, `Origin` refusal, forwarding-header refusal, MAC over canonical fields, sequence replay
-refusal, expiry and revocation, instance binding) → own-data copy of each snapshot with per-source
-isolation → exact validator → fixed 256 KiB budget → signed frame → native client `outboundHttp()`
-re-validates and binds the instance. Minimization happens at the capture site: the URL (and any
-userinfo, query or fragment in it), the `Request` object, `init` (method, headers, body, signal,
-credentials mode), the `Response` headers, cookies and body, the abort reason and every rejection
-value stay in the caller's locals. No collector signature can accept any of them.
+**Reviewed flow:** application code or the SDK client calls `observed.fetch` → a guarded
+`timing.now()` read and `started`+1 → exactly one `Reflect.apply(inner, receiver, args)` with the
+caller's arguments unread and the §3.3 receiver rule → a synchronous throw recorded and rethrown, a
+returned value adopted by `Promise.resolve` → the derived promise records
+`(ok, statusClass, generation, start)` on settlement, reading only `status`, and settles with the
+identical value or reason → the one SDK collector (one record, monotonic, generation-guarded) → the
+frozen snapshot-only source, registered by `observed.plugin` under
+`CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` with `{ multi: true }` → `DiagnosticsPlugin` collects
+sources at `onBootstrap` (more than 16 refuses startup) → authenticated `GET /v1/outbound-http`
+behind every M98b control (exact `Host` authority, `Origin` refusal, forwarding-header refusal, MAC
+over canonical fields, sequence replay refusal, expiry and revocation, instance binding) → own-data
+copy per source with isolation → invariant validator → 256 KiB budget → signed frame →
+`client.outboundHttp()` re-validates and binds the instance. Minimization happens at the capture
+site: the URL (userinfo, query, fragment), the `Request`, `init` (method, headers, body, signal,
+credentials), response headers, cookies, `url`, `Location` and body, abort reasons and rejection
+values stay in the caller's locals. No collector signature can accept any of them.
 
 **Assets.**
 
-| Asset                                                                  | Why it is sensitive                                                                                  |
-| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Request URL: origin, hostname, path, query, fragment, userinfo         | Names internal services and tenants; query strings and userinfo routinely carry tokens and API keys. |
-| Request headers and body (`Authorization`, API keys, cookies, payload) | Credentials and application data.                                                                    |
-| Response headers and body (`Set-Cookie`, tokens, PII)                  | Credentials and application data returned by the upstream.                                           |
-| Abort reasons and rejection values (`TypeError` text, `cause`)         | Network errors quote the URL and host; an application abort reason may carry anything.               |
-| The injected `fetch` and `timing` implementations                      | Application code; observation must not change how or with what receiver they run.                    |
-| Counts, status classes and times to headers                            | Low sensitivity; reveal activity volume and upstream latency, aggregated across every tenant.        |
-| The session key and signed channel                                     | Owned by M98b; this letter adds a route behind it and must not weaken it.                            |
+| Asset                                                                  | Why it is sensitive                                                                                    |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Request URL: origin, hostname, path, query, fragment, userinfo         | Names internal services and tenants; queries and userinfo routinely carry tokens and API keys.         |
+| Request headers and body (`Authorization`, API keys, cookies, payload) | Credentials and application data.                                                                      |
+| Response headers, `url`, `Location` on a manual redirect, and body     | Credentials (`Set-Cookie`), internal hostnames, application data.                                      |
+| Abort reasons and rejection values (`TypeError` text, `cause`)         | Network errors quote the URL and host; an application abort reason may carry anything.                 |
+| The wrapped `fetch`, `timing` and the helper's own `plugin`            | Application code and a registration handle; observation must not change how they run or leak `plugin`. |
+| The alias                                                              | Disclosed to the devtool as written; a badly chosen alias could name a customer or host.               |
+| Counts, status classes, durations                                      | Low sensitivity; reveal activity volume and upstream latency, aggregated across every tenant.          |
+| The session key and signed channel                                     | Owned by M98b; this letter adds a route behind it and must not weaken it.                              |
 
 **Attackers and their reach.**
 
@@ -405,87 +435,110 @@ value stay in the caller's locals. No collector signature can accept any of them
 | -------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | An unpaired local process, or a browser tab on the host                                | Read any outbound observation, cause a source read, or obtain an unsigned response.                                                                                                                                                                                                                                                      |
 | A website using DNS rebinding (hostname resolved to `127.0.0.1`; may send no `Origin`) | Read any outbound observation or cause a source read.                                                                                                                                                                                                                                                                                    |
-| The paired devtool (trusted reader of the minimized DTO)                               | Obtain any asset above except counts, status classes and timings under approved aliases; learn a destination; cause any outbound request; replay or modify a call.                                                                                                                                                                       |
-| A remote upstream server (untrusted network input)                                     | Put a byte it chose into a record beyond one of seven fixed status-class values; grow diagnostic state by answering slowly, never answering, redirecting or erroring; change the `Response` the application receives or the order it receives it in.                                                                                     |
-| A caller whose input is attacker-influenced (a user-supplied URL, header or body)      | Have any of it read by observation code, reach the collector, or change the delegation (arguments, arity, receiver, call count).                                                                                                                                                                                                         |
-| A third-party in-process plugin or an application-supplied hostile source              | Put an unvalidated field, an accessor result, a control character or an oversized list into the signed frame, or make the connector invoke its getters. It MAY blank all outbound reporting through the two deliberate whole-response collapses (a duplicate alias; an over-budget body), which answer a value-free `collection-failed`. |
-| A throwing or non-finite clock, a throwing `status` getter, a throwing injected fetch  | Change the delegation count, the returned `Response` identity, the thrown or rejected value's identity, or synchrony; leak error text into a record.                                                                                                                                                                                     |
+| The paired devtool (trusted reader of the minimized DTO)                               | Obtain any asset above except counts, status classes, durations and approved aliases; learn a destination; cause, replay or modify any request.                                                                                                                                                                                          |
+| A remote upstream server (untrusted network input)                                     | Put anything into a record beyond one of five fixed status classes and a duration; grow diagnostic state beyond O(pending) by answering slowly, never answering, redirecting or erroring; change the `Response` the application receives or its order.                                                                                   |
+| A caller whose input is attacker-influenced (user-supplied URL, header, body)          | Have any of it read by observation code or reach the collector; change the delegation's arguments, arity, receiver or call count.                                                                                                                                                                                                        |
+| A third-party in-process plugin registering a hostile source under the token           | Put an unvalidated field, accessor result, control character, invariant-violating record or oversized list into the signed frame, or make the connector invoke its getters. It MAY blank all outbound reporting through the two deliberate collapses (duplicate alias; over-budget body), which answer a value-free `collection-failed`. |
+| A throwing or non-finite clock, a throwing `status` getter, a throwing wrapped fetch   | Change the delegation count, the returned or thrown value's identity, or synchrony; leak error text into a record.                                                                                                                                                                                                                       |
 
 **Out of the threat model (unchanged from M98b and M98i–M98l):** a privileged local sniffer, remote
 access, and shared multi-tenant production use. Application code runs with application privileges;
-the injected `fetch`, `timing` and any hostile source are not sandboxed — the reader keeps their
-OUTPUT out of the signed frame, it does not contain their code. Unadopted fetches (a bare
-`globalThis.fetch`, a third-party SDK's internal client, `SseClient` without the wrapper) are
-invisible and never labelled observed. A browser SDK instance may construct a helper, but nothing
-transmits its state: the connector reads only sources handed to a `DiagnosticsPlugin` in the same
-process. Existing application logging of fetch errors is a separate path this change neither alters
-nor sanitizes.
+the wrapped fetch, timing, thenables and hostile sources are not sandboxed — the reader keeps their
+OUTPUT out of the signed frame. Unadopted fetches are invisible and never labelled observed. A
+browser instance of the helper has no path to a connector: the connector reads only sources
+registered in its own process. Outbound volume and latency reach the paired devtool by design.
+Existing application logging of fetch errors is a separate path this change neither alters nor
+sanitizes.
 
-**Approved budgets.** One approved alias per source and exactly one record per source, so no
-capacity refusal exists and `dropped` stays `0`; the shared 64-slot and 16-source bounds still apply
-to what the connector accepts. A record expires 60 s after its last settlement, checked on write and
-read, never by a timer; stale beyond 30 s. Counters saturate at `Number.MAX_SAFE_INTEGER`. Per
-attempt: two clock reads (start, settle), one `started` increment, one derived promise with two
-settlement closures and one guarded `status` read; no queue, no I/O, no body access, no per-call
-table — a hung upstream holds only the closure its own pending promise already holds. At most 16
-sources; a 17th, a repeated source object or a non-object element refuses `DiagnosticsPlugin`
-construction with a fixed error naming no alias. A 256 KiB response that collapses to a fixed
-`collection-failed` with no sources rather than truncating. The disabled path is the absence of the
-wrapper: no collector, no clock read, no extra microtask. Enabled overhead target ≤ 5 % median
-throughput against a real loopback HTTP server, five warmed 10,000-attempt runs, measured during
-implementation and recorded here with the harness outside the tree.
+**Approved budgets.** One record per source; at most 16 sources per application (a 17th refuses
+startup with a fixed error). Record expiry 60 s after last activity, never while attempts are in
+flight; `stale` beyond 30 s; checked on write and read, never by a timer. Counters saturate at
+`Number.MAX_SAFE_INTEGER`. Per attempt: two clock reads, one derived promise with two reactions, one
+guarded `status` read; no queue, no I/O, no body access, no per-call table — O(pending attempts),
+released on settlement. Response ≤ 256 KiB, else a fixed `collection-failed`. The disabled path is
+the absence of the helper. Enabled overhead target ≤ 5 % median (§3.4).
 
-| #  | Finding                                                                                                                                                                                                                                                                                                              | Resolution (where)                                                                                                                                                                                                                                                       |
-| -- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| D1 | The plan fixed the receiver to `globalThis`. The SDK calls `this.#fetch(...)` (`http-client.ts:242`), so the injected fetch's receiver is the client; rebinding changes it, and turns a receiver-bound failure into a success — observation altering application behavior, the property the audit must prove absent. | Forward the caller's own receiver and exact argument list via `Reflect.apply` over a rest parameter, in a plain non-async `function` (§3.3). Test: a `this`-recording fetch sees the identical receiver wrapped and unwrapped, through the SDK and directly.             |
-| D2 | "Unchanged input/init" was underspecified: a `(input, init) => inner(input, init)` wrapper turns an omitted `init` into an explicit `undefined` and must NAME both, inviting a read.                                                                                                                                 | Rest-parameter forwarding: the wrapper never binds, reads or normalizes `input`/`init` (§3.3). Test: Proxy-wrapped input, init and headers whose every trap records access — zero traps fire in observation code; `arguments.length` is identical wrapped and unwrapped. |
-| D3 | `now: () => number` invites `performance.now`, which throws when detached (measured), latching `collection-failed` on the first call — a helper that silently reports nothing (the M52c detached-method class).                                                                                                      | Optional `timing` object called as a method, default `createDefaultClientTiming()`, same shape as `ClientOptions.timing` (§3.4, C4). A non-finite reading latches `collection-failed` exactly as a throw does. Test both, plus a detached-method control.                |
-| D4 | `ObservedFetchOptions.enabled: true` and §3.4's `diagnostics?: { enabled, alias }` plugin option were template carry-overs: no absent form exists (calling the helper is the opt-in), so the field would be read by nothing.                                                                                         | Cut both (§3.4, dead-option rule). Disabled = not calling `createObservedFetch`; the test asserts the unwrapped path allocates no collector.                                                                                                                             |
-| D5 | `count` counted only settled attempts, so a hung upstream — the case an operator most needs — was invisible; and a counter reset by expiry while a call was in flight could let a late settlement push `count` above `started` or move a reading backwards (the M98j review defects).                                | Add `started` (the M98j precedent) and a per-record generation; a settlement from an earlier generation is discarded (§3.3). Test: an unresolved fetch shows `started - count === 1`; expiry during flight never yields `count > started`.                               |
-| D6 | The plan said the application registers `close` with "application onClose"; `IApplication` has no such member (`plugin.ts:434`), so the documented lifecycle was unimplementable.                                                                                                                                    | The application calls `observed.close()` after `app.stop()`; unclosed state is one bounded record (§3.2, C3). Test: close is idempotent, a settlement after close records nothing, `snapshot()` answers `disabled`.                                                      |
-| D7 | Handing the collector to `DiagnosticsPlugin` would let any `outboundHttpSources` reader forge counts or call `close` (the M98l finding).                                                                                                                                                                             | `source` is a frozen facade whose only key is `snapshot` (§3.3). Test pins the single key.                                                                                                                                                                               |
-| D8 | The source list is an application-supplied array: a hostile array (index getters, a `Proxy`, a `toJSON`) or the same source twice would reach the connector unchecked, and a duplicate object would collapse every read permanently.                                                                                 | Copy index by index at construction, bounded at 17 reads, reading no property of any element; refuse a non-object, a 17th element and a repeated object with a fixed value-free error (§3.2, the M98e bypass class). Test each refusal and that no element getter runs.  |
-| D9 | Putting the collector in `common` (the M98l precedent) would give the SDK its first RUNTIME import of `common`, ending its browser-portable type-only property; and a raw status number on the wire is attacker-chosen input.                                                                                        | Collector in `packages/sdk/src/diagnostics/` with a type-only-import test (§3.3); status reduced to seven fixed classes before the collector, `0` and out-of-range → `'other'` (§3.3).                                                                                   |
+**Round-0 findings (author, before the independent review).**
 
-**Accepted residual risks** (documented, not sanitized): timing and volume of outbound calls reach
-the paired devtool; an alias an application chooses badly (a hostname, a customer name) is disclosed
-as written; counts aggregate every tenant; a `Response` subclass or `Proxy` returned by application
-code runs its own `status` getter; the derived promise adds one microtask, so promise identity is
-not preserved. No unresolved design alternative is delegated to implementation.
+| #  | Finding                                                                                                                                                    | Resolution                                                                                             |
+| -- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| D1 | Fixing the receiver to `globalThis` changes the SDK's call (`http-client.ts:242`, receiver = client) and can turn a receiver-bound failure into a success. | Forward the caller's receiver, refined by R1 (§3.3).                                                   |
+| D2 | A `(input, init) => inner(input, init)` wrapper names both arguments and turns an omitted `init` into an explicit `undefined`.                             | Rest-parameter forwarding, arguments never read (§3.3).                                                |
+| D3 | `now: () => number` invites detached `performance.now`, which throws (measured), latching `collection-failed` silently.                                    | `timing` object called as a method; refined by R4 (§3.4).                                              |
+| D4 | `enabled: true` and a plugin `diagnostics` option were template carry-overs read by nothing.                                                               | Cut (§3.4, §4.1).                                                                                      |
+| D5 | Counting only settled attempts hides a hung upstream; expiry during flight could push `count` above `started`.                                             | `started` counter plus generation guard; refined by R3 (§3.1, §3.4).                                   |
+| D6 | "Register close with application onClose" was unimplementable — `IApplication` has no `onClose`.                                                           | Superseded by R2: the helper's plugin registers `onClose` (§3.2, C5).                                  |
+| D7 | Handing the collector to the connector lets any reader forge counts or close it.                                                                           | Frozen snapshot-only source facade (§3.3).                                                             |
+| D8 | An application-supplied source array could be hostile or repeat an object.                                                                                 | Superseded by R2: sources arrive through the kernel registry; the option is cut.                       |
+| D9 | A `common`-resident collector ends the SDK's type-only import property; a raw status number is attacker-chosen.                                            | Collector in the SDK as a declared local copy (R7); status reduced to five fixed classes (§3.1, §3.3). |
 
-**Approved by:** pending — the maintainer.
+**Independent review findings (round 1) and resolutions.**
+
+| #   | Sev    | Finding                                                                                                                                                                                                                  | Resolution                                                                                                                                                                                          |
+| --- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | High   | Forwarding `this` hands the helper object to the wrapped fetch on a direct `observed.fetch(url)` call; on workerd the platform `fetch` then throws `Illegal invocation` (probed) while the unwrapped `fetch(url)` works. | Forward `undefined` when `this` is the `ObservedFetch` object, the SDK client's receiver otherwise; an omitted `fetch` uses a receiver-agnostic default; workerd rows in O2/O4 (§3.3).              |
+| R2  | High   | `DiagnosticsPlugin` is built before `createApp` in the generated devtool entry (`dev-entry.ts:112-120`), so a sources option forces a module-level holder and keeps capture on in production.                            | Maintainer decision: the helper returns a registration plugin; a new multi-provider token is read at bootstrap; the composition gates on the `devtool` parameter, documented and e2e-tested (§3.2). |
+| R3  | Medium | Two expiry rules; `ageMs` undefined while only in flight; a call hung longer than 60 s vanished on expiry.                                                                                                               | One rule: 60 s after last start or settlement, never while in flight; `ageMs` from last activity (§3.4); O5 rows.                                                                                   |
+| R4  | Medium | "Copied to function references" contradicts calling `timing.now()` as a method; `{ now: performance.now }` still throws.                                                                                                 | Keep the object, never copy the method; probe once at construction and refuse loudly (§3.4); O3 row.                                                                                                |
+| R5  | Medium | Validator invariants were unspecified; the "64-slot bound" would admit 64 records.                                                                                                                                       | Invariants and state rules written out (§3.3); each is an O7 row.                                                                                                                                   |
+| R6  | Medium | O10 as written fails for the wrong reason: the SDK graph already lists `common` modules via type edges; the exact `common` pin in `sdk/deno.json` was missing from §5.                                                   | Pass condition is "no edge into `common` carries runtime code"; `deno.json` pin in §5 and the upgrading notes.                                                                                      |
+| R7  | Low    | "No §11.1 duplication" was false — alias, saturation and freshness code exists in `common`.                                                                                                                              | Declared a deliberate local copy with a shared alias test table (§3.3).                                                                                                                             |
+| R8  | Low    | Template leftovers (`enabled`, `now`, "disabled plugin sources", "lifecycle observations") contradicted decisions.                                                                                                       | Removed; `alias` is `null` only when `disabled` (§3.3, §4.1).                                                                                                                                       |
+| R9  | Low    | `dropped` is always `0`.                                                                                                                                                                                                 | Cut from the snapshot (§3.3).                                                                                                                                                                       |
+| R10 | Low    | No counting table (synchronous throw, non-`Response` value).                                                                                                                                                             | Counting table added (§3.1).                                                                                                                                                                        |
+| R11 | Low    | Three §1 citations were imprecise.                                                                                                                                                                                       | §1 rebuilt with verified locations.                                                                                                                                                                 |
+| R12 | Low    | No audit rows for backpressure, failed-startup cleanup, production exposure.                                                                                                                                             | O11–O13 added (§10.2).                                                                                                                                                                              |
+| R13 | Low    | "Grows no diagnostic state" overstated — each pending call holds a derived promise and two reactions.                                                                                                                    | Restated as O(pending), released on settlement (§3.4, budgets).                                                                                                                                     |
+| R14 | Nit    | `'1xx'` cannot come from a real `fetch`.                                                                                                                                                                                 | Removed; any value outside `200..599` is `'other'` (§3.1).                                                                                                                                          |
+
+The reviewer's confirmations are kept as evidence: the SDK call site and default fetch, the exported
+default timing, the type-only imports, the SSE call's `undefined` receiver, the missing
+`IApplication.onClose`, the reserved manifest key, descriptor-based `copyOwnData`, the derived
+promise reporting a dropped rejection exactly once with the identical reason (and zero times when
+handled), `await`-equivalent thenable ordering with one added microtask, and side-effect-free
+`status` on a real `Response`.
+
+**Accepted residual risks** (documented, not sanitized): outbound volume and latency reach the
+paired devtool; a badly chosen alias is disclosed as written; counts aggregate every tenant; a
+`Response` subclass or `Proxy` returned by application code runs its own `status` getter; promise
+identity is not preserved; an application that constructs the helper unconditionally keeps one
+bounded record in production. No unresolved design alternative is delegated to implementation.
+
+**Approved by:** pending — the maintainer (the §3.2 registration design was approved on 2026-09-29).
 
 ### 10.2 Required implementation audit matrix — not yet executed
 
 Use the §6 homes. Every row needs an approved-data positive control so a collector recording
 nothing, or an endpoint refusing everything, fails. For every new control, disable it locally,
-observe its regression test fail, and restore it. Record commands, exit statuses and observed
-behavior.
+observe its test fail, and restore it. Record commands, exit statuses and observed behavior.
 
-| ID                              | Exercise                                                                                                                                                                                                                                                                                   | Pass condition                                                                                                                                                                                                                                                           |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| O1 — Minimization               | Canaries in URL userinfo, path, query and fragment; request and response headers (mixed-case `Authorization`, `Cookie`, `Set-Cookie`); request and response bodies; an abort reason; a rejection whose `message`/`cause`/`stack` getters record access. Through the SDK and directly.      | No canary in collector inputs, retained state, snapshot, signed frame, client DTO or any diagnostics-generated log or error; no secret-bearing getter runs. Alias, counts, status class and duration present.                                                            |
-| O2 — Transparency               | Proxy-recorded `input`/`init`; `this`-recording fetch; one-argument and two-argument calls; `Request` input; omitted `init`.                                                                                                                                                               | Zero observation-code property reads on arguments; identical receiver, arity and arguments wrapped vs unwrapped; exactly one delegation per call.                                                                                                                        |
-| O3 — Result fidelity            | Resolved `Response` (identity and `bodyUsed === false`, stream unlocked); rejection with an object reason; synchronous throw; non-Promise return; thenable; a `Response` whose `status` getter throws; a throwing and a `NaN` clock.                                                       | Identical `Response`, identical reason, synchronous throw stays synchronous, one delegation in every case; collection latches `collection-failed` and application results are unchanged. Unhandled-rejection reporting identical wrapped and unwrapped, in a subprocess. |
-| O4 — Real traffic               | A real loopback HTTP server: 2xx, 3xx with `redirect: 'follow'` and `'manual'`, 4xx, 5xx, a connection refusal, an abort mid-headers, a never-answering server; SDK client retries, breaker open, rate-limiter wait; `SseClient` with the wrapper.                                         | Status classes and failures match; retries count as separate attempts; a breaker-refused request is not an attempt; redirects count once; the hung call shows in `started - count`; no public network is contacted.                                                      |
-| O5 — Bounds and time            | Sustained attempts past `MAX_SAFE_INTEGER` via a seam; expiry at 59,999 / 60,000 ms and stale at 30,000 / 30,001 ms on a fake clock; expiry during a pending call; backward clock.                                                                                                         | Saturating counters, exact state transitions, `count <= started` always, no reading moves backwards, memory flat in steady state, no timer armed.                                                                                                                        |
-| O6 — Registration and lifecycle | 0, 16 and 17 sources; repeated object; non-object element; array with index getters, `Proxy` and `toJSON`; close before, during and after a pending call; closed helper still delegating.                                                                                                  | Fixed value-free refusals naming no alias; no element property read at construction; no late revival; closed source answers `disabled`; delegation unchanged after close.                                                                                                |
-| O7 — Hostile projection         | Snapshots with accessors, custom prototypes, extra keys, symbol keys, `Proxy` throws, oversized and sparse arrays, invalid enums, `NaN`/negative/fractional/unsafe numbers, `count > started`, control-character and 65-byte aliases, duplicate aliases; response over 256 KiB via a seam. | Own-data copy only; per-source value-free `collection-failed`; duplicate aliases and over-budget collapse the whole response; the client independently rejects each malformed frame.                                                                                     |
-| O8 — Admission and transport    | Raw `Deno.connect` probes (never `fetch`, which strips forbidden headers): unpaired, wrong key, replay, wrong instance, `Origin`, preflight, forwarding headers, wrong and rebound `Host`, noncanonical and encoded target, query, non-GET method, body.                                   | No rejected request reaches `snapshot()`; no unsigned success; a correctly paired canonical GET succeeds.                                                                                                                                                                |
-| O9 — Session and compatibility  | Revoke/expire during verify, source read and signing; tampered body/MAC/sequence; concurrent client calls; eleven-key manifest with `outboundHttp: true`, legacy three-field status, `outboundHttp: false` pairing, no sources.                                                            | Post-await gates discard data; an integrity failure is never masked by a collection failure; `false` answers a local typed unsupported with no request; no sources answers `unsupported` with `[]`; other inspectors unaffected.                                         |
-| O10 — Performance and graph     | Five warmed 10,000-attempt runs, unwrapped vs wrapped, real loopback server; `deno info` of the SDK graph.                                                                                                                                                                                 | Medians recorded, zero extra fetch calls, flat memory; the SDK graph contains no runtime `@setu-ts/common` module and no `diagnostics-plugin` import.                                                                                                                    |
+| ID                          | Exercise                                                                                                                                                                                                                                                                                                                   | Pass condition                                                                                                                                                                                                                                                                     |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| O1 — Minimization           | Canaries in URL userinfo, path, query, fragment; mixed-case `Authorization`, `Cookie`, `Set-Cookie`; request and response bodies; a manual-redirect `Location`; `response.url`; an abort reason; a rejection whose `message`/`cause`/`stack` getters record access. Through the SDK, `SseClient` and directly.             | No canary in collector inputs, retained state, snapshot, signed frame, client DTO or any diagnostics-generated log or error; no secret-bearing getter runs. Alias, counts, status class and duration present.                                                                      |
+| O2 — Transparency           | Proxy-recorded `input`/`init`; `this`-recording fetch; one- and two-argument calls; `Request` input; omitted `init`; direct, destructured and SDK-client call sites; omitted `fetch`. On Deno and on real workerd (the `apps/cloudflare` wrangler harness).                                                                | Zero observation-code reads on arguments; arity and arguments identical wrapped vs unwrapped; receiver is the client via the SDK and `undefined` for direct and destructured calls; the platform `fetch` wrapped and called directly succeeds on workerd.                          |
+| O3 — Result fidelity        | Resolved `Response` (identity, `bodyUsed === false`, stream unlocked); object rejection reason; synchronous throw; non-object resolution; thenable; throwing `status` getter; throwing and `NaN` clock after construction; `{ now: performance.now }` and a throwing `now` at construction.                                | Identical value and reason; a sync throw stays sync; one delegation always; post-construction faults latch `collection-failed` without changing results; construction faults refuse with a fixed error. Unhandled-rejection reporting identical wrapped vs unwrapped (subprocess). |
+| O4 — Real traffic           | Real loopback HTTP server: 2xx, 3xx with `redirect: 'follow'` and `'manual'`, 4xx, 5xx, connection refused, abort mid-headers, never-answering server; SDK retries, open breaker, rate-limiter wait; `SseClient`; the core cases repeated on workerd.                                                                      | Classes and failures match the counting table; retries are separate attempts; breaker-refused requests are not attempts; a followed redirect counts once; the hung call shows as `started - count`; no public network contacted.                                                   |
+| O5 — Bounds and time        | Saturation via seam; expiry at 59,999/60,000 ms and stale at 30,000/30,001 ms on a fake clock; a pending call across 60 s; expiry then late settlement; backward clock.                                                                                                                                                    | Saturating counters; exact transitions; a record with in-flight attempts never expires; stale generations discarded; `count <= started` and `responses + failures === count` always; no reading moves backwards; no timer armed.                                                   |
+| O6 — Registration/lifecycle | 0, 16 and 17 helpers; the same plugin registered twice; plugin name against every `CAPABILITIES` value; token literal against `CAPABILITIES`; close before, during and after a pending call; wrapper after close; the alias searched for in every refusal.                                                                 | 17 refuses startup with a fixed error; a double registration throws the kernel duplicate-name error; no name equals a token; a closed source answers `disabled`; no late revival; delegation unchanged; no refusal contains the alias.                                             |
+| O7 — Hostile projection     | Sources returning accessors, custom prototypes, extra and symbol keys, `Proxy` throws, sparse and oversized arrays, invalid enums, `NaN`/negative/fractional/unsafe numbers, each §3.3 invariant violated, `unsupported` from a source, control-character and 65-byte aliases, duplicate aliases; over 256 KiB via a seam. | Own-data copy only; per-source value-free `collection-failed`; duplicate aliases and over-budget collapse the whole response; the client independently rejects each malformed frame.                                                                                               |
+| O8 — Admission/transport    | Raw `Deno.connect` probes (never `fetch`, which strips forbidden headers): unpaired, wrong key, replay, wrong instance, `Origin`, preflight, forwarding headers, wrong and rebound `Host`, noncanonical and encoded target, query, non-GET, body.                                                                          | No rejected request reaches `snapshot()`; no unsigned success; a correctly paired canonical GET succeeds.                                                                                                                                                                          |
+| O9 — Session/compatibility  | Revoke/expire during verify, source read and signing; tampered body/MAC/sequence; concurrent client calls; manifest with `outboundHttp: true`, legacy three-field status, `outboundHttp: false` pairing, no sources.                                                                                                       | Post-await gates discard data; an integrity failure is never masked by a collection failure; `false` answers local `unsupported` with no request; no sources answers `unsupported` with `[]`; other inspectors unaffected.                                                         |
+| O10 — Performance/graph     | Five warmed 10,000-attempt runs, unwrapped vs wrapped, real loopback server; `deno info --json packages/sdk/src/index.ts`.                                                                                                                                                                                                 | Medians recorded; zero extra fetch calls; flat memory; no dependency edge into `common` carries runtime code; no `diagnostics-plugin` or `kernel` import in the SDK graph.                                                                                                         |
+| O11 — Backpressure          | A slow consumer of the response body; many concurrent pending attempts; a slow devtool reader polling during traffic.                                                                                                                                                                                                      | Capture is synchronous and unaffected by body consumption; memory O(pending) and released on settlement; reads never delay delegation.                                                                                                                                             |
+| O12 — Failed startup        | Startup failing before and after `observed.plugin` registers; a later plugin throwing in `register()`.                                                                                                                                                                                                                     | `onClose` runs when the plugin registered; nothing to release when it did not; no timer, listener or socket left behind.                                                                                                                                                           |
+| O13 — Production exposure   | The §3.2 composition booted without the `devtool` parameter, and with it.                                                                                                                                                                                                                                                  | Without: no helper, no plugin, no outbound source, the client uses the unwrapped fetch. With: exactly one source, observed end to end through the connector.                                                                                                                       |
 
-Runtime ledger: the SDK wrapper is runtime-agnostic and is exercised on Deno in the suite; the
-connector is Deno-only (M98b). Node and Bun wrapper behavior is supported only if a real-fetch run
-on each is recorded; otherwise it is listed as untested, not audited.
+Runtime ledger: the wrapper is exercised on Deno (suite) and on real workerd (O2/O4). Node and Bun
+wrapper behavior is supported only if a real-fetch run on each is recorded; otherwise it is listed
+as untested, not audited. The connector is Deno-only (M98b).
 
 ### 10.3 Completion gate and evidence record
 
 Before implementation: maintainer approval of §10.1. Before completion or publication: the
 independent committed-tree audit per `.roo/skills/security-audit/SKILL.md`, in a context that did
-not implement or fix M98n, covering its defect classes and O1–O10. This design review does not
+not implement or fix M98n, covering its defect classes and O1–O13. This design review does not
 satisfy it. Record in the implementation PR the audited commit, reviewed files, runtime coverage,
-O1–O10 results and negative controls, every finding with severity and disposition, and remaining
+O1–O13 results and negative controls, every finding with severity and disposition, and remaining
 limitations. A fix after the audit changes the audited tree: commit it and re-audit the affected
 controls. Unresolved security or correctness findings block completion. Also supply the §7 gates,
 the ANSI-stripped per-file coverage table, the forbidden-construct scan and both publish-gate exit
