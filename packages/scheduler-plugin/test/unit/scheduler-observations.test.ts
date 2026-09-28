@@ -689,6 +689,99 @@ describe('SchedulerPlugin diagnostics wiring', () => {
     expect(source.snapshot().state).toBe('disabled');
   });
 
+  it('records an attempt only when a behaviour lets the handler run', async () => {
+    // A guard behaviour that declines never invokes the handler: the fire is
+    // still dispatched, but no handler attempt happened and none may be
+    // reported. A behaviour that calls next() leaves the attempt counted.
+    const runs: string[] = [];
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        SchedulerPlugin({
+          behaviors: [{
+            handle: async (ctx, next) => {
+              if (ctx.name !== 'guarded') {
+                await next();
+              }
+            },
+          }],
+          jobs: [
+            {
+              trigger: 'delay',
+              name: 'guarded',
+              delayMs: 10,
+              handler: () => void runs.push('guarded'),
+            },
+            { trigger: 'delay', name: 'open', delayMs: 10, handler: () => void runs.push('open') },
+          ],
+          diagnostics: {
+            enabled: true,
+            alias: 'cron',
+            jobs: { guarded: 'guarded-alias', open: 'open-alias' },
+          },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(runs).toEqual(['open']);
+      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
+        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+      )[0]!.snapshot();
+      expect(recordOf(snapshot, 'guarded-alias', 'fire')).toMatchObject({
+        count: 1,
+        started: 1,
+        succeeded: 1,
+      });
+      expect(recordOf(snapshot, 'guarded-alias', 'attempt')).toBeUndefined();
+      expect(recordOf(snapshot, 'open-alias', 'attempt')).toMatchObject({
+        count: 1,
+        started: 1,
+        succeeded: 1,
+      });
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('records no attempt when a behaviour refuses by throwing, and retries none', async () => {
+    let handlerRuns = 0;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        SchedulerPlugin({
+          behaviors: [{
+            handle: () => {
+              throw new Error('refused-canary');
+            },
+          }],
+          jobs: [{
+            trigger: 'delay',
+            name: 'refused',
+            delayMs: 10,
+            handler: () => {
+              handlerRuns++;
+            },
+          }],
+          diagnostics: { enabled: true, alias: 'cron', jobs: { refused: 'refused-alias' } },
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      expect(handlerRuns).toBe(0);
+      const snapshot = app.services.getAll<ISchedulerDiagnosticsSource>(
+        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+      )[0]!.snapshot();
+      expect(recordOf(snapshot, 'refused-alias', 'fire')).toMatchObject({ started: 1, failed: 1 });
+      expect(recordOf(snapshot, 'refused-alias', 'attempt')).toBeUndefined();
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('leaves provides unchanged — the diagnostics token is never claimed', () => {
     const plugin = SchedulerPlugin({
       diagnostics: { enabled: true, alias: 'cron', jobs: {} },

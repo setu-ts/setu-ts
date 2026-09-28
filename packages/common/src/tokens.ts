@@ -174,7 +174,9 @@ export const CAPABILITIES = {
    * Scheduler execution observations (M98k) — an
    * `ISchedulerDiagnosticsSource` every SchedulerPlugin instance registers
    * under this token with `{ multi: true }`, without claiming it in
-   * `provides`, so multiple scheduler instances never collide. The
+   * `provides`, so the diagnostics token never collides with another
+   * provider of it (an application registers at most one SchedulerPlugin —
+   * its plugin name is fixed — but other code may contribute a source). The
    * DiagnosticsPlugin reads every source to serve `GET /v1/scheduler`. A
    * read never acquires a lock, invokes a handler, or claims cluster
    * completeness — a skipped local fire is not a globally missed execution.

@@ -119,9 +119,10 @@ the handler receives its original job directly and no chain is allocated.
 per instance) that the local diagnostics connector reads to serve `GET /v1/scheduler`. Only exact
 job names listed in `jobs` are observed, each under its approved alias; counters distinguish
 contended fires (a lock held elsewhere), lock-failed fires, dispatched fires and handler attempts
-(including retries), plus the wall-clock lateness each fire started late. A skipped local fire is
-never reported as a globally missed execution. Job names, cron expressions, payloads, job ids, lock
-keys and thrown errors are never captured; without the option nothing is observed at all.
+(including retries; a `behaviors` entry that declines a dispatch invokes no handler, so it records
+no attempt), plus the wall-clock lateness each fire started late. A skipped local fire is never
+reported as a globally missed execution. Job names, cron expressions, payloads, job ids, lock keys
+and thrown errors are never captured; without the option nothing is observed at all.
 
 ## Exports
 

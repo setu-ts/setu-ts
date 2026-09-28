@@ -204,8 +204,8 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       ctx.services.register<IScheduler>('scheduler', service);
 
       // M98k: EVERY instance contributes one scheduler-diagnostics source as
-      // a multi provider (never claimed in `provides`, so multiple scheduler
-      // instances never collide). It describes THIS service only — a later
+      // a multi provider (never claimed in `provides`, so it never collides
+      // with another source's provider). It describes THIS service only — a later
       // replacement of the scheduler token is outside its coverage. Not
       // opted in, the source is inert (`disabled`) and nothing is attached:
       // every fire runs the pre-M98k path.

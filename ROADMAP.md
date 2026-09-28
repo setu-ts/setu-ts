@@ -11154,8 +11154,8 @@ plan: `plans/archive/milestone-98j-event-observations.md`.
 
 ### Milestone 98k: Scheduler Execution Observations
 
-**Status:** Implemented on `feat/m98k-scheduler-observations`. Owner: `packages/scheduler-plugin`.
-Canonical plan: `plans/milestone-98k-scheduler-observations.md`.
+**Status:** Implemented on `feat/m98k-scheduler-observations`; security audit pending. Owner:
+`packages/scheduler-plugin`. Canonical plan: `plans/milestone-98k-scheduler-observations.md`.
 
 - [x] Observe timer fire, slot-lock and handler-lock outcomes inside SchedulerService, and actual
       attempt settlement inside the executor. Use runtime.now only to compare intended epoch fire
@@ -11169,7 +11169,7 @@ Canonical plan: `plans/milestone-98k-scheduler-observations.md`.
       before buffering.
 - [x] Local observed execution only; durable history, cluster completeness and job control are
       excluded.
-- [x] Pass recorded pre-implementation design review and committed-tree implementation security
+- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
       audit. Compare fire times, pause/resume/remove, delay/cron/every, retries, slot dedup and
       overlap locks with diagnostics off/on/failing. Prove lock losers do not produce handler
       records.
@@ -12247,7 +12247,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98h       | ✅     | auth-plugin — bounded authorization decision explanations ([#376](https://github.com/setu-ts/setu-ts/pull/376); security audit passed on round 5 of `44789a1d`)              |
 | 98i       | ✅     | common + cache-plugin + diagnostics-plugin — cache operation counters ([#374](https://github.com/setu-ts/setu-ts/pull/374); security audit passed on re-audit of `aab0bd78`) |
 | 98j       | ✅     | events-plugin + common + diagnostics-plugin — event dispatch observations ([#375](https://github.com/setu-ts/setu-ts/pull/375); security audit history in the plan §12)      |
-| 98k       | ✅     | scheduler-plugin + common + diagnostics-plugin — scheduler execution observations (PR pending)                                                                               |
+| 98k       | ⬜     | scheduler-plugin + common + diagnostics-plugin — scheduler execution observations (security audit pending)                                                                   |
 | 98l       | ✅     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations                                                                         |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                    |
 | 98n       | ⬜     | outbound http attempt observations — design security review and implementation audit required                                                                                |

@@ -1966,7 +1966,10 @@ export interface RealtimeDiagnosticsResponse {
  * The fixed scheduler observation an {@linkcode ISchedulerDiagnosticsSource}
  * records (M98k). `fire` is one local timer fire of an approved job —
  * observed whether or not the fire proceeded, so contention and lock
- * failures are visible; `attempt` is one handler attempt of the executor.
+ * failures are visible; `attempt` is one invocation of the application's
+ * handler by the executor. A behaviour that declines a dispatch (never
+ * calling `next()`, or throwing) invokes no handler and records no attempt;
+ * the fire still reports the dispatch's settlement.
  * The vocabulary is fixed — a fire is never described by a schedule kind or
  * an application string.
  *
@@ -1992,7 +1995,7 @@ export type SchedulerDiagnosticsOperation = 'fire' | 'attempt';
  * counter exists; `retryAttempts` is nonapplicable and `0`.
  *
  * On an `attempt` record `count` is settled handler attempts; `started` the
- * attempts begun; `succeeded`/`failed` the settled outcomes;
+ * handler invocations begun; `succeeded`/`failed` the settled outcomes;
  * `retryAttempts` the attempts numbered above 1; `contended` and
  * `lockFailed` are nonapplicable and `0`; `lastLatenessMs` is nonapplicable
  * and `0` — lateness is a property of the fire, reported there only.
@@ -2068,7 +2071,8 @@ export interface SchedulerDiagnosticsSnapshot {
 /**
  * Read-only scheduler diagnostics source — the surface every SchedulerPlugin
  * instance registers under {@linkcode CAPABILITIES.SCHEDULER_DIAGNOSTICS} as
- * a MULTI provider (M98k), so multiple scheduler instances never collide.
+ * a MULTI provider (M98k), so the token never collides with another source's
+ * provider (one SchedulerPlugin per application; other code may add sources).
  * The DiagnosticsPlugin reads every source to serve `GET /v1/scheduler`.
  *
  * Synchronous by contract: `snapshot()` returns already-counted, frozen data

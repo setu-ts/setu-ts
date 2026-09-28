@@ -55,7 +55,8 @@ All notable changes to this project are documented here. The format follows
   approved aliases, so an empty map approves nothing); the instance's own `SchedulerService` and
   executor then record each approved job's local timer fires — contended (slot or overlap lock held
   elsewhere), lock-failed (a lock operation rejected), dispatched — and each handler attempt
-  (started, succeeded, failed, retryAttempts) with monotonic `lastDurationMs` and the wall-clock
+  (started, succeeded, failed, retryAttempts; a `behaviors` entry that declines a dispatch invokes
+  no handler and records no attempt) with monotonic `lastDurationMs` and the wall-clock
   `lastLatenessMs` a fire started late (`max(0, actualStart - intendedFire)`, never an absolute
   schedule). A skipped local fire is never reported as a globally missed execution: no missed
   counter exists. Job names, cron expressions, payloads, job ids, lock keys and tokens, and thrown
