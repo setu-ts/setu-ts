@@ -881,3 +881,67 @@ describe('RedisBackplane close during an outage', () => {
     expect([subscriber.disconnectCount, client.disconnectCount]).toEqual([0, 0]);
   });
 });
+
+describe('RedisBackplane rollback of a failed open', () => {
+  it('force-disconnects the connections it built when their rollback QUIT also fails', async () => {
+    // A SUBSCRIBE that timed out is followed by a QUIT that fails the same
+    // way; without the disconnect() fallback those owned connections keep
+    // reconnecting after connect() has already rejected.
+    const clients: FakeRedisClient[] = [];
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = new FakeRedisClient();
+        client.failQuit = new Error('quit timed out');
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+    const subscribeFailure = new Error('Command timed out');
+    const original = module.create;
+    module.create = (url, options) => {
+      const client = original(url, options) as FakeRedisClient;
+      if (clients.length === 2) {
+        client.failSubscribe = subscribeFailure;
+      }
+      return client;
+    };
+
+    // The open's own failure is what the caller sees, not the rollback's.
+    await expect(backplane.connect()).rejects.toBe(subscribeFailure);
+    expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([[1, 1], [1, 1]]);
+  });
+
+  it('force-disconnects the connections when close lands mid-open and their QUIT fails', async () => {
+    const clients: FakeRedisClient[] = [];
+    let release: (() => void) | undefined;
+    const module: IRedisModule = {
+      create: (): IRedisBackplaneClient => {
+        const client = new FakeRedisClient();
+        client.failQuit = new Error('quit timed out');
+        if (clients.length === 1) {
+          release = client.holdSubscribe();
+        }
+        clients.push(client);
+        return client;
+      },
+    };
+    const backplane = new RedisBackplane(
+      { transport: 'redis', url: 'redis://localhost:6379', module },
+      'node-a',
+      'realtime',
+    );
+
+    const connecting = backplane.connect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await backplane.close();
+    release?.();
+    await connecting;
+
+    expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([[1, 1], [1, 1]]);
+  });
+});

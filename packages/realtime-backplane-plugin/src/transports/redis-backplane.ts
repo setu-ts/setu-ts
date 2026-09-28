@@ -292,19 +292,20 @@ export class RedisBackplane implements IRealtimeBackplane {
   }
 
   /**
-   * Quits connections abandoned by a failed open.
+   * Closes connections abandoned by a failed or superseded open, through the
+   * same QUIT-then-`disconnect()` path as {@linkcode close}: a SUBSCRIBE that
+   * timed out is usually followed by a QUIT that fails the same way, and
+   * without the fallback those connections would keep reconnecting after
+   * `connect()` had rejected.
    *
    * @param clients - The connections to close
    */
   async #discard(clients: readonly IRedisBackplaneClient[]): Promise<void> {
+    // Best-effort: the open's own failure is what the caller needs to see, so
+    // rollback failures are collected and dropped rather than rethrown.
+    const ignored: unknown[] = [];
     for (const client of clients) {
-      try {
-        await client.quit();
-      } catch {
-        // Best-effort: the open's own failure is what the caller needs to see,
-        // so a rollback quit must not mask it.
-        continue;
-      }
+      await this.#release(client, ignored);
     }
   }
 
