@@ -8,6 +8,45 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Realtime lifecycle observations (M98l): opt-in, minimized WebSocket, SSE and backplane
+  observations through the diagnostics connector.** `WebSocketPlugin`, `SsePlugin` and
+  `RealtimeBackplanePlugin` accept a `diagnostics: { enabled: true, alias }` option (the new
+  `RealtimeDiagnosticsOptions`, declared once in `@setu-ts/common` and re-exported by all three;
+  validated when the plugin factory is called, never echoing a value). A WebSocket source counts
+  `open` (a handshake that fails after the upgrade was accepted is a failed open), `close` (a close
+  after a transport error or with code `1006` is `failed`) and every frame `send` writes or refuses
+  — once, at the connection, so a room broadcast or heartbeat is not counted twice. An SSE source
+  counts `open`, `close` and every enqueued frame, and reports closes caused by the 1 MiB backlog
+  guard in `backpressureCloses` (a number only on the SSE `close` record, `0` when none, `null`
+  everywhere else). A backplane source counts `backplane-publish` (the transport's `publish()`
+  resolving — never peer delivery — with its duration) and `backplane-receive` (after the
+  transport's own shape and origin filters), across the memory, redis and messaging transports; a
+  `'custom'` transport is never observed. WebSocket and SSE sources also report current
+  `openConnections` and `groups` gauges, read from the plugin's OWN service on each authenticated
+  read, which never expire with the records, so an idle connection stays visible. No frame, message,
+  close reason, connection id, room or channel name, header, query, principal, `Last-Event-ID` or
+  backplane origin is ever captured. Every instance registers a frozen, snapshot-only
+  `IRealtimeDiagnosticsSource` under the new multi-provider `CAPABILITIES.REALTIME_DIAGNOSTICS`
+  (`disabled` without the option). Observation never changes a result: a refused send throws the
+  same error, a rejected publish rejects with the same reason, and a failing clock or gauge reader
+  latches the source `collection-failed`. New public surface on `@setu-ts/common`:
+  `CAPABILITIES.REALTIME_DIAGNOSTICS`, `IRealtimeDiagnosticsSource`, `RealtimeDiagnosticsSnapshot`,
+  `RealtimeDiagnosticsRecord`, `RealtimeDiagnosticsGauges`, `RealtimeDiagnosticsResponse`,
+  `RealtimeSourceKind`, `RealtimeObservationOperation`, `RealtimeGaugeState`, and — because the
+  three owning plugins need the identical collector and may not import one another — the one shared
+  collector: `compileRealtimeDiagnosticsAlias`, `createRealtimeObservationCollector`,
+  `IRealtimeObservationCollector`, `RealtimeObservationCollectorInit`, `RealtimeGaugeReading` and
+  `RealtimeDiagnosticsOptions`. New connector surface: `GET /v1/realtime` (authenticated like every
+  operation; a snapshot operation with no query; positional `s<N>` source ids; more than 16 sources
+  refuses startup; a throwing or invalid source answered by a value-free snapshot of kind `unknown`;
+  duplicate aliases or an over-budget body collapse to a fixed collection-failed response with no
+  sources; any kind/operation, kind/gauge or backpressure combination outside the contract refused
+  by both the connector and the client), the status manifest's `realtime` key now `true`, and
+  `IDiagnosticsClient.realtime()` that answers a frozen typed `unsupported` response without a
+  request when the negotiated manifest lacks the inspector. **Breaking for implementors:**
+  `realtime()` is a REQUIRED member of `IDiagnosticsClient`, so a hand-written client must add it
+  (answering `unsupported` is a valid implementation).
+
 - **Event dispatch observations (M98j): opt-in, minimized event-dispatch observations through the
   diagnostics connector.** `EventsPlugin` accepts a `diagnostics` option
   (`EventsDiagnosticsOptions`, exported from `@setu-ts/events-plugin`) that attaches an internal

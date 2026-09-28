@@ -194,6 +194,7 @@ ws.route('/ws/chat', {
 | `scalingNotice`    | `boolean`                                                            | `true`   | Logs one `info` line at startup when no realtime backplane is registered. `false` silences it.                                                         |
 | `routes`           | `readonly WebSocketRouteEntry[]`                                     | —        | Declarative exact-path routes. Each entry is a `WebSocketRouteDefinition` (`{ path, handlers, options? }`) or a registry factory resolved at `onInit`. |
 | `behaviors`        | `readonly (IIngressBehavior \| RegistryFactory<IIngressBehavior>)[]` | —        | Plugin-level chain around every route's `onMessage`. It receives the route path and frame in an `IngressContext`.                                      |
+| `diagnostics`      | `RealtimeDiagnosticsOptions`                                         | —        | Opt-in realtime observations (M98l); see [Diagnostics](#diagnostics-m98l).                                                                             |
 
 `WebSocketRouteOptions.guards` is route-scoped: guards run in declared order before the matched
 route's handshake, and the first `{ status }` refusal wins. It is separate from the plugin-level
@@ -366,6 +367,23 @@ custom third-party adapter predating the seam. In that state the service still r
 health indicator reports `available: false`, so one codebase deploys everywhere; the failure
 surfaces at registration rather than at a peer's first connect.
 
+## Diagnostics (M98l)
+
+`WebSocketPlugin({ diagnostics: { enabled: true, alias: 'chat' } })` counts, for the local
+diagnostics connector's `GET /v1/realtime` (`@setu-ts/diagnostics-plugin`), how many connections
+opened (a handshake that fails after the upgrade was accepted is a failed open) and closed (a close
+after a transport error, or with code `1006`, is `failed`), and every frame `send` wrote or refused.
+Sends are counted once, at the connection, so `sendJson`, a room broadcast and a heartbeat each
+count one per recipient. On each read of a paired devtool the source also reports the service's
+current `connectionCount` and `roomCount`, which never expire the way operation records do. No
+frame, close code or reason, connection id, room name, header, query or principal is ever captured.
+
+Without the option the plugin registers an inert `disabled` source and nothing is attached, so its
+hot paths read no clock. Observation never changes a result: a refused send still throws the same
+error, and a failing clock or gauge reader latches the source `collection-failed` instead. A
+replacement registered later under the same capability is outside coverage and is never read. Enable
+only on an approved development dataset: counts aggregate every tenant using the instance.
+
 ## Health
 
 Registers a `websocket` health indicator reporting `{ available, connections, rooms, routes }`.
@@ -393,6 +411,7 @@ Registers a `websocket` health indicator reporting `{ available, connections, ro
 | `IWebSocketService`          | interface |
 | `IWebSocketTransport`        | interface |
 | `LocalBroadcastOptions`      | interface |
+| `RealtimeDiagnosticsOptions` | interface |
 | `RoomBroadcastOptions`       | interface |
 | `RoomMembershipListener`     | interface |
 | `WebSocketCloseEvent`        | interface |

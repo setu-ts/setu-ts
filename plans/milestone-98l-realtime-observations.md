@@ -494,8 +494,19 @@ size-getter reads per authenticated read of an enabled websocket or sse source; 
 backplane, disabled, closed or failed source; never on a write path. At most 16 sources; a 17th
 refuses startup with a fixed error. A 256 KiB response that collapses to a fixed `collection-failed`
 with no sources rather than truncating. The disabled path is one `WeakMap.get` per observed event.
-§3.4's overhead target is measured before completion and recorded, as M98i and M98j did; it is not
-assumed.
+
+**Overhead — measured on Deno 2.9 during implementation, 2026-09-28.** _Application level (the
+number to judge)._ A real kernel application with a real `WebSocket` client echoing 10,000 frames
+per sample (one inbound frame and one `send` each), one process per run, 5 warm-up and 15 measured
+samples, 10 runs alternating the order of `off` and `on`: median 31.8 ms off against 32.5 ms on,
+about 2.3% more time. The per-pair delta spread from −13.9% to +15.9% with a median of +3.5%, so the
+difference is inside the noise and within §3.4's ≤5% target, not a precise figure. _Component level
+(context)._ Over a no-op transport, 10,000 sends cost 0.04 ms unobserved and 1.0 ms observed — about
+100 ns per send, dominated by the one clock read — and 10,000 backplane publishes through a no-op
+broker cost 0.4 ms against 2.2 ms, about 190 ns per publish for the extra clock read and the derived
+promise. Those ratios are large only because the fake transports do nothing; a real socket write or
+broker publish costs microseconds. SSE enqueue timings were dominated by stream noise and showed no
+measurable difference. The harnesses are outside the tree (`.tmp/m98l-bench/`).
 
 | Finding                                                                                                                                     | Resolution                                                                                                                                                                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -513,6 +524,17 @@ assumed.
 | A shared collector in `common` is new public surface an application could call.                                                             | It is a pure, allocation-bounded object with no I/O and no registry access; calling it only builds another collector nobody reads. The source registration and the attachment remain inside the owning plugins.                                                                                                                                                                    |
 | Registering the collector would hand every `getAll` reader its `observe` and `close`, so any plugin could forge counts or silence a source. | Found while writing this review: each plugin registers the collector's frozen `source` facade, which exposes `snapshot()` alone. A test pins the facade's single key.                                                                                                                                                                                                              |
 | Counts aggregate every tenant; publish timings are a coarse latency side channel.                                                           | As M98i/M98j: enable on an approved development dataset only; no tenant selector or per-user identifier exists; `lastDurationMs` is integer milliseconds of the last publish, not per frame.                                                                                                                                                                                       |
+
+**Implementation departures from §3, assessed (recorded 2026-09-28).** (1) The collector lives in
+`common` (§3.1, maintainer decision); the three packages keep only their WeakMap attachment helpers.
+(2) Each plugin registers the collector's frozen snapshot-only `source` facade, found while writing
+this review (findings table). (3) SSE's initial `retry:` frame is not counted: it is written inside
+the exported `SseConnection` constructor, before the service can attach, and attaching earlier would
+need a constructor change (§3.6). (4) The client's realtime tests live in
+`packages/diagnostics-plugin/test/unit/client.test.ts` beside every other inspector's, where the
+signed fake server is, rather than in the realtime test file §6 names. (5) The internal
+`dispatchFrame` helper now returns whether every handler returned, so the three transports record a
+receive's outcome from one place. None widens the boundary.
 
 **For the audit (in addition to the implementation gate below):** probe DNS rebinding on a raw
 socket; probe a hostile source with accessor, index-getter, class-instance, symbol-key and `Proxy`

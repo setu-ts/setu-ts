@@ -81,16 +81,34 @@ without a `subscriber` throws at construction rather than failing at the first p
 
 ## Options
 
-| Option                  | Applies to     | Default                  | Description                                                                                                                                    |
-| ----------------------- | -------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `topic`                 | all but memory | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                   |
-| `origin`                | all            | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                            |
-| `bus`                   | `'memory'`     | `'default'`              | Named in-process bus; separate names stay isolated                                                                                             |
-| `url`                   | `'redis'`      | —                        | Connection URL, used only on the lazy-load path                                                                                                |
-| `client` / `subscriber` | `'redis'`      | —                        | Injected client pair; required together                                                                                                        |
-| `module`                | `'redis'`      | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                |
-| `instance`              | `'custom'`     | —                        | The transport to register, used as-is                                                                                                          |
-| `localNotice`           | `'memory'`     | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it |
+| Option                  | Applies to         | Default                  | Description                                                                                                                                    |
+| ----------------------- | ------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `topic`                 | all but memory     | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                   |
+| `origin`                | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                            |
+| `bus`                   | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                             |
+| `url`                   | `'redis'`          | —                        | Connection URL, used only on the lazy-load path                                                                                                |
+| `client` / `subscriber` | `'redis'`          | —                        | Injected client pair; required together                                                                                                        |
+| `module`                | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                |
+| `instance`              | `'custom'`         | —                        | The transport to register, used as-is                                                                                                          |
+| `localNotice`           | `'memory'`         | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it |
+| `diagnostics`           | all but `'custom'` | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                 |
+
+## Diagnostics (M98l)
+
+`RealtimeBackplanePlugin({ transport: 'redis', url, diagnostics: { enabled: true, alias: 'fanout' } })`
+counts, for the local diagnostics connector's `GET /v1/realtime` (`@setu-ts/diagnostics-plugin`),
+how many publications resolved or rejected (with the duration of the last one) and how many arriving
+frames reached the local handlers. A publication's success means the transport's `publish()`
+resolved — never that a peer received it — and a receive is counted only after the transport's own
+frame-shape and own-origin filters admitted the frame; a receive where any local handler threw is
+`failed`. A backplane reports no gauges. No frame, room or channel name, payload, `exceptId` or
+origin is ever captured. A `'custom'` transport is never observed and its options accept no
+`diagnostics` field.
+
+Without the option the plugin registers an inert `disabled` source and nothing is attached to the
+transport. Observation never changes a result: a rejected publish still rejects with the same
+reason, and a failing clock latches the source `collection-failed` instead. Enable only on an
+approved development dataset: counts aggregate every tenant using the instance.
 
 ## Limitations
 
@@ -167,6 +185,7 @@ serving — never `down`. A transport that cannot probe reports `up` with `reach
 | `IRedisModule`                   | interface |
 | `MemoryBackplaneOptions`         | interface |
 | `MessagingBackplaneOptions`      | interface |
+| `RealtimeDiagnosticsOptions`     | interface |
 | `RealtimeFrame`                  | interface |
 | `RedisBackplaneOptions`          | interface |
 | `RealtimeBackplanePluginOptions` | type      |
