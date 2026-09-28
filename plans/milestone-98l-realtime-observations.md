@@ -1,8 +1,8 @@
 # Milestone 98l — Realtime Lifecycle Observations
 
-> **Status:** Planning. Implementation and fixes: `feat/m98l-realtime-observations`. Design security
-> assessment below requires recorded review before implementation; no implementation or completed
-> security audit is claimed.
+> **Status:** In implementation on `feat/m98l-realtime-observations`. The design security review is
+> recorded in §10.1 (2026-09-28, before implementation) and awaits the maintainer's approval. No
+> completed security audit is claimed.
 
 ## 0. Objective & scope
 
@@ -75,6 +75,18 @@ unchanged. Each hot path checks for an attachment before reading clocks or deriv
 collector accepts only the fixed operation, approved alias, primitive outcome and measured values;
 raw inputs and errors never cross that seam. The source uses the same bounded collector and owns no
 reference to business payloads. Close detaches first, then clears collector state.
+
+**One collector, in `common` (maintainer decision, 2026-09-28).** The three owning packages need the
+same collector: one approved alias per source, the fixed operations, one retention and state rule,
+and the gauge snapshot. §2.2 forbids any of them importing another, so the only way to avoid three
+copies (§11.1) is `@setu-ts/common`. This follows the M47 `encodeFrameData` and M52 `splitWorkerEnv`
+precedents. `common` gains `compileRealtimeDiagnosticsAlias` (the one option validation) and
+`createRealtimeObservationCollector` (the one collector, which is also the source), in
+`packages/common/src/diagnostics/realtime-observations.ts`. That is public surface beyond the
+original §4 and is listed there. Each owning package keeps a small internal
+`diagnostics/realtime-observations.ts` holding only its WeakMap attachment helpers.
+`RealtimeDiagnosticsOptions` is declared once in `common` and re-exported by the three barrels, so
+the three option types are not merely structurally identical but the same type.
 
 ### 3.2 Source ownership and registration
 
@@ -198,19 +210,59 @@ aggregate tenants in that development instance. Do not advertise tenant isolatio
 enable on an explicitly approved development dataset; shared multi-tenant production use is
 unsupported. No tenant selectors, per-user identifiers, resource lookups or controls are added.
 
+### 3.6 What each operation counts (fixed before implementation)
+
+§3.1–§3.4 fix the shape. This section fixes the meaning of each counter at each capture site, so the
+tests have one definition to assert and the three packages cannot drift. Every outcome below is a
+boolean the owning code already computes; no frame, reason, code value or error reaches the
+collector.
+
+| Kind      | Operation           | Captured at                                                                                                              | `succeeded`                                                        | `failed`                                                                                                                                          |
+| --------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| websocket | `open`              | the upgrade sink's `onOpen`, or its `onClose` arriving before `onOpen`                                                   | the socket opened and was registered                               | the adapter accepted the upgrade and the handshake then failed (the existing slot-release path)                                                   |
+| websocket | `close`             | the sink's `onClose` for an opened connection                                                                            | any close not below                                                | the transport reported an error on that connection (`onError`), or the close code is `1006` (abnormal closure). Only the boolean leaves the sink. |
+| websocket | `send`              | `WebSocketConnection.send` (so `sendJson`, room broadcasts and heartbeats are all counted once, at the connection)       | the transport accepted the frame                                   | the connection was not open, or the transport's `send` threw. The throw is rethrown unchanged.                                                    |
+| sse       | `open`              | `SseService.open`                                                                                                        | the connection was constructed and registered                      | construction threw (rethrown unchanged)                                                                                                           |
+| sse       | `close`             | `SseConnection`'s one idempotent cleanup                                                                                 | client abort, stream cancel, application `close()`, shutdown       | the backlog guard closed it (also counted in `backpressureCloses`), or `enqueue` threw                                                            |
+| sse       | `send`              | `SseConnection`'s one enqueue path (so `send`, `comment`, heartbeats and the initial `retry:` frame are all counted)     | the frame was enqueued                                             | the backlog guard refused it, or `enqueue` threw. A write on an already-closed connection is the existing silent no-op and is not counted.        |
+| backplane | `backplane-publish` | `publish()` of the memory, redis and messaging transports                                                                | `publish()` resolved — transport completion, never remote delivery | `publish()` rejected (the rejection is returned unchanged)                                                                                        |
+| backplane | `backplane-receive` | each transport's existing dispatch, after its own frame-shape and own-origin filters (a filtered frame is not a receive) | every local handler returned                                       | at least one local handler threw (the existing isolation already continues to the rest)                                                           |
+
+`lastDurationMs` is a number only for `backplane-publish`, the one operation that settles
+asynchronously. Every other operation is instantaneous at its capture site and carries `null`, which
+also keeps the per-frame send path at one clock read. Heartbeat frames count as sends because they
+are frames the connection writes; §6's idle-connection test disables them for that reason. The
+`'custom'` backplane arm is an application-supplied transport and is never observed: its options
+carry no `diagnostics` field, and its source answers `disabled`.
+
+**Source kinds and gauges per kind.** A websocket or sse source that is enabled and healthy answers
+`state: 'ready'` with `gauges.state: 'available'` in every case, including before any operation and
+after every record has expired. A backplane source answers `gauges.state: 'unsupported'`, and its
+state comes from record age alone (§3.4). `dropped` is structurally `0` for every built-in source:
+one alias and at most three operations per source can never reach the 64-slot bound. The field stays
+on the wire contract, where a third-party source may use it.
+
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol                     | Kind                       | Consumer / real code path that READS it                    |
-| ----------------------------------- | -------------------------- | ---------------------------------------------------------- |
-| `IRealtimeDiagnosticsSource`        | common interface           | Owning source and connector reader.                        |
-| `RealtimeDiagnosticsSnapshot`       | common type                | Source, exact projector and client.                        |
-| `RealtimeDiagnosticsRecord`         | common type                | Bounded collector and devtool summary.                     |
-| `RealtimeDiagnosticsResponse`       | common type                | Connector and native client method.                        |
-| `IDiagnosticsClient.realtime`       | client method              | Devtool inspector.                                         |
-| `RealtimeDiagnosticsOptions`        | owning package option type | Application opt-in and collector construction.             |
-| `CAPABILITIES.REALTIME_DIAGNOSTICS` | common token               | Owning plugin multi-registration and connector resolution. |
+| Exported symbol                      | Kind                       | Consumer / real code path that READS it                    |
+| ------------------------------------ | -------------------------- | ---------------------------------------------------------- |
+| `IRealtimeDiagnosticsSource`         | common interface           | Owning source and connector reader.                        |
+| `RealtimeDiagnosticsSnapshot`        | common type                | Source, exact projector and client.                        |
+| `RealtimeDiagnosticsRecord`          | common type                | Bounded collector and devtool summary.                     |
+| `RealtimeDiagnosticsResponse`        | common type                | Connector and native client method.                        |
+| `IDiagnosticsClient.realtime`        | client method              | Devtool inspector.                                         |
+| `RealtimeDiagnosticsOptions`         | owning package option type | Application opt-in and collector construction.             |
+| `CAPABILITIES.REALTIME_DIAGNOSTICS`  | common token               | Owning plugin multi-registration and connector resolution. |
+| `RealtimeSourceKind`                 | common type                | Snapshot `sourceKind`, collector construction, validators. |
+| `RealtimeObservationOperation`       | common type                | Record `operation`, collector entry points, validators.    |
+| `RealtimeGaugeState`                 | common type                | Snapshot `gauges.state`, validators and client labels.     |
+| `compileRealtimeDiagnosticsAlias`    | common function            | The three plugin factories, at construction (§3.1).        |
+| `createRealtimeObservationCollector` | common function            | The three plugins' `register()` (§3.1).                    |
+| `IRealtimeObservationCollector`      | common interface           | The three packages' capture sites and attachment helpers.  |
 
-Collectors, attachment helpers and projectors remain internal. No general observer/event-bus API.
+The last three are the §3.1 maintainer decision: one collector in `common` instead of three copies.
+`RealtimeDiagnosticsOptions` is declared in `common` and re-exported unchanged by each owning
+barrel. Attachment helpers and projectors remain internal. No general observer/event-bus API.
 
 ### 4.1 Options — every option names its consumer
 
@@ -226,9 +278,11 @@ Collectors, attachment helpers and projectors remain internal. No general observ
 | `packages/common/src/services/diagnostics.ts`                                 | Typed contract, export, authenticated projection or reader. |
 | `packages/common/src/tokens.ts`                                               | Typed contract, export, authenticated projection or reader. |
 | `packages/common/src/index.ts`                                                | Typed contract, export, authenticated projection or reader. |
+| `packages/common/src/diagnostics/realtime-observations.ts`                    | The one realtime collector and option validation (§3.1).    |
 | `packages/diagnostics-plugin/src/interfaces/index.ts`                         | Typed contract, export, authenticated projection or reader. |
 | `packages/diagnostics-plugin/src/plugin/diagnostics-plugin.ts`                | Typed contract, export, authenticated projection or reader. |
 | `packages/diagnostics-plugin/src/protocol/protocol.ts`                        | Typed contract, export, authenticated projection or reader. |
+| `packages/diagnostics-plugin/src/protocol/realtime-protocol.ts`               | Copy-once source read, response build and wire validator.   |
 | `packages/diagnostics-plugin/src/transport/connector-handler.ts`              | Typed contract, export, authenticated projection or reader. |
 | `packages/diagnostics-plugin/src/client/client.ts`                            | Typed contract, export, authenticated projection or reader. |
 | `packages/websocket-plugin/src/services/websocket-service.ts`                 | Opt-in capture, source, options or lifecycle wiring.        |
@@ -262,6 +316,8 @@ contract release; no external dependency is introduced.
 | `packages/common/test/unit/application-diagnostics-contracts.test.ts`        | `packages/common/src/services/diagnostics.ts`                                 | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                   |
 | `packages/common/test/unit/application-diagnostics-contracts.test.ts`        | `packages/common/src/tokens.ts`                                               | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                   |
 | `packages/common/test/unit/application-diagnostics-contracts.test.ts`        | `packages/common/src/index.ts`                                                | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                   |
+| `packages/common/test/unit/realtime-observations.test.ts`                    | `packages/common/src/diagnostics/realtime-observations.ts`                    | Option validation, per-kind state/gauge rules, retention, latching, close, clamping and saturation.       |
+| `packages/diagnostics-plugin/test/unit/realtime-observations.test.ts`        | `packages/diagnostics-plugin/src/protocol/realtime-protocol.ts`               | Hostile sources, kind/operation/gauge combinations, duplicate aliases, budget collapse, wire validator.   |
 | `packages/diagnostics-plugin/test/unit/realtime-observations.test.ts`        | `packages/diagnostics-plugin/src/interfaces/index.ts`                         | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                   |
 | `packages/diagnostics-plugin/test/unit/realtime-observations.test.ts`        | `packages/diagnostics-plugin/src/plugin/diagnostics-plugin.ts`                | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                   |
 | `packages/diagnostics-plugin/test/unit/realtime-observations.test.ts`        | `packages/diagnostics-plugin/src/protocol/protocol.ts`                        | Exact contract, disabled path, failure isolation, bounds, export consumer and teardown.                   |
@@ -355,10 +411,116 @@ audits; it is not implied by completing this milestone.
 
 ## 10. Required security reviews and acceptance evidence
 
-**Design gate — pending recorded review before implementation.** Review this exact dataflow: real
-producer -> primitive-only observation -> bounded source -> authenticated fixed route -> exact
-projector -> validating native client. Confirm field allowlist, instance/data scope, budgets,
-retention and negative tests. Resolve security-boundary findings in this plan first.
+### 10.1 Design security review
+
+**Recorded 2026-09-28, before implementation.** Checked against the §3 decisions as planned,
+including the two recorded on 2026-09-28 (one collector in `common`, §3.1; per-operation meaning,
+§3.6). It was written by the context that is implementing the milestone, at the maintainer's
+direction. It is not the committed-tree audit, which must still run in a fresh context. **Awaiting
+the maintainer's approval.**
+
+**Purpose it serves.** M98 lets a developer inspect a running application on their own machine
+without the devtool gaining access to live services, application data, credentials or any mutation
+control. For the realtime inspector the devtool may learn HOW the owned WebSocket hub, SSE hub and
+backplane transport are behaving: how many connections opened, closed and failed, how many frames
+were written or refused, how many SSE streams were closed for backlog, how many backplane
+publications resolved or rejected and how many arriving frames reached local handlers, and the
+current open-connection and group counts. It never learns WHAT was sent, WHO is connected, WHICH
+room or channel exists, or WHERE a frame came from.
+
+**Reviewed flow:** a socket or stream event, an application `send`, a room/channel broadcast, a
+heartbeat tick, or a backplane `publish`/delivery → the owning object's existing code path → one
+`WeakMap` probe for an attached collector (none → the pre-M98l path unchanged) → a call carrying
+only `(fixed operation, boolean outcome, boolean backpressure)` or, for `backplane-publish`, a
+monotonic start reading → the one `common` collector (at most three records per source, keyed by
+operation under the source's single approved alias, monotonic readings only) → the same object
+answers `IRealtimeDiagnosticsSource.snapshot()`, calling its captured gauge reader (two size getters
+of the plugin's own service) only on an enabled, healthy, websocket or sse source → registered under
+the multi-provider `CAPABILITIES.REALTIME_DIAGNOSTICS` → the connector resolves the sources once at
+bootstrap (more than 16 refuses startup) → authenticated `GET /v1/realtime` behind every M98b
+control (exact `Host` authority, `Origin` refusal, forwarding-header refusal, MAC over canonical
+fields, sequence replay refusal, expiry and revocation, instance binding) → own-data copy of each
+snapshot with per-source isolation → exact validator including the kind/operation/gauge combination
+rules → fixed 256 KiB budget → signed frame → native client re-validates and binds the instance.
+Minimization happens at the capture site, before the collector: the frame, the `SseMessage`, the
+close code and reason, the request, its headers and query, the principal, the connection id, the
+room or channel name, the backplane `RealtimeFrame` (origin, name, payload, `exceptId`) and any
+thrown value stay in the owning code's locals. The collector's signatures cannot accept any of them.
+
+**Assets.**
+
+| Asset                                                     | Why it is sensitive                                                                                    |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Frame and message payloads (WS data, `SseMessage`)        | Application data: chat text, tokens, PII.                                                              |
+| Upgrade request: URL, query, headers, cookies             | Carry credentials, session ids and tenant selectors.                                                   |
+| The principal on `WebSocketConnectionContext.user`        | Identifies a user.                                                                                     |
+| Connection ids, `exceptId`, backplane `origin`            | Correlate to users and instances; `origin` identifies a replica.                                       |
+| Room and channel names                                    | Routinely derived from user or tenant ids (`user-42`, `tenant-acme.orders`); unbounded if user-chosen. |
+| Close codes and reason text, handler and transport errors | Reason text and errors may quote payloads, hosts or credentials.                                       |
+| Counts, gauges and publish timings                        | Low sensitivity; reveal activity levels and connection counts, aggregated across every tenant.         |
+| The session key and signed channel                        | Owned by M98b; this letter adds a route behind it and must not weaken it.                              |
+
+**Attackers and their reach.**
+
+| Attacker                                                                                   | Must not be able to                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| An unpaired local process, or a browser tab on the host                                    | Read any realtime observation, cause a source read or a gauge read, or obtain an unsigned response.                                                                                                                                                                                                                                                                                                          |
+| A website using DNS rebinding (its hostname resolved to `127.0.0.1`; may send no `Origin`) | Read any realtime observation or cause a source read.                                                                                                                                                                                                                                                                                                                                                        |
+| The paired devtool (trusted reader of the minimized DTO)                                   | Obtain any asset above except counts, gauges and publish timings under approved source aliases; open, close or write to a connection; create or enumerate a room or channel; publish to or subscribe on the backplane.                                                                                                                                                                                       |
+| A remote WebSocket or SSE client (untrusted network input)                                 | Make observation grow any state, reach the collector with a byte it sent, change how its own or anyone else's connection behaves, or turn a close reason, a frame or a subprotocol into a retained or projected value.                                                                                                                                                                                       |
+| A peer replica, or anything able to publish on the shared backplane topic                  | Have an origin, a room or channel name, a payload or a malformed frame observed or retained; its frames only ever move a receive counter, and only after the transport's existing shape and origin filters admit them.                                                                                                                                                                                       |
+| A third-party in-process plugin registering a hostile source                               | Put an unvalidated field, an accessor result, a control character, a forged kind/operation/gauge combination or an oversized list into the signed frame, or make the connector invoke its getters. It MAY blank every source's reporting through the two deliberate whole-response collapses (claiming another source's alias; pushing the body over budget), which answer a value-free `collection-failed`. |
+| A failing or throwing clock, gauge reader, handler or transport                            | Change any send, close, broadcast, publish or delivery result, error identity, ordering or membership, or leak error text.                                                                                                                                                                                                                                                                                   |
+
+**Out of the threat model (unchanged from M98b and M98i–M98j):** a privileged local sniffer, remote
+access, and shared multi-tenant production use. A third-party source runs with application
+privileges and is not sandboxed; the reader keeps its OUTPUT out of the signed frame, it does not
+contain its code. Existing application logging (the websocket and SSE plugins' `warn` on a failed
+backplane publish, and the upgrade-routing `error` log) is a separate path this change neither
+alters nor sanitizes. A custom backplane transport, an application-constructed `WebSocketService` or
+`SseService`, and a replacement registered under `CAPABILITIES.WEBSOCKET`, `SSE` or
+`REALTIME_BACKPLANE` are not observed and are never labelled observed.
+
+**Approved budgets.** One approved alias per source and at most three records per source (one per
+operation its kind admits), so no capacity refusal exists and `dropped` stays `0`; the 64-slot and
+16-source bounds of the shared contract still apply to what the connector accepts. A record expires
+60 seconds after its last observation, checked on write and read, never by a timer; a backplane
+source is `stale` when every record is older than 30 seconds. Every counter saturates at
+`Number.MAX_SAFE_INTEGER`. Per observed event: one clock read, and a second only for
+`backplane-publish` (its start). No queue, no I/O, no per-event allocation beyond the one settlement
+closure `backplane-publish` already needs to observe its promise. Gauges: two synchronous
+size-getter reads per authenticated read of an enabled websocket or sse source; zero for a
+backplane, disabled, closed or failed source; never on a write path. At most 16 sources; a 17th
+refuses startup with a fixed error. A 256 KiB response that collapses to a fixed `collection-failed`
+with no sources rather than truncating. The disabled path is one `WeakMap.get` per observed event.
+§3.4's overhead target is measured before completion and recorded, as M98i and M98j did; it is not
+assumed.
+
+| Finding                                                                                                                              | Resolution                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Room and channel names are the most tempting label and the most sensitive one (user and tenant ids).                                 | No per-group label exists anywhere: one alias per source, fixed operations, and a `groups` gauge that is a count. Nothing iterates, names or `peek`s a group; the gauge reads `roomCount`/`channelCount`, which are `Map.size` reads.                                                                                                                                              |
+| A close code or reason is attacker-supplied (the client chooses both).                                                               | Only a boolean leaves the sink: `code === 1006` or an error seen. The reason string is never read by observation code. Canary test plants reason text and asserts it absent at snapshot, wire and client DTO.                                                                                                                                                                      |
+| A remote client can drive the send, open and close paths at will.                                                                    | Every observation lands in one of at most three fixed records, so no input grows collector state. Counters saturate.                                                                                                                                                                                                                                                               |
+| The backplane topic is shared infrastructure; a peer can publish anything on it.                                                     | Receive is counted after the transport's existing `isRealtimeFrame` and own-origin filters, and only as a count. A frame one of those filters drops is not a receive and is not otherwise observed. The frame's fields are never read by observation code.                                                                                                                         |
+| The gauge reader runs application-reachable code on a read.                                                                          | It is a closure over the plugin's OWN service instance, captured at `register()`, reading two getters that return `Set.size`/`Map.size`. It is never resolved from the registry, so a replacement provider is never invoked. It runs only inside an authenticated read of an enabled, healthy websocket or sse source; a throw latches `collection-failed`. `close()` releases it. |
+| A wrapping observer could change an application-visible result: a `send` that throws, a publish that rejects, a handler that throws. | `send` records and rethrows the SAME value. `backplane-publish` returns a promise derived from the transport's that re-rejects with the ORIGINAL reason (the M98i lesson: a side branch would mark it handled). Dispatch isolation is unchanged; observation reads only whether `onError` fired. Every collector call is non-throwing.                                             |
+| A hostile third-party source could smuggle fields, forge a kind, or have the connector run its code.                                 | The shared `copyOwnData`/`copyOwnDataList` reader (own DATA properties only, exact keys, plain prototype, no getter invoked) plus a validator enforcing the kind/operation, kind/gauge and state/gauge combinations; `unknown` is admitted on the wire only in the connector's exact synthetic shape and refused from a source.                                                    |
+| Two sources claiming one alias would make the report ambiguous.                                                                      | Duplicate non-null aliases collapse the whole response to `collection-failed` with no sources (the M98i/M98j rule).                                                                                                                                                                                                                                                                |
+| A source could be read before authentication.                                                                                        | Sources are read only inside the authenticated dispatch, after the shared M98b gate; bootstrap only collects the list.                                                                                                                                                                                                                                                             |
+| Shutdown could resurrect state, or a late read could touch a closed service.                                                         | `onClose` detaches first, then closes the collector (marked closed before clearing, gauge reader released). A late observation is discarded; `snapshot()` answers `disabled` with `disabled` gauges and never calls the reader.                                                                                                                                                    |
+| A DNS-rebinding page reaches the loopback port as same-origin to its own hostname.                                                   | Identical to M98i/M98j: exact `Host` authority, any `Origin` refused, per-launch-key MAC, no CORS permission, `127.0.0.1`-only listener. The audit re-probes it on a raw socket.                                                                                                                                                                                                   |
+| A shared collector in `common` is new public surface an application could call.                                                      | It is a pure, allocation-bounded object with no I/O and no registry access; calling it only builds another collector nobody reads. The source registration and the attachment remain inside the owning plugins.                                                                                                                                                                    |
+| Counts aggregate every tenant; publish timings are a coarse latency side channel.                                                    | As M98i/M98j: enable on an approved development dataset only; no tenant selector or per-user identifier exists; `lastDurationMs` is integer milliseconds of the last publish, not per frame.                                                                                                                                                                                       |
+
+**For the audit (in addition to the implementation gate below):** probe DNS rebinding on a raw
+socket; probe a hostile source with accessor, index-getter, class-instance, symbol-key and `Proxy`
+snapshots, and with forged `unknown`/`sse`-backpressure-on-`send`/numeric-backplane-gauge
+combinations; drive a real WebSocket and a real SSE stream with canaries in frames, messages, close
+reasons, query strings and room/channel names; compare send, close, publish and delivery behaviour
+observed versus unobserved under a throwing transport, a throwing handler, a throwing clock and a
+throwing gauge reader.
+
+**Approved by:** pending — the maintainer.
 
 **Implementation gate — pending committed-tree audit before completion/publication.** Record commit,
 reviewed files, tested adapters/runtimes, findings and dispositions in the implementation PR. Test
