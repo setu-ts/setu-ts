@@ -5,7 +5,7 @@
  * @since 0.2.0
  */
 
-import type { IRealtimeBackplane } from '@setu-ts/common';
+import type { IRealtimeBackplane, RealtimeDiagnosticsOptions } from '@setu-ts/common';
 
 /**
  * The `ioredis`-shaped client surface the Redis transport uses.
@@ -110,6 +110,23 @@ export interface BackplaneCommonOptions {
    * correct for every deployment; override only to make a test deterministic.
    */
   readonly origin?: string;
+  /**
+   * Opt-in realtime lifecycle observations for the local diagnostics
+   * connector (M98l). Absent (the default) registers an inert `disabled`
+   * source and observes nothing. Not available on the `'custom'` arm: an
+   * application-supplied transport is never observed.
+   *
+   * When set, the plugin counts, under the one approved `alias`, how many
+   * publications resolved or rejected (and how long the last took) and how
+   * many arriving frames reached the local handlers, after the transport's
+   * own shape and origin filters. Publication completion is transport
+   * completion, never delivery to a peer. No frame, room or channel name,
+   * payload or origin is ever observed. Validated when
+   * `RealtimeBackplanePlugin(...)` is called.
+   *
+   * @since 0.8.0
+   */
+  readonly diagnostics?: RealtimeDiagnosticsOptions;
 }
 
 /**

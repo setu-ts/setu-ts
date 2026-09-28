@@ -11,8 +11,18 @@ import type {
   IPlugin,
   IPluginContext,
   IRealtimeBackplane,
+  IRealtimeDiagnosticsSource,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  compileRealtimeDiagnosticsAlias,
+  createRealtimeObservationCollector,
+  PLUGIN_PRIORITY,
+} from '@setu-ts/common';
+import {
+  attachRealtimeObserver,
+  detachRealtimeObserver,
+} from '../diagnostics/realtime-observations.ts';
 import type { RealtimeBackplanePluginOptions } from '../interfaces/index.ts';
 import { createBackplane } from '../transports/backplane-factory.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -49,6 +59,13 @@ const PLUGIN_NAME = 'realtime-backplane-plugin';
 export function RealtimeBackplanePlugin(
   options: RealtimeBackplanePluginOptions = { transport: 'memory' },
 ): IPlugin {
+  // M98l: validated here, before any application exists. The `'custom'` arm
+  // carries no `diagnostics` option: its transport is never observed.
+  const diagnosticsOption = options.transport === 'custom' ? undefined : options.diagnostics;
+  const diagnosticsAlias = diagnosticsOption === undefined
+    ? null
+    : compileRealtimeDiagnosticsAlias(diagnosticsOption);
+
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
@@ -85,6 +102,23 @@ export function RealtimeBackplanePlugin(
 
       ctx.services.register<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE, backplane);
 
+      // M98l: one realtime source as a MULTI provider, describing THIS
+      // transport only. A backplane has no gauges. Opted out (and always on
+      // the `'custom'` arm), the collector is inert and nothing is attached.
+      const collector = createRealtimeObservationCollector({
+        kind: 'backplane',
+        alias: diagnosticsAlias,
+        clock: () => ctx.runtime.hrtime(),
+      });
+      if (collector.enabled) {
+        attachRealtimeObserver(backplane, collector);
+      }
+      ctx.services.register<IRealtimeDiagnosticsSource>(
+        CAPABILITIES.REALTIME_DIAGNOSTICS,
+        collector.source,
+        { multi: true },
+      );
+
       ctx.health.register('realtime-backplane', async (): Promise<HealthCheckResult> => {
         // M70c: a fan-out failure is `degraded` (local delivery still works, so
         // /ready keeps serving), never `down`. A transport that cannot probe
@@ -104,6 +138,9 @@ export function RealtimeBackplanePlugin(
       });
 
       ctx.lifecycle.onClose(async () => {
+        // M98l: detached and closed BEFORE the transport tears down.
+        detachRealtimeObserver(backplane);
+        collector.close();
         await backplane.close();
       });
     },

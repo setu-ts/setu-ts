@@ -10,10 +10,20 @@ import type {
   IPlugin,
   IPluginContext,
   IRealtimeBackplane,
+  IRealtimeDiagnosticsSource,
   ISseService,
 } from '@setu-ts/common';
 // IRuntimeServices type used via ctx.runtime (non-optional property)
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  compileRealtimeDiagnosticsAlias,
+  createRealtimeObservationCollector,
+  PLUGIN_PRIORITY,
+} from '@setu-ts/common';
+import {
+  attachRealtimeObserver,
+  detachRealtimeObserver,
+} from '../diagnostics/realtime-observations.ts';
 import type { SsePluginOptions } from '../interfaces/index.ts';
 import { SseService } from '../services/sse-service.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
@@ -38,6 +48,11 @@ const PLUGIN_NAME = 'sse-plugin';
  * @since 0.1.0
  */
 export function SsePlugin(options?: SsePluginOptions): IPlugin {
+  // M98l: validated here, before any application exists.
+  const diagnosticsAlias = options?.diagnostics === undefined
+    ? null
+    : compileRealtimeDiagnosticsAlias(options.diagnostics);
+
   return {
     name: PLUGIN_NAME,
     version: denoJson.version,
@@ -74,6 +89,27 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
       const sseService = new SseService(options, runtime, backplane, ctx.logger);
       ctx.services.register<ISseService>(CAPABILITIES.SSE, sseService);
 
+      // M98l: one realtime source as a MULTI provider, describing THIS
+      // service only; the gauge reader closes over this instance rather than
+      // resolving the SSE token. Opted out, nothing is attached.
+      const collector = createRealtimeObservationCollector({
+        kind: 'sse',
+        alias: diagnosticsAlias,
+        clock: () => runtime.hrtime(),
+        gauges: () => ({
+          openConnections: sseService.connectionCount,
+          groups: sseService.channelCount,
+        }),
+      });
+      if (collector.enabled) {
+        attachRealtimeObserver(sseService, collector);
+      }
+      ctx.services.register<IRealtimeDiagnosticsSource>(
+        CAPABILITIES.REALTIME_DIAGNOSTICS,
+        collector.source,
+        { multi: true },
+      );
+
       // Register health indicator (§3.9).
       ctx.health.register(
         'sse',
@@ -104,6 +140,9 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
         // shutdown cannot reach a half-torn-down service. The backplane's own
         // transport is closed by the plugin that owns it.
         unsubscribe?.();
+        // M98l: detached first, then closed (releasing the gauge reader).
+        detachRealtimeObserver(sseService);
+        collector.close();
         sseService.closeAll();
       });
     },

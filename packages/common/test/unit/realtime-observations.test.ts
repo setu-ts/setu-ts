@@ -101,6 +101,15 @@ describe('M98l common contracts', () => {
     expect(Object.keys(response).sort()).toEqual(['instanceId', 'sources', 'state', 'version']);
   });
 
+  it('registers a frozen snapshot-only facade, never the collector', () => {
+    const ws = collector('websocket');
+    expect(Object.keys(ws.source)).toEqual(['snapshot']);
+    expect(Object.isFrozen(ws.source)).toBe(true);
+    expect(ws.source).toBe(ws.source);
+    ws.observe('open', true);
+    expect(ws.source.snapshot()).toEqual(ws.snapshot());
+  });
+
   it('a record carries exactly the committed keys', () => {
     const sse = collector('sse');
     sse.observe('close', true);

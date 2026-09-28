@@ -6,6 +6,7 @@
  */
 
 import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
+import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { dispatchFrame } from './dispatch.ts';
 
 /**
@@ -90,6 +91,16 @@ export class MemoryBackplane implements IRealtimeBackplane {
   }
 
   publish(frame: RealtimeFrame): Promise<void> {
+    // M98l: counted as `backplane-publish` when observed. Only the settlement
+    // is recorded; the frame is never read.
+    const observer = realtimeObserverOf(this);
+    return observer === undefined
+      ? this.#publish(frame)
+      : observer.observePublish(() => this.#publish(frame));
+  }
+
+  /** The publication itself: delivered to every other member of the bus. */
+  #publish(frame: RealtimeFrame): Promise<void> {
     const members = BUSES.get(this.#bus);
     if (members === undefined) {
       return Promise.resolve();
@@ -136,8 +147,10 @@ export class MemoryBackplane implements IRealtimeBackplane {
     if (frame.origin === this.origin) {
       return;
     }
-    dispatchFrame(this.#handlers, frame, (error) => {
+    const delivered = dispatchFrame(this.#handlers, frame, (error) => {
       this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
     });
+    // M98l: counted only after the own-origin filter admitted the frame.
+    realtimeObserverOf(this)?.observe('backplane-receive', delivered);
   }
 }

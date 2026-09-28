@@ -84,8 +84,9 @@ export interface RealtimeObservationCollectorInit {
 }
 
 /**
- * The collector a realtime plugin attaches to its component. It is also the
- * `IRealtimeDiagnosticsSource` the plugin registers.
+ * The collector a realtime plugin attaches to its component. It answers
+ * `snapshot()` itself; the plugin registers its frozen {@linkcode source}
+ * facade, which exposes `snapshot()` alone.
  *
  * Every entry point is non-throwing and never changes the application's
  * result: a failing clock or gauge reader latches `collection-failed`, clears
@@ -96,6 +97,12 @@ export interface RealtimeObservationCollectorInit {
 export interface IRealtimeObservationCollector extends IRealtimeDiagnosticsSource {
   /** `true` when opted in and not yet closed; a capture site skips work when `false`. */
   readonly enabled: boolean;
+  /**
+   * The frozen, snapshot-only facade a plugin registers under
+   * `CAPABILITIES.REALTIME_DIAGNOSTICS`. Registering the collector itself
+   * would hand every registry reader its `observe` and `close`.
+   */
+  readonly source: IRealtimeDiagnosticsSource;
   /**
    * Records one instantaneous observation. An operation the collector's kind
    * does not admit is ignored.
@@ -284,6 +291,9 @@ class RealtimeObservationCollector implements IRealtimeObservationCollector {
   #gauges: (() => RealtimeGaugeReading) | undefined;
   #failed = false;
   #closed = false;
+  readonly source: IRealtimeDiagnosticsSource = Object.freeze({
+    snapshot: (): RealtimeDiagnosticsSnapshot => this.snapshot(),
+  });
 
   constructor(init: RealtimeObservationCollectorInit) {
     this.#kind = init.kind;
@@ -531,7 +541,7 @@ class RealtimeObservationCollector implements IRealtimeObservationCollector {
  * the clock or the gauges, and answers a `disabled` snapshot.
  *
  * @param init - The component kind, approved alias, clock and gauge reader
- * @returns The collector, which is also the source
+ * @returns The collector; register its `source` facade, never the collector
  * @throws {TypeError} When an enabled `websocket` or `sse` collector is given
  * no gauge reader
  * @example

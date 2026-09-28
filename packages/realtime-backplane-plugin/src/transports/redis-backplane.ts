@@ -7,6 +7,7 @@
 
 import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 import type { IRedisBackplaneClient, RedisBackplaneOptions } from '../interfaces/index.ts';
+import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { dispatchFrame } from './dispatch.ts';
 import { isRealtimeFrame } from './messaging-backplane.ts';
 import { loadRedisModule } from './redis-module.ts';
@@ -276,7 +277,17 @@ export class RedisBackplane implements IRealtimeBackplane {
     }
   }
 
-  async publish(frame: RealtimeFrame): Promise<void> {
+  publish(frame: RealtimeFrame): Promise<void> {
+    // M98l: counted as `backplane-publish` when observed. Completion means
+    // `publish()` resolved, never that a peer received the frame.
+    const observer = realtimeObserverOf(this);
+    return observer === undefined
+      ? this.#publish(frame)
+      : observer.observePublish(() => this.#publish(frame));
+  }
+
+  /** The publication itself, always on the publishing connection. */
+  async #publish(frame: RealtimeFrame): Promise<void> {
     // Always the publisher: the subscriber connection would reject this.
     await this.#publisher?.publish(this.#topic, JSON.stringify(frame));
   }
@@ -340,8 +351,10 @@ export class RedisBackplane implements IRealtimeBackplane {
     // Isolated per handler: this runs inside ioredis's `message` listener,
     // where a throw would be unhandled, and the WebSocket and SSE plugins share
     // this subscription so one must not starve the other.
-    dispatchFrame(this.#handlers, parsed, (error) => {
+    const delivered = dispatchFrame(this.#handlers, parsed, (error) => {
       this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
     });
+    // M98l: counted only after the parse, shape and own-origin filters.
+    realtimeObserverOf(this)?.observe('backplane-receive', delivered);
   }
 }

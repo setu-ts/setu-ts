@@ -72,6 +72,7 @@ export type {
 export type {
   EncodedPayload,
   IRealtimeBackplane,
+  RealtimeDiagnosticsOptions,
   RealtimeFrame,
   RealtimeFrameHandler,
   RealtimeFrameKind,

@@ -38,6 +38,10 @@ import {
   isWebSocketUpgradeRequest,
 } from '@setu-ts/common';
 import { WebSocketConnection } from '../connection/websocket-connection.ts';
+import {
+  attachRealtimeObserver,
+  realtimeObserverOf,
+} from '../diagnostics/realtime-observations.ts';
 import { RoomRegistry } from '../rooms/room-registry.ts';
 import type { WsRoute } from '../routing/ws-route-table.ts';
 import { WsRouteTable } from '../routing/ws-route-table.ts';
@@ -57,6 +61,8 @@ const STATUS_ROUTER_FAILED = 500;
 const CLOSE_MESSAGE_TOO_BIG = 1009;
 /** Close code used when the server shuts down. */
 const CLOSE_GOING_AWAY = 1001;
+/** RFC 6455 abnormal closure: the connection dropped without a close frame. */
+const CLOSE_ABNORMAL = 1006;
 
 /** Resolved options with every default applied. */
 interface ResolvedOptions {
@@ -597,6 +603,10 @@ export class WebSocketService implements IWebSocketService {
     // fails after the router accepted signals it via onClose, so a refused or
     // malformed upgrade can never leak a slot and starve `maxConnections`.
     let settled = false;
+    // M98l: whether the transport reported an error on this connection. Only
+    // this boolean and the close code's 1006 test ever reach the collector —
+    // never the error, the code value or the reason.
+    let errored = false;
     const settlePending = (): void => {
       if (!settled) {
         settled = true;
@@ -616,6 +626,11 @@ export class WebSocketService implements IWebSocketService {
         );
         conn = opened;
         this.#connections.add(opened);
+        const observer = realtimeObserverOf(this);
+        if (observer !== undefined) {
+          attachRealtimeObserver(opened, observer);
+          observer.observe('open', true);
+        }
         invoke(handlers.onOpen, opened, context);
       },
 
@@ -665,12 +680,18 @@ export class WebSocketService implements IWebSocketService {
         // release its slot, and that path has no connection to report on.
         settlePending();
         if (conn === null) {
+          // The adapter accepted the upgrade and the handshake then failed.
+          realtimeObserverOf(this)?.observe('open', false);
           return;
         }
         const closing = conn;
         closing.markClosed();
         this.#connections.delete(closing);
         this.#rooms.evict(closing);
+        realtimeObserverOf(closing)?.observe(
+          'close',
+          !errored && event.code !== CLOSE_ABNORMAL,
+        );
         invoke(handlers.onClose, closing, event);
       },
 
@@ -678,6 +699,7 @@ export class WebSocketService implements IWebSocketService {
         if (conn === null) {
           return;
         }
+        errored = true;
         report(conn, error);
       },
     };

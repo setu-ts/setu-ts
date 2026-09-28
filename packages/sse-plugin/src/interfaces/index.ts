@@ -5,6 +5,8 @@
  * @since 0.1.0
  */
 
+import type { RealtimeDiagnosticsOptions } from '@setu-ts/common';
+
 /**
  * Options for the SsePlugin.
  *
@@ -39,4 +41,20 @@ export interface SsePluginOptions {
    * @since 0.2.0
    */
   readonly scalingNotice?: boolean;
+  /**
+   * Opt-in realtime lifecycle observations for the local diagnostics
+   * connector (M98l). Absent (the default) registers an inert `disabled`
+   * source and observes nothing.
+   *
+   * When set, the plugin counts, under the one approved `alias`, how many
+   * streams opened and closed (closes caused by the backlog guard are
+   * counted separately) and how many frames were enqueued or refused, and
+   * reads the service's current connection and channel counts when a paired
+   * devtool asks. No message, comment, channel name, connection id,
+   * `Last-Event-ID` or request data is ever observed. Validated when
+   * `SsePlugin(...)` is called.
+   *
+   * @since 0.8.0
+   */
+  readonly diagnostics?: RealtimeDiagnosticsOptions;
 }

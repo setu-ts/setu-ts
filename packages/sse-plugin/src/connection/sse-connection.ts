@@ -19,6 +19,14 @@ import type {
 } from '@setu-ts/common';
 import { encodeSseComment, encodeSseMessage } from '../utils/sse-frame.ts';
 import { SSE_HWM_BYTES, SSE_MAX_BACKLOG_BYTES } from '../channels/channel-registry.ts';
+import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
+
+/**
+ * Why a connection closed, for M98l observation only: `backpressure` is the
+ * backlog guard, `error` an enqueue that threw, `normal` everything else. The
+ * category is the only thing that reaches the collector.
+ */
+type CloseCause = 'normal' | 'backpressure' | 'error';
 
 /**
  * Implements {@linkcode IConn}.
@@ -132,21 +140,28 @@ export class SseConnection implements IConn {
     if (!this.#isOpen || !this.#controller) return;
 
     // Backpressure check (§3.6).
+    // M98l: every frame this path writes — a message, a comment, a heartbeat
+    // — is counted here, once. Only the outcome reaches the collector.
+    const observer = realtimeObserverOf(this);
     const desired = this.#controller.desiredSize;
     if (desired !== null && desired < -SSE_MAX_BACKLOG_BYTES) {
       // Fail-fast: close the connection when backlog exceeds 1 MiB.
-      this.#cleanup();
+      observer?.observe('send', false);
+      this.#cleanup('backpressure');
       return;
     }
 
     try {
       this.#controller.enqueue(this.#encoder.encode(frame));
     } catch {
+      observer?.observe('send', false);
       // Controller already closed.
       if (this.#isOpen) {
-        this.#cleanup();
+        this.#cleanup('error');
       }
+      return;
     }
+    observer?.observe('send', true);
   }
 
   /** Called when the stream is cancelled by the consumer. */
@@ -154,10 +169,15 @@ export class SseConnection implements IConn {
     this.#cleanup();
   }
 
-  /** Idempotent cleanup (§3.3). */
-  #cleanup(): void {
+  /**
+   * Idempotent cleanup (§3.3).
+   *
+   * @param cause - Why the connection closed; read only by M98l observation
+   */
+  #cleanup(cause: CloseCause = 'normal'): void {
     if (!this.#isOpen) return;
     this.#isOpen = false;
+    realtimeObserverOf(this)?.observe('close', cause === 'normal', cause === 'backpressure');
 
     // Clear heartbeat interval.
     if (this.#heartBeatHandle !== null) {
