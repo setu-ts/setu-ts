@@ -594,3 +594,19 @@ were again observed failing and restored. **No finding open.** Record outside th
 (`.verify-98l/audit2/AUDIT-98l-round2.md`). Its informational notes were applied after it: this
 record gained the out-of-scope sentence above (O1), and an internal comment in the collector that
 used F1's old phrasing was reworded (O2, comment only, no code change).
+
+**Live Redis, after round 2 (2026-09-28), at the maintainer's request.** Both audits left the Redis
+backplane reviewed in source only.
+`packages/realtime-backplane-plugin/test/integration/realtime-observations-redis.test.ts` now drives
+it against a real Redis 7: two replicas, each a real kernel application with the `'redis'`
+backplane, the WebSocket plugin and the diagnostics connector, and a real WebSocket client on
+replica B. Replica A broadcasts to B's room across real pub/sub, and both replicas are read through
+their signed connectors: A records one resolved publish with a measured duration and only the one
+genuine receive (B's marker), because Redis hands A its own message back and the own-origin filter
+drops it before it is counted; B records one receive, one send and the live gauges; room, payload,
+origin and topic canaries are absent from every signed response. With the origin filter removed from
+`RedisBackplane` the test fails (A records two receives) and passes once restored; it passed three
+further runs, and reports `ignored`, not passed, without `REDIS_URL`. The existing guarded Redis
+suites in the backplane, websocket and SSE packages also passed against the same server. Not
+exercised live: a publish that REJECTS on a real Redis — ioredis queues commands while disconnected
+rather than rejecting — which stays covered by the fake-broker tests.
