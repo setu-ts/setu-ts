@@ -245,21 +245,24 @@ on the wire contract, where a third-party source may use it.
 
 ## 4. Exported surface — every symbol names its consumer
 
-| Exported symbol                      | Kind                       | Consumer / real code path that READS it                    |
-| ------------------------------------ | -------------------------- | ---------------------------------------------------------- |
-| `IRealtimeDiagnosticsSource`         | common interface           | Owning source and connector reader.                        |
-| `RealtimeDiagnosticsSnapshot`        | common type                | Source, exact projector and client.                        |
-| `RealtimeDiagnosticsRecord`          | common type                | Bounded collector and devtool summary.                     |
-| `RealtimeDiagnosticsResponse`        | common type                | Connector and native client method.                        |
-| `IDiagnosticsClient.realtime`        | client method              | Devtool inspector.                                         |
-| `RealtimeDiagnosticsOptions`         | owning package option type | Application opt-in and collector construction.             |
-| `CAPABILITIES.REALTIME_DIAGNOSTICS`  | common token               | Owning plugin multi-registration and connector resolution. |
-| `RealtimeSourceKind`                 | common type                | Snapshot `sourceKind`, collector construction, validators. |
-| `RealtimeObservationOperation`       | common type                | Record `operation`, collector entry points, validators.    |
-| `RealtimeGaugeState`                 | common type                | Snapshot `gauges.state`, validators and client labels.     |
-| `compileRealtimeDiagnosticsAlias`    | common function            | The three plugin factories, at construction (§3.1).        |
-| `createRealtimeObservationCollector` | common function            | The three plugins' `register()` (§3.1).                    |
-| `IRealtimeObservationCollector`      | common interface           | The three packages' capture sites and attachment helpers.  |
+| Exported symbol                          | Kind                       | Consumer / real code path that READS it                                        |
+| ---------------------------------------- | -------------------------- | ------------------------------------------------------------------------------ |
+| `IRealtimeDiagnosticsSource`             | common interface           | Owning source and connector reader.                                            |
+| `RealtimeDiagnosticsSnapshot`            | common type                | Source, exact projector and client.                                            |
+| `RealtimeDiagnosticsRecord`              | common type                | Bounded collector and devtool summary.                                         |
+| `RealtimeDiagnosticsResponse`            | common type                | Connector and native client method.                                            |
+| `IDiagnosticsClient.realtime`            | client method              | Devtool inspector.                                                             |
+| `RealtimeDiagnosticsOptions`             | owning package option type | Application opt-in and collector construction.                                 |
+| `CAPABILITIES.REALTIME_DIAGNOSTICS`      | common token               | Owning plugin multi-registration and connector resolution.                     |
+| `RealtimeSourceKind`                     | common type                | Snapshot `sourceKind`, collector construction, validators.                     |
+| `RealtimeObservationOperation`           | common type                | Record `operation`, collector entry points, validators.                        |
+| `RealtimeGaugeState`                     | common type                | Snapshot `gauges.state`, validators and client labels.                         |
+| `compileRealtimeDiagnosticsAlias`        | common function            | The three plugin factories, at construction (§3.1).                            |
+| `createRealtimeObservationCollector`     | common function            | The three plugins' `register()` (§3.1).                                        |
+| `IRealtimeObservationCollector`          | common interface           | The three packages' capture sites and attachment helpers.                      |
+| `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`       | backplane package const    | `RedisBackplane` constructor default; applications reading the default.        |
+| `RedisBackplaneOptions.commandTimeoutMs` | backplane option           | `RedisBackplane` constructor → ioredis `commandTimeout` on both built clients. |
+| `IRedisBackplaneClient.disconnect?`      | backplane facade member    | `RedisBackplane.close()` after a failed QUIT.                                  |
 
 The last three are the §3.1 maintainer decision: one collector in `common` instead of three copies.
 `RealtimeDiagnosticsOptions` is declared in `common` and re-exported unchanged by each owning
@@ -621,9 +624,10 @@ M47, and invisible to M98l's counters. Separately, a publish after `close()` res
 sending and was counted `succeeded`. Fixed: the lazy path now builds both connections with an
 ioredis `commandTimeout` (`RedisBackplaneOptions.commandTimeoutMs`, default
 `DEFAULT_REDIS_COMMAND_TIMEOUT_MS` = 15 s, above the retry budget so the documented partition
-behaviour is unchanged; `0` disables; non-finite or negative refused at construction), and a publish
-with no connection rejects. `outage-real.test.ts` now pauses and then stops the real server, asserts
-each publish rejects with `Command timed out`, is recorded `failed` with the measured duration, and
-that publishing recovers afterwards. Negative controls, both observed failing and restored: with the
-timeout not forwarded to the constructor the paused case reports "still pending after 6000 ms"; with
-the no-connection publish restored to a silent return, six unit steps fail.
+behaviour is unchanged; `0` disables; a value outside 0–2147483647 refused at construction, because
+a longer delay overflows the timer to 1 ms), and a publish with no connection rejects.
+`outage-real.test.ts` now pauses and then stops the real server, asserts each publish rejects with
+`Command timed out`, is recorded `failed` with the measured duration, and that publishing recovers
+afterwards. Negative controls, both observed failing and restored: with the timeout not forwarded to
+the constructor the paused case reports "still pending after 6000 ms"; with the no-connection
+publish restored to a silent return, six unit steps fail.

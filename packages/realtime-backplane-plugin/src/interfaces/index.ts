@@ -54,6 +54,15 @@ export interface IRedisBackplaneClient {
   /** Closes the connection. */
   quit(): Promise<unknown>;
   /**
+   * Forcibly closes the connection without waiting for the server and stops
+   * reconnecting. Optional; the real `ioredis` client exposes it. `close()`
+   * calls it when `quit()` fails — during an outage — so the connection does
+   * not keep reconnecting after the application has stopped.
+   *
+   * @since 0.8.0
+   */
+  disconnect?(): void;
+  /**
    * M70c: resolves when this connection is alive. Optional so a minimal
    * injected fake still type-checks; the real `ioredis` client exposes it.
    *
@@ -206,7 +215,9 @@ export interface RedisBackplaneOptions extends BackplaneCommonOptions {
    * Read only on the lazy `npm:ioredis` path: an injected `client` /
    * `subscriber` pair keeps whatever timeout it was constructed with.
    *
-   * @throws {RangeError} At construction, when not a finite number `>= 0`
+   * @throws {RangeError} At construction, when not a number from `0` to
+   * `2147483647` — above that, the runtime's timer overflows to 1 ms and every
+   * command would time out almost at once
    * @since 0.8.0
    */
   readonly commandTimeoutMs?: number;

@@ -454,14 +454,21 @@ All notable changes to this project are documented here. The format follows
   and an observed publish (M98l) was never recorded. Measured against a paused real Redis 7: still
   pending after 20 s. The two connections the lazy path builds now carry an ioredis
   `commandTimeout`, from the new `RedisBackplaneOptions.commandTimeoutMs` (default
-  `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`, 15 s; `0` disables; a non-finite or negative value throws
-  `RangeError` at construction). The default sits above ioredis's ~11 s retry budget, so a dropped
+  `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`, 15 s; `0` disables; a value outside `0`–`2147483647` throws
+  `RangeError` at construction, since a longer delay overflows the runtime timer to 1 ms and every
+  command then times out at once). The default sits above ioredis's ~11 s retry budget, so a dropped
   connection still buffers and rejects as documented. An injected `client`/`subscriber` pair is
   unaffected and keeps its own timeout. `IRedisModule.create` gains an optional second `options`
   argument carrying it; existing callers and modules still type-check. **Behaviour change:**
   `RedisBackplane.publish()` before `connect()` or after `close()` now REJECTS ("the redis transport
   is not connected") instead of resolving without sending, so a frame sent nowhere reads as a
-  failure — it previously counted as a successful publication when observed.
+  failure — it previously counted as a successful publication when observed. **`close()` during an
+  outage now releases both connections.** It stopped at the first rejected step — an UNSUBSCRIBE or
+  QUIT that timed out — so both connections kept reconnecting after the application stopped;
+  measured against a real Redis, both reconnected (`ready`) once the server returned. Every step now
+  runs, a connection whose QUIT fails is force-closed through the new optional
+  `IRedisBackplaneClient.disconnect?()`, and the first failure is still rethrown after everything is
+  released.
 - **`cli` — `setu new --template full-stack` now demonstrates React Router route middleware, and
   explains both middleware layers.** A generated full-stack project has two: kernel middleware
   (`setu generate middleware`), which runs for every request, and React Router's route `middleware`

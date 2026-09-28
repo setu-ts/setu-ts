@@ -81,18 +81,18 @@ without a `subscriber` throws at construction rather than failing at the first p
 
 ## Options
 
-| Option                  | Applies to         | Default                  | Description                                                                                                                                    |
-| ----------------------- | ------------------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `topic`                 | all but memory     | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                   |
-| `origin`                | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                            |
-| `bus`                   | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                             |
-| `url`                   | `'redis'`          | —                        | Connection URL, used only on the lazy-load path                                                                                                |
-| `client` / `subscriber` | `'redis'`          | —                        | Injected client pair; required together                                                                                                        |
-| `module`                | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                |
-| `commandTimeoutMs`      | `'redis'`          | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be a finite number `>= 0`. See Limitations                 |
-| `instance`              | `'custom'`         | —                        | The transport to register, used as-is                                                                                                          |
-| `localNotice`           | `'memory'`         | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it |
-| `diagnostics`           | all but `'custom'` | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                 |
+| Option                  | Applies to         | Default                  | Description                                                                                                                                                       |
+| ----------------------- | ------------------ | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `topic`                 | all but memory     | `'setu-ts.realtime'`     | Broker topic / Redis channel. Every replica must agree on it                                                                                                      |
+| `origin`                | all                | a fresh `runtime.uuid()` | This replica's identity. Override only to make a test deterministic                                                                                               |
+| `bus`                   | `'memory'`         | `'default'`              | Named in-process bus; separate names stay isolated                                                                                                                |
+| `url`                   | `'redis'`          | —                        | Connection URL, used only on the lazy-load path                                                                                                                   |
+| `client` / `subscriber` | `'redis'`          | —                        | Injected client pair; required together                                                                                                                           |
+| `module`                | `'redis'`          | —                        | An `ioredis`-shaped module, for testing without the real driver                                                                                                   |
+| `commandTimeoutMs`      | `'redis'`          | `15000`                  | Per-command timeout on the two connections the lazy path builds; `0` disables. Must be `0`–`2147483647` (above that the timer overflows to 1 ms). See Limitations |
+| `instance`              | `'custom'`         | —                        | The transport to register, used as-is                                                                                                                             |
+| `localNotice`           | `'memory'`         | `true`                   | Logs one `info` line at registration when the transport is the process-local `'memory'`, naming `'redis'`/`'messaging'`. `false` suppresses it                    |
+| `diagnostics`           | all but `'custom'` | omitted                  | Opt-in realtime observations (M98l); see below                                                                                                                    |
 
 ## Diagnostics (M98l)
 
@@ -141,6 +141,10 @@ worth knowing. On `'redis'`, ioredis's own defaults govern what a partition does
   makes a dropped connection reject sooner too.
 - **A publish before `connect()` or after `close()` rejects** rather than resolving, so a frame sent
   nowhere reads as a failure. It resolved without sending before 0.8.0.
+- **`close()` during an outage still releases both connections.** Each step runs even when an
+  earlier one fails, a connection whose QUIT fails is force-closed through `disconnect()`, and the
+  first failure is rethrown afterwards, so a shutdown during an outage is reported rather than
+  leaving connections reconnecting behind it.
 
 Frames are never persisted or replayed beyond that buffer. `commandTimeoutMs` is the only ioredis
 setting reachable through this plugin's options, and applies only on the lazy path — an application
