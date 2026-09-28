@@ -5,6 +5,7 @@
  */
 
 import type {
+  ConnectionErrorReporter,
   IIngressBehavior,
   MessageHandler,
   MessageMetadata,
@@ -630,6 +631,15 @@ export interface RedisStreamsOptions {
   blockSizeMs?: number;
   /** Optional logger for error reporting. */
   logger?: { error: (msg: string) => void };
+  /**
+   * Receives the connection errors (`ioredis` `'error'` events) of the client
+   * the broker BUILDS, instead of `ioredis` printing each reconnect failure to
+   * the console. Never attached to an injected `client`, which belongs to the
+   * caller. `MessagingPlugin` supplies one backed by its logger.
+   *
+   * @since 0.8.0
+   */
+  connectionErrorReporter?: ConnectionErrorReporter;
 }
 
 /**

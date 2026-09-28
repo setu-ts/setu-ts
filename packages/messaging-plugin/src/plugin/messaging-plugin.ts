@@ -11,6 +11,7 @@ import {
   CAPABILITIES,
   createCachedProbe,
   createCapabilityToken,
+  createConnectionErrorReporter,
   PLUGIN_PRIORITY,
   resolveRegistryEntry,
 } from '@setu-ts/common';
@@ -263,6 +264,12 @@ export function MessagingPlugin(
         if (opts.pollIntervalMs !== undefined) redisOptions.pollIntervalMs = opts.pollIntervalMs;
         if (opts.blockSizeMs !== undefined) redisOptions.blockSizeMs = opts.blockSizeMs;
         if (logger !== undefined) redisOptions.logger = logger;
+        // The built client's reconnect failures go to the logger (read at call
+        // time) rather than ioredis's own console fallback.
+        redisOptions.connectionErrorReporter = createConnectionErrorReporter({
+          source: `${pluginName}: redis-streams broker`,
+          logger: () => ctx.logger,
+        });
         broker = new RedisStreamsBroker(ctx.runtime, serializer, redisOptions);
       } else if (brokerType === 'rabbitmq') {
         const opts = options as {

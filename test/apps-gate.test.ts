@@ -341,7 +341,9 @@ describe('real-backend CI wiring', () => {
   });
 
   it('grants each Redis package the net permission its guarded test needs', async () => {
-    const redisPackages = ['cache-plugin', 'messaging-plugin'];
+    // auth-plugin and scheduler-plugin joined with the connection-error suites
+    // (their Redis stores/locks build ioredis clients too).
+    const redisPackages = ['cache-plugin', 'messaging-plugin', 'auth-plugin', 'scheduler-plugin'];
     for (const pkg of redisPackages) {
       const config = await readJson<{
         readonly test?: { readonly permissions?: { readonly net?: readonly string[] } };

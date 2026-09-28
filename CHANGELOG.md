@@ -528,6 +528,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`cache-plugin`, `messaging-plugin`, `queue-plugin`, `realtime-backplane-plugin`,
+  `scheduler-plugin`, `auth-plugin` — a Redis outage no longer prints to the console.** Every
+  `ioredis` client the framework builds had no `'error'` listener, so `ioredis` fell back to
+  `console.error` and printed `[ioredis] Unhandled error event: … ECONNREFUSED` on every reconnect
+  attempt — dozens of lines per outage, outside the logger, its structure, its redaction and its
+  sink. `@setu-ts/common` adds `createConnectionErrorReporter` and `attachConnectionErrorReporter`:
+  the first error of an outage is logged at `warn`, identical repeats at `debug` with a count, the
+  recovery at `info`, and a failing logger never throws into the driver (types
+  `ConnectionErrorReporter`, `ConnectionErrorReporterOptions` and `ConnectionErrorLogger`). The five
+  plugins attach a reporter over the application logger (read at call time) to the clients they
+  BUILD, through a new optional `connectionErrorReporter` option on the Redis store, broker,
+  adapter, lock and backplane options; an injected client gets no listener, since it belongs to the
+  caller. `RedisRateLimitStore` is built by the application, so it takes the reporter as an option
+  and keeps the console fallback without one. With no logger registered the events are dropped;
+  health reporting is unchanged. All additions are optional, so no caller changes.
 - **`diagnostics-plugin` — the connector refuses URL aliases of a target and answers an out-of-range
   events cursor as a caller error.** Found by the M98b committed-tree security audit. The handler
   parsed the target from the NORMALIZED URL, so `/v1/./snapshot`, `/v1/x/../snapshot`,
