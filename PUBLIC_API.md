@@ -2291,9 +2291,10 @@ authorization when RBAC is configured:
 - `IAuthorizationService` under `CAPABILITIES.AUTHORIZATION` (`'authorization'`) — RBAC checks, only
   when `rbac` is supplied.
 
-`jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `apiKey`,
-`session`, or `strategies`; `local` alone cannot recognize a later request. A JWT-only registration
-provides `jwt` and `authentication`; it deliberately does not register an authorization service.
+`jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `issuers`,
+`apiKey`, `session`, or `strategies`; `local` alone cannot recognize a later request. A JWT-only
+registration provides `jwt` and `authentication`; it deliberately does not register an authorization
+service.
 
 **What the guards then do (M89b, X18-2).** `requireAuth()` and `publicRoute()` resolve nothing and
 are unaffected. The four authorization guards — `requireRole`, `requirePermission`, `requireAnyRole`
@@ -2317,6 +2318,29 @@ They still fail closed either way; what changed is that the refusal is legible.
 > the first non-null principal wins, so a request carrying both a bearer header and a session cookie
 > authenticates by the JWT.
 >
+> **Tokens from an outside issuer (M100b):** `jwt` verifies tokens this application issued;
+> `issuers: readonly TrustedIssuer[]` verifies access tokens an outside identity provider issued,
+> against its published key set. Each entry is
+> `{ name, issuer, audience, keys: { jwksUri } | { discovery: true }, algorithms?,
+> clockToleranceSec?, keySet?, toPrincipal }`
+> — `audience` and `toPrincipal` required. The internal `issuers` strategy runs immediately after
+> the JWT strategy, reading the same header and scheme; the chain is **jwt → issuers → api-key →
+> session → caller-supplied**. A token's `iss` is read unverified only to select the entry whose
+> `issuer` equals it exactly. `none` and `HS*` are refused before key lookup; keys are filtered by
+> `kty`/`crv`/`use`/`alg`/`key_ops`/`kid`; RS256, PS256, ES256, ES384 and EdDSA (`Ed25519`) verify
+> through `runtime.subtle` with zero npm dependencies. `iss` exact, `aud` contains `audience`, `exp`
+> required, `exp`/`nbf`/future `iat` within `clockToleranceSec` (default 30, max 300). Key sets are
+> cached on the monotonic clock (`keySet.ttlMs` 10 min), an unknown `kid` refetches at most once per
+> `keySet.minRefreshIntervalMs` (60 s) with concurrent refetches coalesced, the last good set
+> survives fetch failures for `keySet.maxStaleMs` (24 h) and is then dropped, and each fetch is
+> bounded by `keySet.fetchTimeoutMs` (5 s), 64 KiB and 64 keys. Every refusal — duplicate name or
+> issuer, empty audience, unsupported algorithm, out-of-range tolerance or timing, non-`https`
+> non-loopback URL — throws `AuthPluginConfigurationError` from `AuthPlugin(...)`.
+> `http?: IAuthHttp` replaces the default `fetch` seam. An `auth` health indicator reports `up` or
+> `degraded` (with per-issuer `stale`/`expired`/`unfetched`), never `down`, and performs no I/O.
+> `typ: at+jwt` (RFC 9068) is not enforced, so the API needs an audience distinct from any sign-in
+> client id; multi-tenant Entra ID is not supported. `IJwtService` remains self-issued only.
+>
 > **Phasing (M16b, shipped):** **refresh tokens** and **rate limiting** shipped in M16b as
 > standalone additions — `RefreshTokenService` (app-instantiated; NOT an `IAuthStrategy`, since a
 > refresh token arrives in the request body, not as a passive header credential) and
@@ -2326,52 +2350,56 @@ They still fail closed either way; what changed is that the refusal is legible.
 
 ### Exports
 
-| Export                              | File                                          | Description                                                                                                          |
-| ----------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `AuthPlugin`                        | `src/plugin/auth-plugin.ts`                   | Plugin factory                                                                                                       |
-| `AuthPluginOptions`                 | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies` / `authorizationDiagnostics`) |
-| `AuthMiddlewareOption`              | `src/interfaces/index.ts`                     | Global authentication middleware priority and path exclusions                                                        |
-| `AuthPluginConfigurationError`      | `src/errors.ts`                               | Invalid passive-strategy or middleware configuration                                                                 |
-| `AuthorizationDiagnosticsOptions`   | `src/interfaces/index.ts`                     | M98h opt-in for minimized authorization decision explanations through the diagnostics connector                      |
-| `IAuthorizationDiagnosticsSource`   | re-export                                     | From `@setu-ts/common` — the source AuthPlugin registers under `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`              |
-| `JwtOptions`                        | `src/interfaces/index.ts`                     | JWT config (key material, algorithm, expected aud/iss, header/scheme)                                                |
-| `ApiKeyOptions`                     | `src/interfaces/index.ts`                     | API-key strategy config (header + `validate` callback)                                                               |
-| `LocalOptions`                      | `src/interfaces/index.ts`                     | Local credential config (`verify` callback)                                                                          |
-| `SessionAuthOptions`                | `src/interfaces/index.ts`                     | Session strategy config (required `toPrincipal` callback)                                                            |
-| `PasswordHasher`                    | `src/services/password-hasher.ts`             | PBKDF2-SHA256 hash/verify utility                                                                                    |
-| `MalformedPasswordHashError`        | `src/services/password-hasher.ts`             | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash                                            |
-| `authMiddleware`                    | `src/middleware/auth-middleware.ts`           | Global middleware: authenticates and populates `ctx.request.user`                                                    |
-| `requireAuth`                       | `src/guards/index.ts`                         | Guard: require an authenticated principal (401)                                                                      |
-| `requireRole`                       | `src/guards/index.ts`                         | Guard: require a role (401/403)                                                                                      |
-| `requirePermission`                 | `src/guards/index.ts`                         | Guard: require a permission (401/403)                                                                                |
-| `requireAnyRole`                    | `src/guards/index.ts`                         | Guard: require any of the given roles                                                                                |
-| `requireAllPermissions`             | `src/guards/index.ts`                         | Guard: require all of the given permissions                                                                          |
-| `publicRoute`                       | `src/guards/index.ts`                         | Guard: explicitly allow unauthenticated access                                                                       |
-| `RefreshTokenService`               | `src/services/refresh-token-service.ts`       | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                                                            |
-| `RefreshTokenOptions`               | `src/services/refresh-token-service.ts`       | `RefreshTokenService` constructor options                                                                            |
-| `TokenPair`                         | `src/services/refresh-token-service.ts`       | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                                                        |
-| `RefreshTokenStore`                 | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                                                            |
-| `RefreshTokenRecord`                | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                                                   |
-| `IRefreshTokenRotation`             | `src/stores/refresh-token-store.ts`           | Result of atomically rotating a refresh record                                                                       |
-| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                                             |
-| `IAccessTokenRevocationStore`       | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                                                  |
-| `MemoryAccessTokenRevocationStore`  | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                                                        |
-| `rateLimitMiddleware`               | `src/middleware/rate-limit-middleware.ts`     | Fixed-window rate limiter middleware factory (429 short-circuit)                                                     |
-| `RateLimitOptions`                  | `src/middleware/rate-limit-middleware.ts`     | `rateLimitMiddleware(options)` parameter, including `exclude`                                                        |
-| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | `src/middleware/rate-limit-middleware.ts`     | The six operational paths `exclude` exempts by default; spread it to extend rather than replace                      |
-| `RateLimitStore`                    | `src/stores/rate-limit-store.ts`              | Pluggable store interface (`increment`/`reset`)                                                                      |
-| `RateLimitResult`                   | `src/stores/rate-limit-store.ts`              | `{ count, resetTime }` returned by `increment`                                                                       |
-| `MemoryRateLimitStore`              | `src/stores/rate-limit-store.ts`              | Default in-memory fixed-window store                                                                                 |
-| `RedisRateLimitStore`               | `src/stores/redis-rate-limit-store.ts`        | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`), namespacing keys under `keyPrefix`                            |
-| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | `src/stores/redis-rate-limit-store.ts`        | `'setu:ratelimit:'` — the namespace `RedisRateLimitStore` applies when no `keyPrefix` is given                       |
-| `IAuthService`                      | re-export                                     | From `@setu-ts/common`                                                                                               |
-| `IJwtService`                       | re-export                                     | From `@setu-ts/common`                                                                                               |
-| `IAuthorizationService`             | re-export                                     | From `@setu-ts/common`                                                                                               |
-| `IAuthStrategy`                     | re-export                                     | From `@setu-ts/common`                                                                                               |
-| `IPrincipal`                        | re-export                                     | From `@setu-ts/common`                                                                                               |
-| `JwtSignOptions`                    | re-export                                     | From `@setu-ts/common`                                                                                               |
-| `RbacConfig`                        | re-export                                     | From `@setu-ts/common`                                                                                               |
-| `RoleDefinition`                    | re-export                                     | From `@setu-ts/common`                                                                                               |
+| Export                              | File                                          | Description                                                                                                                               |
+| ----------------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `AuthPlugin`                        | `src/plugin/auth-plugin.ts`                   | Plugin factory                                                                                                                            |
+| `AuthPluginOptions`                 | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `issuers` / `http` / `apiKey` / `local` / `rbac` / `session` / `strategies` / `authorizationDiagnostics`) |
+| `AuthMiddlewareOption`              | `src/interfaces/index.ts`                     | Global authentication middleware priority and path exclusions                                                                             |
+| `AuthPluginConfigurationError`      | `src/errors.ts`                               | Invalid passive-strategy or middleware configuration                                                                                      |
+| `AuthorizationDiagnosticsOptions`   | `src/interfaces/index.ts`                     | M98h opt-in for minimized authorization decision explanations through the diagnostics connector                                           |
+| `IAuthorizationDiagnosticsSource`   | re-export                                     | From `@setu-ts/common` — the source AuthPlugin registers under `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`                                   |
+| `JwtOptions`                        | `src/interfaces/index.ts`                     | JWT config (key material, algorithm, expected aud/iss, header/scheme)                                                                     |
+| `ApiKeyOptions`                     | `src/interfaces/index.ts`                     | API-key strategy config (header + `validate` callback)                                                                                    |
+| `LocalOptions`                      | `src/interfaces/index.ts`                     | Local credential config (`verify` callback)                                                                                               |
+| `SessionAuthOptions`                | `src/interfaces/index.ts`                     | Session strategy config (required `toPrincipal` callback)                                                                                 |
+| `TrustedIssuer`                     | `src/interfaces/index.ts`                     | M100b outside identity provider: issuer, audience, key source, algorithms, clock tolerance, key-set timings, `toPrincipal`                |
+| `IssuerKeySource`                   | `src/interfaces/index.ts`                     | `{ jwksUri }` or `{ discovery: true }`                                                                                                    |
+| `IssuerAlgorithm`                   | `src/interfaces/index.ts`                     | `'RS256' \| 'PS256' \| 'ES256' \| 'ES384' \| 'EdDSA'` issuer allowlist entry                                                              |
+| `IAuthHttp`                         | `src/interfaces/index.ts`                     | Outbound GET seam for issuer key sets and discovery documents                                                                             |
+| `PasswordHasher`                    | `src/services/password-hasher.ts`             | PBKDF2-SHA256 hash/verify utility                                                                                                         |
+| `MalformedPasswordHashError`        | `src/services/password-hasher.ts`             | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash                                                                 |
+| `authMiddleware`                    | `src/middleware/auth-middleware.ts`           | Global middleware: authenticates and populates `ctx.request.user`                                                                         |
+| `requireAuth`                       | `src/guards/index.ts`                         | Guard: require an authenticated principal (401)                                                                                           |
+| `requireRole`                       | `src/guards/index.ts`                         | Guard: require a role (401/403)                                                                                                           |
+| `requirePermission`                 | `src/guards/index.ts`                         | Guard: require a permission (401/403)                                                                                                     |
+| `requireAnyRole`                    | `src/guards/index.ts`                         | Guard: require any of the given roles                                                                                                     |
+| `requireAllPermissions`             | `src/guards/index.ts`                         | Guard: require all of the given permissions                                                                                               |
+| `publicRoute`                       | `src/guards/index.ts`                         | Guard: explicitly allow unauthenticated access                                                                                            |
+| `RefreshTokenService`               | `src/services/refresh-token-service.ts`       | Refresh tokens: `issue` / `refresh` (rotation) / `revoke`                                                                                 |
+| `RefreshTokenOptions`               | `src/services/refresh-token-service.ts`       | `RefreshTokenService` constructor options                                                                                                 |
+| `TokenPair`                         | `src/services/refresh-token-service.ts`       | `{ accessToken, refreshToken }` returned by `issue`/`refresh`                                                                             |
+| `RefreshTokenStore`                 | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                                                                                 |
+| `RefreshTokenRecord`                | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                                                                        |
+| `IRefreshTokenRotation`             | `src/stores/refresh-token-store.ts`           | Result of atomically rotating a refresh record                                                                                            |
+| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                                                                  |
+| `IAccessTokenRevocationStore`       | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                                                                       |
+| `MemoryAccessTokenRevocationStore`  | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                                                                             |
+| `rateLimitMiddleware`               | `src/middleware/rate-limit-middleware.ts`     | Fixed-window rate limiter middleware factory (429 short-circuit)                                                                          |
+| `RateLimitOptions`                  | `src/middleware/rate-limit-middleware.ts`     | `rateLimitMiddleware(options)` parameter, including `exclude`                                                                             |
+| `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | `src/middleware/rate-limit-middleware.ts`     | The six operational paths `exclude` exempts by default; spread it to extend rather than replace                                           |
+| `RateLimitStore`                    | `src/stores/rate-limit-store.ts`              | Pluggable store interface (`increment`/`reset`)                                                                                           |
+| `RateLimitResult`                   | `src/stores/rate-limit-store.ts`              | `{ count, resetTime }` returned by `increment`                                                                                            |
+| `MemoryRateLimitStore`              | `src/stores/rate-limit-store.ts`              | Default in-memory fixed-window store                                                                                                      |
+| `RedisRateLimitStore`               | `src/stores/redis-rate-limit-store.ts`        | Redis-backed store (inject-or-lazy `npm:ioredis@5.x`), namespacing keys under `keyPrefix`                                                 |
+| `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | `src/stores/redis-rate-limit-store.ts`        | `'setu:ratelimit:'` — the namespace `RedisRateLimitStore` applies when no `keyPrefix` is given                                            |
+| `IAuthService`                      | re-export                                     | From `@setu-ts/common`                                                                                                                    |
+| `IJwtService`                       | re-export                                     | From `@setu-ts/common`                                                                                                                    |
+| `IAuthorizationService`             | re-export                                     | From `@setu-ts/common`                                                                                                                    |
+| `IAuthStrategy`                     | re-export                                     | From `@setu-ts/common`                                                                                                                    |
+| `IPrincipal`                        | re-export                                     | From `@setu-ts/common`                                                                                                                    |
+| `JwtSignOptions`                    | re-export                                     | From `@setu-ts/common`                                                                                                                    |
+| `RbacConfig`                        | re-export                                     | From `@setu-ts/common`                                                                                                                    |
+| `RoleDefinition`                    | re-export                                     | From `@setu-ts/common`                                                                                                                    |
 
 ### Registration
 

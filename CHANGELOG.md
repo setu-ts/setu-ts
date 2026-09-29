@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Tokens from an outside issuer (M100b).** `AuthPluginOptions.issuers` accepts access tokens an
+  outside identity provider issued (Auth0, Entra ID, Google, Keycloak, Cognito), verified against
+  its published key set through `runtime.subtle` with zero npm dependencies. Each exported
+  `TrustedIssuer` names an exact `issuer`, a required `audience`, a key source (`IssuerKeySource`:
+  `{ jwksUri }` or `{ discovery: true }`), an optional algorithm allowlist (`IssuerAlgorithm`:
+  RS256, PS256, ES256, ES384, EdDSA) and a required `toPrincipal`. `none` and `HS*` are refused
+  before any key lookup, and keys are filtered by type, curve, use, algorithm, operations and `kid`.
+  Key sets are cached on the monotonic clock, refetched at most once per cooldown for an unknown
+  `kid`, kept through fetch failures for a bounded time, and bounded per fetch by time, bytes and
+  key count. A new `auth` health indicator reports `up` or `degraded` — never `down` — from cached
+  state only. `http` (the exported `IAuthHttp`) replaces the default `fetch` seam. The chain is now
+  jwt → issuers → api-key → session → caller-supplied; with `issuers` unset nothing changes.
+  Verified against a real Keycloak 26.4 realm, including key rotation through the admin API.
+
 - **Authentication composition (M100a).** `AuthPluginOptions.jwt` is optional, so API-key, session,
   and caller-strategy applications no longer invent JWT key material. `AuthPlugin` registers passive
   authentication globally at priority 300 by default; `middleware` can change the priority, exclude

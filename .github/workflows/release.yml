@@ -63,6 +63,9 @@ jobs:
       # every tag run while passing on every PR.
       DYNAMODB_ENDPOINT: http://127.0.0.1:8000
       BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086
+      # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on this
+      # exact base URL, which is also the host:port the manifest's net grant scopes.
+      KEYCLOAK_URL: http://localhost:8180
       # M90d §3.5: same real-backend NATS and Kafka endpoints as ci.yml — the
       # release job re-runs the same suite, and test/apps-gate.test.ts pins the
       # wiring on both workflows.
@@ -168,6 +171,29 @@ jobs:
 
       - name: Frozen dependency install
         run: deno ci
+
+      # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on
+      # KEYCLOAK_URL. A step rather than a `services:` container because the
+      # realm is imported at startup — `start-dev --import-realm` is a COMMAND
+      # and the realm file is a volume, neither of which a service block can
+      # set. Readiness is the realm's own discovery document, which is exactly
+      # what the suite reads first.
+      - name: Start Keycloak (outside-issuer suite)
+        run: |
+          docker run -d --name keycloak -p 127.0.0.1:8180:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -v "$GITHUB_WORKSPACE/packages/auth-plugin/test/fixtures/keycloak:/opt/keycloak/data/import:ro" \
+            quay.io/keycloak/keycloak:26.4 start-dev --import-realm
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:8180/realms/setu/.well-known/openid-configuration >/dev/null; then
+              echo 'keycloak ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'keycloak did not become ready'
+          docker logs keycloak
+          exit 1
 
       # ── Gates ────────────────────────────────────────────────────────────
       # Same four gates as CI, re-run here so a tag can never publish a tree

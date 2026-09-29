@@ -100,6 +100,11 @@ app.router.post('/auth/login', async (ctx) => {
 
 - **JwtStrategy** — passive bearer-token authentication. Extracts `Authorization: Bearer <token>`,
   calls `IJwtService.verify`, and maps the claims to an `IPrincipal`.
+- **IssuerStrategy** — passive bearer-token authentication for tokens an **outside identity
+  provider** issued (Auth0, Entra ID, Google, Keycloak, Cognito). Configured by the `issuers`
+  option, runs immediately after the JWT strategy, reads the same header and scheme, and verifies
+  against the provider's published key set. See
+  [Accepting tokens from an identity provider](#accepting-tokens-from-an-identity-provider).
 - **ApiKeyStrategy** — passive API-key authentication. Reads the key from a configurable header
   (default `X-API-Key`) and calls the app-supplied `apiKey.validate(key)` callback.
 - **SessionStrategy** — passive cookie-session authentication. Reads the session cookie through
@@ -111,10 +116,10 @@ app.router.post('/auth/login', async (ctx) => {
 - **LocalStrategy** — explicit credentials verification. Not passive; reached only via
   `IAuthService.verifyCredentials` from a login handler.
 
-Passive strategies run in a fixed order during `IAuthService.authenticate` — **jwt → api-key →
-session → caller-supplied, in declaration order** — and the first non-null principal wins, with
-`null` returned when none match. A request carrying both a bearer header and a session cookie is
-therefore authenticated by the JWT, because the explicit credential runs first. Caller-supplied
+Passive strategies run in a fixed order during `IAuthService.authenticate` — **jwt → issuers →
+api-key → session → caller-supplied, in declaration order** — and the first non-null principal wins,
+with `null` returned when none match. A request carrying both a bearer header and a session cookie
+is therefore authenticated by the JWT, because the explicit credential runs first. Caller-supplied
 strategies come from the `strategies` option and run last; a `name` colliding with any other
 strategy in the assembled chain makes `register()` throw, because a strategy's `name` is its only
 identity.
@@ -236,8 +241,10 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 | `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`           | -                   | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`. |
 | `strategies`                     | `readonly IAuthStrategy[]`                            | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                 |
 | `middleware`                     | `false \| AuthMiddlewareOption`                       | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                      |
+| `issuers`                        | `readonly TrustedIssuer[]`                            | -                   | Outside identity providers whose access tokens are accepted.                                    |
+| `http`                           | `IAuthHttp`                                           | `fetch`-based       | Outbound HTTP for issuer key sets and discovery documents.                                      |
 
-At least one passive strategy must be configured through `jwt`, `apiKey`, `session`, or
+At least one passive strategy must be configured through `jwt`, `issuers`, `apiKey`, `session`, or
 `strategies`; `local` alone is a login verifier and cannot authenticate a later request. For
 backend-backed strategies on public operational routes, exclusions can be explicit:
 
@@ -256,6 +263,65 @@ strategy chain twice.
 
 When `jwt` is supplied, omitting both `jwt.secret` (HS256) and `jwt.privateKey` + `jwt.publicKey`
 (RS256) throws at construction.
+
+## Accepting tokens from an identity provider
+
+`jwt` verifies tokens **this application issued**, against one key it holds. `issuers` verifies
+tokens **an outside identity provider issued**, against the provider's published key set, which
+rotates. The two coexist: a self-issued token is recognized by the JWT strategy first, and a token
+whose `iss` names a configured provider is recognized by the issuer strategy next.
+
+```typescript
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+AuthPlugin({
+  issuers: [{
+    name: 'keycloak',
+    issuer: 'https://id.example.com/realms/acme',
+    audience: 'orders-api',
+    keys: { discovery: true },
+    toPrincipal: (claims) =>
+      typeof claims.sub === 'string'
+        ? { id: claims.sub, roles: Array.isArray(claims.roles) ? claims.roles.map(String) : [] }
+        : null,
+  }],
+});
+```
+
+- **Routing.** A token's `iss` is read without trusting the token, only to choose the configured
+  entry whose `issuer` equals it exactly. A token from an unconfigured issuer leaves the chain to
+  continue; nothing else from an unverified token is used.
+- **Keys.** `keys` is `{ jwksUri }` or `{ discovery: true }`, which reads `jwks_uri` from
+  `<issuer>/.well-known/openid-configuration` and requires that document's `issuer` to match. Both
+  URLs must be `https` (or `http` on a loopback host). Keys are filtered by `kty`, `crv`, `use`,
+  `alg`, `key_ops` and `kid`, so an encryption key in the same set is never used to verify a
+  signature.
+- **Algorithms.** RS256, PS256, ES256, ES384 and EdDSA (also spelled `Ed25519`), narrowed per issuer
+  with `algorithms`. `none` and every `HS*` algorithm are refused before any key is looked up, so a
+  token signed with HMAC using the provider's public key as the secret cannot pass.
+- **Claims.** `iss` exact, `aud` must contain `audience`, `exp` required; `exp`, `nbf` and a future
+  `iat` allow `clockToleranceSec` (default 30, at most 300). `toPrincipal` receives the full
+  verified claims and decides where roles live — the plugin never guesses.
+- **Rotation.** The key set is cached for `keySet.ttlMs` (default 10 minutes). A token naming an
+  unknown `kid` triggers at most one refetch per `keySet.minRefreshIntervalMs` (default 60 s), and
+  concurrent refetches share one request, so forged `kid`s cannot turn requests into outbound
+  fetches. If fetching fails the last good set stays usable for `keySet.maxStaleMs` (default 24 h)
+  after it was last confirmed, then is dropped — a key the provider removed cannot authenticate
+  indefinitely while its endpoint is unreachable. Each fetch is bounded by `keySet.fetchTimeoutMs`
+  (default 5 s), 64 KiB and 64 keys.
+- **Health.** An `auth` indicator reports `up` when every issuer's key set is current, and
+  `degraded` with each issuer's state (`stale`, `expired`, `unfetched`) otherwise — never `down`, so
+  a provider outage does not restart the application. It reads cached state and performs no I/O, so
+  it reports `unfetched` until the first token from that issuer arrives.
+- **Failures** return no principal and are logged at `debug` with a fixed reason code, never the
+  token.
+
+**Give the API its own audience.** Access-token type (`typ: at+jwt`, RFC 9068) is not enforced, so a
+provider's **ID token** whose `aud` equals `audience` would verify as an access token. That happens
+when an API reuses a sign-in client's id as its audience; configure a distinct resource identifier
+for the API instead. **Multi-tenant Entra ID** (`common`/`organizations`) is not supported, because
+its discovery document carries a `{tenantid}` issuer template that cannot equal a configured issuer;
+a single-tenant Entra issuer works.
 
 ## Refresh Tokens
 
@@ -446,6 +512,7 @@ MIT
 | `AuthorizationDiagnosticsOptions`   | interface |
 | `AuthPluginOptions`                 | interface |
 | `IAccessTokenRevocationStore`       | interface |
+| `IAuthHttp`                         | interface |
 | `IAuthorizationDiagnosticsSource`   | interface |
 | `IAuthorizationService`             | interface |
 | `IAuthService`                      | interface |
@@ -465,7 +532,10 @@ MIT
 | `RoleDefinition`                    | interface |
 | `SessionAuthOptions`                | interface |
 | `TokenPair`                         | interface |
+| `TrustedIssuer`                     | interface |
 | `IRefreshTokenRotation`             | type      |
+| `IssuerAlgorithm`                   | type      |
+| `IssuerKeySource`                   | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

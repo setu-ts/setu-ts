@@ -240,6 +240,31 @@ describe('real-backend CI wiring', () => {
     ]);
   });
 
+  it('starts Keycloak and declares its URL and grant (M100b §6)', async () => {
+    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    // A step rather than a service: the realm is imported by a COMMAND and a
+    // volume, neither of which a service block can set. Pinned so a later edit
+    // cannot drop it and turn the real-provider suite into a permanent skip.
+    expect(workflow).toContain('quay.io/keycloak/keycloak:26.4 start-dev --import-realm');
+    expect(workflow).toContain('-p 127.0.0.1:8180:8080');
+    expect(workflow).toContain(
+      'packages/auth-plugin/test/fixtures/keycloak:/opt/keycloak/data/import:ro',
+    );
+    expect(workflow).toContain('KEYCLOAK_URL: http://localhost:8180');
+    expect(workflow).toContain(
+      'http://localhost:8180/realms/setu/.well-known/openid-configuration',
+    );
+    const config = await readJson<{
+      test: { permissions: { net: string[] } };
+    }>('packages/auth-plugin/deno.json');
+    expect(config.test.permissions.net).toContain('localhost:8180');
+    const suite = await Deno.readTextFile(
+      'packages/auth-plugin/test/e2e/keycloak-issuer-real.test.ts',
+    );
+    expect(suite).toContain("Deno.env.get('KEYCLOAK_URL')");
+    expect(suite).toContain('ignore: BASE === undefined');
+  });
+
   it('starts the Bigtable emulator and declares its endpoint and grant (M82 §3.13)', async () => {
     const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
     // Started as a STEP rather than a `services:` container, because the
@@ -376,6 +401,13 @@ describe('real-backend CI wiring', () => {
           'localhost:4222',
           '127.0.0.1:9092',
           'localhost:9092',
+        ]);
+      } else if (pkg === 'auth-plugin') {
+        // M100b §6: plus the real-provider Keycloak suite, endpoint-scoped.
+        expect(config.test?.permissions?.net).toEqual([
+          '127.0.0.1:6379',
+          'localhost:6379',
+          'localhost:8180',
         ]);
       } else {
         expect(config.test?.permissions?.net).toEqual(['127.0.0.1:6379', 'localhost:6379']);
