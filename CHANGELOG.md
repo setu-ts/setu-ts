@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Authentication composition (M100a).** `AuthPluginOptions.jwt` is optional, so API-key, session,
+  and caller-strategy applications no longer invent JWT key material. `AuthPlugin` registers passive
+  authentication globally at priority 300 by default; `middleware` can change the priority, exclude
+  paths, or disable registration for route-level composition through the exported
+  `AuthMiddlewareOption`. Empty passive chains now throw the exported
+  `AuthPluginConfigurationError`. Applications with a hand-added global `authMiddleware()` should
+  remove it; duplicates remain correct but authenticate twice.
+
 - **Storage operation counters (M98m): opt-in, minimized storage observations through the
   diagnostics connector.** `StoragePlugin` accepts `diagnostics: { enabled: true, alias }` (the new
   exported `StorageDiagnosticsOptions`, validated when `StoragePlugin(...)` is called, never echoing
@@ -525,6 +533,16 @@ All notable changes to this project are documented here. The format follows
   the runbook.
 
 ### Changed
+
+- **`auth-plugin` — `AuthPlugin` now registers `authMiddleware()` globally by default (M100a).**
+  Every request runs the passive strategy chain at priority 300, so `ctx.request.user` is populated
+  on routes that previously saw no principal, and a backend-backed strategy (`apiKey.validate`, a
+  store-strategy session) now performs its lookup for every request that carries its credential,
+  including health probes and metrics scrapes that do; a request without one costs no lookup.
+  `middleware: false` restores the previous composition exactly: nothing is registered globally and
+  route-level `authMiddleware()` copies keep working. `middleware: { exclude }` skips selected paths
+  instead (no path is excluded by default). A hand-added global `authMiddleware()` should be
+  removed; left in place it stays correct but runs every strategy twice. See `docs/upgrading.md`.
 
 - **`kernel` — retrying a `start()` that failed after plugin registration began now throws by
   name.** `start()` rolls its started state back on failure, and its comment promised the failed

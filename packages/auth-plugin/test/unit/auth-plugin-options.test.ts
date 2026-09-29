@@ -1,5 +1,5 @@
 /**
- * Tests for AuthPlugin factory.
+ * Tests for AuthPlugin factory options and registration.
  */
 
 import { describe, it } from '@std/testing/bdd';
@@ -15,8 +15,11 @@ import type {
   IPrincipal,
   IRequest,
   ISessionService,
+  MiddlewareFunction,
+  MiddlewareOptions,
   SessionView,
 } from '@setu-ts/common';
+import { AuthPluginConfigurationError } from '../../src/errors.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import manifest from '../../deno.json' with { type: 'json' };
 
@@ -27,9 +30,11 @@ function createFakeContext(): {
   ctx: IPluginContext;
   onCloseHandlers: Array<() => Promise<void>>;
   registered: Map<string, unknown>;
+  middlewareAdded: Array<{ fn: MiddlewareFunction; options?: MiddlewareOptions }>;
 } {
   const registered = new Map<string, unknown>();
   const onCloseHandlers: Array<() => Promise<void>> = [];
+  const middlewareAdded: Array<{ fn: MiddlewareFunction; options?: MiddlewareOptions }> = [];
 
   const runtime = createFakeRuntime();
 
@@ -49,7 +54,11 @@ function createFakeContext(): {
       registerFactory: () => {},
       unregister: () => false,
     },
-    middleware: { add: () => {} },
+    middleware: {
+      add: (fn, options) => {
+        middlewareAdded.push(options === undefined ? { fn } : { fn, options });
+      },
+    },
     router: {
       get: () => {},
       post: () => {},
@@ -97,10 +106,77 @@ function createFakeContext(): {
     app: null as unknown as IPluginContext['app'],
   };
 
-  return { ctx, onCloseHandlers, registered };
+  return { ctx, onCloseHandlers, registered, middlewareAdded };
 }
 
 describe('AuthPlugin', () => {
+  it('supports API-key authentication without JWT', async () => {
+    const plugin = AuthPlugin({ apiKey: { validate: () => Promise.resolve(null) } });
+    const { ctx, registered } = createFakeContext();
+
+    await plugin.register!(ctx);
+
+    expect(plugin.provides).not.toContain(CAPABILITIES.JWT);
+    expect(registered.has(CAPABILITIES.JWT)).toBe(false);
+    expect(registered.has(CAPABILITIES.AUTH)).toBe(true);
+  });
+
+  it('refuses an empty passive strategy chain and names every configuration arm', () => {
+    const plugin = AuthPlugin({});
+    const { ctx } = createFakeContext();
+
+    expect(() => plugin.register!(ctx)).toThrow(AuthPluginConfigurationError);
+    for (const arm of ['jwt', 'apiKey', 'session', 'strategies']) {
+      expect(() => plugin.register!(ctx)).toThrow(arm);
+    }
+  });
+
+  it('refuses local-only configuration because local cannot authenticate a request', () => {
+    const plugin = AuthPlugin({ local: { verify: () => Promise.resolve(null) } });
+    const { ctx } = createFakeContext();
+
+    expect(() => plugin.register!(ctx)).toThrow(AuthPluginConfigurationError);
+  });
+
+  it('registers global authentication middleware at priority 300 by default', async () => {
+    const plugin = AuthPlugin({ apiKey: { validate: () => Promise.resolve(null) } });
+    const { ctx, middlewareAdded } = createFakeContext();
+
+    await plugin.register!(ctx);
+
+    expect(middlewareAdded).toHaveLength(1);
+    expect(middlewareAdded[0]?.options).toEqual({ name: 'auth', priority: 300 });
+  });
+
+  it('moves or disables global authentication middleware when configured', async () => {
+    const moved = AuthPlugin({
+      apiKey: { validate: () => Promise.resolve(null) },
+      middleware: { priority: 425 },
+    });
+    const movedContext = createFakeContext();
+    await moved.register!(movedContext.ctx);
+    expect(movedContext.middlewareAdded[0]?.options?.priority).toBe(425);
+
+    const disabled = AuthPlugin({
+      apiKey: { validate: () => Promise.resolve(null) },
+      middleware: false,
+    });
+    const disabledContext = createFakeContext();
+    await disabled.register!(disabledContext.ctx);
+    expect(disabledContext.middlewareAdded).toHaveLength(0);
+  });
+
+  it('refuses non-integer middleware priorities at construction', () => {
+    for (const priority of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+      expect(() =>
+        AuthPlugin({
+          apiKey: { validate: () => Promise.resolve(null) },
+          middleware: { priority },
+        })
+      ).toThrow(AuthPluginConfigurationError);
+    }
+  });
+
   it('supports JWT-only registration without an RBAC configuration', async () => {
     const plugin = AuthPlugin({ jwt: { secret: 'test-secret' } });
     const { ctx, registered } = createFakeContext();

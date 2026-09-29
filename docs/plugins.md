@@ -402,7 +402,7 @@ emitDecoratorMetadata).
 
 **Purpose:** Authentication and authorization with JWT and API key support.
 
-**Capability Token:** `CAPABILITIES.AUTHENTICATION`, `CAPABILITIES.AUTHORIZATION`
+**Capability Token:** `CAPABILITIES.AUTH`, `CAPABILITIES.AUTHORIZATION`
 
 **Runtime Compatibility:**
 

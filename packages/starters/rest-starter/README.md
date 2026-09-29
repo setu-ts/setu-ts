@@ -57,7 +57,7 @@ const options: RestStarterOptions = {
   serviceDiscovery: { provider: 'static', services: {/* service endpoint map */} },
   decorators: {/* decorator plugin options */},
   database: { type: 'memory' },
-  // `jwt` is required on the auth arm; `rbac` is optional.
+  // Pick any passive strategy; AuthPlugin installs its middleware globally.
   auth: { jwt: { secret: jwtSecret } },
   session: { secret: sessionSecret },
   di: {/* di plugin options */},
@@ -117,15 +117,15 @@ defaults:
 The remaining seven are **gated arms** — supplying one registers a plugin that is otherwise absent,
 so the default composition never bundles something unusable:
 
-| Option             | Type                            | Registers when supplied                                                                      |
-| ------------------ | ------------------------------- | -------------------------------------------------------------------------------------------- |
-| `database`         | `DatabasePluginOptions`         | `DatabasePlugin`                                                                             |
-| `auth`             | `AuthPluginOptions`             | `AuthPlugin`. `rbac` is itself optional — `jwt` alone registers no authorization capability. |
-| `session`          | `SessionPluginOptions`          | `SessionPlugin`                                                                              |
-| `di`               | `DiPluginOptions`               | `DiPlugin`, which changes how every decorated service is constructed                         |
-| `graphql`          | `GraphqlPluginOptions`          | `GraphqlPlugin`                                                                              |
-| `serviceDiscovery` | `ServiceDiscoveryPluginOptions` | `ServiceDiscoveryPlugin`                                                                     |
-| `realtime`         | `RealtimeArm`                   | WebSocket, SSE, and backplane — one per sub-arm                                              |
+| Option             | Type                            | Registers when supplied                                                                    |
+| ------------------ | ------------------------------- | ------------------------------------------------------------------------------------------ |
+| `database`         | `DatabasePluginOptions`         | `DatabasePlugin`                                                                           |
+| `auth`             | `AuthPluginOptions`             | `AuthPlugin`; needs one passive strategy and registers authentication middleware globally. |
+| `session`          | `SessionPluginOptions`          | `SessionPlugin`                                                                            |
+| `di`               | `DiPluginOptions`               | `DiPlugin`, which changes how every decorated service is constructed                       |
+| `graphql`          | `GraphqlPluginOptions`          | `GraphqlPlugin`                                                                            |
+| `serviceDiscovery` | `ServiceDiscoveryPluginOptions` | `ServiceDiscoveryPlugin`                                                                   |
+| `realtime`         | `RealtimeArm`                   | WebSocket, SSE, and backplane — one per sub-arm                                            |
 
 ## Included Plugins
 

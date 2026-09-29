@@ -146,16 +146,16 @@ async function addMiddleware(ctx: IPluginContext) {
 
 The default middleware priority order:
 
-| Priority | Middleware                     | Description                       |
-| -------- | ------------------------------ | --------------------------------- |
-| 10       | `cacheApiMiddleware`           | Cache API middleware (Cloudflare) |
-| 15       | `cacheMiddleware`              | Response caching                  |
-| 20       | `metricsMiddleware`            | Metrics collection                |
-| 25       | `authMiddleware`               | Authentication                    |
-| 30       | `telemetryMiddleware`          | Telemetry/request tracing         |
-| 35       | `validateBody`/`validateQuery` | Request validation                |
-| 40       | `multiTenancyMiddleware`       | Multi-tenancy                     |
-| 500      | Default middleware             | Application routes                |
+| Priority | Middleware               | Description                   |
+| -------- | ------------------------ | ----------------------------- |
+| 20       | `metricsMiddleware`      | Metrics collection            |
+| 30       | `telemetryMiddleware`    | Telemetry/request tracing     |
+| 40       | `multiTenancyMiddleware` | Multi-tenancy                 |
+| 120–270  | HTTP security middleware | CORS, headers, CSRF, size, IP |
+| 260      | `sessionMiddleware`      | Session load and commit       |
+| 275      | `csrfFormMiddleware`     | Synchronizer-token check      |
+| 300      | `authMiddleware`         | Authentication                |
+| 500      | Default middleware       | Application routes            |
 
 ## Plugin Context
 

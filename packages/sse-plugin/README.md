@@ -168,11 +168,11 @@ produces a principal, `requireAuth()` on the route admits an `EventSource` exact
 Configure the session arm on `@setu-ts/auth-plugin` and guard the route:
 
 - `SessionPlugin` (from `@setu-ts/session-plugin`) registers the session middleware at priority 260.
-- `AuthPlugin({ jwt: { … }, session: { toPrincipal } })` — `toPrincipal(view)` maps the opened
-  `SessionView` to the principal it carries, or returns `null` when the session holds no identity.
-  Without `SessionPlugin` registered, `AuthPlugin` throws at `register()` naming both plugins.
-- `app.middleware.add(authMiddleware(), { priority: 300 })` — the authentication band; a bare
-  `add()` would take the kernel default of 500 and run after it.
+- `AuthPlugin({ session: { toPrincipal } })` — `toPrincipal(view)` maps the opened `SessionView` to
+  the principal it carries, or returns `null` when the session holds no identity. Without
+  `SessionPlugin` registered, `AuthPlugin` throws at `register()` naming both plugins.
+- `AuthPlugin` registers the authentication middleware itself, at priority 300 — the authentication
+  band — so no `app.middleware.add(authMiddleware())` is needed.
 - The route itself: `app.router.get('/events', { middleware: [requireAuth()], handler })`, where the
   handler opens the stream with `sse.open(ctx)`.
 

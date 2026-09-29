@@ -42,7 +42,7 @@ deno add @setu-ts/auth-plugin
 ## Usage
 
 ```typescript
-import { authMiddleware, AuthPlugin } from '@setu-ts/auth-plugin';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
 
 app.register(AuthPlugin({
   jwt: {
@@ -67,11 +67,7 @@ app.register(AuthPlugin({
   },
 }));
 
-// Global middleware: authenticates every request and populates ctx.request.user.
-// The priority is explicit and deliberate: ARCHITECTURE.md §10 reserves 300 for
-// authentication, but a bare add() takes the kernel's default of 500 — AFTER
-// every band in that table, including the row named for it.
-app.middleware.add(authMiddleware(), { priority: 300 });
+// AuthPlugin registers passive authentication globally at priority 300.
 ```
 
 ## Login (Issue Token)
@@ -221,26 +217,45 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 
 ## Options
 
-| Option                           | Type                                                  | Default           | Description                                                                                     |
-| -------------------------------- | ----------------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `jwt.secret`                     | `string \| Uint8Array`                                | -                 | HS256 key. Required for HS256.                                                                  |
-| `jwt.privateKey`                 | `string` (PEM)                                        | -                 | RS256 private key. Required for RS256.                                                          |
-| `jwt.publicKey`                  | `string` (PEM)                                        | -                 | RS256 public key. Required for RS256.                                                           |
-| `jwt.algorithm`                  | `'HS256' \| 'RS256'`                                  | inferred          | Inferred from which key material is provided.                                                   |
-| `jwt.audience`                   | `string`                                              | -                 | Expected `aud`; enforced on verify.                                                             |
-| `jwt.issuer`                     | `string`                                              | -                 | Expected `iss`; enforced on verify.                                                             |
-| `jwt.header`                     | `string`                                              | `'authorization'` | Header name for bearer extraction.                                                              |
-| `jwt.scheme`                     | `string`                                              | `'bearer'`        | Token scheme prefix.                                                                            |
-| `jwt.accessTokenRevocationStore` | `IAccessTokenRevocationStore`                         | -                 | Shared store that rejects revoked typed access tokens.                                          |
-| `apiKey.header`                  | `string`                                              | `'X-API-Key'`     | Header holding the API key.                                                                     |
-| `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                | -                 | App-supplied API-key lookup.                                                                    |
-| `local.verify`                   | `(identifier, secret) => Promise<IPrincipal \| null>` | -                 | App-supplied credential check.                                                                  |
-| `rbac.roles`                     | `Record<string, RoleDefinition>`                      | -                 | Role → permissions + `inherits` hierarchy.                                                      |
-| `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`           | -                 | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`. |
-| `strategies`                     | `readonly IAuthStrategy[]`                            | -                 | Caller-supplied strategies, appended after every built-in in declaration order.                 |
+| Option                           | Type                                                  | Default             | Description                                                                                     |
+| -------------------------------- | ----------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------- |
+| `jwt`                            | `JwtOptions`                                          | -                   | Optional JWT service and passive bearer strategy.                                               |
+| `jwt.secret`                     | `string \| Uint8Array`                                | -                   | HS256 key. Required for HS256.                                                                  |
+| `jwt.privateKey`                 | `string` (PEM)                                        | -                   | RS256 private key. Required for RS256.                                                          |
+| `jwt.publicKey`                  | `string` (PEM)                                        | -                   | RS256 public key. Required for RS256.                                                           |
+| `jwt.algorithm`                  | `'HS256' \| 'RS256'`                                  | inferred            | Inferred from which key material is provided.                                                   |
+| `jwt.audience`                   | `string`                                              | -                   | Expected `aud`; enforced on verify.                                                             |
+| `jwt.issuer`                     | `string`                                              | -                   | Expected `iss`; enforced on verify.                                                             |
+| `jwt.header`                     | `string`                                              | `'authorization'`   | Header name for bearer extraction.                                                              |
+| `jwt.scheme`                     | `string`                                              | `'bearer'`          | Token scheme prefix.                                                                            |
+| `jwt.accessTokenRevocationStore` | `IAccessTokenRevocationStore`                         | -                   | Shared store that rejects revoked typed access tokens.                                          |
+| `apiKey.header`                  | `string`                                              | `'X-API-Key'`       | Header holding the API key.                                                                     |
+| `apiKey.validate`                | `(key) => Promise<IPrincipal \| null>`                | -                   | App-supplied API-key lookup.                                                                    |
+| `local.verify`                   | `(identifier, secret) => Promise<IPrincipal \| null>` | -                   | App-supplied credential check.                                                                  |
+| `rbac.roles`                     | `Record<string, RoleDefinition>`                      | -                   | Role → permissions + `inherits` hierarchy.                                                      |
+| `session.toPrincipal`            | `(view: SessionView) => IPrincipal \| null`           | -                   | Maps the opened session to its principal; `null` continues the chain. Requires `SessionPlugin`. |
+| `strategies`                     | `readonly IAuthStrategy[]`                            | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                 |
+| `middleware`                     | `false \| AuthMiddlewareOption`                       | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                      |
 
-Supplying neither `jwt.secret` (HS256) nor `jwt.privateKey` + `jwt.publicKey` (RS256) throws at
-registration.
+At least one passive strategy must be configured through `jwt`, `apiKey`, `session`, or
+`strategies`; `local` alone is a login verifier and cannot authenticate a later request. For
+backend-backed strategies on public operational routes, exclusions can be explicit:
+
+```typescript
+import { AuthPlugin, DEFAULT_RATE_LIMIT_EXCLUDED_PATHS } from '@setu-ts/auth-plugin';
+
+AuthPlugin({
+  apiKey: { validate: async () => null },
+  middleware: { exclude: DEFAULT_RATE_LIMIT_EXCLUDED_PATHS },
+});
+```
+
+Pass `middleware: false` only when attaching `authMiddleware()` at route level yourself. Existing
+applications that added a global copy should remove it; two copies remain correct but run the
+strategy chain twice.
+
+When `jwt` is supplied, omitting both `jwt.secret` (HS256) and `jwt.privateKey` + `jwt.publicKey`
+(RS256) throws at construction.
 
 ## Refresh Tokens
 
@@ -416,6 +431,7 @@ MIT
 | `requireAuth`                       | function  |
 | `requirePermission`                 | function  |
 | `requireRole`                       | function  |
+| `AuthPluginConfigurationError`      | class     |
 | `MalformedPasswordHashError`        | class     |
 | `MemoryAccessTokenRevocationStore`  | class     |
 | `MemoryRateLimitStore`              | class     |
@@ -426,8 +442,9 @@ MIT
 | `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
 | `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
 | `ApiKeyOptions`                     | interface |
-| `AuthPluginOptions`                 | interface |
+| `AuthMiddlewareOption`              | interface |
 | `AuthorizationDiagnosticsOptions`   | interface |
+| `AuthPluginOptions`                 | interface |
 | `IAccessTokenRevocationStore`       | interface |
 | `IAuthorizationDiagnosticsSource`   | interface |
 | `IAuthorizationService`             | interface |

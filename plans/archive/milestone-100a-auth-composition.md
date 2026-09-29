@@ -1,7 +1,7 @@
 # Milestone 100a — Two Composition Defects in `@setu-ts/auth-plugin`
 
-> **Status:** Planning on `docs/m100-auth-federation-mfa`. Implementation and fixes belong on
-> `feat/m100a-auth-composition`; `main` remains protected.
+> **Status:** Complete (PR #384). Implementation and fixes: `feat/m100a-auth-composition`. The
+> design security review is recorded in §10.
 
 ## 0. Objective & scope
 
@@ -183,6 +183,14 @@ deno task release:verify <version>
 
 **Reviewed change:** the set of requests that are authenticated grows from "routes the application
 remembered to cover" to "every request", and a JWT-less configuration becomes legal.
+
+**Assets:** the request principal (`ctx.request.user`) that guards and handlers trust, and the
+authorization decisions made from it on guarded routes.
+
+**Attacker:** an unauthenticated network client that controls every request header, including
+`Authorization`, `X-API-Key` and `Cookie`, and can forge or replay credentials, such as an HS256
+token signed with a guessed secret. The attacker has no access to configured secrets or the session
+key. A malicious application or plugin author is out of scope.
 
 | Finding                                                                       | Resolution in this plan                                                                              |
 | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |

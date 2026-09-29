@@ -5453,9 +5453,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   on the real local-filesystem provider the difference is within noise (enabled/disabled 1.001 over
   24 paired runs); sampled timing was rejected because the `common` contract says age, duration and
   bytes describe one settlement — complete (PR #383).
-- **Next milestone** — **M100a** (`packages/auth-plugin` + `packages/starters` — `jwt` optional; the
-  plugin registers `authMiddleware()` itself; design security review and implementation audit
-  required).
+- **Milestone 100a** (`packages/auth-plugin` + `packages/starters/*` — authentication composition):
+  `jwt` is optional, its capability and strategy are conditional, and an empty passive strategy
+  chain is refused at startup. `AuthPlugin` now registers passive authentication globally at
+  priority 300 by default, with priority, exclusion, and opt-out controls. A full-stack starter
+  regression proves a session principal reaches React Router's `userContext` without a hand-added
+  middleware copy — complete (PR #384).
+- **Next milestone** — **M100b** (`packages/auth-plugin` — tokens from an outside issuer; design
+  security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

@@ -98,6 +98,17 @@ One case used to succeed and is now refused: the first plugin to run threw befor
 such as a runtime provider rejecting its options. In every case, rebuild the application (call your
 `createApp()` again) and start that one.
 
+### Remove hand-added global `authMiddleware()` calls
+
+`AuthPlugin` now registers `authMiddleware()` globally at priority 300. Remove any existing global
+`app.middleware.add(authMiddleware(), ...)` call; leaving it in place remains correct but executes
+every passive strategy twice. If the old application deliberately attached authentication only to
+selected routes, configure `middleware: false` and keep those route-level copies.
+
+The `jwt` option is now optional. A configuration must still supply at least one passive request
+strategy through `jwt`, `apiKey`, `session`, or `strategies`; `local` alone only verifies login
+credentials and is refused at startup.
+
 ## 0.7.0
 
 ### Regenerate your client if you adopt `@HttpCode` or `@Redirect`

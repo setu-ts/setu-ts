@@ -10,7 +10,7 @@ import type {
   IPluginContext,
   IRuntimeServices,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import { CAPABILITIES, createPathMatcher, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IAuthStrategy, IPrincipal, ISessionService } from '@setu-ts/common';
 import type { AuthPluginOptions } from '../interfaces/index.ts';
 import { JwtService } from '../services/jwt-service.ts';
@@ -21,6 +21,8 @@ import { ApiKeyStrategy } from '../strategies/api-key-strategy.ts';
 import { SessionStrategy } from '../strategies/session-strategy.ts';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 import { attachAuthorizationObserver } from '../diagnostics/authorization-observer.ts';
+import { AuthPluginConfigurationError } from '../errors.ts';
+import { authMiddleware } from '../middleware/auth-middleware.ts';
 import {
   AuthorizationObservationCollector,
   compileAuthorizationDiagnosticsOptions,
@@ -29,11 +31,13 @@ import {
 } from '../diagnostics/authorization-observation-collector.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
+const AUTH_MIDDLEWARE_PRIORITY = 300;
+
 /**
  * AuthPlugin factory.
  *
  * Creates a plugin that registers:
- * - IJwtService under CAPABILITIES.JWT
+ * - IJwtService under CAPABILITIES.JWT when `jwt` is configured
  * - IAuthService under CAPABILITIES.AUTH
  * - IAuthorizationService under CAPABILITIES.AUTHORIZATION when `rbac` is configured
  *
@@ -51,20 +55,27 @@ import denoJson from '../../deno.json' with { type: 'json' };
  *     },
  *   },
  * }));
- * // Register the global middleware at the priority ARCHITECTURE.md §10
- * // reserves for it; a bare add() takes the kernel default of 500.
- * app.middleware.add(authMiddleware(), { priority: 300 });
+ * // Passive authentication is registered globally at priority 300.
  * ```
  */
 export function AuthPlugin(options: AuthPluginOptions): IPlugin {
-  // Validate options
-  if (!options.jwt.secret && !(options.jwt.privateKey && options.jwt.publicKey)) {
+  if (
+    options.jwt !== undefined &&
+    !options.jwt.secret &&
+    !(options.jwt.privateKey && options.jwt.publicKey)
+  ) {
     throw new Error(
       'AuthPlugin requires either jwt.secret (for HS256) or jwt.privateKey + jwt.publicKey (for RS256)',
     );
   }
-
-  const algorithm = options.jwt.algorithm ?? (options.jwt.secret ? 'HS256' : 'RS256');
+  if (
+    options.middleware !== undefined && options.middleware !== false &&
+    options.middleware.priority !== undefined && !Number.isInteger(options.middleware.priority)
+  ) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: middleware.priority must be a finite integer',
+    );
+  }
 
   // Authorization decision explanations (M98h): the option is validated HERE,
   // at construction, whether or not RBAC is configured — a malformed option
@@ -78,7 +89,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     name: 'auth-plugin',
     version: denoJson.version,
     provides: [
-      CAPABILITIES.JWT,
+      ...(options.jwt === undefined ? [] : [CAPABILITIES.JWT]),
       CAPABILITIES.AUTH,
       CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
       ...(options.rbac === undefined ? [] : [CAPABILITIES.AUTHORIZATION]),
@@ -93,57 +104,54 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       // Resolve runtime
       const runtime = ctx.services.get<IRuntimeServices>('runtime');
 
-      // Build JwtService options, assigning only defined values
-      // (satisfies exactOptionalPropertyTypes)
-      const jwtOptions: {
-        secret?: string | Uint8Array;
-        privateKey?: string;
-        publicKey?: string;
-        algorithm: 'HS256' | 'RS256';
-        expectedAudience?: string;
-        expectedIssuer?: string;
-      } = {
-        algorithm,
-      };
-      if (options.jwt.secret !== undefined) {
-        jwtOptions.secret = options.jwt.secret;
-      }
-      if (options.jwt.privateKey !== undefined) {
-        jwtOptions.privateKey = options.jwt.privateKey;
-      }
-      if (options.jwt.publicKey !== undefined) {
-        jwtOptions.publicKey = options.jwt.publicKey;
-      }
-      if (options.jwt.audience !== undefined) {
-        jwtOptions.expectedAudience = options.jwt.audience;
-      }
-      if (options.jwt.issuer !== undefined) {
-        jwtOptions.expectedIssuer = options.jwt.issuer;
-      }
-
-      // Create JWT service
-      const jwtService = new JwtService(runtime, jwtOptions);
-
       // Build strategies list
       const strategies: IAuthStrategy[] = [];
+      let jwtService: JwtService | null = null;
 
-      // JWT strategy (always present)
-      const jwtStrategyOpts: {
-        jwtService: JwtService;
-        header?: string;
-        scheme?: string;
-        accessTokenRevocationStore?: IAccessTokenRevocationStore;
-      } = { jwtService };
-      if (options.jwt.header !== undefined) {
-        jwtStrategyOpts.header = options.jwt.header;
+      if (options.jwt !== undefined) {
+        const algorithm = options.jwt.algorithm ?? (options.jwt.secret ? 'HS256' : 'RS256');
+        const jwtOptions: {
+          secret?: string | Uint8Array;
+          privateKey?: string;
+          publicKey?: string;
+          algorithm: 'HS256' | 'RS256';
+          expectedAudience?: string;
+          expectedIssuer?: string;
+        } = { algorithm };
+        if (options.jwt.secret !== undefined) {
+          jwtOptions.secret = options.jwt.secret;
+        }
+        if (options.jwt.privateKey !== undefined) {
+          jwtOptions.privateKey = options.jwt.privateKey;
+        }
+        if (options.jwt.publicKey !== undefined) {
+          jwtOptions.publicKey = options.jwt.publicKey;
+        }
+        if (options.jwt.audience !== undefined) {
+          jwtOptions.expectedAudience = options.jwt.audience;
+        }
+        if (options.jwt.issuer !== undefined) {
+          jwtOptions.expectedIssuer = options.jwt.issuer;
+        }
+
+        jwtService = new JwtService(runtime, jwtOptions);
+        const jwtStrategyOpts: {
+          jwtService: JwtService;
+          header?: string;
+          scheme?: string;
+          accessTokenRevocationStore?: IAccessTokenRevocationStore;
+        } = { jwtService };
+        if (options.jwt.header !== undefined) {
+          jwtStrategyOpts.header = options.jwt.header;
+        }
+        if (options.jwt.scheme !== undefined) {
+          jwtStrategyOpts.scheme = options.jwt.scheme;
+        }
+        if (options.jwt.accessTokenRevocationStore !== undefined) {
+          jwtStrategyOpts.accessTokenRevocationStore = options.jwt.accessTokenRevocationStore;
+        }
+        strategies.push(new JwtStrategy(jwtStrategyOpts));
       }
-      if (options.jwt.scheme !== undefined) {
-        jwtStrategyOpts.scheme = options.jwt.scheme;
-      }
-      if (options.jwt.accessTokenRevocationStore !== undefined) {
-        jwtStrategyOpts.accessTokenRevocationStore = options.jwt.accessTokenRevocationStore;
-      }
-      strategies.push(new JwtStrategy(jwtStrategyOpts));
 
       // API key strategy (optional)
       if (options.apiKey) {
@@ -180,6 +188,12 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         }
       }
 
+      if (strategies.length === 0) {
+        throw new AuthPluginConfigurationError(
+          'auth-plugin requires at least one passive authentication strategy; configure jwt, apiKey, session, or strategies',
+        );
+      }
+
       // A strategy's name is its only identity; a duplicate makes the later
       // entry unreachable for anything that reasons about the chain by name.
       const seenNames = new Set<string>();
@@ -200,8 +214,29 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       const authService = new AuthService(strategies, localStrategy);
 
       // Register services
-      ctx.services.register(CAPABILITIES.JWT, jwtService);
+      if (jwtService !== null) {
+        ctx.services.register(CAPABILITIES.JWT, jwtService);
+      }
       ctx.services.register(CAPABILITIES.AUTH, authService);
+
+      if (options.middleware !== false) {
+        const configured = options.middleware ?? {};
+        const isExcluded = createPathMatcher(configured.exclude ?? []);
+        const authenticate = authMiddleware();
+        ctx.middleware.add(
+          async (requestContext, next): Promise<void> => {
+            if (isExcluded(requestContext.request.path)) {
+              await next();
+              return;
+            }
+            await authenticate(requestContext, next);
+          },
+          {
+            name: 'auth',
+            priority: configured.priority ?? AUTH_MIDDLEWARE_PRIORITY,
+          },
+        );
+      }
 
       // Authorization decision explanations (M98h). The AuthPlugin ALWAYS
       // registers a source under CAPABILITIES.AUTHORIZATION_DIAGNOSTICS: a
