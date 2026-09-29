@@ -1,6 +1,6 @@
 # Milestone 100a — Two Composition Defects in `@setu-ts/auth-plugin`
 
-> **Status:** Complete (PR pending). Implementation and fixes: `feat/m100a-auth-composition`. The
+> **Status:** Complete (PR #384). Implementation and fixes: `feat/m100a-auth-composition`. The
 > design security review is recorded in §10.
 
 ## 0. Objective & scope

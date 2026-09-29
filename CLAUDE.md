@@ -5458,7 +5458,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   chain is refused at startup. `AuthPlugin` now registers passive authentication globally at
   priority 300 by default, with priority, exclusion, and opt-out controls. A full-stack starter
   regression proves a session principal reaches React Router's `userContext` without a hand-added
-  middleware copy — complete (PR pending).
+  middleware copy — complete (PR #384).
 - **Next milestone** — **M100b** (`packages/auth-plugin` — tokens from an outside issuer; design
   security review and implementation audit required).
 
