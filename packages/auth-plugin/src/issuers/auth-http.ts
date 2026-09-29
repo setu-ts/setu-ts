@@ -30,8 +30,12 @@ export class AuthHttpBodyTooLargeError extends Error {
  * The body is read from its stream with a running byte total; the moment the
  * total passes `maxBytes` the stream is CANCELLED (never abandoned) and the call
  * rejects. `text()` is never used, because a limit checked on a finished string
- * has already buffered the body it exists to refuse. Redirects are refused, so a
- * validated `https` URL cannot be bounced to another scheme or host.
+ * has already buffered the body it exists to refuse. Redirects are NOT followed
+ * (`redirect: 'manual'`), so a validated `https` URL cannot be bounced to another
+ * scheme or host: the redirect response itself comes back, and its non-200
+ * status is refused by the caller. `'manual'` rather than `'error'` because
+ * Cloudflare Workers throws on `'error'` ("won't be implemented … at the edge"),
+ * which would fail every key-set fetch there.
  *
  * @param fetchFn - Fetch implementation; defaults to the global `fetch`,
  *   resolved at call time with the global as receiver
@@ -45,7 +49,7 @@ export function createDefaultAuthHttp(
       const response = await fetchFn(url, {
         method: 'GET',
         signal,
-        redirect: 'error',
+        redirect: 'manual',
         headers: { accept: 'application/json' },
       });
       const body = await readCapped(response.body, maxBytes);

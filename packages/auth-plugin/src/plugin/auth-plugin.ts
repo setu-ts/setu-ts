@@ -92,6 +92,11 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   // Outside issuers (M100b): validated here, at construction, because every
   // refusal is a configuration that would silently weaken verification.
   const compiledIssuers = options.issuers === undefined ? [] : compileIssuers(options.issuers);
+  if (options.http !== undefined && compiledIssuers.length === 0) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: http is only read for issuers; configure issuers or drop http',
+    );
+  }
 
   return {
     name: 'auth-plugin',
@@ -166,7 +171,14 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       const issuerKeySets: IssuerKeySet[] = [];
       if (compiledIssuers.length > 0) {
         const http = options.http ?? createDefaultAuthHttp();
-        const debug = (message: string): void => ctx.logger?.debug(message);
+        // A throwing logger must not abort the rest of the strategy chain.
+        const debug = (message: string): void => {
+          try {
+            ctx.logger?.debug(message);
+          } catch {
+            // Reporting is best-effort; authentication outcome is unaffected.
+          }
+        };
         const bindings = compiledIssuers.map((issuer) => {
           const keySet = new IssuerKeySet(issuer, runtime, http, (name, reason) => {
             debug(`auth-plugin: issuer '${name}' key-set refresh failed (${reason})`);
@@ -184,6 +196,15 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
             ...(options.jwt?.scheme !== undefined ? { scheme: options.jwt.scheme } : {}),
           }),
         );
+        // Abort key-set fetches at the START of stop(): the kernel drains
+        // in-flight requests before onClose, so a request parked on a fetch
+        // would otherwise hold shutdown for up to fetchTimeoutMs. Cached sets
+        // stay usable for requests still being served in this window.
+        ctx.lifecycle.onStopping(() => {
+          for (const keySet of issuerKeySets) {
+            keySet.close();
+          }
+        });
         // Reads cached state only — no I/O — and never reports `down`, because
         // an identity-provider outage must not restart the application.
         ctx.health.register('auth', () => {
@@ -321,7 +342,12 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
 
       // Cleanup on close
       ctx.lifecycle.onClose(() => {
-        // JwtService cached keys are GC'd when the service is dropped
+        // JwtService cached keys are GC'd when the service is dropped. Key sets
+        // are closed here too (idempotent) for a failed start, where the
+        // stopping phase never runs.
+        for (const keySet of issuerKeySets) {
+          keySet.close();
+        }
         if (authorizationSource instanceof AuthorizationObservationCollector) {
           authorizationSource.close();
         }

@@ -272,8 +272,16 @@ including a real Keycloak token re-signed with `alg: HS256` using the realm's pu
   `unfetched` until the first token from that issuer arrives.
 - **A token with a `crit` header is refused** (`crit-unsupported`): no extension is understood, and
   RFC 7515 §4.1.11 requires refusing one that is not.
-- **The default HTTP seam refuses redirects** (`redirect: 'error'`), so a validated `https` URL
-  cannot be bounced to another scheme or host.
+- **The default HTTP seam does not follow redirects** (`redirect: 'manual'`), so a validated `https`
+  URL cannot be bounced to another scheme or host; the redirect's non-200 status is refused. The
+  first implementation used `'error'`, which code review found Cloudflare Workers THROWS on
+  (measured on workerd: "won't be implemented … at the edge"), failing every key-set fetch there.
+- **Key sets are closed at `onStopping`, not only `onClose`.** The kernel drains in-flight requests
+  before `onClose`, so a request parked on a key-set fetch held shutdown for up to `fetchTimeoutMs`
+  (measured: 10 s with an `onClose`-only abort, 89 ms with `onStopping`).
+- **Two refusals beyond §3.2**, both from code review: `keySet.ttlMs` above `keySet.maxStaleMs` (the
+  cap would drop a set still fresh by TTL, refusing a valid token each cycle), and `http` without
+  `issuers` (nothing would read it).
 - **The key-set cache tracks "ever fetched" explicitly.** Using a zero timestamp as the sentinel
   broke under a monotonic clock that reads `0`, which the test fake did.
 - **Keycloak is a CI step in `ci.yml`, `release.yml` and `drift.yml`**, compared byte-for-byte by

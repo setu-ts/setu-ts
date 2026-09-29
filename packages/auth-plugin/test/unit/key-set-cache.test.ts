@@ -146,4 +146,44 @@ describe('IssuerKeySet', () => {
     expect(await keySet.keys()).toBeNull();
     expect(failures).toEqual(['key-set-fetch-failed']);
   });
+
+  it('refuses a redirect response rather than following it', async () => {
+    const t = setup();
+    t.respond({ status: 302, body: '' });
+    expect(await t.keySet.keys()).toBeNull();
+    expect(t.failures).toEqual(['http-status']);
+  });
+
+  it('close() aborts an in-flight fetch and stops later refreshes', async () => {
+    const runtime = createFakeRuntime();
+    let aborted = false;
+    let calls = 0;
+    const keySet = new IssuerKeySet(issuer(), runtime, {
+      get: (_url, { signal }) => {
+        calls++;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            aborted = true;
+            reject(new Error('aborted'));
+          });
+        });
+      },
+    }, () => {});
+    const pending = keySet.keys();
+    keySet.close();
+    expect(await pending).toBeNull();
+    expect(aborted).toBe(true);
+    runtime.setHrtime(10_000);
+    expect(await keySet.keys()).toBeNull();
+    expect(calls).toBe(1);
+  });
+
+  it('close() keeps a cached set usable for draining requests', async () => {
+    const t = setup();
+    await t.keySet.keys();
+    t.keySet.close();
+    t.runtime.setHrtime(2000);
+    expect(await t.keySet.keys()).toEqual([KEY]);
+    expect(t.calls.length).toBe(1);
+  });
 });

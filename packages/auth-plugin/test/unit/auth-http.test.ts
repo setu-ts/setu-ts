@@ -36,7 +36,8 @@ describe('createDefaultAuthHttp', () => {
     const signal = new AbortController().signal;
     const response = await http.get('https://idp.test/jwks', { signal, maxBytes: 100 });
     expect(response).toEqual({ status: 200, body: '{"a":1}' });
-    expect(seen[0].redirect).toBe('error');
+    // 'manual', never 'error': Cloudflare Workers throws on 'error'.
+    expect(seen[0].redirect).toBe('manual');
     expect(seen[0].signal).toBe(signal);
   });
 

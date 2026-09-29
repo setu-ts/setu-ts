@@ -308,7 +308,8 @@ AuthPlugin({
   fetches. If fetching fails the last good set stays usable for `keySet.maxStaleMs` (default 24 h)
   after it was last confirmed, then is dropped — a key the provider removed cannot authenticate
   indefinitely while its endpoint is unreachable. Each fetch is bounded by `keySet.fetchTimeoutMs`
-  (default 5 s), 64 KiB and 64 keys.
+  (default 5 s), 64 KiB and 64 keys, and does not follow redirects. `ttlMs` may not exceed
+  `maxStaleMs`. Fetches in flight are aborted when the application begins stopping.
 - **Health.** An `auth` indicator reports `up` when every issuer's key set is current, and
   `degraded` with each issuer's state (`stale`, `expired`, `unfetched`) otherwise — never `down`, so
   a provider outage does not restart the application. It reads cached state and performs no I/O, so

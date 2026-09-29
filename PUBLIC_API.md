@@ -2334,12 +2334,13 @@ They still fail closed either way; what changed is that the refusal is legible.
 > `keySet.minRefreshIntervalMs` (60 s) with concurrent refetches coalesced, the last good set
 > survives fetch failures for `keySet.maxStaleMs` (24 h) and is then dropped, and each fetch is
 > bounded by `keySet.fetchTimeoutMs` (5 s), 64 KiB and 64 keys. Every refusal — duplicate name or
-> issuer, empty audience, unsupported algorithm, out-of-range tolerance or timing, non-`https`
-> non-loopback URL — throws `AuthPluginConfigurationError` from `AuthPlugin(...)`.
-> `http?: IAuthHttp` replaces the default `fetch` seam. An `auth` health indicator reports `up` or
-> `degraded` (with per-issuer `stale`/`expired`/`unfetched`), never `down`, and performs no I/O.
-> `typ: at+jwt` (RFC 9068) is not enforced, so the API needs an audience distinct from any sign-in
-> client id; multi-tenant Entra ID is not supported. `IJwtService` remains self-issued only.
+> issuer, empty audience, unsupported algorithm, out-of-range tolerance or timing, a `keySet.ttlMs`
+> above `keySet.maxStaleMs`, `http` without `issuers`, non-`https` non-loopback URL — throws
+> `AuthPluginConfigurationError` from `AuthPlugin(...)`. `http?: IAuthHttp` replaces the default
+> `fetch` seam. An `auth` health indicator reports `up` or `degraded` (with per-issuer
+> `stale`/`expired`/`unfetched`), never `down`, and performs no I/O. `typ: at+jwt` (RFC 9068) is not
+> enforced, so the API needs an audience distinct from any sign-in client id; multi-tenant Entra ID
+> is not supported. `IJwtService` remains self-issued only.
 >
 > **Phasing (M16b, shipped):** **refresh tokens** and **rate limiting** shipped in M16b as
 > standalone additions — `RefreshTokenService` (app-instantiated; NOT an `IAuthStrategy`, since a

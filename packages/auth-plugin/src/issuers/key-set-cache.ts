@@ -46,6 +46,8 @@ export class IssuerKeySet {
   #inflight: Promise<void> | null = null;
   #discovery: Readonly<Record<string, unknown>> | null = null;
   #discoveryAt = 0;
+  #closed = false;
+  readonly #controllers = new Set<AbortController>();
 
   /**
    * @param issuer - The compiled issuer entry
@@ -93,13 +95,25 @@ export class IssuerKeySet {
       this.#runtime.hrtime() - this.#confirmedAt < this.#issuer.timings.ttlMs;
     if (this.#inflight !== null) {
       await this.#inflight;
-    } else if ((!fresh || force) && this.#cooldownElapsed()) {
+    } else if ((!fresh || force) && !this.#closed && this.#cooldownElapsed()) {
       this.#inflight = this.#refresh().finally(() => {
         this.#inflight = null;
       });
       await this.#inflight;
     }
     return this.#usable();
+  }
+
+  /**
+   * Stops refreshing and aborts any fetch in flight, so an application stop
+   * is not held open by a key-set request or its timeout timer. A cached set
+   * stays usable for requests still draining.
+   */
+  close(): void {
+    this.#closed = true;
+    for (const controller of this.#controllers) {
+      controller.abort();
+    }
   }
 
   #usable(): readonly Jwk[] | null {
@@ -168,6 +182,7 @@ export class IssuerKeySet {
 
   async #fetchJson(url: string): Promise<Readonly<Record<string, unknown>>> {
     const controller = new AbortController();
+    this.#controllers.add(controller);
     const timer = this.#runtime.setTimeout(
       () => controller.abort(),
       this.#issuer.timings.fetchTimeoutMs,
@@ -180,6 +195,7 @@ export class IssuerKeySet {
       });
     } finally {
       this.#runtime.clearTimeout(timer);
+      this.#controllers.delete(controller);
     }
     if (response.status !== 200) {
       throw new RefreshError('http-status');

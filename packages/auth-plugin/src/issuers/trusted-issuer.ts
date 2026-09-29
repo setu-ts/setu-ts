@@ -102,7 +102,7 @@ function timing(name: string, key: keyof KeySetTimings, value: number | undefine
  * @returns The compiled entries, in configuration order
  * @throws {AuthPluginConfigurationError} On a duplicate name or issuer, an
  *   empty audience, an unsupported algorithm, an out-of-range clock tolerance
- *   or timing, or a URL that is neither `https` nor loopback `http`
+ *   or timing, a `ttlMs` above `maxStaleMs`, or a URL that is neither `https` nor loopback `http`
  */
 export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly CompiledIssuer[] {
   const names = new Set<string>();
@@ -165,6 +165,17 @@ export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly Comp
     }
 
     const keySet = entry.keySet ?? {};
+    const timings: KeySetTimings = {
+      ttlMs: timing(name, 'ttlMs', keySet.ttlMs),
+      minRefreshIntervalMs: timing(name, 'minRefreshIntervalMs', keySet.minRefreshIntervalMs),
+      fetchTimeoutMs: timing(name, 'fetchTimeoutMs', keySet.fetchTimeoutMs),
+      maxStaleMs: timing(name, 'maxStaleMs', keySet.maxStaleMs),
+    };
+    // A set still fresh by its TTL must never be past the stale cap, or the
+    // cap drops it while no refresh is due and a valid token is refused.
+    if (timings.ttlMs > timings.maxStaleMs) {
+      refuse(name, 'keySet.ttlMs must not exceed keySet.maxStaleMs');
+    }
     return {
       name,
       issuer: entry.issuer,
@@ -173,12 +184,7 @@ export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly Comp
       discoveryUrl,
       algorithms: new Set(algorithms),
       clockToleranceSec: tolerance,
-      timings: {
-        ttlMs: timing(name, 'ttlMs', keySet.ttlMs),
-        minRefreshIntervalMs: timing(name, 'minRefreshIntervalMs', keySet.minRefreshIntervalMs),
-        fetchTimeoutMs: timing(name, 'fetchTimeoutMs', keySet.fetchTimeoutMs),
-        maxStaleMs: timing(name, 'maxStaleMs', keySet.maxStaleMs),
-      },
+      timings,
       toPrincipal: entry.toPrincipal,
     };
   });

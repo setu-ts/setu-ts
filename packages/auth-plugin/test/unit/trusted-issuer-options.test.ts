@@ -70,6 +70,24 @@ describe('TrustedIssuer validation at construction', () => {
     }
   });
 
+  it('refuses a ttlMs above maxStaleMs, accepting them equal', () => {
+    expect(refusal([{ ...base, keySet: { ttlMs: 2000, maxStaleMs: 1000 } }])).toContain(
+      'keySet.ttlMs must not exceed keySet.maxStaleMs',
+    );
+    expect(refusal([{ ...base, keySet: { ttlMs: 48 * 3_600_000 } }])).toContain(
+      'must not exceed',
+    );
+    const [compiled] = compileIssuers([{ ...base, keySet: { ttlMs: 1000, maxStaleMs: 1000 } }]);
+    expect(compiled.timings.ttlMs).toBe(1000);
+  });
+
+  it('refuses http without issuers, since nothing would read it', () => {
+    const http = { get: () => Promise.resolve({ status: 200, body: '{}' }) };
+    expect(() => AuthPlugin({ apiKey: { validate: () => Promise.resolve(null) }, http })).toThrow(
+      AuthPluginConfigurationError,
+    );
+  });
+
   it('builds a discovery URL for discovery: true', () => {
     const [compiled] = compileIssuers([{ ...base, keys: { discovery: true } }]);
     expect(compiled.discoveryUrl).toBe('https://idp.test/.well-known/openid-configuration');
