@@ -117,6 +117,9 @@ and the CLI's command discovery rely on.
 - The kernel emits only bare 404/500 JSON; error formatting belongs to the exceptions package.
 - A runtime provider is mandatory — `start()` fails fast if no plugin provides
   `CAPABILITIES.RUNTIME`.
+- A failed `start()` can be corrected and retried only when it failed before any plugin registered
+  (plugin resolution). Once a plugin's `register()` has run, a second `start()` throws by name —
+  create a new application instead.
 
 See the repository's
 [`PUBLIC_API.md`](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#createapplication-setu-tskernel)

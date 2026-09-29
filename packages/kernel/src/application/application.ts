@@ -269,10 +269,13 @@ class Application implements IKernelApplication {
   #started = false;
   /**
    * Whether any plugin has begun registering. Unlike {@linkcode #started} this is
-   * never reset: `start()` rolls `#started` back on failure so a failed start can
-   * be corrected and retried, but plugins that already ran cannot be un-run.
-   * `unregister` reads this so it can never report having removed a plugin whose
-   * `register()` has already executed.
+   * never reset: plugins that already ran cannot be un-run. `start()` rolls
+   * `#started` back on failure, but only a failure BEFORE this flag is set can be
+   * corrected and retried — once a plugin's `register()` has run, its services,
+   * hooks, routes and middleware (and any side effect outside the kernel) survive
+   * the rollback, so `start()` reads this to refuse a retry by name rather than
+   * failing on the leftover state. `unregister` reads it so it can never report
+   * having removed a plugin whose `register()` has already executed.
    *
    * Set inside the registration loop rather than on entry to `#runStartup`,
    * because plugin RESOLUTION can fail before anything runs — and correcting
@@ -419,8 +422,7 @@ class Application implements IKernelApplication {
 
   unregister(name: string): boolean {
     // `#registrationStarted`, not `#started`: a FAILED `start()` rolls `#started`
-    // back so the application can be corrected and retried, but the plugins that
-    // ran before the failure have already run — their `register()` executed and
+    // back, but the plugins that ran before the failure have already run — their `register()` executed and
     // their services are in the registry. Removing one from the pending list
     // then could not deliver what this method promises, and returning `true`
     // would report a removal that did not happen.
@@ -449,10 +451,25 @@ class Application implements IKernelApplication {
     if (this.#started) {
       throw new Error('Application has already been started.');
     }
+    // A failed start is retryable only if it failed before any plugin ran
+    // `register()` (plugin resolution: a missing runtime provider, an
+    // unsatisfied dependency, a cycle). After that, every plugin that ran left
+    // its services in a registry that may already be sealed, its lifecycle
+    // hooks, its routes and its middleware behind — and possibly a resource its
+    // `onClose` did not release. A second attempt would re-run `register()`
+    // against that state and fail on it (`Capability 'runtime' is already
+    // registered`), so refuse by name instead of pretending it can be undone.
+    if (this.#registrationStarted) {
+      throw new Error(
+        'Cannot retry start() after plugins have registered: a previous start() failed ' +
+          'after plugin registration began, and plugins that already ran cannot be un-run. ' +
+          'Create a new application instead.',
+      );
+    }
     // Mark as started up-front so plugins cannot register more plugins during
     // startup, but roll it back if any startup step throws (see the catch
-    // below) so a failed start can be corrected and retried instead of
-    // wedging the application.
+    // below) so a start that failed before any plugin registered can be
+    // corrected and retried; later failures are refused above.
     this.#started = true;
     try {
       await this.#runStartup(options);
