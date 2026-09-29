@@ -212,9 +212,21 @@ export function createObservedFetch(options: ObservedFetchOptions): ObservedFetc
         collector.settle(token, false, 'other');
         throw error;
       }
+      // Adopt the value as `await` would. `Promise.resolve` reads a native
+      // promise's `constructor`, which can throw; unwrapped, that fault only
+      // surfaces at the caller's `await`, so it becomes a rejection with the
+      // identical value here — recorded as a failure, never a synchronous
+      // throw and never a permanently in-flight attempt.
+      let adopted: Promise<Response>;
+      try {
+        adopted = Promise.resolve(result as Response | PromiseLike<Response>);
+      } catch (error) {
+        collector.settle(token, false, 'other');
+        return Promise.reject(error);
+      }
       // A DERIVED promise, never a side branch: a dropped rejection is still
       // reported to the host exactly once (the M98i lesson).
-      return Promise.resolve(result as Response | PromiseLike<Response>).then(
+      return adopted.then(
         (value) => {
           collector.settle(token, true, statusOf(value));
           return value;

@@ -85,6 +85,7 @@ home:** `packages/sdk/test/unit/outbound-http-observations.test.ts` and
 | Promise resolves with a value whose `status` is readable           | —         | +1      | +1          | —          | class of status   | elapsed          |
 | Promise resolves; `status` getter throws or value is not an object | —         | +1      | +1          | —          | `'other'`         | elapsed          |
 | Promise rejects (network error, abort, any reason)                 | —         | +1      | —           | +1         | unchanged         | elapsed          |
+| Adopting the value throws (e.g. a promise's `constructor` getter)  | —         | +1      | —           | +1         | unchanged         | elapsed (≈0)     |
 | Settlement from an earlier generation (§3.4)                       | —         | —       | —           | —          | —                 | —                |
 
 An HTTP error status is a response, not a failure. `responses + failures === count` and

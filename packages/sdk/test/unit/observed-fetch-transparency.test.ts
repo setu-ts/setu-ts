@@ -8,6 +8,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
+import type { IOutboundHttpDiagnosticsSource, IPluginContext } from '@setu-ts/common';
 
 import { createObservedFetch } from '../../src/http/observed-fetch.ts';
 import { createClient } from '../../src/sdk.ts';
@@ -179,6 +180,52 @@ describe('createObservedFetch — result fidelity', () => {
       })) as unknown as Fetch,
     });
     expect(await thenable.fetch('https://example.test/')).toBe(response);
+  });
+
+  it('turns a throwing promise constructor getter into a recorded rejection, as await does', async () => {
+    const fault = new Error('constructor getter');
+    const hostile = () => {
+      const promise = Promise.resolve(new Response(null));
+      Object.defineProperty(promise, 'constructor', {
+        get() {
+          throw fault;
+        },
+      });
+      return promise;
+    };
+    // Unwrapped baseline: the fault surfaces only at `await`.
+    let unwrapped: unknown;
+    try {
+      await hostile();
+    } catch (thrown) {
+      unwrapped = thrown;
+    }
+    expect(unwrapped).toBe(fault);
+
+    const observed = createObservedFetch({ alias: 'a', fetch: hostile as unknown as Fetch });
+    let returned: Promise<Response> | undefined;
+    expect(() => {
+      returned = observed.fetch('https://example.test/');
+    }).not.toThrow();
+    let wrapped: unknown;
+    try {
+      await returned;
+    } catch (thrown) {
+      wrapped = thrown;
+    }
+    expect(wrapped).toBe(fault);
+    let source: IOutboundHttpDiagnosticsSource | undefined;
+    await observed.plugin.register({
+      app: {},
+      services: {
+        register(_token: string, service: unknown) {
+          source = service as IOutboundHttpDiagnosticsSource;
+        },
+      },
+      lifecycle: { onClose() {} },
+    } as unknown as IPluginContext);
+    if (source === undefined) throw new Error('source not registered');
+    expect(source.snapshot().records[0]).toMatchObject({ started: 1, count: 1, failures: 1 });
   });
 
   it('reads only status on the resolved value, and a throwing status getter changes nothing', async () => {
