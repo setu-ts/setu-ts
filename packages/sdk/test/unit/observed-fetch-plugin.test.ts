@@ -68,6 +68,18 @@ describe('createObservedFetch — registration plugin', () => {
     expect(names.size).toBe(20);
   });
 
+  it('names helpers from two separate module copies distinctly (no shared counter)', async () => {
+    const copy = await import('../../src/http/observed-fetch.ts?second-copy') as {
+      createObservedFetch: typeof createObservedFetch;
+    };
+    // Vacuity guard: the copies must really be distinct module instances.
+    expect(copy.createObservedFetch).not.toBe(createObservedFetch);
+    const first = createObservedFetch({ alias: 'a', fetch: ok }).plugin.name;
+    const second = copy.createObservedFetch({ alias: 'a', fetch: ok }).plugin.name;
+    expect(second).toMatch(/^outbound-http-diagnostics-[0-9a-f]{32}$/);
+    expect(second).not.toBe(first);
+  });
+
   it('declares no provides and no dependencies, and is frozen', () => {
     const observed = createObservedFetch({ alias: 'a', fetch: ok });
     expect(observed.plugin.version).toBe(SDK_VERSION);

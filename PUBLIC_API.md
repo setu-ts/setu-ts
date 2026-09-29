@@ -11566,11 +11566,12 @@ calls the wrapped fetch exactly once, and returns the identical value or rethrow
 value; a synchronous throw stays synchronous (a deliberate departure from the framework's promise
 rule, so wrapping never changes application behavior). It reads only the resolved value's `status`.
 Register `plugin` in exactly one application: it registers the source under
-`CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`, closes the helper on shutdown, refuses another
-application, and reopens for the same application's retried `start()`. Its name is
-`outbound-http-diagnostics-<32 hex>`, drawn from `crypto.getRandomValues` (required; Node ≥ 19).
-Construct the helper only when a devtool composition is present. Construction refusals are fixed
-messages that never echo a value.
+`CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`, closes the helper on shutdown, refuses another application
+(the same application registering it again reopens the source rather than refusing — though the
+kernel currently refuses a retried `start()` of any application registering `RuntimePlugin`, so this
+path is not a working recovery). Its name is `outbound-http-diagnostics-<32 hex>`, drawn from
+`crypto.getRandomValues` (required; Node ≥ 19). Construct the helper only when a devtool composition
+is present. Construction refusals are fixed messages that never echo a value.
 
 ### ClientRateLimitPolicy
 

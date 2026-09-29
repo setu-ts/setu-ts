@@ -236,8 +236,10 @@ export function createObservedFetch(options: ObservedFetchOptions): ObservedFetc
         if (registeredApp !== ctx.app) {
           throw new Error(OBSERVED_FETCH_ERRORS.otherApp);
         }
-        // The same application retrying after a failed start(): its registry
-        // and close hooks survive the rollback, so only reopen.
+        // The same application registering again: its registry and close
+        // hooks survive a failed start's rollback, so only reopen. (The kernel
+        // today refuses such a retry once RuntimePlugin re-registers
+        // `runtime`, so this is tolerance, not a working recovery path.)
         collector.reopen();
         return;
       }

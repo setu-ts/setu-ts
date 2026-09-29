@@ -20,9 +20,11 @@ All notable changes to this project are documented here. The format follows
   time to headers. No URL, host, header, cookie, body, signal or error is ever read. `plugin`
   registers a frozen snapshot-only `IOutboundHttpDiagnosticsSource` under the new multi-provider
   `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` and closes the helper on shutdown; it refuses a second
-  application and reopens for the same application's retried `start()`. A record never expires while
-  an attempt is in flight, so a hung upstream stays visible as `started - count`. New public surface
-  on `@setu-ts/common`: `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`, `IOutboundHttpDiagnosticsSource`,
+  application. (A re-registration by the SAME application reopens the source instead of refusing it,
+  but a retried `start()` is not a working recovery today: the kernel refuses the retry itself once
+  `RuntimePlugin` re-registers `runtime`.) A record never expires while an attempt is in flight, so
+  a hung upstream stays visible as `started - count`. New public surface on `@setu-ts/common`:
+  `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`, `IOutboundHttpDiagnosticsSource`,
   `OutboundHttpDiagnosticsSnapshot`, `OutboundHttpDiagnosticsRecord`,
   `OutboundHttpDiagnosticsResponse` and `OutboundHttpStatusClass`; on `@setu-ts/sdk`:
   `createObservedFetch`, `ObservedFetch`, `ObservedFetchOptions`. New connector surface:

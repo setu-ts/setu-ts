@@ -85,6 +85,9 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
       diagnostics: {},
     });
     await app.start({ port: freePort(), hostname: '127.0.0.1' });
+    // Declared outside the try so a failing assertion still releases the hung
+    // upstream call in `finally` — otherwise the test never ends.
+    let hung: Promise<Response> | undefined;
     try {
       const sdk = createClient({ baseUrl: upstream.base, fetch: observed.fetch });
       await sdk.request({
@@ -96,12 +99,13 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
       await expect(sdk.request({ method: 'GET', path: 'missing' })).rejects.toThrow();
       // Direct call with userinfo and a fragment in the URL.
       const withUserinfo = upstream.base.replace('http://', `http://user:${CANARY}@`);
-      const direct = await observed.fetch(`${withUserinfo}/boom#${CANARY}`).catch(() => null);
-      await direct?.text();
+      const direct = await observed.fetch(`${withUserinfo}/boom#${CANARY}`);
+      expect(direct.status).toBe(503);
+      await direct.text();
       // A refused connection: a rejection whose message quotes the address.
       await expect(observed.fetch(`http://127.0.0.1:${freePort()}/${CANARY}`)).rejects.toThrow();
       // A hung call stays in flight.
-      const hung = observed.fetch(`${upstream.base}/hang`);
+      hung = observed.fetch(`${upstream.base}/hang`);
 
       const source = app.services.getAll<IOutboundHttpDiagnosticsSource>(
         CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS,
@@ -127,11 +131,13 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
       expect(snapshot.alias).toEqual('payments-api');
       expect(snapshot.coverage).toEqual('owned-instance');
       const record = snapshot.records[0]!;
-      // POST ok, GET 404, direct 503 (or a userinfo refusal), refused, hung.
+      // POST 200, GET 404, direct 503 (Deno's fetch accepts userinfo), refused, hung.
       expect(record.started).toBe(5);
       expect(record.count).toBe(4);
-      expect(record.responses + record.failures).toBe(4);
-      expect(record.failures).toBeGreaterThanOrEqual(1);
+      expect(record.responses).toBe(3);
+      expect(record.failures).toBe(1);
+      // The refusal settles last, and a failure leaves the class unchanged.
+      expect(record.lastStatusClass).toBe('5xx');
       expect(record.lastDurationMs).not.toBeNull();
 
       // --- Canaries absent everywhere ---------------------------------
@@ -140,10 +146,9 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
         expect(frame).not.toContain(CANARY);
       }
       expect(JSON.stringify(response)).not.toContain(CANARY);
-
-      upstream.releaseHangs();
-      await (await hung).text();
     } finally {
+      upstream.releaseHangs();
+      await hung?.then((response) => response.text()).catch(() => undefined);
       await app.stop();
       await upstream.close();
     }

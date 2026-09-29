@@ -123,12 +123,15 @@ holder — the M70d defect class — and would keep capture running in productio
   `register(ctx)` refuses, with a fixed error, a DIFFERENT application; otherwise one application's
   `stop()` would close the source another still reads (round 2 N5). The SAME application may
   register again after its own failed `start()` — the kernel rolls back and runs `runClose()`, and
-  its documented recovery is a second `start()` (`application.ts:272`, `:449-468`) — and
-  re-registration reopens the collector (round 3 M1). A helper closed by its application's normal
-  `stop()` reopens the same way if that application is started again. Registering the same plugin
-  object twice in ONE application is refused by the kernel's duplicate-name check. A test that
-  reuses one module-level helper across applications is refused by design; the README says to build
-  the helper inside the factory.
+  re-registration reopens the collector rather than refusing (round 3 M1). **Correction (code
+  review, 2026-09-29):** the second `start()` the kernel comment calls its recovery does not work
+  for any real application — `RuntimePlugin` re-registers `runtime` and the retry throws
+  `Capability 'runtime' is already registered` (reproduced identically on `main`, a pre-existing
+  kernel defect outside this letter), and an application cannot be started again after a normal
+  `stop()` at all (`#started` stays set). The reopen branch is therefore tolerance, not a working
+  recovery, and the docs say so. Registering the same plugin object twice in ONE application is
+  refused by the kernel's duplicate-name check. A test that reuses one module-level helper across
+  applications is refused by design; the README says to build the helper inside the factory.
 - **`version`.** A string literal equal to the SDK's own `deno.json` version, pinned by a test that
   reads the manifest. A static JSON import was rejected: it would be the browser-portable SDK's
   first import attribute (Node ≥ 20.10, attribute-aware bundlers, no older Safari) and bundle the
@@ -385,11 +388,13 @@ event-bus API.
 | `packages/diagnostics-plugin/src/interfaces/index.ts`                | Client interface member.                                                         |
 
 Also update PUBLIC_API.md, ARCHITECTURE.md, docs/diagnostics-protocol.md, the SDK and diagnostics
-READMEs (the SDK README carries the compiled §3.2 example), CHANGELOG.md, docs/upgrading.md (the
-`deno.json` pin), docs/releasing.md (the plugin version literal as a bump site), ROADMAP.md (C3–C5 —
-applied during planning, 2026-09-29) and CLAUDE.md. No external dependency is introduced. The SDK's
-pinned `common` specifier moves with the release that publishes the new contracts (the alpha.3
-inline-specifier trap: check the SDK's inline specifiers too).
+READMEs (the SDK README carries the compiled §3.2 example), CHANGELOG.md, docs/releasing.md (the
+plugin version literal as a bump site), ROADMAP.md (C3–C5 — applied during planning, 2026-09-29) and
+CLAUDE.md. No external dependency is introduced. No `docs/upgrading.md` entry is owed (code review,
+2026-09-29, correcting an earlier draft): the SDK's `common` pin is internal to the published
+package and moves with the release bump already in `docs/releasing.md`, so it asks nothing of an
+application. The SDK's pinned `common` specifier moves with the release that publishes the new
+contracts (the alpha.3 inline-specifier trap: check the SDK's inline specifiers too).
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
