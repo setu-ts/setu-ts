@@ -69,9 +69,12 @@ type Adoption = 'await' | 'resolve';
  * Settlement never subscribes through a result's own `then`: the `'await'`
  * form is a plain `await` inside an async function, and the `'resolve'`
  * form attaches through the intrinsic `Promise.prototype.then` to the
- * promise `Promise.resolve` produced. The caller receives a promise that
- * settles with the handler's own value or error, so an ignored rejection
- * is still reported as unhandled — observation never marks it handled.
+ * promise `Promise.resolve` produced. On the `'resolve'` path the caller
+ * receives a promise that settles with the handler's own value or error; on
+ * the `'await'` path — whose only consumer, the executor, discards the value
+ * — it settles with the handler's error, or with nothing. Either way an
+ * ignored rejection is still reported as unhandled — observation never
+ * marks it handled.
  *
  * Known, accepted difference (audit K1, maintainer-accepted 2026-09-29):
  * on the `'resolve'` path the observed call returns that DERIVED promise,
@@ -85,24 +88,27 @@ type Adoption = 'await' | 'resolve';
  * unobserved) into a silent one when observed. The derived promise is the
  * lesser difference.
  *
- * Scope, measured by the audits (K2, K3), whatever the handler returned —
- * `undefined` and ordinary promises included:
+ * Scope of the guarantee (audits K2–K5; maintainer decision 2026-09-29).
+ * An ORDINARY handler result is `undefined`, a primitive, or an unmodified
+ * native promise that fulfils with `undefined` or a primitive or rejects —
+ * with no `then` added to the built-in prototypes. For ordinary results:
  *
- * - IDENTICAL observed and unobserved, for a handler returning anything
- *   but an own-`then`-overridden native promise: the value or error
- *   `next()` settles with (pinned by off/on tests), whether the executor
- *   retries, and whether an ignored rejection is reported as unhandled.
- * - May DIFFER: microtask timing. Behind a chain, a behaviour resumes from
- *   `await next()` one microtask later, a `.then` it attaches to `next()`
- *   runs one microtask later, and an outer behaviour chaining on an inner
- *   one sees the shift; no behaviour is free of it. A behaviour that holds
- *   or returns `next()`'s result also gets a different object.
- * - Needs an unusual handler result: the own-property and own-`then`
- *   differences apply only to a handler returning a native promise it
- *   augmented or whose `then` it overrode. For an own-`then` override,
- *   behind a behaviour that subscribes through `next().then(...)`, whether
- *   and how the dispatch settles — and so whether it retries — may differ,
- *   since the observed `next()` is not subscribed through that override.
+ * - IDENTICAL observed and unobserved: the value or error `next()` settles
+ *   with (pinned by off/on tests), whether the executor retries, and
+ *   whether an ignored rejection is reported as unhandled.
+ * - May DIFFER behind a behaviour chain (accepted as K1): microtask timing
+ *   — a behaviour resumes from `await next()`, or runs a `.then` attached
+ *   to it, one microtask later, and an outer behaviour chaining on an inner
+ *   one sees the shift — and a behaviour that holds or returns `next()`'s
+ *   result gets a different object.
+ *
+ * For any OTHER result — a thenable, an object, a promise fulfilling with
+ * one, a native promise with own properties or an overridden `then` or
+ * `constructor`, or any value whose accessors have effects or answer
+ * differently on each read — observed and unobserved runs may differ in
+ * more ways, including how often those accessors are read, when they run,
+ * how the dispatch settles and whether it retries. That whole class is
+ * accepted by the maintainer as part of K1: no guarantee is made for it.
  *
  * @param handler - The application's handler
  * @param job - The delivered job
@@ -128,16 +134,17 @@ function invokeHandler<T>(
         settle(false);
         throw error;
       }
-      let value: unknown;
       try {
-        value = await result;
+        await result;
       } catch (error) {
         settle(false);
         throw error;
       }
       settle(true);
-      // The handler's own fulfilment value, passed through unchanged.
-      return value as void;
+      // Deliberately returns nothing (audit K5): the executor, this form's
+      // only consumer, discards the value, and returning it would make the
+      // promise re-read its `then` — adopting a late-appearing `then` that
+      // the unobserved `await` never sees.
     })();
   }
   let adopted: Promise<void>;

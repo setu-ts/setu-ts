@@ -1070,6 +1070,44 @@ describe('SchedulerPlugin diagnostics wiring', () => {
     }
   });
 
+  it("never re-adopts a handler's fulfilment value on the direct path (K5)", async () => {
+    // A value whose `then` is absent on the first read and callable later.
+    // Unobserved, `await` reads it once (as a plain value) and the job
+    // succeeds; observation must not read it again and adopt the late
+    // `then`, which would reject and retry.
+    const { off, on } = await offOn(() => {
+      const state = { runs: 0, thenReads: 0 };
+      return {
+        state,
+        settleMs: 150,
+        options: {
+          jobs: [{
+            trigger: 'delay',
+            name: 'job',
+            delayMs: 10,
+            retry: { limit: 3, delay: 5, backoff: 'fixed' },
+            handler: () => {
+              state.runs++;
+              const late = {
+                get then(): unknown {
+                  state.thenReads++;
+                  return state.thenReads === 1
+                    ? undefined
+                    : (_ok: unknown, fail: (reason: unknown) => void) =>
+                      fail(new Error('k5-canary'));
+                },
+              };
+              return Promise.resolve(late) as unknown as Promise<void>;
+            },
+          }],
+        },
+      };
+    });
+    expect(off.state).toEqual({ runs: 1, thenReads: 1 });
+    expect(on.state).toEqual(off.state);
+    expect(on.attempt).toMatchObject({ started: 1, count: 1, succeeded: 1, failed: 0 });
+  });
+
   it('adopts a native promise with a throwing constructor exactly as unobserved (J1)', async () => {
     // `Promise.resolve` reads a native promise's `constructor`; a throwing
     // read throws SYNCHRONOUSLY out of the chain's last step, so the
