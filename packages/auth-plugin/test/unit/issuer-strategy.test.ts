@@ -139,7 +139,7 @@ describe('IssuerStrategy refusals', () => {
   });
 
   it('reports no-key-set when a forced refresh drops an expired set', async () => {
-    const t = await setupStrategy({ issuer: { keySet: { maxStaleMs: 100_000 } } });
+    const t = await setupStrategy({ issuer: { keySet: { ttlMs: 60_000, maxStaleMs: 100_000 } } });
     await t.strategy.authenticate(request(`Bearer ${await signToken(t.key, valid())}`));
     t.setJwks(() => ({ status: 500, body: '' }));
     t.runtime.setHrtime(100_000);
