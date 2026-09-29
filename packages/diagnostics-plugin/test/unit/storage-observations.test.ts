@@ -181,6 +181,10 @@ describe('storage protocol — source reading', () => {
       () => ready('primary', [{ ...record('primary', 'delete'), lastBytes: 4 }]),
     ],
     [
+      'bytes on a record with no successful call',
+      () => ready('primary', [{ ...record(), count: 1, succeeded: 0, failed: 1, lastBytes: 4 }]),
+    ],
+    [
       'a ready state whose freshest record is stale',
       () => ready('primary', [{ ...record(), ageMs: 30_001 }]),
     ],
@@ -206,6 +210,17 @@ describe('storage protocol — source reading', () => {
       expect(only(make())).toEqual(FAILED);
     });
   }
+
+  it('accepts bytes on a mixed record whose last settlement succeeded', () => {
+    const mixed = ready('primary', [{
+      ...record(),
+      count: 2,
+      succeeded: 1,
+      failed: 1,
+      lastBytes: 4,
+    }]);
+    expect(only(mixed)).toEqual(mixed);
+  });
 
   it('keeps a collection-failed source reporting its own approved alias', () => {
     const failed = { ...FAILED, alias: 'primary' };

@@ -239,6 +239,11 @@ function isRecordProjection(value: unknown, alias: string): value is StorageDiag
   if (value.lastBytes !== null && !isCounter(value.lastBytes)) {
     return false;
   }
+  // A byte count is only ever set by a successful settlement, so a record
+  // with no success cannot carry one.
+  if (value.lastBytes !== null && succeeded === 0) {
+    return false;
+  }
   if (value.lastBytes !== null && !BYTE_OPERATIONS.has(value.operation)) {
     return false;
   }
