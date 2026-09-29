@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IJwtService } from '@setu-ts/common';
-import { authMiddleware, requireAuth } from '@setu-ts/auth-plugin';
+import { requireAuth } from '@setu-ts/auth-plugin';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createRestApp } from '@setu-ts/rest-starter';
 
@@ -41,7 +41,6 @@ export function createRestExampleApp(): IKernelApplication {
       exclude: ['/health', '/live', '/ready', '/metrics'],
     },
   });
-  app.middleware.add(authMiddleware());
 
   app.router.post('/todos', {
     middleware: [requireAuth()],

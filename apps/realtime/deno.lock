@@ -158,6 +158,7 @@
           "jsr:@setu-ts/common@0.7"
         ]
       },
+      "jsr:@setu-ts/diagnostics-plugin@0.7.0": {},
       "jsr:@setu-ts/events-plugin@0.7.0": {},
       "jsr:@setu-ts/exceptions@0.7.0": {},
       "jsr:@setu-ts/feature-flags-plugin@0.7.0": {},
