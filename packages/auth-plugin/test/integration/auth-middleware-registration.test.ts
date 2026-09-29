@@ -9,6 +9,7 @@ import type { HandlerResult, IPlugin, IPluginContext, IRequestContext } from '@s
 import { createApplication } from '@setu-ts/kernel';
 import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import { authMiddleware } from '../../src/middleware/auth-middleware.ts';
+import { requireAuth } from '../../src/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 function runtimePlugin(): IPlugin {
@@ -138,15 +139,19 @@ describe('AuthPlugin middleware registration', () => {
         }),
       ],
     });
-    defaultApp.router.get('/metrics', principalRoute);
+    defaultApp.router.get('/metrics', { middleware: [requireAuth()], handler: principalRoute });
     await defaultApp.start();
     const authenticated = await defaultApp.inject({
       method: 'GET',
       url: 'http://localhost/metrics',
       headers: { 'x-api-key': 'valid' },
     });
+    expect(authenticated.statusCode).toBe(200);
     expect(authenticated.json<{ id: string | null }>()).toEqual({ id: 'api-user' });
     expect(defaultCalls).toBe(1);
+    // The guard is live, not inert: the same route refuses a request carrying no credential.
+    const anonymous = await defaultApp.inject({ method: 'GET', url: 'http://localhost/metrics' });
+    expect(anonymous.statusCode).toBe(401);
     await defaultApp.stop();
   });
 
