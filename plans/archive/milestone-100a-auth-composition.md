@@ -184,6 +184,14 @@ deno task release:verify <version>
 **Reviewed change:** the set of requests that are authenticated grows from "routes the application
 remembered to cover" to "every request", and a JWT-less configuration becomes legal.
 
+**Assets:** the request principal (`ctx.request.user`) that guards and handlers trust, and the
+authorization decisions made from it on guarded routes.
+
+**Attacker:** an unauthenticated network client that controls every request header, including
+`Authorization`, `X-API-Key` and `Cookie`, and can forge or replay credentials, such as an HS256
+token signed with a guessed secret. The attacker has no access to configured secrets or the session
+key. A malicious application or plugin author is out of scope.
+
 | Finding                                                                       | Resolution in this plan                                                                              |
 | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | Global authentication could reject requests that used to pass.                | `authMiddleware` never rejects; guards decide. Asserted by the opt-out/duplicate tests.              |
