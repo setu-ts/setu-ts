@@ -266,12 +266,17 @@ indistinguishable to the wrapped fetch and to its caller, on every supported run
   synchronously. This deliberately departs from the repository's "a `Promise`-typed function never
   throws synchronously" rule (M52b/M52c/M70j): that rule governs framework code, while this wrapper
   must not change the behavior of the application code it wraps. The JSDoc states the departure.
-- A returned value is adopted as `await` adopts it — `Promise.resolve(result).then(onOk, onErr)` —
-  where `onOk` returns the IDENTICAL value and `onErr` rethrows the IDENTICAL reason. The caller
-  gets the derived promise, never a side branch, so a dropped rejection is still reported exactly
-  once (probed; the M98i defect was a side branch marking the original handled). One added
-  microtask; promise identity is not preserved and not claimed. A thenable's `then` is application
-  code and runs in the same job order `await` would give it.
+- A returned value is adopted BY `await`, inside an async function the caller receives
+  (`value = await result`, settle, return it; `catch` settles and rethrows) — so it returns the
+  IDENTICAL value and rethrows the IDENTICAL reason, reads a native promise's `constructor` exactly
+  once, performs no species lookup and never calls an own `then`. (Audit F1/F2, 2026-09-29: an
+  earlier `Promise.resolve(result).then(onOk, onErr)` read `constructor` twice and called an own
+  `then`, so a hostile promise could make the wrapper throw synchronously where `await` resolves,
+  leaving a permanently in-flight attempt.) The caller gets the derived promise, never a side
+  branch, so a dropped rejection is still reported exactly once (probed; the M98i defect was a side
+  branch marking the original handled). One added microtask; promise identity is not preserved and
+  not claimed. A thenable's `then` is application code and runs in the same job order `await` would
+  give it.
 - Inside `onOk`, `status` is the only property read, inside a guard (side-effect-free on a real
   `Response`, probed). Nothing reads `headers`, `body`, `bodyUsed`, `url`, `redirected` or `type`.
   Inside `onErr`, the reason is never inspected. **Measured during implementation:** against the

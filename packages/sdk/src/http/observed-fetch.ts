@@ -212,30 +212,26 @@ export function createObservedFetch(options: ObservedFetchOptions): ObservedFetc
         collector.settle(token, false, 'other');
         throw error;
       }
-      // Adopt the value as `await` would. `Promise.resolve` reads a native
-      // promise's `constructor`, which can throw; unwrapped, that fault only
-      // surfaces at the caller's `await`, so it becomes a rejection with the
-      // identical value here — recorded as a failure, never a synchronous
-      // throw and never a permanently in-flight attempt.
-      let adopted: Promise<Response>;
-      try {
-        adopted = Promise.resolve(result as Response | PromiseLike<Response>);
-      } catch (error) {
-        collector.settle(token, false, 'other');
-        return Promise.reject(error);
-      }
-      // A DERIVED promise, never a side branch: a dropped rejection is still
+      // Adopt the value with exactly `await`'s semantics — `await` itself
+      // reads a native promise's `constructor` once, performs no species
+      // lookup and never calls an own `then`. Any fault there (a throwing
+      // `constructor` getter, for instance) becomes a rejection with the
+      // identical value, as at the caller's own `await`, and is recorded as a
+      // failure: never a synchronous throw, never a permanently in-flight
+      // attempt. The caller receives this async function's promise — a
+      // DERIVED promise, never a side branch, so a dropped rejection is still
       // reported to the host exactly once (the M98i lesson).
-      return adopted.then(
-        (value) => {
-          collector.settle(token, true, statusOf(value));
-          return value;
-        },
-        (reason: unknown) => {
+      return (async (): Promise<Response> => {
+        let value: Response;
+        try {
+          value = await (result as Response | PromiseLike<Response>);
+        } catch (reason) {
           collector.settle(token, false, 'other');
           throw reason;
-        },
-      );
+        }
+        collector.settle(token, true, statusOf(value));
+        return value;
+      })();
     },
   };
 

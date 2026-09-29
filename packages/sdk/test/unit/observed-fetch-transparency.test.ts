@@ -228,6 +228,74 @@ describe('createObservedFetch — result fidelity', () => {
     expect(source.snapshot().records[0]).toMatchObject({ started: 1, count: 1, failures: 1 });
   });
 
+  it('adopts a native promise exactly as await does: one constructor read, no own then', async () => {
+    const response = new Response(null, { status: 200 });
+    // An own `then` that throws, one that counts, and a constructor getter
+    // that answers Promise once and throws after — `await` survives all three.
+    const cases: {
+      name: string;
+      make: () => { promise: Promise<Response>; calls: () => number };
+    }[] = [
+      {
+        name: 'own throwing then',
+        make: () => {
+          const promise = Promise.resolve(response);
+          Object.defineProperty(promise, 'then', {
+            value: () => {
+              throw new Error('own then');
+            },
+          });
+          return { promise, calls: () => 0 };
+        },
+      },
+      {
+        name: 'own counting then',
+        make: () => {
+          let count = 0;
+          const promise = Promise.resolve(response);
+          const original = promise.then.bind(promise);
+          Object.defineProperty(promise, 'then', {
+            value: (...args: Parameters<typeof original>) => {
+              count++;
+              return original(...args);
+            },
+          });
+          return { promise, calls: () => count };
+        },
+      },
+      {
+        name: 'constructor throwing on the second read',
+        make: () => {
+          let reads = 0;
+          const promise = Promise.resolve(response);
+          Object.defineProperty(promise, 'constructor', {
+            get() {
+              reads++;
+              if (reads > 1) throw new Error('second constructor read');
+              return Promise;
+            },
+          });
+          return { promise, calls: () => reads - 1 };
+        },
+      },
+    ];
+    for (const entry of cases) {
+      const unwrapped = entry.make();
+      expect(await unwrapped.promise).toBe(response);
+      const wrappedCase = entry.make();
+      const observed = createObservedFetch({
+        alias: 'a',
+        fetch: (() => wrappedCase.promise) as unknown as Fetch,
+      });
+      let returned: Promise<Response> | undefined;
+      expect(() => {
+        returned = observed.fetch('https://example.test/');
+      }, entry.name).not.toThrow();
+      expect(await returned, entry.name).toBe(response);
+      expect(wrappedCase.calls(), entry.name).toBe(unwrapped.calls());
+    }
+  });
+
   it('reads only status on the resolved value, and a throwing status getter changes nothing', async () => {
     // Promise resolution itself reads `then`; compare against the unwrapped
     // baseline so only observation-code reads remain.
