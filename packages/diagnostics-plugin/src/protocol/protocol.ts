@@ -77,6 +77,12 @@ export const HEALTH_TARGET = '/v1/health';
 export const CONFIG_TARGET = '/v1/config';
 /** The cache observations target (M98i); it carries no query. */
 export const CACHE_TARGET = '/v1/cache';
+/**
+ * The scheduler-observations target (M98k); it carries no query.
+ *
+ * @internal
+ */
+export const SCHEDULER_TARGET = '/v1/scheduler';
 const EVENTS_PATH = '/v1/events';
 
 /**
@@ -155,6 +161,7 @@ export interface ParsedTarget {
     | 'health'
     | 'config'
     | 'cache'
+    | 'scheduler'
     | 'queues'
     | 'traces'
     | 'authorization'
@@ -197,6 +204,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === CACHE_TARGET && search === '') {
     return { op: 'cache', canonicalTarget: CACHE_TARGET, after: 0, limit: 0 };
+  }
+  if (path === SCHEDULER_TARGET && search === '') {
+    return { op: 'scheduler', canonicalTarget: SCHEDULER_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENT_PATH && search === '') {
     return { op: 'event', canonicalTarget: EVENT_PATH, after: 0, limit: 0 };
@@ -447,10 +457,9 @@ export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number]
 /**
  * The inspector manifest this connector serves: `health` (M98d),
  * `configuration` (M98e), `queues` (M98f), `traces` (M98g), `cache` (M98i),
- * `authorization` (M98h), `events` (M98j), `realtime` (M98l) and
- * `outboundHttp` (M98n) are
- * implemented; the rest are reserved and false until their own connector
- * operation ships.
+ * `authorization` (M98h), `events` (M98j), `scheduler` (M98k), `realtime`
+ * (M98l) and `outboundHttp` (M98n) are implemented; the rest are reserved and
+ * false until their own connector operation ships.
  *
  * @returns The fixed manifest
  * @internal
@@ -463,8 +472,8 @@ export function currentInspectorsManifest(): InspectorsManifest {
     traces: true,
     authorization: true,
     cache: true,
+    scheduler: true,
     events: true,
-    scheduler: false,
     realtime: true,
     storage: false,
     outboundHttp: true,

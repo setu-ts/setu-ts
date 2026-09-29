@@ -76,6 +76,28 @@ All notable changes to this project are documented here. The format follows
   `realtime()` is a REQUIRED member of `IDiagnosticsClient`, so a hand-written client must add it
   (answering `unsupported` is a valid implementation).
 
+- **Scheduler execution observations (M98k): opt-in, minimized fire and attempt observations through
+  the diagnostics connector.** `SchedulerPlugin` accepts
+  `diagnostics: { enabled: true, alias,
+  jobs }` (the new exported `SchedulerDiagnosticsOptions`,
+  validated when `SchedulerPlugin(...)` is called; `jobs` is REQUIRED and maps exact job names to
+  approved aliases, so an empty map approves nothing); the instance's own `SchedulerService` and
+  executor then record each approved job's local timer fires — contended (slot or overlap lock held
+  elsewhere), lock-failed (a lock operation rejected), dispatched — and each handler attempt
+  (started, succeeded, failed, retryAttempts; a `behaviors` entry that declines a dispatch invokes
+  no handler and records no attempt) with monotonic `lastDurationMs` and the wall-clock
+  `lastLatenessMs` a fire started late (`max(0, actualStart - intendedFire)`, never an absolute
+  schedule). A skipped local fire is never reported as a globally missed execution: no missed
+  counter exists. Job names, cron expressions, payloads, job ids, lock keys and tokens, and thrown
+  values never reach the collector. Every SchedulerPlugin instance registers an
+  `ISchedulerDiagnosticsSource` under the new multi-provider `CAPABILITIES.SCHEDULER_DIAGNOSTICS`
+  (`disabled` without the option, with nothing attached to the service and no clock read on any
+  fire). New public surface on `@setu-ts/common`: `CAPABILITIES.SCHEDULER_DIAGNOSTICS`,
+  `ISchedulerDiagnosticsSource`, `SchedulerDiagnosticsSnapshot`, `SchedulerDiagnosticsRecord`,
+  `SchedulerDiagnosticsResponse`, `SchedulerDiagnosticsOperation`. New connector surface:
+  `GET /v1/scheduler` (at most 16 sources, more refuses startup) and the REQUIRED
+  `IDiagnosticsClient.scheduler()`; the status manifest now reports `scheduler: true`. Unobserved
+  services run the pre-M98k path — one field read, no clock.
 - **Event dispatch observations (M98j): opt-in, minimized event-dispatch observations through the
   diagnostics connector.** `EventsPlugin` accepts a `diagnostics` option
   (`EventsDiagnosticsOptions`, exported from `@setu-ts/events-plugin`) that attaches an internal

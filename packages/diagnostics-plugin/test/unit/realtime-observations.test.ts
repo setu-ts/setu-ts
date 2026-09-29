@@ -508,6 +508,7 @@ async function harness(realtimeSources: readonly IRealtimeDiagnosticsSource[]) {
     eventSources: [],
     realtimeSources,
     outboundHttpSources: [],
+    schedulerSources: [],
   });
   session.bindInstance(TEST_INSTANCE_ID);
   return { handler, key, clock, session };

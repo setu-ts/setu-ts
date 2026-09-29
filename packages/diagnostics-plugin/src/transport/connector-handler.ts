@@ -30,6 +30,7 @@ import type {
   IRealtimeDiagnosticsSource,
   IRequest,
   IResponse,
+  ISchedulerDiagnosticsSource,
   ITraceDiagnosticsSource,
   ResponseSnapshot,
   TraceDiagnosticsBatch,
@@ -41,6 +42,10 @@ import type { ConnectorLimits, LimitsClock } from './limits.ts';
 import type { IQueueMerger } from './queue-merger.ts';
 import { isQueueBatchProjection, projectQueueBatch } from '../protocol/queue-protocol.ts';
 import { buildCacheResponse, isCacheResponseProjection } from '../protocol/cache-protocol.ts';
+import {
+  buildSchedulerResponse,
+  isSchedulerResponseProjection,
+} from '../protocol/scheduler-protocol.ts';
 import {
   buildRealtimeResponse,
   isRealtimeResponseProjection,
@@ -235,6 +240,15 @@ export interface ConnectorHandlerDeps {
    * only each source's synchronous `snapshot()` — never a cache operation.
    */
   readonly cacheSources: readonly ICacheDiagnosticsSource[];
+  /**
+   * Every scheduler-diagnostics source (M98k), resolved ONCE from
+   * `CAPABILITIES.SCHEDULER_DIAGNOSTICS` at bootstrap, in registration order
+   * and at most 16. Empty when no SchedulerPlugin is registered: the
+   * connector then answers a typed `unsupported` response for
+   * `GET /v1/scheduler`. A read calls only each source's synchronous
+   * `snapshot()` — never a lock, a handler, or the job registry.
+   */
+  readonly schedulerSources: readonly ISchedulerDiagnosticsSource[];
   /**
    * The queue-observation merger (M98f) over every queue-diagnostics source
    * registered when the connector bootstrapped. With no source registered it
@@ -1163,6 +1177,21 @@ export function createConnectorHandler(
           deps.outboundHttpSources,
         );
         if (!isOutboundHttpResponseProjection(candidate)) {
+          return refusalResponse('unavailable');
+        }
+        projected = candidate;
+      } else if (target.op === 'scheduler') {
+        // The scheduler operation (M98k). Every session and request check
+        // above ran before any source is read. Each source read is isolated,
+        // and the wire validator — the SAME one the client runs — checks the
+        // built response before anything is signed. The cross-instance check
+        // above already proved the presented (non-null) instance IS the
+        // session's bound one.
+        const candidate = buildSchedulerResponse(
+          parsed.instance as string,
+          deps.schedulerSources,
+        );
+        if (!isSchedulerResponseProjection(candidate)) {
           return refusalResponse('unavailable');
         }
         projected = candidate;

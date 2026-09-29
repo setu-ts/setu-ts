@@ -325,6 +325,7 @@ package fits the plugin architecture.
 | `IRouterApi`                         | interface |
 | `IRuntimeServices`                   | interface |
 | `IScheduler`                         | interface |
+| `ISchedulerDiagnosticsSource`        | interface |
 | `ISecretManager`                     | interface |
 | `IServiceDiscovery`                  | interface |
 | `IServiceRegistry`                   | interface |
@@ -407,6 +408,9 @@ package fits the plugin architecture.
 | `RouteValidationMetadata`            | interface |
 | `ScheduledJob`                       | interface |
 | `ScheduleOptions`                    | interface |
+| `SchedulerDiagnosticsRecord`         | interface |
+| `SchedulerDiagnosticsResponse`       | interface |
+| `SchedulerDiagnosticsSnapshot`       | interface |
 | `SerializedError`                    | interface |
 | `ServiceInstance`                    | interface |
 | `SignedUrlOptions`                   | interface |
@@ -528,6 +532,7 @@ package fits the plugin architecture.
 | `RuntimePlatform`                    | type      |
 | `RuntimeSignal`                      | type      |
 | `SchedulerBackoff`                   | type      |
+| `SchedulerDiagnosticsOperation`      | type      |
 | `SchedulerJobHandler`                | type      |
 | `SecurityRequirement`                | type      |
 | `ServerHandle`                       | type      |
