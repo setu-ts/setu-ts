@@ -2279,9 +2279,9 @@ export type StorageDiagnosticsOperation =
  * duration, on the runtime's monotonic clock, of the most recently settled
  * call, and is `null` for `getSignedUrl`, which records outcome and age only.
  * `lastBytes` is a number only after a SUCCESSFUL `put` (the application's
- * argument) or `get` (the application's result), including `getStream`'s
- * buffered fallback; a zero length is a real zero. It is `null` after a
- * failure and for every other operation. `ageMs` is the elapsed time since
+ * argument) or `get` (the application's result); a zero length is a real
+ * zero. It is `null` after a failure and for every other operation —
+ * including `getStream`, even when it takes the buffered fallback. `ageMs` is the elapsed time since
  * the most recent settled call. Age, duration and bytes describe the same
  * last settlement. Paths, bytes, metadata, signed URLs and errors are never
  * carried.

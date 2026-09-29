@@ -4186,21 +4186,6 @@ only — no indicator `data`, no error text, no absolute time), projected field-
 by the same 256 KiB response ceiling as every other operation. A client paired against a legacy M98b
 status body (no manifest) resolves all inspectors to `false` and its `health()` answers
 `unsupported` without sending the request. The full wire shape is in `docs/diagnostics-protocol.md`.
-cache: true, events: true, scheduler: false, realtime: true, storage: true, outboundHttp: false
-}`(`configuration`is`true`since M98e,`queues`since M98f,`traces`since M98g,`cache`since M98i,`authorization`since M98h,`events`since M98j,`realtime`since M98l and`storage`since M98m, all
-below) — and the connector serves a first inspector operation,`GET
-/v1/health`. The client reads it
-through`client.health():
-Promise<HealthDiagnosticsSnapshot>`. The connector resolves the optional
-health source under`CAPABILITIES.HEALTH_DIAGNOSTICS`once, at registration: an absent source
-answers a typed`unsupported`snapshot (no indicator runs, startup never fails), a
-registered-but-disabled source answers`disabled`, and a throwing source answers a value-free`collection-failed`snapshot — as does a source whose projected DTO fails the exact validator (an
-unknown enum, a non-finite or negative measurement, an oversized alias, more than 64 observations, a
-malformed shape), so nothing unvalidated is ever signed — none of which changes the application's
-readiness. The snapshot is the health plugin's minimized DTO (approved alias, framework status,
-outcome state, monotonic timing only — no indicator`data`, no error text, no absolute time),
-projected field-by-field and bounded by the same 256 KiB response ceiling as every other operation.
-A client paired against a legacy M98b status body (no manifest) resolves all inspectors to`false`and its`health()`answers`unsupported`without sending the request. The full wire shape is in`docs/diagnostics-protocol.md`.
 
 **Queue observations (M98f).** The connector serves `GET /v1/queues?after=<N>&limit=<N>` (the same
 canonical query grammar as `/v1/events`), read through

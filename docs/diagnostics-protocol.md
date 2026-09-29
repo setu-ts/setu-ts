@@ -175,12 +175,7 @@ every inspector the connector knows and whether it is implemented; the connector
 implemented. A client that reads a legacy M98b three-field status body (no `inspectors`) resolves
 the manifest to all-`false`, so its `health()`, `configuration()`, `queues()`, `traces()`,
 `cache()`, `authorization()`, `events()`, `scheduler()`, `realtime()`, `storage()` and
-`outboundHttp()` answer a typed `unsupported` without sending the request. `cache: true` (M98i),
-`authorization: true` (M98h), `events: true` (M98j), `realtime: true` (M98l) and `storage: true`
-(M98m), and leaves the rest (`scheduler`, `outboundHttp`) reserved and `false`. A client that reads
-a legacy M98b three-field status body (no `inspectors`) resolves the manifest to all-`false`, so its
-`health()`, `configuration()`, `queues()`, `traces()`, `cache()`, `authorization()`, `events()`,
-`realtime()` and `storage()` answer a typed `unsupported` without sending the request.
+`outboundHttp()` answer a typed `unsupported` without sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
