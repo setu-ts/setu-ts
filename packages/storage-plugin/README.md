@@ -208,7 +208,7 @@ failure), and `null` for the non-buffered operations; `getStream` counts the ope
 Object paths, stored bytes, content types, signed URLs and errors are never captured. Without the
 option the instance registers an inert `disabled` source and its storage calls are not touched.
 Results, errors, the `getStream?` fallback and rejection reasons are identical either way; enabled
-calls add one clock read (two on the timed one-in-eight sample) and one derived promise each (which
+calls add two monotonic clock reads (every call is timed) and one derived promise each (which
 re-rejects with the original reason, so an unhandled rejection stays unhandled). Direct provider
 calls and a service constructed without the collector are outside coverage. Enable only on an
 approved development dataset: counts aggregate every tenant using the instance.

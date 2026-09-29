@@ -6476,20 +6476,21 @@ local diagnostics connector's `GET /v1/storage`. `enabled` must be the literal `
 Every instance, opted in or not, registers an `IStorageDiagnosticsSource` under
 `CAPABILITIES.STORAGE_DIAGNOSTICS` with `{ multi: true }` (not in `provides`); without the option it
 answers `disabled` and nothing is attached to the service — no clock read and no extra promise on
-any storage call. With it, each call reads the runtime monotonic clock once (and a second time on
-the first call per operation and one in every eight after it, which are the timed calls) and returns
-a promise derived from the provider's that re-rejects with the original reason, so an unhandled
-provider rejection stays unhandled; results, `null` semantics, the `getStream?` fallback and the
-ORIGINAL rejection reason are unchanged, and a synchronous provider throw is still thrown
-synchronously. A `null` `get` is impossible (absent objects throw and settle as `failed`); a `false`
-`exists` and a `false` `delete` are successful calls. `getSignedUrl` mints a URL, not a data
-transfer: its record carries `lastDurationMs: null` and `lastBytes: null`. `lastBytes` is the byte
-length of the last settled buffer for `put` and `get`, and `null` for the non-buffered operations. A
-`getStream` counts the open, not the drain. Records expire 60 seconds after their last observation
-and a snapshot whose freshest record is older than 30 seconds is `stale`. A clock failure latches
-`collection-failed` without changing any application result; closing the plugin detaches the
-collector. Object paths, stored bytes, content types, signed URLs and error text never reach the
-collector, the wire, or the client.
+any storage call. With it, each call reads the runtime monotonic clock twice (at start and at
+settlement — every call is timed, so `ageMs`, `lastDurationMs` and `lastBytes` describe one
+settlement) and returns a promise derived from the provider's that re-rejects with the original
+reason, so an unhandled provider rejection stays unhandled; results, `null` semantics, the
+`getStream?` fallback and the ORIGINAL rejection reason are unchanged, and a synchronous provider
+throw reaches the caller as a rejection with the same error, exactly as without the option. A `null`
+`get` is impossible (absent objects throw and settle as `failed`); a `false` `exists` and a `false`
+`delete` are successful calls. `getSignedUrl` mints a URL, not a data transfer: its record carries
+`lastDurationMs: null` and `lastBytes: null`. `lastBytes` is the byte length of the last settled
+buffer for `put` and `get`, and `null` for the non-buffered operations. A `getStream` counts the
+open, not the drain. Records expire 60 seconds after their last observation and a snapshot whose
+freshest record is older than 30 seconds is `stale`. A clock failure latches `collection-failed`
+without changing any application result; closing the plugin detaches the collector. Object paths,
+stored bytes, content types, signed URLs and error text never reach the collector, the wire, or the
+client.
 
 ## MailPlugin() (`@setu-ts/mail-plugin`)
 

@@ -316,6 +316,16 @@ describe('storage diagnostics — collector', () => {
     });
   });
 
+  it('clamps a duration from an enormous finite clock jump to MAX_SAFE_INTEGER', () => {
+    const { c, clock } = collector();
+    const start = c.begin();
+    clock.value = 1e300;
+    c.settle('put', start, 'succeeded', 1);
+    const [record] = c.snapshot().records;
+    expect(record!.lastDurationMs).toBe(Number.MAX_SAFE_INTEGER);
+    expect(Number.isSafeInteger(record!.lastDurationMs)).toBe(true);
+  });
+
   it('keeps the cumulative dropped count through a collection-failed latch', () => {
     const { c, clock } = collector();
     const starts: (number | null)[] = [];

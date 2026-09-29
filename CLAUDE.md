@@ -5404,11 +5404,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   properties; duplicate aliases or an over-budget body collapse to `collection-failed` — the M98i
   cache rule) and the client gains `storage()`. The collector is NOT shared in `common` (a single
   plugin owns it, unlike M98l's three): the option and collector types live in
-  `@setu-ts/storage-plugin`. Enabled calls read the monotonic clock once (twice on a timed
-  one-in-eight sample) and settle through one derived promise that re-rejects with the original
-  reason, so an unhandled provider rejection stays unhandled. The design security review was
-  approved and the committed-tree implementation security audit passed on `e3ddbfd4` (333 probes, 6
-  negative controls, no findings) — complete (PR pending).
+  `@setu-ts/storage-plugin`. Enabled calls read the monotonic clock twice (every call is timed, so
+  age, duration and bytes describe one settlement) and settle through one derived promise that
+  re-rejects with the original reason, so an unhandled provider rejection stays unhandled. The
+  design security review was approved and the committed-tree implementation security audit passed on
+  `e3ddbfd4` (333 probes, 6 negative controls, no findings) — complete (PR pending).
 - **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
   design security review and implementation audit required).
 

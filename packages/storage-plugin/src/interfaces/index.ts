@@ -127,7 +127,7 @@ export interface AzureStorageOptions {
  * control character, and approving it IS authorizing its disclosure — never
  * derive it from a path.
  *
- * @since 0.7.0
+ * @since 0.8.0
  */
 export interface StorageDiagnosticsOptions {
   /**

@@ -282,8 +282,14 @@ export class StorageObservationCollector {
         record.lastBytes = bytes;
       }
       // getSignedUrl records outcome and age only — never a duration.
+      // Clamped to MAX_SAFE_INTEGER like every other number: a finite but
+      // enormous clock jump must not store a duration the wire validator
+      // refuses, which would report the whole source collection-failed.
       if (operation !== 'getSignedUrl') {
-        record.lastDurationMs = Math.round(Math.max(0, now - start));
+        record.lastDurationMs = Math.min(
+          Number.MAX_SAFE_INTEGER,
+          Math.round(Math.max(0, now - start)),
+        );
       }
       record.lastAt = now;
     } catch {

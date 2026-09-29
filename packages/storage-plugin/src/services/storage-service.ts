@@ -97,8 +97,10 @@ function intrinsicByteLength(value: Uint8Array): number | null {
  * application-visible behaviour: the same result, the same ORIGINAL rejection
  * reason (a derived promise re-rejects with it, so a fire-and-forget call
  * whose provider rejects still surfaces as an unhandled rejection exactly as
- * without diagnostics), and the same synchronous throw for a provider that
- * throws before a promise exists.
+ * without diagnostics). A provider that throws before a promise exists is
+ * settled as `failed` and rethrown; every caller is an `async` method, so it
+ * reaches the application as a rejection with that same error — exactly as
+ * without diagnostics.
  *
  * @param collector - The service's attached collector
  * @param operation - The fixed service operation

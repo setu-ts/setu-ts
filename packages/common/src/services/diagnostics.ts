@@ -1970,7 +1970,7 @@ export interface RealtimeDiagnosticsResponse {
  * without native streaming, the buffered read behind the fallback) and its
  * outcome — never transfer progress, and never a completion claim.
  *
- * @since 0.7.0
+ * @since 0.8.0
  */
 export type StorageDiagnosticsOperation =
   | 'put'
@@ -1996,7 +1996,7 @@ export type StorageDiagnosticsOperation =
  * last settlement. Paths, bytes, metadata, signed URLs and errors are never
  * carried.
  *
- * @since 0.7.0
+ * @since 0.8.0
  */
 export interface StorageDiagnosticsRecord {
   /** The configured source alias (always equal to the snapshot's alias). */
@@ -2029,7 +2029,7 @@ export interface StorageDiagnosticsRecord {
  * because the source's active-observation budget was full (saturating). A
  * collection failure clears `records` and reports `collection-failed`.
  *
- * @since 0.7.0
+ * @since 0.8.0
  */
 export interface StorageDiagnosticsSnapshot {
   /** The source's own availability state. */
@@ -2062,7 +2062,7 @@ export interface StorageDiagnosticsSnapshot {
  * );
  * const snapshots = sources.map((source) => source.snapshot());
  * ```
- * @since 0.7.0
+ * @since 0.8.0
  */
 export interface IStorageDiagnosticsSource {
   /**
@@ -2082,7 +2082,7 @@ export interface IStorageDiagnosticsSource {
  * source is registered; otherwise `ready` if any source is ready, then
  * `collection-failed`, `stale`, `no-data`, `disabled` in that priority.
  *
- * @since 0.7.0
+ * @since 0.8.0
  */
 export interface StorageDiagnosticsResponse {
   /** Contract version. */
