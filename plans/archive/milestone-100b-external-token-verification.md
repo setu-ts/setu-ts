@@ -296,3 +296,8 @@ including a real Keycloak token re-signed with `alg: HS256` using the realm's pu
     is now refused at construction, without echoing the value.
   - **F3 (Low):** `sub` is unique only within one issuer. The `toPrincipal` JSDoc, the README and
     PUBLIC_API now say to namespace the id when more than one issuer is configured.
+- **Security audit round 2 (commit `e184b5e4`)** confirmed F1–F3 fixed with probes and negative
+  controls, and found **N1 (Low, fixed)**. The namespacing note said "more than one issuer", but a
+  self-issued `jwt` plus one issuer collide the same way, because `JwtStrategy` also maps `sub` to
+  the id. The note now covers every identity source in the JSDoc, README and PUBLIC_API, and the
+  README example namespaces unconditionally.

@@ -194,9 +194,12 @@ export interface TrustedIssuer {
    * Maps the verified claims to a principal. Return `null` to leave the request
    * anonymous. The plugin never guesses where a provider puts roles.
    *
-   * `sub` is unique only within its issuer. With more than one issuer
-   * configured, namespace the id (for example `` `${claims.iss}|${claims.sub}` ``)
-   * so the same `sub` at two providers cannot become one principal.
+   * `sub` is unique only within its issuer. Whenever this issuer is not the
+   * application's only identity source — another issuer, a self-issued `jwt`
+   * (whose strategy also maps `sub` to the id), an API key, a session, or a
+   * custom strategy — namespace the id (for example
+   * `` `${claims.iss}|${claims.sub}` ``) so an outside `sub` cannot become the
+   * same principal as an identity from another source.
    */
   toPrincipal(
     claims: Readonly<Record<string, unknown>>,

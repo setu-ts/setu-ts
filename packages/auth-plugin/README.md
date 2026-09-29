@@ -282,7 +282,11 @@ AuthPlugin({
     keys: { discovery: true },
     toPrincipal: (claims) =>
       typeof claims.sub === 'string'
-        ? { id: claims.sub, roles: Array.isArray(claims.roles) ? claims.roles.map(String) : [] }
+        ? {
+          // Namespaced: `sub` is unique only within its issuer.
+          id: `${claims.iss}|${claims.sub}`,
+          roles: Array.isArray(claims.roles) ? claims.roles.map(String) : [],
+        }
         : null,
   }],
 });
@@ -301,10 +305,11 @@ AuthPlugin({
   token signed with HMAC using the provider's public key as the secret cannot pass.
 - **Claims.** `iss` exact, `aud` must contain `audience`, `exp` required; `exp`, `nbf` and a future
   `iat` allow `clockToleranceSec` (default 30, at most 300). `toPrincipal` receives the full
-  verified claims and decides where roles live — the plugin never guesses. **With more than one
-  issuer, namespace the id** — `sub` is unique only within its issuer, so
-  ``{ id: `${claims.iss}|${claims.sub}` }`` keeps the same `sub` at two providers from becoming one
-  principal.
+  verified claims and decides where roles live — the plugin never guesses. **Namespace the id
+  whenever this issuer is not the only identity source** — `sub` is unique only within its issuer,
+  and a self-issued `jwt`, another issuer, an API key, a session or a custom strategy can each
+  produce the same id, so ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the example) keeps an
+  outside `sub` from becoming the same principal as an identity from another source.
 - **Rotation.** The key set is cached for `keySet.ttlMs` (default 10 minutes). A token naming an
   unknown `kid` triggers at most one refetch per `keySet.minRefreshIntervalMs` (default 60 s), and
   concurrent refetches share one request, so forged `kid`s cannot turn requests into outbound
