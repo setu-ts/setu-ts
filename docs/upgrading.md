@@ -12,17 +12,6 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Remove hand-added global `authMiddleware()` calls
-
-`AuthPlugin` now registers `authMiddleware()` globally at priority 300. Remove any existing global
-`app.middleware.add(authMiddleware(), ...)` call; leaving it in place remains correct but executes
-every passive strategy twice. If the old application deliberately attached authentication only to
-selected routes, configure `middleware: false` and keep those route-level copies.
-
-The `jwt` option is now optional. A configuration must still supply at least one passive request
-strategy through `jwt`, `apiKey`, `session`, or `strategies`; `local` alone only verifies login
-credentials and is refused at startup.
-
 The two `app.inject()` changes below are silent — they compile, so the compiler will not point at
 them. Neither affects a served request.
 
@@ -108,6 +97,17 @@ Most such retries already failed, with the misleading `Capability 'runtime' is a
 One case used to succeed and is now refused: the first plugin to run threw before writing any state,
 such as a runtime provider rejecting its options. In every case, rebuild the application (call your
 `createApp()` again) and start that one.
+
+### Remove hand-added global `authMiddleware()` calls
+
+`AuthPlugin` now registers `authMiddleware()` globally at priority 300. Remove any existing global
+`app.middleware.add(authMiddleware(), ...)` call; leaving it in place remains correct but executes
+every passive strategy twice. If the old application deliberately attached authentication only to
+selected routes, configure `middleware: false` and keep those route-level copies.
+
+The `jwt` option is now optional. A configuration must still supply at least one passive request
+strategy through `jwt`, `apiKey`, `session`, or `strategies`; `local` alone only verifies login
+credentials and is refused at startup.
 
 ## 0.7.0
 

@@ -534,6 +534,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`auth-plugin` — `AuthPlugin` now registers `authMiddleware()` globally by default (M100a).**
+  Every request runs the passive strategy chain at priority 300, so `ctx.request.user` is populated
+  on routes that previously saw no principal, and a backend-backed strategy (`apiKey.validate`, a
+  store-strategy session) now performs its lookup for every request, including health probes and
+  metrics scrapes. `middleware: false` restores the previous composition exactly: nothing is
+  registered globally and route-level `authMiddleware()` copies keep working.
+  `middleware: { exclude }` skips selected paths instead (no path is excluded by default). A
+  hand-added global `authMiddleware()` should be removed; left in place it stays correct but runs
+  every strategy twice. See `docs/upgrading.md`.
+
 - **`kernel` — retrying a `start()` that failed after plugin registration began now throws by
   name.** `start()` rolls its started state back on failure, and its comment promised the failed
   start could be "corrected and retried". Once a plugin had run `register()`, that retry re-ran

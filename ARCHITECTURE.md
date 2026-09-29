@@ -1906,7 +1906,7 @@ app.middleware.add(loggingMiddleware(), { priority: 50 });
 
 // Route-level middleware
 app.router.get('/users', {
-  middleware: [authMiddleware(), validationMiddleware()],
+  middleware: [requireAuth(), validationMiddleware()],
   handler: async (ctx) => {/* ... */},
 });
 ```
