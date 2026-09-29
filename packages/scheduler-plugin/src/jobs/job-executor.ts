@@ -44,10 +44,10 @@ const ATTEMPT_BEGINS = new WeakMap<object, () => SchedulerAttemptSettle>();
 
 /**
  * How a call site adopts the handler's result when UNOBSERVED. The observed
- * path must adopt it with exactly the same operation, or observation would
- * change what the handler sees: which accessors are read, when a thenable's
- * `then` runs, whether a malformed value throws synchronously or rejects,
- * and which `then` a native promise is subscribed through.
+ * path adopts it with the same operation, so observation does not change
+ * which accessors the adoption reads, when a thenable's `then` runs, whether
+ * a malformed value throws synchronously or rejects, or which `then` a
+ * native promise is subscribed through.
  *
  * - `'await'` — the value is handed to `await` (the executor's direct
  *   dispatch, and the zero-behaviour chain dispatch, whose raw result the
@@ -70,6 +70,19 @@ type Adoption = 'await' | 'resolve';
  * promise `Promise.resolve` produced. The caller receives a promise that
  * settles with the handler's own value or error, so an ignored rejection
  * is still reported as unhandled — observation never marks it handled.
+ *
+ * Known, accepted difference (audit K1, maintainer-accepted 2026-09-29):
+ * on the `'resolve'` path the observed call returns that DERIVED promise,
+ * not the one `Promise.resolve` produced, so a behaviour holding `next()`'s
+ * return value can tell: it is not identical to the handler's promise,
+ * carries none of that promise's own properties, settles one microtask
+ * later, and is not subscribed through a handler-promise's own `then`
+ * override. Returning the adopted promise itself would need a side
+ * reaction to observe it, and that marks its rejection handled — turning a
+ * rejection a behaviour ignores (a process-level unhandled rejection when
+ * unobserved) into a silent one when observed. The derived promise is the
+ * lesser difference. Handlers returning `undefined` or an ordinary promise,
+ * and behaviours that only `await next()`, are unaffected.
  *
  * @param handler - The application's handler
  * @param job - The delivered job
