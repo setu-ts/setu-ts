@@ -1607,6 +1607,31 @@ describe('Application review fixes', () => {
     expect(registrations).toBe(1);
   });
 
+  it('refuses a retry even when the failing plugin wrote no state first', async () => {
+    // Before the guard this retry SUCCEEDED: the runtime provider threw before
+    // registering anything, so no leftover state blocked the second attempt.
+    // It is refused now by design — the kernel cannot tell a plugin that wrote
+    // nothing from one that opened a connection its `onClose` did not release.
+    let failOnce = true;
+    const real = runtimePlugin();
+    const app = createApplication({
+      plugins: [{
+        ...real,
+        register(ctx: IPluginContext) {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error('bad runtime options');
+          }
+          return real.register(ctx);
+        },
+      }],
+    });
+    await expect(app.start()).rejects.toThrow('bad runtime options');
+    await expect(app.start()).rejects.toThrow(
+      'Cannot retry start() after plugins have registered',
+    );
+  });
+
   it('refuses a retry after a failure past bootstrap, once the registry is sealed', async () => {
     let bootstraps = 0;
     const app = createApplication({

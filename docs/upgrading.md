@@ -88,11 +88,15 @@ passed and what the handler sees, or read `ctx.request.headers` inside the handl
 ### Create a new application instead of retrying a failed `start()`
 
 If your code catches a rejected `app.start()` and calls `start()` again on the same application,
-that retry only ever worked when the failure came before any plugin registered (a missing runtime
-provider, an unsatisfied dependency, a dependency cycle). After a plugin's `register()` had run, the
-retry always failed, with the misleading `Capability 'runtime' is already registered`. It now fails
-with `Cannot retry start() after plugins have registered … Create a new application instead.` — so
-rebuild the application (call your `createApp()` again) and start that one.
+that retry now works only when the failure came before any plugin ran `register()` — plugin
+resolution: a missing runtime provider, an unsatisfied dependency, a dependency cycle. Once
+registration has begun, a second `start()` throws
+`Cannot retry start() after plugins have registered … Create a new application instead.`
+
+Most such retries already failed, with the misleading `Capability 'runtime' is already registered`.
+One case used to succeed and is now refused: the first plugin to run threw before writing any state,
+such as a runtime provider rejecting its options. In every case, rebuild the application (call your
+`createApp()` again) and start that one.
 
 ## 0.7.0
 
