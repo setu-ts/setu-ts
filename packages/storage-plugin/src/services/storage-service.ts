@@ -213,14 +213,14 @@ export class StorageService implements IStorage {
   async get(path: string): Promise<Uint8Array> {
     const collector = collectors.get(this);
     if (collector === undefined) {
-      return await this.readBuffered(path);
+      return await this.#readBuffered(path);
     }
     // Bytes are measured on successful settlement, through the intrinsic
     // accessor; a failure isolates to `null` and never changes the result.
     return await observeStorageCall(
       collector,
       'get',
-      () => this.readBuffered(path),
+      () => this.#readBuffered(path),
       (value) => intrinsicByteLength(value),
     );
   }
@@ -302,7 +302,7 @@ export class StorageService implements IStorage {
         }
         return stream;
       }
-      return await this.readBufferedStream(path);
+      return await this.#readBufferedStream(path);
     }
     if (streamFn !== undefined) {
       return await observeStorageCall(collector, 'getStream', async () => {
@@ -319,7 +319,7 @@ export class StorageService implements IStorage {
     return await observeStorageCall(
       collector,
       'getStream',
-      () => this.readBufferedStream(path),
+      () => this.#readBufferedStream(path),
       null,
     );
   }
@@ -332,7 +332,7 @@ export class StorageService implements IStorage {
    * @returns The object bytes
    * @throws {Error} If the object does not exist
    */
-  async readBuffered(path: string): Promise<Uint8Array> {
+  async #readBuffered(path: string): Promise<Uint8Array> {
     const data = await this.#provider.get(path);
     if (data === null) {
       throw new Error(`Storage object not found: ${path}`);
@@ -348,8 +348,8 @@ export class StorageService implements IStorage {
    * @returns A `ReadableStream` of object bytes
    * @throws {Error} If the object does not exist
    */
-  async readBufferedStream(path: string): Promise<ReadableStream<Uint8Array>> {
-    const data = await this.readBuffered(path);
+  async #readBufferedStream(path: string): Promise<ReadableStream<Uint8Array>> {
+    const data = await this.#readBuffered(path);
     return new ReadableStream({
       start(controller) {
         controller.enqueue(data);

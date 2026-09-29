@@ -311,19 +311,19 @@ export class StorageObservationCollector {
       return disabledStorageSnapshot();
     }
     if (this.#failed) {
-      return failedStorageSnapshot(this.#alias);
+      return failedStorageSnapshot(this.#alias, this.#dropped);
     }
     let now: number;
     try {
       const reading = this.#clock();
       if (!Number.isFinite(reading)) {
         this.#fail();
-        return failedStorageSnapshot(this.#alias);
+        return failedStorageSnapshot(this.#alias, this.#dropped);
       }
       now = Math.max(reading, this.#lastAccepted);
     } catch {
       this.#fail();
-      return failedStorageSnapshot(this.#alias);
+      return failedStorageSnapshot(this.#alias, this.#dropped);
     }
     const records: StorageDiagnosticsRecord[] = [];
     let freshest = Number.POSITIVE_INFINITY;
@@ -332,7 +332,10 @@ export class StorageObservationCollector {
       if (record === undefined) {
         continue;
       }
-      const age = Math.max(0, now - record.lastAt);
+      // Rounded ONCE, before both comparisons, so the reported `ageMs`, the
+      // expiry decision and the stale decision all read the same integer —
+      // the wire validator re-derives the state from `ageMs`.
+      const age = Math.round(Math.max(0, now - record.lastAt));
       if (age >= STORAGE_COLLECTOR_LIMITS.retentionMs) {
         this.#records.delete(operation);
         continue;
@@ -343,7 +346,7 @@ export class StorageObservationCollector {
         operation,
         count: record.count,
         lastDurationMs: record.lastDurationMs,
-        ageMs: Math.round(age),
+        ageMs: age,
         succeeded: record.succeeded,
         failed: record.failed,
         lastBytes: record.lastBytes,
@@ -386,14 +389,18 @@ export function disabledStorageSnapshot(): StorageDiagnosticsSnapshot {
   });
 }
 
-/** The value-free snapshot a failed collector answers. */
-function failedStorageSnapshot(alias: string): StorageDiagnosticsSnapshot {
+/**
+ * The value-free snapshot a failed collector answers. `dropped` is kept:
+ * it is source-lifetime cumulative until close, and a collection fault is
+ * not a close.
+ */
+function failedStorageSnapshot(alias: string, dropped: number): StorageDiagnosticsSnapshot {
   return Object.freeze({
     state: 'collection-failed' as const,
     alias,
     coverage: 'owned-instance' as const,
     records: Object.freeze([]),
-    dropped: 0,
+    dropped,
   });
 }
 

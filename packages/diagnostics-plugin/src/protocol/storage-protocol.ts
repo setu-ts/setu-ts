@@ -95,6 +95,14 @@ const RECORD_KEYS: readonly string[] = [
   'lastBytes',
 ];
 
+/**
+ * The producer's retention and stale thresholds (ms), restated here because
+ * the connector may not import the storage plugin. A `ready`/`stale`
+ * snapshot's state must agree with its records' `ageMs` under them.
+ */
+const RETENTION_MS = 60_000;
+const STALE_MS = 30_000;
+
 const RESPONSE_KEYS: readonly string[] = ['version', 'instanceId', 'state', 'sources'];
 const ENTRY_KEYS: readonly string[] = ['sourceId', 'snapshot'];
 
@@ -152,15 +160,29 @@ export function isStorageSnapshotProjection(value: unknown): value is StorageDia
     return false;
   }
   const seen = new Set<string>();
+  let freshest = Number.POSITIVE_INFINITY;
   for (const record of records) {
     if (!isRecordProjection(record, value.alias as string)) {
       return false;
     }
+    // An expired record is never reported.
+    const age = (record as { ageMs: number }).ageMs;
+    if (age >= RETENTION_MS) {
+      return false;
+    }
+    freshest = Math.min(freshest, age);
     const operation = (record as { operation: string }).operation;
     if (seen.has(operation)) {
       return false;
     }
     seen.add(operation);
+  }
+  // ready ⇔ some record is at most STALE_MS old; stale ⇔ none is.
+  if (value.state === 'ready' && freshest > STALE_MS) {
+    return false;
+  }
+  if (value.state === 'stale' && freshest <= STALE_MS) {
+    return false;
   }
   return true;
 }
@@ -201,6 +223,10 @@ function isRecordProjection(value: unknown, alias: string): value is StorageDiag
   }
   // getSignedUrl records outcome and age only — never a duration.
   if (value.operation === DURATIONLESS_OPERATION && value.lastDurationMs !== null) {
+    return false;
+  }
+  // Every other operation records its last settled duration.
+  if (value.operation !== DURATIONLESS_OPERATION && value.lastDurationMs === null) {
     return false;
   }
   if (value.lastDurationMs !== null && !isCounter(value.lastDurationMs)) {

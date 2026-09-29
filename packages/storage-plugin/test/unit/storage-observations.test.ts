@@ -316,6 +316,38 @@ describe('storage diagnostics — collector', () => {
     });
   });
 
+  it('keeps the cumulative dropped count through a collection-failed latch', () => {
+    const { c, clock } = collector();
+    const starts: (number | null)[] = [];
+    for (let i = 0; i <= STORAGE_COLLECTOR_LIMITS.maxActiveTokens; i++) {
+      starts.push(c.begin());
+    }
+    expect(c.snapshot().dropped).toBe(1);
+    clock.throws = true;
+    c.settle('put', starts[0]!, 'succeeded', 1);
+    clock.throws = false;
+    expect(c.snapshot()).toEqual({
+      state: 'collection-failed',
+      alias: 'primary',
+      coverage: 'owned-instance',
+      records: [],
+      dropped: 1,
+    });
+  });
+
+  it('reports ages, expiry and staleness from one rounded integer', () => {
+    const { c, clock } = collector();
+    c.settle('put', c.begin(), 'succeeded', 1);
+    // 30_000.4 rounds to 30_000: reported age and state must agree (ready).
+    clock.advance(30_000.4);
+    const at = c.snapshot();
+    expect(at.state).toBe('ready');
+    expect(at.records[0]!.ageMs).toBe(30_000);
+    // 59_999.6 rounds to 60_000: expired, never reported as ageMs 60_000.
+    clock.advance(29_999.2);
+    expect(c.snapshot()).toMatchObject({ state: 'no-data', records: [] });
+  });
+
   it('latches collection-failed on a throwing clock at begin', () => {
     const { c, clock } = collector();
     clock.throws = true;
@@ -414,6 +446,18 @@ describe('storage diagnostics — collector', () => {
 });
 
 describe('storage diagnostics — service seam', () => {
+  it('exposes no public unobserved read beside the IStorage methods', () => {
+    expect(Object.getOwnPropertyNames(StorageService.prototype).sort()).toEqual([
+      'constructor',
+      'delete',
+      'exists',
+      'get',
+      'getSignedUrl',
+      'getStream',
+      'put',
+    ]);
+  });
+
   it('runs unobserved with no attachment, exactly as before M98m', async () => {
     const provider = createFakeProvider();
     const service = new StorageService(provider);

@@ -180,6 +180,19 @@ describe('storage protocol — source reading', () => {
       'bytes on a non-buffered operation',
       () => ready('primary', [{ ...record('primary', 'delete'), lastBytes: 4 }]),
     ],
+    [
+      'a ready state whose freshest record is stale',
+      () => ready('primary', [{ ...record(), ageMs: 30_001 }]),
+    ],
+    ['a stale state with a fresh record', () => ({ ...ready(), state: 'stale' })],
+    [
+      'an expired record',
+      () => ({ ...ready('primary', [{ ...record(), ageMs: 60_000 }]), state: 'stale' }),
+    ],
+    [
+      'a null duration on a timed operation',
+      () => ready('primary', [{ ...record(), lastDurationMs: null }]),
+    ],
     ['a count disagreeing with its outcomes', () => ready('primary', [{ ...record(), count: 3 }])],
     ['a throwing proxy', () =>
       new Proxy(ready(), {
@@ -240,7 +253,7 @@ describe('storage protocol — aggregate response', () => {
     const cases: ReadonlyArray<[unknown[], string]> = [
       [[DISABLED, ready('a')], 'ready'],
       [[DISABLED, new Error('x')], 'collection-failed'],
-      [[DISABLED, { ...ready('a'), state: 'stale' }], 'stale'],
+      [[DISABLED, { ...ready('a', [{ ...record('a'), ageMs: 30_001 }]), state: 'stale' }], 'stale'],
       [[DISABLED, { ...ready('a'), state: 'no-data', records: [] }], 'no-data'],
       [[DISABLED, DISABLED], 'disabled'],
     ];
