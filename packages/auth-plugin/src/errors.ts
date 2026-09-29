@@ -11,7 +11,7 @@
  * The error is exported so startup code can distinguish an authentication
  * configuration failure from an unrelated application boot failure.
  *
- * @since 0.9.0
+ * @since 0.8.0
  */
 export class AuthPluginConfigurationError extends Error {
   /** Stable discriminant for consumers that cannot use `instanceof` across realms. */

@@ -4,7 +4,13 @@
  * @module
  */
 
-import type { IAuthStrategy, IPrincipal, RbacConfig, SessionView } from '@setu-ts/common';
+import type {
+  IAuthStrategy,
+  IPrincipal,
+  PathPattern,
+  RbacConfig,
+  SessionView,
+} from '@setu-ts/common';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 
 /**
@@ -119,13 +125,13 @@ export interface AuthorizationDiagnosticsOptions {
  * routes that never need a principal, or disable registration to attach
  * {@linkcode authMiddleware} at route level yourself.
  *
- * @since 0.9.0
+ * @since 0.8.0
  */
 export interface AuthMiddlewareOption {
   /** Execution priority. Defaults to the authentication band at 300. */
   readonly priority?: number;
   /** Paths that skip passive authentication. Defaults to no exclusions. */
-  readonly exclude?: readonly (string | RegExp)[];
+  readonly exclude?: readonly PathPattern[];
 }
 
 /**
