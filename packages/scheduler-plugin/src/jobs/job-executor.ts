@@ -85,13 +85,20 @@ type Adoption = 'await' | 'resolve';
  * unobserved) into a silent one when observed. The derived promise is the
  * lesser difference.
  *
- * Scope, whatever the handler returned (audit K2): a behaviour that only
- * `await`s `next()` is unaffected. Any behaviour that HOLDS or RETURNS
- * `next()`'s result gets a different object when observed, and a callback
- * it attaches with `.then` runs one microtask later — even for a handler
- * returning `undefined` or an ordinary promise. Only the own-property and
- * own-`then` differences additionally need a handler returning a native
- * promise it augmented or whose `then` it overrode.
+ * Scope, measured by the audits (K2, K3), whatever the handler returned —
+ * `undefined` and ordinary promises included:
+ *
+ * - IDENTICAL observed and unobserved: the value or error the handler
+ *   settles with, whether the executor retries, and whether an ignored
+ *   rejection is reported as unhandled.
+ * - May DIFFER: microtask timing. Behind a chain, a behaviour resumes from
+ *   `await next()` one microtask later, a `.then` it attaches to `next()`
+ *   runs one microtask later, and an outer behaviour chaining on an inner
+ *   one sees the shift; no behaviour is free of it. A behaviour that holds
+ *   or returns `next()`'s result also gets a different object.
+ * - Needs an unusual handler result: the own-property and own-`then`
+ *   differences apply only to a handler returning a native promise it
+ *   augmented or whose `then` it overrode.
  *
  * @param handler - The application's handler
  * @param job - The delivered job
