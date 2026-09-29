@@ -1,7 +1,6 @@
 # Milestone 100b — Tokens From an Outside Issuer (`@setu-ts/auth-plugin`)
 
-> **Status:** Planning on `docs/m100-auth-federation-mfa`. Implementation and fixes belong on
-> `feat/m100b-external-token-verification`; `main` remains protected. Depends on 100a.
+> **Status:** Complete on `feat/m100b-external-token-verification`. Depends on 100a.
 
 ## 0. Objective & scope
 
@@ -261,3 +260,22 @@ checks → `toPrincipal`.
 
 The implementation audit re-runs each row as a negative control against the committed tree,
 including a real Keycloak token re-signed with `alg: HS256` using the realm's public key.
+
+## 11. Implementation notes — deviations from this plan
+
+- **Option validation lives in `src/issuers/trusted-issuer.ts`**, not inline in `auth-plugin.ts`;
+  `AuthPlugin(...)` calls it at construction, so every §3.2 refusal still throws there.
+- **`toPrincipal` throwing** is caught and reported as `verification-error`; the request stays
+  anonymous. Its test lives in `issuer-strategy.test.ts`.
+- **Health reports every issuer's state**, including `expired` (§3.5's past-`maxStaleMs` state),
+  rather than only `stale`/`unfetched` as §3.7 listed. The indicator performs no I/O, so it reads
+  `unfetched` until the first token from that issuer arrives.
+- **A token with a `crit` header is refused** (`crit-unsupported`): no extension is understood, and
+  RFC 7515 §4.1.11 requires refusing one that is not.
+- **The default HTTP seam refuses redirects** (`redirect: 'error'`), so a validated `https` URL
+  cannot be bounced to another scheme or host.
+- **The key-set cache tracks "ever fetched" explicitly.** Using a zero timestamp as the sentinel
+  broke under a monotonic clock that reads `0`, which the test fake did.
+- **Keycloak is a CI step in `ci.yml`, `release.yml` and `drift.yml`**, compared byte-for-byte by
+  `test/unit/release-notes.test.ts`, because the backend-parity test requires every suite-running
+  workflow to start it, not only the PR job.

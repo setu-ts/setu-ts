@@ -5459,8 +5459,20 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   priority 300 by default, with priority, exclusion, and opt-out controls. A full-stack starter
   regression proves a session principal reaches React Router's `userContext` without a hand-added
   middleware copy — complete (PR #384).
-- **Next milestone** — **M100b** (`packages/auth-plugin` — tokens from an outside issuer; design
-  security review and implementation audit required).
+- **Milestone 100b** (`packages/auth-plugin` + `packages/cli` — tokens from an outside issuer):
+  `AuthPluginOptions.issuers` verifies access tokens an outside provider issued against its
+  published, rotating key set, through `runtime.subtle` with zero npm dependencies. An internal
+  `issuers` strategy runs after the JWT strategy and reads `iss` unverified only as a configuration
+  lookup key. `none` and `HS*` are refused before key lookup, and keys are filtered by
+  `kty`/`crv`/`use`/`alg`/`key_ops`/`kid`. Key sets are cached on the monotonic clock with a
+  cooldown-bounded unknown-`kid` refetch, coalescing, a `maxStaleMs` cap and per-fetch
+  time/byte/key-count bounds. A new `auth` health indicator never reports `down`. Every §3.2 refusal
+  throws at construction. Driven against a real Keycloak 26.4 realm, including admin-API key
+  rotation and an HS256 forgery using the realm's public key; CI starts Keycloak in all three
+  suite-running workflows — complete (PR pending).
+- **Next milestone** — **M100c** (`packages/auth-plugin` + `packages/common` — sign-in with an
+  outside provider over OAuth 2.0 / OpenID Connect; design security review and implementation audit
+  required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
