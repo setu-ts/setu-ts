@@ -45,9 +45,11 @@ const ATTEMPT_BEGINS = new WeakMap<object, () => SchedulerAttemptSettle>();
 /**
  * How a call site adopts the handler's result when UNOBSERVED. The observed
  * path adopts it with the same operation, so observation does not change
- * which accessors the adoption reads, when a thenable's `then` runs, whether
- * a malformed value throws synchronously or rejects, or which `then` a
- * native promise is subscribed through.
+ * which accessors the adoption reads, when a thenable's `then` runs, or
+ * whether a malformed value throws synchronously or rejects. On the
+ * `'await'` path it also does not change which `then` a native promise is
+ * subscribed through; on the `'resolve'` path what the caller RECEIVES
+ * differs — see the K1 note at {@linkcode invokeHandler}.
  *
  * - `'await'` — the value is handed to `await` (the executor's direct
  *   dispatch, and the zero-behaviour chain dispatch, whose raw result the
@@ -81,8 +83,15 @@ type Adoption = 'await' | 'resolve';
  * reaction to observe it, and that marks its rejection handled — turning a
  * rejection a behaviour ignores (a process-level unhandled rejection when
  * unobserved) into a silent one when observed. The derived promise is the
- * lesser difference. Handlers returning `undefined` or an ordinary promise,
- * and behaviours that only `await next()`, are unaffected.
+ * lesser difference.
+ *
+ * Scope, whatever the handler returned (audit K2): a behaviour that only
+ * `await`s `next()` is unaffected. Any behaviour that HOLDS or RETURNS
+ * `next()`'s result gets a different object when observed, and a callback
+ * it attaches with `.then` runs one microtask later — even for a handler
+ * returning `undefined` or an ordinary promise. Only the own-property and
+ * own-`then` differences additionally need a handler returning a native
+ * promise it augmented or whose `then` it overrode.
  *
  * @param handler - The application's handler
  * @param job - The delivered job
