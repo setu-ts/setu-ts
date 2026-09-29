@@ -13,11 +13,17 @@ import type {
   IPlugin,
   IRuntimeServices,
   IScheduler,
+  ISchedulerDiagnosticsSource,
   RegistryFactory,
   ScheduleOptions,
   SchedulerJobHandler,
 } from '@setu-ts/common';
-import { causeMessage, createConnectionErrorReporter, resolveRegistryEntry } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  causeMessage,
+  createConnectionErrorReporter,
+  resolveRegistryEntry,
+} from '@setu-ts/common';
 import { SchedulerUnavailableError } from '../errors.ts';
 import type {
   IDistributedLock,
@@ -29,6 +35,16 @@ import { resolveLock } from '../lock/distributed-lock.ts';
 import type { ILifecyclableLock } from '../lock/distributed-lock.ts';
 import { withIngressBehaviors } from '../jobs/job-executor.ts';
 import { SchedulerService } from '../services/scheduler-service.ts';
+import {
+  attachSchedulerCollector,
+  detachSchedulerCollector,
+} from '../services/scheduler-service.ts';
+import type { CompiledSchedulerDiagnostics } from '../diagnostics/scheduler-observations.ts';
+import {
+  compileSchedulerDiagnostics,
+  createSchedulerDiagnosticsSource,
+  SchedulerObservationCollector,
+} from '../diagnostics/scheduler-observations.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 /**
@@ -77,6 +93,13 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
     .filter((slot): slot is { entry: RegistryFactory<SchedulerJobDefinition>; index: number } =>
       typeof slot.entry === 'function'
     );
+  // M98k: validated here, before any application exists — the one
+  // validation of these options. `null` when `diagnostics` was omitted,
+  // which is the inert disabled-source configuration.
+  const diagnostics: CompiledSchedulerDiagnostics | null = options?.diagnostics === undefined
+    ? null
+    : compileSchedulerDiagnostics(options.diagnostics);
+
   const behaviorInstances = behaviors.filter((entry): entry is IIngressBehavior =>
     typeof entry !== 'function'
   );
@@ -180,6 +203,27 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       // Register the service
       ctx.services.register<IScheduler>('scheduler', service);
 
+      // M98k: EVERY instance contributes one scheduler-diagnostics source as
+      // a multi provider (never claimed in `provides`, so it never collides
+      // with another source's provider). It describes THIS service only — a later
+      // replacement of the scheduler token is outside its coverage. Not
+      // opted in, the source is inert (`disabled`) and nothing is attached:
+      // every fire runs the pre-M98k path.
+      const collector = diagnostics === null ? null : new SchedulerObservationCollector(
+        diagnostics.alias,
+        diagnostics.jobs,
+        ctx.runtime.now.bind(ctx.runtime),
+        ctx.runtime.hrtime.bind(ctx.runtime),
+      );
+      if (collector !== null) {
+        attachSchedulerCollector(service, collector);
+      }
+      ctx.services.register<ISchedulerDiagnosticsSource>(
+        CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+        createSchedulerDiagnosticsSource(collector),
+        { multi: true },
+      );
+
       // Declared job INSTANCES register now, exactly as an imperative
       // `cron()`/`every()`/`delay()` call made before this arm existed.
       //
@@ -200,8 +244,12 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       const healthIndicator: HealthIndicatorFn = service.createHealthIndicator();
       ctx.health.register('scheduler', healthIndicator);
 
-      // Register lifecycle hook for cleanup
+      // Register lifecycle hook for cleanup. M98k: detach FIRST, then clear
+      // collector state — no late fire or attempt is observed and nothing
+      // repopulates a cleared collector.
       ctx.lifecycle.onClose(async () => {
+        detachSchedulerCollector(service);
+        collector?.close();
         await service.disconnect();
 
         // Disconnect Redis lock if needed

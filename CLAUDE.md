@@ -5367,6 +5367,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tests. Round 7 was the last at the maintainer's direction; its fixes and the merge with `main`
   (M98h) are verified by tests and gates, and the per-event `begin` token (~50 ns per publish,
   against the design review's no-allocation budget) was accepted — complete (PR #375).
+- **Milestone 98k** (`packages/scheduler-plugin` + `packages/common` + `packages/diagnostics-plugin`
+  — scheduler execution observations):
+  `SchedulerPlugin({ diagnostics: { enabled: true, alias,
+  jobs } })` records each approved job's
+  local timer fires (contended / lock-failed / dispatched, with wall-clock lateness
+  `max(0, actualStart - intendedFire)`) and each handler attempt (started, succeeded, failed,
+  retries) through a private-field collector (set in a static block) attached to the plugin's own
+  service — unobserved services read one field and no clock. Multi-provider
+  `CAPABILITIES.SCHEDULER_DIAGNOSTICS`; the connector serves `GET /v1/scheduler` (16-source bound)
+  and the client `scheduler()`; the status manifest flips `scheduler: true`. A skipped local fire is
+  never a globally missed execution; lock losers produce no handler records (proven by test).
+  Verification found five collector defects every gate passed (fractional lateness blanking the
+  whole source, no slot reclaim at capacity, double drops, `started < count`, unguarded observation
+  clock reads). The design review was recorded retroactively. The security audit ran nine
+  fresh-context rounds; after the first, every finding came from observing the handler's result on
+  the observed path and was Low, with no data exposure. The maintainer accepted K1 — behind a
+  behaviour chain, `next()` returns a derived promise — and narrowed the observed-equals-unobserved
+  guarantee to ordinary handler results. Round 9 failed on K5, which was then fixed and accepted,
+  and the maintainer waived further rounds — complete (PR #379).
 - **Milestone 98l** (`packages/websocket-plugin` + `packages/sse-plugin` +
   `packages/realtime-backplane-plugin` + `packages/common` + `packages/diagnostics-plugin` —
   realtime lifecycle observations): each plugin accepts `diagnostics: { enabled: true, alias }` and
@@ -5389,8 +5408,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   doc correction claimed QUIT alone stops ioredis reconnecting, which round 4 measured false after a
   25 s outage — both fixed; round 5 passed on `bec04876`. The design review was approved by the
   maintainer — complete (PR #377).
-- **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
-  design security review and implementation audit required).
+- **Next milestone** — **M98m** (`packages/storage-plugin` — storage operation observations; design
+  security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

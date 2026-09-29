@@ -2628,6 +2628,18 @@ unhandled backend rejection stays unhandled with diagnostics on (a side branch o
 promise would have marked it handled and hidden it). Only one call in eight per operation is timed
 with a start reading — the per-call cost is one clock read plus one promise reaction.
 
+Scheduler execution observations (M98k) use the same multi-provider shape, attached to the plugin's
+OWN `SchedulerService` and threaded to the executor per dispatched fire. The service observes each
+approved job's timer fire at its entry — lateness measured once against the intended epoch fire time
+(`max(0, actualStart - intendedFire)`, never an absolute schedule) — and settles it at the
+skip-or-dispatch decision: contended (fire slot held elsewhere, a delay whose registration slot
+belonged to another replica, or the overlap mutex held), lock-failed (a lock operation rejected), or
+dispatched with its settlement and monotonic duration. The executor observes handler attempts —
+started, succeeded/failed, the retry count — reading clocks only when an observer was supplied, so
+an unapproved job allocates nothing and a lock loser produces NO attempt record. A skipped local
+fire is never a globally missed execution: no missed counter exists, and coverage is always
+`owned-instance`, never cluster completeness.
+
 ### Authorization Decision Explanation Boundary (Milestone 98h)
 
 Authorization decision explanations apply the pattern to the first-party RBAC evaluator, with two

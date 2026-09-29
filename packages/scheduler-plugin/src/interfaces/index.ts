@@ -122,6 +122,55 @@ export interface SchedulerPluginOptions {
    * @since 0.3.0
    */
   readonly behaviors?: readonly (IIngressBehavior | RegistryFactory<IIngressBehavior>)[];
+
+  /**
+   * Opt-in scheduler execution observations (M98k). Absent — the default —
+   * registers an inert `disabled` diagnostics source and attaches no
+   * collector: no fire is ever timed or labelled. When supplied, `enabled`
+   * must be the literal `true`, `alias` names this scheduler instance, and
+   * `jobs` maps EXACT job names to approved display aliases — only those
+   * jobs are observed. Validation happens when `SchedulerPlugin(...)` is
+   * called, so an invalid option refuses before any application exists.
+   *
+   * Records carry only approved aliases and fixed-vocabulary counters: a
+   * job name, cron expression, payload, lock key or thrown value never
+   * enters a record. A read never acquires a lock or invokes a handler, and
+   * a skipped local fire is never reported as a globally missed execution.
+   *
+   * @since 0.8.0
+   */
+  readonly diagnostics?: SchedulerDiagnosticsOptions;
+}
+
+/**
+ * The opt-in scheduler-observation policy (M98k).
+ *
+ * Only fires of and attempts by THIS plugin instance's own
+ * `SchedulerService` are counted, per approved job, under the approved
+ * aliases. `jobs` is required: an empty map approves no observations, which
+ * is distinct from omitting `diagnostics` entirely (an inert `disabled`
+ * source with no collector at all). Alias values must be unique, 1–64
+ * UTF-8 bytes, and free of control characters — "safe" is a SHAPE, not
+ * secret detection; approving an alias IS authorizing its disclosure, so
+ * never derive one by truncating or hashing a sensitive name. At most 64
+ * exact entries.
+ *
+ * @since 0.8.0
+ */
+export interface SchedulerDiagnosticsOptions {
+  /**
+   * The explicit opt-in, deliberately the LITERAL `true`: `enabled: false`
+   * (or any other value) is refused; omit `diagnostics` instead.
+   */
+  readonly enabled: true;
+  /** The display alias for this scheduler instance; unique across sources. */
+  readonly alias: string;
+  /**
+   * Exact job names approved for observation, mapped to their approved
+   * display aliases. Required; an empty map approves nothing. Lookup uses
+   * own entries only, never inherited properties.
+   */
+  readonly jobs: Readonly<Record<string, string>>;
 }
 
 /**

@@ -18,6 +18,158 @@ import type {
 } from '@setu-ts/common';
 import { composeBehaviorChain } from '@setu-ts/common';
 import { computeBackoffMs } from '../retry/retry-handler.ts';
+import type {
+  SchedulerAttemptObserver,
+  SchedulerAttemptSettle,
+} from '../diagnostics/scheduler-observations.ts';
+
+/**
+ * The handlers {@linkcode withIngressBehaviors} returned (M98k). Such a
+ * function is the behaviour CHAIN, not the application's handler: a
+ * behaviour may decline the dispatch, call `next()` more than once, or call
+ * it after its own step returned, so {@linkcode run} must not treat invoking
+ * the chain as a handler attempt. The chain measures the handler itself,
+ * through {@linkcode invokeHandler}.
+ */
+const CHAIN_WRAPPED = new WeakSet<object>();
+
+/**
+ * The attempt observer's `begin` for each OBSERVED job object, registered by
+ * {@linkcode run}. Every handler invocation for that job — however many the
+ * chain makes, and whenever it makes them — begins and settles its own
+ * attempt. Only an observed dispatch registers one, so an unobserved
+ * dispatch pays one `WeakMap.get` and no allocation.
+ */
+const ATTEMPT_BEGINS = new WeakMap<object, () => SchedulerAttemptSettle>();
+
+/**
+ * How a call site adopts the handler's result when UNOBSERVED. The observed
+ * path adopts it with the same operation, so observation does not change
+ * which accessors the adoption reads, when a thenable's `then` runs, or
+ * whether a malformed value throws synchronously or rejects. On the
+ * `'await'` path it also does not change which `then` a native promise is
+ * subscribed through; on the `'resolve'` path what the caller RECEIVES
+ * differs — see the K1 note at {@linkcode invokeHandler}.
+ *
+ * - `'await'` — the value is handed to `await` (the executor's direct
+ *   dispatch, and the zero-behaviour chain dispatch, whose raw result the
+ *   executor awaits).
+ * - `'resolve'` — the value is handed to `Promise.resolve` (the behaviour
+ *   chain's terminal step).
+ */
+type Adoption = 'await' | 'resolve';
+
+/**
+ * Invokes the application's handler — the one place it runs — adopting its
+ * result exactly as the unobserved call site does. For an OBSERVED job it
+ * also records that invocation as one attempt, settled by the adopted
+ * result: fulfilled, rejected, or a synchronous throw from the handler or
+ * from the adoption itself.
+ *
+ * Settlement never subscribes through a result's own `then`: the `'await'`
+ * form is a plain `await` inside an async function, and the `'resolve'`
+ * form attaches through the intrinsic `Promise.prototype.then` to the
+ * promise `Promise.resolve` produced. On the `'resolve'` path the caller
+ * receives a promise that settles with the handler's own value or error; on
+ * the `'await'` path — whose only consumer, the executor, discards the value
+ * — it settles with the handler's error, or with nothing. Either way an
+ * ignored rejection is still reported as unhandled — observation never
+ * marks it handled.
+ *
+ * Known, accepted difference (audit K1, maintainer-accepted 2026-09-29):
+ * on the `'resolve'` path the observed call returns that DERIVED promise,
+ * not the one `Promise.resolve` produced, so a behaviour holding `next()`'s
+ * return value can tell: it is not identical to the handler's promise,
+ * carries none of that promise's own properties, settles one microtask
+ * later, and is not subscribed through a handler-promise's own `then`
+ * override. Returning the adopted promise itself would need a side
+ * reaction to observe it, and that marks its rejection handled — turning a
+ * rejection a behaviour ignores (a process-level unhandled rejection when
+ * unobserved) into a silent one when observed. The derived promise is the
+ * lesser difference.
+ *
+ * Scope of the guarantee (audits K2–K5; maintainer decision 2026-09-29).
+ * An ORDINARY handler result is `undefined`, a primitive, or an unmodified
+ * native promise that fulfils with `undefined` or a primitive or rejects —
+ * with no `then` added to the built-in prototypes. For ordinary results:
+ *
+ * - IDENTICAL observed and unobserved: the value or error `next()` settles
+ *   with (pinned by off/on tests), whether the executor retries, and
+ *   whether an ignored rejection is reported as unhandled.
+ * - May DIFFER behind a behaviour chain (accepted as K1): microtask timing
+ *   — a behaviour resumes from `await next()`, or runs a `.then` attached
+ *   to it, one microtask later, and an outer behaviour chaining on an inner
+ *   one sees the shift — and a behaviour that holds or returns `next()`'s
+ *   result gets a different object.
+ *
+ * For any OTHER result — a thenable, an object, a promise fulfilling with
+ * one, a native promise with own properties or an overridden `then` or
+ * `constructor`, or any value whose accessors have effects or answer
+ * differently on each read — observed and unobserved runs may differ in
+ * more ways, including how often those accessors are read, when they run,
+ * how the dispatch settles and whether it retries. That whole class is
+ * accepted by the maintainer as part of K1: no guarantee is made for it.
+ *
+ * @param handler - The application's handler
+ * @param job - The delivered job
+ * @param adoption - How the unobserved call site adopts the result
+ * @returns What the unobserved call site would return, or its observed equivalent
+ */
+function invokeHandler<T>(
+  handler: SchedulerJobHandler<T>,
+  job: ScheduledJob<T>,
+  adoption: Adoption,
+): void | Promise<void> {
+  const begin = ATTEMPT_BEGINS.get(job);
+  if (begin === undefined) {
+    return adoption === 'await' ? handler(job) : Promise.resolve(handler(job));
+  }
+  const settle = begin();
+  if (adoption === 'await') {
+    return (async (): Promise<void> => {
+      let result: void | Promise<void>;
+      try {
+        result = handler(job);
+      } catch (error) {
+        settle(false);
+        throw error;
+      }
+      try {
+        await result;
+      } catch (error) {
+        settle(false);
+        throw error;
+      }
+      settle(true);
+      // Deliberately returns nothing (audit K5): the executor, this form's
+      // only consumer, discards the value, and returning it would make the
+      // promise re-read its `then` — adopting a late-appearing `then` that
+      // the unobserved `await` never sees.
+    })();
+  }
+  let adopted: Promise<void>;
+  try {
+    adopted = Promise.resolve(handler(job));
+  } catch (error) {
+    // A synchronous throw from the handler OR from `Promise.resolve` (a
+    // native promise whose `constructor` read throws) — thrown on, exactly
+    // as the unobserved terminal step throws it.
+    settle(false);
+    throw error;
+  }
+  return Reflect.apply(Promise.prototype.then, adopted, [
+    // Fulfil with the handler's OWN value (audit K4): a behaviour's
+    // `await next()` must receive what the handler settled with.
+    (value: unknown) => {
+      settle(true);
+      return value;
+    },
+    (error: unknown) => {
+      settle(false);
+      throw error;
+    },
+  ]) as Promise<void>;
+}
 
 /**
  * Options passed to `run()`.
@@ -25,6 +177,12 @@ import { computeBackoffMs } from '../retry/retry-handler.ts';
 interface RunOptions {
   runtime: IRuntimeServices;
   logger?: ILogger | undefined;
+  /**
+   * The M98k attempt observer for an observed dispatch. Absent — the
+   * default — the executor runs exactly the pre-M98k path: no observation
+   * object is allocated. Present, the observer times each attempt itself.
+   */
+  attempts?: SchedulerAttemptObserver | undefined;
 }
 
 /**
@@ -46,7 +204,7 @@ export async function run<T = unknown>(
   retry: RetryOptions | undefined,
   options: RunOptions,
 ): Promise<void> {
-  const { runtime, logger } = options;
+  const { runtime, logger, attempts } = options;
   const limit = retry?.limit ?? 1;
   let attempt = 0;
 
@@ -62,8 +220,21 @@ export async function run<T = unknown>(
       attempts: attempt,
     };
 
+    // M98k: an attempt is one INVOCATION of the application's handler,
+    // begun and settled around that invocation by `invokeHandler` — inside
+    // the behaviour chain when one is configured, so a declined dispatch
+    // records none and a late or repeated `next()` records its own. The
+    // observer measures through the collector's guarded clock; the executor
+    // reads no clock, so a throwing clock can never fail or retry a handler
+    // that succeeded.
+    if (attempts !== undefined) {
+      const isRetry = attempt > 1;
+      ATTEMPT_BEGINS.set(job, () => attempts.begin(isRetry));
+    }
     try {
-      await handler(job);
+      await (attempts === undefined || CHAIN_WRAPPED.has(handler)
+        ? handler(job)
+        : invokeHandler(handler, job, 'await'));
       return;
     } catch (error) {
       if (attempt < limit) {
@@ -102,7 +273,9 @@ export async function run<T = unknown>(
  * With an EMPTY behaviour list the original handler is invoked directly with
  * no chain allocated: a synchronous throw propagates synchronously and the
  * handler's own return value is handed back as-is, so the zero-configuration
- * dispatch is byte-identical to the unwrapped call.
+ * dispatch is byte-identical to the unwrapped call. (An OBSERVED dispatch —
+ * M98k diagnostics — returns a promise settling with the handler's own
+ * result and error instead, so the attempt can be settled by it.)
  *
  * @typeParam T - The job payload type
  * @param handler - The handler to wrap
@@ -135,19 +308,22 @@ export function withIngressBehaviors<T>(
     if (behaviors.length === 0) {
       // Zero-configuration dispatch — byte-identical to the pre-chain
       // behaviour: a direct invocation, no envelope, no promise mediation.
-      return handler(job);
+      return invokeHandler(handler, job, 'await');
     }
 
     return composeBehaviorChain<IngressContext<ScheduledJob<T>>, void>(
       { kind: 'scheduler', name: job.name, payload: job, attempt: job.attempts },
       behaviors,
-      () => Promise.resolve(handler(job)),
+      // The terminal step: the one place the application's handler runs.
+      () => invokeHandler(handler, job, 'resolve') as Promise<void>,
     );
   };
 
-  return (job: ScheduledJob<T>): void | Promise<void> => {
+  const wrapped = (job: ScheduledJob<T>): void | Promise<void> => {
     // The deferred result is RETURNED so a handler failure still reaches the
     // executor's retry path rather than becoming an unhandled rejection.
     return gate === undefined ? dispatch(job) : gate.then(() => dispatch(job));
   };
+  CHAIN_WRAPPED.add(wrapped);
+  return wrapped;
 }

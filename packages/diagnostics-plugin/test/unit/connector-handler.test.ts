@@ -17,6 +17,7 @@ import type {
   IConfigDiagnosticsSource,
   IEventDiagnosticsSource,
   IResponse,
+  ISchedulerDiagnosticsSource,
   ITraceDiagnosticsSource,
 } from '@setu-ts/common';
 import { createConnectorHandler, refusalResponse } from '../../src/transport/connector-handler.ts';
@@ -28,7 +29,13 @@ import { ConnectorLimits } from '../../src/transport/limits.ts';
 import { QueueObservationMerger } from '../../src/transport/queue-merger.ts';
 import type { IQueueMerger } from '../../src/transport/queue-merger.ts';
 import { isQueueBatchProjection } from '../../src/protocol/queue-protocol.ts';
-import { responseMacFields, sha256Hex, verifyFields } from '../../src/security/authentication.ts';
+import {
+  canonicalBytes,
+  requestMacFields,
+  responseMacFields,
+  sha256Hex,
+  verifyFields,
+} from '../../src/security/authentication.ts';
 import {
   createTestSession,
   fakeRequest,
@@ -113,6 +120,7 @@ async function buildHarness(options?: {
   batch?: Record<string, unknown>;
   configSource?: IConfigDiagnosticsSource | null;
   cacheSources?: readonly ICacheDiagnosticsSource[];
+  schedulerSources?: readonly ISchedulerDiagnosticsSource[];
 }): Promise<HandlerHarness> {
   const clock = new MutableClock();
   // The 15-minute default TTL: what the fixture's frozen-clock status body
@@ -138,6 +146,7 @@ async function buildHarness(options?: {
     healthSource: null,
     configSource: options?.configSource ?? null,
     cacheSources: options?.cacheSources ?? [],
+    schedulerSources: options?.schedulerSources ?? [],
   });
   return { handler, clock, source, session, key };
 }
@@ -589,6 +598,7 @@ describe('Connector handler — authentication and binding', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
     });
     expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
     clock.advance(1_000);
@@ -796,6 +806,7 @@ describe('Connector handler — projection hardening', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
     });
     // The throwing path is BELOW the handler's try — the connector-handler
     // module catches nothing inside; the runtime listener owns the 503 arm.
@@ -873,6 +884,7 @@ describe('Connector handler — health operation (M98d)', () => {
       healthSource: { snapshot: () => healthSnapshot },
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -917,6 +929,7 @@ describe('Connector handler — health operation (M98d)', () => {
       },
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -967,6 +980,7 @@ describe('Connector handler — health operation (M98d)', () => {
       healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -1176,6 +1190,48 @@ describe('Connector handler — fixture vectors', () => {
     expect(view.headers.get('x-setu-mac')).toEqual(fixture.statusExchange.response.mac);
   });
 
+  it('pins each recorded macInput to the canonical MAC fields it documents', async () => {
+    // The fixture records every `macInput` beside its MAC as documentation of
+    // the canonical string. The exchange test above never reads those strings,
+    // so a regenerated fixture once shipped the RESPONSE input under the
+    // request (review of PR #379). Pin both against the production
+    // canonicalization, and the request string against the fixture MAC.
+    const request = fixture.statusExchange.request;
+    const response = fixture.statusExchange.response;
+    const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+    expect(request.macInput).toEqual(
+      decode(canonicalBytes(requestMacFields(
+        fixture.sessionId,
+        request.instance,
+        request.sequence,
+        fixture.authority,
+        request.target,
+      ))),
+    );
+    expect(response.macInput).toEqual(
+      decode(canonicalBytes(responseMacFields(
+        fixture.sessionId,
+        fixture.instanceId,
+        request.sequence,
+        request.target,
+        String(response.status),
+        response.bodySha256,
+      ))),
+    );
+    const key = await crypto.subtle.importKey(
+      'raw',
+      new Uint8Array(fixture.keyHex.match(/../g)!.map((pair) => parseInt(pair, 16))),
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const sign = async (input: string) =>
+      [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(input)))]
+        .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+    expect(await sign(request.macInput)).toEqual(request.mac);
+    expect(await sign(response.macInput)).toEqual(response.mac);
+  });
+
   it('refuses every fixture-rejected target', async () => {
     const { handler, clock } = await buildHarness();
     for (const target of fixture.rejectedTargets as string[]) {
@@ -1286,6 +1342,7 @@ describe('Connector handler — remaining structural arms', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
     });
     // Forty full-burst honest statuses without any elapsed time exhaust the
     // session's fixed burst budget. Sequence 1 binds (empty instance);
@@ -1334,6 +1391,7 @@ describe('Connector handler — remaining structural arms', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
     });
     // The request CLAIMS port 5959 (its Host and URL match the handler) but
     // the MAC was signed for 4919: authentication must refuse it.
@@ -1722,6 +1780,7 @@ describe('Connector handler — queue observations (M98f)', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
     });
     return { handler, key, clock };
   }
@@ -1869,6 +1928,7 @@ describe('Connector handler — trace observations (M98g)', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
     });
     return { handler, key, clock };
   }
@@ -2054,6 +2114,7 @@ describe('Connector handler — event observation operation (M98j)', () => {
       eventSources: sources,
       realtimeSources: [],
       cacheSources: [],
+      schedulerSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -2349,6 +2410,7 @@ describe('Connector handler — authorization explanations (M98h)', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      schedulerSources: [],
       eventSources: [],
       realtimeSources: [],
     });

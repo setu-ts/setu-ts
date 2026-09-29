@@ -15,10 +15,10 @@
     },
     "response": {
       "status": 200,
-      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000,\"inspectors\":{\"health\":true,\"configuration\":true,\"queues\":true,\"traces\":true,\"authorization\":true,\"cache\":true,\"events\":true,\"scheduler\":false,\"realtime\":true,\"storage\":false,\"outboundHttp\":false}}",
-      "bodySha256": "5ed1a485f77ae2e9608b16faa9657c66a9bfcb7f9468a0300b2b4477792e8649",
-      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\n5ed1a485f77ae2e9608b16faa9657c66a9bfcb7f9468a0300b2b4477792e8649",
-      "mac": "2e15ef2295c53c151e0b94e623b4ec88c60d0b592bbb30fb65463d90c0bf9c7e"
+      "body": "{\"version\":1,\"instanceId\":\"3f2504e0-4f89-41d3-9a0c-0305e82c3301\",\"expiresInMs\":900000,\"inspectors\":{\"health\":true,\"configuration\":true,\"queues\":true,\"traces\":true,\"authorization\":true,\"cache\":true,\"scheduler\":true,\"events\":true,\"realtime\":true,\"storage\":false,\"outboundHttp\":false}}",
+      "bodySha256": "4eda99421a3089dab4e715d1ae0e485f8fb9d7f11cdbf66e9a459c43238fabe5",
+      "macInput": "setu-diagnostics-v1\nresponse\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n1\n/v1/status\n200\n4eda99421a3089dab4e715d1ae0e485f8fb9d7f11cdbf66e9a459c43238fabe5",
+      "mac": "af4afba93661be4415f3b1e33015817e6499cce26d0cdd4886b842d5df1e109e"
     }
   },
   "rejectedTargets": [
