@@ -135,6 +135,92 @@ export interface AuthMiddlewareOption {
 }
 
 /**
+ * A signature algorithm accepted from an outside issuer. `'EdDSA'` also admits a
+ * token whose header carries the fully-specified `alg: 'Ed25519'` (RFC 9864);
+ * both require an `OKP`/`Ed25519` key. HMAC algorithms and `none` are never
+ * accepted from an issuer, whatever the allowlist says.
+ *
+ * @since 0.8.0
+ */
+export type IssuerAlgorithm = 'RS256' | 'PS256' | 'ES256' | 'ES384' | 'EdDSA';
+
+/**
+ * Where an outside issuer's signing keys are read from: an explicit JWKS URL,
+ * or OpenID Connect discovery (`<issuer>/.well-known/openid-configuration`,
+ * whose `jwks_uri` is used). Both URLs must be `https`, or `http` on a
+ * loopback host.
+ *
+ * @since 0.8.0
+ */
+export type IssuerKeySource = { readonly jwksUri: string } | { readonly discovery: true };
+
+/**
+ * An identity provider whose access tokens this application accepts.
+ *
+ * A token is routed to the entry whose `issuer` equals its `iss` claim exactly,
+ * then verified against that issuer's published key set. `audience` is
+ * required: without it a token the same provider minted for a different API
+ * would be accepted.
+ *
+ * @since 0.8.0
+ */
+export interface TrustedIssuer {
+  /** Unique name, used in health output and logs. */
+  readonly name: string;
+  /** Exact `iss` value this entry accepts. */
+  readonly issuer: string;
+  /** Audience that must appear in the token's `aud` claim. */
+  readonly audience: string;
+  /** Key-set source. */
+  readonly keys: IssuerKeySource;
+  /** Algorithm allowlist. Defaults to all five supported algorithms. */
+  readonly algorithms?: readonly IssuerAlgorithm[];
+  /** Clock tolerance for `exp`/`nbf`/`iat`, in seconds, `0`–`300`. Default `30`. */
+  readonly clockToleranceSec?: number;
+  /**
+   * Key-set cache timings, in milliseconds, each a finite positive number:
+   * `ttlMs` (default 10 minutes) before a refetch, `minRefreshIntervalMs`
+   * (default 60 s) between fetch attempts, `fetchTimeoutMs` (default 5 s) per
+   * fetch, and `maxStaleMs` (default 24 hours) that the last good set stays
+   * usable after it was last confirmed while fetches fail.
+   */
+  readonly keySet?: {
+    readonly ttlMs?: number;
+    readonly minRefreshIntervalMs?: number;
+    readonly fetchTimeoutMs?: number;
+    readonly maxStaleMs?: number;
+  };
+  /**
+   * Maps the verified claims to a principal. Return `null` to leave the request
+   * anonymous. The plugin never guesses where a provider puts roles.
+   */
+  toPrincipal(
+    claims: Readonly<Record<string, unknown>>,
+  ): IPrincipal | null | Promise<IPrincipal | null>;
+}
+
+/**
+ * Outbound HTTP seam used to fetch key sets and discovery documents. Defaults
+ * to one over `fetch`. An implementation must reject once the response body
+ * exceeds `maxBytes` while reading it, and must honour `signal`.
+ *
+ * @since 0.8.0
+ */
+export interface IAuthHttp {
+  /**
+   * Performs a GET request.
+   *
+   * @param url - Absolute URL
+   * @param options - Abort signal and response-body byte limit
+   * @returns The status code and the body as text
+   */
+  get(
+    url: string,
+    options: { readonly signal: AbortSignal; readonly maxBytes: number },
+  ): Promise<{ readonly status: number; readonly body: string }>;
+}
+
+/**
  * Auth plugin configuration options.
  *
  * @since 0.1.0
@@ -178,4 +264,13 @@ export interface AuthPluginOptions {
    * assembled chain makes `register()` throw.
    */
   readonly strategies?: readonly IAuthStrategy[];
+  /**
+   * Outside identity providers whose access tokens are accepted (M100b). Builds
+   * an internal `issuers` strategy placed immediately after the JWT strategy,
+   * reading the same header and scheme as `jwt`, and registers an `auth`
+   * health indicator reporting each issuer's cached key-set state.
+   */
+  readonly issuers?: readonly TrustedIssuer[];
+  /** Outbound HTTP seam for `issuers`. Defaults to one over `fetch`. */
+  readonly http?: IAuthHttp;
 }

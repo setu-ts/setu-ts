@@ -29,6 +29,10 @@ import {
   createDisabledAuthorizationSource,
   createUnsupportedAuthorizationSource,
 } from '../diagnostics/authorization-observation-collector.ts';
+import { compileIssuers } from '../issuers/trusted-issuer.ts';
+import { IssuerKeySet } from '../issuers/key-set-cache.ts';
+import { createDefaultAuthHttp } from '../issuers/auth-http.ts';
+import { IssuerStrategy } from '../strategies/issuer-strategy.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 const AUTH_MIDDLEWARE_PRIORITY = 300;
@@ -84,6 +88,10 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   const authorizationPolicy = options.authorizationDiagnostics === undefined
     ? null
     : compileAuthorizationDiagnosticsOptions(options.authorizationDiagnostics);
+
+  // Outside issuers (M100b): validated here, at construction, because every
+  // refusal is a configuration that would silently weaken verification.
+  const compiledIssuers = options.issuers === undefined ? [] : compileIssuers(options.issuers);
 
   return {
     name: 'auth-plugin',
@@ -153,6 +161,46 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         strategies.push(new JwtStrategy(jwtStrategyOpts));
       }
 
+      // Outside-issuer strategy (M100b), immediately after the JWT strategy and
+      // reading the same header and scheme. The logger is read at call time.
+      const issuerKeySets: IssuerKeySet[] = [];
+      if (compiledIssuers.length > 0) {
+        const http = options.http ?? createDefaultAuthHttp();
+        const debug = (message: string): void => ctx.logger?.debug(message);
+        const bindings = compiledIssuers.map((issuer) => {
+          const keySet = new IssuerKeySet(issuer, runtime, http, (name, reason) => {
+            debug(`auth-plugin: issuer '${name}' key-set refresh failed (${reason})`);
+          });
+          issuerKeySets.push(keySet);
+          return { issuer, keySet };
+        });
+        strategies.push(
+          new IssuerStrategy({
+            bindings,
+            runtime,
+            report: (name, reason) =>
+              debug(`auth-plugin: issuer '${name}' token refused (${reason})`),
+            ...(options.jwt?.header !== undefined ? { header: options.jwt.header } : {}),
+            ...(options.jwt?.scheme !== undefined ? { scheme: options.jwt.scheme } : {}),
+          }),
+        );
+        // Reads cached state only — no I/O — and never reports `down`, because
+        // an identity-provider outage must not restart the application.
+        ctx.health.register('auth', () => {
+          const states: Record<string, string> = {};
+          let current = true;
+          compiledIssuers.forEach((issuer, index) => {
+            const state = issuerKeySets[index].state();
+            states[issuer.name] = state;
+            current &&= state === 'current';
+          });
+          return Promise.resolve({
+            status: current ? 'up' : 'degraded',
+            data: { issuers: states },
+          });
+        });
+      }
+
       // API key strategy (optional)
       if (options.apiKey) {
         const apiKeyOpts: {
@@ -190,7 +238,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
 
       if (strategies.length === 0) {
         throw new AuthPluginConfigurationError(
-          'auth-plugin requires at least one passive authentication strategy; configure jwt, apiKey, session, or strategies',
+          'auth-plugin requires at least one passive authentication strategy; configure jwt, issuers, apiKey, session, or strategies',
         );
       }
 
