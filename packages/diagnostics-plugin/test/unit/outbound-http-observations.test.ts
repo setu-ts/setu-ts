@@ -173,7 +173,7 @@ describe('outbound HTTP protocol — snapshot reader', () => {
       () => ready({ records: [record({ started: Number.MAX_SAFE_INTEGER + 2 })] }),
     ],
     ['ready with no record', () => ready({ records: [] })],
-    ['no-data with a record', () => noData() && { ...noData(), records: [record()] }],
+    ['no-data with a record', () => ({ ...noData(), records: [record()] })],
     ['disabled with an alias', () => ({ ...disabled(), alias: 'payments' })],
     ['a source-reported unsupported', () => ({ ...noData(), state: 'unsupported' })],
     ['an unknown coverage', () => ready({ coverage: 'process' })],
