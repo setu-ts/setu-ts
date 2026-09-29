@@ -5408,6 +5408,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   doc correction claimed QUIT alone stops ioredis reconnecting, which round 4 measured false after a
   25 s outage — both fixed; round 5 passed on `bec04876`. The design review was approved by the
   maintainer — complete (PR #377).
+- **Milestone 98n** (`packages/sdk` + `packages/common` + `packages/diagnostics-plugin` — outbound
+  HTTP attempt observations): `createObservedFetch({ alias, fetch?, timing? })` returns
+  `{ fetch, plugin }`. The wrapper calls the wrapped fetch exactly once with the caller's own
+  arguments (never read) and receiver (except the helper itself, forwarded as `undefined`, since the
+  platform fetch throws `Illegal invocation` on workerd with that receiver), and records only
+  started / settled / responded / failed, a five-value status class and time to headers — never a
+  URL, header, body, signal or error. `plugin` registers a frozen snapshot-only source under the new
+  multi-provider `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` (the SDK writes the token as a literal so
+  its `common` imports stay type-only) and closes it on shutdown; one helper serves one application.
+  The connector serves `GET /v1/outbound-http`, the manifest's `outboundHttp` is `true`, and the
+  client gains `outboundHttp()`. Code review fixed a doc claim that the helper "reopens for a
+  retried `start()`" — the kernel refuses any retry once `RuntimePlugin` re-registers `runtime`, a
+  pre-existing kernel defect left for a `fix/…` branch — plus an e2e that hung instead of failing.
+  The independent committed-tree audit failed twice, each time on one Low in the same class: a
+  hostile promise from the wrapped fetch (a throwing `constructor` getter, an own `then`) made the
+  wrapper throw synchronously where `await` resolves, stranding a permanently in-flight attempt. The
+  result is now adopted by `await` inside the promise the caller receives. Re-audit passed on
+  `cfd20fe0` with no finding open — complete (PR pending).
 - **Next milestone** — **M98m** (`packages/storage-plugin` — storage operation observations; design
   security review and implementation audit required).
 

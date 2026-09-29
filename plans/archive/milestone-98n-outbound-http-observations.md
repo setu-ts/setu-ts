@@ -1,11 +1,10 @@
 # Milestone 98n — Outbound HTTP Attempt Observations
 
-> **Status:** In progress. Implementation and fixes: `feat/m98n-outbound-http-observations`. The
-> design security review is recorded in §10.1 (2026-09-29), revised after an independent review
-> round (rounds 1–3: findings R1–R14, N1–N7, M1 and L1–L3, all resolved in this plan), and the
-> registration design in §3.2 was chosen by the maintainer on 2026-09-29. The maintainer approved
-> §10.1 on 2026-09-29. Implementation is committed on the branch (2026-09-29); the independent
-> committed-tree security audit (§10.3) has NOT run, so M98n is not complete.
+> **Status:** Complete (PR pending). Implementation and fixes:
+> `feat/m98n-outbound-http-observations`. The design security review is recorded in §10.1
+> (2026-09-29) and was approved by the maintainer. The independent committed-tree security audit
+> (§10.3) failed on F1, then on F2 (both Low, both fixed on the branch) and passed on `cfd20fe0`
+> with no finding open; the audit record is in the PR.
 
 ## 0. Objective & scope
 
