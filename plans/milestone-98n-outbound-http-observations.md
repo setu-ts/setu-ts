@@ -277,9 +277,9 @@ indistinguishable to the wrapped fetch and to its caller, on every supported run
   branch marking the original handled). One added microtask; promise identity is not preserved and
   not claimed. A thenable's `then` is application code and runs in the same job order `await` would
   give it.
-- Inside `onOk`, `status` is the only property read, inside a guard (side-effect-free on a real
+- On success, `status` is the only property read, inside a guard (side-effect-free on a real
   `Response`, probed). Nothing reads `headers`, `body`, `bodyUsed`, `url`, `redirected` or `type`.
-  Inside `onErr`, the reason is never inspected. **Measured during implementation:** against the
+  On failure, the reason is never inspected. **Measured during implementation:** against the
   unwrapped baseline, the only extra reads on a resolved value are `status` and one `then` — the
   derived promise resolving with the value, the same thenable check `await` performs (the one added
   resolution step above), not observation code. A throwing `status` getter or a non-object value is
@@ -468,7 +468,7 @@ went, WHAT it sent or received, WHO it was for, or WHY it failed.
 **Reviewed flow:** application code or the SDK client calls `observed.fetch` → a guarded
 `timing.now()` read and `started`+1 → exactly one `Reflect.apply(inner, receiver, args)` with the
 caller's arguments unread and the §3.3 receiver rule → a synchronous throw recorded and rethrown, a
-returned value adopted by `Promise.resolve` → the derived promise records
+returned value adopted by `await` inside the returned async function → the derived promise records
 `(ok, statusClass, generation, start)` on settlement, reading only `status`, and settles with the
 identical value or reason → the one SDK collector (one record, monotonic, generation-guarded) → the
 frozen snapshot-only source, registered by `observed.plugin` under
