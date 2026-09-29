@@ -180,7 +180,7 @@ export interface TrustedIssuer {
   /**
    * Key-set cache timings, in milliseconds, each a finite positive number:
    * `ttlMs` (default 10 minutes) before a refetch, `minRefreshIntervalMs`
-   * (default 60 s) between fetch attempts, `fetchTimeoutMs` (default 5 s) per
+   * (default 60 s) between fetch attempts, `fetchTimeoutMs` (default 5 s, at most 2147483647) per
    * fetch, and `maxStaleMs` (default 24 hours) that the last good set stays
    * usable after it was last confirmed while fetches fail.
    */
@@ -193,6 +193,10 @@ export interface TrustedIssuer {
   /**
    * Maps the verified claims to a principal. Return `null` to leave the request
    * anonymous. The plugin never guesses where a provider puts roles.
+   *
+   * `sub` is unique only within its issuer. With more than one issuer
+   * configured, namespace the id (for example `` `${claims.iss}|${claims.sub}` ``)
+   * so the same `sub` at two providers cannot become one principal.
    */
   toPrincipal(
     claims: Readonly<Record<string, unknown>>,

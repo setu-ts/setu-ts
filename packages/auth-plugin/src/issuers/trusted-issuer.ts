@@ -46,6 +46,7 @@ const DEFAULT_TIMINGS: KeySetTimings = {
 };
 
 const DEFAULT_CLOCK_TOLERANCE_SEC = 30;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const MAX_CLOCK_TOLERANCE_SEC = 300;
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
 
@@ -91,6 +92,11 @@ function timing(name: string, key: keyof KeySetTimings, value: number | undefine
   }
   if (!Number.isFinite(value) || value <= 0) {
     refuse(name, `keySet.${key} must be a finite positive number`);
+  }
+  // `fetchTimeoutMs` becomes a timer delay; a delay above 2^31-1 overflows
+  // and fires almost immediately, aborting every fetch.
+  if (key === 'fetchTimeoutMs' && value > MAX_TIMER_DELAY_MS) {
+    refuse(name, `keySet.fetchTimeoutMs must not exceed ${MAX_TIMER_DELAY_MS}`);
   }
   return value;
 }

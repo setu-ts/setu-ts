@@ -301,7 +301,10 @@ AuthPlugin({
   token signed with HMAC using the provider's public key as the secret cannot pass.
 - **Claims.** `iss` exact, `aud` must contain `audience`, `exp` required; `exp`, `nbf` and a future
   `iat` allow `clockToleranceSec` (default 30, at most 300). `toPrincipal` receives the full
-  verified claims and decides where roles live — the plugin never guesses.
+  verified claims and decides where roles live — the plugin never guesses. **With more than one
+  issuer, namespace the id** — `sub` is unique only within its issuer, so
+  ``{ id: `${claims.iss}|${claims.sub}` }`` keeps the same `sub` at two providers from becoming one
+  principal.
 - **Rotation.** The key set is cached for `keySet.ttlMs` (default 10 minutes). A token naming an
   unknown `kid` triggers at most one refetch per `keySet.minRefreshIntervalMs` (default 60 s), and
   concurrent refetches share one request, so forged `kid`s cannot turn requests into outbound

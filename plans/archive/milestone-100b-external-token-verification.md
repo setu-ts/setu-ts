@@ -287,3 +287,12 @@ including a real Keycloak token re-signed with `alg: HS256` using the realm's pu
 - **Keycloak is a CI step in `ci.yml`, `release.yml` and `drift.yml`**, compared byte-for-byte by
   `test/unit/release-notes.test.ts`, because the backend-parity test requires every suite-running
   workflow to start it, not only the PR job.
+- **Security audit round 1 (commit `2e7e3269`, failed on three findings, all fixed):**
+  - **F1 (Medium):** one forged-`kid` token held every concurrent valid request behind its refresh
+    (measured 4985 ms against 2 ms), because `keys()` always awaited an in-flight refresh. A caller
+    whose set is fresh and who did not force a refresh now reads the cache without waiting. A caller
+    past its TTL still waits, which is ordinary expiry that no attacker can trigger.
+  - **F2 (Low):** a `fetchTimeoutMs` above 2³¹−1 ms overflowed the timer, aborting every fetch. It
+    is now refused at construction, without echoing the value.
+  - **F3 (Low):** `sub` is unique only within one issuer. The `toPrincipal` JSDoc, the README and
+    PUBLIC_API now say to namespace the id when more than one issuer is configured.

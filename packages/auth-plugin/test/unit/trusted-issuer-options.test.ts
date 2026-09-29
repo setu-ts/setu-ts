@@ -70,6 +70,17 @@ describe('TrustedIssuer validation at construction', () => {
     }
   });
 
+  it('refuses a fetchTimeoutMs a timer cannot hold, accepting the maximum', () => {
+    const message = refusal([{ ...base, keySet: { fetchTimeoutMs: 3_000_000_000 } }]);
+    expect(message).toContain('keySet.fetchTimeoutMs must not exceed 2147483647');
+    expect(message).not.toContain('3000000000');
+    const [compiled] = compileIssuers([{
+      ...base,
+      keySet: { fetchTimeoutMs: 2_147_483_647, ttlMs: 1000, maxStaleMs: 1000 },
+    }]);
+    expect(compiled.timings.fetchTimeoutMs).toBe(2_147_483_647);
+  });
+
   it('refuses a ttlMs above maxStaleMs, accepting them equal', () => {
     expect(refusal([{ ...base, keySet: { ttlMs: 2000, maxStaleMs: 1000 } }])).toContain(
       'keySet.ttlMs must not exceed keySet.maxStaleMs',

@@ -186,4 +186,46 @@ describe('IssuerKeySet', () => {
     expect(await t.keySet.keys()).toEqual([KEY]);
     expect(t.calls.length).toBe(1);
   });
+
+  it('serves a fresh set without waiting on a refresh another caller forced', async () => {
+    const runtime = createFakeRuntime();
+    let release!: () => void;
+    let calls = 0;
+    const keySet = new IssuerKeySet(issuer(), runtime, {
+      get: () => {
+        calls++;
+        if (calls === 1) {
+          return Promise.resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
+        }
+        // The forced refresh parks until released, like a blocked endpoint.
+        return new Promise((resolve) => {
+          release = () => resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
+        });
+      },
+    }, () => {});
+    await keySet.keys();
+    runtime.setHrtime(100);
+    const forced = keySet.keys(true);
+    let served = false;
+    const normal = keySet.keys().then((keys) => {
+      served = true;
+      return keys;
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(served).toBe(true);
+    expect(await normal).toEqual([KEY]);
+    release();
+    expect(await forced).toEqual([KEY]);
+  });
+
+  it('makes a stale caller wait on the in-flight refresh', async () => {
+    const t = setup();
+    await t.keySet.keys();
+    t.runtime.setHrtime(1000);
+    const [a, b] = await Promise.all([t.keySet.keys(), t.keySet.keys()]);
+    expect(a).toEqual([KEY]);
+    expect(b).toEqual([KEY]);
+    expect(t.calls.length).toBe(2);
+  });
 });

@@ -94,6 +94,12 @@ export class IssuerKeySet {
     const fresh = this.#keys !== null &&
       this.#runtime.hrtime() - this.#confirmedAt < this.#issuer.timings.ttlMs;
     if (this.#inflight !== null) {
+      // A caller whose cached set is still fresh and who did not ask for a
+      // refresh never waits on someone else's: otherwise one forged-`kid`
+      // token would park every valid request behind a slow or blocked fetch.
+      if (fresh && !force) {
+        return this.#usable();
+      }
       await this.#inflight;
     } else if ((!fresh || force) && !this.#closed && this.#cooldownElapsed()) {
       this.#inflight = this.#refresh().finally(() => {

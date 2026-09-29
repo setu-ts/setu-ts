@@ -2340,7 +2340,10 @@ They still fail closed either way; what changed is that the refusal is legible.
 > `fetch` seam. An `auth` health indicator reports `up` or `degraded` (with per-issuer
 > `stale`/`expired`/`unfetched`), never `down`, and performs no I/O. `typ: at+jwt` (RFC 9068) is not
 > enforced, so the API needs an audience distinct from any sign-in client id; multi-tenant Entra ID
-> is not supported. `IJwtService` remains self-issued only.
+> is not supported. `IJwtService` remains self-issued only. `sub` is unique only within its issuer,
+> so with more than one issuer `toPrincipal` should namespace the id
+> (`` `${claims.iss}|${claims.sub}` ``). `keySet.fetchTimeoutMs` may not exceed 2147483647, since a
+> larger timer delay overflows.
 >
 > **Phasing (M16b, shipped):** **refresh tokens** and **rate limiting** shipped in M16b as
 > standalone additions — `RefreshTokenService` (app-instantiated; NOT an `IAuthStrategy`, since a
