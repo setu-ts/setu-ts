@@ -20,9 +20,10 @@ import { CAPABILITIES, replacePrincipal } from '@setu-ts/common';
  *
  * @example
  * ```typescript
- * // Priority 300 is the band ARCHITECTURE.md §10 reserves for authentication;
- * // a bare add() would take the kernel default of 500 and run after it.
- * app.middleware.add(authMiddleware(), { priority: 300 });
+ * // AuthPlugin registers this globally by default. Disable that registration
+ * // only when attaching authentication to selected routes yourself.
+ * app.register(AuthPlugin({ apiKey: { validate }, middleware: false }));
+ * app.router.get('/private', { middleware: [authMiddleware()], handler });
  * ```
  */
 export function authMiddleware(): MiddlewareFunction {

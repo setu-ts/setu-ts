@@ -110,6 +110,10 @@ rather than an inert one.
 |                  | ResiliencePlugin   | Circuit breaker & retries |
 |                  | TelemetryPlugin    | Tracing & observability   |
 
+The inherited `auth` arm accepts any `AuthPluginOptions` with at least one passive strategy (`jwt`,
+`apiKey`, `session`, or `strategies`). When present, `AuthPlugin` installs authentication middleware
+globally at priority 300 unless `auth.middleware` disables or moves it.
+
 All microservice plugins are enabled by default; individual plugins can be configured or omitted via
 options.
 

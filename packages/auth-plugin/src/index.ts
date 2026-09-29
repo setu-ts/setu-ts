@@ -8,7 +8,7 @@
  *
  * @example
  * ```typescript
- * import { AuthPlugin, authMiddleware, requireAuth, requireRole } from '@setu-ts/auth-plugin';
+ * import { AuthPlugin, requireAuth, requireRole } from '@setu-ts/auth-plugin';
  *
  * app.register(AuthPlugin({
  *   jwt: { secret: process.env.JWT_SECRET! },
@@ -19,16 +19,14 @@
  *     },
  *   },
  * }));
- * // Priority 300 is the band ARCHITECTURE.md §10 reserves for authentication;
- * // a bare add() would take the kernel default of 500 and run after it.
- * app.middleware.add(authMiddleware(), { priority: 300 });
  * app.router.get('/protected', { middleware: [requireAuth()], handler });
  * ```
  */
 
 // Plugin factory
 export { AuthPlugin } from './plugin/auth-plugin.ts';
-export type { AuthPluginOptions } from './interfaces/index.ts';
+export type { AuthMiddlewareOption, AuthPluginOptions } from './interfaces/index.ts';
+export { AuthPluginConfigurationError } from './errors.ts';
 
 // Option types
 export type { JwtOptions } from './interfaces/index.ts';

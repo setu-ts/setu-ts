@@ -113,9 +113,9 @@ export interface RestStarterOptions {
   database?: DatabasePluginOptions;
   /**
    * Optional arm: {@linkcode AuthPlugin}. Provided only when the caller supplies
-   * auth configuration; omitted → auth not registered. `rbac` is itself
-   * optional — supply `jwt` alone for a JWT-only application, which registers
-   * no authorization capability.
+   * auth configuration; omitted → auth not registered. Configure at least one
+   * passive strategy (`jwt`, `apiKey`, `session`, or `strategies`). The plugin
+   * registers its authentication middleware globally unless disabled.
    */
   auth?: AuthPluginOptions;
   /**

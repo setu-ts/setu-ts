@@ -12,7 +12,7 @@
  *   - `SessionPlugin` (registers `sessionMiddleware` at priority 260),
  *   - `AuthPlugin({ jwt, session })` (appends the internal `SessionStrategy`),
  *   - `SsePlugin` (the SSE hub the `/events` route streams through),
- *   - `authMiddleware()` added at priority 300 (the authentication band),
+ *   - AuthPlugin's own global middleware at priority 300,
  *   - a `requireAuth()` route guard on `/me` and `/events`.
  *
  * Every step is driven with `app.fetch` (a web `Request` → web `Response`),
@@ -31,7 +31,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
 import { SsePlugin } from '@setu-ts/sse-plugin';
 
-import { authMiddleware, AuthPlugin, requireAuth } from '../../src/index.ts';
+import { AuthPlugin, requireAuth } from '../../src/index.ts';
 
 /** Session secret (≥32 chars). */
 const SESSION_SECRET = 'realtime-auth-session-secret-at-least-32-chars';
@@ -46,8 +46,8 @@ const COOKIE_NAME = 'setu_session';
  * Builds the real application under test.
  *
  * `SessionPlugin` registers `sessionMiddleware` at priority 260 (after security
- * headers, before authentication). `authMiddleware()` is added at 300 so the
- * strategy chain runs after the session has loaded. `requireAuth()` guards the
+ * headers, before authentication). AuthPlugin registers at 300 so the strategy
+ * chain runs after the session has loaded. `requireAuth()` guards the
  * two routes that must not be reachable anonymously.
  */
 function buildApp(): IKernelApplication {
@@ -72,10 +72,6 @@ function buildApp(): IKernelApplication {
       SsePlugin({ scalingNotice: false }),
     ],
   });
-
-  // Priority 300 is the band ARCHITECTURE.md §10 reserves for authentication;
-  // a bare add() would take the kernel default of 500 and run after it.
-  app.middleware.add(authMiddleware(), { priority: 300 });
 
   // Login: create a session, store the identity, and let the session
   // middleware's commit write the `Set-Cookie`. No `authorization` involved.

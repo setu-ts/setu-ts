@@ -123,6 +123,10 @@ const app = createApplication({
 |                  | MultiTenancyPlugin | Tenant isolation               |
 |                  | ReactRouterPlugin  | React SSR & file-based routing |
 
+The inherited `auth` arm accepts any `AuthPluginOptions` with at least one passive strategy (`jwt`,
+`apiKey`, `session`, or `strategies`). When present, `AuthPlugin` installs authentication middleware
+globally at priority 300 unless `auth.middleware` disables or moves it.
+
 Gated plugins (`featureFlags`, `notifications`, `multiTenancy`, `reactRouter`, `static`) are only
 registered when explicitly provided in options. The `static` arm exists because this is the one tier
 that by definition serves a browser: supplying it registers `StaticPlugin` with the given options

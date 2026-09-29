@@ -1882,12 +1882,11 @@ last outbound).
 | 350      | AuthorizationMiddleware   | Check permissions        |
 | 400      | ValidationMiddleware      | Validate request         |
 
-These priorities are **conventional bands, not self-registrations**: no first-party middleware
-registers itself globally at the number this table names — the application (or a starter) adds it.
-`AuthMiddleware` is the consequential case: `AuthPlugin` registers only services, and every doc site
-therefore writes the global add explicitly with `{ priority: 300 }`. A bare
-`app.middleware.add(authMiddleware())` takes the kernel's default priority of **500**, which is
-after every row above (including the row named for it) and outside the table's range entirely.
+These priorities are conventional bands. Metrics (20), telemetry (30), tenant resolution (40), HTTP
+security (120–270), session (260/275), and authentication (300) are self-registered by their own
+plugins. The application (or a starter) adds the error handler and any application middleware.
+`AuthPluginOptions.middleware` can move authentication, exclude selected paths, or disable its
+global registration when the application attaches `authMiddleware()` per route.
 
 The session sits below authentication so an auth strategy can read it — `SessionStrategy`
 (configured by `AuthPluginOptions.session`) is that reader. It opens the cookie through

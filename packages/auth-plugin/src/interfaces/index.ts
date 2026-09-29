@@ -4,7 +4,13 @@
  * @module
  */
 
-import type { IAuthStrategy, IPrincipal, RbacConfig, SessionView } from '@setu-ts/common';
+import type {
+  IAuthStrategy,
+  IPrincipal,
+  PathPattern,
+  RbacConfig,
+  SessionView,
+} from '@setu-ts/common';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 
 /**
@@ -113,13 +119,34 @@ export interface AuthorizationDiagnosticsOptions {
 }
 
 /**
+ * Global authentication middleware configuration.
+ *
+ * Authentication runs for every path by default. Supply exclusions only for
+ * routes that never need a principal, or disable registration to attach
+ * {@linkcode authMiddleware} at route level yourself.
+ *
+ * @since 0.9.0
+ */
+export interface AuthMiddlewareOption {
+  /** Execution priority. Defaults to the authentication band at 300. */
+  readonly priority?: number;
+  /** Paths that skip passive authentication. Defaults to no exclusions. */
+  readonly exclude?: readonly PathPattern[];
+}
+
+/**
  * Auth plugin configuration options.
  *
  * @since 0.1.0
  */
 export interface AuthPluginOptions {
-  /** JWT configuration. Required. */
-  readonly jwt: JwtOptions;
+  /** JWT configuration. Omit when the application uses another strategy. */
+  readonly jwt?: JwtOptions;
+  /**
+   * Global authentication middleware configuration. Omit to register it at
+   * priority 300, or pass `false` when attaching it per route yourself.
+   */
+  readonly middleware?: false | AuthMiddlewareOption;
   /** API key configuration. Optional. */
   readonly apiKey?: ApiKeyOptions;
   /** Local credentials configuration. Optional. */

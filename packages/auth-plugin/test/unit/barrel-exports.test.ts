@@ -3,7 +3,9 @@ import { expect } from '@std/expect';
 import * as auth from '../../src/index.ts';
 import type { IPrincipal, SessionView } from '@setu-ts/common';
 import type {
+  AuthMiddlewareOption,
   AuthorizationDiagnosticsOptions,
+  AuthPluginOptions,
   IAuthorizationDiagnosticsSource,
   IRefreshTokenRotation,
   SessionAuthOptions,
@@ -16,6 +18,22 @@ import type {
  * Types are verified by the type checker (deno check).
  */
 describe('barrel exports', () => {
+  it('exports AuthPluginConfigurationError', () => {
+    const error = new auth.AuthPluginConfigurationError('invalid auth configuration');
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('AuthPluginConfigurationError');
+  });
+
+  it('exports the JWT-optional middleware option types', () => {
+    const middleware: AuthMiddlewareOption = { priority: 300, exclude: ['/health'] };
+    const options: AuthPluginOptions = {
+      apiKey: { validate: () => Promise.resolve(null) },
+      middleware,
+    };
+    expect(options.jwt).toBeUndefined();
+    expect(options.middleware).toBe(middleware);
+  });
+
   it('exports the plugin factory', () => {
     expect(auth.AuthPlugin).toBeDefined();
     expect(typeof auth.AuthPlugin).toBe('function');

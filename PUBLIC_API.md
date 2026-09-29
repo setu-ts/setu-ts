@@ -2282,16 +2282,18 @@ password hashing) runs through Web Crypto via `IRuntimeServices`, so **no npm pa
 issuing or verifying a token, or in hashing a password**. The package declares one optional driver —
 `RedisRateLimitStore` lazy-loads `ioredis` — which nothing imports unless that store is constructed.
 
-Registers JWT and authentication services under existing capability tokens, plus authorization when
-RBAC is configured:
+Registers authentication under the existing capability token, JWT only when configured, and
+authorization when RBAC is configured:
 
-- `IJwtService` under `CAPABILITIES.JWT` (`'jwt'`) — sign/verify/decode JWTs.
+- `IJwtService` under `CAPABILITIES.JWT` (`'jwt'`) — sign/verify/decode JWTs, only when `jwt` is
+  supplied.
 - `IAuthService` under `CAPABILITIES.AUTH` (`'authentication'`) — passive strategy chain + login.
 - `IAuthorizationService` under `CAPABILITIES.AUTHORIZATION` (`'authorization'`) — RBAC checks, only
   when `rbac` is supplied.
 
-`rbac` is optional. A JWT-only registration provides `jwt` and `authentication`; it deliberately
-does not register an authorization service or advertise the authorization capability.
+`jwt` and `rbac` are optional. At least one passive strategy must come from `jwt`, `apiKey`,
+`session`, or `strategies`; `local` alone cannot recognize a later request. A JWT-only registration
+provides `jwt` and `authentication`; it deliberately does not register an authorization service.
 
 **What the guards then do (M89b, X18-2).** `requireAuth()` and `publicRoute()` resolve nothing and
 are unaffected. The four authorization guards — `requireRole`, `requirePermission`, `requireAnyRole`
@@ -2319,9 +2321,8 @@ They still fail closed either way; what changed is that the refusal is legible.
 > standalone additions — `RefreshTokenService` (app-instantiated; NOT an `IAuthStrategy`, since a
 > refresh token arrives in the request body, not as a passive header credential) and
 > `rateLimitMiddleware` (a decoupled middleware factory with no capability token). Neither is an
-> `AuthPlugin` option: the plugin's option shape, `provides`, and registration are unchanged from
-> M16. `IJwtService` still exposes only `sign`/`verify`/`decode` — a refresh token is a signed JWT
-> carrying `type: 'refresh'` and a `jti`.
+> `AuthPlugin` option. `IJwtService` still exposes only `sign`/`verify`/`decode` — a refresh token
+> is a signed JWT carrying `type: 'refresh'` and a `jti`.
 
 ### Exports
 
@@ -2329,6 +2330,8 @@ They still fail closed either way; what changed is that the refusal is legible.
 | ----------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `AuthPlugin`                        | `src/plugin/auth-plugin.ts`                   | Plugin factory                                                                                                       |
 | `AuthPluginOptions`                 | `src/interfaces/index.ts`                     | Plugin factory options (`jwt` / `apiKey` / `local` / `rbac` / `session` / `strategies` / `authorizationDiagnostics`) |
+| `AuthMiddlewareOption`              | `src/interfaces/index.ts`                     | Global authentication middleware priority and path exclusions                                                        |
+| `AuthPluginConfigurationError`      | `src/errors.ts`                               | Invalid passive-strategy or middleware configuration                                                                 |
 | `AuthorizationDiagnosticsOptions`   | `src/interfaces/index.ts`                     | M98h opt-in for minimized authorization decision explanations through the diagnostics connector                      |
 | `IAuthorizationDiagnosticsSource`   | re-export                                     | From `@setu-ts/common` — the source AuthPlugin registers under `CAPABILITIES.AUTHORIZATION_DIAGNOSTICS`              |
 | `JwtOptions`                        | `src/interfaces/index.ts`                     | JWT config (key material, algorithm, expected aud/iss, header/scheme)                                                |
@@ -2373,7 +2376,7 @@ They still fail closed either way; what changed is that the refusal is legible.
 ### Registration
 
 ```typescript
-import { authMiddleware, AuthPlugin } from '@setu-ts/auth-plugin';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
 
 app.register(AuthPlugin({
   jwt: {
@@ -2398,12 +2401,13 @@ app.register(AuthPlugin({
   },
 }));
 
-// Global middleware: authenticates every request and sets ctx.request.user.
-// The priority is explicit and deliberate: the §10 table in ARCHITECTURE.md
-// reserves 300 for authentication, but a bare add() takes the kernel's default
-// of 500 — AFTER every band in that table, including the row named for it.
-app.middleware.add(authMiddleware(), { priority: 300 });
+// AuthPlugin registers passive authentication globally at priority 300.
 ```
+
+To attach authentication only to selected routes, set `middleware: false` and use the exported
+`authMiddleware()` there. Existing applications should remove a hand-added global copy; leaving it
+temporarily is correct but runs the strategy chain twice. `middleware: { priority, exclude }` moves
+the global stage or skips exact/regular-expression paths. No paths are excluded by default.
 
 ### Login (Issue Token)
 
