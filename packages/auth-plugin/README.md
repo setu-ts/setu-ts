@@ -242,8 +242,10 @@ At least one passive strategy must be configured through `jwt`, `apiKey`, `sessi
 backend-backed strategies on public operational routes, exclusions can be explicit:
 
 ```typescript
+import { AuthPlugin, DEFAULT_RATE_LIMIT_EXCLUDED_PATHS } from '@setu-ts/auth-plugin';
+
 AuthPlugin({
-  apiKey: { validate },
+  apiKey: { validate: async () => null },
   middleware: { exclude: DEFAULT_RATE_LIMIT_EXCLUDED_PATHS },
 });
 ```

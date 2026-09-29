@@ -76,6 +76,27 @@ describe('AuthPlugin middleware registration', () => {
     await app.stop();
   });
 
+  it('publishes a custom middleware priority through kernel diagnostics', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        AuthPlugin({
+          apiKey: { validate: () => Promise.resolve(null) },
+          middleware: { priority: 425 },
+        }),
+      ],
+      diagnostics: { labels: { middleware: ['auth'] } },
+    });
+
+    await app.start();
+    const auth = app.diagnostics!.snapshot().nodes.find(
+      (node) => node.kind === 'middleware' && node.label === 'auth',
+    );
+
+    expect(auth?.priority).toBe(425);
+    await app.stop();
+  });
+
   it('skips excluded paths and excludes nothing by default', async () => {
     let excludedCalls = 0;
     const excluded = createApplication({

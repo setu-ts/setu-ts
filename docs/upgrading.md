@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Remove hand-added global authentication middleware
+### Remove hand-added global `authMiddleware()` calls
 
 `AuthPlugin` now registers `authMiddleware()` globally at priority 300. Remove any existing global
 `app.middleware.add(authMiddleware(), ...)` call; leaving it in place remains correct but executes

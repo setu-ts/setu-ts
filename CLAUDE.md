@@ -5426,7 +5426,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   wrapper throw synchronously where `await` resolves, stranding a permanently in-flight attempt. The
   result is now adopted by `await` inside the promise the caller receives. Re-audit passed on
   `cfd20fe0` with no finding open — complete (PR #380).
-- **Next milestone** — **M98m** (`packages/storage-plugin` — storage operation observations; design
+- **Milestone 100a** (`packages/auth-plugin` + `packages/starters/*` — authentication composition):
+  `jwt` is optional, its capability and strategy are conditional, and an empty passive strategy
+  chain is refused at startup. `AuthPlugin` now registers passive authentication globally at
+  priority 300 by default, with priority, exclusion, and opt-out controls. A full-stack starter
+  regression proves a session principal reaches React Router's `userContext` without a hand-added
+  middleware copy — complete (PR pending).
+- **Next milestone** — **M100b** (`packages/auth-plugin` — tokens from an outside issuer; design
   security review and implementation audit required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

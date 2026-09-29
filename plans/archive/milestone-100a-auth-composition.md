@@ -1,7 +1,7 @@
 # Milestone 100a — Two Composition Defects in `@setu-ts/auth-plugin`
 
-> **Status:** Planning on `docs/m100-auth-federation-mfa`. Implementation and fixes belong on
-> `feat/m100a-auth-composition`; `main` remains protected.
+> **Status:** Complete (PR pending). Implementation and fixes: `feat/m100a-auth-composition`. The
+> design security review is recorded in §10.
 
 ## 0. Objective & scope
 

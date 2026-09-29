@@ -75,7 +75,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M70n: every README the documentation workstream touched, folded into this
   // gate rather than a second one (plan §3.16). Counts are pinned so a fence
   // added later cannot slip past unclassified.
-  'packages/auth-plugin/README.md': 7,
+  // M100a: +1 for the automatic middleware exclusion example.
+  'packages/auth-plugin/README.md': 8,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   'packages/session-plugin/README.md': 11,

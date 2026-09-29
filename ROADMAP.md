@@ -11859,7 +11859,7 @@ because one of them invalidated part of a previous run's claims:
 (the `IAuthSessionService` contract, its token, and one authorization-failure member);
 `packages/session-plugin` is consumed, not changed.
 
-**Plans:** `plans/milestone-100a-auth-composition.md`,
+**Plans:** `plans/archive/milestone-100a-auth-composition.md`,
 `plans/milestone-100b-external-token-verification.md`, `plans/milestone-100c-oidc-sign-in.md`,
 `plans/milestone-100d-totp-mfa.md`, `plans/milestone-100e-passkeys.md`,
 `plans/milestone-100f-saml-sp.md`. Each carries its design security review.
@@ -11909,7 +11909,7 @@ workerd via `wrangler dev`; Keycloak 26.4):
   but NOT a SAML IdP's cross-site POST — so 100f binds its pending request with a separate `__Host-`
   cookie instead of the session.
 
-### Milestone 100a: Two Composition Defects in the Existing Plugin
+### Milestone 100a: Two Composition Defects in the Existing Plugin ✅ COMPLETE
 
 **Package(s):** `packages/auth-plugin`, `packages/starters/*`
 
@@ -12271,7 +12271,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 99d       | ✅     | decorator-plugin + secrets-plugin — a composition the framework silently declines to give you                                                                                                                                                 |
 | 99e       | ✅     | cli + docs — a template axis that forces one style (class-based microservice)                                                                                                                                                                 |
 | 100       | ⬜     | auth-plugin — authentication beyond bearer tokens (umbrella; 100a–100f, each with a design security review and implementation audit)                                                                                                          |
-| 100a      | ⬜     | auth-plugin + starters — `jwt` optional; the plugin registers `authMiddleware()` itself                                                                                                                                                       |
+| 100a      | ✅     | auth-plugin + starters — `jwt` optional; the plugin registers `authMiddleware()` itself                                                                                                                                                       |
 | 100b      | ⬜     | auth-plugin — tokens from an outside issuer (key sets, rotation, ES256/EdDSA)                                                                                                                                                                 |
 | 100c      | ⬜     | auth-plugin — sign-in with an outside provider (OAuth 2.0 / OpenID Connect)                                                                                                                                                                   |
 | 100d      | ⬜     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                                                                                                                  |

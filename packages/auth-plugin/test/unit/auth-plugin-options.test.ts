@@ -1,5 +1,5 @@
 /**
- * Tests for AuthPlugin factory.
+ * Tests for AuthPlugin factory options and registration.
  */
 
 import { describe, it } from '@std/testing/bdd';

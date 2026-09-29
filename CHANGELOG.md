@@ -11,9 +11,10 @@ All notable changes to this project are documented here. The format follows
 - **Authentication composition (M100a).** `AuthPluginOptions.jwt` is optional, so API-key, session,
   and caller-strategy applications no longer invent JWT key material. `AuthPlugin` registers passive
   authentication globally at priority 300 by default; `middleware` can change the priority, exclude
-  paths, or disable registration for route-level composition. Empty passive chains now throw the
-  exported `AuthPluginConfigurationError`. Applications with a hand-added global `authMiddleware()`
-  should remove it; duplicates remain correct but authenticate twice.
+  paths, or disable registration for route-level composition through the exported
+  `AuthMiddlewareOption`. Empty passive chains now throw the exported
+  `AuthPluginConfigurationError`. Applications with a hand-added global `authMiddleware()` should
+  remove it; duplicates remain correct but authenticate twice.
 
 - **Outbound HTTP attempt observations (M98n): opt-in, minimized fetch-attempt counters through the
   diagnostics connector.** `@setu-ts/sdk` exports `createObservedFetch({ alias, fetch?, timing? })`,

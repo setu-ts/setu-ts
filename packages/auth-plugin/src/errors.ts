@@ -18,6 +18,8 @@ export class AuthPluginConfigurationError extends Error {
   override readonly name = 'AuthPluginConfigurationError';
 
   /**
+   * Creates an authentication plugin configuration error.
+   *
    * @param message - The invalid configuration and how to correct it
    */
   constructor(message: string) {
