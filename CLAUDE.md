@@ -5426,6 +5426,33 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   wrapper throw synchronously where `await` resolves, stranding a permanently in-flight attempt. The
   result is now adopted by `await` inside the promise the caller receives. Re-audit passed on
   `cfd20fe0` with no finding open — complete (PR #380).
+- **Milestone 98m** (`packages/storage-plugin` + `packages/common` + `packages/diagnostics-plugin` —
+  storage operation counters): `StoragePlugin({ diagnostics: { enabled: true, alias } })` counts
+  every public call its OWN `StorageService` makes (`put`/`get`/`delete`/`exists`/`getSignedUrl`/
+  `getStream`) with succeeded/failed outcomes; `getSignedUrl` mints a URL rather than transferring
+  bytes, so its record carries `lastDurationMs: null` and `lastBytes: null` by construction, and
+  `lastBytes` is the byte length of the last settled buffer for `put`/`get` (a `get` that finds
+  nothing throws and settles as a failure) and `null` for the non-buffered operations; `getStream`
+  counts the open, not the drain. Object paths, stored bytes, content types, signed URLs and error
+  text are classified away before the collector. Every instance registers an
+  `IStorageDiagnosticsSource` under the new multi-provider `CAPABILITIES.STORAGE_DIAGNOSTICS`
+  (`disabled` without the option, with nothing attached to the service); the connector serves
+  `GET /v1/storage` (at most 16 sources, more refuses startup; copy-once reader of own data
+  properties; duplicate aliases or an over-budget body collapse to `collection-failed` — the M98i
+  cache rule) and the client gains `storage()`. The collector is NOT shared in `common` (a single
+  plugin owns it, unlike M98l's three): the option and collector types live in
+  `@setu-ts/storage-plugin`. Enabled calls read the monotonic clock twice (every call is timed, so
+  age, duration and bytes describe one settlement) and settle through one derived promise that
+  re-rejects with the original reason, so an unhandled provider rejection stays unhandled. The
+  design security review was approved; the committed-tree audit passed on `e3ddbfd4`, then failed
+  its re-audit on `0430459e` on two Lows (an unclamped duration, fixed in `4427347b`, and an
+  unmeasured overhead target) and round 3, on the merge with `main` (M98k, M98n), on a stale
+  CHANGELOG cost claim, since fixed (the maintainer waived a re-audit of that doc-only fix). **The
+  ≤5% overhead target is missed on the in-memory provider and accepted by the maintainer**: ~0.23 µs
+  per enabled call (two clock reads plus promise wrapping) against ~0.15 µs of in-memory work, while
+  on the real local-filesystem provider the difference is within noise (enabled/disabled 1.001 over
+  24 paired runs); sampled timing was rejected because the `common` contract says age, duration and
+  bytes describe one settlement — complete (PR #383).
 - **Milestone 100a** (`packages/auth-plugin` + `packages/starters/*` — authentication composition):
   `jwt` is optional, its capability and strategy are conditional, and an empty passive strategy
   chain is refused at startup. `AuthPlugin` now registers passive authentication globally at

@@ -2252,3 +2252,140 @@ export interface OutboundHttpDiagnosticsResponse {
     readonly snapshot: OutboundHttpDiagnosticsSnapshot;
   }[];
 }
+
+/**
+ * The fixed storage operations a storage diagnostics source counts (M98m).
+ *
+ * `getStream` records the acquisition of the stream (or, for a provider
+ * without native streaming, the buffered read behind the fallback) and its
+ * outcome — never transfer progress, and never a completion claim.
+ *
+ * @since 0.8.0
+ */
+export type StorageDiagnosticsOperation =
+  | 'put'
+  | 'get'
+  | 'delete'
+  | 'exists'
+  | 'getSignedUrl'
+  | 'getStream';
+
+/**
+ * Cumulative counters for one (source alias, operation) pair (M98m).
+ *
+ * Every settled service operation increments `count` and exactly one of
+ * `succeeded` (fulfilled) or `failed` (rejected, or threw synchronously);
+ * `count` is the saturating sum of the two. `lastDurationMs` is the integer
+ * duration, on the runtime's monotonic clock, of the most recently settled
+ * call, and is `null` for `getSignedUrl`, which records outcome and age only.
+ * `lastBytes` is a number only after a SUCCESSFUL `put` (the application's
+ * argument) or `get` (the application's result); a zero length is a real
+ * zero. It is `null` after a failure and for every other operation —
+ * including `getStream`, even when it takes the buffered fallback. `ageMs` is the elapsed time since
+ * the most recent settled call. Age, duration and bytes describe the same
+ * last settlement. Paths, bytes, metadata, signed URLs and errors are never
+ * carried.
+ *
+ * @since 0.8.0
+ */
+export interface StorageDiagnosticsRecord {
+  /** The configured source alias (always equal to the snapshot's alias). */
+  readonly alias: string;
+  /** The operation these counters describe. */
+  readonly operation: StorageDiagnosticsOperation;
+  /** Settled operations observed. */
+  readonly count: number;
+  /** Integer ms of the last settled call; `null` for `getSignedUrl`. */
+  readonly lastDurationMs: number | null;
+  /** Monotonic ms since the last settled call. */
+  readonly ageMs: number;
+  /** Fulfilled calls. */
+  readonly succeeded: number;
+  /** Rejected (or synchronously throwing) calls. */
+  readonly failed: number;
+  /** Bytes of the last successful `put`/`get`; `null` everywhere else. */
+  readonly lastBytes: number | null;
+}
+
+/**
+ * One storage source's snapshot (M98m): the counters its owned
+ * `StorageService` observed.
+ *
+ * `coverage` is always `owned-instance`: the source describes the
+ * `StorageService` its own plugin created, never whatever is currently
+ * registered under the storage token, and never a replacement service.
+ * `alias` is `null` exactly when the plugin was not opted into observation
+ * (`state: 'disabled'`). `dropped` counts operations that ran unobserved
+ * because the source's active-observation budget was full (saturating). A
+ * collection failure clears `records` and reports `collection-failed`.
+ *
+ * @since 0.8.0
+ */
+export interface StorageDiagnosticsSnapshot {
+  /** The source's own availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** The configured display alias, or `null` when disabled. */
+  readonly alias: string | null;
+  /** Always `owned-instance`: only the plugin's own service is observed. */
+  readonly coverage: 'owned-instance';
+  /** Retained counters, at most one per fixed operation. */
+  readonly records: readonly StorageDiagnosticsRecord[];
+  /** Observations that ran unobserved for want of an active token (saturating). */
+  readonly dropped: number;
+}
+
+/**
+ * Read-only storage diagnostics source — the surface every StoragePlugin
+ * instance registers under {@linkcode CAPABILITIES.STORAGE_DIAGNOSTICS} as a
+ * MULTI provider (M98m), so multiple storage instances stay independently
+ * observable. The DiagnosticsPlugin reads every source to serve
+ * `GET /v1/storage`.
+ *
+ * Synchronous by contract: `snapshot()` returns already-counted, frozen data
+ * and never performs a storage operation, resolves the storage capability, or
+ * probes a backend.
+ *
+ * @example
+ * ```typescript
+ * const sources = ctx.services.getAll<IStorageDiagnosticsSource>(
+ *   CAPABILITIES.STORAGE_DIAGNOSTICS,
+ * );
+ * const snapshots = sources.map((source) => source.snapshot());
+ * ```
+ * @since 0.8.0
+ */
+export interface IStorageDiagnosticsSource {
+  /**
+   * Returns the source's current counters.
+   *
+   * @returns A deeply frozen {@linkcode StorageDiagnosticsSnapshot}
+   */
+  snapshot(): StorageDiagnosticsSnapshot;
+}
+
+/**
+ * The storage diagnostics response the connector serves for
+ * `GET /v1/storage` (M98m).
+ *
+ * `sources` lists every registered storage source in registration order under
+ * a session-local `sourceId` (`s1`…`s16`). `state` is `unsupported` when no
+ * source is registered; otherwise `ready` if any source is ready, then
+ * `collection-failed`, `stale`, `no-data`, `disabled` in that priority.
+ *
+ * @since 0.8.0
+ */
+export interface StorageDiagnosticsResponse {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the response was read for. */
+  readonly instanceId: string;
+  /** The aggregate availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** One snapshot per registered source, in registration order. */
+  readonly sources: readonly {
+    /** The session-local source identifier. */
+    readonly sourceId: string;
+    /** The source's snapshot. */
+    readonly snapshot: StorageDiagnosticsSnapshot;
+  }[];
+}

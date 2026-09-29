@@ -90,6 +90,8 @@ function fakeServer(
     cacheBody?: Record<string, unknown>;
     /** The body to serve for `/v1/realtime`; defaults to a three-source response. */
     realtimeBody?: Record<string, unknown>;
+    /** The body to serve for `/v1/storage`; defaults to a one-source ready response. */
+    storageBody?: Record<string, unknown>;
     /** The body to serve for `/v1/outbound-http`; defaults to a one-source response. */
     outboundHttpBody?: Record<string, unknown>;
     /** The body to serve for `/v1/queues`; defaults to a one-event batch. */
@@ -209,6 +211,8 @@ function fakeServer(
         bodyText = JSON.stringify(overrides.outboundHttpBody ?? outboundHttpResponseBody());
       } else if (target === '/v1/realtime') {
         bodyText = JSON.stringify(overrides.realtimeBody ?? realtimeResponseBody());
+      } else if (target === '/v1/storage') {
+        bodyText = JSON.stringify(overrides.storageBody ?? storageResponseBody());
       } else if (url.pathname === '/v1/queues') {
         const after = Number(url.searchParams.get('after'));
         bodyText = JSON.stringify((overrides.queuesBody ?? queueBatchBody)(after));
@@ -843,6 +847,34 @@ function realtimeResponseBody(): Record<string, unknown> {
         },
       },
     ],
+  };
+}
+
+/** A ready one-source storage response (M98m). */
+function storageResponseBody(): Record<string, unknown> {
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    sources: [{
+      sourceId: 's1',
+      snapshot: {
+        state: 'ready',
+        alias: 'primary',
+        coverage: 'owned-instance',
+        records: [{
+          alias: 'primary',
+          operation: 'put',
+          count: 2,
+          lastDurationMs: 1,
+          ageMs: 3,
+          succeeded: 1,
+          failed: 1,
+          lastBytes: 64,
+        }],
+        dropped: 0,
+      },
+    }],
   };
 }
 
@@ -1904,4 +1936,80 @@ describe('Client — core results are deeply frozen (F03)', () => {
     }).toThrow(TypeError);
     client.close();
   });
+});
+
+describe('Client — storage negotiation (M98m)', () => {
+  it('reads the storage response through the signed exchange and deep-freezes it', async () => {
+    const { client, requests } = buildClient();
+    const response = await client.storage();
+    expect(response).toEqual(storageResponseBody());
+    expect(requests.map((r) => r.target)).toEqual(['/v1/status', '/v1/storage']);
+    expect(Object.isFrozen(response.sources[0]!.snapshot.records[0])).toBe(true);
+    client.close();
+  });
+
+  it('answers unsupported WITHOUT a request when the manifest storage key is false', async () => {
+    const noStorage = { ...currentInspectorsManifest(), storage: false };
+    const { client, requests } = buildClient({ server: { statusInspectors: noStorage } });
+    const response = await client.storage();
+    expect(response).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'unsupported',
+      sources: [],
+    });
+    expect(Object.isFrozen(response)).toBe(true);
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  it('never probes the route when paired against the legacy status body', async () => {
+    const { client, requests } = buildClient({ server: { legacyStatus: true } });
+    expect((await client.storage()).state).toEqual('unsupported');
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  const hostile: ReadonlyArray<[string, (body: Record<string, unknown>) => void]> = [
+    ['a missing outcome field', (b) => {
+      const record = ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!;
+      delete record.failed;
+    }],
+    ['an extra record field', (b) => {
+      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!.key = 'canary-key';
+    }],
+    ['an invalid operation', (b) => {
+      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!.operation = 'list';
+    }],
+    ['a duration on getSignedUrl', (b) => {
+      const record = ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!;
+      record.operation = 'getSignedUrl';
+      record.lastBytes = null;
+      record.lastDurationMs = 1;
+    }],
+    ['bytes on a non-buffered operation', (b) => {
+      const record = ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
+        .snapshot.records[0]!;
+      record.operation = 'delete';
+    }],
+    ['a wrong aggregate state', (b) => {
+      b.state = 'no-data';
+    }],
+    ['a different instance', (b) => {
+      b.instanceId = '00000000-0000-4000-8000-000000000000';
+    }],
+  ];
+  for (const [name, mutate] of hostile) {
+    it(`refuses a correctly signed body carrying ${name}`, async () => {
+      const body = storageResponseBody();
+      mutate(body);
+      const { client } = buildClient({ server: { storageBody: body } });
+      await expect(client.storage()).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
 });

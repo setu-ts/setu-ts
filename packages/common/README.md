@@ -337,6 +337,7 @@ package fits the plugin architecture.
 | `ISseService`                        | interface |
 | `ISsrService`                        | interface |
 | `IStorage`                           | interface |
+| `IStorageDiagnosticsSource`          | interface |
 | `ISubscription`                      | interface |
 | `ISummary`                           | interface |
 | `ITelemetryService`                  | interface |
@@ -423,6 +424,9 @@ package fits the plugin architecture.
 | `SseMessage`                         | interface |
 | `StartOptions`                       | interface |
 | `StatResult`                         | interface |
+| `StorageDiagnosticsRecord`           | interface |
+| `StorageDiagnosticsResponse`         | interface |
+| `StorageDiagnosticsSnapshot`         | interface |
 | `SubscribeOptions`                   | interface |
 | `TaskPoolStats`                      | interface |
 | `TelemetryContext`                   | interface |
@@ -545,6 +549,7 @@ package fits the plugin architecture.
 | `SpanKind`                           | type      |
 | `SpanStatus`                         | type      |
 | `StandardCapability`                 | type      |
+| `StorageDiagnosticsOperation`        | type      |
 | `TimerHandle`                        | type      |
 | `TraceCoverage`                      | type      |
 | `TraceInstrumentationKind`           | type      |

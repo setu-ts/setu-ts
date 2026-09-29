@@ -129,6 +129,7 @@ async function harness(schedulerSources: readonly ISchedulerDiagnosticsSource[])
     configSource: null,
     cacheSources: [],
     schedulerSources,
+    storageSources: [],
     realtimeSources: [],
     eventSources: [],
     outboundHttpSources: [],
@@ -181,16 +182,15 @@ describe('scheduler protocol — target and manifest', () => {
     expect(parseTarget('/v1/scheduler/', '')).toBeNull();
   });
 
-  it('activates scheduler in the manifest and leaves the rest reserved', () => {
+  it('activates scheduler in the manifest alongside every other shipped inspector', () => {
     const manifest = currentInspectorsManifest();
     expect(manifest.scheduler).toBe(true);
     expect(manifest.health).toBe(true);
-    // M98j, M98l and M98n also shipped, so `events`, `realtime` and
-    // `outboundHttp` are activated too; the rest stay reserved.
+    // M98j, M98l, M98m and M98n also shipped, so every key is activated.
     expect(manifest.events).toBe(true);
     expect(manifest.realtime).toBe(true);
+    expect(manifest.storage).toBe(true);
     expect(manifest.outboundHttp).toBe(true);
-    expect(manifest.storage).toBe(false);
   });
 });
 
