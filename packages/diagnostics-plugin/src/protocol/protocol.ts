@@ -77,6 +77,12 @@ export const HEALTH_TARGET = '/v1/health';
 export const CONFIG_TARGET = '/v1/config';
 /** The cache observations target (M98i); it carries no query. */
 export const CACHE_TARGET = '/v1/cache';
+/**
+ * The scheduler-observations target (M98k); it carries no query.
+ *
+ * @internal
+ */
+export const SCHEDULER_TARGET = '/v1/scheduler';
 const EVENTS_PATH = '/v1/events';
 
 /**
@@ -102,6 +108,14 @@ export const REALTIME_TARGET = '/v1/realtime';
  * @internal
  */
 export const STORAGE_TARGET = '/v1/storage';
+
+/**
+ * The outbound HTTP attempt observations target (M98n); it carries no query
+ * — a snapshot operation, not a paged one.
+ *
+ * @internal
+ */
+export const OUTBOUND_HTTP_TARGET = '/v1/outbound-http';
 
 /**
  * The queue observations path (M98f); its target carries the same canonical
@@ -155,12 +169,14 @@ export interface ParsedTarget {
     | 'health'
     | 'config'
     | 'cache'
+    | 'scheduler'
     | 'queues'
     | 'traces'
     | 'authorization'
     | 'event'
     | 'realtime'
-    | 'storage';
+    | 'storage'
+    | 'outbound-http';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events and queues); `0` for the other ops. */
@@ -198,6 +214,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   if (path === CACHE_TARGET && search === '') {
     return { op: 'cache', canonicalTarget: CACHE_TARGET, after: 0, limit: 0 };
   }
+  if (path === SCHEDULER_TARGET && search === '') {
+    return { op: 'scheduler', canonicalTarget: SCHEDULER_TARGET, after: 0, limit: 0 };
+  }
   if (path === EVENT_PATH && search === '') {
     return { op: 'event', canonicalTarget: EVENT_PATH, after: 0, limit: 0 };
   }
@@ -206,6 +225,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === STORAGE_TARGET && search === '') {
     return { op: 'storage', canonicalTarget: STORAGE_TARGET, after: 0, limit: 0 };
+  }
+  if (path === OUTBOUND_HTTP_TARGET && search === '') {
+    return { op: 'outbound-http', canonicalTarget: OUTBOUND_HTTP_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENTS_PATH) {
     return parsePagedTarget('events', path, search);
@@ -447,9 +469,9 @@ export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number]
 /**
  * The inspector manifest this connector serves: `health` (M98d),
  * `configuration` (M98e), `queues` (M98f), `traces` (M98g), `cache` (M98i),
- * `authorization` (M98h), `events` (M98j), `realtime` (M98l) and `storage`
- * (M98m) are implemented; the rest are reserved and false until their own
- * connector operation ships.
+ * `authorization` (M98h), `events` (M98j), `scheduler` (M98k), `realtime`
+ * (M98l), `storage` (M98m) and `outboundHttp` (M98n) are implemented — every
+ * reserved inspector key now has a connector operation.
  *
  * @returns The fixed manifest
  * @internal
@@ -462,11 +484,11 @@ export function currentInspectorsManifest(): InspectorsManifest {
     traces: true,
     authorization: true,
     cache: true,
+    scheduler: true,
     events: true,
-    scheduler: false,
     realtime: true,
     storage: true,
-    outboundHttp: false,
+    outboundHttp: true,
   };
 }
 

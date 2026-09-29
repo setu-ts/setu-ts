@@ -27,6 +27,10 @@ export type {
 // Re-exported common types
 export type { BackoffStrategy, CircuitBreakerPolicy, RetryPolicy } from './http/contracts.ts';
 
+// Outbound HTTP attempt observations (M98n)
+export { createObservedFetch } from './http/observed-fetch.ts';
+export type { ObservedFetch, ObservedFetchOptions } from './http/observed-fetch.ts';
+
 // Timing
 export { createDefaultClientTiming } from './http/timing.ts';
 

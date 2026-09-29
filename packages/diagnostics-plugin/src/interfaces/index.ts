@@ -17,8 +17,10 @@ import type {
   EventDiagnosticsResponse,
   HealthDiagnosticsSnapshot,
   IPlugin,
+  OutboundHttpDiagnosticsResponse,
   QueueDiagnosticsBatch,
   RealtimeDiagnosticsResponse,
+  SchedulerDiagnosticsResponse,
   StorageDiagnosticsResponse,
   TraceDiagnosticsBatch,
 } from '@setu-ts/common';
@@ -262,6 +264,24 @@ export interface IDiagnosticsClient {
    */
   cache(): Promise<CacheDiagnosticsResponse>;
   /**
+   * Reads every registered scheduler source's execution observations through
+   * the signed protocol (M98k). Performs the `/v1/status` pairing exchange
+   * first if the session has not yet been bound.
+   *
+   * When the negotiated inspector manifest reports the scheduler inspector
+   * as unsupported, a frozen typed `unsupported` response with no sources is
+   * returned WITHOUT sending an addon request. Otherwise the authenticated
+   * `/v1/scheduler` exchange is performed and its exact contract validated.
+   * The response never carries a job name, cron expression, payload, lock
+   * key or token, or error text; a fire observation never claims cluster
+   * completeness.
+   *
+   * @returns The deeply frozen scheduler response
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  scheduler(): Promise<SchedulerDiagnosticsResponse>;
+  /**
    * Reads the next bounded page of queue attempt observations, plus every
    * queue source's status and latest depths, through the signed protocol
    * (M98f). Performs the `/v1/status` pairing exchange first if the session
@@ -337,6 +357,23 @@ export interface IDiagnosticsClient {
    */
   realtime(): Promise<RealtimeDiagnosticsResponse>;
   /**
+   * Reads the minimized outbound HTTP attempt observations through the
+   * signed protocol (M98n). Performs the `/v1/status` pairing exchange first
+   * if the session has not yet been bound.
+   *
+   * When the negotiated inspector manifest reports the outbound HTTP
+   * inspector as unsupported, a frozen typed `unsupported` response with no
+   * sources is returned WITHOUT sending an addon request. Otherwise the
+   * authenticated `/v1/outbound-http` exchange is performed and its exact
+   * contract — including every counting invariant — validated. The response
+   * never carries a URL, host, header, body, signal or error.
+   *
+   * @returns The deeply frozen outbound HTTP response
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  outboundHttp(): Promise<OutboundHttpDiagnosticsResponse>;
+  /**
    * Reads every registered storage source's operation counters through the
    * signed protocol (M98m). Performs the `/v1/status` pairing exchange first
    * if the session has not yet been bound.
@@ -350,7 +387,7 @@ export interface IDiagnosticsClient {
    *
    * @returns The deeply frozen storage response
    * @throws {Error} Under the same conditions as {@linkcode snapshot}
-   * @since 0.7.0
+   * @since 0.8.0
    */
   storage(): Promise<StorageDiagnosticsResponse>;
   /**

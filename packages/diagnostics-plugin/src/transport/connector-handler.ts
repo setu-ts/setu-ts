@@ -26,9 +26,11 @@ import type {
   IDiagnosticsSource,
   IEventDiagnosticsSource,
   IHealthDiagnosticsSource,
+  IOutboundHttpDiagnosticsSource,
   IRealtimeDiagnosticsSource,
   IRequest,
   IResponse,
+  ISchedulerDiagnosticsSource,
   IStorageDiagnosticsSource,
   ITraceDiagnosticsSource,
   ResponseSnapshot,
@@ -43,9 +45,17 @@ import { isQueueBatchProjection, projectQueueBatch } from '../protocol/queue-pro
 import { buildCacheResponse, isCacheResponseProjection } from '../protocol/cache-protocol.ts';
 import { buildStorageResponse, isStorageResponseProjection } from '../protocol/storage-protocol.ts';
 import {
+  buildSchedulerResponse,
+  isSchedulerResponseProjection,
+} from '../protocol/scheduler-protocol.ts';
+import {
   buildRealtimeResponse,
   isRealtimeResponseProjection,
 } from '../protocol/realtime-protocol.ts';
+import {
+  buildOutboundHttpResponse,
+  isOutboundHttpResponseProjection,
+} from '../protocol/outbound-http-protocol.ts';
 import {
   collectionFailedEventSnapshot,
   isEventResponseProjection,
@@ -233,6 +243,15 @@ export interface ConnectorHandlerDeps {
    */
   readonly cacheSources: readonly ICacheDiagnosticsSource[];
   /**
+   * Every scheduler-diagnostics source (M98k), resolved ONCE from
+   * `CAPABILITIES.SCHEDULER_DIAGNOSTICS` at bootstrap, in registration order
+   * and at most 16. Empty when no SchedulerPlugin is registered: the
+   * connector then answers a typed `unsupported` response for
+   * `GET /v1/scheduler`. A read calls only each source's synchronous
+   * `snapshot()` — never a lock, a handler, or the job registry.
+   */
+  readonly schedulerSources: readonly ISchedulerDiagnosticsSource[];
+  /**
    * The queue-observation merger (M98f) over every queue-diagnostics source
    * registered when the connector bootstrapped. With no source registered it
    * answers a typed `unsupported` batch; it never reserves, settles or counts
@@ -274,6 +293,13 @@ export interface ConnectorHandlerDeps {
    * room/channel lookup.
    */
   readonly realtimeSources: readonly IRealtimeDiagnosticsSource[];
+  /**
+   * The outbound HTTP diagnostics sources (M98n), read ONCE at bootstrap from
+   * `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` (a MULTI token). Empty answers a
+   * typed `unsupported` response for `GET /v1/outbound-http`. A read calls
+   * only each source's synchronous `snapshot()` and never performs a request.
+   */
+  readonly outboundHttpSources: readonly IOutboundHttpDiagnosticsSource[];
   /**
    * The storage-diagnostics sources (M98m), read ONCE at bootstrap from
    * `CAPABILITIES.STORAGE_DIAGNOSTICS` (a MULTI token) after every plugin has
@@ -1148,6 +1174,34 @@ export function createConnectorHandler(
         // the session's bound one.
         const candidate = buildCacheResponse(parsed.instance as string, deps.cacheSources);
         if (!isCacheResponseProjection(candidate)) {
+          return refusalResponse('unavailable');
+        }
+        projected = candidate;
+      } else if (target.op === 'outbound-http') {
+        // The outbound HTTP operation (M98n). Every session and request check
+        // above ran before any source is read; each read is isolated, and the
+        // wire validator — the SAME one the client runs — checks the built
+        // response before anything is signed.
+        const candidate = buildOutboundHttpResponse(
+          parsed.instance as string,
+          deps.outboundHttpSources,
+        );
+        if (!isOutboundHttpResponseProjection(candidate)) {
+          return refusalResponse('unavailable');
+        }
+        projected = candidate;
+      } else if (target.op === 'scheduler') {
+        // The scheduler operation (M98k). Every session and request check
+        // above ran before any source is read. Each source read is isolated,
+        // and the wire validator — the SAME one the client runs — checks the
+        // built response before anything is signed. The cross-instance check
+        // above already proved the presented (non-null) instance IS the
+        // session's bound one.
+        const candidate = buildSchedulerResponse(
+          parsed.instance as string,
+          deps.schedulerSources,
+        );
+        if (!isSchedulerResponseProjection(candidate)) {
           return refusalResponse('unavailable');
         }
         projected = candidate;

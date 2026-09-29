@@ -16,12 +16,23 @@ describe('@setu-ts/sdk barrel', () => {
       'generateOpenApiClient',
       'createSseClient',
       'createRealtimeClient',
+      'createObservedFetch',
     ].sort();
     expect(actual).toEqual(expected);
   });
 
   it('does not leak internal implementation classes', () => {
-    for (const name of ['HttpClient', 'RateLimiter', 'CircuitBreaker', 'RetryStrategy']) {
+    for (
+      const name of [
+        'HttpClient',
+        'RateLimiter',
+        'CircuitBreaker',
+        'RetryStrategy',
+        'OutboundHttpCollector',
+        'createDefaultFetch',
+        'OUTBOUND_HTTP_DIAGNOSTICS_TOKEN',
+      ]
+    ) {
       expect(Object.keys(barrel)).not.toContain(name);
     }
   });

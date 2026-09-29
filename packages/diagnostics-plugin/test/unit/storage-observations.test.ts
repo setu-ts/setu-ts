@@ -365,6 +365,8 @@ async function harness(storageSources: readonly IStorageDiagnosticsSource[]) {
     configSource: null,
     cacheSources: [],
     storageSources,
+    schedulerSources: [],
+    outboundHttpSources: [],
     eventSources: [],
     realtimeSources: [],
   });

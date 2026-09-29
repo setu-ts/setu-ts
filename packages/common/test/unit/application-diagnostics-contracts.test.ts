@@ -1,6 +1,7 @@
 /**
- * Contract tests for the M98i cache-diagnostics DTOs, declared against the
- * `@setu-ts/common` barrel so dropping an export fails `deno check`.
+ * Contract tests for the M98i cache-diagnostics and M98k scheduler-diagnostics
+ * DTOs, declared against the `@setu-ts/common` barrel so dropping an export
+ * fails `deno check`.
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
@@ -11,7 +12,12 @@ import type {
   CacheDiagnosticsResponse,
   CacheDiagnosticsSnapshot,
   ICacheDiagnosticsSource,
+  ISchedulerDiagnosticsSource,
   IStorageDiagnosticsSource,
+  SchedulerDiagnosticsOperation,
+  SchedulerDiagnosticsRecord,
+  SchedulerDiagnosticsResponse,
+  SchedulerDiagnosticsSnapshot,
   StorageDiagnosticsOperation,
   StorageDiagnosticsRecord,
   StorageDiagnosticsResponse,
@@ -64,6 +70,56 @@ describe('cache diagnostics contracts (M98i)', () => {
     expect(operations.length).toBe(5);
     // @ts-expect-error — coverage is always owned-instance
     const wide: CacheDiagnosticsSnapshot['coverage'] = 'all';
+    void wide;
+  });
+});
+
+describe('scheduler diagnostics contracts (M98k)', () => {
+  const RECORD: SchedulerDiagnosticsRecord = {
+    alias: 'tick-alias',
+    operation: 'fire',
+    count: 1,
+    lastDurationMs: null,
+    ageMs: 0,
+    started: 1,
+    succeeded: 1,
+    failed: 0,
+    contended: 0,
+    lockFailed: 0,
+    retryAttempts: 0,
+    lastLatenessMs: 3,
+  };
+
+  it('types a source, snapshot and response with exactly the documented fields', () => {
+    const snapshot: SchedulerDiagnosticsSnapshot = {
+      state: 'ready',
+      alias: 'cron',
+      coverage: 'owned-instance',
+      records: [RECORD],
+      dropped: 0,
+    };
+    const source: ISchedulerDiagnosticsSource = { snapshot: () => snapshot };
+    const response: SchedulerDiagnosticsResponse = {
+      version: 1,
+      instanceId: 'id',
+      state: 'ready',
+      sources: [{ sourceId: 's1', snapshot: source.snapshot() }],
+    };
+    expect(response.sources[0]!.snapshot.records[0]).toEqual(RECORD);
+    expect(Object.keys(RECORD).length).toBe(12);
+    expect(Object.keys(snapshot).length).toBe(5);
+    expect(Object.keys(response).length).toBe(4);
+    expect(CAPABILITIES.SCHEDULER_DIAGNOSTICS).toBe('scheduler-diagnostics');
+  });
+
+  it('admits only the two fixed operations and no missed counter', () => {
+    const operations: SchedulerDiagnosticsOperation[] = ['fire', 'attempt'];
+    // @ts-expect-error — a skipped local fire is not a missed execution
+    const missed: SchedulerDiagnosticsOperation = 'missed';
+    void missed;
+    expect(operations.length).toBe(2);
+    // @ts-expect-error — coverage is always owned-instance
+    const wide: SchedulerDiagnosticsSnapshot['coverage'] = 'cluster';
     void wide;
   });
 });

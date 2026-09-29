@@ -1962,6 +1962,296 @@ export interface RealtimeDiagnosticsResponse {
     readonly snapshot: RealtimeDiagnosticsSnapshot;
   }[];
 }
+/**
+ * The fixed scheduler observation an {@linkcode ISchedulerDiagnosticsSource}
+ * records (M98k). `fire` is one local timer fire of an approved job —
+ * observed whether or not the fire proceeded, so contention and lock
+ * failures are visible; `attempt` is one invocation of the application's
+ * handler by the executor. A behaviour that declines a dispatch (never
+ * calling `next()`, or throwing) invokes no handler and records no attempt;
+ * the fire still reports the dispatch's settlement.
+ * The vocabulary is fixed — a fire is never described by a schedule kind or
+ * an application string.
+ *
+ * @since 0.8.0
+ */
+export type SchedulerDiagnosticsOperation = 'fire' | 'attempt';
+
+/**
+ * Cumulative counters for one (approved job alias, operation) pair of one
+ * scheduler source (M98k).
+ *
+ * `count` counts settled observations, never currently active calls. On a
+ * `fire` record it is local timer fires observed; `started` the fires that
+ * entered local dispatch (fire slot claimed AND the handler mutex
+ * acquired); `contended` the fires skipped because the fire slot was
+ * claimed by another replica, or the registration-time delay slot was not
+ * this replica's, or the overlap mutex was held elsewhere; `lockFailed` the
+ * fires skipped because a lock operation rejected during the skip-decision;
+ * `succeeded`/`failed` the dispatches that settled fulfilled or
+ * rejected-after-their-final-attempt; `lastLatenessMs` the last fire's
+ * `max(0, actualStart - intendedFire)` in wall-clock milliseconds — a
+ * skipped local fire is never a globally missed execution, so no missed
+ * counter exists; `retryAttempts` is nonapplicable and `0`.
+ *
+ * On an `attempt` record `count` is settled handler attempts; `started` the
+ * handler invocations begun; `succeeded`/`failed` the settled outcomes;
+ * `retryAttempts` the attempts numbered above 1; `contended` and
+ * `lockFailed` are nonapplicable and `0`; `lastLatenessMs` is nonapplicable
+ * and `0` — lateness is a property of the fire, reported there only.
+ *
+ * Every counter saturates independently at `Number.MAX_SAFE_INTEGER` and is
+ * a finite non-negative safe integer; durations are integer milliseconds on
+ * the runtime's monotonic clock; `lastDurationMs` is `null` exactly when no
+ * settled observation of this tuple has carried a duration in the current
+ * retention window. Cumulative within the retention window: an expired
+ * record is cleared and starts from zero. No job name, cron expression,
+ * payload, lock key or token, or thrown value is ever carried; the record's
+ * `alias` is the application-approved job alias — never the raw name.
+ *
+ * @since 0.8.0
+ */
+export interface SchedulerDiagnosticsRecord {
+  /** The approved display alias of the job these counters describe. */
+  readonly alias: string;
+  /** Which observation these counters describe. */
+  readonly operation: SchedulerDiagnosticsOperation;
+  /** Settled observations recorded. */
+  readonly count: number;
+  /** Integer ms of the most recent settled duration; `null` when none. */
+  readonly lastDurationMs: number | null;
+  /** Monotonic ms since the most recent settled observation. */
+  readonly ageMs: number;
+  /** Observations that entered their measured unit (a dispatch or attempt). */
+  readonly started: number;
+  /** Observations that settled successfully. */
+  readonly succeeded: number;
+  /** Observations that settled with a failure. */
+  readonly failed: number;
+  /** Fires skipped by contention; `0` on `attempt` records. */
+  readonly contended: number;
+  /** Fires skipped by a lock failure; `0` on `attempt` records. */
+  readonly lockFailed: number;
+  /** Attempts numbered above the first; `0` on `fire` records. */
+  readonly retryAttempts: number;
+  /** Wall-clock ms the last fire started late; `0` on `attempt` records. */
+  readonly lastLatenessMs: number;
+}
+
+/**
+ * One scheduler source's snapshot (M98k): the observations its owned
+ * `SchedulerService` and executor made.
+ *
+ * `coverage` is always `owned-instance`: the source describes the service
+ * its own plugin created — including if that service was later replaced
+ * under the scheduler token, which the source does not observe; a custom
+ * replacement's behavior is never represented. `alias` is the configured
+ * SOURCE alias, `null` exactly when the plugin was not opted into
+ * observation (`state: 'disabled'`); a record's `alias` is the approved JOB
+ * alias, a different namespace. At most 64 (job alias, operation) records
+ * are retained; `dropped` counts observations for which no slot was free
+ * (saturating). A collection failure clears `records` and reports
+ * `collection-failed` carrying no records.
+ *
+ * @since 0.8.0
+ */
+export interface SchedulerDiagnosticsSnapshot {
+  /** The source's own availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** The configured display alias of the source, or `null` when disabled. */
+  readonly alias: string | null;
+  /** Always `owned-instance`: only the plugin's own service is observed. */
+  readonly coverage: 'owned-instance';
+  /** Retained counters, one per (job alias, operation) tuple. */
+  readonly records: readonly SchedulerDiagnosticsRecord[];
+  /** Observations that found no free record slot (saturating). */
+  readonly dropped: number;
+}
+
+/**
+ * Read-only scheduler diagnostics source — the surface every SchedulerPlugin
+ * instance registers under {@linkcode CAPABILITIES.SCHEDULER_DIAGNOSTICS} as
+ * a MULTI provider (M98k), so the token never collides with another source's
+ * provider (one SchedulerPlugin per application; other code may add sources).
+ * The DiagnosticsPlugin reads every source to serve `GET /v1/scheduler`.
+ *
+ * Synchronous by contract: `snapshot()` returns already-counted, frozen data
+ * and never acquires a lock, invokes a handler, reads the job registry, or
+ * probes a backend. A read never claims global or cluster completeness: a
+ * skipped local fire is not a globally missed execution.
+ *
+ * @example
+ * ```typescript
+ * const sources = ctx.services.getAll<ISchedulerDiagnosticsSource>(
+ *   CAPABILITIES.SCHEDULER_DIAGNOSTICS,
+ * );
+ * const snapshots = sources.map((source) => source.snapshot());
+ * ```
+ * @since 0.8.0
+ */
+export interface ISchedulerDiagnosticsSource {
+  /**
+   * Returns the source's current counters.
+   *
+   * @returns A deeply frozen {@linkcode SchedulerDiagnosticsSnapshot}
+   */
+  snapshot(): SchedulerDiagnosticsSnapshot;
+}
+
+/**
+ * The scheduler diagnostics response the connector serves for
+ * `GET /v1/scheduler` (M98k).
+ *
+ * `sources` lists every registered scheduler source in registration order
+ * under a session-local `sourceId` (`s1`…`s16`). `state` is `unsupported`
+ * when no source is registered; otherwise `ready` if any source is ready,
+ * then `collection-failed`, `stale`, `no-data`, `disabled`, `unsupported`
+ * in that priority order, with each individual state still visible in its
+ * entry.
+ *
+ * @since 0.8.0
+ */
+export interface SchedulerDiagnosticsResponse {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the response was read for. */
+  readonly instanceId: string;
+  /** The aggregate availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** One snapshot per registered source, in registration order. */
+  readonly sources: readonly {
+    /** The session-local source identifier. */
+    readonly sourceId: string;
+    /** The source's snapshot. */
+    readonly snapshot: SchedulerDiagnosticsSnapshot;
+  }[];
+}
+
+/**
+ * The status class of the last response an outbound HTTP diagnostics source
+ * observed (M98n). An integer status in `200..599` maps to its class; every
+ * other value — `0` from an opaque or opaqueredirect response, a `1xx` a
+ * fetch never exposes, a non-integer, an out-of-range number — is `other`, so
+ * a raw status number never reaches the wire.
+ *
+ * @since 0.8.0
+ */
+export type OutboundHttpStatusClass = '2xx' | '3xx' | '4xx' | '5xx' | 'other';
+
+/**
+ * Cumulative attempt counters for one outbound HTTP diagnostics source
+ * (M98n).
+ *
+ * `started` counts delegations begun and `count` counts settled attempts, so
+ * `started - count` is the attempts in flight. Every settled attempt
+ * increments exactly one of `responses` (the fetch resolved — an HTTP error
+ * status is a response) or `failures` (it rejected or threw), so
+ * `responses + failures === count` and `count <= started` always hold.
+ * `lastStatusClass` is `null` until a response settles; `lastDurationMs` is
+ * the integer monotonic time to headers of the last settled attempt, `null`
+ * until one settles; `ageMs` is the time since the last start or settlement.
+ * No URL, host, header, body, signal or error is ever carried.
+ *
+ * @since 0.8.0
+ */
+export interface OutboundHttpDiagnosticsRecord {
+  /** The configured source alias (always equal to the snapshot's alias). */
+  readonly alias: string;
+  /** The one fixed operation this source counts. */
+  readonly operation: 'attempt';
+  /** Delegations begun. */
+  readonly started: number;
+  /** Attempts settled. */
+  readonly count: number;
+  /** Attempts that resolved (any HTTP status). */
+  readonly responses: number;
+  /** Attempts that rejected or threw. */
+  readonly failures: number;
+  /** Status class of the last response; `null` until one settles. */
+  readonly lastStatusClass: OutboundHttpStatusClass | null;
+  /** Integer ms of the last settled attempt; `null` until one settles. */
+  readonly lastDurationMs: number | null;
+  /** Monotonic ms since the last start or settlement. */
+  readonly ageMs: number;
+}
+
+/**
+ * One outbound HTTP diagnostics source's snapshot (M98n): the attempts made
+ * through one `createObservedFetch` helper.
+ *
+ * `coverage` is always `owned-instance`: only calls made through that
+ * helper's `fetch` are observed, never any other fetch in the process. At
+ * most one record exists. `alias` is `null` exactly when the helper is closed
+ * (`state: 'disabled'`). `ready`/`stale` carry one record; `disabled`,
+ * `no-data` and `collection-failed` carry none.
+ *
+ * @since 0.8.0
+ */
+export interface OutboundHttpDiagnosticsSnapshot {
+  /** The source's own availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** The configured display alias, or `null` when closed. */
+  readonly alias: string | null;
+  /** Always `owned-instance`. */
+  readonly coverage: 'owned-instance';
+  /** At most one record. */
+  readonly records: readonly OutboundHttpDiagnosticsRecord[];
+}
+
+/**
+ * Read-only outbound HTTP diagnostics source — what the SDK's
+ * `createObservedFetch` helper registers under
+ * {@linkcode CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS} as a MULTI provider
+ * (M98n). The DiagnosticsPlugin reads every source to serve
+ * `GET /v1/outbound-http`.
+ *
+ * Synchronous by contract: `snapshot()` returns already-counted, frozen data
+ * and never performs a request.
+ *
+ * @example
+ * ```typescript
+ * const sources = ctx.services.getAll<IOutboundHttpDiagnosticsSource>(
+ *   CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS,
+ * );
+ * const snapshots = sources.map((source) => source.snapshot());
+ * ```
+ * @since 0.8.0
+ */
+export interface IOutboundHttpDiagnosticsSource {
+  /**
+   * Returns the source's current counters.
+   *
+   * @returns A deeply frozen {@linkcode OutboundHttpDiagnosticsSnapshot}
+   */
+  snapshot(): OutboundHttpDiagnosticsSnapshot;
+}
+
+/**
+ * The outbound HTTP diagnostics response the connector serves for
+ * `GET /v1/outbound-http` (M98n).
+ *
+ * `sources` lists every registered source in registration order under a
+ * session-local `sourceId` (`s1`…`s16`). `state` is `unsupported` when no
+ * source is registered; otherwise `ready` if any source is ready, then
+ * `collection-failed`, `stale`, `no-data`, `disabled` in that priority.
+ *
+ * @since 0.8.0
+ */
+export interface OutboundHttpDiagnosticsResponse {
+  /** Contract version. */
+  readonly version: 1;
+  /** The instance UUID the response was read for. */
+  readonly instanceId: string;
+  /** The aggregate availability state. */
+  readonly state: DiagnosticsInspectorState;
+  /** One snapshot per registered source, in registration order. */
+  readonly sources: readonly {
+    /** The session-local source identifier. */
+    readonly sourceId: string;
+    /** The source's snapshot. */
+    readonly snapshot: OutboundHttpDiagnosticsSnapshot;
+  }[];
+}
 
 /**
  * The fixed storage operations a storage diagnostics source counts (M98m).

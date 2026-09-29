@@ -5367,6 +5367,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   tests. Round 7 was the last at the maintainer's direction; its fixes and the merge with `main`
   (M98h) are verified by tests and gates, and the per-event `begin` token (~50 ns per publish,
   against the design review's no-allocation budget) was accepted — complete (PR #375).
+- **Milestone 98k** (`packages/scheduler-plugin` + `packages/common` + `packages/diagnostics-plugin`
+  — scheduler execution observations):
+  `SchedulerPlugin({ diagnostics: { enabled: true, alias,
+  jobs } })` records each approved job's
+  local timer fires (contended / lock-failed / dispatched, with wall-clock lateness
+  `max(0, actualStart - intendedFire)`) and each handler attempt (started, succeeded, failed,
+  retries) through a private-field collector (set in a static block) attached to the plugin's own
+  service — unobserved services read one field and no clock. Multi-provider
+  `CAPABILITIES.SCHEDULER_DIAGNOSTICS`; the connector serves `GET /v1/scheduler` (16-source bound)
+  and the client `scheduler()`; the status manifest flips `scheduler: true`. A skipped local fire is
+  never a globally missed execution; lock losers produce no handler records (proven by test).
+  Verification found five collector defects every gate passed (fractional lateness blanking the
+  whole source, no slot reclaim at capacity, double drops, `started < count`, unguarded observation
+  clock reads). The design review was recorded retroactively. The security audit ran nine
+  fresh-context rounds; after the first, every finding came from observing the handler's result on
+  the observed path and was Low, with no data exposure. The maintainer accepted K1 — behind a
+  behaviour chain, `next()` returns a derived promise — and narrowed the observed-equals-unobserved
+  guarantee to ordinary handler results. Round 9 failed on K5, which was then fixed and accepted,
+  and the maintainer waived further rounds — complete (PR #379).
 - **Milestone 98l** (`packages/websocket-plugin` + `packages/sse-plugin` +
   `packages/realtime-backplane-plugin` + `packages/common` + `packages/diagnostics-plugin` —
   realtime lifecycle observations): each plugin accepts `diagnostics: { enabled: true, alias }` and
@@ -5389,6 +5408,24 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   doc correction claimed QUIT alone stops ioredis reconnecting, which round 4 measured false after a
   25 s outage — both fixed; round 5 passed on `bec04876`. The design review was approved by the
   maintainer — complete (PR #377).
+- **Milestone 98n** (`packages/sdk` + `packages/common` + `packages/diagnostics-plugin` — outbound
+  HTTP attempt observations): `createObservedFetch({ alias, fetch?, timing? })` returns
+  `{ fetch, plugin }`. The wrapper calls the wrapped fetch exactly once with the caller's own
+  arguments (never read) and receiver (except the helper itself, forwarded as `undefined`, since the
+  platform fetch throws `Illegal invocation` on workerd with that receiver), and records only
+  started / settled / responded / failed, a five-value status class and time to headers — never a
+  URL, header, body, signal or error. `plugin` registers a frozen snapshot-only source under the new
+  multi-provider `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` (the SDK writes the token as a literal so
+  its `common` imports stay type-only) and closes it on shutdown; one helper serves one application.
+  The connector serves `GET /v1/outbound-http`, the manifest's `outboundHttp` is `true`, and the
+  client gains `outboundHttp()`. Code review fixed a doc claim that the helper "reopens for a
+  retried `start()`" — the kernel refuses any retry once `RuntimePlugin` re-registers `runtime`, a
+  pre-existing kernel defect left for a `fix/…` branch — plus an e2e that hung instead of failing.
+  The independent committed-tree audit failed twice, each time on one Low in the same class: a
+  hostile promise from the wrapped fetch (a throwing `constructor` getter, an own `then`) made the
+  wrapper throw synchronously where `await` resolves, stranding a permanently in-flight attempt. The
+  result is now adopted by `await` inside the promise the caller receives. Re-audit passed on
+  `cfd20fe0` with no finding open — complete (PR #380).
 - **Milestone 98m** (`packages/storage-plugin` + `packages/common` + `packages/diagnostics-plugin` —
   storage operation counters): `StoragePlugin({ diagnostics: { enabled: true, alias } })` counts
   every public call its OWN `StorageService` makes (`put`/`get`/`delete`/`exists`/`getSignedUrl`/
@@ -5407,10 +5444,13 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `@setu-ts/storage-plugin`. Enabled calls read the monotonic clock twice (every call is timed, so
   age, duration and bytes describe one settlement) and settle through one derived promise that
   re-rejects with the original reason, so an unhandled provider rejection stays unhandled. The
-  design security review was approved and the committed-tree implementation security audit passed on
-  `e3ddbfd4` (333 probes, 6 negative controls, no findings) — complete (PR pending).
-- **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
-  design security review and implementation audit required).
+  design security review was approved; the committed-tree audit passed on `e3ddbfd4`, then failed
+  its re-audit on `0430459e` on two Lows (an unclamped duration and an unmeasured overhead target),
+  both addressed in `4427347b`; the merge with `main` (M98k, M98n) is re-audited before merge —
+  complete (PR pending).
+- **Next milestone** — **M100a** (`packages/auth-plugin` + `packages/starters` — `jwt` optional; the
+  plugin registers `authMiddleware()` itself; design security review and implementation audit
+  required).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

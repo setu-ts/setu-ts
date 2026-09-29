@@ -198,9 +198,9 @@ git sha, a sentence, any string over 64 characters) is omitted rather than proje
 eviction is reported as `lost` sequence numbers, and drops as `droppedEvents`. Startup failure and
 final shutdown clear retained metadata while preserving the original application error — a reader
 then sees only the coarse `failed`/`closed` state, the failure code, and counters. A retried
-`start()` continues the event numbering, so a later read reports the discarded range as `lost`.
-Timing is monotonic from runtime registration; `atMs`/`durationMs` are `null` before that, never
-fabricated.
+`start()` — possible only after a failure before any plugin registered — continues the event
+numbering, so a later read reports the discarded range as `lost`. Timing is monotonic from runtime
+registration; `atMs`/`durationMs` are `null` before that, never fabricated.
 
 The runnable consumer is `scripts/inspect-kernel.ts`; the paired throughput/latency harness is
 `scripts/benchmark-kernel-diagnostics.ts --mode=disabled|enabled`. Network authentication and
@@ -4168,24 +4168,39 @@ the kernel omits a non-finite value rather than letting it serialize to `null`.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
 `{ health: true, configuration: true, queues: true, traces: true, authorization: true,
-cache: true, events: true, scheduler: false, realtime: true, storage: true,
-outboundHttp: false }`
+cache: true, scheduler: true, events: true, realtime: true, storage: true,
+outboundHttp: true }`
 (`configuration` is `true` since M98e, `queues` since M98f, `traces` since M98g, `cache` since M98i,
-`authorization` since M98h, `events` since M98j, `realtime` since M98l and `storage` since M98m, all
-below) — and the connector serves a first inspector operation, `GET /v1/health`. The client reads it
-through `client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector resolves the optional
-health source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source
-answers a typed `unsupported` snapshot (no indicator runs, startup never fails), a
-registered-but-disabled source answers `disabled`, and a throwing source answers a value-free
-`collection-failed` snapshot — as does a source whose projected DTO fails the exact validator (an
+`authorization` since M98h, `events` since M98j, `scheduler` since M98k, `realtime` since M98l,
+`storage` since M98m and `outboundHttp` since M98n, all below) — and the connector serves a first
+inspector operation, `GET /v1/health`. The client reads it through
+`client.health(): Promise<HealthDiagnosticsSnapshot>`. The connector resolves the optional health
+source under `CAPABILITIES.HEALTH_DIAGNOSTICS` once, at registration: an absent source answers a
+typed `unsupported` snapshot (no indicator runs, startup never fails), a registered-but-disabled
+source answers `disabled`, and a throwing source answers a value-free `collection-failed` snapshot —
+as does a source whose projected DTO fails the exact validator (an unknown enum, a non-finite or
+negative measurement, an oversized alias, more than 64 observations, a malformed shape), so nothing
+unvalidated is ever signed — none of which changes the application's readiness. The snapshot is the
+health plugin's minimized DTO (approved alias, framework status, outcome state, monotonic timing
+only — no indicator `data`, no error text, no absolute time), projected field-by-field and bounded
+by the same 256 KiB response ceiling as every other operation. A client paired against a legacy M98b
+status body (no manifest) resolves all inspectors to `false` and its `health()` answers
+`unsupported` without sending the request. The full wire shape is in `docs/diagnostics-protocol.md`.
+cache: true, events: true, scheduler: false, realtime: true, storage: true, outboundHttp: false
+}`(`configuration`is`true`since M98e,`queues`since M98f,`traces`since M98g,`cache`since M98i,`authorization`since M98h,`events`since M98j,`realtime`since M98l and`storage`since M98m, all
+below) — and the connector serves a first inspector operation,`GET
+/v1/health`. The client reads it
+through`client.health():
+Promise<HealthDiagnosticsSnapshot>`. The connector resolves the optional
+health source under`CAPABILITIES.HEALTH_DIAGNOSTICS`once, at registration: an absent source
+answers a typed`unsupported`snapshot (no indicator runs, startup never fails), a
+registered-but-disabled source answers`disabled`, and a throwing source answers a value-free`collection-failed`snapshot — as does a source whose projected DTO fails the exact validator (an
 unknown enum, a non-finite or negative measurement, an oversized alias, more than 64 observations, a
 malformed shape), so nothing unvalidated is ever signed — none of which changes the application's
 readiness. The snapshot is the health plugin's minimized DTO (approved alias, framework status,
-outcome state, monotonic timing only — no indicator `data`, no error text, no absolute time),
+outcome state, monotonic timing only — no indicator`data`, no error text, no absolute time),
 projected field-by-field and bounded by the same 256 KiB response ceiling as every other operation.
-A client paired against a legacy M98b status body (no manifest) resolves all inspectors to `false`
-and its `health()` answers `unsupported` without sending the request. The full wire shape is in
-`docs/diagnostics-protocol.md`.
+A client paired against a legacy M98b status body (no manifest) resolves all inspectors to`false`and its`health()`answers`unsupported`without sending the request. The full wire shape is in`docs/diagnostics-protocol.md`.
 
 **Queue observations (M98f).** The connector serves `GET /v1/queues?after=<N>&limit=<N>` (the same
 canonical query grammar as `/v1/events`), read through
@@ -4226,6 +4241,18 @@ no configuration value, value hash, value length, raw key name, or file path is 
 unapproved keys are never observed at all — no counter discloses that they exist. The negotiated
 manifest governs `configuration()` exactly as it governs `health()`: a legacy pairing answers
 `unsupported` without sending the request.
+
+**Scheduler observations (M98k).** The connector serves `GET /v1/scheduler`, read through
+`client.scheduler(): Promise<SchedulerDiagnosticsResponse>`. At bootstrap it resolves every
+`ISchedulerDiagnosticsSource` registered under `CAPABILITIES.SCHEDULER_DIAGNOSTICS` (each
+SchedulerPlugin instance contributes one as a multi provider) and refuses to start with more than
+16. Each authenticated read calls every source's synchronous `snapshot()` once, copies only plain
+own data properties, and isolates a throwing or malformed source as a value-free `collection-failed`
+snapshot; duplicate non-null SOURCE aliases or a body over 256 KiB collapse the response to
+`collection-failed` with no sources. With no source the response is `unsupported`; a client whose
+negotiated manifest has `scheduler: false` answers that locally without a request.
+`IDiagnosticsClient.scheduler` is a new REQUIRED member — additive for callers; a structural
+implementation must add it. The wire shape is in `docs/diagnostics-protocol.md`.
 
 **Cache observations (M98i).** The connector serves `GET /v1/cache`, read through
 `client.cache(): Promise<CacheDiagnosticsResponse>`. At bootstrap it resolves every
@@ -4368,6 +4395,21 @@ sources, and refuses any kind/operation, kind/gauge or backpressure combination 
 — and so does the client. A client whose negotiated manifest has `realtime: false` answers a frozen
 `unsupported` response without sending the request. `IDiagnosticsClient.realtime` is a new REQUIRED
 member — additive for callers; a structural implementation must add it.
+
+**Outbound HTTP attempt observations (M98n).** The connector serves `GET /v1/outbound-http` — a
+SNAPSHOT operation with no query — read through
+`client.outboundHttp(): Promise<OutboundHttpDiagnosticsResponse>`. Sources come from the SDK's
+`createObservedFetch` helper: its `plugin` registers one `IOutboundHttpDiagnosticsSource` under
+`CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` as a multi provider (never in `provides`). A source holds
+at most one record counting `started`, `count`, `responses` and `failures`, with `lastStatusClass`
+(`'2xx' | '3xx' | '4xx' | '5xx' | 'other'`, `null` until a response), `lastDurationMs` (time to
+headers, `null` until a settlement) and `ageMs`. The connector reads the sources at bootstrap (more
+than 16 refuses startup), assigns `s1`…`s16`, answers a throwing or invalid source with a value-free
+`collection-failed` snapshot, collapses duplicate non-null aliases or an over-budget body to a fixed
+no-source response, and refuses any snapshot breaking `responses + failures === count`,
+`count <= started` or the state rules — and so does the client. A client whose negotiated manifest
+has `outboundHttp: false` answers a frozen `unsupported` response without sending the request.
+`IDiagnosticsClient.outboundHttp` is a new REQUIRED member.
 
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
@@ -10360,18 +10402,29 @@ a MULTI-provider token: every CachePlugin instance registers one `ICacheDiagnost
 `present`, `absent`, `removed`, `notRemoved`) and the connector's `CacheDiagnosticsResponse`. See
 the diagnostics-connector section for the wire operation.
 
-**Storage observation contracts (M98m).** `CAPABILITIES.STORAGE_DIAGNOSTICS`
-(`'storage-diagnostics'`) is a MULTI-provider token: every StoragePlugin instance registers one
-`IStorageDiagnosticsSource` (`snapshot(): StorageDiagnosticsSnapshot` — synchronous, performs no
-storage operation). The DTOs are `StorageDiagnosticsSnapshot` (`state`, `alias | null`,
-`coverage: 'owned-instance'`, `records`, `dropped`), `StorageDiagnosticsRecord` (alias,
-`StorageDiagnosticsOperation`, `count`, `lastDurationMs`, `ageMs`, `succeeded`, `failed`,
-`lastBytes`) and the connector's `StorageDiagnosticsResponse`. The operation vocabulary is the six
-public calls `put`, `get`, `delete`, `exists`, `getSignedUrl`, `getStream`; `lastDurationMs` and
-`lastBytes` are `null` for `getSignedUrl`, and `lastBytes` is `null` for the non-buffered
-operations. Unlike the M98l realtime contracts, the collector is NOT shared in `common` — a single
-plugin owns it — so the option and collector types live in `@setu-ts/storage-plugin`. See the
-diagnostics-connector section for the wire operation.
+**Scheduler observation contracts (M98k).** `CAPABILITIES.SCHEDULER_DIAGNOSTICS`
+(`'scheduler-diagnostics'`) is a MULTI-provider token: every SchedulerPlugin instance registers one
+`ISchedulerDiagnosticsSource` (`snapshot(): SchedulerDiagnosticsSnapshot` — synchronous, never
+acquires a lock, invokes a handler, or reads the job registry). The DTOs are
+`SchedulerDiagnosticsSnapshot` (`state`, `alias | null`, `coverage: 'owned-instance'`, `records`,
+`dropped`), `SchedulerDiagnosticsRecord` (the JOB alias, `SchedulerDiagnosticsOperation`
+(`'fire' | 'attempt'`), `count`, `lastDurationMs | null`, `ageMs`, and the non-negative saturating
+counters `started`, `succeeded`, `failed`, `contended`, `lockFailed`, `retryAttempts`,
+`lastLatenessMs`) and the connector's `SchedulerDiagnosticsResponse`. Lateness is
+`max(0, actualStart - intendedFire)`; a skipped local fire is never a globally missed execution and
+no missed counter exists. See the diagnostics-connector section for the wire operation. **Storage
+observation contracts (M98m).** `CAPABILITIES.STORAGE_DIAGNOSTICS` (`'storage-diagnostics'`) is a
+MULTI-provider token: every StoragePlugin instance registers one `IStorageDiagnosticsSource`
+(`snapshot(): StorageDiagnosticsSnapshot` — synchronous, performs no storage operation). The DTOs
+are `StorageDiagnosticsSnapshot` (`state`, `alias | null`, `coverage: 'owned-instance'`, `records`,
+`dropped`), `StorageDiagnosticsRecord` (alias, `StorageDiagnosticsOperation`, `count`,
+`lastDurationMs`, `ageMs`, `succeeded`, `failed`, `lastBytes`) and the connector's
+`StorageDiagnosticsResponse`. The operation vocabulary is the six public calls `put`, `get`,
+`delete`, `exists`, `getSignedUrl`, `getStream`; `lastDurationMs` and `lastBytes` are `null` for
+`getSignedUrl`, and `lastBytes` is `null` for the non-buffered operations. Unlike the M98l realtime
+contracts, the collector is NOT shared in `common` — a single plugin owns it — so the option and
+collector types live in `@setu-ts/storage-plugin`. See the diagnostics-connector section for the
+wire operation.
 
 **Event observation contracts (M98j).** `CAPABILITIES.EVENTS_DIAGNOSTICS` (`'event-diagnostics'`) is
 a MULTI-provider token: every EventsPlugin instance registers one `IEventDiagnosticsSource`
@@ -10403,6 +10456,18 @@ collector that reads neither the clock nor the gauges. `RealtimeGaugeReading` is
 return shape. The collector is pure and bounded — no I/O, no timer, no registry access — and a
 failing clock or gauge reader latches `collection-failed` without changing any application result.
 See the diagnostics-connector section for the wire operation.
+
+**Outbound HTTP observation contracts (M98n).** `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`
+(`'outbound-http-diagnostics'`) is a MULTI-provider token whose producer is the SDK's
+`createObservedFetch` registration plugin.
+`IOutboundHttpDiagnosticsSource.snapshot():
+OutboundHttpDiagnosticsSnapshot` is synchronous and
+never performs a request. The DTOs are `OutboundHttpDiagnosticsSnapshot` (`state`, `alias | null`,
+`coverage: 'owned-instance'`, at most one record), `OutboundHttpDiagnosticsRecord` (alias,
+`operation: 'attempt'`, `started`, `count`, `responses`, `failures`,
+`lastStatusClass: OutboundHttpStatusClass | null`, `lastDurationMs`, `ageMs`),
+`OutboundHttpStatusClass` and the connector's `OutboundHttpDiagnosticsResponse`. See the
+diagnostics-connector section for the wire operation.
 
 **Trace observation contracts (M98g).** `CAPABILITIES.TRACE_DIAGNOSTICS` (`'trace-diagnostics'`) is
 a SINGLE-provider token: the TelemetryPlugin always registers one `ITraceDiagnosticsSource`
@@ -10520,6 +10585,17 @@ Contract notes:
   (`database-plugin` provides `database`), so a failure after a `without` reads as a missing
   capability rather than as the exclusion that caused it. `@setu-ts/testing`'s
   `createTestApp({ app, without })` is the intended caller.
+- **A failed `start()` is retryable only if it failed before any plugin registered** — plugin
+  resolution (an unsatisfied dependency, a cycle, no runtime provider), which is the same boundary
+  `unregister` uses. Correct the plugin list and call `start()` again. Once any plugin's
+  `register()` has run, a second `start()` **throws**
+  `Cannot retry start() after plugins have registered … Create
+  a new application instead.`: the
+  plugins that ran left their services (in a registry that may already be sealed), lifecycle hooks,
+  routes and middleware behind, and possibly resources outside the kernel, none of which can be
+  un-run. The failed attempt's `onClose` hooks have already run. Restart after a successful
+  `start()` + `stop()` is not supported either — `start()` throws
+  `Application has already been started.`
 - **`hasPlugin(name: string): boolean`** reports whether a plugin carrying that name is pending. A
   pure read — it resolves and constructs nothing. It exists so a caller applying several exclusions
   can validate the whole set before removing any of them: `unregister` mutates immediately, so
@@ -11569,6 +11645,36 @@ function createDefaultClientTiming(): IClientTiming;
 
 `now()` uses `performance.now()` (monotonic); `sleep()` uses `setTimeout` with an abort listener.
 Inject a deterministic implementation in tests.
+
+### createObservedFetch() (M98n)
+
+```typescript
+interface ObservedFetchOptions {
+  readonly alias: string; // 1–64 UTF-8 bytes, no control characters
+  readonly fetch?: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
+  readonly timing?: Pick<IClientTiming, 'now'>;
+}
+interface ObservedFetch {
+  readonly fetch: (input: RequestInfo, init?: RequestInit) => Promise<Response>;
+  readonly plugin: IPlugin;
+}
+function createObservedFetch(options: ObservedFetchOptions): ObservedFetch;
+```
+
+Opt-in outbound attempt counters for the local diagnostics connector. `fetch` defaults to the SDK's
+call-time `globalThis.fetch`; `timing` defaults to `createDefaultClientTiming()` and is always
+called as `timing.now()`, probed once at construction. The wrapper forwards the caller's arguments
+unread and its receiver unchanged — except the helper object itself, forwarded as `undefined` —
+calls the wrapped fetch exactly once, and returns the identical value or rethrows the identical
+value; a synchronous throw stays synchronous (a deliberate departure from the framework's promise
+rule, so wrapping never changes application behavior). It reads only the resolved value's `status`.
+Register `plugin` in exactly one application: it registers the source under
+`CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`, closes the helper on shutdown, refuses another application
+(the same application registering it again reopens the source rather than refusing — though the
+kernel currently refuses a retried `start()` of any application registering `RuntimePlugin`, so this
+path is not a working recovery). Its name is `outbound-http-diagnostics-<32 hex>`, drawn from
+`crypto.getRandomValues` (required; Node ≥ 19). Construct the helper only when a devtool composition
+is present. Construction refusals are fixed messages that never echo a value.
 
 ### ClientRateLimitPolicy
 

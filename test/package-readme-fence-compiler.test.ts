@@ -117,7 +117,8 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/mail-plugin/README.md': 2,
   'packages/metrics-plugin/README.md': 2,
   'packages/runtime/README.md': 3,
-  'packages/sdk/README.md': 14,
+  // M98n: +1 for the devtool-gated observed-fetch composition.
+  'packages/sdk/README.md': 15,
   'packages/telemetry-plugin/README.md': 2,
   'packages/testing/README.md': 9,
 };

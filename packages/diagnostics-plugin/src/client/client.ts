@@ -21,8 +21,10 @@ import type {
   DiagnosticsSnapshot,
   EventDiagnosticsResponse,
   HealthDiagnosticsSnapshot,
+  OutboundHttpDiagnosticsResponse,
   QueueDiagnosticsBatch,
   RealtimeDiagnosticsResponse,
+  SchedulerDiagnosticsResponse,
   StorageDiagnosticsResponse,
   TraceDiagnosticsBatch,
 } from '@setu-ts/common';
@@ -48,9 +50,11 @@ import {
   isConfigSnapshotProjection,
   isHealthSnapshotProjection,
   isSnapshotProjection,
+  OUTBOUND_HTTP_TARGET,
   parseStatusBody,
   QUEUES_PATH,
   REALTIME_TARGET,
+  SCHEDULER_TARGET,
   SNAPSHOT_TARGET,
   STATUS_TARGET,
   STORAGE_TARGET,
@@ -60,6 +64,8 @@ import { isEventResponseProjection } from '../protocol/event-protocol.ts';
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
 import { isCacheResponseProjection } from '../protocol/cache-protocol.ts';
 import { isRealtimeResponseProjection } from '../protocol/realtime-protocol.ts';
+import { isOutboundHttpResponseProjection } from '../protocol/outbound-http-protocol.ts';
+import { isSchedulerResponseProjection } from '../protocol/scheduler-protocol.ts';
 import { isStorageResponseProjection } from '../protocol/storage-protocol.ts';
 import { isTraceBatchProjection } from '../protocol/trace-protocol.ts';
 import { isAuthorizationBatchProjection } from '../protocol/authorization-protocol.ts';
@@ -606,6 +612,39 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       });
     },
 
+    async scheduler(): Promise<SchedulerDiagnosticsResponse> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the scheduler inspector — a
+        // legacy or pre-M98k server — answers a local typed `unsupported`
+        // response and sends no request.
+        if (inspectors !== null && inspectors.scheduler === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            sources: [],
+          });
+        }
+        const result = await exchange(SCHEDULER_TARGET);
+        const parsed = parseBody(result.bodyText);
+        // The same exact validator the connector ran before signing, plus
+        // the body's own instance binding.
+        if (!isSchedulerResponseProjection(parsed) || parsed.instanceId !== bound) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return deepFreeze(parsed);
+      });
+    },
+
     async realtime(): Promise<RealtimeDiagnosticsResponse> {
       return await enqueue(async () => {
         checkUsable();
@@ -666,6 +705,37 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // The same exact validator the connector ran before signing, plus
         // the body's own instance binding.
         if (!isStorageResponseProjection(parsed) || parsed.instanceId !== bound) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return deepFreeze(parsed);
+      });
+    },
+
+    async outboundHttp(): Promise<OutboundHttpDiagnosticsResponse> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the outbound HTTP inspector —
+        // a legacy or pre-M98n server — answers a local typed `unsupported`
+        // response and sends no request.
+        if (inspectors !== null && inspectors.outboundHttp === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            sources: [],
+          });
+        }
+        const result = await exchange(OUTBOUND_HTTP_TARGET);
+        const parsed = parseBody(result.bodyText);
+        if (!isOutboundHttpResponseProjection(parsed) || parsed.instanceId !== bound) {
           throw new Error(CLIENT_ERRORS.connection);
         }
         return deepFreeze(parsed);

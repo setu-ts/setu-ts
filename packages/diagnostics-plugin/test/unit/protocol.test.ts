@@ -187,7 +187,7 @@ describe('Protocol — status body and fixed errors', () => {
     });
   });
 
-  it('serves the fixed inspector manifest with health, configuration, queues, traces, cache, authorization, events, realtime and storage true and the rest false', () => {
+  it('serves the fixed inspector manifest with every inspector true', () => {
     const manifest = currentInspectorsManifest();
     const implemented: readonly string[] = [
       'health',
@@ -195,10 +195,12 @@ describe('Protocol — status body and fixed errors', () => {
       'queues',
       'traces',
       'cache',
+      'scheduler',
       'authorization',
       'events',
       'realtime',
       'storage',
+      'outboundHttp',
     ];
     for (const key of INSPECTOR_KEYS) {
       expect(manifest[key]).toBe(implemented.includes(key));

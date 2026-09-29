@@ -171,6 +171,18 @@ export const CAPABILITIES = {
    */
   CACHE_DIAGNOSTICS: 'cache-diagnostics',
   /**
+   * Scheduler execution observations (M98k) — an
+   * `ISchedulerDiagnosticsSource` every SchedulerPlugin instance registers
+   * under this token with `{ multi: true }`, without claiming it in
+   * `provides`, so the diagnostics token never collides with another
+   * provider of it (an application registers at most one SchedulerPlugin —
+   * its plugin name is fixed — but other code may contribute a source). The
+   * DiagnosticsPlugin reads every source to serve `GET /v1/scheduler`. A
+   * read never acquires a lock, invokes a handler, or claims cluster
+   * completeness — a skipped local fire is not a globally missed execution.
+   */
+  SCHEDULER_DIAGNOSTICS: 'scheduler-diagnostics',
+  /**
    * Minimized event-dispatch observations (M98j) — an
    * `IEventDiagnosticsSource` every EventsPlugin instance registers under
    * this token with `{ multi: true }`, without claiming it in `provides`, so
@@ -190,6 +202,17 @@ export const CAPABILITIES = {
    * subscribes, or creates or enumerates a room or channel.
    */
   REALTIME_DIAGNOSTICS: 'realtime-diagnostics',
+  /**
+   * Minimized outbound HTTP attempt observations (M98n) — an
+   * `IOutboundHttpDiagnosticsSource` the SDK's `createObservedFetch` helper
+   * registers, through its returned plugin, under this token with
+   * `{ multi: true }` and without claiming it in `provides`. The SDK writes
+   * this value as a literal (so its `common` imports stay type-only), pinned
+   * by a test. The DiagnosticsPlugin reads every source to serve
+   * `GET /v1/outbound-http`; no registered source means a typed
+   * `unsupported` response. A read never performs a request.
+   */
+  OUTBOUND_HTTP_DIAGNOSTICS: 'outbound-http-diagnostics',
   /**
    * Minimized storage operation observations (M98m) — an
    * `IStorageDiagnosticsSource` every StoragePlugin instance registers under

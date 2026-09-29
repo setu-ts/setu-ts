@@ -226,8 +226,8 @@ export class DiagnosticsEventRing {
    * through a read.
    *
    * The sequence counter is deliberately NOT reset: the discarded range is
-   * treated exactly like an eviction. A failed start can be corrected and
-   * retried on the same instance, and restarting at 1 would REUSE sequence
+   * treated exactly like an eviction. A start that failed before any plugin
+   * registered can be corrected and retried on the same instance, and restarting at 1 would REUSE sequence
    * numbers a reader already holds — a cursor past the new last sequence would
    * then be refused as "beyond the current sequence", and one inside the new
    * range would silently skip the retry's first events. Keeping the numbering

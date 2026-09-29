@@ -158,14 +158,14 @@ inspector operations `/v1/health` (M98d), `/v1/config` (M98e) and `/v1/queues?af
 (M98f) — over bounded polling. The status body carries an `inspectors` manifest (`health`,
 `configuration` and `queues` implemented; the rest reserved and `false` until their own operations
 ship); a client paired against a legacy three-field status body resolves it to all-`false`, and its
-`health()`, `configuration()` and `queues()` answer a typed `unsupported` without sending the
-request. Requests authenticate with `X-Setu-Session`, `X-Setu-Sequence` (strictly monotonic),
-`X-Setu-Instance`, and `X-Setu-Mac` (HMAC-SHA-256 over canonical newline-joined fields, verified via
-`subtle.verify`). Responses are signed over their exact bytes; the client verifies BEFORE parsing
-anything. Bodies are bounded (256 KiB), events are capped at 128 per read, and a fixed set of
-value-free error codes (`invalid-request`, `unauthorized`, `expired`, `unsupported-version`,
-`unavailable`, `rate-limited`) never reflects input. See `docs/diagnostics-protocol.md` in the
-repository for the complete wire specification and fixtures.
+`health()`, `configuration()`, `queues()` and `scheduler()` answer a typed `unsupported` without
+sending the request. Requests authenticate with `X-Setu-Session`, `X-Setu-Sequence` (strictly
+monotonic), `X-Setu-Instance`, and `X-Setu-Mac` (HMAC-SHA-256 over canonical newline-joined fields,
+verified via `subtle.verify`). Responses are signed over their exact bytes; the client verifies
+BEFORE parsing anything. Bodies are bounded (256 KiB), events are capped at 128 per read, and a
+fixed set of value-free error codes (`invalid-request`, `unauthorized`, `expired`,
+`unsupported-version`, `unavailable`, `rate-limited`) never reflects input. See
+`docs/diagnostics-protocol.md` in the repository for the complete wire specification and fixtures.
 
 Bounds: at most 8 simultaneous handlers with one slot reserved against unpaired floods, an anonymous
 refusal budget of 5 requests/second (burst 10), a per-session budget of 20 requests/second (burst
@@ -208,10 +208,15 @@ backplane reports its gauges as `unsupported`, and a source that cannot be read 
 value-free snapshot of kind `unknown`. With no realtime plugin registered the connector answers
 `state: 'unsupported'`.
 
-The M98m storage inspector is read through `client.storage(): Promise<StorageDiagnosticsResponse>`,
-the same aggregate shape as the M98i cache inspector. Each StoragePlugin instance contributes one
-source; a source that cannot be read appears as a value-free `collection-failed` snapshot. With no
-storage plugin registered the connector answers `state: 'unsupported'`.
+The M98n outbound HTTP inspector is read through
+`client.outboundHttp(): Promise<OutboundHttpDiagnosticsResponse>`. Each `createObservedFetch` helper
+from `@setu-ts/sdk` whose `plugin` the application registered contributes one source counting the
+attempts made through that helper's `fetch` — never a URL, header, body or error. With no helper
+registered the connector answers `state: 'unsupported'`. The M98m storage inspector is read through
+`client.storage(): Promise<StorageDiagnosticsResponse>`, the same aggregate shape as the M98i cache
+inspector. Each StoragePlugin instance contributes one source; a source that cannot be read appears
+as a value-free `collection-failed` snapshot. With no storage plugin registered the connector
+answers `state: 'unsupported'`.
 
 The full public surface is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#diagnostics-connector-setu-tsdiagnostics-plugin).
@@ -240,12 +245,18 @@ multi-provider sources resolved at bootstrap (more refuses startup). Keys, prefi
 factory results and errors never reach any layer; the e2e canary plants each and asserts its absence
 in the source snapshot, the raw signed bytes and the client DTO.
 
-The M98m storage inspector (`GET /v1/storage`, `client.storage()`) serves every StoragePlugin
-instance's operation counters — per fixed operation, under each instance's approved alias — from at
-most 16 multi-provider sources resolved at bootstrap (more refuses startup), the M98i cache rule.
-Object paths, stored bytes, content types, signed URLs and error text never reach any layer; the e2e
-canary plants each and asserts its absence in the source snapshot, the raw signed bytes and the
-client DTO.
+The M98k scheduler inspector (`GET /v1/scheduler`, `client.scheduler()`) serves every
+SchedulerPlugin instance's execution observations — contended, lock-failed and dispatched fires with
+wall-clock lateness, and handler attempts with their retry count — from at most 16 multi-provider
+sources resolved at bootstrap. Job names, cron expressions, payloads, job ids, lock keys and thrown
+errors never reach any layer; the e2e canary plants each and asserts its absence in the source
+snapshot, the raw signed bytes and the client DTO, and proves a lock loser produces no handler
+record. A skipped local fire is never reported as a globally missed execution. The M98m storage
+inspector (`GET /v1/storage`, `client.storage()`) serves every StoragePlugin instance's operation
+counters — per fixed operation, under each instance's approved alias — from at most 16
+multi-provider sources resolved at bootstrap (more refuses startup), the M98i cache rule. Object
+paths, stored bytes, content types, signed URLs and error text never reach any layer; the e2e canary
+plants each and asserts its absence in the source snapshot, the raw signed bytes and the client DTO.
 
 The M98g trace inspector (`GET /v1/traces?after=N&limit=N`, `client.traces(after, limit?)`) serves
 the TelemetryPlugin's completed, sampled spans under the same rules: only approved operation

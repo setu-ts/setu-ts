@@ -2628,25 +2628,36 @@ unhandled backend rejection stays unhandled with diagnostics on (a side branch o
 promise would have marked it handled and hidden it). Only one call in eight per operation is timed
 with a start reading — the per-call cost is one clock read plus one promise reaction.
 
-Storage observations (M98m) reuse the cache pattern without change of shape: each StoragePlugin
-instance attaches a bounded collector to its OWN `StorageService` through a private field set by an
-internal, non-barrel attach function (the exported constructor is unchanged, and an unattached
-service does one field read beyond the pre-M98m path) and registers an `IStorageDiagnosticsSource`
-under `CAPABILITIES.STORAGE_DIAGNOSTICS` with `{ multi: true }`. Only a fixed operation name, a
-primitive outcome code, at most two monotonic readings and a byte length cross into the collector —
-the wrapper classifies a result (a `null` `get` is impossible because absent objects throw; a
-`false` `exists`/`delete` is a success) before calling it, and a rejection is recorded without the
-error being read. `getSignedUrl` mints a URL rather than transferring bytes, so the collector
-carries `null` for its duration and byte length by construction; `getStream` counts the open, not
-the drain. The collector is NOT shared in `common` (unlike the M98l realtime collector) because a
-single plugin owns it; the option and collector types live in `@setu-ts/storage-plugin`. The
-connector resolves the sources once at bootstrap (refusing more than 16), reads each synchronously
-only after authentication, and copies only own data properties of plain objects, so a hostile
-replacement source cannot run a getter or smuggle a field. Coverage is `owned-instance`: direct
-provider calls and a service constructed without the collector are not represented. Object paths,
-stored bytes, content types, signed URLs (the synthetic `memory://` URL encodes the path) and error
-text never reach the collector, the wire, or the client. The caller receives a promise derived from
-the provider's, which re-rejects with the ORIGINAL reason, so an unhandled provider rejection stays
+Scheduler execution observations (M98k) use the same multi-provider shape, attached to the plugin's
+OWN `SchedulerService` and threaded to the executor per dispatched fire. The service observes each
+approved job's timer fire at its entry — lateness measured once against the intended epoch fire time
+(`max(0, actualStart - intendedFire)`, never an absolute schedule) — and settles it at the
+skip-or-dispatch decision: contended (fire slot held elsewhere, a delay whose registration slot
+belonged to another replica, or the overlap mutex held), lock-failed (a lock operation rejected), or
+dispatched with its settlement and monotonic duration. The executor observes handler attempts —
+started, succeeded/failed, the retry count — reading clocks only when an observer was supplied, so
+an unapproved job allocates nothing and a lock loser produces NO attempt record. A skipped local
+fire is never a globally missed execution: no missed counter exists, and coverage is always
+`owned-instance`, never cluster completeness. Storage observations (M98m) reuse the cache pattern
+without change of shape: each StoragePlugin instance attaches a bounded collector to its OWN
+`StorageService` through a module-private `WeakMap` written by an internal, non-barrel attach
+function (the exported constructor is unchanged, and an unattached service does one `WeakMap` read
+beyond the pre-M98m path) and registers an `IStorageDiagnosticsSource` under
+`CAPABILITIES.STORAGE_DIAGNOSTICS` with `{ multi: true }`. Only a fixed operation name, a primitive
+outcome code, at most two monotonic readings and a byte length cross into the collector — the
+wrapper classifies a result (a `null` `get` is impossible because absent objects throw; a `false`
+`exists`/`delete` is a success) before calling it, and a rejection is recorded without the error
+being read. `getSignedUrl` mints a URL rather than transferring bytes, so the collector carries
+`null` for its duration and byte length by construction; `getStream` counts the open, not the drain.
+The collector is NOT shared in `common` (unlike the M98l realtime collector) because a single plugin
+owns it; the option and collector types live in `@setu-ts/storage-plugin`. The connector resolves
+the sources once at bootstrap (refusing more than 16), reads each synchronously only after
+authentication, and copies only own data properties of plain objects, so a hostile replacement
+source cannot run a getter or smuggle a field. Coverage is `owned-instance`: direct provider calls
+and a service constructed without the collector are not represented. Object paths, stored bytes,
+content types, signed URLs (the synthetic `memory://` URL encodes the path) and error text never
+reach the collector, the wire, or the client. The caller receives a promise derived from the
+provider's, which re-rejects with the ORIGINAL reason, so an unhandled provider rejection stays
 unhandled with diagnostics on.
 
 ### Authorization Decision Explanation Boundary (Milestone 98h)
@@ -2733,6 +2744,16 @@ operation records and must not expire with them, so each websocket and sse sourc
 over its OWN service's size getters at registration and calls it only inside an authenticated read.
 Nothing resolves the capability on a read, so a replacement provider is never invoked, and `close`
 releases the reader.
+
+Outbound HTTP observations (M98n) are the one letter whose producer is not a plugin: the SDK is a
+browser-portable library whose only `common` imports are types. `createObservedFetch` therefore
+returns a fetch wrapper together with a small registration plugin that puts the helper's frozen,
+snapshot-only source under the multi token `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` (written in the
+SDK as a literal, pinned to `CAPABILITIES` by a test), and its collector is a deliberate local copy
+rather than an import from `common`. The wrapper forwards the caller's own arguments and receiver to
+exactly one delegation and reads only the response's `status`. The documented composition builds the
+helper only when the application factory receives its devtool composition, so a production entry
+carries no wrapper at all.
 
 ---
 

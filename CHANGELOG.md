@@ -36,6 +36,34 @@ All notable changes to this project are documented here. The format follows
   returned promise is a derived one rather than the provider's own. **Breaking for implementors:**
   `storage()` is a REQUIRED member of `IDiagnosticsClient`, so a hand-written client must add it
   (answering `unsupported` is a valid implementation).
+- **Outbound HTTP attempt observations (M98n): opt-in, minimized fetch-attempt counters through the
+  diagnostics connector.** `@setu-ts/sdk` exports `createObservedFetch({ alias, fetch?, timing? })`,
+  which returns `{ fetch, plugin }`: pass `fetch` to `ClientOptions.fetch`,
+  `SseClientOptions.fetch`, or call it directly, and register `plugin` in exactly one application.
+  The wrapper calls the wrapped fetch exactly once with the caller's own arguments (never read) and
+  receiver (except the helper object itself, which is forwarded as `undefined` — the platform
+  `fetch` throws `Illegal invocation` on workerd otherwise), returns the identical value or rethrows
+  the identical value — a synchronous throw stays synchronous — and records only that an attempt
+  started, whether it resolved or failed, the response's status class (`2xx`–`5xx`, `other`) and its
+  time to headers. No URL, host, header, cookie, body, signal or error is ever read. `plugin`
+  registers a frozen snapshot-only `IOutboundHttpDiagnosticsSource` under the new multi-provider
+  `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` and closes the helper on shutdown; it refuses a second
+  application. (A re-registration by the SAME application reopens the source instead of refusing it,
+  but a retried `start()` is not a working recovery today: the kernel refuses the retry itself once
+  `RuntimePlugin` re-registers `runtime`.) A record never expires while an attempt is in flight, so
+  a hung upstream stays visible as `started - count`. New public surface on `@setu-ts/common`:
+  `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS`, `IOutboundHttpDiagnosticsSource`,
+  `OutboundHttpDiagnosticsSnapshot`, `OutboundHttpDiagnosticsRecord`,
+  `OutboundHttpDiagnosticsResponse` and `OutboundHttpStatusClass`; on `@setu-ts/sdk`:
+  `createObservedFetch`, `ObservedFetch`, `ObservedFetchOptions`. New connector surface:
+  `GET /v1/outbound-http` (authenticated like every operation; a snapshot operation with no query;
+  more than 16 sources refuses startup; every counting invariant checked by the connector and the
+  client), the status manifest's `outboundHttp` key now `true`, and
+  `IDiagnosticsClient.outboundHttp()`, which answers a frozen typed `unsupported` response without a
+  request when the negotiated manifest lacks the inspector. **Breaking for implementors:**
+  `outboundHttp()` is a REQUIRED member of `IDiagnosticsClient`. The SDK's `common` imports stay
+  type-only: its collector is a deliberate local copy, and a test checks the module graph. The
+  helper needs `crypto.getRandomValues` (Node ≥ 19).
 
 - **Realtime lifecycle observations (M98l): opt-in, minimized WebSocket, SSE and backplane
   observations through the diagnostics connector.** `WebSocketPlugin`, `SsePlugin` and
@@ -76,6 +104,28 @@ All notable changes to this project are documented here. The format follows
   `realtime()` is a REQUIRED member of `IDiagnosticsClient`, so a hand-written client must add it
   (answering `unsupported` is a valid implementation).
 
+- **Scheduler execution observations (M98k): opt-in, minimized fire and attempt observations through
+  the diagnostics connector.** `SchedulerPlugin` accepts
+  `diagnostics: { enabled: true, alias,
+  jobs }` (the new exported `SchedulerDiagnosticsOptions`,
+  validated when `SchedulerPlugin(...)` is called; `jobs` is REQUIRED and maps exact job names to
+  approved aliases, so an empty map approves nothing); the instance's own `SchedulerService` and
+  executor then record each approved job's local timer fires — contended (slot or overlap lock held
+  elsewhere), lock-failed (a lock operation rejected), dispatched — and each handler attempt
+  (started, succeeded, failed, retryAttempts; a `behaviors` entry that declines a dispatch invokes
+  no handler and records no attempt) with monotonic `lastDurationMs` and the wall-clock
+  `lastLatenessMs` a fire started late (`max(0, actualStart - intendedFire)`, never an absolute
+  schedule). A skipped local fire is never reported as a globally missed execution: no missed
+  counter exists. Job names, cron expressions, payloads, job ids, lock keys and tokens, and thrown
+  values never reach the collector. Every SchedulerPlugin instance registers an
+  `ISchedulerDiagnosticsSource` under the new multi-provider `CAPABILITIES.SCHEDULER_DIAGNOSTICS`
+  (`disabled` without the option, with nothing attached to the service and no clock read on any
+  fire). New public surface on `@setu-ts/common`: `CAPABILITIES.SCHEDULER_DIAGNOSTICS`,
+  `ISchedulerDiagnosticsSource`, `SchedulerDiagnosticsSnapshot`, `SchedulerDiagnosticsRecord`,
+  `SchedulerDiagnosticsResponse`, `SchedulerDiagnosticsOperation`. New connector surface:
+  `GET /v1/scheduler` (at most 16 sources, more refuses startup) and the REQUIRED
+  `IDiagnosticsClient.scheduler()`; the status manifest now reports `scheduler: true`. Unobserved
+  services run the pre-M98k path — one field read, no clock.
 - **Event dispatch observations (M98j): opt-in, minimized event-dispatch observations through the
   diagnostics connector.** `EventsPlugin` accepts a `diagnostics` option
   (`EventsDiagnosticsOptions`, exported from `@setu-ts/events-plugin`) that attaches an internal
@@ -475,6 +525,25 @@ All notable changes to this project are documented here. The format follows
   the runbook.
 
 ### Changed
+
+- **`kernel` — retrying a `start()` that failed after plugin registration began now throws by
+  name.** `start()` rolls its started state back on failure, and its comment promised the failed
+  start could be "corrected and retried". Once a plugin had run `register()`, that retry re-ran
+  every plugin against state that survived the rollback — the registry (sealed, too, if the failure
+  came after bootstrap), lifecycle hooks, routes and middleware — so in the ordinary case it failed
+  with a misleading `Capability 'runtime' is already registered` (or
+  `Cannot register capability 'runtime'
+  after runBootstrap() has completed`). It now fails with
+  `Cannot retry start() after plugins have
+  registered … Create a new application instead.`, before
+  anything runs again. **This also refuses a retry that used to succeed**: when the first plugin to
+  run threw before writing any state — for example a runtime provider rejecting its options —
+  nothing was left behind and the retry worked. It is refused now because the kernel cannot tell a
+  plugin that wrote nothing from one that opened a connection its `onClose` did not release.
+  Failures during plugin resolution (no runtime provider, an unsatisfied dependency, a cycle) stay
+  retryable, as before. **Migration:** code that catches a failed `start()` and calls `start()`
+  again on the same application must create a new application instead (call your `createApp()`
+  again).
 
 - **`realtime-backplane-plugin` — a Redis publish on a failed connection is reported, not lost.** A
   connection that stays open while the server answers nothing — a paused or partitioned host that
