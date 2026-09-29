@@ -22,6 +22,7 @@ import { HttpClientError } from '../errors.ts';
 import { createCircuitBreaker } from '../circuit-breaker/circuit-breaker.ts';
 import { runWithRetry } from '../retry/retry-strategy.ts';
 import { createRateLimiter } from './rate-limiter.ts';
+import { createDefaultFetch } from './default-fetch.ts';
 
 /**
  * Matches a path that carries its own scheme (`https:`, `mailto:`) or is
@@ -123,7 +124,7 @@ export class HttpClient implements IHttpClient {
   constructor(options: ResolvedClientOptions) {
     this.#baseUrl = options.baseUrl;
     this.#defaultHeaders = options.headers;
-    this.#fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+    this.#fetch = options.fetch ?? createDefaultFetch();
     this.#timing = options.timing;
     this.#retry = options.retry;
     this.#circuitBreaker = options.circuitBreaker;

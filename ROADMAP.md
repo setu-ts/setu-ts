@@ -11235,25 +11235,34 @@ the three share lives in `@setu-ts/common` (maintainer decision, plan §3.1). Ca
 
 ### Milestone 98n: Outbound HTTP Attempt Observations
 
-**Status:** Planned. Owner: `packages/sdk`. Canonical plan:
-`plans/milestone-98n-outbound-http-observations.md`.
+**Status:** Complete (PR #380). Owner: `packages/sdk`. Plan archived at
+`plans/archive/milestone-98n-outbound-http-observations.md`. Committed-tree security audit passed on
+`cfd20fe0` (findings F1, F2 fixed on the branch).
 
-- [ ] Export createObservedFetch with an explicitly injected fetch and monotonic clock. Applications
-      pass the returned fetch to ClientOptions.fetch or call it directly. Call the injected fetch
-      exactly once with unchanged input/init and return the original Response or throw the original
-      rejection. Record elapsed time until response headers or rejection, status class and fixed
-      success/failure only. Never read request URLs, headers, bodies, signals or rejection
-      properties. No monkey-patching global fetch. Retries appear as separate attempts; logical
-      request counts, redirect-hop counts and timeout attribution are explicitly unavailable. No new
-      HTTP client plugin is introduced.
-- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+- [x] Export `createObservedFetch({ alias, fetch?, timing? })`. `fetch` is optional (default: the
+      SDK's call-time global fetch) and `timing` is an optional monotonic clock OBJECT called as
+      `timing.now()` (default `createDefaultClientTiming()`), probed once at construction (plan C4).
+      Applications pass the returned `fetch` to `ClientOptions.fetch` or call it directly. Call the
+      wrapped fetch exactly once with the caller's arguments unread and return the identical value
+      or rethrow the identical value. Record elapsed time until response headers or rejection,
+      status class and fixed success/failure only. Never read request URLs, headers, bodies, signals
+      or rejection properties. No monkey-patching global fetch. Retries appear as separate attempts;
+      logical request counts, redirect-hop counts and timeout attribution are explicitly
+      unavailable.
+- [x] The helper also returns a small registration `plugin` (not an HTTP client plugin) that
+      registers its snapshot-only source under a new multi-provider
+      `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` token, read by `DiagnosticsPlugin` at bootstrap (plan
+      C3; maintainer decision 2026-09-29). The plugin closes the helper through its own
+      `ctx.lifecycle.onClose` — `IApplication` has no `onClose` (plan C5). The documented
+      composition builds the helper only when the factory's `devtool` parameter is present.
+- [x] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
       reader and native client method; activate only the reserved `outboundHttp` manifest entry.
-- [ ] Exclude URLs, origin/hostnames, headers, cookies, request/response bodies, signal reasons,
+- [x] Exclude URLs, origin/hostnames, headers, cookies, request/response bodies, signal reasons,
       exception properties before buffering.
-- [ ] Explicitly adopted server-side fetch attempts only. Browser SDK collection is not
+- [x] Explicitly adopted server-side fetch attempts only. Browser SDK collection is not
       automatically sent to the framework; unrelated fetches and third-party internal calls are
       invisible.
-- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+- [x] Pass recorded pre-implementation design review and committed-tree implementation security
       audit. Verify exact input/init and Response identity, stream untouched, original synchronous
       throws and promise rejections, abort, SDK retry count and redirects delegated unchanged. Test
       with real local HTTP via SDK injected fetch; no public network test dependency.
@@ -12240,7 +12249,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                                                                                                                      |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                                                                                                                          |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                                                                                                                            |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98j complete, 98k–98n planned with security audit gates)                                                                                                                                  |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98l and 98n complete, 98m planned with security audit gates)                                                                                                                              |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                                                                                                                    |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))                                                                                                     |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                                                                                                                 |
@@ -12254,7 +12263,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98k       | ✅     | scheduler-plugin + common + diagnostics-plugin — scheduler execution observations ([#379](https://github.com/setu-ts/setu-ts/pull/379); security audit: nine rounds, last failed on K5, fixed and accepted, further rounds waived — plan §12) |
 | 98l       | ✅     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations                                                                                                                                          |
 | 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                                                                                     |
-| 98n       | ⬜     | outbound http attempt observations — design security review and implementation audit required                                                                                                                                                 |
+| 98n       | ✅     | sdk + common + diagnostics-plugin — outbound HTTP attempt observations ([#380](https://github.com/setu-ts/setu-ts/pull/380))                                                                                                                  |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High, plus the 99e maintainer report)                                                                                                                                                    |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                                                                                                                            |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                                                                                                                          |

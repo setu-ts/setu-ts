@@ -90,6 +90,8 @@ function fakeServer(
     cacheBody?: Record<string, unknown>;
     /** The body to serve for `/v1/realtime`; defaults to a three-source response. */
     realtimeBody?: Record<string, unknown>;
+    /** The body to serve for `/v1/outbound-http`; defaults to a one-source response. */
+    outboundHttpBody?: Record<string, unknown>;
     /** The body to serve for `/v1/queues`; defaults to a one-event batch. */
     queuesBody?: (after: number) => Record<string, unknown>;
     /** The body to serve for `/v1/traces`; defaults to a one-record batch. */
@@ -203,6 +205,8 @@ function fakeServer(
         );
       } else if (target === '/v1/cache') {
         bodyText = JSON.stringify(overrides.cacheBody ?? cacheResponseBody());
+      } else if (target === '/v1/outbound-http') {
+        bodyText = JSON.stringify(overrides.outboundHttpBody ?? outboundHttpResponseBody());
       } else if (target === '/v1/realtime') {
         bodyText = JSON.stringify(overrides.realtimeBody ?? realtimeResponseBody());
       } else if (url.pathname === '/v1/queues') {
@@ -846,6 +850,94 @@ function realtimeResponseBody(): Record<string, unknown> {
 function realtimeSnapshot(body: Record<string, unknown>, index: number): Record<string, unknown> {
   return (body.sources as { snapshot: Record<string, unknown> }[])[index]!.snapshot;
 }
+
+/** A one-source outbound HTTP response. */
+function outboundHttpResponseBody(): Record<string, unknown> {
+  return {
+    version: 1,
+    instanceId: TEST_INSTANCE_ID,
+    state: 'ready',
+    sources: [{
+      sourceId: 's1',
+      snapshot: {
+        state: 'ready',
+        alias: 'payments',
+        coverage: 'owned-instance',
+        records: [{
+          alias: 'payments',
+          operation: 'attempt',
+          started: 2,
+          count: 1,
+          responses: 1,
+          failures: 0,
+          lastStatusClass: '2xx',
+          lastDurationMs: 7,
+          ageMs: 1,
+        }],
+      },
+    }],
+  };
+}
+
+function outboundRecord(body: Record<string, unknown>): Record<string, unknown> {
+  const snapshot = (body.sources as { snapshot: Record<string, unknown> }[])[0]!.snapshot;
+  return (snapshot.records as Record<string, unknown>[])[0]!;
+}
+
+describe('Client — outbound HTTP negotiation (M98n)', () => {
+  it('reads the outbound HTTP response through the signed exchange and deep-freezes it', async () => {
+    const { client, requests } = buildClient();
+    const response = await client.outboundHttp();
+    expect(response).toEqual(outboundHttpResponseBody());
+    expect(requests.map((r) => r.target)).toEqual(['/v1/status', '/v1/outbound-http']);
+    expect(Object.isFrozen(response.sources[0]!.snapshot.records[0])).toBe(true);
+    client.close();
+  });
+
+  it('answers unsupported WITHOUT a request when the manifest outboundHttp key is false', async () => {
+    const without = { ...currentInspectorsManifest(), outboundHttp: false };
+    const { client, requests } = buildClient({ server: { statusInspectors: without } });
+    expect(await client.outboundHttp()).toEqual({
+      version: 1,
+      instanceId: TEST_INSTANCE_ID,
+      state: 'unsupported',
+      sources: [],
+    });
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  it('never probes the route when paired against the legacy status body', async () => {
+    const { client, requests } = buildClient({ server: { legacyStatus: true } });
+    expect((await client.outboundHttp()).state).toEqual('unsupported');
+    expect(requests.length).toEqual(1);
+    client.close();
+  });
+
+  const hostile: ReadonlyArray<[string, (body: Record<string, unknown>) => void]> = [
+    ['count above started', (b) => {
+      outboundRecord(b).count = 3;
+    }],
+    ['a raw status number', (b) => {
+      outboundRecord(b).lastStatusClass = 404;
+    }],
+    ['an extra record field', (b) => {
+      outboundRecord(b).url = 'https://canary.example/secret';
+    }],
+    ['a different instance', (b) => {
+      b.instanceId = '00000000-0000-4000-8000-000000000000';
+    }],
+  ];
+  for (const [name, mutate] of hostile) {
+    it(`refuses a correctly signed body carrying ${name}`, async () => {
+      const body = outboundHttpResponseBody();
+      mutate(body);
+      const { client } = buildClient({ server: { outboundHttpBody: body } });
+      await expect(client.outboundHttp()).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    });
+  }
+});
 
 describe('Client — realtime negotiation (M98l)', () => {
   it('reads the realtime response through the signed exchange and deep-freezes it', async () => {

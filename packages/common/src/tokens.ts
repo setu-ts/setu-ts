@@ -202,6 +202,17 @@ export const CAPABILITIES = {
    * subscribes, or creates or enumerates a room or channel.
    */
   REALTIME_DIAGNOSTICS: 'realtime-diagnostics',
+  /**
+   * Minimized outbound HTTP attempt observations (M98n) — an
+   * `IOutboundHttpDiagnosticsSource` the SDK's `createObservedFetch` helper
+   * registers, through its returned plugin, under this token with
+   * `{ multi: true }` and without claiming it in `provides`. The SDK writes
+   * this value as a literal (so its `common` imports stay type-only), pinned
+   * by a test. The DiagnosticsPlugin reads every source to serve
+   * `GET /v1/outbound-http`; no registered source means a typed
+   * `unsupported` response. A read never performs a request.
+   */
+  OUTBOUND_HTTP_DIAGNOSTICS: 'outbound-http-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

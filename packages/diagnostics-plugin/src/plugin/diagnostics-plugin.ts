@@ -21,6 +21,7 @@ import type {
   IHealthDiagnosticsSource,
   ILocalDiagnosticsListener,
   ILocalDiagnosticsListenerFactory,
+  IOutboundHttpDiagnosticsSource,
   IPluginContext,
   IQueueDiagnosticsSource,
   IRealtimeDiagnosticsSource,
@@ -38,6 +39,7 @@ import { QueueObservationMerger } from '../transport/queue-merger.ts';
 import { MAX_CACHE_SOURCES } from '../protocol/cache-protocol.ts';
 import { MAX_EVENT_SOURCES } from '../protocol/event-protocol.ts';
 import { MAX_REALTIME_SOURCES } from '../protocol/realtime-protocol.ts';
+import { MAX_OUTBOUND_HTTP_SOURCES } from '../protocol/outbound-http-protocol.ts';
 import { MAX_SCHEDULER_SOURCES } from '../protocol/scheduler-protocol.ts';
 
 /**
@@ -72,6 +74,9 @@ export const PLUGIN_ERRORS = {
   tooManyEventSources:
     'DiagnosticsPlugin: more than 16 event-diagnostics sources are registered; ' +
     'the connector reads at most 16.',
+  tooManyOutboundHttpSources:
+    'DiagnosticsPlugin: more than 16 outbound-http-diagnostics sources are registered; ' +
+    'the inspector refuses to start.',
   tooManyRealtimeSources:
     'DiagnosticsPlugin: more than 16 realtime-diagnostics sources are registered; ' +
     'the connector reads at most 16.',
@@ -344,6 +349,19 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           session = null;
           throw new Error(PLUGIN_ERRORS.tooManyRealtimeSources);
         }
+        // The outbound HTTP sources (M98n): each `createObservedFetch` helper's
+        // plugin contributes one. Collected only — no snapshot before an
+        // authenticated request. More than 16 refuses by a fixed error.
+        const outboundHttpSources = ctx.services.has(CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS)
+          ? ctx.services.getAll<IOutboundHttpDiagnosticsSource>(
+            CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS,
+          )
+          : [];
+        if (outboundHttpSources.length > MAX_OUTBOUND_HTTP_SOURCES) {
+          active.revoke();
+          session = null;
+          throw new Error(PLUGIN_ERRORS.tooManyOutboundHttpSources);
+        }
         const handler = createConnectorHandler({
           port: options.port,
           subtle: ctx.runtime.subtle,
@@ -360,6 +378,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           eventSources,
           authorization: authorizationSource,
           realtimeSources,
+          outboundHttpSources,
         });
         // The devtool's own startup line. Without it the runtime prints a
         // bare `Listening on http://127.0.0.1:<port>/`, which in an

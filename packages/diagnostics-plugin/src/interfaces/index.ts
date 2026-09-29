@@ -17,6 +17,7 @@ import type {
   EventDiagnosticsResponse,
   HealthDiagnosticsSnapshot,
   IPlugin,
+  OutboundHttpDiagnosticsResponse,
   QueueDiagnosticsBatch,
   RealtimeDiagnosticsResponse,
   SchedulerDiagnosticsResponse,
@@ -354,6 +355,23 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   realtime(): Promise<RealtimeDiagnosticsResponse>;
+  /**
+   * Reads the minimized outbound HTTP attempt observations through the
+   * signed protocol (M98n). Performs the `/v1/status` pairing exchange first
+   * if the session has not yet been bound.
+   *
+   * When the negotiated inspector manifest reports the outbound HTTP
+   * inspector as unsupported, a frozen typed `unsupported` response with no
+   * sources is returned WITHOUT sending an addon request. Otherwise the
+   * authenticated `/v1/outbound-http` exchange is performed and its exact
+   * contract — including every counting invariant — validated. The response
+   * never carries a URL, host, header, body, signal or error.
+   *
+   * @returns The deeply frozen outbound HTTP response
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  outboundHttp(): Promise<OutboundHttpDiagnosticsResponse>;
   /**
    * Reads the next bounded page of authorization decision explanations
    * through the signed protocol (M98h). Performs the `/v1/status` pairing

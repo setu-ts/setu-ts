@@ -131,6 +131,7 @@ async function harness(schedulerSources: readonly ISchedulerDiagnosticsSource[])
     schedulerSources,
     realtimeSources: [],
     eventSources: [],
+    outboundHttpSources: [],
   });
   session.bindInstance(TEST_INSTANCE_ID);
   return { handler, key, clock, session };
@@ -184,12 +185,12 @@ describe('scheduler protocol — target and manifest', () => {
     const manifest = currentInspectorsManifest();
     expect(manifest.scheduler).toBe(true);
     expect(manifest.health).toBe(true);
-    // M98j and M98l shipped first on main, so `events` and `realtime` are
-    // activated too; the rest stay reserved.
+    // M98j, M98l and M98n also shipped, so `events`, `realtime` and
+    // `outboundHttp` are activated too; the rest stay reserved.
     expect(manifest.events).toBe(true);
     expect(manifest.realtime).toBe(true);
+    expect(manifest.outboundHttp).toBe(true);
     expect(manifest.storage).toBe(false);
-    expect(manifest.outboundHttp).toBe(false);
   });
 });
 

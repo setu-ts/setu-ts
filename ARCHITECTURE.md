@@ -2725,6 +2725,16 @@ over its OWN service's size getters at registration and calls it only inside an 
 Nothing resolves the capability on a read, so a replacement provider is never invoked, and `close`
 releases the reader.
 
+Outbound HTTP observations (M98n) are the one letter whose producer is not a plugin: the SDK is a
+browser-portable library whose only `common` imports are types. `createObservedFetch` therefore
+returns a fetch wrapper together with a small registration plugin that puts the helper's frozen,
+snapshot-only source under the multi token `CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS` (written in the
+SDK as a literal, pinned to `CAPABILITIES` by a test), and its collector is a deliberate local copy
+rather than an import from `common`. The wrapper forwards the caller's own arguments and receiver to
+exactly one delegation and reads only the response's `status`. The documented composition builds the
+helper only when the application factory receives its devtool composition, so a production entry
+carries no wrapper at all.
+
 ---
 
 ## 15. Performance Philosophy
