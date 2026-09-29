@@ -2628,6 +2628,27 @@ unhandled backend rejection stays unhandled with diagnostics on (a side branch o
 promise would have marked it handled and hidden it). Only one call in eight per operation is timed
 with a start reading — the per-call cost is one clock read plus one promise reaction.
 
+Storage observations (M98m) reuse the cache pattern without change of shape: each StoragePlugin
+instance attaches a bounded collector to its OWN `StorageService` through a private field set by an
+internal, non-barrel attach function (the exported constructor is unchanged, and an unattached
+service does one field read beyond the pre-M98m path) and registers an `IStorageDiagnosticsSource`
+under `CAPABILITIES.STORAGE_DIAGNOSTICS` with `{ multi: true }`. Only a fixed operation name, a
+primitive outcome code, at most two monotonic readings and a byte length cross into the collector —
+the wrapper classifies a result (a `null` `get` is impossible because absent objects throw; a
+`false` `exists`/`delete` is a success) before calling it, and a rejection is recorded without the
+error being read. `getSignedUrl` mints a URL rather than transferring bytes, so the collector
+carries `null` for its duration and byte length by construction; `getStream` counts the open, not
+the drain. The collector is NOT shared in `common` (unlike the M98l realtime collector) because a
+single plugin owns it; the option and collector types live in `@setu-ts/storage-plugin`. The
+connector resolves the sources once at bootstrap (refusing more than 16), reads each synchronously
+only after authentication, and copies only own data properties of plain objects, so a hostile
+replacement source cannot run a getter or smuggle a field. Coverage is `owned-instance`: direct
+provider calls and a service constructed without the collector are not represented. Object paths,
+stored bytes, content types, signed URLs (the synthetic `memory://` URL encodes the path) and error
+text never reach the collector, the wire, or the client. The caller receives a promise derived from
+the provider's, which re-rejects with the ORIGINAL reason, so an unhandled provider rejection stays
+unhandled with diagnostics on.
+
 ### Authorization Decision Explanation Boundary (Milestone 98h)
 
 Authorization decision explanations apply the pattern to the first-party RBAC evaluator, with two

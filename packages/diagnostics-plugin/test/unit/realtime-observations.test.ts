@@ -505,6 +505,7 @@ async function harness(realtimeSources: readonly IRealtimeDiagnosticsSource[]) {
     healthSource: null,
     configSource: null,
     cacheSources: [],
+    storageSources: [],
     eventSources: [],
     realtimeSources,
   });

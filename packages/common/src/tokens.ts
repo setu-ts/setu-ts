@@ -190,6 +190,16 @@ export const CAPABILITIES = {
    * subscribes, or creates or enumerates a room or channel.
    */
   REALTIME_DIAGNOSTICS: 'realtime-diagnostics',
+  /**
+   * Minimized storage operation observations (M98m) — an
+   * `IStorageDiagnosticsSource` every StoragePlugin instance registers under
+   * this token with `{ multi: true }`, without claiming it in `provides`, so
+   * multiple storage instances never collide. The DiagnosticsPlugin reads
+   * every source to serve `GET /v1/storage`; no registered source means the
+   * connector answers a typed `unsupported` response. A read never performs a
+   * storage operation, resolves the storage capability, or probes a backend.
+   */
+  STORAGE_DIAGNOSTICS: 'storage-diagnostics',
   /** Metric registration contributions (multi-provider). */
   METRIC_REGISTRATION: 'metric-registration',
   /** OpenAPI schema contributions (multi-provider). */

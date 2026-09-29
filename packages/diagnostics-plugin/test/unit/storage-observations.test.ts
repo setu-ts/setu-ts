@@ -1,8 +1,8 @@
 /**
- * Unit tests for the M98i cache operation: the copy-once source reader and
+ * Unit tests for the M98m storage operation: the copy-once source reader and
  * its refusals (getters, prototypes, extra keys, proxies, oversized lists,
  * duplicate aliases, budget overrun), the aggregate state priority, the ONE
- * wire validator, the authenticated `GET /v1/cache` dispatch (source reads
+ * wire validator, the authenticated `GET /v1/storage` dispatch (source reads
  * only after authentication, unsupported without sources), and the
  * connector's refusal of more than 16 sources at bootstrap.
  */
@@ -10,21 +10,21 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import type {
-  CacheDiagnosticsSnapshot,
-  ICacheDiagnosticsSource,
   IPlugin,
   IResponse,
+  IStorageDiagnosticsSource,
+  StorageDiagnosticsSnapshot,
 } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 import {
-  buildCacheResponse,
-  isCacheResponseProjection,
-  isCacheSnapshotProjection,
-  MAX_CACHE_SOURCES,
-} from '../../src/protocol/cache-protocol.ts';
+  buildStorageResponse,
+  isStorageResponseProjection,
+  isStorageSnapshotProjection,
+  MAX_STORAGE_SOURCES,
+} from '../../src/protocol/storage-protocol.ts';
 import { parseTarget } from '../../src/protocol/protocol.ts';
 import { createConnectorHandler } from '../../src/transport/connector-handler.ts';
 import { ConnectorLimits } from '../../src/transport/limits.ts';
@@ -48,22 +48,17 @@ import {
 
 const HOST = `127.0.0.1:${TEST_PORT}`;
 
-/** A well-formed record. */
-function record(alias = 'primary', operation = 'get'): Record<string, unknown> {
+/** A well-formed record, with the operation's nullability respected. */
+function record(alias = 'primary', operation = 'put'): Record<string, unknown> {
   return {
     alias,
     operation,
     count: 1,
-    lastDurationMs: 2,
+    lastDurationMs: operation === 'getSignedUrl' ? null : 2,
     ageMs: 3,
     succeeded: 1,
     failed: 0,
-    hits: 1,
-    misses: 0,
-    present: 0,
-    absent: 0,
-    removed: 0,
-    notRemoved: 0,
+    lastBytes: operation === 'put' || operation === 'get' ? 4 : null,
   };
 }
 
@@ -88,15 +83,15 @@ const FAILED = {
 };
 
 /** A source answering `value` (or throwing it when it is an Error). */
-function source(value: unknown): ICacheDiagnosticsSource & { calls: number } {
+function source(value: unknown): IStorageDiagnosticsSource & { calls: number } {
   const s = {
     calls: 0,
-    snapshot(): CacheDiagnosticsSnapshot {
+    snapshot(): StorageDiagnosticsSnapshot {
       s.calls++;
       if (value instanceof Error) {
         throw value;
       }
-      return value as CacheDiagnosticsSnapshot;
+      return value as StorageDiagnosticsSnapshot;
     },
   };
   return s;
@@ -104,24 +99,24 @@ function source(value: unknown): ICacheDiagnosticsSource & { calls: number } {
 
 /** The one-source response's first snapshot. */
 function only(value: unknown): unknown {
-  const response = buildCacheResponse(TEST_INSTANCE_ID, [source(value)]);
+  const response = buildStorageResponse(TEST_INSTANCE_ID, [source(value)]);
   return (response.sources as { snapshot: unknown }[])[0]!.snapshot;
 }
 
-describe('cache protocol — target', () => {
-  it('parses exactly /v1/cache with no query', () => {
-    expect(parseTarget('/v1/cache', '')).toEqual({
-      op: 'cache',
-      canonicalTarget: '/v1/cache',
+describe('storage protocol — target', () => {
+  it('parses exactly /v1/storage with no query', () => {
+    expect(parseTarget('/v1/storage', '')).toEqual({
+      op: 'storage',
+      canonicalTarget: '/v1/storage',
       after: 0,
       limit: 0,
     });
-    expect(parseTarget('/v1/cache', 'after=0&limit=1')).toBeNull();
-    expect(parseTarget('/v1/cache/', '')).toBeNull();
+    expect(parseTarget('/v1/storage', 'after=0&limit=1')).toBeNull();
+    expect(parseTarget('/v1/storage/', '')).toBeNull();
   });
 });
 
-describe('cache protocol — source reading', () => {
+describe('storage protocol — source reading', () => {
   it('copies a well-formed snapshot (positive control)', () => {
     expect(only(ready())).toEqual(ready());
     expect(only(DISABLED)).toEqual(DISABLED);
@@ -158,10 +153,10 @@ describe('cache protocol — source reading', () => {
     }],
     ['a sparse record list', () => ready('primary', new Array(1) as never)],
     ['a record with an extra key', () => ready('primary', [{ ...record(), value: 'x' }])],
-    ['more than 64 records', () =>
+    ['more than 6 records', () =>
       ready(
         'primary',
-        Array.from({ length: 65 }, () => record()),
+        Array.from({ length: 7 }, () => record()),
       )],
     ['an unknown state', () => ({ ...ready(), state: 'unsupported' })],
     ['a wrong coverage', () => ({ ...ready(), coverage: 'all' })],
@@ -172,11 +167,20 @@ describe('cache protocol — source reading', () => {
     ['a no-data source with records', () => ({ ...ready(), state: 'no-data' })],
     ['a ready source with no records', () => ({ ...ready(), records: [] })],
     ['a record under another alias', () => ready('primary', [record('other')])],
-    ['an invalid operation', () => ready('primary', [record('primary', 'evict')])],
+    ['an invalid operation', () => ready('primary', [record('primary', 'list' as never)])],
     ['a duplicate operation', () => ready('primary', [record(), record()])],
     ['a negative counter', () => ready('primary', [{ ...record(), failed: -1 }])],
     ['a non-finite counter', () => ready('primary', [{ ...record(), ageMs: Infinity }])],
     ['a fractional duration', () => ready('primary', [{ ...record(), lastDurationMs: 1.5 }])],
+    [
+      'a duration on getSignedUrl',
+      () => ready('primary', [{ ...record('primary', 'getSignedUrl'), lastDurationMs: 2 }]),
+    ],
+    [
+      'bytes on a non-buffered operation',
+      () => ready('primary', [{ ...record('primary', 'delete'), lastBytes: 4 }]),
+    ],
+    ['a count disagreeing with its outcomes', () => ready('primary', [{ ...record(), count: 3 }])],
     ['a throwing proxy', () =>
       new Proxy(ready(), {
         ownKeys: () => {
@@ -196,9 +200,12 @@ describe('cache protocol — source reading', () => {
     expect(only({ ...DISABLED, state: 'ready', records: [record()] })).toEqual(FAILED);
   });
 
-  it('accepts a null lastDurationMs and snapshots at the record bound', () => {
-    const ops = ['get', 'set', 'delete', 'has', 'clear'];
-    const records = ops.map((op) => ({ ...record('p', op), lastDurationMs: null }));
+  it('accepts null duration and bytes, and a zero byte length', () => {
+    const records = [
+      { ...record('p', 'getSignedUrl'), lastDurationMs: null, lastBytes: null },
+      { ...record('p', 'getStream'), lastBytes: null },
+      { ...record('p', 'put'), lastBytes: 0 },
+    ];
     expect(only(ready('p', records))).toEqual(ready('p', records));
   });
 
@@ -217,16 +224,16 @@ describe('cache protocol — source reading', () => {
   });
 });
 
-describe('cache protocol — aggregate response', () => {
+describe('storage protocol — aggregate response', () => {
   it('answers unsupported with no sources', () => {
-    const response = buildCacheResponse(TEST_INSTANCE_ID, []);
+    const response = buildStorageResponse(TEST_INSTANCE_ID, []);
     expect(response).toEqual({
       version: 1,
       instanceId: TEST_INSTANCE_ID,
       state: 'unsupported',
       sources: [],
     });
-    expect(isCacheResponseProjection(response)).toBe(true);
+    expect(isStorageResponseProjection(response)).toBe(true);
   });
 
   it('assigns s1…sN ids in registration order and applies the state priority', () => {
@@ -238,18 +245,18 @@ describe('cache protocol — aggregate response', () => {
       [[DISABLED, DISABLED], 'disabled'],
     ];
     for (const [values, state] of cases) {
-      const response = buildCacheResponse(TEST_INSTANCE_ID, values.map(source));
+      const response = buildStorageResponse(TEST_INSTANCE_ID, values.map(source));
       expect(response.state).toBe(state);
       expect((response.sources as { sourceId: string }[]).map((s) => s.sourceId)).toEqual([
         's1',
         's2',
       ]);
-      expect(isCacheResponseProjection(response)).toBe(true);
+      expect(isStorageResponseProjection(response)).toBe(true);
     }
   });
 
   it('collapses duplicate non-null aliases to collection-failed with no sources', () => {
-    const response = buildCacheResponse(TEST_INSTANCE_ID, [
+    const response = buildStorageResponse(TEST_INSTANCE_ID, [
       source(ready('same')),
       source(DISABLED),
       source(DISABLED),
@@ -261,19 +268,19 @@ describe('cache protocol — aggregate response', () => {
       state: 'collection-failed',
       sources: [],
     });
-    expect(isCacheResponseProjection(response)).toBe(true);
+    expect(isStorageResponseProjection(response)).toBe(true);
   });
 
   it('collapses a response over the 256 KiB budget rather than truncating it', () => {
-    const ops = ['get', 'set', 'delete', 'has', 'clear'];
+    const ops = ['put', 'get', 'delete', 'exists', 'getSignedUrl', 'getStream'];
     const make = (count: number) =>
       Array.from({ length: count }, (_, i) => {
         const alias = `source-${i}`;
         return source(ready(alias, ops.map((op) => record(alias, op))));
       });
     // Positive control: sixteen full sources are far under the budget.
-    expect(buildCacheResponse(TEST_INSTANCE_ID, make(16)).state).toBe('ready');
-    expect(buildCacheResponse(TEST_INSTANCE_ID, make(1_000))).toEqual({
+    expect(buildStorageResponse(TEST_INSTANCE_ID, make(16)).state).toBe('ready');
+    expect(buildStorageResponse(TEST_INSTANCE_ID, make(1_000))).toEqual({
       version: 1,
       instanceId: TEST_INSTANCE_ID,
       state: 'collection-failed',
@@ -282,8 +289,8 @@ describe('cache protocol — aggregate response', () => {
   });
 
   it('validator refuses malformed responses', () => {
-    const good = buildCacheResponse(TEST_INSTANCE_ID, [source(ready())]);
-    expect(isCacheResponseProjection(good)).toBe(true);
+    const good = buildStorageResponse(TEST_INSTANCE_ID, [source(ready())]);
+    expect(isStorageResponseProjection(good)).toBe(true);
     const bad: unknown[] = [
       null,
       { ...good, extra: 1 },
@@ -311,9 +318,9 @@ describe('cache protocol — aggregate response', () => {
       { ...good, sources: [{ sourceId: 's1', snapshot: DISABLED }], state: 'unsupported' },
     ];
     for (const value of bad) {
-      expect(isCacheResponseProjection(value)).toBe(false);
+      expect(isStorageResponseProjection(value)).toBe(false);
     }
-    expect(isCacheSnapshotProjection('x')).toBe(false);
+    expect(isStorageSnapshotProjection('x')).toBe(false);
   });
 });
 
@@ -326,8 +333,8 @@ function inspect(
   return { status: snapshot.status, body: JSON.parse(text), text };
 }
 
-/** Builds a handler over the given cache sources, bound to the test instance. */
-async function harness(cacheSources: readonly ICacheDiagnosticsSource[]) {
+/** Builds a handler over the given storage sources, bound to the test instance. */
+async function harness(storageSources: readonly IStorageDiagnosticsSource[]) {
   const clock = new MutableClock();
   const session = await createTestSession(crypto.subtle, clock, 900_000);
   const key = await importTestKey(crypto.subtle);
@@ -343,8 +350,8 @@ async function harness(cacheSources: readonly ICacheDiagnosticsSource[]) {
     clock,
     healthSource: null,
     configSource: null,
-    cacheSources,
-    storageSources: [],
+    cacheSources: [],
+    storageSources,
     eventSources: [],
     realtimeSources: [],
   });
@@ -352,8 +359,8 @@ async function harness(cacheSources: readonly ICacheDiagnosticsSource[]) {
   return { handler, key, clock, session };
 }
 
-/** One `/v1/cache` request's overridable parts. */
-interface CacheRequestParts {
+/** One `/v1/storage` request's overridable parts. */
+interface StorageRequestParts {
   readonly method?: string;
   readonly sessionId?: string;
   readonly sequence?: number;
@@ -361,19 +368,19 @@ interface CacheRequestParts {
   readonly mac?: string;
 }
 
-/** Sends a signed `/v1/cache` request; each part may be overridden. */
+/** Sends a signed `/v1/storage` request; each part may be overridden. */
 async function request(
   handler: (request: ReturnType<typeof fakeRequest>) => Promise<IResponse>,
   key: CryptoKey,
-  parts: CacheRequestParts = {},
+  parts: StorageRequestParts = {},
 ): Promise<IResponse> {
   const sequence = parts.sequence ?? 1;
   const instance = parts.instance ?? TEST_INSTANCE_ID;
   const mac = parts.mac ??
-    await signRequest(crypto.subtle, key, '/v1/cache', sequence, instance);
+    await signRequest(crypto.subtle, key, '/v1/storage', sequence, instance);
   return await handler(fakeRequest({
     ...(parts.method !== undefined ? { method: parts.method } : {}),
-    url: `http://${HOST}/v1/cache`,
+    url: `http://${HOST}/v1/storage`,
     headers: {
       host: HOST,
       'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
@@ -384,7 +391,7 @@ async function request(
   }));
 }
 
-describe('connector — GET /v1/cache', () => {
+describe('connector — GET /v1/storage', () => {
   it('serves the aggregate response after authentication', async () => {
     const s = source(ready());
     const { handler, key } = await harness([s]);
@@ -481,15 +488,15 @@ describe('connector — GET /v1/cache', () => {
   });
 });
 
-describe('DiagnosticsPlugin — cache source bound', () => {
+describe('DiagnosticsPlugin — storage source bound', () => {
   function sources(count: number): IPlugin {
     return {
-      name: 'fake-cache-sources',
+      name: 'fake-storage-sources',
       version: '0.0.0',
       register(ctx) {
         for (let i = 0; i < count; i++) {
-          ctx.services.register<ICacheDiagnosticsSource>(
-            CAPABILITIES.CACHE_DIAGNOSTICS,
+          ctx.services.register<IStorageDiagnosticsSource>(
+            CAPABILITIES.STORAGE_DIAGNOSTICS,
             source(DISABLED),
             { multi: true },
           );
@@ -523,14 +530,14 @@ describe('DiagnosticsPlugin — cache source bound', () => {
   }
 
   it('starts with exactly 16 sources', async () => {
-    const { app, started } = boot(MAX_CACHE_SOURCES);
+    const { app, started } = boot(MAX_STORAGE_SOURCES);
     await started;
     await app.stop();
   });
 
   it('refuses a 17th source with a fixed, value-free configuration error', async () => {
-    const { app, started } = boot(MAX_CACHE_SOURCES + 1);
-    await expect(started).rejects.toThrow(PLUGIN_ERRORS.tooManyCacheSources);
+    const { app, started } = boot(MAX_STORAGE_SOURCES + 1);
+    await expect(started).rejects.toThrow(PLUGIN_ERRORS.tooManyStorageSources);
     await app.stop().catch(() => {});
   });
 });

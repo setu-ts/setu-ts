@@ -96,6 +96,14 @@ export const EVENT_PATH = '/v1/event';
 export const REALTIME_TARGET = '/v1/realtime';
 
 /**
+ * The storage operation observations target (M98m); it carries no query —
+ * a snapshot operation, not a paged one.
+ *
+ * @internal
+ */
+export const STORAGE_TARGET = '/v1/storage';
+
+/**
  * The queue observations path (M98f); its target carries the same canonical
  * `?after=<N>&limit=<N>` query as the events target.
  *
@@ -151,7 +159,8 @@ export interface ParsedTarget {
     | 'traces'
     | 'authorization'
     | 'event'
-    | 'realtime';
+    | 'realtime'
+    | 'storage';
   /** The exact canonical target string, byte-identical to the request's. */
   readonly canonicalTarget: string;
   /** The parsed `after` cursor (events and queues); `0` for the other ops. */
@@ -194,6 +203,9 @@ export function parseTarget(path: string, search: string): ParsedTarget | null {
   }
   if (path === REALTIME_TARGET && search === '') {
     return { op: 'realtime', canonicalTarget: REALTIME_TARGET, after: 0, limit: 0 };
+  }
+  if (path === STORAGE_TARGET && search === '') {
+    return { op: 'storage', canonicalTarget: STORAGE_TARGET, after: 0, limit: 0 };
   }
   if (path === EVENTS_PATH) {
     return parsePagedTarget('events', path, search);
@@ -435,9 +447,9 @@ export type InspectorsManifest = Readonly<Record<(typeof INSPECTOR_KEYS)[number]
 /**
  * The inspector manifest this connector serves: `health` (M98d),
  * `configuration` (M98e), `queues` (M98f), `traces` (M98g), `cache` (M98i),
- * `authorization` (M98h), `events` (M98j) and `realtime` (M98l) are
- * implemented; the rest are reserved and false until their own connector
- * operation ships.
+ * `authorization` (M98h), `events` (M98j), `realtime` (M98l) and `storage`
+ * (M98m) are implemented; the rest are reserved and false until their own
+ * connector operation ships.
  *
  * @returns The fixed manifest
  * @internal
@@ -453,7 +465,7 @@ export function currentInspectorsManifest(): InspectorsManifest {
     events: true,
     scheduler: false,
     realtime: true,
-    storage: false,
+    storage: true,
     outboundHttp: false,
   };
 }

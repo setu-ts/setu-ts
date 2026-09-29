@@ -138,6 +138,7 @@ async function buildHarness(options?: {
     healthSource: null,
     configSource: options?.configSource ?? null,
     cacheSources: options?.cacheSources ?? [],
+    storageSources: [],
   });
   return { handler, clock, source, session, key };
 }
@@ -589,6 +590,7 @@ describe('Connector handler — authentication and binding', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      storageSources: [],
     });
     expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
     clock.advance(1_000);
@@ -796,6 +798,7 @@ describe('Connector handler — projection hardening', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      storageSources: [],
     });
     // The throwing path is BELOW the handler's try — the connector-handler
     // module catches nothing inside; the runtime listener owns the 503 arm.
@@ -873,6 +876,7 @@ describe('Connector handler — health operation (M98d)', () => {
       healthSource: { snapshot: () => healthSnapshot },
       configSource: null,
       cacheSources: [],
+      storageSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -917,6 +921,7 @@ describe('Connector handler — health operation (M98d)', () => {
       },
       configSource: null,
       cacheSources: [],
+      storageSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -967,6 +972,7 @@ describe('Connector handler — health operation (M98d)', () => {
       healthSource: healthSource as { snapshot: (id: string) => HealthDiagnosticsSnapshot },
       configSource: null,
       cacheSources: [],
+      storageSources: [],
     });
     const mac = await signRequest(crypto.subtle, key, '/v1/health', 2, TEST_INSTANCE_ID);
     const view = inspect(
@@ -1286,6 +1292,7 @@ describe('Connector handler — remaining structural arms', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      storageSources: [],
     });
     // Forty full-burst honest statuses without any elapsed time exhaust the
     // session's fixed burst budget. Sequence 1 binds (empty instance);
@@ -1334,6 +1341,7 @@ describe('Connector handler — remaining structural arms', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      storageSources: [],
     });
     // The request CLAIMS port 5959 (its Host and URL match the handler) but
     // the MAC was signed for 4919: authentication must refuse it.
@@ -1722,6 +1730,7 @@ describe('Connector handler — queue observations (M98f)', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      storageSources: [],
     });
     return { handler, key, clock };
   }
@@ -1869,6 +1878,7 @@ describe('Connector handler — trace observations (M98g)', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      storageSources: [],
     });
     return { handler, key, clock };
   }
@@ -2054,6 +2064,7 @@ describe('Connector handler — event observation operation (M98j)', () => {
       eventSources: sources,
       realtimeSources: [],
       cacheSources: [],
+      storageSources: [],
       authorization: null,
       source: fakeSource(minimalSnapshot(), minimalBatch()),
       clock,
@@ -2349,6 +2360,7 @@ describe('Connector handler — authorization explanations (M98h)', () => {
       healthSource: null,
       configSource: null,
       cacheSources: [],
+      storageSources: [],
       eventSources: [],
       realtimeSources: [],
     });

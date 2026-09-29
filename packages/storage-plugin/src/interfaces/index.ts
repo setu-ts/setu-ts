@@ -69,6 +69,8 @@ export type StoragePluginOptions =
 export interface MemoryStorageOptions {
   /** Selects the memory backend. Optional — an omitted provider means memory. */
   readonly provider?: 'memory';
+  /** Opt-in storage operation observations; see {@linkcode StorageDiagnosticsOptions}. */
+  readonly diagnostics?: StorageDiagnosticsOptions;
 }
 
 /** The local-filesystem arm. */
@@ -77,6 +79,8 @@ export interface LocalStorageOptions {
   readonly provider: 'local';
   /** Root directory configuration. */
   readonly options?: LocalStorageProviderOptions;
+  /** Opt-in storage operation observations; see {@linkcode StorageDiagnosticsOptions}. */
+  readonly diagnostics?: StorageDiagnosticsOptions;
 }
 
 /**
@@ -88,6 +92,8 @@ export interface S3StorageOptions {
   readonly provider: 's3' | 'b2';
   /** Bucket and credentials; `bucket` is required. */
   readonly options: S3ProviderOptions;
+  /** Opt-in storage operation observations; see {@linkcode StorageDiagnosticsOptions}. */
+  readonly diagnostics?: StorageDiagnosticsOptions;
 }
 
 /** The Google Cloud Storage arm. */
@@ -96,6 +102,8 @@ export interface GcsStorageOptions {
   readonly provider: 'gcs';
   /** Bucket and project; `bucket` is required. */
   readonly options: GcsProviderOptions;
+  /** Opt-in storage operation observations; see {@linkcode StorageDiagnosticsOptions}. */
+  readonly diagnostics?: StorageDiagnosticsOptions;
 }
 
 /** The Azure Blob Storage arm. */
@@ -104,6 +112,34 @@ export interface AzureStorageOptions {
   readonly provider: 'azure';
   /** Container and credentials; `containerName` is required. */
   readonly options: AzureBlobProviderOptions;
+  /** Opt-in storage operation observations; see {@linkcode StorageDiagnosticsOptions}. */
+  readonly diagnostics?: StorageDiagnosticsOptions;
+}
+
+/**
+ * The opt-in storage-observation policy (M98m).
+ *
+ * Only settlements through THIS plugin instance's own `StorageService` are
+ * counted, per fixed operation, under the one approved alias. Paths, bytes,
+ * metadata, content types, signed URLs, credentials and errors are never
+ * captured, and no per-object label exists. "Safe" is a SHAPE, not secret
+ * detection: the alias is a string of `1`–`64` UTF-8 bytes containing no
+ * control character, and approving it IS authorizing its disclosure — never
+ * derive it from a path.
+ *
+ * @since 0.7.0
+ */
+export interface StorageDiagnosticsOptions {
+  /**
+   * The explicit opt-in, deliberately the LITERAL `true`: `enabled: false`
+   * (or any other value) is refused; omit `diagnostics` instead.
+   */
+  readonly enabled: true;
+  /**
+   * The display alias for this storage instance; unique across storage
+   * diagnostics sources.
+   */
+  readonly alias: string;
 }
 
 /**

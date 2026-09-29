@@ -37,6 +37,7 @@ verified.
 | `GET /v1/authorization?after=N&limit=N` | M98h's authorization-decision-explanation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
 | `GET /v1/event`                         | M98j's aggregated event-dispatch observation snapshot (below); a SNAPSHOT operation — no query is admitted, exactly like `/v1/health` and `/v1/config`                           |
 | `GET /v1/realtime`                      | M98l's realtime lifecycle observations across every WebSocket, SSE and backplane source (below); a SNAPSHOT operation — no query is admitted                                     |
+| `GET /v1/storage`                       | M98m's storage operation counters across every storage source (below); a SNAPSHOT operation — no query is admitted, exactly like `/v1/cache`                                     |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
 duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
@@ -167,12 +168,12 @@ design security review, R7).
 `GET /v1/health` is the first inspector operation. The status body's `inspectors` manifest names
 every inspector the connector knows and whether it is implemented; the connector serves
 `health: true` (M98d), `configuration: true` (M98e), `queues: true` (M98f), `traces: true` (M98g),
-`cache: true` (M98i), `authorization: true` (M98h), `events: true` (M98j) and `realtime: true`
-(M98l), and leaves the rest (`scheduler`, `storage`, `outboundHttp`) reserved and `false`. A client
-that reads a legacy M98b three-field status body (no `inspectors`) resolves the manifest to
+`cache: true` (M98i), `authorization: true` (M98h), `events: true` (M98j), `realtime: true` (M98l)
+and `storage: true` (M98m), and leaves the rest (`scheduler`, `outboundHttp`) reserved and `false`.
+A client that reads a legacy M98b three-field status body (no `inspectors`) resolves the manifest to
 all-`false`, so its `health()`, `configuration()`, `queues()`, `traces()`, `cache()`,
-`authorization()`, `events()` and `realtime()` answer a typed `unsupported` without sending the
-request.
+`authorization()`, `events()`, `realtime()` and `storage()` answer a typed `unsupported` without
+sending the request.
 
 The answer is the health plugin's minimized `HealthDiagnosticsSnapshot` — the same frozen DTO the
 plugin registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`, projected field-by-field:
@@ -387,6 +388,45 @@ non-null aliases across sources, or a response over 256 KiB, collapse the whole 
 Keys, prefixes, values, Redis URLs, factory results and errors never reach the collector, the wire,
 or the client. Only calls through the plugin's OWN `CacheService` are counted: direct store calls
 and a replacement service registered later are outside coverage.
+
+## Storage observations (M98m)
+
+`GET /v1/storage` (no query) answers
+`{ version: 1, instanceId, state, sources: [{ sourceId, snapshot }] }` over every
+`IStorageDiagnosticsSource` registered under `CAPABILITIES.STORAGE_DIAGNOSTICS` — the same aggregate
+shape, the same `s1`…`s16` session-local ids, and the same more-than-16-refuses-startup rule as the
+M98i cache operation. Every StoragePlugin instance registers one as a multi provider (never in
+`provides`); the connector resolves them ONCE at bootstrap, in registration order. Sources are read
+only after the request authenticated.
+
+A snapshot is exactly `{ state, alias, coverage: 'owned-instance', records, dropped }`; `alias` is
+`null` when the plugin was not opted in (`state: 'disabled'`). A record is exactly
+`{ alias, operation, count, lastDurationMs, ageMs, succeeded, failed, lastBytes }` for one of the
+six public operations `put`, `get`, `delete`, `exists`, `getSignedUrl`, `getStream`. Every settled
+call increments `count` and exactly one of `succeeded`/`failed`. `getSignedUrl` is a URL mint, not a
+data transfer: `lastDurationMs` and `lastBytes` are `null` for it. `lastBytes` is the byte length of
+the last settled buffer for the buffered operations `put` and `get` (a `get` that finds nothing
+settles as a failure and carries `null`), and `null` for the non-buffered operations `delete`,
+`exists`, `getStream`. A `getStream` counts the open, not the drain: the stream is handed to the
+caller and its eventual consumption is outside coverage.
+
+Each source is untrusted input: only a plain object (`Object.prototype` or `null` prototype) of own
+DATA properties is admitted, each field read once through its descriptor (a getter is never
+invoked), lists read by index, at most 6 records, exact keys and enums, unique operations,
+non-negative safe-integer counters, and the per-operation nullability above. A source that throws or
+fails any check is reported as a fixed
+`{ state: 'collection-failed', alias: null, records: [],
+dropped: 0 }` — no error text. Duplicate
+non-null aliases across sources, or a response over 256 KiB, collapse the whole response to
+`{ state: 'collection-failed', sources: [] }`; a partial document is never produced. The aggregate
+`state` is `unsupported` with no source, otherwise the first of `ready`, `collection-failed`,
+`stale`, `no-data`, `disabled` present. The client runs the same validator; a manifest with
+`storage: false` answers a local typed `unsupported` response without a request.
+
+Object paths, stored bytes, content types, signed URLs (the synthetic `memory://` URL encodes the
+path) and error text never reach the collector, the wire, or the client. Only calls through the
+plugin's OWN `StorageService` are counted: direct provider calls and a service constructed without
+the collector are outside coverage.
 
 ## Trace observations (M98g)
 

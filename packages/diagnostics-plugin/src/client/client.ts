@@ -23,6 +23,7 @@ import type {
   HealthDiagnosticsSnapshot,
   QueueDiagnosticsBatch,
   RealtimeDiagnosticsResponse,
+  StorageDiagnosticsResponse,
   TraceDiagnosticsBatch,
 } from '@setu-ts/common';
 
@@ -52,12 +53,14 @@ import {
   REALTIME_TARGET,
   SNAPSHOT_TARGET,
   STATUS_TARGET,
+  STORAGE_TARGET,
   TRACES_PATH,
 } from '../protocol/protocol.ts';
 import { isEventResponseProjection } from '../protocol/event-protocol.ts';
 import { isQueueBatchProjection } from '../protocol/queue-protocol.ts';
 import { isCacheResponseProjection } from '../protocol/cache-protocol.ts';
 import { isRealtimeResponseProjection } from '../protocol/realtime-protocol.ts';
+import { isStorageResponseProjection } from '../protocol/storage-protocol.ts';
 import { isTraceBatchProjection } from '../protocol/trace-protocol.ts';
 import { isAuthorizationBatchProjection } from '../protocol/authorization-protocol.ts';
 
@@ -630,6 +633,39 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         // The same exact validator the connector ran before signing, plus
         // the body's own instance binding.
         if (!isRealtimeResponseProjection(parsed) || parsed.instanceId !== bound) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return deepFreeze(parsed);
+      });
+    },
+
+    async storage(): Promise<StorageDiagnosticsResponse> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeAndBind(STATUS_TARGET);
+          checkUsable();
+        }
+        const bound = instanceId;
+        if (bound === null) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        // Negotiated support: a manifest without the storage inspector — a
+        // legacy or pre-M98m server — answers a local typed `unsupported`
+        // response and sends no request.
+        if (inspectors !== null && inspectors.storage === false) {
+          return deepFreeze({
+            version: 1,
+            instanceId: bound,
+            state: 'unsupported',
+            sources: [],
+          });
+        }
+        const result = await exchange(STORAGE_TARGET);
+        const parsed = parseBody(result.bodyText);
+        // The same exact validator the connector ran before signing, plus
+        // the body's own instance binding.
+        if (!isStorageResponseProjection(parsed) || parsed.instanceId !== bound) {
           throw new Error(CLIENT_ERRORS.connection);
         }
         return deepFreeze(parsed);

@@ -208,6 +208,11 @@ backplane reports its gauges as `unsupported`, and a source that cannot be read 
 value-free snapshot of kind `unknown`. With no realtime plugin registered the connector answers
 `state: 'unsupported'`.
 
+The M98m storage inspector is read through `client.storage(): Promise<StorageDiagnosticsResponse>`,
+the same aggregate shape as the M98i cache inspector. Each StoragePlugin instance contributes one
+source; a source that cannot be read appears as a value-free `collection-failed` snapshot. With no
+storage plugin registered the connector answers `state: 'unsupported'`.
+
 The full public surface is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#diagnostics-connector-setu-tsdiagnostics-plugin).
 
@@ -234,6 +239,13 @@ operation counters — per fixed operation, under each instance's approved alias
 multi-provider sources resolved at bootstrap (more refuses startup). Keys, prefixes, values, URLs,
 factory results and errors never reach any layer; the e2e canary plants each and asserts its absence
 in the source snapshot, the raw signed bytes and the client DTO.
+
+The M98m storage inspector (`GET /v1/storage`, `client.storage()`) serves every StoragePlugin
+instance's operation counters — per fixed operation, under each instance's approved alias — from at
+most 16 multi-provider sources resolved at bootstrap (more refuses startup), the M98i cache rule.
+Object paths, stored bytes, content types, signed URLs and error text never reach any layer; the e2e
+canary plants each and asserts its absence in the source snapshot, the raw signed bytes and the
+client DTO.
 
 The M98g trace inspector (`GET /v1/traces?after=N&limit=N`, `client.traces(after, limit?)`) serves
 the TelemetryPlugin's completed, sampled spans under the same rules: only approved operation

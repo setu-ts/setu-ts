@@ -10,11 +10,21 @@ import type {
   IPluginContext,
   IRuntimeServices,
   IStorage,
+  IStorageDiagnosticsSource,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { StoragePluginOptions, StorageProviderType } from '../interfaces/index.ts';
 import type { StorageProvider } from '../interfaces/index.ts';
-import { StorageService } from '../services/storage-service.ts';
+import {
+  attachStorageCollector,
+  detachStorageCollector,
+  StorageService,
+} from '../services/storage-service.ts';
+import {
+  compileStorageDiagnosticsAlias,
+  createStorageDiagnosticsSource,
+  StorageObservationCollector,
+} from '../diagnostics/storage-observations.ts';
 import { MemoryProvider } from '../providers/memory-provider.ts';
 import { LocalStorageProvider } from '../providers/local-provider.ts';
 import { S3Provider } from '../providers/s3-provider.ts';
@@ -136,6 +146,10 @@ export function createProvider(
 export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
   const config: StoragePluginOptions = options ?? {};
   const providerType = config.provider ?? DEFAULT_PROVIDER;
+  // M98m: validated here, before any application exists.
+  const diagnosticsAlias = config.diagnostics === undefined
+    ? null
+    : compileStorageDiagnosticsAlias(config.diagnostics);
 
   return {
     name: PLUGIN_NAME,
@@ -150,6 +164,24 @@ export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
 
       const service = new StorageService(provider);
       ctx.services.register<IStorage>(CAPABILITIES.STORAGE, service);
+
+      // M98m: EVERY instance contributes one storage-diagnostics source as a
+      // multi provider (never claimed in `provides`, so multiple storage
+      // instances never collide). It describes THIS service only — a later
+      // replacement of the storage token is outside its coverage. Opted out,
+      // the source is inert and nothing is attached to the service.
+      const collector = diagnosticsAlias === null ? null : new StorageObservationCollector(
+        diagnosticsAlias,
+        ctx.runtime.hrtime.bind(ctx.runtime),
+      );
+      if (collector !== null) {
+        attachStorageCollector(service, collector);
+      }
+      ctx.services.register<IStorageDiagnosticsSource>(
+        CAPABILITIES.STORAGE_DIAGNOSTICS,
+        createStorageDiagnosticsSource(collector),
+        { multi: true },
+      );
 
       // M70c: reports BOTH signals. `isReady()` is lifecycle (never started /
       // shut down → `down`); `isHealthy()` is reachability (the backend answers
@@ -175,6 +207,11 @@ export function StoragePlugin(options?: StoragePluginOptions): IPlugin {
       ctx.health.register(CAPABILITIES.STORAGE, storageIndicator);
 
       ctx.lifecycle.onClose(async () => {
+        // Detach first so no late call is observed, then clear, BEFORE the
+        // provider disconnect: a failed disconnect must not leave a live
+        // collector attached to a half-closed service.
+        detachStorageCollector(service);
+        collector?.close();
         await provider.disconnect();
       });
     },

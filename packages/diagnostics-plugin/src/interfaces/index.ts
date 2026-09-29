@@ -19,6 +19,7 @@ import type {
   IPlugin,
   QueueDiagnosticsBatch,
   RealtimeDiagnosticsResponse,
+  StorageDiagnosticsResponse,
   TraceDiagnosticsBatch,
 } from '@setu-ts/common';
 
@@ -335,6 +336,23 @@ export interface IDiagnosticsClient {
    * @since 0.8.0
    */
   realtime(): Promise<RealtimeDiagnosticsResponse>;
+  /**
+   * Reads every registered storage source's operation counters through the
+   * signed protocol (M98m). Performs the `/v1/status` pairing exchange first
+   * if the session has not yet been bound.
+   *
+   * When the negotiated inspector manifest reports the storage inspector as
+   * unsupported, a frozen typed `unsupported` response with no sources is
+   * returned WITHOUT sending an addon request. Otherwise the authenticated
+   * `/v1/storage` exchange is performed and its exact contract validated.
+   * The response never carries a path, byte, metadata entry, content type,
+   * signed URL, credential or error text.
+   *
+   * @returns The deeply frozen storage response
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.7.0
+   */
+  storage(): Promise<StorageDiagnosticsResponse>;
   /**
    * Reads the next bounded page of authorization decision explanations
    * through the signed protocol (M98h). Performs the `/v1/status` pairing

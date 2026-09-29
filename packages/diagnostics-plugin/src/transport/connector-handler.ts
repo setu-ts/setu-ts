@@ -29,6 +29,7 @@ import type {
   IRealtimeDiagnosticsSource,
   IRequest,
   IResponse,
+  IStorageDiagnosticsSource,
   ITraceDiagnosticsSource,
   ResponseSnapshot,
   TraceDiagnosticsBatch,
@@ -40,6 +41,7 @@ import type { ConnectorLimits, LimitsClock } from './limits.ts';
 import type { IQueueMerger } from './queue-merger.ts';
 import { isQueueBatchProjection, projectQueueBatch } from '../protocol/queue-protocol.ts';
 import { buildCacheResponse, isCacheResponseProjection } from '../protocol/cache-protocol.ts';
+import { buildStorageResponse, isStorageResponseProjection } from '../protocol/storage-protocol.ts';
 import {
   buildRealtimeResponse,
   isRealtimeResponseProjection,
@@ -272,6 +274,14 @@ export interface ConnectorHandlerDeps {
    * room/channel lookup.
    */
   readonly realtimeSources: readonly IRealtimeDiagnosticsSource[];
+  /**
+   * The storage-diagnostics sources (M98m), read ONCE at bootstrap from
+   * `CAPABILITIES.STORAGE_DIAGNOSTICS` (a MULTI token) after every plugin has
+   * registered. At most 16 (more refuses startup); an empty list answers a
+   * typed `unsupported` response for `GET /v1/storage`. A read calls only
+   * each source's synchronous `snapshot()` — never a storage operation.
+   */
+  readonly storageSources: readonly IStorageDiagnosticsSource[];
 }
 
 /**
@@ -1150,6 +1160,18 @@ export function createConnectorHandler(
         // the presented (non-null) instance IS the session's bound one.
         const candidate = buildRealtimeResponse(parsed.instance as string, deps.realtimeSources);
         if (!isRealtimeResponseProjection(candidate)) {
+          return refusalResponse('unavailable');
+        }
+        projected = candidate;
+      } else if (target.op === 'storage') {
+        // The storage operation (M98m). Every session and request check above
+        // ran before any source is read. Each source read is isolated, and
+        // the wire validator — the SAME one the client runs — checks the
+        // built response before anything is signed. The cross-instance
+        // check above already proved the presented (non-null) instance IS
+        // the session's bound one.
+        const candidate = buildStorageResponse(parsed.instance as string, deps.storageSources);
+        if (!isStorageResponseProjection(candidate)) {
           return refusalResponse('unavailable');
         }
         projected = candidate;

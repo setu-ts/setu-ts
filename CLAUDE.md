@@ -5389,6 +5389,25 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   doc correction claimed QUIT alone stops ioredis reconnecting, which round 4 measured false after a
   25 s outage — both fixed; round 5 passed on `bec04876`. The design review was approved by the
   maintainer — complete (PR #377).
+- **Milestone 98m** (`packages/storage-plugin` + `packages/common` + `packages/diagnostics-plugin` —
+  storage operation counters): `StoragePlugin({ diagnostics: { enabled: true, alias } })` counts
+  every public call its OWN `StorageService` makes (`put`/`get`/`delete`/`exists`/`getSignedUrl`/
+  `getStream`) with succeeded/failed outcomes; `getSignedUrl` mints a URL rather than transferring
+  bytes, so its record carries `lastDurationMs: null` and `lastBytes: null` by construction, and
+  `lastBytes` is the byte length of the last settled buffer for `put`/`get` (a `get` that finds
+  nothing throws and settles as a failure) and `null` for the non-buffered operations; `getStream`
+  counts the open, not the drain. Object paths, stored bytes, content types, signed URLs and error
+  text are classified away before the collector. Every instance registers an
+  `IStorageDiagnosticsSource` under the new multi-provider `CAPABILITIES.STORAGE_DIAGNOSTICS`
+  (`disabled` without the option, with nothing attached to the service); the connector serves
+  `GET /v1/storage` (at most 16 sources, more refuses startup; copy-once reader of own data
+  properties; duplicate aliases or an over-budget body collapse to `collection-failed` — the M98i
+  cache rule) and the client gains `storage()`. The collector is NOT shared in `common` (a single
+  plugin owns it, unlike M98l's three): the option and collector types live in
+  `@setu-ts/storage-plugin`. Enabled calls read the monotonic clock once (twice on a timed
+  one-in-eight sample) and settle through one derived promise that re-rejects with the original
+  reason, so an unhandled provider rejection stays unhandled. The design security review was
+  approved; the committed-tree implementation security audit is pending — implementation complete.
 - **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
   design security review and implementation audit required).
 
