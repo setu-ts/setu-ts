@@ -1025,6 +1025,51 @@ describe('SchedulerPlugin diagnostics wiring', () => {
     };
   }
 
+  it("hands a behaviour the handler's own value and error from next() (K4)", async () => {
+    // A `() => void`-typed function that returns a value is assignable to a
+    // SchedulerJobHandler, so a behaviour's `await next()` can receive a
+    // value: observation must pass it through, not replace it.
+    const thrown = new Error('k4-canary');
+    const shapes: Record<string, () => void> = {
+      value: () => 42,
+      resolved: () => Promise.resolve(42),
+      async: async () => {
+        await Promise.resolve();
+        return 42;
+      },
+      rejected: () => Promise.reject(thrown),
+    };
+    for (const [shape, returns] of Object.entries(shapes)) {
+      const { off, on } = await offOn(() => {
+        const state: { got?: unknown; error?: unknown } = {};
+        return {
+          state,
+          settleMs: 80,
+          options: {
+            behaviors: [{
+              handle: async (_ctx, next) => {
+                try {
+                  state.got = await next();
+                } catch (error) {
+                  state.error = error;
+                }
+              },
+            } as IIngressBehavior],
+            jobs: [{ trigger: 'delay', name: 'job', delayMs: 10, handler: returns }],
+          },
+        };
+      });
+      if (shape === 'rejected') {
+        expect(off.state.error).toBe(thrown);
+        expect(on.state.error).toBe(thrown);
+      } else {
+        expect(off.state.got).toBe(42);
+        expect(on.state.got).toBe(42);
+      }
+      expect(on.state).toEqual(off.state);
+    }
+  });
+
   it('adopts a native promise with a throwing constructor exactly as unobserved (J1)', async () => {
     // `Promise.resolve` reads a native promise's `constructor`; a throwing
     // read throws SYNCHRONOUSLY out of the chain's last step, so the

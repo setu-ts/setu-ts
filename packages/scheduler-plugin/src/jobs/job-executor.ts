@@ -88,9 +88,10 @@ type Adoption = 'await' | 'resolve';
  * Scope, measured by the audits (K2, K3), whatever the handler returned —
  * `undefined` and ordinary promises included:
  *
- * - IDENTICAL observed and unobserved: the value or error the handler
- *   settles with, whether the executor retries, and whether an ignored
- *   rejection is reported as unhandled.
+ * - IDENTICAL observed and unobserved, for a handler returning anything
+ *   but an own-`then`-overridden native promise: the value or error
+ *   `next()` settles with (pinned by off/on tests), whether the executor
+ *   retries, and whether an ignored rejection is reported as unhandled.
  * - May DIFFER: microtask timing. Behind a chain, a behaviour resumes from
  *   `await next()` one microtask later, a `.then` it attaches to `next()`
  *   runs one microtask later, and an outer behaviour chaining on an inner
@@ -98,7 +99,10 @@ type Adoption = 'await' | 'resolve';
  *   or returns `next()`'s result also gets a different object.
  * - Needs an unusual handler result: the own-property and own-`then`
  *   differences apply only to a handler returning a native promise it
- *   augmented or whose `then` it overrode.
+ *   augmented or whose `then` it overrode. For an own-`then` override,
+ *   behind a behaviour that subscribes through `next().then(...)`, whether
+ *   and how the dispatch settles — and so whether it retries — may differ,
+ *   since the observed `next()` is not subscribed through that override.
  *
  * @param handler - The application's handler
  * @param job - The delivered job
@@ -124,13 +128,16 @@ function invokeHandler<T>(
         settle(false);
         throw error;
       }
+      let value: unknown;
       try {
-        await result;
+        value = await result;
       } catch (error) {
         settle(false);
         throw error;
       }
       settle(true);
+      // The handler's own fulfilment value, passed through unchanged.
+      return value as void;
     })();
   }
   let adopted: Promise<void>;
@@ -144,7 +151,12 @@ function invokeHandler<T>(
     throw error;
   }
   return Reflect.apply(Promise.prototype.then, adopted, [
-    () => settle(true),
+    // Fulfil with the handler's OWN value (audit K4): a behaviour's
+    // `await next()` must receive what the handler settled with.
+    (value: unknown) => {
+      settle(true);
+      return value;
+    },
     (error: unknown) => {
       settle(false);
       throw error;
