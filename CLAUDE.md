@@ -5452,7 +5452,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   per enabled call (two clock reads plus promise wrapping) against ~0.15 µs of in-memory work, while
   on the real local-filesystem provider the difference is within noise (enabled/disabled 1.001 over
   24 paired runs); sampled timing was rejected because the `common` contract says age, duration and
-  bytes describe one settlement — complete (PR pending).
+  bytes describe one settlement — complete (PR #383).
 - **Next milestone** — **M100a** (`packages/auth-plugin` + `packages/starters` — `jwt` optional; the
   plugin registers `authMiddleware()` itself; design security review and implementation audit
   required).
