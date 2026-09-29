@@ -198,8 +198,11 @@ export interface TrustedIssuer {
    * application's only identity source — another issuer, a self-issued `jwt`
    * (whose strategy also maps `sub` to the id), an API key, a session, or a
    * custom strategy — namespace the id (for example
-   * `` `${claims.iss}|${claims.sub}` ``) so an outside `sub` cannot become the
-   * same principal as an identity from another source.
+   * `` `${claims.iss}|${claims.sub}` ``). Namespacing this side alone is not
+   * enough when another source can produce an id of the same form (a
+   * self-issued `sub` or a username a user chooses, say): namespace every
+   * source (for example `` `local|${id}` ``), or keep the other sources' ids
+   * free of the separator.
    */
   toPrincipal(
     claims: Readonly<Record<string, unknown>>,

@@ -301,3 +301,8 @@ including a real Keycloak token re-signed with `alg: HS256` using the realm's pu
   self-issued `jwt` plus one issuer collide the same way, because `JwtStrategy` also maps `sub` to
   the id. The note now covers every identity source in the JSDoc, README and PUBLIC_API, and the
   README example namespaces unconditionally.
+- **Security audit round 3 (commit `f75a93be`)** confirmed N1 closed and found **N2 (Low, fixed)**,
+  which the N1 wording itself introduced. It claimed a namespaced outside id "cannot" collide, but
+  namespacing only one side does not stop a local id of the form `<issuer>|<sub>` (for example a
+  self-issued `sub` or a user-chosen username). All three sites now say to namespace every source,
+  or to keep the other sources' ids free of the separator.

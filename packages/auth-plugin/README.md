@@ -308,8 +308,10 @@ AuthPlugin({
   verified claims and decides where roles live — the plugin never guesses. **Namespace the id
   whenever this issuer is not the only identity source** — `sub` is unique only within its issuer,
   and a self-issued `jwt`, another issuer, an API key, a session or a custom strategy can each
-  produce the same id, so ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the example) keeps an
-  outside `sub` from becoming the same principal as an identity from another source.
+  produce the same id. ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the example) separates an
+  outside `sub` from the other sources only if none of them can produce an id of that form — a
+  self-issued `sub` or a user-chosen username could — so namespace every source (for example
+  ``{ id: `local|${id}` }``) or keep the other sources' ids free of the separator.
 - **Rotation.** The key set is cached for `keySet.ttlMs` (default 10 minutes). A token naming an
   unknown `kid` triggers at most one refetch per `keySet.minRefreshIntervalMs` (default 60 s), and
   concurrent refetches share one request, so forged `kid`s cannot turn requests into outbound

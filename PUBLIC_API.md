@@ -2343,8 +2343,10 @@ They still fail closed either way; what changed is that the refusal is legible.
 > is not supported. `IJwtService` remains self-issued only. `sub` is unique only within its issuer,
 > so whenever an issuer is not the only identity source — another issuer, a self-issued `jwt` (whose
 > strategy also maps `sub` to the id), an API key, a session or a custom strategy — `toPrincipal`
-> should namespace the id (`` `${claims.iss}|${claims.sub}` ``). `keySet.fetchTimeoutMs` may not
-> exceed 2147483647, since a larger timer delay overflows.
+> should namespace the id (`` `${claims.iss}|${claims.sub}` ``) — and every other source too (or
+> keep their ids free of the separator), since namespacing one side does not stop a local id of the
+> same form colliding. `keySet.fetchTimeoutMs` may not exceed 2147483647, since a larger timer delay
+> overflows.
 >
 > **Phasing (M16b, shipped):** **refresh tokens** and **rate limiting** shipped in M16b as
 > standalone additions — `RefreshTokenService` (app-instantiated; NOT an `IAuthStrategy`, since a
