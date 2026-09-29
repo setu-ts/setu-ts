@@ -5445,9 +5445,14 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   age, duration and bytes describe one settlement) and settle through one derived promise that
   re-rejects with the original reason, so an unhandled provider rejection stays unhandled. The
   design security review was approved; the committed-tree audit passed on `e3ddbfd4`, then failed
-  its re-audit on `0430459e` on two Lows (an unclamped duration and an unmeasured overhead target),
-  both addressed in `4427347b`; the merge with `main` (M98k, M98n) is re-audited before merge —
-  complete (PR pending).
+  its re-audit on `0430459e` on two Lows (an unclamped duration, fixed in `4427347b`, and an
+  unmeasured overhead target) and round 3, on the merge with `main` (M98k, M98n), on a stale
+  CHANGELOG cost claim, since fixed (the maintainer waived a re-audit of that doc-only fix). **The
+  ≤5% overhead target is missed on the in-memory provider and accepted by the maintainer**: ~0.23 µs
+  per enabled call (two clock reads plus promise wrapping) against ~0.15 µs of in-memory work, while
+  on the real local-filesystem provider the difference is within noise (enabled/disabled 1.001 over
+  24 paired runs); sampled timing was rejected because the `common` contract says age, duration and
+  bytes describe one settlement — complete (PR pending).
 - **Next milestone** — **M100a** (`packages/auth-plugin` + `packages/starters` — `jwt` optional; the
   plugin registers `authMiddleware()` itself; design security review and implementation audit
   required).

@@ -11216,7 +11216,15 @@ the three share lives in `@setu-ts/common` (maintainer decision, plan §3.1). Ca
 
 **Status:** Complete. The design security review (plan §10.1) was approved before implementation;
 the committed-tree implementation security audit passed on `e3ddbfd4` (333 probes, 6 negative
-controls, no findings). Owner: `packages/storage-plugin`. Canonical plan:
+controls, no findings), then ran two more rounds: round 2 found an unclamped `lastDurationMs`
+(fixed) and an unmeasured overhead target; round 3, on the merge with `main`, found a stale
+CHANGELOG cost claim (fixed; the maintainer waived a re-audit of that doc-only fix). **The S9
+overhead target (≤5%) is missed on the in-memory provider and accepted by the maintainer**: enabled
+calls add ~0.23 µs (two ~72–100 ns monotonic clock reads plus ~0.075 µs of promise wrapping) to
+~0.15 µs of in-memory work, while against the real `LocalStorageProvider` (~20–33 µs/op) 24 paired
+runs gave enabled/disabled 1.001, indistinguishable from noise. Sampled timing (the M98i approach)
+was rejected because the committed `StorageDiagnosticsRecord` contract says age, duration and bytes
+describe the same settlement. Owner: `packages/storage-plugin`. Canonical plan:
 `plans/archive/milestone-98m-storage-observations.md`.
 
 - [x] Observe service operation settlement once. For put/get record byteLength already available

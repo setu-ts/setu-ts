@@ -29,8 +29,8 @@ All notable changes to this project are documented here. The format follows
   source answered by that source's own value-free `collection-failed` snapshot; duplicate aliases or
   an over-budget body collapse to the fixed collection-failed response with no sources) and the
   REQUIRED `IDiagnosticsClient.storage()`; the status manifest now reports `storage: true`. Enabled
-  calls read the monotonic clock once (twice on a timed one-in-eight sample, which `lastDurationMs`
-  reports) and settle through one derived promise that re-rejects with the original reason, so an
+  calls read the monotonic clock twice (every call is timed, so age, duration and bytes describe one
+  settlement) and settle through one derived promise that re-rejects with the original reason, so an
   unhandled provider rejection stays unhandled. Results, errors, rejection reasons, unhandled-
   rejection reporting and relative ordering are unchanged either way; with diagnostics on, the
   returned promise is a derived one rather than the provider's own. **Breaking for implementors:**
