@@ -1,8 +1,9 @@
 # Milestone 98k — Scheduler Execution Observations
 
-> **Status:** Implemented on `feat/m98k-scheduler-observations`. No design review was recorded
-> before implementation; it is recorded retroactively in §10.1. The committed-tree security audit
-> runs in a fresh context before the PR merges; its history is in §12.
+> **Status:** Complete (PR #379). No design review was recorded before implementation; it is
+> recorded retroactively in §10.1 and maintainer-approved. The committed-tree security audit ran
+> nine rounds in fresh contexts; round 9 failed on K5, which was then fixed and accepted, and the
+> maintainer waived further rounds (§12).
 
 ## 0. Objective & scope
 
@@ -405,7 +406,7 @@ throwing clock and a throwing lock.
 
 **Approved by the maintainer on 2026-09-29,** as drafted, including the overhead decision above.
 
-**Implementation gate — pending committed-tree audit before completion/publication.** Record commit,
+**Implementation gate — ran nine rounds, then waived by the maintainer (§12).** Record commit,
 reviewed files, tested adapters/runtimes, findings and dispositions in the implementation PR. Test
 real operations through the connector. No untested adapter can be listed as audited support.
 
@@ -594,3 +595,10 @@ names.
 | #  | Severity | Finding                                                                                                                                                                                                                                                                                                           | Disposition                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | -- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | K5 | Low      | Returning the handler's value from the settlement re-runs promise resolution, so a fulfilment value whose `then` is absent on the first read and callable later is adopted only when observed: 1 → 3 retries with no behaviour, the failed dispatches recorded as succeeded, and a stalled `every` job (q23–q25). | **No-behaviour case fixed** by reverting the `'await'` form's return (unneeded — the executor discards the value); an off/on test pins it and fails against `19ec9fe6`. **Behind-a-chain residue accepted by the maintainer, 2026-09-29**, together with a narrowed guarantee: equivalence is claimed only for ordinary handler results, and every other result (this case included) is accepted as part of K1 with no guarantee. Reason: carrying the handler's value to `next()` (K4) needs a derived promise, and a derived promise necessarily re-resolves the value; the only alternative is the side reaction K1 already rejected. |
+
+**Audit closed — 2026-09-29, maintainer decision.** After round 9 the maintainer waived further
+rounds. The final commit of the audited work (`752e0016`: the K5 no-behaviour fix, its test, and the
+narrowed guarantee) was verified by the full gates, the package suites and a negative control (its
+test fails against `19ec9fe6`), but NOT re-audited in a fresh context. No finding above Low was
+raised in any round; every Low is fixed or accepted by the maintainer with its reason recorded above
+(K1, and K5's behind-a-chain residue within K1's narrowed scope).

@@ -5377,9 +5377,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   service — unobserved services read one field and no clock. Multi-provider
   `CAPABILITIES.SCHEDULER_DIAGNOSTICS`; the connector serves `GET /v1/scheduler` (16-source bound)
   and the client `scheduler()`; the status manifest flips `scheduler: true`. A skipped local fire is
-  never a globally missed execution; lock losers produce no handler records (proven by test) —
-  implemented; the design review was recorded retroactively and the security audit is pending (PR
-  pending).
+  never a globally missed execution; lock losers produce no handler records (proven by test).
+  Verification found five collector defects every gate passed (fractional lateness blanking the
+  whole source, no slot reclaim at capacity, double drops, `started < count`, unguarded observation
+  clock reads). The design review was recorded retroactively. The security audit ran nine
+  fresh-context rounds; after the first, every finding came from observing the handler's result on
+  the observed path and was Low, with no data exposure. The maintainer accepted K1 — behind a
+  behaviour chain, `next()` returns a derived promise — and narrowed the observed-equals-unobserved
+  guarantee to ordinary handler results. Round 9 failed on K5, which was then fixed and accepted,
+  and the maintainer waived further rounds — complete (PR #379).
 - **Milestone 98l** (`packages/websocket-plugin` + `packages/sse-plugin` +
   `packages/realtime-backplane-plugin` + `packages/common` + `packages/diagnostics-plugin` —
   realtime lifecycle observations): each plugin accepts `diagnostics: { enabled: true, alias }` and
