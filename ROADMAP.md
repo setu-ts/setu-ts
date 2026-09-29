@@ -11210,9 +11210,10 @@ the three share lives in `@setu-ts/common` (maintainer decision, plan §3.1). Ca
 
 ### Milestone 98m: Storage Operation Observations
 
-**Status:** Implementation complete. Design security review approved (plan §10.1); the independent
-committed-tree implementation security audit is pending. Owner: `packages/storage-plugin`. Canonical
-plan: `plans/milestone-98m-storage-observations.md`.
+**Status:** Complete. The design security review (plan §10.1) was approved before implementation;
+the committed-tree implementation security audit passed on `e3ddbfd4` (333 probes, 6 negative
+controls, no findings). Owner: `packages/storage-plugin`. Canonical plan:
+`plans/archive/milestone-98m-storage-observations.md`.
 
 - [x] Observe service operation settlement once. For put/get record byteLength already available
       from the application argument/result, without copying bytes. getStream records only stream
@@ -11225,7 +11226,7 @@ plan: `plans/milestone-98m-storage-observations.md`.
 - [x] Exclude object paths, contents, metadata, content types, signed URLs, provider credentials,
       raw errors before buffering.
 - [x] Operation/acquisition timings, not transfer progress, inventory or object browsing.
-- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+- [x] Pass recorded pre-implementation design review and committed-tree implementation security
       audit. Test all existing provider arms using injected clients and existing guarded real-import
       suites. Compare optional put arguments, sync provider throws, missing objects, stream
       identity/cancellation/backpressure and fallback call counts.
@@ -12250,7 +12251,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98j       | ✅     | events-plugin + common + diagnostics-plugin — event dispatch observations ([#375](https://github.com/setu-ts/setu-ts/pull/375); security audit history in the plan §12)      |
 | 98k       | ⬜     | scheduler execution observations — design security review and implementation audit required                                                                                  |
 | 98l       | ✅     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations                                                                         |
-| 98m       | ⬜     | storage-plugin + common + diagnostics-plugin — storage operation counters (implementation complete; committed-tree implementation security audit pending)                    |
+| 98m       | ✅     | storage-plugin + common + diagnostics-plugin — storage operation counters                                                                                                    |
 | 98n       | ⬜     | outbound http attempt observations — design security review and implementation audit required                                                                                |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High, plus the 99e maintainer report)                                                                                   |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                                                           |

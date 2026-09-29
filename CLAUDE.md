@@ -5407,7 +5407,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `@setu-ts/storage-plugin`. Enabled calls read the monotonic clock once (twice on a timed
   one-in-eight sample) and settle through one derived promise that re-rejects with the original
   reason, so an unhandled provider rejection stays unhandled. The design security review was
-  approved; the committed-tree implementation security audit is pending — implementation complete.
+  approved and the committed-tree implementation security audit passed on `e3ddbfd4` (333 probes, 6
+  negative controls, no findings) — complete (PR pending).
 - **Next milestone** — **M98k** (`packages/scheduler-plugin` — scheduler execution observations;
   design security review and implementation audit required).
 

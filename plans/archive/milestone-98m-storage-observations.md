@@ -1,9 +1,9 @@
 # Milestone 98m — Storage Operation Observations
 
-> **Status:** Planning. Implementation and fixes: `feat/m98m-storage-observations`. Design security
-> assessment recorded in §10 on 2026-09-28. Its mitigations are implementation requirements, not
-> tested controls. Maintainer approval and the committed-implementation security audit remain
-> pending; no implementation or completed security audit is claimed.
+> **Status:** Complete. Implementation and fixes: `feat/m98m-storage-observations`. The design
+> security assessment (§10.1, recorded 2026-09-28 before implementation) was approved before
+> implementation. The committed-tree implementation security audit passed on `e3ddbfd4` (333 probes,
+> 6 negative controls, no findings).
 
 ## 0. Objective & scope
 
