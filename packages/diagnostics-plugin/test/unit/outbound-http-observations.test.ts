@@ -347,6 +347,7 @@ async function harness(outboundHttpSources: readonly IOutboundHttpDiagnosticsSou
     eventSources: [],
     realtimeSources: [],
     schedulerSources: [],
+    storageSources: [],
     outboundHttpSources,
   });
   session.bindInstance(TEST_INSTANCE_ID);

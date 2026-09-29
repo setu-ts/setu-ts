@@ -50,6 +50,7 @@ export type {
   MemoryStorageOptions,
   S3ProviderOptions,
   S3StorageOptions,
+  StorageDiagnosticsOptions,
   StoragePluginOptions,
   StorageProviderOptions,
   StorageProviderType,

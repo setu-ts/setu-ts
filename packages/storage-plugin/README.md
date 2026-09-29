@@ -196,6 +196,23 @@ lifecycle (`isReady()`) and its reachability (`isHealthy()`).
 `data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
 the provider has no liveness check.
 
+## Diagnostics (M98m)
+
+`StoragePlugin({ diagnostics: { enabled: true, alias: 'primary' } })` counts every public call this
+instance's own `StorageService` makes (`put`, `get`, `delete`, `exists`, `getSignedUrl`,
+`getStream`) — succeeded and failed — for the local diagnostics connector's `GET /v1/storage`
+(`@setu-ts/diagnostics-plugin`). `getSignedUrl` mints a URL rather than transferring bytes, so its
+record carries `lastDurationMs: null` and `lastBytes: null`; `lastBytes` is the byte length of the
+last settled buffer for `put` and `get` (a `get` that finds nothing throws and settles as a
+failure), and `null` for the non-buffered operations; `getStream` counts the open, not the drain.
+Object paths, stored bytes, content types, signed URLs and errors are never captured. Without the
+option the instance registers an inert `disabled` source and its storage calls are not touched.
+Results, errors, the `getStream?` fallback and rejection reasons are identical either way; enabled
+calls add two monotonic clock reads (every call is timed) and one derived promise each (which
+re-rejects with the original reason, so an unhandled rejection stays unhandled). Direct provider
+calls and a service constructed without the collector are outside coverage. Enable only on an
+approved development dataset: counts aggregate every tenant using the instance.
+
 ## Exports
 
 | Export                        | Kind      |
@@ -223,6 +240,7 @@ the provider has no liveness check.
 | `LocalStorageProviderOptions` | interface |
 | `MemoryStorageOptions`        | interface |
 | `PutObjectOptions`            | interface |
+| `StorageDiagnosticsOptions`   | interface |
 | `S3ProviderOptions`           | interface |
 | `S3StorageOptions`            | interface |
 | `SignedUrlOptions`            | interface |

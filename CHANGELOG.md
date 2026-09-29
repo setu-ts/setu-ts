@@ -8,6 +8,34 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Storage operation counters (M98m): opt-in, minimized storage observations through the
+  diagnostics connector.** `StoragePlugin` accepts `diagnostics: { enabled: true, alias }` (the new
+  exported `StorageDiagnosticsOptions`, validated when `StoragePlugin(...)` is called, never echoing
+  a value); the instance's own `StorageService` then counts each public `put`/`get`/`delete`/
+  `exists`/`getSignedUrl`/`getStream` call with explicit `succeeded`/`failed` outcomes.
+  `getSignedUrl` mints a URL rather than transferring bytes, so its record carries
+  `lastDurationMs: null` and `lastBytes: null`; `lastBytes` is the byte length of the last settled
+  buffer for the buffered operations `put` and `get` and `null` for the non-buffered operations (a
+  `get` that finds nothing throws and settles as a failure). `getStream` counts the open, not the
+  drain. Object paths, stored bytes, content types, signed URLs (the synthetic `memory://` URL
+  encodes the path) and error text are never captured. Every StoragePlugin instance registers an
+  `IStorageDiagnosticsSource` under the new multi-provider `CAPABILITIES.STORAGE_DIAGNOSTICS`
+  (`disabled` without the option, with nothing attached to the service). New public surface on
+  `@setu-ts/common`: `CAPABILITIES.STORAGE_DIAGNOSTICS`, `IStorageDiagnosticsSource`,
+  `StorageDiagnosticsSnapshot`, `StorageDiagnosticsRecord`, `StorageDiagnosticsResponse`,
+  `StorageDiagnosticsOperation`. New connector surface: `GET /v1/storage` (authenticated like every
+  operation; a snapshot operation — no query — exactly like `/v1/cache`; positional `s<N>` source
+  ids; more than 16 sources refuses startup with a fixed configuration error; a throwing or invalid
+  source answered by that source's own value-free `collection-failed` snapshot; duplicate aliases or
+  an over-budget body collapse to the fixed collection-failed response with no sources) and the
+  REQUIRED `IDiagnosticsClient.storage()`; the status manifest now reports `storage: true`. Enabled
+  calls read the monotonic clock twice (every call is timed, so age, duration and bytes describe one
+  settlement) and settle through one derived promise that re-rejects with the original reason, so an
+  unhandled provider rejection stays unhandled. Results, errors, rejection reasons, unhandled-
+  rejection reporting and relative ordering are unchanged either way; with diagnostics on, the
+  returned promise is a derived one rather than the provider's own. **Breaking for implementors:**
+  `storage()` is a REQUIRED member of `IDiagnosticsClient`, so a hand-written client must add it
+  (answering `unsupported` is a valid implementation).
 - **Outbound HTTP attempt observations (M98n): opt-in, minimized fetch-attempt counters through the
   diagnostics connector.** `@setu-ts/sdk` exports `createObservedFetch({ alias, fetch?, timing? })`,
   which returns `{ fetch, plugin }`: pass `fetch` to `ClientOptions.fetch`,

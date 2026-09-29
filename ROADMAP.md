@@ -11214,21 +11214,31 @@ the three share lives in `@setu-ts/common` (maintainer decision, plan §3.1). Ca
 
 ### Milestone 98m: Storage Operation Observations
 
-**Status:** Planned. Owner: `packages/storage-plugin`. Canonical plan:
-`plans/milestone-98m-storage-observations.md`.
+**Status:** Complete (PR #383). The design security review (plan §10.1) was approved before
+implementation; the committed-tree implementation security audit passed on `e3ddbfd4` (333 probes, 6
+negative controls, no findings), then ran two more rounds: round 2 found an unclamped
+`lastDurationMs` (fixed) and an unmeasured overhead target; round 3, on the merge with `main`, found
+a stale CHANGELOG cost claim (fixed; the maintainer waived a re-audit of that doc-only fix). **The
+S9 overhead target (≤5%) is missed on the in-memory provider and accepted by the maintainer**:
+enabled calls add ~0.23 µs (two ~72–100 ns monotonic clock reads plus ~0.075 µs of promise wrapping)
+to ~0.15 µs of in-memory work, while against the real `LocalStorageProvider` (~20–33 µs/op) 24
+paired runs gave enabled/disabled 1.001, indistinguishable from noise. Sampled timing (the M98i
+approach) was rejected because the committed `StorageDiagnosticsRecord` contract says age, duration
+and bytes describe the same settlement. Owner: `packages/storage-plugin`. Canonical plan:
+`plans/archive/milestone-98m-storage-observations.md`.
 
-- [ ] Observe service operation settlement once. For put/get record byteLength already available
+- [x] Observe service operation settlement once. For put/get record byteLength already available
       from the application argument/result, without copying bytes. getStream records only stream
       acquisition duration and outcome; bytes remain null and transfer completion is unknown. Its
       buffered fallback must not double count internal get as another public operation. getSignedUrl
       records success/failure only and never reads the returned URL. No additional
       exists/get/list/probe call is allowed.
-- [ ] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
+- [x] Add minimized source contracts, opt-in collection, bounded retention, authenticated fixed
       reader and native client method; activate only the reserved `storage` manifest entry.
-- [ ] Exclude object paths, contents, metadata, content types, signed URLs, provider credentials,
+- [x] Exclude object paths, contents, metadata, content types, signed URLs, provider credentials,
       raw errors before buffering.
-- [ ] Operation/acquisition timings, not transfer progress, inventory or object browsing.
-- [ ] Pass recorded pre-implementation design review and committed-tree implementation security
+- [x] Operation/acquisition timings, not transfer progress, inventory or object browsing.
+- [x] Pass recorded pre-implementation design review and committed-tree implementation security
       audit. Test all existing provider arms using injected clients and existing guarded real-import
       suites. Compare optional put arguments, sync provider throws, missing objects, stream
       identity/cancellation/backpressure and fallback call counts.
@@ -12249,7 +12259,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                                                                                                                      |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                                                                                                                          |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                                                                                                                            |
-| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98l and 98n complete, 98m planned with security audit gates)                                                                                                                              |
+| 98        | ✅     | secure read-only devtool diagnostics (umbrella; 98a–98n complete)                                                                                                                                                                             |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                                                                                                                    |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))                                                                                                     |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                                                                                                                 |
@@ -12262,7 +12272,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98j       | ✅     | events-plugin + common + diagnostics-plugin — event dispatch observations ([#375](https://github.com/setu-ts/setu-ts/pull/375); security audit history in the plan §12)                                                                       |
 | 98k       | ✅     | scheduler-plugin + common + diagnostics-plugin — scheduler execution observations ([#379](https://github.com/setu-ts/setu-ts/pull/379); security audit: nine rounds, last failed on K5, fixed and accepted, further rounds waived — plan §12) |
 | 98l       | ✅     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations                                                                                                                                          |
-| 98m       | ⬜     | storage operation observations — design security review and implementation audit required                                                                                                                                                     |
+| 98m       | ✅     | storage-plugin + common + diagnostics-plugin — storage operation counters ([#383](https://github.com/setu-ts/setu-ts/pull/383))                                                                                                               |
 | 98n       | ✅     | sdk + common + diagnostics-plugin — outbound HTTP attempt observations ([#380](https://github.com/setu-ts/setu-ts/pull/380))                                                                                                                  |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High, plus the 99e maintainer report)                                                                                                                                                    |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                                                                                                                            |

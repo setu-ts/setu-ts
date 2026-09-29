@@ -26,6 +26,7 @@ import type {
   IQueueDiagnosticsSource,
   IRealtimeDiagnosticsSource,
   ISchedulerDiagnosticsSource,
+  IStorageDiagnosticsSource,
   ITraceDiagnosticsSource,
   TimerHandle,
 } from '@setu-ts/common';
@@ -41,6 +42,7 @@ import { MAX_EVENT_SOURCES } from '../protocol/event-protocol.ts';
 import { MAX_REALTIME_SOURCES } from '../protocol/realtime-protocol.ts';
 import { MAX_OUTBOUND_HTTP_SOURCES } from '../protocol/outbound-http-protocol.ts';
 import { MAX_SCHEDULER_SOURCES } from '../protocol/scheduler-protocol.ts';
+import { MAX_STORAGE_SOURCES } from '../protocol/storage-protocol.ts';
 
 /**
  * The default session lifetime: 15 minutes.
@@ -82,6 +84,9 @@ export const PLUGIN_ERRORS = {
     'the connector reads at most 16.',
   tooManyCacheSources:
     'DiagnosticsPlugin: more than 16 cache-diagnostics sources are registered; ' +
+    'the connector reads at most 16.',
+  tooManyStorageSources:
+    'DiagnosticsPlugin: more than 16 storage-diagnostics sources are registered; ' +
     'the connector reads at most 16.',
   missingDiagnostics:
     'DiagnosticsPlugin: the application was not created with kernel diagnostics enabled. ' +
@@ -196,6 +201,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
       CAPABILITIES.TRACE_DIAGNOSTICS,
       CAPABILITIES.EVENTS_DIAGNOSTICS,
       CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
+      CAPABILITIES.STORAGE_DIAGNOSTICS,
     ],
 
     register(ctx: IPluginContext): void {
@@ -362,6 +368,19 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           session = null;
           throw new Error(PLUGIN_ERRORS.tooManyOutboundHttpSources);
         }
+        // The storage-diagnostics sources (M98m), read ONCE here for the
+        // same reason: every StoragePlugin instance contributes one,
+        // possibly after this plugin registered. Collected only — no
+        // snapshot, and so no counter read, before an authenticated
+        // request. More than 16 refuses by a fixed, value-free error.
+        const storageSources = ctx.services.has(CAPABILITIES.STORAGE_DIAGNOSTICS)
+          ? ctx.services.getAll<IStorageDiagnosticsSource>(CAPABILITIES.STORAGE_DIAGNOSTICS)
+          : [];
+        if (storageSources.length > MAX_STORAGE_SOURCES) {
+          active.revoke();
+          session = null;
+          throw new Error(PLUGIN_ERRORS.tooManyStorageSources);
+        }
         const handler = createConnectorHandler({
           port: options.port,
           subtle: ctx.runtime.subtle,
@@ -379,6 +398,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           authorization: authorizationSource,
           realtimeSources,
           outboundHttpSources,
+          storageSources,
         });
         // The devtool's own startup line. Without it the runtime prints a
         // bare `Listening on http://127.0.0.1:<port>/`, which in an

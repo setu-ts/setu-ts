@@ -13,10 +13,15 @@ import type {
   CacheDiagnosticsSnapshot,
   ICacheDiagnosticsSource,
   ISchedulerDiagnosticsSource,
+  IStorageDiagnosticsSource,
   SchedulerDiagnosticsOperation,
   SchedulerDiagnosticsRecord,
   SchedulerDiagnosticsResponse,
   SchedulerDiagnosticsSnapshot,
+  StorageDiagnosticsOperation,
+  StorageDiagnosticsRecord,
+  StorageDiagnosticsResponse,
+  StorageDiagnosticsSnapshot,
 } from '../../src/index.ts';
 import { CAPABILITIES } from '../../src/index.ts';
 
@@ -115,6 +120,57 @@ describe('scheduler diagnostics contracts (M98k)', () => {
     expect(operations.length).toBe(2);
     // @ts-expect-error — coverage is always owned-instance
     const wide: SchedulerDiagnosticsSnapshot['coverage'] = 'cluster';
+    void wide;
+  });
+});
+
+const STORAGE_RECORD: StorageDiagnosticsRecord = {
+  alias: 'primary',
+  operation: 'put',
+  count: 1,
+  lastDurationMs: 2,
+  ageMs: 0,
+  succeeded: 1,
+  failed: 0,
+  lastBytes: 3,
+};
+
+describe('storage diagnostics contracts (M98m)', () => {
+  it('types a source, snapshot and response with exactly the documented fields', () => {
+    const snapshot: StorageDiagnosticsSnapshot = {
+      state: 'ready',
+      alias: 'primary',
+      coverage: 'owned-instance',
+      records: [STORAGE_RECORD],
+      dropped: 0,
+    };
+    const source: IStorageDiagnosticsSource = { snapshot: () => snapshot };
+    const response: StorageDiagnosticsResponse = {
+      version: 1,
+      instanceId: 'id',
+      state: 'ready',
+      sources: [{ sourceId: 's1', snapshot: source.snapshot() }],
+    };
+    expect(response.sources[0]!.snapshot.records[0]).toEqual(STORAGE_RECORD);
+    expect(Object.keys(STORAGE_RECORD).length).toBe(8);
+    expect(CAPABILITIES.STORAGE_DIAGNOSTICS).toBe('storage-diagnostics');
+  });
+
+  it('admits only the six fixed operations and no eviction', () => {
+    const operations: StorageDiagnosticsOperation[] = [
+      'put',
+      'get',
+      'delete',
+      'exists',
+      'getSignedUrl',
+      'getStream',
+    ];
+    // @ts-expect-error — no list operation exists
+    const list: StorageDiagnosticsOperation = 'list';
+    void list;
+    expect(operations.length).toBe(6);
+    // @ts-expect-error — coverage is always owned-instance
+    const wide: StorageDiagnosticsSnapshot['coverage'] = 'all';
     void wide;
   });
 });
