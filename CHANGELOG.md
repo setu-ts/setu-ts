@@ -469,6 +469,21 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **`kernel` — retrying a `start()` that failed after a plugin registered now throws by name.**
+  `start()` rolls its started state back on failure, and its comment promised the failed start could
+  be "corrected and retried". That held only for failures before any plugin ran `register()`. After
+  one had, the retry re-ran every plugin against state that survived the rollback — the registry
+  (sealed, too, if the failure came after bootstrap), lifecycle hooks, routes and middleware — so it
+  always failed with a misleading `Capability 'runtime' is already registered` (or
+  `Cannot register
+  capability 'runtime' after runBootstrap() has completed`). It now fails with
+  `Cannot retry start()
+  after plugins have registered … Create a new application instead.`, before
+  anything runs again. Failures during plugin resolution (no runtime provider, an unsatisfied
+  dependency, a cycle) stay retryable, as before. **Migration:** a retry of a post-registration
+  failure never worked, so no working code changes; code that catches a failed `start()` and retries
+  on the same application should create a new application instead.
+
 - **`realtime-backplane-plugin` — a Redis publish on a failed connection is reported, not lost.** A
   connection that stays open while the server answers nothing — a paused or partitioned host that
   sends no reset — triggers no ioredis reconnect, so no retry budget applied and `publish()` never

@@ -1574,6 +1574,65 @@ describe('Application review fixes', () => {
     await app.stop();
   });
 
+  it('refuses by name to retry a start that failed after a plugin registered', async () => {
+    // The pre-registration test above never reaches `register()`, so its retry
+    // runs against an empty registry. Here the runtime provider registers
+    // first, then a plugin fails: the leftover `runtime` registration used to
+    // make the retry fail with "Capability 'runtime' is already registered",
+    // an error naming the wrong cause.
+    let failOnce = true;
+    let registrations = 0;
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'flaky',
+          version: '1.0.0',
+          register() {
+            registrations++;
+            if (failOnce) {
+              failOnce = false;
+              throw new Error('flaky');
+            }
+          },
+        },
+      ],
+    });
+    await expect(app.start()).rejects.toThrow('flaky');
+    await expect(app.start()).rejects.toThrow(
+      'Cannot retry start() after plugins have registered',
+    );
+    await expect(app.start()).rejects.toThrow('Create a new application instead.');
+    // The refusal happens before anything runs again.
+    expect(registrations).toBe(1);
+  });
+
+  it('refuses a retry after a failure past bootstrap, once the registry is sealed', async () => {
+    let bootstraps = 0;
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'boots',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.lifecycle.onBootstrap(() => {
+              bootstraps++;
+            });
+          },
+        },
+      ],
+    });
+    // No http-adapter is registered, so `listen` fails AFTER runBootstrap()
+    // sealed the registry.
+    await expect(app.start({ port: 0 })).rejects.toThrow("no 'http-adapter' capability");
+    expect(bootstraps).toBe(1);
+    await expect(app.start()).rejects.toThrow(
+      'Cannot retry start() after plugins have registered',
+    );
+    expect(bootstraps).toBe(1);
+  });
+
   it('runs close hooks when startup fails after plugins have registered resources', async () => {
     let closed = 0;
     const app = createApplication({

@@ -12,8 +12,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-Both changes are to `app.inject()` and both are silent — they compile, so the compiler will not
-point at them. Neither affects a served request.
+The two `app.inject()` changes below are silent — they compile, so the compiler will not point at
+them. Neither affects a served request.
 
 ### Check a test that asserts no `content-type` for a `Blob` body
 
@@ -84,6 +84,15 @@ headers. Either set the request's `content-type` explicitly, in which case it is
 passed and what the handler sees, or read `ctx.request.headers` inside the handler and report it.
 
 <!-- version:history -->
+
+### Create a new application instead of retrying a failed `start()`
+
+If your code catches a rejected `app.start()` and calls `start()` again on the same application,
+that retry only ever worked when the failure came before any plugin registered (a missing runtime
+provider, an unsatisfied dependency, a dependency cycle). After a plugin's `register()` had run, the
+retry always failed, with the misleading `Capability 'runtime' is already registered`. It now fails
+with `Cannot retry start() after plugins have registered … Create a new application instead.` — so
+rebuild the application (call your `createApp()` again) and start that one.
 
 ## 0.7.0
 

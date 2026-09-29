@@ -198,9 +198,9 @@ git sha, a sentence, any string over 64 characters) is omitted rather than proje
 eviction is reported as `lost` sequence numbers, and drops as `droppedEvents`. Startup failure and
 final shutdown clear retained metadata while preserving the original application error — a reader
 then sees only the coarse `failed`/`closed` state, the failure code, and counters. A retried
-`start()` continues the event numbering, so a later read reports the discarded range as `lost`.
-Timing is monotonic from runtime registration; `atMs`/`durationMs` are `null` before that, never
-fabricated.
+`start()` — possible only after a failure before any plugin registered — continues the event
+numbering, so a later read reports the discarded range as `lost`. Timing is monotonic from runtime
+registration; `atMs`/`durationMs` are `null` before that, never fabricated.
 
 The runnable consumer is `scripts/inspect-kernel.ts`; the paired throughput/latency harness is
 `scripts/benchmark-kernel-diagnostics.ts --mode=disabled|enabled`. Network authentication and
@@ -10491,6 +10491,17 @@ Contract notes:
   (`database-plugin` provides `database`), so a failure after a `without` reads as a missing
   capability rather than as the exclusion that caused it. `@setu-ts/testing`'s
   `createTestApp({ app, without })` is the intended caller.
+- **A failed `start()` is retryable only if it failed before any plugin registered** — plugin
+  resolution (an unsatisfied dependency, a cycle, no runtime provider), which is the same boundary
+  `unregister` uses. Correct the plugin list and call `start()` again. Once any plugin's
+  `register()` has run, a second `start()` **throws**
+  `Cannot retry start() after plugins have registered … Create
+  a new application instead.`: the
+  plugins that ran left their services (in a registry that may already be sealed), lifecycle hooks,
+  routes and middleware behind, and possibly resources outside the kernel, none of which can be
+  un-run. The failed attempt's `onClose` hooks have already run. Restart after a successful
+  `start()` + `stop()` is not supported either — `start()` throws
+  `Application has already been started.`
 - **`hasPlugin(name: string): boolean`** reports whether a plugin carrying that name is pending. A
   pure read — it resolves and constructs nothing. It exists so a caller applying several exclusions
   can validate the whole set before removing any of them: `unregister` mutates immediately, so

@@ -264,7 +264,8 @@ export class DiagnosticsCollector implements IDiagnosticsSource {
   /**
    * Application start has begun. A start following a FAILED start resets the
    * reader for the new attempt — the kernel rolls its own `#started` back so
-   * a failed start can be corrected and retried, and the reader must not keep
+   * a start that failed before any plugin registered can be corrected and
+   * retried, and the reader must not keep
    * reporting `failed` for a process that is starting (or later serving)
    * again. The failed attempt's retained metadata was already cleared by
    * `markStartupFailed`, so the reset recovers nothing sensitive; `closed`
