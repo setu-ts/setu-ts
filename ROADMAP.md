@@ -11235,7 +11235,7 @@ the three share lives in `@setu-ts/common` (maintainer decision, plan §3.1). Ca
 
 ### Milestone 98n: Outbound HTTP Attempt Observations
 
-**Status:** Complete (PR pending). Owner: `packages/sdk`. Plan archived at
+**Status:** Complete (PR #380). Owner: `packages/sdk`. Plan archived at
 `plans/archive/milestone-98n-outbound-http-observations.md`. Committed-tree security audit passed on
 `cfd20fe0` (findings F1, F2 fixed on the branch).
 

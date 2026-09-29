@@ -5425,7 +5425,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   hostile promise from the wrapped fetch (a throwing `constructor` getter, an own `then`) made the
   wrapper throw synchronously where `await` resolves, stranding a permanently in-flight attempt. The
   result is now adopted by `await` inside the promise the caller receives. Re-audit passed on
-  `cfd20fe0` with no finding open — complete (PR pending).
+  `cfd20fe0` with no finding open — complete (PR #380).
 - **Next milestone** — **M98m** (`packages/storage-plugin` — storage operation observations; design
   security review and implementation audit required).
 
