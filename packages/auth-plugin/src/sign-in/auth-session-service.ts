@@ -196,7 +196,7 @@ export class AuthSessionService implements IAuthSessionService {
     options: SignInOptions,
   ): Promise<SignInOutcome> {
     const session = this.#sessionService.from(ctx);
-    const methods = (options?.methods ?? []).filter((method) => AUTH_METHODS.includes(method));
+    const methods = options.methods.filter((method) => AUTH_METHODS.includes(method));
 
     // Check the MFA policy: when it answers `true` and the methods hold no
     // second factor, hold the principal back in a pending record.

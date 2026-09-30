@@ -483,6 +483,109 @@ app.router.get('/account', (ctx) =>
 Not provided: the implicit and hybrid flows, the device flow, dynamic client registration, front-
 and back-channel logout, and account linking — `toPrincipal` decides what an identity maps to.
 
+## Multi-Factor Authentication (TOTP)
+
+`signIn.mfa` adds a TOTP second factor to any sign-in flow that records its principal through
+`IAuthSessionService` — a federated callback, a password login, or both. It is off by default;
+nothing changes until you set `signIn.mfa.required`.
+
+`TotpService` is an app-instantiated service (like `PasswordHasher` and `RefreshTokenService`) — it
+is not an `AuthPlugin` option and registers nothing. It computes RFC 6238 TOTP codes (HMAC-SHA1,
+30-second step, 6 digits, ±1 step window) from a base32 secret, and it verifies them against an
+`ITotpStore`. The shipped `MemoryTotpStore` is single-process; a multi-instance application supplies
+a shared implementation.
+
+```typescript
+import { AuthPlugin, MemoryTotpStore, requireMfa, TotpService } from '@setu-ts/auth-plugin';
+import { createRuntimeServices, RuntimePlugin } from '@setu-ts/runtime';
+import { SessionPlugin } from '@setu-ts/session-plugin';
+import { createApplication } from '@setu-ts/kernel';
+
+const runtime = createRuntimeServices();
+const totp = new TotpService({
+  store: new MemoryTotpStore(runtime),
+  runtime,
+  issuer: 'MyApp',
+});
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    AuthPlugin({
+      signIn: {
+        providers: [],
+        mfa: {
+          required: (principal) => principal.id.startsWith('local|'),
+          pendingTtlMs: 300_000,
+        },
+      },
+    }),
+  ],
+});
+
+app.router.post('/mfa/enrol', async (ctx) => {
+  const { principalId } = await ctx.request.json<{ principalId: string }>();
+  const { secret, uri } = await totp.beginEnrolment(principalId, principalId);
+  return ctx.response.json({ secret, uri });
+});
+
+app.router.post('/mfa/confirm', async (ctx) => {
+  const { principalId, code } = await ctx.request.json<{ principalId: string; code: string }>();
+  const result = await totp.confirmEnrolment(principalId, code);
+  if (result !== 'ok') return ctx.response.status(401).json({ error: result });
+  const recoveryCodes = await totp.generateRecoveryCodes(principalId);
+  return ctx.response.json({ recoveryCodes });
+});
+
+app.router.post('/mfa/complete', async (ctx) => {
+  const { code } = await ctx.request.json<{ code: string }>();
+  const result = await totp.completeSignIn(ctx, code);
+  if (result !== 'signed-in') {
+    return ctx.response.status(401).json({ error: result });
+  }
+  return ctx.response.redirect('/', 302);
+});
+
+app.router.post('/mfa/complete-recovery', async (ctx) => {
+  const { code } = await ctx.request.json<{ code: string }>();
+  const result = await totp.completeSignInWithRecoveryCode(ctx, code);
+  if (result !== 'signed-in') {
+    return ctx.response.status(401).json({ error: result });
+  }
+  return ctx.response.redirect('/', 302);
+});
+
+app.router.get('/account/bank', {
+  middleware: [requireMfa()],
+  handler: async (ctx) => ctx.response.json({ ok: true }),
+});
+```
+
+- **Pending sign-in.** When `mfa.required` returns `true`, `signIn` does NOT sign the session in. It
+  stores a `PendingSignIn` record under a private session key and returns `second-factor-required`.
+  The session is anonymous until `completeSignIn` (or `completeSignInWithRecoveryCode`) succeeds, at
+  which point the principal is recorded with `methods: ['pwd', 'otp']` (or `['fed', 'otp']`) and the
+  session id is rotated. A pending record expires after `pendingTtlMs` and is refused when read
+  after expiry. The internal promotion (`promotePending`) is not exported — only `TotpService` can
+  complete a pending sign-in.
+- **Lockout.** Five failed TOTP attempts within 15 minutes lock the account out of TOTP verification
+  until the window clears. The attempt is reserved BEFORE the code is checked, so the fifth failure
+  is what trips the lock. Recovery codes are not subject to TOTP lockout; a failed recovery-code
+  attempt is recorded but does not extend the lock.
+- **Replay protection.** The store's `claimStep` is monotonic: a code whose step is ≤ the last
+  claimed step is refused, so a captured code cannot be replayed within its ±1 window.
+- **Recovery codes.** `generateRecoveryCodes` mints 10 codes of 16 base32 characters (80 bits each).
+  They are stored as SHA-256 digests and consumed atomically on use — a code works exactly once. The
+  plaintext list is returned to the caller exactly once and is not recoverable.
+- **`requireMfa()` guard.** Answers `401` for an anonymous request and `403`
+  `second-factor-required` for a principal whose `claims.amr` lacks `otp` or `pop`. A session that
+  completed TOTP carries `amr: [..., 'otp']` and passes. The guard is branded `AUTHENTICATED`, so it
+  composes with `requireRole`/`requirePermission` on the same route.
+- **Recovery-code sign-in records `methods: ['otp']`.** A sign-in completed with a recovery code
+  (rather than a TOTP code) records `otp` in `amr` — the second factor was a one-time code, not a
+  time-based one. `requireMfa()` accepts both.
+
 ## Refresh Tokens
 
 `RefreshTokenService` is an app-instantiated service (like `PasswordHasher`) — it is not an
@@ -655,6 +758,7 @@ MIT
 | `requireAllPermissions`             | function  |
 | `requireAnyRole`                    | function  |
 | `requireAuth`                       | function  |
+| `requireMfa`                        | function  |
 | `requirePermission`                 | function  |
 | `requireRole`                       | function  |
 | `AuthPluginConfigurationError`      | class     |
@@ -662,9 +766,11 @@ MIT
 | `MemoryAccessTokenRevocationStore`  | class     |
 | `MemoryRateLimitStore`              | class     |
 | `MemoryRefreshTokenStore`           | class     |
+| `MemoryTotpStore`                   | class     |
 | `PasswordHasher`                    | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
+| `TotpService`                       | class     |
 | `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
 | `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
 | `ApiKeyOptions`                     | interface |
@@ -679,9 +785,11 @@ MIT
 | `IAuthStrategy`                     | interface |
 | `IJwtService`                       | interface |
 | `IPrincipal`                        | interface |
+| `ITotpStore`                        | interface |
 | `JwtOptions`                        | interface |
 | `JwtSignOptions`                    | interface |
 | `LocalOptions`                      | interface |
+| `MfaOptions`                        | interface |
 | `OAuth2Provider`                    | interface |
 | `OidcProvider`                      | interface |
 | `ProviderTokens`                    | interface |
@@ -692,18 +800,24 @@ MIT
 | `RefreshTokenOptions`               | interface |
 | `RefreshTokenRecord`                | interface |
 | `RefreshTokenStore`                 | interface |
+| `ReserveAttemptResult`              | interface |
 | `RoleDefinition`                    | interface |
 | `SessionAuthOptions`                | interface |
 | `SignInConfig`                      | interface |
 | `SignInProviderBase`                | interface |
 | `TokenPair`                         | interface |
+| `TotpEnrolment`                     | interface |
+| `TotpServiceOptions`                | interface |
 | `TrustedIssuer`                     | interface |
 | `IRefreshTokenRotation`             | type      |
 | `IssuerAlgorithm`                   | type      |
 | `IssuerKeySource`                   | type      |
+| `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |
 | `SignInProvider`                    | type      |
 | `TokenEndpointAuth`                 | type      |
+| `TotpCompleteSignInResult`          | type      |
+| `TotpVerifyResult`                  | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

@@ -8,6 +8,31 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Multi-factor authentication with TOTP (M100d).** `AuthPluginOptions.signIn.mfa` adds a TOTP
+  second factor to any sign-in flow that records its principal through `IAuthSessionService`.
+  `TotpService` (app-instantiated, like `PasswordHasher`) computes RFC 6238 codes (HMAC-SHA1,
+  30-second step, 6 digits, ±1 step window) from a base32 secret and verifies them against an
+  `ITotpStore`; the shipped `MemoryTotpStore` is single-process.
+  `signIn.mfa.required(principal,
+  methods)` returns `true` to require a second factor; when it
+  does, `signIn` stores a `PendingSignIn` record (under a private session key, NOT the signed-in
+  key) and returns `second-factor-required` instead of signing the session in.
+  `TotpService.completeSignIn(ctx,
+  code)` and `completeSignInWithRecoveryCode(ctx, code)` complete
+  a pending sign-in, recording the principal with `methods: ['pwd', 'otp']` (or `['fed', 'otp']`)
+  and rotating the session id. Per-account lockout: five failed TOTP attempts within 15 minutes lock
+  the account out; the attempt is reserved before the code is checked. Replay protection: the
+  store's `claimStep` is monotonic, so a captured code cannot be replayed. Recovery codes:
+  `generateRecoveryCodes` mints 10 codes of 16 base32 characters (80 bits), stored as SHA-256
+  digests, consumed atomically on use. The new `requireMfa()` guard answers `401` for an anonymous
+  request and `403` `second-factor-required` for a principal whose `claims.amr` lacks `otp` or
+  `pop`. `@setu-ts/common` gains `PendingSignIn` and the `second-factor-required` arm of
+  `AuthorizationFailure`. New `@setu-ts/auth-plugin` exports: `TotpService`, `MemoryTotpStore`,
+  `requireMfa`, and the types `MfaOptions`, `ITotpStore`, `TotpVerifyResult`,
+  `RecoveryVerifyResult`, `TotpCompleteSignInResult`, `TotpServiceOptions`, `TotpEnrolment`,
+  `ReserveAttemptResult`. The internal `promotePending` is not exported. With `signIn.mfa` unset
+  nothing changes.
+
 - **Sign-in with an outside provider (M100c).** `AuthPluginOptions.signIn` makes the application an
   OAuth 2.0 / OpenID Connect relying party over the authorization-code flow: per provider,
   `GET /auth/<name>/login` and `GET /auth/<name>/callback`, plus one `POST /auth/logout`. Providers
@@ -570,6 +595,18 @@ All notable changes to this project are documented here. The format follows
   the runbook.
 
 ### Changed
+
+- **`common` — `IAuthSessionService` gains a required `pending()` member and `SignInOutcome` widens
+  (M100d, breaking).** `IAuthSessionService` now requires `pending(ctx): PendingSignIn |
+  null`,
+  which reads the pending second-factor record (if any) for the session. `SignInOutcome` widens from
+  `{ status: 'signed-in' }` to `{ status: 'signed-in' } | { status:
+  'second-factor-required' }`,
+  so a sign-in that requires a second factor no longer returns `signed-in`. Applications that
+  implement `IAuthSessionService` by hand must add the `pending()` member; applications that consume
+  the outcome must handle the new `second-factor-required` arm. `@setu-ts/common` exports the new
+  `PendingSignIn` interface. With `signIn.mfa` unset the `auth-plugin`'s own `AuthSessionService`
+  never returns `second-factor-required`, so existing consumers see no behavioral change.
 
 - **`auth-plugin` — `AuthPlugin` now registers `authMiddleware()` globally by default (M100a).**
   Every request runs the passive strategy chain at priority 300, so `ctx.request.user` is populated

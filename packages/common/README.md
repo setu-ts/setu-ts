@@ -372,6 +372,7 @@ package fits the plugin architecture.
 | `OutboundHttpDiagnosticsResponse`    | interface |
 | `OutboundHttpDiagnosticsSnapshot`    | interface |
 | `PageResult`                         | interface |
+| `PendingSignIn`                      | interface |
 | `PickOptions`                        | interface |
 | `ProbeTiming`                        | interface |
 | `ProcessOptions`                     | interface |

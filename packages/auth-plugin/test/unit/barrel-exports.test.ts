@@ -231,6 +231,9 @@ describe('barrel exports', () => {
     // configured through AuthPluginOptions.session; the option is the
     // configuration surface, so the class has no consumer beyond its own
     // test — the same reason JwtStrategy and ApiKeyStrategy are unexported.
+    // promotePending (M100d) is the internal promotion of a pending MFA
+    // sign-in; only TotpService completes a pending record, so the
+    // function has no consumer beyond its own test.
     const internals = [
       'JwtService',
       'AuthService',
@@ -242,6 +245,7 @@ describe('barrel exports', () => {
       'parseDuration',
       'loadIoredis',
       'validateClient',
+      'promotePending',
     ];
     for (const name of internals) {
       expect(auth[name as keyof typeof auth]).toBeUndefined();
