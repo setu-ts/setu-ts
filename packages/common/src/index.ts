@@ -239,6 +239,12 @@ export type {
   RbacConfig,
   RoleDefinition,
 } from './services/auth.ts';
+export type {
+  AuthMethod,
+  IAuthSessionService,
+  SignInOptions,
+  SignInOutcome,
+} from './services/auth-session.ts';
 export { DATA_CLASSIFICATIONS, DEFAULT_SECRET_FIELD_PATTERNS } from './redaction/classification.ts';
 export type { DataClassification } from './redaction/classification.ts';
 export { createMaskRedactor, eraseRedactor } from './redaction/redactors.ts';

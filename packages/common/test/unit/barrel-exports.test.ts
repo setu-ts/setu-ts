@@ -391,3 +391,50 @@ describe('@setu-ts/common barrel — M92 view contract', () => {
     expect(component({ id: 7 })).toBe('<span>7</span>');
   });
 });
+
+// ---------------------------------------------------------------------------
+// M100c — the signed-in principal contract
+// ---------------------------------------------------------------------------
+
+// Compile-time pins: a type-only export is invisible to every runtime
+// assertion, so the contract is declared against the barrel. Dropping the
+// re-export, renaming a member, or changing a signature fails `deno check`
+// here (the M56 defect class).
+const authMethodUnionPinned: Equals<
+  common.AuthMethod,
+  'pwd' | 'otp' | 'pop' | 'fed'
+> = true;
+const signInOutcomePinned: Equals<common.SignInOutcome, { readonly status: 'signed-in' }> = true;
+
+describe('@setu-ts/common barrel — M100c auth-session contract', () => {
+  it('exposes CAPABILITIES.AUTH_SESSION, and the value passes the token grammar', () => {
+    expect(common.CAPABILITIES.AUTH_SESSION).toBe('auth-session');
+    // The grammar is the committed rule for a token; a value that only LOOKS
+    // kebab-case (a colon, an underscore) must not reach the registry.
+    expect(common.createCapabilityToken(common.CAPABILITIES.AUTH_SESSION)).toBe('auth-session');
+  });
+
+  it('exports IAuthSessionService with the committed surface (declared against the barrel)', () => {
+    const service: common.IAuthSessionService = {
+      signIn: (_ctx, _principal, options) => {
+        // `methods` is the only record of how the session authenticated, so it
+        // must be a readable parameter of the committed type.
+        expect(options.methods).toEqual(['fed']);
+        return Promise.resolve({ status: 'signed-in' });
+      },
+      current: (_ctx) => null,
+      signOut: (_ctx) => {},
+    };
+    expect(service.current({} as never)).toBeNull();
+  });
+
+  it('exports SignInOptions with the methods list (declared against the barrel)', () => {
+    const options: common.SignInOptions = { methods: ['pwd', 'otp'] };
+    expect(options.methods).toEqual(['pwd', 'otp']);
+  });
+
+  it('pins AuthMethod and SignInOutcome shapes (compile-time)', () => {
+    expect(authMethodUnionPinned).toBe(true);
+    expect(signInOutcomePinned).toBe(true);
+  });
+});
