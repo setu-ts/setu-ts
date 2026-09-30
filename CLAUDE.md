@@ -5493,7 +5493,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   login and cookie-strategy logout) and N2 (discovery and JWKS reads not bounded for a seam ignoring
   its abort signal), round 3 closed both and found R1, N1's residual for code points above U+00FF.
   R1 is fixed — `isAcceptableUrl` admits printable ASCII only — and was NOT re-audited, at the
-  maintainer's direction — complete (PR pending).
+  maintainer's direction — complete (PR #386).
 - **Next milestone** — **M100d** (`packages/auth-plugin` + `packages/common` — multi-factor
   authentication (TOTP) and step-up; widens `SignInOutcome` with a second-factor arm).
 
