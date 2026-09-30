@@ -5469,7 +5469,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   time/byte/key-count bounds. A new `auth` health indicator never reports `down`. Every §3.2 refusal
   throws at construction. Driven against a real Keycloak 26.4 realm, including admin-API key
   rotation and an HS256 forgery using the realm's public key; CI starts Keycloak in all three
-  suite-running workflows — complete (PR pending).
+  suite-running workflows — complete (PR #385).
 - **Next milestone** — **M100c** (`packages/auth-plugin` + `packages/common` — sign-in with an
   outside provider over OAuth 2.0 / OpenID Connect; design security review and implementation audit
   required).
