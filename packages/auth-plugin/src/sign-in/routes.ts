@@ -34,6 +34,7 @@ import type { IssuerKeySet } from '../issuers/key-set-cache.ts';
 import { JwtVerifier } from '../issuers/jwt-verifier.ts';
 import { isAcceptableUrl } from '../issuers/trusted-issuer.ts';
 import { encodeBase64Url } from '../utils/base64url.ts';
+import { ID_TOKEN_SESSION_KEY, RP_PROVIDER_SESSION_KEY } from './auth-session-service.ts';
 import { addPending, takePending } from './pending-state.ts';
 import { createPkcePair } from './pkce.ts';
 import { safeReturnTo } from './return-to.ts';
@@ -44,9 +45,6 @@ const ENTROPY_BYTES = 32;
 
 /** Wall-clock budget for one provider round trip (discovery, token, userinfo). */
 export const PROVIDER_TIMEOUT_MS = 10_000;
-
-/** The reserved session key holding the ID token, when `idTokenHint` is opted in. */
-export const ID_TOKEN_SESSION_KEY = '__setu_auth_id_token';
 
 /** The query parameter carrying the post-sign-in target at the login route. */
 export const RETURN_TO_QUERY_PARAM = 'returnTo';
@@ -487,8 +485,12 @@ function registerCallback(
       // token routinely runs to kilobytes, and past the session cookie's 4096-byte
       // budget the session plugin throws at commit — which would break the SIGN-IN,
       // not the logout that wanted the token.
-      if (provider.rpInitiatedLogout?.idTokenHint === true && typeof tokens.idToken === 'string') {
-        session.set(ID_TOKEN_SESSION_KEY, tokens.idToken);
+      // Written AFTER signIn, which clears both keys: this sign-in owns them.
+      if (provider.rpInitiatedLogout !== undefined) {
+        session.set(RP_PROVIDER_SESSION_KEY, provider.name);
+        if (provider.rpInitiatedLogout.idTokenHint && typeof tokens.idToken === 'string') {
+          session.set(ID_TOKEN_SESSION_KEY, tokens.idToken);
+        }
       }
       if (provider.onTokens !== undefined) {
         try {
@@ -516,10 +518,13 @@ function registerLogout(router: IRouterApi, deps: SignInRouteDeps): void {
     deps.config.logoutPath,
     flowRoute(async (ctx): Promise<FlowOutcome> => {
       const provider = deps.config.rpLogoutProvider;
-      const wantsRpLogout = provider !== null && provider.rpInitiatedLogout !== undefined;
-      const idTokenHint = wantsRpLogout
-        ? deps.sessionService.from(ctx).get<string>(ID_TOKEN_SESSION_KEY)
-        : undefined;
+      const session = deps.sessionService.from(ctx);
+      // Only a session that actually signed in through the RP-logout provider is
+      // sent there: a password user, a user of another provider, or an anonymous
+      // POST ends the local session only.
+      const wantsRpLogout = provider !== null && provider.rpInitiatedLogout !== undefined &&
+        session.get<string>(RP_PROVIDER_SESSION_KEY) === provider.name;
+      const idTokenHint = wantsRpLogout ? session.get<string>(ID_TOKEN_SESSION_KEY) : undefined;
 
       // Local session first: whatever the provider does afterwards, this application
       // must stop asserting the identity.

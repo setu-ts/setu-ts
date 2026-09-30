@@ -103,6 +103,29 @@ describe('sign-in logout route', () => {
     expect(location.split('?').length).toBe(2);
   });
 
+  it('ends only the local session for a sign-in that did not come through that provider', async () => {
+    const rp = { oidc: { rpInitiatedLogout: { postLogoutRedirectUri: POST_LOGOUT } } };
+    // A password sign-in, and an anonymous POST, are never sent to the provider.
+    harness = await buildSignInApp(rp);
+    jar = new CookieJar();
+    await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+    let response = await jar.fetch(harness.app, '/auth/logout', { method: 'POST' });
+    expect(response.headers.get('location')).toBe('/');
+    response = await new CookieJar().fetch(harness.app, '/auth/logout', { method: 'POST' });
+    expect(response.headers.get('location')).toBe('/');
+    await harness.app.stop();
+
+    // A federated sign-in followed by a password sign-in in the SAME session
+    // does not inherit the provider session, nor its ID token.
+    await signedIn({
+      session: { store: 'memory' },
+      oidc: { rpInitiatedLogout: { postLogoutRedirectUri: POST_LOGOUT, idTokenHint: true } },
+    });
+    await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+    response = await jar.fetch(harness.app, '/auth/logout', { method: 'POST' });
+    expect(response.headers.get('location')).toBe('/');
+  });
+
   it('with form CSRF configured, refuses a logout without the token and accepts one with it', async () => {
     await signedIn({ session: { csrf: {} } });
     const refused = await jar.fetch(harness.app, '/auth/logout', { method: 'POST' });

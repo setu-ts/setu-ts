@@ -2380,7 +2380,8 @@ They still fail closed either way; what changed is that the refusal is legible.
 > success the callback calls `IAuthSessionService.signIn(ctx, principal, { methods: ['fed'] })`
 > (session id regenerated), hands the tokens to `onTokens` (a throwing `onTokens` does not undo the
 > sign-in), and redirects to the stored `returnTo`. Logout calls `signOut` and redirects to `/`, or
-> — for the one provider allowed to set `rpInitiatedLogout` — to its `end_session_endpoint` with
+> — for the one provider allowed to set `rpInitiatedLogout`, and only when the session signed in
+> through it (`IAuthSessionService.signIn` clears that marker) — to its `end_session_endpoint` with
 > `client_id`, `post_logout_redirect_uri` and, only when `idTokenHint: true` stored one,
 > `id_token_hint`. `refreshPrincipal(stored)` re-reads the principal per request (`null` or a throw
 > → anonymous). What `signOut` revokes depends on the session strategy: the store strategy deletes

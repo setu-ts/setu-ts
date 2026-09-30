@@ -62,7 +62,16 @@ export function safeReturnTo(value: string | undefined, fallback = '/'): string 
     if (code < 0x20 || code === 0x7f) {
       return fallback;
     }
-    encoded += code > 0x7f ? encodeURIComponent(char) : char;
+    if (code > 0x7f) {
+      // A lone surrogate has no UTF-8 encoding and makes encodeURIComponent
+      // throw; that is a value to refuse, not a 500.
+      if (code >= 0xd800 && code <= 0xdfff) {
+        return fallback;
+      }
+      encoded += encodeURIComponent(char);
+    } else {
+      encoded += char;
+    }
   }
   if (encoded.length > MAX_RETURN_TO_BYTES) {
     return fallback;

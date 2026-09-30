@@ -25,6 +25,15 @@ import type {
 /** The reserved session key holding the signed-in record. */
 export const AUTH_SESSION_KEY = '__setu_auth_principal';
 
+/**
+ * The reserved key naming the provider a federated sign-in came through, written
+ * only for the provider configured for RP-initiated logout.
+ */
+export const RP_PROVIDER_SESSION_KEY = '__setu_auth_rp';
+
+/** The reserved key holding the ID token, when `idTokenHint` is opted in. */
+export const ID_TOKEN_SESSION_KEY = '__setu_auth_id_token';
+
 /** The authentication methods the framework recognises (RFC 8176 `amr` values). */
 const AUTH_METHODS: readonly AuthMethod[] = ['pwd', 'otp', 'pop', 'fed'];
 
@@ -130,6 +139,12 @@ export class AuthSessionService implements IAuthSessionService {
       const methods = (options?.methods ?? []).filter((method) => AUTH_METHODS.includes(method));
       const record: AuthSessionRecord = { principal, methods, at: this.#now() };
       session.set(AUTH_SESSION_KEY, record);
+      // Provider-session facts belong to the sign-in that wrote them. A later
+      // sign-in in the same session (a password login after a federated one)
+      // must not inherit them, or logout would end a provider session this
+      // identity never had, carrying another sign-in's ID token.
+      session.delete(RP_PROVIDER_SESSION_KEY);
+      session.delete(ID_TOKEN_SESSION_KEY);
       // Rotation keeps the data (ISession.regenerate), so it runs after the write.
       session.regenerate();
       return Promise.resolve({ status: 'signed-in' });

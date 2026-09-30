@@ -17,7 +17,12 @@ import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
-import { AUTH_SESSION_KEY, AuthSessionService } from '../../src/sign-in/auth-session-service.ts';
+import {
+  AUTH_SESSION_KEY,
+  AuthSessionService,
+  ID_TOKEN_SESSION_KEY,
+  RP_PROVIDER_SESSION_KEY,
+} from '../../src/sign-in/auth-session-service.ts';
 import { createFakeSession, createFakeSessionService } from '../fixtures/fake-session.ts';
 
 const PRINCIPAL: IPrincipal = { id: 'u1', roles: ['admin'] };
@@ -48,7 +53,13 @@ describe('AuthSessionService', () => {
     });
     // Session fixation: an id a caller planted before login does not survive it.
     expect(session.id).toBe('session-1-rotated');
-    expect(session.mutations).toEqual([`set:${AUTH_SESSION_KEY}`, 'regenerate']);
+    // The prior sign-in's provider-session facts are cleared before rotation.
+    expect(session.mutations).toEqual([
+      `set:${AUTH_SESSION_KEY}`,
+      `delete:${RP_PROVIDER_SESSION_KEY}`,
+      `delete:${ID_TOKEN_SESSION_KEY}`,
+      'regenerate',
+    ]);
   });
 
   it('reads the principal back without running the strategy chain', () => {

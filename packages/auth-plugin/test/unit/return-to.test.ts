@@ -76,5 +76,7 @@ describe('safeReturnTo', () => {
     // 258 characters, past the cap.
     expect(safeReturnTo('/' + '日'.repeat(86))).toBe('/');
     expect(MAX_RETURN_TO_BYTES).toBe(256);
+    // A lone surrogate cannot be encoded; it is refused rather than thrown.
+    expect(safeReturnTo('/a\ud800b')).toBe('/');
   });
 });

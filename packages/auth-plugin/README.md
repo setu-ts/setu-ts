@@ -451,9 +451,11 @@ app.router.post('/login', async (ctx) => {
 ```
 
 **Logging out.** `POST /auth/logout` ends the local session and redirects to `/` — or, for the one
-`oidc` provider that sets `rpInitiatedLogout`, to its advertised end-session endpoint with
-`client_id` and `post_logout_redirect_uri`. It is a `POST` so form CSRF applies when configured, so
-the logout form carries the token field; without it every logout answers `403`:
+`oidc` provider that sets `rpInitiatedLogout`, when the session signed in through that provider, to
+its advertised end-session endpoint with `client_id` and `post_logout_redirect_uri`. A password
+sign-in, a sign-in through another provider, or an anonymous request ends the local session only. It
+is a `POST` so form CSRF applies when configured, so the logout form carries the token field;
+without it every logout answers `403`:
 
 ```typescript
 import { csrfTokenField } from '@setu-ts/session-plugin';
