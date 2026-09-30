@@ -111,6 +111,9 @@ describe('sign-in login route', () => {
       { authorization_endpoint: 'javascript:alert(1)' },
       // Round-2 N1: `new URL` strips the LF, and the raw value would break `Location`.
       { authorization_endpoint: `${ISSUER}/author\nize` },
+      // Round-3 R1: a code point above U+00FF, which `Headers` also refuses.
+      { authorization_endpoint: `${ISSUER}/\u65e5\u672c` },
+      { authorization_endpoint: 'https://\u65e5\u672c.test/authorize' },
     ];
     for (const [index, extra] of cases.entries()) {
       harness = await buildSignInApp({ discovery: discoveryDocument(extra) });

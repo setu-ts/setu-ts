@@ -16,8 +16,10 @@ All notable changes to this project are documented here. The format follows
   such as GitHub that issue no ID token). PKCE S256 is sent for every provider; `state`, `nonce` and
   the verifier are bound to the user's own session; RFC 9207 `iss` is checked when sent; `returnTo`
   is kept only as a same-origin path; and callback refusals answer with one of four fixed codes in
-  the configured error format. Provider tokens reach `onTokens` and are stored nowhere else.
-  `@setu-ts/common` gains `CAPABILITIES.AUTH_SESSION` and `IAuthSessionService`
+  the configured error format. Every configured or discovered URL must be `https` (or `http` on a
+  loopback host) written in printable ASCII, so a non-conforming discovered endpoint fails the login
+  with `503` instead of a malformed `Location`. Provider tokens reach `onTokens` and are stored
+  nowhere else. `@setu-ts/common` gains `CAPABILITIES.AUTH_SESSION` and `IAuthSessionService`
   (`signIn`/`current`/`signOut`, with `SignInOptions`, `SignInOutcome` and `AuthMethod`): the one
   owner of "this session is signed in as this principal". A password login records its principal
   through it too, and the new `auth-session` strategy authenticates later requests with `claims.amr`

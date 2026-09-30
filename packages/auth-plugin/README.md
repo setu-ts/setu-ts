@@ -298,9 +298,9 @@ AuthPlugin({
   continue; nothing else from an unverified token is used.
 - **Keys.** `keys` is `{ jwksUri }` or `{ discovery: true }`, which reads `jwks_uri` from
   `<issuer>/.well-known/openid-configuration` and requires that document's `issuer` to match. Both
-  URLs must be `https` (or `http` on a loopback host). Keys are filtered by `kty`, `crv`, `use`,
-  `alg`, `key_ops` and `kid`, so an encryption key in the same set is never used to verify a
-  signature.
+  URLs must be `https` (or `http` on a loopback host) and written in printable ASCII — punycode an
+  IDN host, percent-encode a non-ASCII path. Keys are filtered by `kty`, `crv`, `use`, `alg`,
+  `key_ops` and `kid`, so an encryption key in the same set is never used to verify a signature.
 - **Algorithms.** RS256, PS256, ES256, ES384 and EdDSA (also spelled `Ed25519`), narrowed per issuer
   with `algorithms`. `none` and every `HS*` algorithm are refused before any key is looked up, so a
   token signed with HMAC using the provider's public key as the secret cannot pass.

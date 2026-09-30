@@ -2376,12 +2376,14 @@ They still fail closed either way; what changed is that the refusal is legible.
 > answers `403` `principal-refused`. The attempt is consumed before the exchange. The ID token is
 > verified by the M100b verifier with `audience = clientId`, plus `iss === issuer`, `nonce` equality
 > and, for several audiences, `azp === clientId`. Discovered endpoints must be `https` (or loopback
-> `http`), and the `oauth2` userinfo read sends the access token as `Authorization: Bearer`. On
-> success the callback calls `IAuthSessionService.signIn(ctx, principal, { methods: ['fed'] })`
-> (session id regenerated), hands the tokens to `onTokens` (a throwing `onTokens` does not undo the
-> sign-in), and redirects to the stored `returnTo`. Logout calls `signOut` and redirects to `/`, or
-> — for the one provider allowed to set `rpInitiatedLogout`, and only when the session signed in
-> through it (`IAuthSessionService.signIn` clears that marker) — to its `end_session_endpoint` with
+> `http`) and printable ASCII — an endpoint with a space, control character or non-ASCII code point
+> answers the login `503` and drops RP-initiated logout to a local one — and the `oauth2` userinfo
+> read sends the access token as `Authorization: Bearer`. On success the callback calls
+> `IAuthSessionService.signIn(ctx, principal, { methods: ['fed'] })` (session id regenerated), hands
+> the tokens to `onTokens` (a throwing `onTokens` does not undo the sign-in), and redirects to the
+> stored `returnTo`. Logout calls `signOut` and redirects to `/`, or — for the one provider allowed
+> to set `rpInitiatedLogout`, and only when the session signed in through it
+> (`IAuthSessionService.signIn` clears that marker) — to its `end_session_endpoint` with
 > `client_id`, `post_logout_redirect_uri` and, only when `idTokenHint: true` stored one,
 > `id_token_hint`. `refreshPrincipal(stored)` re-reads the principal per request (`null` or a throw
 > → anonymous). What `signOut` revokes depends on the session strategy: the store strategy deletes

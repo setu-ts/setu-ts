@@ -134,11 +134,21 @@ describe('TrustedIssuer validation at construction', () => {
         'https://x.test/\r',
         ' https://x.test',
         'https://x.test/\u007f',
+        // Round 3 R1: `Headers` refuses every code point above U+00FF, and
+        // Latin-1 would go out as a bare non-UTF-8 byte.
+        'https://x.test/\u65e5\u672c',
+        'https://\u65e5\u672c.test/authorize',
+        'https://x.test/a\u2028b',
+        'https://x.test/caf\u00e9',
+        'https://x.test/\u0085',
       ]
     ) {
       expect(new URL(raw).protocol).toBe('https:');
       expect(isAcceptableUrl(raw)).toBe(false);
     }
+    // The encoded spellings of the same URLs are accepted.
+    expect(isAcceptableUrl(new URL('https://\u65e5\u672c.test/caf\u00e9').href)).toBe(true);
+    expect(isAcceptableUrl('https://x.test/a~b?c=d&e=%20#f')).toBe(true);
   });
 
   it('accepts issuers as the only strategy', () => {

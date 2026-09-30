@@ -361,3 +361,12 @@ afterwards.
 - **N2:** the F8 note in §11.1 was overstated — only the token/userinfo calls were raced. The
   discovery and JWKS fetches in `IssuerKeySet` now race their timer (and `close()`) too, reporting
   `fetch-aborted`, so a seam that ignores the abort signal cannot hold a sign-in route open.
+
+### 11.4 Security audit round 3 (on `5c49b99f`) — finding and fix
+
+- **R1 (Low):** the N1 check refused only C0 controls, SPACE and DEL. A discovery endpoint holding a
+  code point above U+00FF (a raw IDN host, a non-ASCII path, U+2028) still passed, was written raw
+  into `Location`, and `Headers` refused it — the same 500 on login and cookie-strategy logout N1
+  was filed for; Latin-1 went out as a bare non-UTF-8 byte. `isAcceptableUrl` now admits printable
+  ASCII (U+0021–U+007E) only; a provider publishes its endpoints punycoded and percent-encoded.
+  Fixed without a re-audit, at the maintainer's direction.

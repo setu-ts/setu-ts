@@ -104,6 +104,18 @@ describe('sign-in logout route', () => {
     expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
   });
 
+  it('ends only the local session when the end-session endpoint is not ASCII (audit R1)', async () => {
+    await signedIn({
+      oidc: { rpInitiatedLogout: { postLogoutRedirectUri: POST_LOGOUT } },
+      discovery: discoveryDocument({ end_session_endpoint: `${ISSUER}/log\u2028out` }),
+    });
+    const response = await jar.fetch(harness.app, '/auth/logout', { method: 'POST' });
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('/');
+    expect(response.headers.getSetCookie().some((c) => /max-age=0/i.test(c))).toBe(true);
+    expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+  });
+
   it('joins an end-session endpoint that already carries a query with & (M100c F6)', async () => {
     await signedIn({
       oidc: { rpInitiatedLogout: { postLogoutRedirectUri: POST_LOGOUT } },
