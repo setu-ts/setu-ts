@@ -70,7 +70,11 @@ describe('compileSignIn', () => {
   });
 
   it('honours a custom prefix, and a bare / means no prefix at all', () => {
-    expect(compileSignIn(config([oidc()], '/signin')).providers[0]?.loginPath).toBe(
+    expect(
+      compileSignIn(
+        config([oidc({ redirectUri: 'https://app.test/signin/acme/callback' })], '/signin'),
+      ).providers[0]?.loginPath,
+    ).toBe(
       '/signin/acme/login',
     );
     const root = compileSignIn(config([oidc()], '/'));
@@ -100,7 +104,21 @@ describe('compileSignIn', () => {
     // the same string; a mismatch fails at the provider instead of here.
     expect(
       refusal(config([oidc({ redirectUri: 'https://app.test/auth/other/callback' })])),
-    ).toContain('must end with /acme/callback');
+    ).toContain('path must end with /auth/acme/callback');
+    // The configured basePath is part of the registered route.
+    expect(
+      refusal(config([oidc({ redirectUri: 'https://app.test/auth/acme/callback' })], '/signin')),
+    ).toContain('path must end with /signin/acme/callback');
+    expect(() =>
+      compileSignIn(config([oidc({ redirectUri: 'https://app.test/acme/callback' })], '/'))
+    ).not.toThrow();
+    // Compared on the parsed path: a query does not defeat it, a mount prefix is allowed.
+    expect(() =>
+      compileSignIn(config([oidc({ redirectUri: 'https://app.test/auth/acme/callback?x=1' })]))
+    ).not.toThrow();
+    expect(() =>
+      compileSignIn(config([oidc({ redirectUri: 'https://app.test/api/auth/acme/callback' })]))
+    ).not.toThrow();
     expect(
       refusal(config([oidc({ redirectUri: 'http://app.test/auth/acme/callback' })])),
     ).toContain('https');

@@ -46,6 +46,7 @@ export class IssuerKeySet {
   #inflight: Promise<void> | null = null;
   #discovery: Readonly<Record<string, unknown>> | null = null;
   #discoveryAt = 0;
+  #discoveryAttemptAt: number | null = null;
   // Shared by the key-set path and the sign-in routes, so a burst of logins
   // cannot each fetch the document.
   #discoveryInflight: Promise<void> | null = null;
@@ -190,6 +191,13 @@ export class IssuerKeySet {
         this.#issuer.name,
         error instanceof RefreshError ? error.message : 'discovery-fetch-failed',
       );
+    }
+    // A failed or cooled-down refresh keeps serving the last issuer-checked
+    // document for as long as the keys it produced would stay usable.
+    if (
+      this.#discovery === null ||
+      this.#runtime.hrtime() - this.#discoveryAt > this.#issuer.timings.maxStaleMs
+    ) {
       return null;
     }
     return this.#discovery;
@@ -209,6 +217,18 @@ export class IssuerKeySet {
       await this.#discoveryInflight;
       return;
     }
+    // The login route is unauthenticated, so it gets the key set's cooldown:
+    // during an outage a stream of logins cannot become a stream of fetches.
+    if (
+      this.#discoveryAttemptAt !== null &&
+      now - this.#discoveryAttemptAt < this.#issuer.timings.minRefreshIntervalMs
+    ) {
+      if (this.#discovery === null) {
+        throw new RefreshError('discovery-cooldown');
+      }
+      return;
+    }
+    this.#discoveryAttemptAt = now;
     this.#discoveryInflight = (async () => {
       const document = await this.#fetchJson(this.#issuer.discoveryUrl ?? '');
       // OpenID Connect Discovery §4.3: a mismatched issuer means a spoofed or

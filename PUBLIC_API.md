@@ -2361,13 +2361,13 @@ They still fail closed either way; what changed is that the refusal is legible.
 > optional `rpInitiatedLogout: { postLogoutRedirectUri, idTokenHint?: true }`) and `OAuth2Provider`
 > (`authorizationEndpoint`, `tokenEndpoint`, `userinfoEndpoint`). Both share `name` (kebab-case),
 > `clientId`, `clientSecret?`, `tokenEndpointAuth?` (`'client_secret_basic'` — the default with a
-> secret — `'client_secret_post'` or `'none'`), `scopes?`, `redirectUri` (must end with
-> `/<name>/callback`), `failureRedirect?` (same-origin path), `toPrincipal(claims)` and
-> `onTokens?(tokens: ProviderTokens)`. Routes: `GET <basePath>/<name>/login`,
-> `GET <basePath>/<name>/callback`, and one `POST <basePath>/logout`. Login stores
-> `{ state, provider, verifier, nonce?, returnTo, createdAt }` in the user's session (at most 3,
-> 10-minute lifetime), sends PKCE S256 for every provider and never `response_mode`, and answers
-> `503` `provider-unavailable` when discovery cannot be read. `returnTo` is kept only as a
+> secret — `'client_secret_post'` or `'none'`), `scopes?`, `redirectUri` (its path must end with
+> `<basePath>/<name>/callback`; a leading mount prefix is allowed), `failureRedirect?` (same-origin
+> path), `toPrincipal(claims)` and `onTokens?(tokens: ProviderTokens)`. Routes:
+> `GET <basePath>/<name>/login`, `GET <basePath>/<name>/callback`, and one `POST <basePath>/logout`.
+> Login stores `{ state, provider, verifier, nonce?, returnTo, createdAt }` in the user's session
+> (at most 3, 10-minute lifetime), sends PKCE S256 for every provider and never `response_mode`, and
+> answers `503` `provider-unavailable` when discovery cannot be read. `returnTo` is kept only as a
 > same-origin path of at most 256 bytes after percent-encoding non-ASCII (else `/`) and is never
 > read from the callback URL. The callback refuses with `401` (or a `failureRedirect?error=<code>`
 > redirect) and one of the fixed codes `provider-denied`, `state-invalid` (unknown, replayed,

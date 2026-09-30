@@ -166,5 +166,6 @@ describe('AuthSessionStrategy edge cases', () => {
     expect(principal?.claims?.amr).toEqual(['otp']);
     expect(Object.isFrozen(principal)).toBe(true);
     expect(Object.isFrozen(principal?.claims)).toBe(true);
+    expect(Object.isFrozen(principal?.claims?.amr)).toBe(true);
   });
 });

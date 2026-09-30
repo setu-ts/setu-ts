@@ -160,8 +160,11 @@ function compileBase(
   // The registered route and the value the provider matches against must be the
   // same string; a mismatch is a login that fails at the provider with an error
   // that names neither the route nor the option.
-  if (!provider.redirectUri.endsWith(`/${name}/callback`)) {
-    refuse(name, `redirectUri must end with /${name}/callback`);
+  // Compared on the parsed path, so a query does not defeat it; a leading
+  // reverse-proxy mount prefix is still allowed.
+  const callbackPath = `${basePath}/${name}/callback`;
+  if (!new URL(provider.redirectUri).pathname.endsWith(callbackPath)) {
+    refuse(name, `redirectUri path must end with ${callbackPath}`);
   }
   if (provider.failureRedirect !== undefined) {
     // A failure redirect is a redirect: it gets the same same-origin check as

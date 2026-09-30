@@ -51,6 +51,40 @@ describe('discovery', () => {
     ]);
   });
 
+  it('does not refetch within the cooldown, and serves the last document through a failed refresh', async () => {
+    let answer: { status?: number; body: unknown } = {
+      body: { issuer: 'https://idp.test', jwks_uri: 'https://idp.test/certs' },
+    };
+    const t = setup('https://idp.test', () => answer);
+    const first = await t.keySet.discovery();
+    expect(first).not.toBeNull();
+    answer = { status: 500, body: 'down' };
+    // Past the TTL: one refresh is attempted, fails, and the cached document is served.
+    t.runtime.setHrtime(1000);
+    expect(await t.keySet.discovery()).toBe(first);
+    // Within the cooldown: no further fetch, however many logins arrive.
+    for (let i = 0; i < 20; i++) {
+      expect(await t.keySet.discovery()).toBe(first);
+    }
+    expect(t.calls.length).toBe(2);
+    // Past maxStaleMs (default 24 h) the stale document is no longer served.
+    t.runtime.setHrtime(24 * 60 * 60_000 + 2000);
+    expect(await t.keySet.discovery()).toBeNull();
+  });
+
+  it('applies the cooldown when no document was ever fetched', async () => {
+    const t = setup('https://idp.test', () => ({ status: 500, body: 'down' }));
+    expect(await t.keySet.discovery()).toBeNull();
+    for (let i = 0; i < 20; i++) {
+      expect(await t.keySet.discovery()).toBeNull();
+    }
+    expect(t.calls.length).toBe(1);
+    expect(t.failures.at(-1)).toBe('discovery-cooldown');
+    t.runtime.setHrtime(100);
+    expect(await t.keySet.discovery()).toBeNull();
+    expect(t.calls.length).toBe(2);
+  });
+
   it('refuses a document whose issuer does not equal the configured one', async () => {
     const t = setup('https://idp.test', () => ({
       body: { issuer: 'https://evil.test', jwks_uri: 'https://idp.test/certs' },

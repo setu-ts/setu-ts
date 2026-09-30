@@ -376,8 +376,8 @@ export interface SignInProviderBase {
   /** Requested scopes. Defaults to `['openid']` for `oidc` and `[]` for `oauth2`. */
   readonly scopes?: readonly string[];
   /**
-   * The exact redirect URI sent to the provider. It must end with that
-   * provider's callback path, so the registered route and the value the provider
+   * The exact redirect URI sent to the provider. Its path must end with that
+   * provider's callback path, `<basePath>/<name>/callback`, so the registered route and the value the provider
    * matches against cannot disagree.
    */
   readonly redirectUri: string;

@@ -48,7 +48,10 @@ function withAmr(principal: IPrincipal, record: AuthSessionRecord): IPrincipal {
   // quietly upgrade the authentication method of an authenticated request.
   return Object.freeze({
     ...principal,
-    claims: Object.freeze({ ...(principal.claims ?? {}), amr: record.methods }),
+    claims: Object.freeze({
+      ...(principal.claims ?? {}),
+      amr: Object.freeze([...record.methods]),
+    }),
   });
 }
 
