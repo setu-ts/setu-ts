@@ -16,6 +16,7 @@ import type { CompiledIssuer } from '../issuers/trusted-issuer.ts';
 import { compileIssuers, isAcceptableUrl } from '../issuers/trusted-issuer.ts';
 import { AuthPluginConfigurationError } from '../errors.ts';
 import type {
+  MfaOptions,
   OAuth2Provider,
   OidcProvider,
   ProviderTokens,
@@ -103,6 +104,10 @@ export interface CompiledSignIn {
    * have to re-read the raw option.
    */
   readonly refreshPrincipal: RefreshPrincipal | null;
+  /**
+   * The MFA policy, or `null` when no second factor is required.
+   */
+  readonly mfa: MfaOptions | null;
 }
 
 function refuse(name: string, reason: string): never {
@@ -370,5 +375,6 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
     logoutPath: `${basePath}/logout`,
     rpLogoutProvider: rpLogoutProviders[0] ?? null,
     refreshPrincipal: config.refreshPrincipal ?? null,
+    mfa: config.mfa ?? null,
   };
 }

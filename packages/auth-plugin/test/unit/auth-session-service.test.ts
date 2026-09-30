@@ -21,6 +21,7 @@ import {
   AUTH_SESSION_KEY,
   AuthSessionService,
   ID_TOKEN_SESSION_KEY,
+  PENDING_MFA_SESSION_KEY,
   RP_PROVIDER_SESSION_KEY,
 } from '../../src/sign-in/auth-session-service.ts';
 import { createFakeSession, createFakeSessionService } from '../fixtures/fake-session.ts';
@@ -58,6 +59,7 @@ describe('AuthSessionService', () => {
       `set:${AUTH_SESSION_KEY}`,
       `delete:${RP_PROVIDER_SESSION_KEY}`,
       `delete:${ID_TOKEN_SESSION_KEY}`,
+      `delete:${PENDING_MFA_SESSION_KEY}`,
       'regenerate',
     ]);
   });
@@ -107,6 +109,86 @@ describe('AuthSessionService', () => {
       session.set(AUTH_SESSION_KEY, corrupt);
       expect(impl.current(CTX), JSON.stringify(corrupt)).toBeNull();
     }
+  });
+
+  it('MFA required: stores pending record and returns second-factor-required', async () => {
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      mfa: {
+        required: () => true,
+        pendingTtlMs: 300_000,
+      },
+    });
+    const outcome = await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(outcome).toEqual({ status: 'second-factor-required' });
+    // The pending record is written, not the signed-in record.
+    expect(session.get(AUTH_SESSION_KEY)).toBeUndefined();
+    expect(session.get(PENDING_MFA_SESSION_KEY)).toEqual({
+      principal: PRINCIPAL,
+      methods: ['pwd'],
+      at: NOW,
+    });
+    // Session is rotated.
+    expect(session.id).toBe('session-1-rotated');
+  });
+
+  it('MFA required: pending() reads the pending record back', async () => {
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      mfa: {
+        required: () => true,
+        pendingTtlMs: 300_000,
+      },
+    });
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    const pending = impl.pending(CTX);
+    expect(pending).not.toBeNull();
+    expect(pending?.principal).toEqual(PRINCIPAL);
+    expect(pending?.methods).toEqual(['pwd']);
+  });
+
+  it('MFA not required: signs in normally', async () => {
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      mfa: {
+        required: () => false,
+        pendingTtlMs: 300_000,
+      },
+    });
+    const outcome = await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(outcome).toEqual({ status: 'signed-in' });
+    expect(session.get(AUTH_SESSION_KEY)).toBeDefined();
+    expect(session.get(PENDING_MFA_SESSION_KEY)).toBeUndefined();
+  });
+
+  it('MFA with otp in methods: skips the MFA check entirely', async () => {
+    const session = createFakeSession();
+    let called = false;
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      mfa: {
+        required: () => {
+          called = true;
+          return true;
+        },
+        pendingTtlMs: 300_000,
+      },
+    });
+    const outcome = await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd', 'otp'] });
+    expect(outcome).toEqual({ status: 'signed-in' });
+    expect(called).toBe(false);
+  });
+
+  it('pending() returns null when no pending record exists', () => {
+    const { impl } = service();
+    expect(impl.pending(CTX)).toBeNull();
   });
 });
 

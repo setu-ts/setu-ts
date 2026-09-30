@@ -5,6 +5,7 @@
  */
 
 import type {
+  AuthMethod,
   IAuthStrategy,
   IPrincipal,
   PathPattern,
@@ -473,6 +474,33 @@ export type RefreshPrincipal = (
 ) => IPrincipal | null | Promise<IPrincipal | null>;
 
 /**
+ * MFA policy for sign-in (plan §3.1, §4.1).
+ *
+ * @since 0.9.0
+ */
+export interface MfaOptions {
+  /**
+   * Decides whether a second factor is required for a given principal and set
+   * of methods. Return `true` to require a second factor; the sign-in then
+   * stores a pending record and resolves `second-factor-required`.
+   *
+   * The principal is the one `toPrincipal` built (or the application's password
+   * login produced), and `methods` are the methods that produced it so far.
+   * An application whose provider already enforced MFA can answer `false` from
+   * the provider's claims.
+   */
+  readonly required: (
+    principal: IPrincipal,
+    methods: readonly AuthMethod[],
+  ) => boolean | Promise<boolean>;
+  /**
+   * How long a pending second-factor record may sit before it is refused, in
+   * milliseconds. Defaults to 300 000 (5 minutes).
+   */
+  readonly pendingTtlMs?: number;
+}
+
+/**
  * Sign-in configuration (plan §3.2–§3.8).
  *
  * @since 0.8.0
@@ -489,4 +517,11 @@ export interface SignInConfig {
    * the snapshot is used and stays in force until sign-out.
    */
   refreshPrincipal?: RefreshPrincipal;
+  /**
+   * MFA policy: decides when a second factor is required at sign-in. Absent
+   * means no second factor is ever required.
+   *
+   * @since 0.9.0
+   */
+  readonly mfa?: MfaOptions;
 }

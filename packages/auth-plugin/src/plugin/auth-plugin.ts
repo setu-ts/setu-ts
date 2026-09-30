@@ -301,9 +301,16 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           signInKeySets.push(keySet);
         }
 
+        const mfa = compiledSignIn.mfa;
         const authSessionService = new AuthSessionService({
           sessionService,
           now: () => runtime.now(),
+          ...(mfa === null ? {} : {
+            mfa: {
+              required: mfa.required,
+              pendingTtlMs: mfa.pendingTtlMs ?? 300_000,
+            },
+          }),
         });
         ctx.services.register(CAPABILITIES.AUTH_SESSION, authSessionService);
 

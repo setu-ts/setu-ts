@@ -242,6 +242,7 @@ export type {
 export type {
   AuthMethod,
   IAuthSessionService,
+  PendingSignIn,
   SignInOptions,
   SignInOutcome,
 } from './services/auth-session.ts';
