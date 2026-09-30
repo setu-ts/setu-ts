@@ -506,6 +506,7 @@ const totp = new TotpService({
   store: new MemoryTotpStore(runtime),
   runtime,
   issuer: 'MyApp',
+  pendingTtlMs: 300_000,
 });
 
 const app = createApplication({

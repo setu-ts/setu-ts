@@ -34,6 +34,11 @@ export interface TotpServiceOptions {
   readonly runtime: IRuntimeServices;
   /** The issuer name shown in the authenticator app. */
   readonly issuer: string;
+  /**
+   * How long a pending second-factor record may sit before it is refused, in
+   * milliseconds. Defaults to 300 000 (5 minutes).
+   */
+  readonly pendingTtlMs?: number;
 }
 
 /** The result of a TOTP code verification. */
@@ -77,14 +82,16 @@ export class TotpService {
   #store: ITotpStore;
   #runtime: IRuntimeServices;
   #issuer: string;
+  #pendingTtlMs: number;
 
   /**
-   * @param options - Store, runtime, and issuer
+   * @param options - Store, runtime, issuer, and pending-record TTL
    */
   constructor(options: TotpServiceOptions) {
     this.#store = options.store;
     this.#runtime = options.runtime;
     this.#issuer = options.issuer;
+    this.#pendingTtlMs = options.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS;
   }
 
   /**
@@ -163,7 +170,12 @@ export class TotpService {
       return 'not-enrolled';
     }
 
-    const secret = decodeBase32(enrolment.secret);
+    let secret: Uint8Array;
+    try {
+      secret = decodeBase32(enrolment.secret);
+    } catch {
+      return 'invalid';
+    }
     const current = totpCounter(now);
 
     for (let delta = -1; delta <= 1; delta++) {
@@ -228,8 +240,14 @@ export class TotpService {
 
     // Decode the base32 code back to raw bytes so the digest matches the one
     // stored by `generateRecoveryCodes` (which hashes the raw bytes, not the
-    // base32 string).
-    const raw = decodeBase32(code);
+    // base32 string). A code with characters outside the base32 alphabet is
+    // simply not a valid recovery code.
+    let raw: Uint8Array;
+    try {
+      raw = decodeBase32(code);
+    } catch {
+      return 'invalid';
+    }
     const digestBytes = await this.#runtime.subtle.digest('SHA-256', toBuffer(raw));
     const digest = bytesToHex(new Uint8Array(digestBytes));
 
@@ -278,7 +296,7 @@ export class TotpService {
     const outcome = promotePending(ctx, 'otp', {
       sessionService,
       now: () => this.#runtime.now(),
-      pendingTtlMs: DEFAULT_PENDING_TTL_MS,
+      pendingTtlMs: this.#pendingTtlMs,
     });
     if (outcome !== 'signed-in') {
       return 'no-pending';
@@ -319,7 +337,7 @@ export class TotpService {
     const outcome = promotePending(ctx, 'otp', {
       sessionService,
       now: () => this.#runtime.now(),
-      pendingTtlMs: DEFAULT_PENDING_TTL_MS,
+      pendingTtlMs: this.#pendingTtlMs,
     });
     if (outcome !== 'signed-in') {
       return 'no-pending';
