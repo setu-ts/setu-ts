@@ -325,3 +325,20 @@ afterwards.
 - **Test homes:** the §6 `sign-in-options.test.ts` cases live in the pre-existing
   `sign-in-config.test.ts` (construction) and `integration/auth-session-strategy.test.ts`
   (`register()` refusal, `provides`).
+
+### 11.1 Security audit round 1 (on `09ef18ef`) — findings and fixes
+
+- **F2 (Medium):** the `oauth2` userinfo read never sent the access token, so no `oauth2` sign-in
+  could succeed. `IAuthHttp.get` gains an optional `headers` (the seam is unreleased, M100b) and the
+  read sends `Authorization: Bearer`; proven against real Keycloak driven as an `oauth2` provider.
+- **F1:** the ID token's `iss` is now compared with the provider's issuer (OIDC Core §3.1.3.7).
+- **F3:** a non-ASCII `returnTo` is percent-encoded, so the `Location` header is a legal ByteString.
+- **F4:** §3.7's budget claim was false — five entries of 512 bytes overflowed the cookie on the
+  fourth login. The caps are now **three** entries and **256** bytes (measured against the encoded
+  form).
+- **F5:** discovered `authorization`/`token`/`end_session` endpoints must pass the same
+  https-or-loopback rule as `jwks_uri`.
+- **F6:** an end-session endpoint with an existing query is joined with `&`.
+- **F7:** the `issuers` bearer strategy refuses a token whose claims carry Keycloak's `typ: "ID"`.
+- **F8:** `attempt()` races the provider call against its timer, so a seam that ignores the abort
+  signal cannot hold a request open.

@@ -2339,14 +2339,14 @@ They still fail closed either way; what changed is that the refusal is legible.
 > throws `AuthPluginConfigurationError` from `AuthPlugin(...)`. `http?: IAuthHttp` replaces the
 > default `fetch` seam. An `auth` health indicator reports `up` or `degraded` (with per-issuer
 > `stale`/`expired`/`unfetched`), never `down`, and performs no I/O. `typ: at+jwt` (RFC 9068) is not
-> enforced, so the API needs an audience distinct from any sign-in client id; multi-tenant Entra ID
-> is not supported. `IJwtService` remains self-issued only. `sub` is unique only within its issuer,
-> so whenever an issuer is not the only identity source — another issuer, a self-issued `jwt` (whose
-> strategy also maps `sub` to the id), an API key, a session or a custom strategy — `toPrincipal`
-> should namespace the id (`` `${claims.iss}|${claims.sub}` ``) — and every other source too (or
-> keep their ids free of the separator), since namespacing one side does not stop a local id of the
-> same form colliding. `keySet.fetchTimeoutMs` may not exceed 2147483647, since a larger timer delay
-> overflows.
+> enforced (only a Keycloak `typ: "ID"` claim is refused), so the API needs an audience distinct
+> from any sign-in client id; multi-tenant Entra ID is not supported. `IJwtService` remains
+> self-issued only. `sub` is unique only within its issuer, so whenever an issuer is not the only
+> identity source — another issuer, a self-issued `jwt` (whose strategy also maps `sub` to the id),
+> an API key, a session or a custom strategy — `toPrincipal` should namespace the id
+> (`` `${claims.iss}|${claims.sub}` ``) — and every other source too (or keep their ids free of the
+> separator), since namespacing one side does not stop a local id of the same form colliding.
+> `keySet.fetchTimeoutMs` may not exceed 2147483647, since a larger timer delay overflows.
 >
 > **Sign-in with an outside provider (M100c):** `signIn: SignInConfig` —
 > `{ basePath?: string (default '/auth'), providers: readonly SignInProvider[], refreshPrincipal? }`
@@ -2365,16 +2365,18 @@ They still fail closed either way; what changed is that the refusal is legible.
 > `/<name>/callback`), `failureRedirect?` (same-origin path), `toPrincipal(claims)` and
 > `onTokens?(tokens: ProviderTokens)`. Routes: `GET <basePath>/<name>/login`,
 > `GET <basePath>/<name>/callback`, and one `POST <basePath>/logout`. Login stores
-> `{ state, provider, verifier, nonce?, returnTo, createdAt }` in the user's session (at most 5,
+> `{ state, provider, verifier, nonce?, returnTo, createdAt }` in the user's session (at most 3,
 > 10-minute lifetime), sends PKCE S256 for every provider and never `response_mode`, and answers
 > `503` `provider-unavailable` when discovery cannot be read. `returnTo` is kept only as a
-> same-origin path of at most 512 bytes (else `/`) and is never read from the callback URL. The
-> callback refuses with `401` (or a `failureRedirect?error=<code>` redirect) and one of the fixed
-> codes `provider-denied`, `state-invalid` (unknown, replayed, expired, another provider's, or an
-> RFC 9207 `iss` naming another issuer), `exchange-failed` and `profile-unavailable`, through
-> `respondWithError`; `toPrincipal` returning `null` or throwing answers `403` `principal-refused`.
-> The attempt is consumed before the exchange. The ID token is verified by the M100b verifier with
-> `audience = clientId`, plus `nonce` equality and, for several audiences, `azp === clientId`. On
+> same-origin path of at most 256 bytes after percent-encoding non-ASCII (else `/`) and is never
+> read from the callback URL. The callback refuses with `401` (or a `failureRedirect?error=<code>`
+> redirect) and one of the fixed codes `provider-denied`, `state-invalid` (unknown, replayed,
+> expired, another provider's, or an RFC 9207 `iss` naming another issuer), `exchange-failed` and
+> `profile-unavailable`, through `respondWithError`; `toPrincipal` returning `null` or throwing
+> answers `403` `principal-refused`. The attempt is consumed before the exchange. The ID token is
+> verified by the M100b verifier with `audience = clientId`, plus `iss === issuer`, `nonce` equality
+> and, for several audiences, `azp === clientId`. Discovered endpoints must be `https` (or loopback
+> `http`), and the `oauth2` userinfo read sends the access token as `Authorization: Bearer`. On
 > success the callback calls `IAuthSessionService.signIn(ctx, principal, { methods: ['fed'] })`
 > (session id regenerated), hands the tokens to `onTokens` (a throwing `onTokens` does not undo the
 > sign-in), and redirects to the stored `returnTo`. Logout calls `signOut` and redirects to `/`, or

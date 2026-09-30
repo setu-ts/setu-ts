@@ -221,9 +221,12 @@ export async function fetchUserInfo(
     readonly reason: TokenExchangeFailure;
   }
 > {
+  // RFC 6750 §2.1: the access token rides the Authorization header. Without it
+  // every provider answers 401, so no oauth2 sign-in could ever succeed.
   const response = await http.get(options.userinfoEndpoint, {
     signal: options.signal,
     maxBytes: MAX_TOKEN_RESPONSE_BYTES,
+    headers: { authorization: `Bearer ${options.accessToken}` },
   });
   if (response.status < 200 || response.status > 299) {
     return { ok: false, reason: 'provider-error' };
@@ -271,7 +274,7 @@ export function authorizationUrl(options: {
   if (typeof options.nonce === 'string') {
     params.set('nonce', options.nonce);
   }
-  // `URLSearchParams` sorts its keys, so the join below cannot produce `?` twice.
+  // The endpoint may already carry a query; join with `&` so `?` is never doubled.
   const separator = options.authorizationEndpoint.includes('?') ? '&' : '?';
   return `${options.authorizationEndpoint}${separator}${params.toString()}`;
 }

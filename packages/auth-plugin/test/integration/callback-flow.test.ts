@@ -193,6 +193,32 @@ describe('sign-in callback route', () => {
     );
   });
 
+  it('refuses an ID token whose iss is another issuer or absent (M100c F1)', async () => {
+    await start();
+    for (const iss of ['https://evil.test', undefined]) {
+      const params = await followLogin(harness, jar);
+      harness.state.idClaims = { iss };
+      await harness.prepare();
+      await expectRefused(
+        await callback(harness, jar, { code: 'c', state: params.get('state') ?? '' }),
+        'exchange-failed',
+      );
+    }
+  });
+
+  it('redirects to a non-ASCII returnTo as a legal header (M100c F3)', async () => {
+    await start();
+    const params = await followLogin(
+      harness,
+      jar,
+      'idp',
+      `?returnTo=${encodeURIComponent('/日本')}`,
+    );
+    const response = await callback(harness, jar, { code: 'c', state: params.get('state') ?? '' });
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('/%E6%97%A5%E6%9C%AC');
+  });
+
   it('checks azp when aud names several clients', async () => {
     await start();
     let params = await followLogin(harness, jar);
@@ -307,6 +333,9 @@ describe('sign-in callback route', () => {
     expect(exchange?.headers?.authorization).toBeUndefined();
     const me = await json(await jar.fetch(harness.app, '/me'));
     expect((me.user as { id: string }).id).toBe('gh:42');
+    // RFC 6750: the access token rides the Authorization header of the profile read.
+    const profile = harness.requests.find((request) => request.url === GH.userinfo);
+    expect(profile?.headers?.authorization).toBe('Bearer gh-token');
   });
 
   it('refuses with profile-unavailable when userinfo fails', async () => {

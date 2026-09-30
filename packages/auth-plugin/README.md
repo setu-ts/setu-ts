@@ -329,11 +329,12 @@ AuthPlugin({
   token.
 
 **Give the API its own audience.** Access-token type (`typ: at+jwt`, RFC 9068) is not enforced, so a
-provider's **ID token** whose `aud` equals `audience` would verify as an access token. That happens
+provider's **ID token** whose `aud` equals `audience` could verify as an access token. That happens
 when an API reuses a sign-in client's id as its audience; configure a distinct resource identifier
-for the API instead. **Multi-tenant Entra ID** (`common`/`organizations`) is not supported, because
-its discovery document carries a `{tenantid}` issuer template that cannot equal a configured issuer;
-a single-tenant Entra issuer works.
+for the API instead. A token carrying Keycloak's `typ: "ID"` claim is refused either way, but other
+providers do not mark their ID tokens. **Multi-tenant Entra ID** (`common`/`organizations`) is not
+supported, because its discovery document carries a `{tenantid}` issuer template that cannot equal a
+configured issuer; a single-tenant Entra issuer works.
 
 ## Signing a user in
 
@@ -404,13 +405,13 @@ A link to `/auth/keycloak/login?returnTo=/orders` starts a sign-in and lands on 
 afterwards.
 
 - **Login** mints `state` and a PKCE verifier (32 random bytes each, S256 challenge) and, for
-  `oidc`, a `nonce`, stores them in the user's OWN session (at most five attempts, ten minutes
+  `oidc`, a `nonce`, stores them in the user's OWN session (at most three attempts, ten minutes
   each), and redirects to the provider. PKCE is sent for every provider, confidential clients
   included. `returnTo` is kept only when it is a same-origin path — one leading `/`, no `\`, no
-  scheme, no control character, at most 512 bytes — and otherwise becomes `/`; it is stored at login
-  and never read from the callback URL, so the redirect after sign-in cannot be steered. When the
-  provider's discovery document cannot be read, login answers `503` `provider-unavailable` rather
-  than redirecting to an endpoint it never read.
+  scheme, no control character, at most 256 bytes with non-ASCII percent-encoded — and otherwise
+  becomes `/`; it is stored at login and never read from the callback URL, so the redirect after
+  sign-in cannot be steered. When the provider's discovery document cannot be read, login answers
+  `503` `provider-unavailable` rather than redirecting to an endpoint it never read.
 - **Callback** refuses — `401`, or a redirect to `failureRedirect` with `?error=<code>` — with one
   of four fixed codes: `provider-denied` (the provider reported an error), `state-invalid` (unknown,
   replayed, expired, issued for another provider, or an RFC 9207 `iss` naming another issuer),

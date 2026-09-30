@@ -121,6 +121,14 @@ export class IssuerStrategy implements IAuthStrategy {
         this.#report(binding.issuer.name, outcome.reason);
         return null;
       }
+      // Keycloak marks an ID token with `typ: "ID"` in its claims. Refused on the
+      // bearer path: an ID token is an assertion for the client, not a grant to
+      // call this API, and one handed out as `id_token_hint` would otherwise
+      // authenticate here until it expires.
+      if (outcome.claims.typ === 'ID') {
+        this.#report(binding.issuer.name, 'id-token-as-bearer');
+        return null;
+      }
       return await binding.issuer.toPrincipal(outcome.claims);
     } catch {
       this.#report(binding.issuer.name, 'verification-error');

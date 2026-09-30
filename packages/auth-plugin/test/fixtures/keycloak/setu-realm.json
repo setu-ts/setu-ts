@@ -54,7 +54,8 @@
       "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
-        "http://localhost/auth/keycloak/callback"
+        "http://localhost/auth/keycloak/callback",
+        "http://localhost/auth/keycloak-oauth2/callback"
       ],
       "webOrigins": [],
       "attributes": {

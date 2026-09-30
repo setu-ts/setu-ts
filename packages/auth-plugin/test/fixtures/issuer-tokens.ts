@@ -132,8 +132,8 @@ export function createFakeHttp(
     calls,
     requests,
     http: {
-      get(url) {
-        return answer('GET', url, null, null);
+      get(url, { headers }) {
+        return answer('GET', url, null, headers ?? null);
       },
       post(url, { form, headers }) {
         return answer('POST', url, form, headers ?? null);

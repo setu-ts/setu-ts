@@ -32,6 +32,7 @@ import type { IAuthHttp } from '../interfaces/index.ts';
 import type { CompiledProvider, CompiledSignIn } from './config.ts';
 import type { IssuerKeySet } from '../issuers/key-set-cache.ts';
 import { JwtVerifier } from '../issuers/jwt-verifier.ts';
+import { isAcceptableUrl } from '../issuers/trusted-issuer.ts';
 import { encodeBase64Url } from '../utils/base64url.ts';
 import { addPending, takePending } from './pending-state.ts';
 import { createPkcePair } from './pkce.ts';
@@ -104,15 +105,24 @@ interface ResolvedEndpoints {
  * runtime can clear. A throwing seam must not escape as a 500: `null` means
  * "the provider did not answer", and the caller turns that into a fixed refusal.
  */
-async function attempt<T>(
+export async function attempt<T>(
   runtime: IRuntimeServices,
   timeoutMs: number,
   body: (signal: AbortSignal) => Promise<T>,
 ): Promise<T | null> {
   const controller = new AbortController();
-  const timer = runtime.setTimeout(() => controller.abort(), timeoutMs);
+  // Raced rather than trusted: an injected seam that ignores the signal would
+  // otherwise hold the request, and the application's shutdown drain, open.
+  let expire: () => void = () => {};
+  const expired = new Promise<null>((resolve) => {
+    expire = () => resolve(null);
+  });
+  const timer = runtime.setTimeout(() => {
+    controller.abort();
+    expire();
+  }, timeoutMs);
   try {
-    return await body(controller.signal);
+    return await Promise.race([body(controller.signal), expired]);
   } catch {
     return null;
   } finally {
@@ -151,15 +161,23 @@ async function resolveEndpoints(
   }
   const authorizationEndpoint = document.authorization_endpoint;
   const tokenEndpoint = document.token_endpoint;
-  if (typeof authorizationEndpoint !== 'string' || typeof tokenEndpoint !== 'string') {
+  // The same https-or-loopback rule `jwks_uri` gets: an `http` token endpoint
+  // would receive the client secret in cleartext, and an authorization endpoint
+  // becomes a `Location` header the user's browser follows.
+  if (!isEndpoint(authorizationEndpoint) || !isEndpoint(tokenEndpoint)) {
     return null;
   }
   const endSession = document.end_session_endpoint;
   return {
     authorizationEndpoint,
     tokenEndpoint,
-    endSessionEndpoint: typeof endSession === 'string' ? endSession : null,
+    endSessionEndpoint: isEndpoint(endSession) ? endSession : null,
   };
+}
+
+/** A discovery-supplied endpoint: a string that is https, or http on loopback. */
+function isEndpoint(value: unknown): value is string {
+  return typeof value === 'string' && isAcceptableUrl(value);
 }
 
 /**
@@ -321,6 +339,12 @@ async function verifyIdToken(
     return null;
   }
   const claims = outcome.claims;
+  // OIDC Core §3.1.3.7 step 2. The shared verifier leaves `iss` to its caller
+  // (M100b binds it by the issuer lookup), so the ID-token path checks it here.
+  if (claims.iss !== provider.issuer) {
+    deps.debug?.(`auth-plugin: signIn['${provider.name}'] id_token iss mismatch`);
+    return null;
+  }
   if (expectedNonce === undefined || claims.nonce !== expectedNonce) {
     // Without a matching nonce this may be an ID token replayed from another
     // login attempt by the same provider.
@@ -527,7 +551,8 @@ function registerLogout(router: IRouterApi, deps: SignInRouteDeps): void {
       if (provider.rpInitiatedLogout.idTokenHint === true && typeof idTokenHint === 'string') {
         params.set('id_token_hint', idTokenHint);
       }
-      return `${endSession}?${params.toString()}`;
+      const separator = endSession.includes('?') ? '&' : '?';
+      return `${endSession}${separator}${params.toString()}`;
     }),
   );
 }

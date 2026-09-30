@@ -54,10 +54,10 @@ export function createDefaultAuthHttp(
     return { status: response.status, body };
   };
   return {
-    get(url, { signal, maxBytes }) {
+    get(url, { signal, maxBytes, headers }) {
       return send(
         url,
-        { method: 'GET', signal, headers: { accept: 'application/json' } },
+        { method: 'GET', signal, headers: { accept: 'application/json', ...(headers ?? {}) } },
         maxBytes,
       );
     },

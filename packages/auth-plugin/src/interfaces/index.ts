@@ -222,12 +222,17 @@ export interface IAuthHttp {
    * Performs a GET request.
    *
    * @param url - Absolute URL
-   * @param options - Abort signal and response-body byte limit
+   * @param options - Abort signal, response-body byte limit, and any extra request
+   *   headers (the sign-in userinfo read sends its bearer access token here)
    * @returns The status code and the body as text
    */
   get(
     url: string,
-    options: { readonly signal: AbortSignal; readonly maxBytes: number },
+    options: {
+      readonly signal: AbortSignal;
+      readonly maxBytes: number;
+      readonly headers?: Readonly<Record<string, string>>;
+    },
   ): Promise<{ readonly status: number; readonly body: string }>;
   /**
    * Performs a `POST` whose body is `form` encoded as

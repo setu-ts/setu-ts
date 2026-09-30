@@ -47,6 +47,22 @@ async function buildApp(): Promise<IKernelApplication> {
               claims: { username: claims.preferred_username },
             }),
             rpInitiatedLogout: { postLogoutRedirectUri: POST_LOGOUT, idTokenHint: true },
+          }, {
+            // The same realm driven as a PLAIN OAuth 2.0 provider: no ID token is
+            // read, so the profile must come from userinfo with the access token.
+            kind: 'oauth2',
+            name: 'keycloak-oauth2',
+            clientId: 'setu-web',
+            clientSecret: 'setu-web-secret',
+            scopes: ['openid'],
+            authorizationEndpoint: `${REALM}/protocol/openid-connect/auth`,
+            tokenEndpoint: `${REALM}/protocol/openid-connect/token`,
+            userinfoEndpoint: `${REALM}/protocol/openid-connect/userinfo`,
+            redirectUri: 'http://localhost/auth/keycloak-oauth2/callback',
+            toPrincipal: (profile) => ({
+              id: `keycloak-oauth2:${String(profile.sub)}`,
+              claims: { username: profile.preferred_username },
+            }),
           }],
         },
       }),
@@ -87,7 +103,39 @@ function unescapeHtml(value: string): string {
   return value.replaceAll('&amp;', '&').replaceAll('&#x3D;', '=').replaceAll('&quot;', '"');
 }
 
+/** Logs `alice` in at Keycloak and returns the redirect back to the application. */
+async function providerLogin(authorize: string, providerJar: ProviderJar): Promise<URL> {
+  const formPage = await providerJar.fetch(authorize);
+  const html = await formPage.text();
+  const form = /<form[^>]*id="kc-form-login"[^>]*action="([^"]+)"/.exec(html);
+  if (form === null) throw new Error('Keycloak login form not found');
+  const submitted = await providerJar.fetch(unescapeHtml(form[1]), {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ username: 'alice', password: 'alice-password' }).toString(),
+  });
+  return new URL(submitted.headers.get('location') ?? '');
+}
+
 describe('Keycloak sign-in (real)', { ignore: BASE === undefined }, () => {
+  it('signs a user in through the oauth2 arm, reading userinfo with the access token', async () => {
+    const app = await buildApp();
+    try {
+      const appJar = new CookieJar();
+      const login = await appJar.fetch(app, '/auth/keycloak-oauth2/login');
+      const back = await providerLogin(login.headers.get('location') ?? '', new ProviderJar());
+      const done = await appJar.fetch(app, `${back.pathname}${back.search}`);
+      expect(done.status).toBe(302);
+      const me = await appJar.fetch(app, '/me');
+      expect(me.status).toBe(200);
+      const user = ((await me.json()) as { user: Record<string, unknown> }).user;
+      expect(String(user.id).startsWith('keycloak-oauth2:')).toBe(true);
+      expect(user.claims).toEqual({ username: 'alice', amr: ['fed'] });
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('signs a user in through the real login form and serves a protected route', async () => {
     const app = await buildApp();
     try {

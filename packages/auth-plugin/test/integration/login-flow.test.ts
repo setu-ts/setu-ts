@@ -8,10 +8,13 @@ import { afterEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
+import { MAX_PENDING_ENTRIES } from '../../src/sign-in/pending-state.ts';
+import { MAX_RETURN_TO_BYTES } from '../../src/sign-in/return-to.ts';
 import {
   buildSignInApp,
   CLIENT_ID,
   CookieJar,
+  discoveryDocument,
   followLogin,
   GH,
   ISSUER,
@@ -102,13 +105,41 @@ describe('sign-in login route', () => {
     await response.body?.cancel();
   });
 
-  it('keeps at most five pending attempts, so two tabs work but the map cannot grow', async () => {
+  it('refuses a discovered endpoint that is not https (M100c F5)', async () => {
+    for (
+      const extra of [
+        { token_endpoint: 'http://attacker.example/token' },
+        { authorization_endpoint: 'javascript:alert(1)' },
+      ]
+    ) {
+      harness = await buildSignInApp({ discovery: discoveryDocument(extra) });
+      const response = await new CookieJar().fetch(harness.app, '/auth/idp/login');
+      expect(response.status).toBe(503);
+      await response.body?.cancel();
+      if (extra.token_endpoint === undefined) break;
+      await harness.app.stop();
+    }
+  });
+
+  it('survives repeated logins with the longest returnTo on the COOKIE strategy (M100c F4)', async () => {
+    harness = await buildSignInApp();
+    const jar = new CookieJar();
+    const longest = '/' + 'a'.repeat(MAX_RETURN_TO_BYTES - 1);
+    for (let index = 0; index < 7; index += 1) {
+      const response = await jar.fetch(harness.app, `/auth/idp/login?returnTo=${longest}`);
+      expect(response.status).toBe(302);
+      await response.body?.cancel();
+    }
+    expect(jar.cookie?.length ?? 0).toBeLessThan(3000);
+  });
+
+  it('keeps at most three pending attempts, so two tabs work but the map cannot grow', async () => {
     harness = await buildSignInApp();
     const jar = new CookieJar();
     for (let index = 0; index < 7; index += 1) {
       await followLogin(harness, jar);
     }
     const session = await json(await jar.fetch(harness.app, '/_session'));
-    expect((session.pending as unknown[]).length).toBe(5);
+    expect((session.pending as unknown[]).length).toBe(MAX_PENDING_ENTRIES);
   });
 });

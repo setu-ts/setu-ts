@@ -1,5 +1,5 @@
 /**
- * Pending sign-in entry storage (plan §3.5): the five-entry cap, expiry on a
+ * Pending sign-in entry storage (plan §3.5): the three-entry cap, expiry on a
  * controllable clock, and single use.
  */
 
@@ -65,10 +65,10 @@ describe('pending-state', () => {
     }
     const stored = session.get<PendingEntry[]>(PENDING_SESSION_KEY);
     expect(stored?.length).toBe(MAX_PENDING_ENTRIES);
-    // The two oldest are gone; the newest five survive, oldest first.
-    expect(stored?.map((storedEntry) => storedEntry.state)).toEqual(['s2', 's3', 's4', 's5', 's6']);
+    // The two oldest are gone; the newest three survive, oldest first.
+    expect(stored?.map((storedEntry) => storedEntry.state)).toEqual(['s2', 's3', 's4']);
     expect(takePending(session, 's0', 'acme', NOW)).toEqual({ ok: false, reason: 'unknown-state' });
-    expect(takePending(session, 's6', 'acme', NOW).ok).toBe(true);
+    expect(takePending(session, 's4', 'acme', NOW).ok).toBe(true);
   });
 
   it('expires an entry on the runtime clock, boundary inclusive', () => {

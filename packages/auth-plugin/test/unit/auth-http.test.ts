@@ -99,6 +99,21 @@ describe('createDefaultAuthHttp', () => {
     expect(seen[0].init.body).toBe('grant_type=authorization_code&code=c%2F1%2B2');
   });
 
+  it('sends caller headers on a GET beside the JSON accept header (M100c F2)', async () => {
+    const seen: Headers[] = [];
+    const http = createDefaultAuthHttp((_url, init) => {
+      seen.push(new Headers(init.headers));
+      return Promise.resolve(new Response('{}'));
+    });
+    await http.get('https://idp.test/userinfo', {
+      signal: new AbortController().signal,
+      maxBytes: 512,
+      headers: { authorization: 'Bearer t' },
+    });
+    expect(seen[0].get('authorization')).toBe('Bearer t');
+    expect(seen[0].get('accept')).toBe('application/json');
+  });
+
   it('a secret containing & cannot inject a second form parameter', async () => {
     let body = '';
     const http = createDefaultAuthHttp((_url, init) => {

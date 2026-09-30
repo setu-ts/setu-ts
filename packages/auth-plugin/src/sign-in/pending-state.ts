@@ -21,7 +21,7 @@ import type { ISession } from '@setu-ts/common';
 export const PENDING_SESSION_KEY = '__setu_auth_pending';
 
 /** Pending entries per session, before the oldest start being evicted. */
-export const MAX_PENDING_ENTRIES = 5;
+export const MAX_PENDING_ENTRIES = 3;
 
 /** How long an entry may sit before the callback refuses it, in milliseconds. */
 export const PENDING_TTL_MS = 10 * 60 * 1000;
