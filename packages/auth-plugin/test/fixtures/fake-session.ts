@@ -7,7 +7,7 @@
  * so a test cannot accidentally rely on storing a non-serializable value.
  */
 
-import type { ISession } from '@setu-ts/common';
+import type { ISession, ISessionService, IRequestContext } from '@setu-ts/common';
 
 /** A fake session with its mutation log attached. */
 export interface FakeSession extends ISession {
@@ -83,4 +83,18 @@ export function createFakeSession(
     },
   };
   return session;
+}
+
+/**
+ * A fake `ISessionService` that hands the given session to every `from` call,
+ * standing in for the middleware having loaded it onto the request.
+ *
+ * @param session - The session a request carries
+ * @returns A session service whose `from` returns that session
+ */
+export function createFakeSessionService(session: ISession): ISessionService {
+  return {
+    from: (_ctx: IRequestContext) => session,
+    fromHeaders: () => Promise.resolve({ id: session.id, data: session.toJSON() }),
+  } as ISessionService;
 }
