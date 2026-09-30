@@ -49,6 +49,15 @@ describe('TrustedIssuer validation at construction', () => {
       [[{ ...base, keys: { jwksUri: 'http://idp.test/jwks' } }], 'keys.jwksUri'],
       [[{ ...base, issuer: 'http://idp.test', keys: { discovery: true } }], 'for discovery'],
       [[{ ...base, keys: {} }], 'keys must be'],
+      [[{ ...base, keys: undefined }], 'keys must be'],
+      [[{ ...base, keys: null }], 'keys must be'],
+      [[{ ...base, keys: 'https://idp.test/jwks' }], 'keys must be'],
+      [[{ ...base, keys: { jwksUri: 123 } }], 'keys.jwksUri'],
+      [
+        [{ ...base, keys: { jwksUri: { toString: () => 'https://idp.test/jwks' } } }],
+        'keys.jwksUri',
+      ],
+      [[{ ...base, algorithms: 'RS256' }], 'algorithms must be an array'],
     ];
     for (const [entries, message] of cases) {
       expect(refusal(entries)).toContain(message);

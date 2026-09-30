@@ -137,6 +137,9 @@ export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly Comp
     }
 
     const algorithms = entry.algorithms ?? SUPPORTED_ALGORITHMS;
+    if (!Array.isArray(algorithms)) {
+      refuse(name, 'algorithms must be an array');
+    }
     if (algorithms.length === 0) {
       refuse(name, 'algorithms must not be empty');
     }
@@ -156,9 +159,15 @@ export function compileIssuers(issuers: readonly TrustedIssuer[]): readonly Comp
 
     let jwksUri: string | null = null;
     let discoveryUrl: string | null = null;
+    // Plain-JavaScript callers bypass the types: a non-object `keys` would make
+    // `in` throw a bare TypeError, and a non-string URL would be coerced.
+    const keys: unknown = entry.keys;
+    if (typeof keys !== 'object' || keys === null) {
+      refuse(name, 'keys must be { jwksUri } or { discovery: true }');
+    }
     if ('jwksUri' in entry.keys) {
       jwksUri = entry.keys.jwksUri;
-      if (!isAcceptableUrl(jwksUri)) {
+      if (typeof jwksUri !== 'string' || !isAcceptableUrl(jwksUri)) {
         refuse(name, 'keys.jwksUri must be https, or http on a loopback host');
       }
     } else if (entry.keys.discovery === true) {

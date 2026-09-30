@@ -55,7 +55,7 @@
     "npm:kafkajs@2": "2.2.4",
     "npm:mongodb@^6.21.0": "6.21.0",
     "npm:nats@2": "2.29.3",
-    "npm:nodemailer@9": "9.1.1",
+    "npm:nodemailer@10": "10.0.12",
     "npm:pg@8": "8.23.0",
     "npm:pino@10": "10.3.1",
     "npm:react-router@8": "8.4.0_react@19.3.0",
@@ -2321,8 +2321,8 @@
         "formdata-polyfill"
       ]
     },
-    "nodemailer@9.1.1": {
-      "integrity": "sha512-izw9mVKFix6YSnC9eLgV6g1opl9DUlRio9ZNcq+Wu9Ujn2UwF+8Nl0B8nz22kEC+CTZCvinkxwJ0DeFbb6NwcQ=="
+    "nodemailer@10.0.12": {
+      "integrity": "sha512-PQ46oNbNMuH/Sno7B5IWIU9etytwrO0xdTFvWXpIQFRXhBAXtzD48243AS+BCbQQTPD8y3fqUrgLn0tSo77gvg=="
     },
     "object-hash@3.0.0": {
       "integrity": "sha512-RSn9F68PjH9HqtltsSnqYC1XXoWe9Bju5+213R98cNGttag9q9yAOTzdbsqvIa7aNm5WffBZFpWYr2aWrklWAw=="

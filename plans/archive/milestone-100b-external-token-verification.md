@@ -306,3 +306,11 @@ including a real Keycloak token re-signed with `alg: HS256` using the realm's pu
   namespacing only one side does not stop a local id of the form `<issuer>|<sub>` (for example a
   self-issued `sub` or a user-chosen username). All three sites now say to namespace every source,
   or to keep the other sources' ids free of the separator.
+- **Folded in at the maintainer's direction:** a `mail-plugin` dependency bump, unrelated to this
+  milestone. CI's vulnerability scan failed on a new high advisory against `nodemailer` ≤10.0.5
+  (GHSA-v53p-9fqp-m79j). `SmtpProvider`'s lazy import moved from `npm:nodemailer@^9` to `@^10`, and
+  the lockfile was refreshed surgically. By convention this belongs on a `fix/…` branch; it ships
+  here, recorded rather than silent.
+- **PR review (CodeRabbit):** a non-object `keys`, a non-string `jwksUri`, or a non-array
+  `algorithms` from a plain-JavaScript caller threw a bare `TypeError` (or was coerced) instead of
+  `AuthPluginConfigurationError`. All three are now refused by name.

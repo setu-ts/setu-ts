@@ -658,6 +658,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`mail-plugin` now loads `nodemailer` 10, closing a high-severity advisory.** `SmtpProvider`
+  lazily imported `npm:nodemailer@^9`, and every 9.x release is inside GHSA-v53p-9fqp-m79j
+  (quadratic backtracking in the address parser's free-text fallback, a remote denial of service,
+  fixed in 10.0.6). The lazy import is now `npm:nodemailer@^10`. nodemailer 10's only breaking
+  change is requiring Node.js 20 or newer; the transport API the plugin uses (`createTransport`,
+  `sendMail`, `verify`, `close`) is unchanged, which was verified against the real 10.0.12 module.
+  An application that injects its own transport is unaffected.
+
 - **`cache-plugin`, `messaging-plugin`, `queue-plugin`, `realtime-backplane-plugin`,
   `scheduler-plugin`, `auth-plugin` — a Redis outage no longer prints to the console.** Every
   `ioredis` client the framework builds had no `'error'` listener, so `ioredis` fell back to
