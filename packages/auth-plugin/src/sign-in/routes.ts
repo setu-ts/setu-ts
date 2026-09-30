@@ -113,16 +113,13 @@ export async function attempt<T>(
   const controller = new AbortController();
   // Raced rather than trusted: an injected seam that ignores the signal would
   // otherwise hold the request, and the application's shutdown drain, open.
-  let expire: () => void = () => {};
-  const expired = new Promise<null>((resolve) => {
-    expire = () => resolve(null);
-  });
+  const expired = Promise.withResolvers<null>();
   const timer = runtime.setTimeout(() => {
     controller.abort();
-    expire();
+    expired.resolve(null);
   }, timeoutMs);
   try {
-    return await Promise.race([body(controller.signal), expired]);
+    return await Promise.race([body(controller.signal), expired.promise]);
   } catch {
     return null;
   } finally {
