@@ -23,7 +23,10 @@ All notable changes to this project are documented here. The format follows
   through it too, and the new `auth-session` strategy authenticates later requests with `claims.amr`
   from the recorded methods and no hand-written middleware. `signIn.refreshPrincipal` re-reads the
   principal per request. `IAuthHttp` gains `post` for the token exchange. Requires `SessionPlugin`.
-  Verified against a real Keycloak 26.4 realm. With `signIn` unset nothing changes.
+  New `@setu-ts/auth-plugin` types: `SignInConfig`, `SignInProvider` (`OidcProvider` |
+  `OAuth2Provider`, sharing `SignInProviderBase`), `TokenEndpointAuth`, `ProviderTokens` and
+  `RefreshPrincipal`. Verified against a real Keycloak 26.4 realm. With `signIn` unset nothing
+  changes.
 
 - **Tokens from an outside issuer (M100b).** `AuthPluginOptions.issuers` accepts access tokens an
   outside identity provider issued (Auth0, Entra ID, Google, Keycloak, Cognito), verified against
