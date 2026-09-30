@@ -240,10 +240,10 @@ approved development dataset: counts aggregate every tenant using the instance.
 | `LocalStorageProviderOptions` | interface |
 | `MemoryStorageOptions`        | interface |
 | `PutObjectOptions`            | interface |
-| `StorageDiagnosticsOptions`   | interface |
 | `S3ProviderOptions`           | interface |
 | `S3StorageOptions`            | interface |
 | `SignedUrlOptions`            | interface |
+| `StorageDiagnosticsOptions`   | interface |
 | `UploadedFile`                | interface |
 | `UploadMiddlewareOptions`     | interface |
 | `StoragePluginOptions`        | type      |

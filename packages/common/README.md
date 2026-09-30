@@ -252,6 +252,7 @@ package fits the plugin architecture.
 | `IAuthorizationDiagnosticsSource`    | interface |
 | `IAuthorizationService`              | interface |
 | `IAuthService`                       | interface |
+| `IAuthSessionService`                | interface |
 | `IAuthStrategy`                      | interface |
 | `ICacheDiagnosticsSource`            | interface |
 | `ICacheStore`                        | interface |
@@ -415,6 +416,7 @@ package fits the plugin architecture.
 | `SerializedError`                    | interface |
 | `ServiceInstance`                    | interface |
 | `SignedUrlOptions`                   | interface |
+| `SignInOptions`                      | interface |
 | `Some`                               | interface |
 | `SpanContext`                        | interface |
 | `SpanOptions`                        | interface |
@@ -450,6 +452,7 @@ package fits the plugin architecture.
 | `WorkerTaskReply`                    | interface |
 | `WorkerTaskRequest`                  | interface |
 | `WrapOptions`                        | interface |
+| `AuthMethod`                         | type      |
 | `AuthorizationCoverage`              | type      |
 | `AuthorizationDecisionOperation`     | type      |
 | `AuthorizationDecisionReason`        | type      |
@@ -545,6 +548,7 @@ package fits the plugin architecture.
 | `ServiceScope`                       | type      |
 | `SessionData`                        | type      |
 | `SessionView`                        | type      |
+| `SignInOutcome`                      | type      |
 | `SpanAttributeValue`                 | type      |
 | `SpanKind`                           | type      |
 | `SpanStatus`                         | type      |

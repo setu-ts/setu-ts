@@ -61,6 +61,7 @@ describe('outside issuers — lifecycle and containment', () => {
           });
         });
       },
+      post: () => Promise.reject(new Error('post is not expected by this fixture')),
     };
     const app = createApplication({
       plugins: [
@@ -86,7 +87,10 @@ describe('outside issuers — lifecycle and containment', () => {
   });
 
   it('keeps authenticating through later strategies when the logger throws', async () => {
-    const http: IAuthHttp = { get: () => Promise.resolve({ status: 503, body: '' }) };
+    const http: IAuthHttp = {
+      get: () => Promise.resolve({ status: 503, body: '' }),
+      post: () => Promise.reject(new Error('post is not expected by this fixture')),
+    };
     const app = createApplication({
       plugins: [
         RuntimePlugin(),

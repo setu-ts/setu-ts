@@ -71,6 +71,80 @@ describe('createDefaultAuthHttp', () => {
     await expect(pending).rejects.toThrow('aborted');
   });
 
+  it('POSTs the form url-encoded, asking for JSON, and reports status and body', async () => {
+    const seen: { url: string; init: RequestInit }[] = [];
+    const http = createDefaultAuthHttp((url, init) => {
+      seen.push({ url, init });
+      return Promise.resolve(new Response('{"access_token":"a1"}', { status: 200 }));
+    });
+    const signal = new AbortController().signal;
+    const response = await http.post('https://idp.test/token', {
+      signal,
+      maxBytes: 2048,
+      form: { grant_type: 'authorization_code', code: 'c/1+2' },
+      headers: { authorization: 'Basic dXNlcjpwYXNz' },
+    });
+    expect(response).toEqual({ status: 200, body: '{"access_token":"a1"}' });
+    expect(seen[0].url).toBe('https://idp.test/token');
+    expect(seen[0].init.method).toBe('POST');
+    expect(seen[0].init.signal).toBe(signal);
+    // 'manual' for POST too: a token endpoint that redirects must not be followed
+    // with the client's credentials in tow.
+    expect(seen[0].init.redirect).toBe('manual');
+    const headers = new Headers(seen[0].init.headers);
+    expect(headers.get('accept')).toBe('application/json');
+    expect(headers.get('content-type')).toBe('application/x-www-form-urlencoded');
+    expect(headers.get('authorization')).toBe('Basic dXNlcjpwYXNz');
+    // The seam encodes, so a value containing a separator stays ONE parameter.
+    expect(seen[0].init.body).toBe('grant_type=authorization_code&code=c%2F1%2B2');
+  });
+
+  it('sends caller headers on a GET beside the JSON accept header (M100c F2)', async () => {
+    const seen: Headers[] = [];
+    const http = createDefaultAuthHttp((_url, init) => {
+      seen.push(new Headers(init.headers));
+      return Promise.resolve(new Response('{}'));
+    });
+    await http.get('https://idp.test/userinfo', {
+      signal: new AbortController().signal,
+      maxBytes: 512,
+      headers: { authorization: 'Bearer t' },
+    });
+    expect(seen[0].get('authorization')).toBe('Bearer t');
+    expect(seen[0].get('accept')).toBe('application/json');
+  });
+
+  it('a secret containing & cannot inject a second form parameter', async () => {
+    let body = '';
+    const http = createDefaultAuthHttp((_url, init) => {
+      body = String(init.body);
+      return Promise.resolve(new Response('{}'));
+    });
+    await http.post('https://idp.test/token', {
+      signal: new AbortController().signal,
+      maxBytes: 512,
+      // Decoded naively this would read as client_secret=x, admin=true.
+      form: { client_secret: 'x admin=true' },
+    });
+    expect(body).toBe('client_secret=x+admin%3Dtrue');
+    const params = new URLSearchParams(body);
+    expect([...params.keys()]).toEqual(['client_secret']);
+    expect(params.get('client_secret')).toBe('x admin=true');
+  });
+
+  it('cancels an oversized POST body once it passes maxBytes', async () => {
+    const endless = streamOf([], true);
+    const http = createDefaultAuthHttp(() => Promise.resolve(new Response(endless.stream)));
+    await expect(
+      http.post('https://idp.test/token', {
+        signal: new AbortController().signal,
+        maxBytes: 1024,
+        form: {},
+      }),
+    ).rejects.toBeInstanceOf(AuthHttpBodyTooLargeError);
+    expect(endless.wasCancelled()).toBe(true);
+  });
+
   it('defaults to the global fetch, called with the global as receiver', async () => {
     const original = globalThis.fetch;
     let receiver: unknown = null;

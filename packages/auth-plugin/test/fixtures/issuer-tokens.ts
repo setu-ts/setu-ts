@@ -5,7 +5,7 @@
  * @module
  */
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
-import type { IssuerAlgorithm } from '../../src/interfaces/index.ts';
+import type { IAuthHttp, IssuerAlgorithm } from '../../src/interfaces/index.ts';
 
 /** A generated signing key with its public JWK. */
 export interface TestKey {
@@ -89,6 +89,14 @@ export function rawToken(
   return `${segment(header)}.${segment(payload)}.${signature}`;
 }
 
+/** One recorded request: the method, target, and what was sent. */
+export interface RecordedRequest {
+  readonly method: 'GET' | 'POST';
+  readonly url: string;
+  readonly form: Readonly<Record<string, string>> | null;
+  readonly headers: Readonly<Record<string, string>> | null;
+}
+
 /** A recording fake `IAuthHttp` answering from a URL → response map. */
 export function createFakeHttp(
   routes: Record<
@@ -96,29 +104,39 @@ export function createFakeHttp(
     { status?: number; body: unknown } | (() => { status?: number; body: unknown })
   >,
 ): {
-  http: {
-    get(
-      url: string,
-      options: { signal: AbortSignal; maxBytes: number },
-    ): Promise<{ status: number; body: string }>;
-  };
+  http: IAuthHttp;
+  /** Every requested URL, in order, whichever method was used. */
   calls: string[];
+  /** Every request with its method and body, for asserting an exact exchange. */
+  requests: RecordedRequest[];
 } {
   const calls: string[] = [];
+  const requests: RecordedRequest[] = [];
+  const answer = (
+    method: 'GET' | 'POST',
+    url: string,
+    form: Readonly<Record<string, string>> | null,
+    headers: Readonly<Record<string, string>> | null,
+  ): Promise<{ status: number; body: string }> => {
+    calls.push(url);
+    requests.push({ method, url, form, headers });
+    const route = routes[url];
+    if (route === undefined) {
+      return Promise.reject(new Error(`no route for ${url}`));
+    }
+    const resolved = typeof route === 'function' ? route() : route;
+    const body = typeof resolved.body === 'string' ? resolved.body : JSON.stringify(resolved.body);
+    return Promise.resolve({ status: resolved.status ?? 200, body });
+  };
   return {
     calls,
+    requests,
     http: {
-      get(url) {
-        calls.push(url);
-        const route = routes[url];
-        if (route === undefined) {
-          return Promise.reject(new Error(`no route for ${url}`));
-        }
-        const resolved = typeof route === 'function' ? route() : route;
-        const body = typeof resolved.body === 'string'
-          ? resolved.body
-          : JSON.stringify(resolved.body);
-        return Promise.resolve({ status: resolved.status ?? 200, body });
+      get(url, { headers }) {
+        return answer('GET', url, null, headers ?? null);
+      },
+      post(url, { form, headers }) {
+        return answer('POST', url, form, headers ?? null);
       },
     },
   };

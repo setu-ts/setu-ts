@@ -4944,7 +4944,10 @@ the plugin composition** the generated `setu.config.ts` calls.
 catch-all route — and answers `401` rather than redirecting, so page-level gating uses React
 Router's route `middleware` export, reading the session through its context key rather than
 reimplementing it. The scaffold ships that as `app/middleware/require-user.server.ts` (added after
-M36c, when a reader had no example of the second middleware layer).
+M36c, when a reader had no example of the second middleware layer). With M100c's `signIn`, a sign-in
+populates `userContext` through M100a's global authentication middleware, so that page middleware
+reads the principal rather than a hand-written session key; see the auth-plugin README's "Signing a
+user in".
 
 Session reaches loaders through an **app-declared** `RouterContextKey`, never a plugin-to-plugin
 import: `getSession` takes an `IRequestContext`, which a loader never sees, while
@@ -11987,7 +11990,7 @@ access token it did not issue and must verify it.
 - Outbound HTTP through one injectable seam defaulting to `fetch` (the M30 `INotificationHttp` / M50
   `IDiscoveryHttp` precedent), so tests drive it without a network.
 
-### Milestone 100c: Sign-In With an Outside Provider (OAuth 2.0 / OpenID Connect)
+### Milestone 100c: Sign-In With an Outside Provider (OAuth 2.0 / OpenID Connect) ✅ COMPLETE
 
 **Package(s):** `packages/auth-plugin`, `packages/common`
 
@@ -12000,8 +12003,12 @@ The relying-party case: a user clicks "Sign in with Google" and comes back signe
   than four private copies of one write.
 
 - Authorization-code flow with **PKCE (S256) always**, `state` always, and `nonce` for OIDC. All
-  three are held server-side in the session, single-use — so the arm requires `SessionPlugin` and
-  refuses at `register()` without it, naming both plugins (the M73 precedent).
+  three are bound to the user's own session — in the encrypted cookie on the default strategy,
+  server-side on the store strategy — so the arm requires `SessionPlugin` and refuses at
+  `register()` without it, naming both plugins (the M73 precedent). **Corrected at plan time:** the
+  entry is deleted on use, but on the cookie strategy an older copy of the cookie still holds it, so
+  `state` is NOT claimed single-use server-side; a replayed callback is stopped by the provider's
+  single-use code plus the PKCE verifier (RFC 6749 §4.1.2).
 - OIDC providers through discovery; ID tokens validated with 100b's verifier (`iss`, `aud`, `exp`,
   `nonce`, and `azp` when multiple audiences). Plain OAuth 2.0 providers with no ID token (GitHub is
   the common one) through an explicit userinfo arm, so the difference is a compile-time choice
@@ -12012,12 +12019,30 @@ The relying-party case: a user clicks "Sign in with Google" and comes back signe
   session id** (M48's fixation defence).
 - `returnTo` accepts only a same-origin relative path — an open redirect on a login callback is a
   phishing primitive.
-- Provider access and refresh tokens are NOT stored by default; storing them is an explicit option,
-  because persisting third-party credentials is a liability the application should opt into.
+- Provider access and refresh tokens are NOT stored; an `onTokens` callback hands them to the
+  application, which is the only way to keep one — persisting third-party credentials is a liability
+  the application should opt into, and an access token would consume the session cookie's budget.
 - RP-initiated logout where the provider advertises `end_session_endpoint`.
 - **Real-provider proof, not a fake:** the Keycloak container 100b adds to CI also serves
   authorization and token endpoints, so the whole flow runs against a real authorization server (the
   M53 real-backend thesis). Pinned in `test/apps-gate.test.ts` so it cannot silently skip.
+
+**Shipped.** `AuthPluginOptions.signIn` registers `IAuthSessionService` under
+`CAPABILITIES.AUTH_SESSION`, an internal `auth-session` strategy (after `session`, before
+caller-supplied), and per-provider `login`/`callback` routes plus one `POST <basePath>/logout`.
+Providers are a union on `kind` — `oidc` (discovery, ID token through the M100b verifier with
+`audience = clientId`, `nonce`, `azp`) and `oauth2` (userinfo). Callback refusals are four fixed
+codes (`provider-denied`, `state-invalid`, `exchange-failed`, `profile-unavailable`) written through
+`respondWithError`, so they honour the configured error format; that is why each flow runs as route
+middleware and the terminal redirect is the handler — the responder seam writes a response without
+producing the `HandlerResult` a handler must return. RFC 9207 `iss` is checked when the provider
+sends it. Login answers `503 provider-unavailable`, not `401`, when discovery cannot be read — the
+caller did nothing wrong. Driven headlessly against a real Keycloak 26.4 realm: login redirect, the
+real login form, credential POST, the redirect back carrying `code`/`state`/`iss`, the exchange over
+the default `fetch` seam, ID-token verification against the realm's keys, a refused replay, and
+RP-initiated logout with `id_token_hint` accepted by Keycloak. The realm gained a standard-flow
+client and a user in the existing import file rather than a second fixture, so CI's container is
+unchanged.
 
 ### Milestone 100d: Multi-Factor Authentication (TOTP)
 
@@ -12284,7 +12309,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 100       | ⬜     | auth-plugin — authentication beyond bearer tokens (umbrella; 100a–100f, each with a design security review and implementation audit)                                                                                                          |
 | 100a      | ✅     | auth-plugin + starters — `jwt` optional; the plugin registers `authMiddleware()` itself ([#384](https://github.com/setu-ts/setu-ts/pull/384))                                                                                                 |
 | 100b      | ✅     | auth-plugin — tokens from an outside issuer (key sets, rotation, ES256/EdDSA) ([#385](https://github.com/setu-ts/setu-ts/pull/385))                                                                                                           |
-| 100c      | ⬜     | auth-plugin — sign-in with an outside provider (OAuth 2.0 / OpenID Connect)                                                                                                                                                                   |
+| 100c      | ✅     | auth-plugin + common — sign-in with an outside provider (OAuth 2.0 / OpenID Connect) (PR #386)                                                                                                                                                |
 | 100d      | ⬜     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                                                                                                                  |
 | 100e      | ⬜     | auth-plugin — passkeys (WebAuthn)                                                                                                                                                                                                             |
 | 100f      | ⬜     | auth-plugin — SAML 2.0 service provider                                                                                                                                                                                                       |

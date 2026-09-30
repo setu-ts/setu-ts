@@ -30,6 +30,7 @@ async function buildApp(available: () => boolean) {
           : { status: 503, body: '' },
       );
     },
+    post: () => Promise.reject(new Error('post is not expected by this fixture')),
   };
   const app: IKernelApplication = createApplication({
     plugins: [

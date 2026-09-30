@@ -210,9 +210,10 @@ export interface TrustedIssuer {
 }
 
 /**
- * Outbound HTTP seam used to fetch key sets and discovery documents. Defaults
- * to one over `fetch`. An implementation must reject once the response body
- * exceeds `maxBytes` while reading it, and must honour `signal`.
+ * Outbound HTTP seam used to fetch key sets, read discovery documents, and
+ * exchange an authorization code at a provider's token endpoint. Defaults to one
+ * over `fetch`. An implementation must reject once the response body exceeds
+ * `maxBytes` while reading it, and must honour `signal`.
  *
  * @since 0.8.0
  */
@@ -221,12 +222,40 @@ export interface IAuthHttp {
    * Performs a GET request.
    *
    * @param url - Absolute URL
-   * @param options - Abort signal and response-body byte limit
+   * @param options - Abort signal, response-body byte limit, and any extra request
+   *   headers (the sign-in userinfo read sends its bearer access token here)
    * @returns The status code and the body as text
    */
   get(
     url: string,
-    options: { readonly signal: AbortSignal; readonly maxBytes: number },
+    options: {
+      readonly signal: AbortSignal;
+      readonly maxBytes: number;
+      readonly headers?: Readonly<Record<string, string>>;
+    },
+  ): Promise<{ readonly status: number; readonly body: string }>;
+  /**
+   * Performs a `POST` whose body is `form` encoded as
+   * `application/x-www-form-urlencoded`, for the OAuth 2.0 token endpoint.
+   *
+   * `form` is passed as a map rather than a pre-encoded string so the seam, not
+   * each caller, owns the encoding: a secret containing `&` or `+` must not be
+   * able to inject a second parameter into the request.
+   *
+   * @param url - Absolute URL
+   * @param options - Abort signal, response-body byte limit, the form fields, and
+   *   any extra request headers (for example the `client_secret_basic` credential)
+   * @returns The status code and the body as text
+   * @since 0.8.0
+   */
+  post(
+    url: string,
+    options: {
+      readonly signal: AbortSignal;
+      readonly maxBytes: number;
+      readonly form: Readonly<Record<string, string>>;
+      readonly headers?: Readonly<Record<string, string>>;
+    },
   ): Promise<{ readonly status: number; readonly body: string }>;
 }
 
@@ -281,6 +310,183 @@ export interface AuthPluginOptions {
    * health indicator reporting each issuer's cached key-set state.
    */
   readonly issuers?: readonly TrustedIssuer[];
-  /** Outbound HTTP seam for `issuers`. Defaults to one over `fetch`. */
+  /**
+   * Sign-in with an outside provider (M100c). Registers the sign-in routes, the
+   * `auth-session` authentication strategy, and `CAPABILITIES.AUTH_SESSION`, and
+   * requires the `session` capability (SessionPlugin).
+   */
+  readonly signIn?: SignInConfig;
+  /** Outbound HTTP seam for `issuers` and `signIn`. Defaults to one over `fetch`. */
   readonly http?: IAuthHttp;
+}
+
+/**
+ * How the plugin authenticates to a provider's token endpoint.
+ *
+ * - `'client_secret_basic'` — the credential pair in the `Authorization` header.
+ * - `'client_secret_post'` — the pair as form fields.
+ * - `'none'` — a public client: no credential, PKCE only.
+ *
+ * @since 0.8.0
+ */
+export type TokenEndpointAuth = 'client_secret_basic' | 'client_secret_post' | 'none';
+
+/**
+ * The tokens a provider returned from its token endpoint.
+ *
+ * Handed to {@linkcode SignInProviderBase.onTokens} and stored nowhere else: an
+ * access token can run to kilobytes, and past the session cookie's 4096-byte
+ * budget the session plugin throws at commit, which would break the sign-in
+ * rather than the feature that wanted the token.
+ *
+ * @since 0.8.0
+ */
+export interface ProviderTokens {
+  /** The access token. */
+  readonly accessToken: string;
+  /** The provider's token type, usually `Bearer`. */
+  readonly tokenType?: string;
+  /** Lifetime in seconds, as the provider reported it. */
+  readonly expiresIn?: number;
+  /** The scope the provider actually granted. */
+  readonly scope?: string;
+  /** The refresh token, when issued. */
+  readonly refreshToken?: string;
+  /** The ID token; present for an `oidc` provider, absent for `oauth2`. */
+  readonly idToken?: string;
+}
+
+/**
+ * The fields an `oidc` and an `oauth2` provider share.
+ *
+ * @since 0.8.0
+ */
+export interface SignInProviderBase {
+  /** Kebab-case name, used in the route paths (`/auth/<name>/login`). */
+  readonly name: string;
+  /** The provider's client id. */
+  readonly clientId: string;
+  /**
+   * The client secret. Required for `client_secret_basic` and
+   * `client_secret_post`, forbidden with `tokenEndpointAuth: 'none'`.
+   */
+  readonly clientSecret?: string;
+  /** Token-endpoint authentication. Defaults to `client_secret_basic` when a secret is present, otherwise `none`. */
+  readonly tokenEndpointAuth?: TokenEndpointAuth;
+  /** Requested scopes. Defaults to `['openid']` for `oidc` and `[]` for `oauth2`. */
+  readonly scopes?: readonly string[];
+  /**
+   * The exact redirect URI sent to the provider. Its path must end with that
+   * provider's callback path, `<basePath>/<name>/callback`, so the registered route and the value the provider
+   * matches against cannot disagree.
+   */
+  readonly redirectUri: string;
+  /**
+   * Redirect here with a fixed `?error=` code instead of answering `401`. The
+   * code is one of this plugin's own; a provider-supplied message is never
+   * placed in the URL.
+   */
+  readonly failureRedirect?: string;
+  /**
+   * Maps the verified claims to a principal. For `oidc` these are the ID token
+   * claims; for `oauth2` the `userinfoEndpoint` response. Return `null` to
+   * refuse the sign-in with `403`.
+   *
+   * `sub` is unique only within its issuer, so an application with more than one
+   * identity source must namespace the id, exactly as
+   * {@linkcode TrustedIssuer.toPrincipal} requires.
+   */
+  toPrincipal(
+    claims: Readonly<Record<string, unknown>>,
+  ): IPrincipal | null | Promise<IPrincipal | null>;
+  /**
+   * Receives the provider's tokens after a successful callback. Nothing stores
+   * them: this is the only way to keep one.
+   */
+  onTokens?(tokens: ProviderTokens): void | Promise<void>;
+}
+
+/**
+ * An OpenID Connect provider: endpoints and keys come from discovery, and the
+ * callback verifies an ID token.
+ *
+ * @since 0.8.0
+ */
+export interface OidcProvider extends SignInProviderBase {
+  /** Discriminant. */
+  readonly kind: 'oidc';
+  /**
+   * The issuer URL. Discovery reads `<issuer>/.well-known/openid-configuration`,
+   * and the ID token's `iss` must equal this value exactly.
+   */
+  readonly issuer: string;
+  /**
+   * RP-initiated logout (plan §3.8). Without it, logout ends the local session
+   * only.
+   */
+  readonly rpInitiatedLogout?: {
+    /** The exact `post_logout_redirect_uri` registered with the provider. */
+    readonly postLogoutRedirectUri: string;
+    /**
+     * Store the ID token at sign-in and send it as `id_token_hint`. Off by
+     * default: an ID token routinely runs to kilobytes and would consume the
+     * session cookie's budget. The README recommends the store strategy for it.
+     */
+    readonly idTokenHint?: true;
+  };
+}
+
+/**
+ * An OAuth 2.0 provider with no ID token (GitHub, for example). Endpoints are
+ * configured by hand and the profile comes from `userinfoEndpoint`.
+ *
+ * @since 0.8.0
+ */
+export interface OAuth2Provider extends SignInProviderBase {
+  /** Discriminant. */
+  readonly kind: 'oauth2';
+  /** The authorization endpoint the login route redirects to. */
+  readonly authorizationEndpoint: string;
+  /** The token endpoint the code is exchanged at. */
+  readonly tokenEndpoint: string;
+  /** The profile endpoint read after the exchange. */
+  readonly userinfoEndpoint: string;
+}
+
+/**
+ * A sign-in provider: either an OpenID Connect provider with discovery and ID
+ * tokens, or a plain OAuth 2.0 provider with a userinfo endpoint.
+ *
+ * @since 0.8.0
+ */
+export type SignInProvider = OidcProvider | OAuth2Provider;
+
+/**
+ * Re-reads the stored principal on each request. Returning `null` makes that
+ * request anonymous, which is how a deactivation or a revoked role takes effect
+ * before the session ends.
+ *
+ * @since 0.8.0
+ */
+export type RefreshPrincipal = (
+  stored: IPrincipal,
+) => IPrincipal | null | Promise<IPrincipal | null>;
+
+/**
+ * Sign-in configuration (plan §3.2–§3.8).
+ *
+ * @since 0.8.0
+ */
+export interface SignInConfig {
+  /** Route prefix. Defaults to `/auth`. */
+  readonly basePath?: string;
+  /** The providers to offer. At least one. */
+  readonly providers: readonly SignInProvider[];
+  /**
+   * Re-read the principal on every request instead of trusting the session
+   * snapshot. Return `null` to make the request anonymous — that is how a
+   * deactivation or a revoked role takes effect before the session ends. Absent,
+   * the snapshot is used and stays in force until sign-out.
+   */
+  refreshPrincipal?: RefreshPrincipal;
 }

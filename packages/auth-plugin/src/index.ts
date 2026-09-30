@@ -40,6 +40,16 @@ export type {
   IssuerKeySource,
   TrustedIssuer,
 } from './interfaces/index.ts';
+export type {
+  OAuth2Provider,
+  OidcProvider,
+  ProviderTokens,
+  RefreshPrincipal,
+  SignInConfig,
+  SignInProvider,
+  SignInProviderBase,
+  TokenEndpointAuth,
+} from './interfaces/index.ts';
 
 // Exported utilities
 export { MalformedPasswordHashError, PasswordHasher } from './services/password-hasher.ts';

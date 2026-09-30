@@ -102,7 +102,10 @@ describe('TrustedIssuer validation at construction', () => {
   });
 
   it('refuses http without issuers, since nothing would read it', () => {
-    const http = { get: () => Promise.resolve({ status: 200, body: '{}' }) };
+    const http = {
+      get: () => Promise.resolve({ status: 200, body: '{}' }),
+      post: () => Promise.reject(new Error('post is not expected by this fixture')),
+    };
     expect(() => AuthPlugin({ apiKey: { validate: () => Promise.resolve(null) }, http })).toThrow(
       AuthPluginConfigurationError,
     );
@@ -122,6 +125,30 @@ describe('TrustedIssuer validation at construction', () => {
     expect(isAcceptableUrl('http://idp.test')).toBe(false);
     expect(isAcceptableUrl('ftp://x.test')).toBe(false);
     expect(isAcceptableUrl('not a url')).toBe(false);
+    // `new URL` strips these silently; the RAW string is what reaches a header
+    // (audit N2 round 2, N1).
+    for (
+      const raw of [
+        'https://x.test/a\nb',
+        'https://x.test/\ta',
+        'https://x.test/\r',
+        ' https://x.test',
+        'https://x.test/\u007f',
+        // Round 3 R1: `Headers` refuses every code point above U+00FF, and
+        // Latin-1 would go out as a bare non-UTF-8 byte.
+        'https://x.test/\u65e5\u672c',
+        'https://\u65e5\u672c.test/authorize',
+        'https://x.test/a\u2028b',
+        'https://x.test/caf\u00e9',
+        'https://x.test/\u0085',
+      ]
+    ) {
+      expect(new URL(raw).protocol).toBe('https:');
+      expect(isAcceptableUrl(raw)).toBe(false);
+    }
+    // The encoded spellings of the same URLs are accepted.
+    expect(isAcceptableUrl(new URL('https://\u65e5\u672c.test/caf\u00e9').href)).toBe(true);
+    expect(isAcceptableUrl('https://x.test/a~b?c=d&e=%20#f')).toBe(true);
   });
 
   it('accepts issuers as the only strategy', () => {

@@ -62,6 +62,16 @@ describe('IssuerStrategy refusals', () => {
     return t.refusals;
   }
 
+  it('refuses a Keycloak ID token (typ ID) presented as a bearer (M100c F7)', async () => {
+    expect(await refusal((t) => signToken(t.key, valid({ typ: 'ID' })))).toEqual([
+      'id-token-as-bearer',
+    ]);
+    // The control: the same token typed as an access token authenticates.
+    const t = await setupStrategy();
+    const token = await signToken(t.key, valid({ typ: 'Bearer' }));
+    expect(await t.strategy.authenticate(request(`Bearer ${token}`))).toEqual({ id: 'u1' });
+  });
+
   it('refuses alg none and HS256 before any key is fetched', async () => {
     const t = await setupStrategy();
     for (const alg of ['none', 'HS256']) {

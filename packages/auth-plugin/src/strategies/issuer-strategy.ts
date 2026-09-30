@@ -3,20 +3,21 @@
  * built by `AuthPlugin` from `AuthPluginOptions.issuers`.
  *
  * Flow: header → unverified decode for `iss` only → configuration lookup →
- * algorithm allowlist → key filter → signature verify → claim checks →
- * `toPrincipal`. Nothing from the unverified payload is used except `iss` as a
- * lookup key into configuration. Every failure returns `null` so the chain
- * continues, and is reported with a fixed reason code — never the token.
+ * {@linkcode JwtVerifier}. Nothing from the unverified payload is used except
+ * `iss` as a lookup key into configuration. Every failure returns `null` so the
+ * chain continues, and is reported with a fixed reason code — never the token.
+ *
+ * The signature and claim checks live in `JwtVerifier`, shared with the sign-in
+ * callback (M100c), so an ID token from a provider cannot be verified to a
+ * different standard than an access token from that same provider.
  *
  * @module
  */
 
 import type { IAuthStrategy, IPrincipal, IRequest, IRuntimeServices } from '@setu-ts/common';
-import { decodeBase64Url } from '../utils/base64url.ts';
-import type { Jwk, KeyRefusal } from '../issuers/key-selection.ts';
-import { checkAlgorithm, selectKey, SignatureVerifier } from '../issuers/key-selection.ts';
 import type { IssuerKeySet } from '../issuers/key-set-cache.ts';
 import type { CompiledIssuer } from '../issuers/trusted-issuer.ts';
+import { decodeJsonSegment, JwtVerifier } from '../issuers/jwt-verifier.ts';
 
 /** Reports why a token was refused. `reason` is a fixed code. */
 export type TokenRefusalReporter = (issuer: string, reason: string) => void;
@@ -36,33 +37,13 @@ export interface IssuerStrategyOptions {
   readonly scheme?: string;
 }
 
-const TEXT = new TextEncoder();
-
-/**
- * Decodes a base64url JSON object segment.
- *
- * @param segment - The segment
- * @returns The object, or `null` when it is not a JSON object
- */
-function decodeSegment(segment: string): Record<string, unknown> | null {
-  try {
-    const value: unknown = JSON.parse(new TextDecoder().decode(decodeBase64Url(segment)));
-    return typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Strategy verifying tokens against each configured issuer's published keys.
  */
 export class IssuerStrategy implements IAuthStrategy {
   readonly name = 'issuers';
   readonly #byIssuer: ReadonlyMap<string, IssuerBinding>;
-  readonly #runtime: IRuntimeServices;
-  readonly #verifier: SignatureVerifier;
+  readonly #verifiers: ReadonlyMap<string, JwtVerifier>;
   readonly #report: TokenRefusalReporter;
   readonly #header: string;
   readonly #scheme: string;
@@ -72,8 +53,21 @@ export class IssuerStrategy implements IAuthStrategy {
    */
   constructor(options: IssuerStrategyOptions) {
     this.#byIssuer = new Map(options.bindings.map((binding) => [binding.issuer.issuer, binding]));
-    this.#runtime = options.runtime;
-    this.#verifier = new SignatureVerifier(options.runtime.subtle);
+    // One verifier per issuer: it owns the key-set reference, the algorithm
+    // allowlist, the audience and the clock tolerance, so routing to the right
+    // verifier is the same lookup that routes the token.
+    this.#verifiers = new Map(
+      options.bindings.map((binding) => [
+        binding.issuer.issuer,
+        new JwtVerifier({
+          keySet: binding.keySet,
+          runtime: options.runtime,
+          algorithms: binding.issuer.algorithms,
+          audience: binding.issuer.audience,
+          clockToleranceSec: binding.issuer.clockToleranceSec,
+        }),
+      ]),
+    );
     this.#report = options.report;
     this.#header = options.header ?? 'authorization';
     this.#scheme = (options.scheme ?? 'bearer').toLowerCase();
@@ -94,11 +88,14 @@ export class IssuerStrategy implements IAuthStrategy {
     if (parts.length !== 2 || parts[0].toLowerCase() !== this.#scheme || !parts[1]) {
       return null;
     }
-    const segments = parts[1].split('.');
+    const compact = parts[1];
+    const segments = compact.split('.');
     if (segments.length !== 3) {
       return null;
     }
-    const payload = decodeSegment(segments[1]);
+    // `iss` is read unverified for exactly one purpose: choosing which
+    // configured issuer verifies the token. It is never trusted as a fact.
+    const payload = decodeJsonSegment(segments[1]);
     const iss = payload?.iss;
     if (payload === null || typeof iss !== 'string') {
       return null;
@@ -107,96 +104,35 @@ export class IssuerStrategy implements IAuthStrategy {
     if (binding === undefined) {
       return null;
     }
+    const verifier = this.#verifiers.get(iss);
+    // `#byIssuer` and `#verifiers` are built from the same list, so this cannot
+    // be undefined; guarded so a future edit that desynchronises them fails
+    // closed (anonymous) rather than throwing inside the strategy chain.
+    if (verifier === undefined) {
+      return null;
+    }
+
+    // One try/catch around verification AND the application's mapping, exactly as
+    // before the extraction: a throw anywhere in here must not escape into the
+    // strategy chain, which would turn a refused token into a 500.
     try {
-      return await this.#verify(binding, segments, payload);
+      const outcome = await verifier.verify(compact);
+      if (outcome.ok === false) {
+        this.#report(binding.issuer.name, outcome.reason);
+        return null;
+      }
+      // Keycloak marks an ID token with `typ: "ID"` in its claims. Refused on the
+      // bearer path: an ID token is an assertion for the client, not a grant to
+      // call this API, and one handed out as `id_token_hint` would otherwise
+      // authenticate here until it expires.
+      if (outcome.claims.typ === 'ID') {
+        this.#report(binding.issuer.name, 'id-token-as-bearer');
+        return null;
+      }
+      return await binding.issuer.toPrincipal(outcome.claims);
     } catch {
       this.#report(binding.issuer.name, 'verification-error');
       return null;
     }
-  }
-
-  async #verify(
-    binding: IssuerBinding,
-    segments: readonly string[],
-    payload: Record<string, unknown>,
-  ): Promise<IPrincipal | null> {
-    const { issuer, keySet } = binding;
-    const refuse = (reason: string): null => {
-      this.#report(issuer.name, reason);
-      return null;
-    };
-
-    const header = decodeSegment(segments[0]);
-    if (header === null) {
-      return refuse('malformed-header');
-    }
-    if (header.crit !== undefined) {
-      return refuse('crit-unsupported');
-    }
-    const family = checkAlgorithm(header.alg, issuer.algorithms);
-    if (family === 'algorithm-refused' || family === 'algorithm-not-allowed') {
-      return refuse(family);
-    }
-    if (header.kid !== undefined && typeof header.kid !== 'string') {
-      return refuse('malformed-header');
-    }
-    const kid = header.kid;
-
-    let keys = await keySet.keys();
-    if (keys === null) {
-      return refuse('no-key-set');
-    }
-    let selected: Jwk | KeyRefusal = selectKey(keys, family, kid);
-    if (selected === 'no-matching-key' && kid !== undefined) {
-      keys = await keySet.keys(true);
-      if (keys === null) {
-        return refuse('no-key-set');
-      }
-      selected = selectKey(keys, family, kid);
-    }
-    if (typeof selected === 'string') {
-      return refuse(selected);
-    }
-
-    let signature: Uint8Array;
-    try {
-      signature = decodeBase64Url(segments[2]);
-    } catch {
-      return refuse('malformed-signature');
-    }
-    const signingInput = TEXT.encode(`${segments[0]}.${segments[1]}`);
-    if (!await this.#verifier.verify(selected, family, signature, signingInput)) {
-      return refuse('bad-signature');
-    }
-
-    const claimFailure = this.#checkClaims(issuer, payload);
-    if (claimFailure !== null) {
-      return refuse(claimFailure);
-    }
-    return await issuer.toPrincipal(Object.freeze({ ...payload }));
-  }
-
-  #checkClaims(issuer: CompiledIssuer, payload: Record<string, unknown>): string | null {
-    const aud = payload.aud;
-    const audiences = Array.isArray(aud) ? aud : [aud];
-    if (!audiences.includes(issuer.audience)) {
-      return 'audience-mismatch';
-    }
-    const now = this.#runtime.now() / 1000;
-    const skew = issuer.clockToleranceSec;
-    const { exp, nbf, iat } = payload;
-    if (typeof exp !== 'number' || !Number.isFinite(exp)) {
-      return 'exp-missing';
-    }
-    if (now > exp + skew) {
-      return 'expired';
-    }
-    if (nbf !== undefined && (typeof nbf !== 'number' || now + skew < nbf)) {
-      return 'not-yet-valid';
-    }
-    if (iat !== undefined && (typeof iat !== 'number' || iat > now + skew)) {
-      return 'issued-in-future';
-    }
-    return null;
   }
 }

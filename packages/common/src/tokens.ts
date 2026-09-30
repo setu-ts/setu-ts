@@ -59,6 +59,16 @@ export const CAPABILITIES = {
   AUTHORIZATION: 'authorization',
   /** JWT sign/verify service. */
   JWT: 'jwt',
+  /**
+   * The single owner of "this session is signed in as this principal" — an
+   * `IAuthSessionService` the AuthPlugin registers when its `signIn` option is
+   * configured. Every later authentication feature (second factor, passkeys,
+   * SAML) creates, holds back, or promotes that one record through this token,
+   * instead of each keeping a private copy of the same session write.
+   *
+   * @since 0.8.0
+   */
+  AUTH_SESSION: 'auth-session',
   /** Job scheduling (cron, delayed, recurring). */
   SCHEDULER: 'scheduler',
   /** Metrics collection. */

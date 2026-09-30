@@ -51,12 +51,27 @@ const MAX_CLOCK_TOLERANCE_SEC = 300;
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
- * Whether a URL is `https`, or `http` on a loopback host.
+ * Whether a URL is `https`, or `http` on a loopback host, written entirely in
+ * printable ASCII (U+0021–U+007E). A URL with a space, a control character or a
+ * non-ASCII code point is refused rather than normalized: the raw string is what
+ * reaches a `Location` header, so an IDN host must be punycoded and a non-ASCII
+ * path percent-encoded.
  *
  * @param value - Candidate URL
  * @returns `true` when acceptable
  */
 export function isAcceptableUrl(value: string): boolean {
+  // `new URL` silently strips TAB/CR/LF and trims spaces, so a check on the
+  // PARSED URL would pass a raw string that is then written verbatim into a
+  // `Location` header — which `Headers` refuses, turning every login (and, on
+  // the cookie strategy, logout) into a 500. The raw string is what is used, so
+  // the raw string is what is checked — and only printable ASCII survives it:
+  // `Headers` also refuses any code point above U+00FF (a raw IDN host, a
+  // non-ASCII path, U+2028), and Latin-1 would go out as a bare non-UTF-8 byte.
+  // A provider publishes its endpoints percent-encoded and punycoded.
+  if (/[^\u0021-\u007e]/.test(value)) {
+    return false;
+  }
   let url: URL;
   try {
     url = new URL(value);

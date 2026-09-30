@@ -1,7 +1,7 @@
 # Milestone 100c — Sign-In With an Outside Provider (`@setu-ts/auth-plugin`)
 
-> **Status:** Planning on `docs/m100-auth-federation-mfa`. Implementation and fixes belong on
-> `feat/m100c-oidc-sign-in`; `main` remains protected. Depends on 100a and 100b.
+> **Status:** Implemented on `feat/m100c-oidc-sign-in` (see §11 for where the implementation departs
+> from this plan, and why). Depends on 100a and 100b.
 
 ## 0. Objective & scope
 
@@ -304,3 +304,69 @@ consumed → code exchange with verifier → ID token verified → principal map
 The implementation audit replays a captured callback, swaps `state` between two providers, submits
 every `returnTo` from the §3.7 refusal table, and confirms the pre-sign-in session id is rejected
 afterwards.
+
+## 11. Implementation notes — departures from this plan
+
+- **Flows are route middleware; the redirect is the handler.** §3.6 requires every refusal through
+  `respondWithError`, which writes a response and returns `void`, while `RouteHandler` must return a
+  `HandlerResult`. Each route is therefore `{ middleware: [flow], handler: redirect }`: the flow
+  either writes a refusal and does not call `next()`, or stores its target under
+  `auth-plugin:sign-in-redirect` and the handler redirects.
+- **Login answers `503 provider-unavailable`** when discovery cannot be read or lacks an endpoint —
+  a dependency outage, not an authentication failure (§3.5 named no status).
+- **RFC 9207 `iss` mismatch reports `state-invalid`** and is checked after the entry is consumed, so
+  a mix-up attempt cannot be retried.
+- **Exports beyond §4:** `SignInProviderBase`, `TokenEndpointAuth` and `RefreshPrincipal` are
+  exported because exported types reference them (a private type reference on JSR).
+- **Keycloak fixture:** the realm gained a standard-flow `setu-web` client and an `alice` user in
+  the EXISTING `test/fixtures/keycloak/setu-realm.json` rather than a new `keycloak-realm.json`, so
+  CI's import volume is unchanged; `test/apps-gate.test.ts` pins both suites' guards and the realm's
+  client and user.
+- **Test homes:** the §6 `sign-in-options.test.ts` cases live in the pre-existing
+  `sign-in-config.test.ts` (construction) and `integration/auth-session-strategy.test.ts`
+  (`register()` refusal, `provides`).
+
+### 11.1 Security audit round 1 (on `09ef18ef`) — findings and fixes
+
+- **F2 (Medium):** the `oauth2` userinfo read never sent the access token, so no `oauth2` sign-in
+  could succeed. `IAuthHttp.get` gains an optional `headers` (the seam is unreleased, M100b) and the
+  read sends `Authorization: Bearer`; proven against real Keycloak driven as an `oauth2` provider.
+- **F1:** the ID token's `iss` is now compared with the provider's issuer (OIDC Core §3.1.3.7).
+- **F3:** a non-ASCII `returnTo` is percent-encoded, so the `Location` header is a legal ByteString.
+- **F4:** §3.7's budget claim was false — five entries of 512 bytes overflowed the cookie on the
+  fourth login. The caps are now **three** entries and **256** bytes (measured against the encoded
+  form).
+- **F5:** discovered `authorization`/`token`/`end_session` endpoints must pass the same
+  https-or-loopback rule as `jwks_uri`.
+- **F6:** an end-session endpoint with an existing query is joined with `&`.
+- **F7:** the `issuers` bearer strategy refuses a token whose claims carry Keycloak's `typ: "ID"`.
+- **F8:** `attempt()` races the provider call against its timer, so a seam that ignores the abort
+  signal cannot hold a request open.
+
+### 11.2 Code review (after audit round 1)
+
+- **RP-initiated logout only for its own sign-in.** §3.8 as implemented sent EVERY logout — password
+  sign-ins, another provider's users, anonymous POSTs — to the RP-logout provider, and a password
+  sign-in after a federated one in the same session kept the old ID token. The callback now records
+  the provider under `__setu_auth_rp`; `IAuthSessionService.signIn` clears it and the stored ID
+  token, so the sign-in that wrote them owns them.
+- `safeReturnTo` refuses a lone surrogate, which `encodeURIComponent` would otherwise throw on.
+
+### 11.3 Security audit round 2 (on `fdbd290a`) — findings and fixes
+
+- **N1:** `isAcceptableUrl` checked the PARSED URL, and `new URL` silently strips TAB/CR/LF, while
+  the raw string reached `Location`: a discovery endpoint with a newline made every login 500 and,
+  on the cookie strategy, a logout that did not log out. The raw string is now refused when it holds
+  a control character or space, for every caller (issuers included).
+- **N2:** the F8 note in §11.1 was overstated — only the token/userinfo calls were raced. The
+  discovery and JWKS fetches in `IssuerKeySet` now race their timer (and `close()`) too, reporting
+  `fetch-aborted`, so a seam that ignores the abort signal cannot hold a sign-in route open.
+
+### 11.4 Security audit round 3 (on `5c49b99f`) — finding and fix
+
+- **R1 (Low):** the N1 check refused only C0 controls, SPACE and DEL. A discovery endpoint holding a
+  code point above U+00FF (a raw IDN host, a non-ASCII path, U+2028) still passed, was written raw
+  into `Location`, and `Headers` refused it — the same 500 on login and cookie-strategy logout N1
+  was filed for; Latin-1 went out as a bare non-UTF-8 byte. `isAcceptableUrl` now admits printable
+  ASCII (U+0021–U+007E) only; a provider publishes its endpoints punycoded and percent-encoded.
+  Fixed without a re-audit, at the maintainer's direction.
