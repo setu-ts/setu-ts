@@ -342,3 +342,12 @@ afterwards.
 - **F7:** the `issuers` bearer strategy refuses a token whose claims carry Keycloak's `typ: "ID"`.
 - **F8:** `attempt()` races the provider call against its timer, so a seam that ignores the abort
   signal cannot hold a request open.
+
+### 11.2 Code review (after audit round 1)
+
+- **RP-initiated logout only for its own sign-in.** §3.8 as implemented sent EVERY logout — password
+  sign-ins, another provider's users, anonymous POSTs — to the RP-logout provider, and a password
+  sign-in after a federated one in the same session kept the old ID token. The callback now records
+  the provider under `__setu_auth_rp`; `IAuthSessionService.signIn` clears it and the stored ID
+  token, so the sign-in that wrote them owns them.
+- `safeReturnTo` refuses a lone surrogate, which `encodeURIComponent` would otherwise throw on.
