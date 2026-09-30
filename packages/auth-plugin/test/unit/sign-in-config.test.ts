@@ -9,7 +9,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { compileSignIn, DEFAULT_SIGN_IN_BASE_PATH } from '../../src/sign-in/config.ts';
-import type { OidcProvider, OAuth2Provider, SignInConfig } from '../../src/interfaces/index.ts';
+import type { OAuth2Provider, OidcProvider, SignInConfig } from '../../src/interfaces/index.ts';
 
 const oidc = (overrides: Partial<OidcProvider> = {}): OidcProvider => ({
   kind: 'oidc',
@@ -111,7 +111,9 @@ describe('compileSignIn', () => {
     expect(refusal(config([oidc({ failureRedirect: 'https://evil.test/oops' })]))).toContain(
       'same-origin',
     );
-    expect(compileSignIn(config([oidc({ failureRedirect: '/login' })])).providers[0]?.failureRedirect)
+    expect(
+      compileSignIn(config([oidc({ failureRedirect: '/login' })])).providers[0]?.failureRedirect,
+    )
       .toBe('/login');
   });
 
@@ -192,7 +194,9 @@ describe('compileSignIn', () => {
   it('refuses rpInitiatedLogout on the oauth2 arm', () => {
     // The type forbids it; a plain-JavaScript config must still be refused,
     // because the logout route only knows how to end an OIDC session.
-    expect(refusal(config([oauth2({ rpInitiatedLogout: { postLogoutRedirectUri: '/done' } } as never)])))
+    expect(
+      refusal(config([oauth2({ rpInitiatedLogout: { postLogoutRedirectUri: '/done' } } as never)])),
+    )
       .toContain('only available on an oidc provider');
   });
 

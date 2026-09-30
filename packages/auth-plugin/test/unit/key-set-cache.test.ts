@@ -127,10 +127,15 @@ describe('IssuerKeySet', () => {
     const runtime = createFakeRuntime();
     const seen: number[] = [];
     const failures: string[] = [];
-    const keySet = new IssuerKeySet(issuer(), runtime, getOnly((_url, { maxBytes }) => {
-      seen.push(maxBytes);
-      return Promise.reject(new Error('secret-bearing transport message'));
-    }), (_n, reason) => failures.push(reason));
+    const keySet = new IssuerKeySet(
+      issuer(),
+      runtime,
+      getOnly((_url, { maxBytes }) => {
+        seen.push(maxBytes);
+        return Promise.reject(new Error('secret-bearing transport message'));
+      }),
+      (_n, reason) => failures.push(reason),
+    );
     expect(await keySet.keys()).toBeNull();
     expect(failures).toEqual(['key-set-fetch-failed']);
     expect(seen).toEqual([MAX_RESPONSE_BYTES]);
@@ -165,15 +170,20 @@ describe('IssuerKeySet', () => {
     const runtime = createFakeRuntime();
     let aborted = false;
     let calls = 0;
-    const keySet = new IssuerKeySet(issuer(), runtime, getOnly((_url, { signal }) => {
-      calls++;
-      return new Promise((_resolve, reject) => {
-        signal.addEventListener('abort', () => {
-          aborted = true;
-          reject(new Error('aborted'));
+    const keySet = new IssuerKeySet(
+      issuer(),
+      runtime,
+      getOnly((_url, { signal }) => {
+        calls++;
+        return new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            aborted = true;
+            reject(new Error('aborted'));
+          });
         });
-      });
-    }), () => {});
+      }),
+      () => {},
+    );
     const pending = keySet.keys();
     keySet.close();
     expect(await pending).toBeNull();
@@ -196,16 +206,21 @@ describe('IssuerKeySet', () => {
     const runtime = createFakeRuntime();
     let release!: () => void;
     let calls = 0;
-    const keySet = new IssuerKeySet(issuer(), runtime, getOnly(() => {
-      calls++;
-      if (calls === 1) {
-        return Promise.resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
-      }
-      // The forced refresh parks until released, like a blocked endpoint.
-      return new Promise((resolve) => {
-        release = () => resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
-      });
-    }), () => {});
+    const keySet = new IssuerKeySet(
+      issuer(),
+      runtime,
+      getOnly(() => {
+        calls++;
+        if (calls === 1) {
+          return Promise.resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
+        }
+        // The forced refresh parks until released, like a blocked endpoint.
+        return new Promise((resolve) => {
+          release = () => resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
+        });
+      }),
+      () => {},
+    );
     await keySet.keys();
     runtime.setHrtime(100);
     const forced = keySet.keys(true);

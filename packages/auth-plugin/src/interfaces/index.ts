@@ -351,8 +351,12 @@ export interface ProviderTokens {
   readonly idToken?: string;
 }
 
-/** The fields an `oidc` and an `oauth2` provider share. */
-interface SignInProviderBase {
+/**
+ * The fields an `oidc` and an `oauth2` provider share.
+ *
+ * @since 0.8.0
+ */
+export interface SignInProviderBase {
   /** Kebab-case name, used in the route paths (`/auth/<name>/login`). */
   readonly name: string;
   /** The provider's client id. */
@@ -453,6 +457,17 @@ export interface OAuth2Provider extends SignInProviderBase {
 export type SignInProvider = OidcProvider | OAuth2Provider;
 
 /**
+ * Re-reads the stored principal on each request. Returning `null` makes that
+ * request anonymous, which is how a deactivation or a revoked role takes effect
+ * before the session ends.
+ *
+ * @since 0.8.0
+ */
+export type RefreshPrincipal = (
+  stored: IPrincipal,
+) => IPrincipal | null | Promise<IPrincipal | null>;
+
+/**
  * Sign-in configuration (plan §3.2–§3.8).
  *
  * @since 0.8.0
@@ -468,7 +483,5 @@ export interface SignInConfig {
    * deactivation or a revoked role takes effect before the session ends. Absent,
    * the snapshot is used and stays in force until sign-out.
    */
-  refreshPrincipal?(
-    stored: IPrincipal,
-  ): IPrincipal | null | Promise<IPrincipal | null>;
+  refreshPrincipal?: RefreshPrincipal;
 }

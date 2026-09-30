@@ -45,7 +45,10 @@ export async function challengeForVerifier(
   runtime: IRuntimeServices,
   verifier: string,
 ): Promise<string> {
-  const digest = await runtime.subtle.digest('SHA-256', toBuffer(new TextEncoder().encode(verifier)));
+  const digest = await runtime.subtle.digest(
+    'SHA-256',
+    toBuffer(new TextEncoder().encode(verifier)),
+  );
   return encodeBase64Url(new Uint8Array(digest));
 }
 

@@ -11,7 +11,15 @@ import type {
   IRefreshTokenRotation,
   IssuerAlgorithm,
   IssuerKeySource,
+  OAuth2Provider,
+  OidcProvider,
+  ProviderTokens,
+  RefreshPrincipal,
   SessionAuthOptions,
+  SignInConfig,
+  SignInProvider,
+  SignInProviderBase,
+  TokenEndpointAuth,
   TrustedIssuer,
 } from '../../src/index.ts';
 
@@ -168,6 +176,52 @@ describe('barrel exports', () => {
       undefined as unknown as IAuthorizationDiagnosticsSource;
     void source;
     expect(options.enabled).toBe(true);
+  });
+
+  it('exports the M100c sign-in types and keeps the flow internal', () => {
+    // Compile-time: every sign-in type resolves from the barrel. Dropping a
+    // re-export stops this file compiling.
+    const auth_: TokenEndpointAuth = 'none';
+    const base: Omit<SignInProviderBase, 'toPrincipal'> = {
+      name: 'idp',
+      clientId: 'c',
+      redirectUri: 'https://app.test/auth/idp/callback',
+      tokenEndpointAuth: auth_,
+    };
+    const oidc: OidcProvider = {
+      ...base,
+      kind: 'oidc',
+      issuer: 'https://idp.test',
+      toPrincipal: () => null,
+    };
+    const oauth2: OAuth2Provider = {
+      ...base,
+      name: 'gh',
+      redirectUri: 'https://app.test/auth/gh/callback',
+      kind: 'oauth2',
+      authorizationEndpoint: 'https://gh.test/a',
+      tokenEndpoint: 'https://gh.test/t',
+      userinfoEndpoint: 'https://gh.test/u',
+      toPrincipal: () => null,
+    };
+    const providers: SignInProvider[] = [oidc, oauth2];
+    const refreshPrincipal: RefreshPrincipal = (stored) => stored;
+    const config: SignInConfig = { providers, refreshPrincipal };
+    const tokens: ProviderTokens = { accessToken: 'a' };
+    expect(config.providers.length).toBe(2);
+    expect(tokens.accessToken).toBe('a');
+    const barrel = auth as Record<string, unknown>;
+    for (
+      const internal of [
+        'AuthSessionService',
+        'AuthSessionStrategy',
+        'compileSignIn',
+        'registerSignInRoutes',
+        'exchangeCode',
+      ]
+    ) {
+      expect(barrel[internal]).toBeUndefined();
+    }
   });
 
   it('does not export internal implementations', () => {

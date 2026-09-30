@@ -149,7 +149,7 @@ describe('exchangeCode', () => {
     expect(JSON.stringify(outcome)).not.toContain('admin@corp');
   });
 
-  it('drops a provider error code outside the RFC 6749 alphabet', async () => {
+  it('drops a provider error code outside the RFC 6749 alphabet', () => {
     const outcome = parseTokenResponse(400, JSON.stringify({ error: 'oops <script>' }));
     expect(outcome).toEqual({ ok: false, reason: 'provider-error' });
   });

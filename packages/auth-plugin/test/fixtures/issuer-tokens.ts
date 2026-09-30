@@ -125,9 +125,7 @@ export function createFakeHttp(
       return Promise.reject(new Error(`no route for ${url}`));
     }
     const resolved = typeof route === 'function' ? route() : route;
-    const body = typeof resolved.body === 'string'
-      ? resolved.body
-      : JSON.stringify(resolved.body);
+    const body = typeof resolved.body === 'string' ? resolved.body : JSON.stringify(resolved.body);
     return Promise.resolve({ status: resolved.status ?? 200, body });
   };
   return {

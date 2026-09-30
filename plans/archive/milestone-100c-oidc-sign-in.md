@@ -1,7 +1,7 @@
 # Milestone 100c — Sign-In With an Outside Provider (`@setu-ts/auth-plugin`)
 
-> **Status:** Planning on `docs/m100-auth-federation-mfa`. Implementation and fixes belong on
-> `feat/m100c-oidc-sign-in`; `main` remains protected. Depends on 100a and 100b.
+> **Status:** Implemented on `feat/m100c-oidc-sign-in` (see §11 for where the implementation departs
+> from this plan, and why). Depends on 100a and 100b.
 
 ## 0. Objective & scope
 
@@ -304,3 +304,24 @@ consumed → code exchange with verifier → ID token verified → principal map
 The implementation audit replays a captured callback, swaps `state` between two providers, submits
 every `returnTo` from the §3.7 refusal table, and confirms the pre-sign-in session id is rejected
 afterwards.
+
+## 11. Implementation notes — departures from this plan
+
+- **Flows are route middleware; the redirect is the handler.** §3.6 requires every refusal through
+  `respondWithError`, which writes a response and returns `void`, while `RouteHandler` must return a
+  `HandlerResult`. Each route is therefore `{ middleware: [flow], handler: redirect }`: the flow
+  either writes a refusal and does not call `next()`, or stores its target under
+  `auth-plugin:sign-in-redirect` and the handler redirects.
+- **Login answers `503 provider-unavailable`** when discovery cannot be read or lacks an endpoint —
+  a dependency outage, not an authentication failure (§3.5 named no status).
+- **RFC 9207 `iss` mismatch reports `state-invalid`** and is checked after the entry is consumed, so
+  a mix-up attempt cannot be retried.
+- **Exports beyond §4:** `SignInProviderBase`, `TokenEndpointAuth` and `RefreshPrincipal` are
+  exported because exported types reference them (a private type reference on JSR).
+- **Keycloak fixture:** the realm gained a standard-flow `setu-web` client and an `alice` user in
+  the EXISTING `test/fixtures/keycloak/setu-realm.json` rather than a new `keycloak-realm.json`, so
+  CI's import volume is unchanged; `test/apps-gate.test.ts` pins both suites' guards and the realm's
+  client and user.
+- **Test homes:** the §6 `sign-in-options.test.ts` cases live in the pre-existing
+  `sign-in-config.test.ts` (construction) and `integration/auth-session-strategy.test.ts`
+  (`register()` refusal, `provides`).

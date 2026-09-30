@@ -5470,9 +5470,26 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   throws at construction. Driven against a real Keycloak 26.4 realm, including admin-API key
   rotation and an HS256 forgery using the realm's public key; CI starts Keycloak in all three
   suite-running workflows — complete (PR #385).
-- **Next milestone** — **M100c** (`packages/auth-plugin` + `packages/common` — sign-in with an
-  outside provider over OAuth 2.0 / OpenID Connect; design security review and implementation audit
-  required).
+- **Milestone 100c** (`packages/auth-plugin` + `packages/common` — sign-in with an outside
+  provider): `AuthPluginOptions.signIn` makes the application an OAuth 2.0 / OpenID Connect relying
+  party over the authorization-code flow — per provider `GET <basePath>/<name>/login` and
+  `/callback`, one `POST <basePath>/logout` — with a `kind`-discriminated `oidc` arm (discovery; ID
+  token through the M100b verifier with `audience = clientId`, `nonce`, `azp`) and `oauth2` arm
+  (userinfo). `common` gains `CAPABILITIES.AUTH_SESSION` + `IAuthSessionService`
+  (`signIn`/`current`/`signOut`), the one owner of "who is signed in" that 100d–100f build on; an
+  internal `auth-session` strategy authenticates later requests with `claims.amr` from the recorded
+  methods, and `refreshPrincipal` re-reads per request (a throw is anonymous, never the stale
+  snapshot). PKCE S256 for every provider, `state`/`nonce`/verifier bound to the user's own session
+  (not claimed single-use on the cookie strategy — the provider's code + PKCE stop a replay), RFC
+  9207 `iss` checked, same-origin `returnTo` capped at 512 bytes and never read from the callback,
+  session id regenerated on sign-in. Callback refusals are four fixed codes written through
+  `respondWithError`, which is why each flow is route MIDDLEWARE and the terminal redirect the
+  handler: the responder seam writes a response without the `HandlerResult` a handler must return.
+  Login answers `503`, not `401`, when discovery cannot be read. Driven headlessly against a real
+  Keycloak 26.4 realm (real login form, `iss`, default `fetch` seam, refused replay, RP-initiated
+  logout with `id_token_hint`) — complete (PR pending).
+- **Next milestone** — **M100d** (`packages/auth-plugin` + `packages/common` — multi-factor
+  authentication (TOTP) and step-up; widens `SignInOutcome` with a second-factor arm).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

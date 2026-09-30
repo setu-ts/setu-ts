@@ -133,9 +133,7 @@ export function parseTokenResponse(
   }
   const tokenType = typeof record.token_type === 'string' ? record.token_type : undefined;
   const scope = typeof record.scope === 'string' ? record.scope : undefined;
-  const refreshToken = typeof record.refresh_token === 'string'
-    ? record.refresh_token
-    : undefined;
+  const refreshToken = typeof record.refresh_token === 'string' ? record.refresh_token : undefined;
   const idToken = typeof record.id_token === 'string' ? record.id_token : undefined;
   const expiresIn = typeof record.expires_in === 'number' && Number.isFinite(record.expires_in)
     ? record.expires_in
@@ -217,10 +215,12 @@ export async function fetchUserInfo(
     readonly accessToken: string;
     readonly signal: AbortSignal;
   },
-): Promise<{ readonly ok: true; readonly claims: Readonly<Record<string, unknown>> } | {
-  readonly ok: false;
-  readonly reason: TokenExchangeFailure;
-}> {
+): Promise<
+  { readonly ok: true; readonly claims: Readonly<Record<string, unknown>> } | {
+    readonly ok: false;
+    readonly reason: TokenExchangeFailure;
+  }
+> {
   const response = await http.get(options.userinfoEndpoint, {
     signal: options.signal,
     maxBytes: MAX_TOKEN_RESPONSE_BYTES,

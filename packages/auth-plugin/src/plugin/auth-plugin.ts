@@ -33,6 +33,11 @@ import { compileIssuers } from '../issuers/trusted-issuer.ts';
 import { IssuerKeySet } from '../issuers/key-set-cache.ts';
 import { createDefaultAuthHttp } from '../issuers/auth-http.ts';
 import { IssuerStrategy } from '../strategies/issuer-strategy.ts';
+import { compileSignIn } from '../sign-in/config.ts';
+import type { CompiledSignIn } from '../sign-in/config.ts';
+import { registerSignInRoutes } from '../sign-in/routes.ts';
+import { AuthSessionService } from '../sign-in/auth-session-service.ts';
+import { AuthSessionStrategy } from '../strategies/auth-session-strategy.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 const AUTH_MIDDLEWARE_PRIORITY = 300;
@@ -92,9 +97,15 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   // Outside issuers (M100b): validated here, at construction, because every
   // refusal is a configuration that would silently weaken verification.
   const compiledIssuers = options.issuers === undefined ? [] : compileIssuers(options.issuers);
-  if (options.http !== undefined && compiledIssuers.length === 0) {
+  // Sign-in (M100c): validated HERE too, at construction, because every refusal
+  // is a configuration that would otherwise fail at the provider — with an error
+  // that names neither the option nor the route.
+  const compiledSignIn: CompiledSignIn | null = options.signIn === undefined
+    ? null
+    : compileSignIn(options.signIn);
+  if (options.http !== undefined && compiledIssuers.length === 0 && compiledSignIn === null) {
     throw new AuthPluginConfigurationError(
-      'auth-plugin: http is only read for issuers; configure issuers or drop http',
+      'auth-plugin: http is only read for issuers and signIn; configure one or drop http',
     );
   }
 
@@ -106,6 +117,9 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       CAPABILITIES.AUTH,
       CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
       ...(options.rbac === undefined ? [] : [CAPABILITIES.AUTHORIZATION]),
+      // M100c: one owner of "who is signed in", resolved by applications'
+      // password logins and by every later federation milestone.
+      ...(compiledSignIn === null ? [] : [CAPABILITIES.AUTH_SESSION]),
     ],
     // The session strategy reads the session service, but only when
     // `options.session` is configured — the edge orders SessionPlugin before
@@ -116,6 +130,19 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     register(ctx: IPluginContext): void {
       // Resolve runtime
       const runtime = ctx.services.get<IRuntimeServices>('runtime');
+
+      // The outbound seam is shared by the issuer key-set caches (M100b) and the
+      // sign-in routes (M100c): one place to configure it, one place to fake it.
+      const http = options.http ?? createDefaultAuthHttp();
+      // Reporting is best-effort: a throwing logger must not abort a strategy
+      // chain or a route handler whose outcome is already decided.
+      const debug = (message: string): void => {
+        try {
+          ctx.logger?.debug(message);
+        } catch {
+          // Swallowed deliberately.
+        }
+      };
 
       // Build strategies list
       const strategies: IAuthStrategy[] = [];
@@ -170,15 +197,6 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       // reading the same header and scheme. The logger is read at call time.
       const issuerKeySets: IssuerKeySet[] = [];
       if (compiledIssuers.length > 0) {
-        const http = options.http ?? createDefaultAuthHttp();
-        // A throwing logger must not abort the rest of the strategy chain.
-        const debug = (message: string): void => {
-          try {
-            ctx.logger?.debug(message);
-          } catch {
-            // Reporting is best-effort; authentication outcome is unaffected.
-          }
-        };
         const bindings = compiledIssuers.map((issuer) => {
           const keySet = new IssuerKeySet(issuer, runtime, http, (name, reason) => {
             debug(`auth-plugin: issuer '${name}' key-set refresh failed (${reason})`);
@@ -249,8 +267,78 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         );
       }
 
+      // Sign-in with an outside provider (M100c). Registered after the M73
+      // session strategy so a session carrying an explicit identity is consulted
+      // before this plugin's own record, and before any caller-supplied strategy.
+      const signInKeySets: IssuerKeySet[] = [];
+      if (compiledSignIn !== null) {
+        // The session is what holds the signed-in record and the pending state,
+        // so this arm cannot work without it. Named as a startup error rather than
+        // failing per request, exactly as options.session does.
+        if (!ctx.services.has(CAPABILITIES.SESSION)) {
+          throw new Error(
+            'auth-plugin: options.signIn requires the session capability — register the session-plugin (SessionPlugin) alongside auth-plugin, or drop options.signIn',
+          );
+        }
+        const sessionService = ctx.services.get<ISessionService>(CAPABILITIES.SESSION);
+
+        // One key-set cache per oidc provider: it holds the discovery document the
+        // routes read their endpoints from AND the keys the ID token verifies
+        // against, so both come from the same issuer-checked fetch.
+        const keySets = new Map<string, IssuerKeySet>();
+        for (const provider of compiledSignIn.providers) {
+          if (provider.compiledIssuer === undefined) {
+            continue;
+          }
+          const keySet = new IssuerKeySet(
+            provider.compiledIssuer,
+            runtime,
+            http,
+            (name, reason) =>
+              debug(`auth-plugin: signIn['${name}'] key-set refresh failed (${reason})`),
+          );
+          keySets.set(provider.name, keySet);
+          signInKeySets.push(keySet);
+        }
+
+        const authSessionService = new AuthSessionService({
+          sessionService,
+          now: () => runtime.now(),
+        });
+        ctx.services.register(CAPABILITIES.AUTH_SESSION, authSessionService);
+
+        strategies.push(
+          new AuthSessionStrategy({
+            sessionService,
+            ...(compiledSignIn.refreshPrincipal === null
+              ? {}
+              : { refreshPrincipal: compiledSignIn.refreshPrincipal }),
+          }),
+        );
+
+        registerSignInRoutes({
+          router: ctx.router,
+          config: compiledSignIn,
+          sessionService,
+          authSessionService,
+          http,
+          runtime,
+          keySets,
+          debug,
+        });
+
+        // Abort discovery fetches at the START of stop(), as the issuer key sets
+        // do: the kernel drains in-flight requests before onClose, so a login
+        // parked on a provider would otherwise hold shutdown open.
+        ctx.lifecycle.onStopping(() => {
+          for (const keySet of signInKeySets) {
+            keySet.close();
+          }
+        });
+      }
+
       // Caller-supplied strategies, appended in declaration order after every
-      // built-in (jwt → api-key → session → caller).
+      // built-in (jwt → api-key → session → auth-session → caller).
       if (options.strategies !== undefined) {
         for (const strategy of options.strategies) {
           strategies.push(strategy);
@@ -346,6 +434,9 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         // are closed here too (idempotent) for a failed start, where the
         // stopping phase never runs.
         for (const keySet of issuerKeySets) {
+          keySet.close();
+        }
+        for (const keySet of signInKeySets) {
           keySet.close();
         }
         if (authorizationSource instanceof AuthorizationObservationCollector) {

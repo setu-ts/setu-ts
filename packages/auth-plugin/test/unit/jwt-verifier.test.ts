@@ -9,7 +9,7 @@
 
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { JwtVerifier, decodeJsonSegment } from '../../src/issuers/jwt-verifier.ts';
+import { decodeJsonSegment, JwtVerifier } from '../../src/issuers/jwt-verifier.ts';
 import type { KeySetReader } from '../../src/issuers/jwt-verifier.ts';
 import type { Jwk } from '../../src/issuers/key-selection.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -54,7 +54,7 @@ function claims(overrides: Record<string, unknown> = {}): Record<string, unknown
   };
 }
 
-async function signed(key: TestKey, payload: Record<string, unknown>): Promise<string> {
+function signed(key: TestKey, payload: Record<string, unknown>): Promise<string> {
   return signToken(key, payload);
 }
 

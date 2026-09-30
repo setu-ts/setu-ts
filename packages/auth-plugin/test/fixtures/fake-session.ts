@@ -7,7 +7,7 @@
  * so a test cannot accidentally rely on storing a non-serializable value.
  */
 
-import type { ISession, ISessionService, IRequestContext } from '@setu-ts/common';
+import type { IRequestContext, ISession, ISessionService } from '@setu-ts/common';
 
 /** A fake session with its mutation log attached. */
 export interface FakeSession extends ISession {

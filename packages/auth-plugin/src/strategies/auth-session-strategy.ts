@@ -19,16 +19,9 @@ import type {
   ISessionService,
   SessionView,
 } from '@setu-ts/common';
-import {
-  AUTH_SESSION_KEY,
-  parseAuthSessionRecord,
-} from '../sign-in/auth-session-service.ts';
+import type { RefreshPrincipal } from '../interfaces/index.ts';
+import { AUTH_SESSION_KEY, parseAuthSessionRecord } from '../sign-in/auth-session-service.ts';
 import type { AuthSessionRecord } from '../sign-in/auth-session-service.ts';
-
-/** Re-reads the stored principal; `null` makes the request anonymous. */
-export type RefreshPrincipal = (
-  stored: IPrincipal,
-) => IPrincipal | null | Promise<IPrincipal | null>;
 
 /** Options for {@linkcode AuthSessionStrategy}. */
 export interface AuthSessionStrategyOptions {

@@ -19,6 +19,7 @@ import type {
   OAuth2Provider,
   OidcProvider,
   ProviderTokens,
+  RefreshPrincipal,
   SignInConfig,
   SignInProvider,
   TokenEndpointAuth,
@@ -96,6 +97,12 @@ export interface CompiledSignIn {
   readonly logoutPath: string;
   /** The one provider configured for RP-initiated logout, if any. */
   readonly rpLogoutProvider: CompiledProvider | null;
+  /**
+   * The per-request re-read handed to the `auth-session` strategy, or `null` when
+   * the session snapshot is trusted. Carried through here so the plugin does not
+   * have to re-read the raw option.
+   */
+  readonly refreshPrincipal: RefreshPrincipal | null;
 }
 
 function refuse(name: string, reason: string): never {
@@ -124,7 +131,10 @@ function resolveAuth(
     refuse(name, `tokenEndpointAuth '${auth}' needs a clientSecret`);
   }
   if (auth === 'none' && hasSecret) {
-    refuse(name, 'has a clientSecret but tokenEndpointAuth none, so the secret would never be sent');
+    refuse(
+      name,
+      'has a clientSecret but tokenEndpointAuth none, so the secret would never be sent',
+    );
   }
   return hasSecret ? { auth, secret: provider.clientSecret } : { auth };
 }
@@ -180,7 +190,10 @@ function compileBase(
 }
 
 /** Validates the `oidc` arm and compiles its issuer through M100b. */
-function compileOidc(provider: OidcProvider, base: Omit<CompiledProvider, 'kind'>): CompiledProvider {
+function compileOidc(
+  provider: OidcProvider,
+  base: Omit<CompiledProvider, 'kind'>,
+): CompiledProvider {
   const name = base.name;
   if (typeof provider.issuer !== 'string' || !isAcceptableUrl(provider.issuer)) {
     refuse(name, 'issuer must be an https URL, or http on a loopback host');
@@ -228,14 +241,12 @@ function compileOidc(provider: OidcProvider, base: Omit<CompiledProvider, 'kind'
     scopes,
     issuer: provider.issuer,
     compiledIssuer,
-    ...(rp === undefined
-      ? {}
-      : {
-        rpInitiatedLogout: {
-          postLogoutRedirectUri: rp.postLogoutRedirectUri,
-          idTokenHint: rp.idTokenHint === true,
-        },
-      }),
+    ...(rp === undefined ? {} : {
+      rpInitiatedLogout: {
+        postLogoutRedirectUri: rp.postLogoutRedirectUri,
+        idTokenHint: rp.idTokenHint === true,
+      },
+    }),
   };
 }
 
@@ -290,9 +301,11 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   const configured = config.basePath ?? DEFAULT_SIGN_IN_BASE_PATH;
   if (configured !== '/' && !(BASE_PATH.test(configured) && !configured.endsWith('/'))) {
     throw new AuthPluginConfigurationError(
-      `auth-plugin: signIn.basePath must be / or kebab-case segments without a trailing slash, got '${String(
-        config.basePath,
-      )}'`,
+      `auth-plugin: signIn.basePath must be / or kebab-case segments without a trailing slash, got '${
+        String(
+          config.basePath,
+        )
+      }'`,
     );
   }
   // `/` means no prefix at all; keeping it literal would build `//acme/login`.
@@ -340,10 +353,19 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
     );
   }
 
+  // A non-function `refreshPrincipal` would otherwise fail per request, on the
+  // path that is hardest to notice: every signed-in request answering anonymous.
+  if (config.refreshPrincipal !== undefined && !isFunction(config.refreshPrincipal)) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: signIn.refreshPrincipal must be a function',
+    );
+  }
+
   return {
     basePath,
     providers,
     logoutPath: `${basePath}/logout`,
     rpLogoutProvider: rpLogoutProviders[0] ?? null,
+    refreshPrincipal: config.refreshPrincipal ?? null,
   };
 }

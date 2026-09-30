@@ -242,7 +242,8 @@ const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
 | `strategies`                     | `readonly IAuthStrategy[]`                            | -                   | Caller-supplied strategies, appended after every built-in in declaration order.                 |
 | `middleware`                     | `false \| AuthMiddlewareOption`                       | `{ priority: 300 }` | Move, exclude paths from, or disable the global authentication middleware.                      |
 | `issuers`                        | `readonly TrustedIssuer[]`                            | -                   | Outside identity providers whose access tokens are accepted.                                    |
-| `http`                           | `IAuthHttp`                                           | `fetch`-based       | Outbound HTTP for issuer key sets and discovery documents.                                      |
+| `http`                           | `IAuthHttp`                                           | `fetch`-based       | Outbound HTTP for issuer key sets, discovery documents, and the sign-in token exchange.         |
+| `signIn`                         | `SignInConfig`                                        | -                   | Sign-in with outside providers; registers `IAuthSessionService`. Requires `SessionPlugin`.      |
 
 At least one passive strategy must be configured through `jwt`, `issuers`, `apiKey`, `session`, or
 `strategies`; `local` alone is a login verifier and cannot authenticate a later request. For
@@ -333,6 +334,151 @@ when an API reuses a sign-in client's id as its audience; configure a distinct r
 for the API instead. **Multi-tenant Entra ID** (`common`/`organizations`) is not supported, because
 its discovery document carries a `{tenantid}` issuer template that cannot equal a configured issuer;
 a single-tenant Entra issuer works.
+
+## Signing a user in
+
+`issuers` accepts a token some other client obtained. `signIn` makes **this application** the
+client: it sends the user to an outside provider (Google, Microsoft Entra ID, GitHub, Keycloak) over
+the OAuth 2.0 authorization-code flow with PKCE, and comes back with a session the rest of the
+application recognises. It requires `SessionPlugin`, and `register()` refuses to start without it.
+
+Configuring `signIn` does three things:
+
+- registers `IAuthSessionService` under `CAPABILITIES.AUTH_SESSION` — the ONE place that records
+  "this session is signed in as this principal";
+- adds an internal `auth-session` strategy after the `session` strategy, so a signed-in session
+  authenticates every later request through the global authentication middleware with no
+  hand-written middleware; the principal carries `claims.amr` from the recorded methods (RFC 8176),
+  overwriting any `amr` the stored principal held;
+- registers, per provider, `GET <basePath>/<name>/login` and `GET <basePath>/<name>/callback`, and
+  one `POST <basePath>/logout` (`basePath` defaults to `/auth`).
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SessionPlugin } from '@setu-ts/session-plugin';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    AuthPlugin({
+      signIn: {
+        providers: [
+          {
+            kind: 'oidc',
+            name: 'keycloak',
+            issuer: 'https://id.example.com/realms/acme',
+            clientId: 'web',
+            clientSecret: 'from-your-secret-store',
+            scopes: ['openid', 'profile', 'email'],
+            redirectUri: 'https://app.example.com/auth/keycloak/callback',
+            // Namespaced: `sub` is unique only within its issuer.
+            toPrincipal: (claims) =>
+              typeof claims.sub === 'string' ? { id: `keycloak|${claims.sub}` } : null,
+            rpInitiatedLogout: { postLogoutRedirectUri: 'https://app.example.com/' },
+          },
+          {
+            // GitHub issues no ID token: the profile comes from a userinfo endpoint.
+            kind: 'oauth2',
+            name: 'github',
+            clientId: 'Iv1.abc',
+            clientSecret: 'from-your-secret-store',
+            tokenEndpointAuth: 'client_secret_post',
+            scopes: ['read:user'],
+            authorizationEndpoint: 'https://github.com/login/oauth/authorize',
+            tokenEndpoint: 'https://github.com/login/oauth/access_token',
+            userinfoEndpoint: 'https://api.github.com/user',
+            redirectUri: 'https://app.example.com/auth/github/callback',
+            toPrincipal: (profile) => ({ id: `github|${String(profile.id)}` }),
+          },
+        ],
+      },
+    }),
+  ],
+});
+```
+
+A link to `/auth/keycloak/login?returnTo=/orders` starts a sign-in and lands on `/orders`
+afterwards.
+
+- **Login** mints `state` and a PKCE verifier (32 random bytes each, S256 challenge) and, for
+  `oidc`, a `nonce`, stores them in the user's OWN session (at most five attempts, ten minutes
+  each), and redirects to the provider. PKCE is sent for every provider, confidential clients
+  included. `returnTo` is kept only when it is a same-origin path — one leading `/`, no `\`, no
+  scheme, no control character, at most 512 bytes — and otherwise becomes `/`; it is stored at login
+  and never read from the callback URL, so the redirect after sign-in cannot be steered. When the
+  provider's discovery document cannot be read, login answers `503` `provider-unavailable` rather
+  than redirecting to an endpoint it never read.
+- **Callback** refuses — `401`, or a redirect to `failureRedirect` with `?error=<code>` — with one
+  of four fixed codes: `provider-denied` (the provider reported an error), `state-invalid` (unknown,
+  replayed, expired, issued for another provider, or an RFC 9207 `iss` naming another issuer),
+  `exchange-failed` (no code, token endpoint refused or unreachable, or the ID token failed
+  verification), and `profile-unavailable` (the `oauth2` userinfo endpoint failed). Nothing the
+  provider said reaches a URL, a body or a log line, and every refusal is written in the
+  application's configured error format. The attempt is consumed before the code is exchanged, so a
+  replayed callback fails. An `oidc` ID token is verified by the same verifier as `issuers` —
+  discovery-checked keys, `iss` exact, `aud` containing `clientId` and, with several audiences,
+  `azp` equal to `clientId` — and its `nonce` must match the attempt. `toPrincipal` returning `null`
+  (or throwing) answers `403` `principal-refused`.
+- **Sign-in** records the principal with `methods: ['fed']` and **regenerates the session id**, so a
+  session id planted before authentication does not survive into the authenticated session. Provider
+  tokens are handed to `onTokens` and stored nowhere else.
+- **Cookies.** The callback needs the session cookie on the provider's cross-site redirect, a
+  top-level `GET`, which `SameSite=Lax` (the session default) and `None` send and `Strict` does not:
+  with `sameSite: 'strict'` every callback fails closed as `state-invalid`.
+
+**Signing in without a provider.** A password login records its principal through the same contract,
+so it authenticates exactly as a federated one does:
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IAuthService, IAuthSessionService } from '@setu-ts/common';
+
+app.router.post('/login', async (ctx) => {
+  const { username, password } = await ctx.request.json<{ username: string; password: string }>();
+  const auth = ctx.services.get<IAuthService>(CAPABILITIES.AUTH);
+  const principal = await auth.verifyCredentials({ identifier: username, secret: password });
+  if (!principal) {
+    return ctx.response.status(401).json({ error: 'Invalid credentials' });
+  }
+  const authSession = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
+  await authSession.signIn(ctx, principal, { methods: ['pwd'] });
+  return ctx.response.redirect('/', 302);
+});
+```
+
+**Logging out.** `POST /auth/logout` ends the local session and redirects to `/` — or, for the one
+`oidc` provider that sets `rpInitiatedLogout`, to its advertised end-session endpoint with
+`client_id` and `post_logout_redirect_uri`. It is a `POST` so form CSRF applies when configured, so
+the logout form carries the token field; without it every logout answers `403`:
+
+```typescript
+import { csrfTokenField } from '@setu-ts/session-plugin';
+
+app.router.get('/account', (ctx) =>
+  ctx.response.html(
+    `<form method="post" action="/auth/logout">${csrfTokenField(ctx)}` +
+      `<button>Sign out</button></form>`,
+  ));
+```
+
+- **What sign-out revokes depends on the session strategy.** With `SessionPlugin({ store })` the
+  stored entry is deleted, so a cookie copied before sign-out stops authenticating at once. With the
+  default encrypted-cookie strategy nothing server-side exists to delete, and a copied cookie keeps
+  authenticating until its `maxAge`. Use the store strategy wherever sign-out must be a revocation.
+- **`idTokenHint: true`** stores the ID token at sign-in and sends it as `id_token_hint`, which lets
+  a provider end its session without a confirmation page. An ID token routinely runs to kilobytes,
+  and past the session cookie's 4096-byte budget the session plugin throws at commit — breaking the
+  sign-in, not the logout — so pair it with the store strategy.
+- **A stored principal is a snapshot.** Roles revoked after sign-in stay in force until the session
+  ends. `signIn.refreshPrincipal(stored)` re-reads it on every request: return the current
+  principal, or `null` to make the request anonymous. It runs per request, so it is opt-in; a
+  throwing re-read is treated as anonymous, never as the stale snapshot.
+
+Not provided: the implicit and hybrid flows, the device flow, dynamic client registration, front-
+and back-channel logout, and account linking — `toPrincipal` decides what an identity maps to.
 
 ## Refresh Tokens
 
@@ -533,6 +679,9 @@ MIT
 | `JwtOptions`                        | interface |
 | `JwtSignOptions`                    | interface |
 | `LocalOptions`                      | interface |
+| `OAuth2Provider`                    | interface |
+| `OidcProvider`                      | interface |
+| `ProviderTokens`                    | interface |
 | `RateLimitOptions`                  | interface |
 | `RateLimitResult`                   | interface |
 | `RateLimitStore`                    | interface |
@@ -542,11 +691,16 @@ MIT
 | `RefreshTokenStore`                 | interface |
 | `RoleDefinition`                    | interface |
 | `SessionAuthOptions`                | interface |
+| `SignInConfig`                      | interface |
+| `SignInProviderBase`                | interface |
 | `TokenPair`                         | interface |
 | `TrustedIssuer`                     | interface |
 | `IRefreshTokenRotation`             | type      |
 | `IssuerAlgorithm`                   | type      |
 | `IssuerKeySource`                   | type      |
+| `RefreshPrincipal`                  | type      |
+| `SignInProvider`                    | type      |
+| `TokenEndpointAuth`                 | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

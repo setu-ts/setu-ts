@@ -258,11 +258,25 @@ describe('real-backend CI wiring', () => {
       test: { permissions: { net: string[] } };
     }>('packages/auth-plugin/deno.json');
     expect(config.test.permissions.net).toContain('localhost:8180');
-    const suite = await Deno.readTextFile(
-      'packages/auth-plugin/test/e2e/keycloak-issuer-real.test.ts',
-    );
-    expect(suite).toContain("Deno.env.get('KEYCLOAK_URL')");
-    expect(suite).toContain('ignore: BASE === undefined');
+    // M100c: the sign-in suite rides the same container and the same guard.
+    for (
+      const file of [
+        'packages/auth-plugin/test/e2e/keycloak-issuer-real.test.ts',
+        'packages/auth-plugin/test/e2e/keycloak-sign-in-real.test.ts',
+      ]
+    ) {
+      const suite = await Deno.readTextFile(file);
+      expect(suite).toContain("Deno.env.get('KEYCLOAK_URL')");
+      expect(suite).toContain('ignore: BASE === undefined');
+    }
+    // The realm the sign-in suite logs into: a standard-flow client and a user.
+    const realm = await readJson<{
+      clients: { clientId: string; standardFlowEnabled?: boolean }[];
+      users?: { username: string }[];
+    }>('packages/auth-plugin/test/fixtures/keycloak/setu-realm.json');
+    expect(realm.clients.find((client) => client.clientId === 'setu-web')?.standardFlowEnabled)
+      .toBe(true);
+    expect(realm.users?.map((user) => user.username)).toContain('alice');
   });
 
   it('starts the Bigtable emulator and declares its endpoint and grant (M82 §3.13)', async () => {

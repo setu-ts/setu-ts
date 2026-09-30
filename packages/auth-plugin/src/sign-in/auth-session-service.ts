@@ -117,20 +117,25 @@ export class AuthSessionService implements IAuthSessionService {
    * @returns `{ status: 'signed-in' }`
    * @throws {Error} If the session middleware did not run for this request
    */
-  async signIn(
+  signIn(
     ctx: IRequestContext,
     principal: IPrincipal,
     options: SignInOptions,
   ): Promise<SignInOutcome> {
-    const session = this.#sessionService.from(ctx);
-    const methods = (options?.methods ?? []).filter((method) =>
-      AUTH_METHODS.includes(method)
-    );
-    const record: AuthSessionRecord = { principal, methods, at: this.#now() };
-    session.set(AUTH_SESSION_KEY, record);
-    // Rotation keeps the data (ISession.regenerate), so it runs after the write.
-    session.regenerate();
-    return { status: 'signed-in' };
+    // Not `async`, since nothing here awaits; the body is still wrapped so a
+    // missing session middleware REJECTS rather than throwing synchronously out
+    // of a method typed to return a promise (the M52b defect class).
+    try {
+      const session = this.#sessionService.from(ctx);
+      const methods = (options?.methods ?? []).filter((method) => AUTH_METHODS.includes(method));
+      const record: AuthSessionRecord = { principal, methods, at: this.#now() };
+      session.set(AUTH_SESSION_KEY, record);
+      // Rotation keeps the data (ISession.regenerate), so it runs after the write.
+      session.regenerate();
+      return Promise.resolve({ status: 'signed-in' });
+    } catch (error) {
+      return Promise.reject(error);
+    }
   }
 
   /**

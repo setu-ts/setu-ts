@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Sign-in with an outside provider (M100c).** `AuthPluginOptions.signIn` makes the application an
+  OAuth 2.0 / OpenID Connect relying party over the authorization-code flow: per provider,
+  `GET /auth/<name>/login` and `GET /auth/<name>/callback`, plus one `POST /auth/logout`. Providers
+  are the exported `OidcProvider` (discovery; the ID token verified by the M100b verifier with the
+  client id as audience, `nonce` and `azp`) or `OAuth2Provider` (a userinfo endpoint, for providers
+  such as GitHub that issue no ID token). PKCE S256 is sent for every provider; `state`, `nonce` and
+  the verifier are bound to the user's own session; RFC 9207 `iss` is checked when sent; `returnTo`
+  is kept only as a same-origin path; and callback refusals answer with one of four fixed codes in
+  the configured error format. Provider tokens reach `onTokens` and are stored nowhere else.
+  `@setu-ts/common` gains `CAPABILITIES.AUTH_SESSION` and `IAuthSessionService`
+  (`signIn`/`current`/`signOut`, with `SignInOptions`, `SignInOutcome` and `AuthMethod`): the one
+  owner of "this session is signed in as this principal". A password login records its principal
+  through it too, and the new `auth-session` strategy authenticates later requests with `claims.amr`
+  from the recorded methods and no hand-written middleware. `signIn.refreshPrincipal` re-reads the
+  principal per request. `IAuthHttp` gains `post` for the token exchange. Requires `SessionPlugin`.
+  Verified against a real Keycloak 26.4 realm. With `signIn` unset nothing changes.
+
 - **Tokens from an outside issuer (M100b).** `AuthPluginOptions.issuers` accepts access tokens an
   outside identity provider issued (Auth0, Entra ID, Google, Keycloak, Cognito), verified against
   its published key set through `runtime.subtle` with zero npm dependencies. Each exported
