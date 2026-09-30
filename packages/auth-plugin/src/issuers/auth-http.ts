@@ -44,16 +44,43 @@ export class AuthHttpBodyTooLargeError extends Error {
 export function createDefaultAuthHttp(
   fetchFn: AuthFetch = (input, init) => globalThis.fetch(input, init),
 ): IAuthHttp {
+  const send = async (
+    url: string,
+    init: RequestInit,
+    maxBytes: number,
+  ): Promise<{ readonly status: number; readonly body: string }> => {
+    const response = await fetchFn(url, { redirect: 'manual', ...init });
+    const body = await readCapped(response.body, maxBytes);
+    return { status: response.status, body };
+  };
   return {
-    async get(url, { signal, maxBytes }) {
-      const response = await fetchFn(url, {
-        method: 'GET',
-        signal,
-        redirect: 'manual',
-        headers: { accept: 'application/json' },
-      });
-      const body = await readCapped(response.body, maxBytes);
-      return { status: response.status, body };
+    get(url, { signal, maxBytes }) {
+      return send(
+        url,
+        { method: 'GET', signal, headers: { accept: 'application/json' } },
+        maxBytes,
+      );
+    },
+    post(url, { signal, maxBytes, form, headers }) {
+      // `URLSearchParams` owns the encoding, so a client secret containing `&`,
+      // `+` or `=` cannot break out of its own parameter and inject another.
+      // `Accept: application/json` is sent because a provider that answers
+      // `application/x-www-form-urlencoded` by default (GitHub does) is otherwise
+      // read as invalid JSON, and the failure reads as a broken login.
+      return send(
+        url,
+        {
+          method: 'POST',
+          signal,
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/x-www-form-urlencoded',
+            ...(headers ?? {}),
+          },
+          body: new URLSearchParams(form).toString(),
+        },
+        maxBytes,
+      );
     },
   };
 }

@@ -210,9 +210,10 @@ export interface TrustedIssuer {
 }
 
 /**
- * Outbound HTTP seam used to fetch key sets and discovery documents. Defaults
- * to one over `fetch`. An implementation must reject once the response body
- * exceeds `maxBytes` while reading it, and must honour `signal`.
+ * Outbound HTTP seam used to fetch key sets, read discovery documents, and
+ * exchange an authorization code at a provider's token endpoint. Defaults to one
+ * over `fetch`. An implementation must reject once the response body exceeds
+ * `maxBytes` while reading it, and must honour `signal`.
  *
  * @since 0.8.0
  */
@@ -227,6 +228,29 @@ export interface IAuthHttp {
   get(
     url: string,
     options: { readonly signal: AbortSignal; readonly maxBytes: number },
+  ): Promise<{ readonly status: number; readonly body: string }>;
+  /**
+   * Performs a `POST` whose body is `form` encoded as
+   * `application/x-www-form-urlencoded`, for the OAuth 2.0 token endpoint.
+   *
+   * `form` is passed as a map rather than a pre-encoded string so the seam, not
+   * each caller, owns the encoding: a secret containing `&` or `+` must not be
+   * able to inject a second parameter into the request.
+   *
+   * @param url - Absolute URL
+   * @param options - Abort signal, response-body byte limit, the form fields, and
+   *   any extra request headers (for example the `client_secret_basic` credential)
+   * @returns The status code and the body as text
+   * @since 0.8.0
+   */
+  post(
+    url: string,
+    options: {
+      readonly signal: AbortSignal;
+      readonly maxBytes: number;
+      readonly form: Readonly<Record<string, string>>;
+      readonly headers?: Readonly<Record<string, string>>;
+    },
   ): Promise<{ readonly status: number; readonly body: string }>;
 }
 

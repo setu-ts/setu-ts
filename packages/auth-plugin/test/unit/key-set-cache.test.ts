@@ -2,12 +2,21 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { IssuerKeySet, MAX_KEYS, MAX_RESPONSE_BYTES } from '../../src/issuers/key-set-cache.ts';
 import { compileIssuers } from '../../src/issuers/trusted-issuer.ts';
-import type { TrustedIssuer } from '../../src/interfaces/index.ts';
+import type { IAuthHttp, TrustedIssuer } from '../../src/interfaces/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createFakeHttp } from '../fixtures/issuer-tokens.ts';
 
 const JWKS = 'https://idp.test/jwks';
 const KEY = { kty: 'RSA', kid: 'k1', n: 'n', e: 'AQAB' };
+
+/**
+ * Wraps a `get` into a full `IAuthHttp` whose `post` fails loudly. A key-set or
+ * discovery refresh only ever GETs, so a change that starts posting through this
+ * seam cannot hide behind a fixture that silently accepted it.
+ */
+function getOnly(get: Required<IAuthHttp>['get']): IAuthHttp {
+  return { get, post: () => Promise.reject(new Error('post is not expected by this fixture')) };
+}
 
 function issuer(overrides: Partial<TrustedIssuer> = {}): ReturnType<typeof compileIssuers>[number] {
   return compileIssuers([{
@@ -118,12 +127,10 @@ describe('IssuerKeySet', () => {
     const runtime = createFakeRuntime();
     const seen: number[] = [];
     const failures: string[] = [];
-    const keySet = new IssuerKeySet(issuer(), runtime, {
-      get: (_url, { maxBytes }) => {
-        seen.push(maxBytes);
-        return Promise.reject(new Error('secret-bearing transport message'));
-      },
-    }, (_n, reason) => failures.push(reason));
+    const keySet = new IssuerKeySet(issuer(), runtime, getOnly((_url, { maxBytes }) => {
+      seen.push(maxBytes);
+      return Promise.reject(new Error('secret-bearing transport message'));
+    }), (_n, reason) => failures.push(reason));
     expect(await keySet.keys()).toBeNull();
     expect(failures).toEqual(['key-set-fetch-failed']);
     expect(seen).toEqual([MAX_RESPONSE_BYTES]);
@@ -135,12 +142,12 @@ describe('IssuerKeySet', () => {
     const keySet = new IssuerKeySet(
       issuer({ keySet: { fetchTimeoutMs: 5 } }),
       runtime,
-      {
-        get: (_url, { signal }) =>
+      getOnly(
+        (_url, { signal }) =>
           new Promise((_resolve, reject) => {
             signal.addEventListener('abort', () => reject(new Error('aborted')));
           }),
-      },
+      ),
       (_n, reason) => failures.push(reason),
     );
     expect(await keySet.keys()).toBeNull();
@@ -158,17 +165,15 @@ describe('IssuerKeySet', () => {
     const runtime = createFakeRuntime();
     let aborted = false;
     let calls = 0;
-    const keySet = new IssuerKeySet(issuer(), runtime, {
-      get: (_url, { signal }) => {
-        calls++;
-        return new Promise((_resolve, reject) => {
-          signal.addEventListener('abort', () => {
-            aborted = true;
-            reject(new Error('aborted'));
-          });
+    const keySet = new IssuerKeySet(issuer(), runtime, getOnly((_url, { signal }) => {
+      calls++;
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          aborted = true;
+          reject(new Error('aborted'));
         });
-      },
-    }, () => {});
+      });
+    }), () => {});
     const pending = keySet.keys();
     keySet.close();
     expect(await pending).toBeNull();
@@ -191,18 +196,16 @@ describe('IssuerKeySet', () => {
     const runtime = createFakeRuntime();
     let release!: () => void;
     let calls = 0;
-    const keySet = new IssuerKeySet(issuer(), runtime, {
-      get: () => {
-        calls++;
-        if (calls === 1) {
-          return Promise.resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
-        }
-        // The forced refresh parks until released, like a blocked endpoint.
-        return new Promise((resolve) => {
-          release = () => resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
-        });
-      },
-    }, () => {});
+    const keySet = new IssuerKeySet(issuer(), runtime, getOnly(() => {
+      calls++;
+      if (calls === 1) {
+        return Promise.resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
+      }
+      // The forced refresh parks until released, like a blocked endpoint.
+      return new Promise((resolve) => {
+        release = () => resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
+      });
+    }), () => {});
     await keySet.keys();
     runtime.setHrtime(100);
     const forced = keySet.keys(true);

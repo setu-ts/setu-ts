@@ -102,7 +102,10 @@ describe('TrustedIssuer validation at construction', () => {
   });
 
   it('refuses http without issuers, since nothing would read it', () => {
-    const http = { get: () => Promise.resolve({ status: 200, body: '{}' }) };
+    const http = {
+      get: () => Promise.resolve({ status: 200, body: '{}' }),
+      post: () => Promise.reject(new Error('post is not expected by this fixture')),
+    };
     expect(() => AuthPlugin({ apiKey: { validate: () => Promise.resolve(null) }, http })).toThrow(
       AuthPluginConfigurationError,
     );

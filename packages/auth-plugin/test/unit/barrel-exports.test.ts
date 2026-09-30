@@ -41,7 +41,12 @@ describe('barrel exports', () => {
   it('exports the outside-issuer option types and keeps the verifier internal', () => {
     const algorithm: IssuerAlgorithm = 'EdDSA';
     const keys: IssuerKeySource = { discovery: true };
-    const http: IAuthHttp = { get: () => Promise.resolve({ status: 200, body: '{}' }) };
+    const http: IAuthHttp = {
+      get: () => Promise.resolve({ status: 200, body: '{}' }),
+      // A key-set/discovery seam never posts; failing loudly here means a later
+      // change that starts posting cannot hide inside this test.
+      post: () => Promise.reject(new Error('post is not expected by this fixture')),
+    };
     const issuer: TrustedIssuer = {
       name: 'idp',
       issuer: 'https://idp.test',
