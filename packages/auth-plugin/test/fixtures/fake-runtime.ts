@@ -18,15 +18,17 @@ import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
  */
 export function createFakeRuntime(startNow?: number): IRuntimeServices & {
   setNow(ms: number): void;
+  setHrtime(ms: number): void;
 } {
   let currentTime = startNow ?? Date.now();
+  let monotonic = 0;
 
-  const runtime: IRuntimeServices & { setNow(ms: number): void } = {
+  const runtime: IRuntimeServices & { setNow(ms: number): void; setHrtime(ms: number): void } = {
     platform: () => 'deno' as const,
     version: () => 'test',
     hostname: () => 'localhost',
     now: () => currentTime,
-    hrtime: () => 0,
+    hrtime: () => monotonic,
     setTimeout: (fn: () => void, ms: number) => {
       const id = setTimeout(fn, ms);
       return { id } as TimerHandle;
@@ -50,6 +52,9 @@ export function createFakeRuntime(startNow?: number): IRuntimeServices & {
     },
     setNow: (ms: number) => {
       currentTime = ms;
+    },
+    setHrtime: (ms: number) => {
+      monotonic = ms;
     },
   };
 

@@ -11870,9 +11870,10 @@ because one of them invalidated part of a previous run's claims:
 `packages/session-plugin` is consumed, not changed.
 
 **Plans:** `plans/archive/milestone-100a-auth-composition.md`,
-`plans/milestone-100b-external-token-verification.md`, `plans/milestone-100c-oidc-sign-in.md`,
-`plans/milestone-100d-totp-mfa.md`, `plans/milestone-100e-passkeys.md`,
-`plans/milestone-100f-saml-sp.md`. Each carries its design security review.
+`plans/archive/milestone-100b-external-token-verification.md`,
+`plans/milestone-100c-oidc-sign-in.md`, `plans/milestone-100d-totp-mfa.md`,
+`plans/milestone-100e-passkeys.md`, `plans/milestone-100f-saml-sp.md`. Each carries its design
+security review.
 
 **Objective:** Bring `auth-plugin` to what a modern framework is expected to ship. Today it
 authenticates exactly what it issued itself, and a request carrying anything else is anonymous:
@@ -11961,7 +11962,7 @@ does not throw — but it authenticates twice per request, so the CHANGELOG and 
 tell the reader to delete their own call. The starters' `auth` JSDoc and the three starter READMEs
 are corrected to match.
 
-### Milestone 100b: Tokens From an Outside Issuer
+### Milestone 100b: Tokens From an Outside Issuer ✅ COMPLETE
 
 **Package(s):** `packages/auth-plugin`, `packages/cli` (health-indicator claim table)
 
@@ -12282,7 +12283,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 99e       | ✅     | cli + docs — a template axis that forces one style (class-based microservice)                                                                                                                                                                 |
 | 100       | ⬜     | auth-plugin — authentication beyond bearer tokens (umbrella; 100a–100f, each with a design security review and implementation audit)                                                                                                          |
 | 100a      | ✅     | auth-plugin + starters — `jwt` optional; the plugin registers `authMiddleware()` itself ([#384](https://github.com/setu-ts/setu-ts/pull/384))                                                                                                 |
-| 100b      | ⬜     | auth-plugin — tokens from an outside issuer (key sets, rotation, ES256/EdDSA)                                                                                                                                                                 |
+| 100b      | ✅     | auth-plugin — tokens from an outside issuer (key sets, rotation, ES256/EdDSA) ([#385](https://github.com/setu-ts/setu-ts/pull/385))                                                                                                           |
 | 100c      | ⬜     | auth-plugin — sign-in with an outside provider (OAuth 2.0 / OpenID Connect)                                                                                                                                                                   |
 | 100d      | ⬜     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                                                                                                                  |
 | 100e      | ⬜     | auth-plugin — passkeys (WebAuthn)                                                                                                                                                                                                             |

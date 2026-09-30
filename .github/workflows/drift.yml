@@ -58,6 +58,9 @@ jobs:
       # lookup, so an IP literal is what keeps the grant endpoint-scoped (the
       # M70g Pub/Sub lesson).
       BIGTABLE_EMULATOR_ENDPOINT: 127.0.0.1:8086
+      # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on this
+      # exact base URL, which is also the host:port the manifest's net grant scopes.
+      KEYCLOAK_URL: http://localhost:8180
       # M90d §3.5: the real-backend NATS and Kafka suites (messaging-plugin)
       # guard on these exact endpoints, which are also the host:port pairs the
       # package manifest's net grant scopes. Started by the steps below.
@@ -168,6 +171,30 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: 2.9.6
+
+      # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on
+      # KEYCLOAK_URL. A step rather than a `services:` container because the
+      # realm is imported at startup — `start-dev --import-realm` is a COMMAND
+      # and the realm file is a volume, neither of which a service block can
+      # set. Readiness is the realm's own discovery document, which is exactly
+      # what the suite reads first.
+      - name: Start Keycloak (outside-issuer suite)
+        continue-on-error: true
+        run: |
+          docker run -d --name keycloak -p 127.0.0.1:8180:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -v "$GITHUB_WORKSPACE/packages/auth-plugin/test/fixtures/keycloak:/opt/keycloak/data/import:ro" \
+            quay.io/keycloak/keycloak:26.4 start-dev --import-realm
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:8180/realms/setu/.well-known/openid-configuration >/dev/null; then
+              echo 'keycloak ready'
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'keycloak did not become ready'
+          docker logs keycloak
+          exit 1
 
       # The four backends that cannot be `services:` containers, because each
       # needs a command or an argument and `options` reaches `docker create`

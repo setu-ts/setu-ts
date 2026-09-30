@@ -59,13 +59,13 @@ describe('REAL Mailpit/SMTP outage (§3.7)', () => {
 
     let nodemailerPresent = false;
     try {
-      await import('npm:nodemailer@^9');
+      await import('npm:nodemailer@^10');
       nodemailerPresent = true;
     } catch {
       // npm:nodemailer not available
     }
     if (!nodemailerPresent) {
-      console.log('SKIP: npm:nodemailer@^9 not available');
+      console.log('SKIP: npm:nodemailer@^10 not available');
       return;
     }
 

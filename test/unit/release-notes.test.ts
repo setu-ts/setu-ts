@@ -331,7 +331,7 @@ describe('release workflow wiring', () => {
     const environment = [...jobSection(prJob, 'env').matchAll(/^ +([A-Z0-9_]+): (\S+)$/gm)];
     expect(environment.length).toBeGreaterThan(10);
 
-    // The four backends that cannot be service containers — each needs a
+    // The five backends that cannot be service containers — each needs a
     // command or an argument, and `options` reaches `docker create` BEFORE the
     // image while the command comes after it — so no image or endpoint pin
     // above reaches them. Compared byte-for-byte against ci.yml's own steps
@@ -345,6 +345,7 @@ describe('release workflow wiring', () => {
       'Start the NATS server (JetStream)',
       'Start Kafka (KRaft single-node)',
       'Start MinIO (S3 storage outage suite)',
+      'Start Keycloak (outside-issuer suite)',
     ];
 
     for (const { workflow, job, expectedStep } of SUITE_CONSUMERS) {

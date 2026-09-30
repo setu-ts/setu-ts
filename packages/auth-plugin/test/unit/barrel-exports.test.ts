@@ -6,9 +6,13 @@ import type {
   AuthMiddlewareOption,
   AuthorizationDiagnosticsOptions,
   AuthPluginOptions,
+  IAuthHttp,
   IAuthorizationDiagnosticsSource,
   IRefreshTokenRotation,
+  IssuerAlgorithm,
+  IssuerKeySource,
   SessionAuthOptions,
+  TrustedIssuer,
 } from '../../src/index.ts';
 
 /**
@@ -32,6 +36,33 @@ describe('barrel exports', () => {
     };
     expect(options.jwt).toBeUndefined();
     expect(options.middleware).toBe(middleware);
+  });
+
+  it('exports the outside-issuer option types and keeps the verifier internal', () => {
+    const algorithm: IssuerAlgorithm = 'EdDSA';
+    const keys: IssuerKeySource = { discovery: true };
+    const http: IAuthHttp = { get: () => Promise.resolve({ status: 200, body: '{}' }) };
+    const issuer: TrustedIssuer = {
+      name: 'idp',
+      issuer: 'https://idp.test',
+      audience: 'api',
+      keys,
+      algorithms: [algorithm],
+      toPrincipal: () => null,
+    };
+    const options: AuthPluginOptions = { issuers: [issuer], http };
+    expect(options.issuers?.[0].keys).toBe(keys);
+    const barrel = auth as Record<string, unknown>;
+    for (
+      const internal of [
+        'IssuerStrategy',
+        'IssuerKeySet',
+        'createDefaultAuthHttp',
+        'compileIssuers',
+      ]
+    ) {
+      expect(barrel[internal]).toBeUndefined();
+    }
   });
 
   it('exports the plugin factory', () => {

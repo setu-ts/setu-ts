@@ -34,6 +34,7 @@
  */
 export const PLUGIN_HEALTH_INDICATORS: ReadonlyMap<string, readonly string[]> = new Map([
   ['audit-plugin', ['audit']],
+  ['auth-plugin', ['auth']],
   ['cache-plugin', ['cache']],
   ['cloudflare-plugin', ['cloudflare']],
   ['cqrs-plugin', ['cqrs']],

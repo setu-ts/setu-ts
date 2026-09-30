@@ -8,6 +8,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Tokens from an outside issuer (M100b).** `AuthPluginOptions.issuers` accepts access tokens an
+  outside identity provider issued (Auth0, Entra ID, Google, Keycloak, Cognito), verified against
+  its published key set through `runtime.subtle` with zero npm dependencies. Each exported
+  `TrustedIssuer` names an exact `issuer`, a required `audience`, a key source (`IssuerKeySource`:
+  `{ jwksUri }` or `{ discovery: true }`), an optional algorithm allowlist (`IssuerAlgorithm`:
+  RS256, PS256, ES256, ES384, EdDSA) and a required `toPrincipal`. `none` and `HS*` are refused
+  before any key lookup, and keys are filtered by type, curve, use, algorithm, operations and `kid`.
+  Key sets are cached on the monotonic clock, refetched at most once per cooldown for an unknown
+  `kid`, kept through fetch failures for a bounded time, and bounded per fetch by time, bytes and
+  key count. A new `auth` health indicator reports `up` or `degraded` — never `down` — from cached
+  state only. `http` (the exported `IAuthHttp`) replaces the default `fetch` seam. The chain is now
+  jwt → issuers → api-key → session → caller-supplied; with `issuers` unset nothing changes.
+  Verified against a real Keycloak 26.4 realm, including key rotation through the admin API.
+
 - **Authentication composition (M100a).** `AuthPluginOptions.jwt` is optional, so API-key, session,
   and caller-strategy applications no longer invent JWT key material. `AuthPlugin` registers passive
   authentication globally at priority 300 by default; `middleware` can change the priority, exclude
@@ -643,6 +657,14 @@ All notable changes to this project are documented here. The format follows
   provider. Nothing changes for the five built-in providers, which all return promises.
 
 ### Fixed
+
+- **`mail-plugin` now loads `nodemailer` 10, closing a high-severity advisory.** `SmtpProvider`
+  lazily imported `npm:nodemailer@^9`, and every 9.x release is inside GHSA-v53p-9fqp-m79j
+  (quadratic backtracking in the address parser's free-text fallback, a remote denial of service,
+  fixed in 10.0.6). The lazy import is now `npm:nodemailer@^10`. nodemailer 10's only breaking
+  change is requiring Node.js 20 or newer; the transport API the plugin uses (`createTransport`,
+  `sendMail`, `verify`, `close`) is unchanged, which was verified against the real 10.0.12 module.
+  An application that injects its own transport is unaffected.
 
 - **`cache-plugin`, `messaging-plugin`, `queue-plugin`, `realtime-backplane-plugin`,
   `scheduler-plugin`, `auth-plugin` — a Redis outage no longer prints to the console.** Every

@@ -1,7 +1,6 @@
 # Milestone 100b — Tokens From an Outside Issuer (`@setu-ts/auth-plugin`)
 
-> **Status:** Planning on `docs/m100-auth-federation-mfa`. Implementation and fixes belong on
-> `feat/m100b-external-token-verification`; `main` remains protected. Depends on 100a.
+> **Status:** Complete on `feat/m100b-external-token-verification`. Depends on 100a.
 
 ## 0. Objective & scope
 
@@ -261,3 +260,57 @@ checks → `toPrincipal`.
 
 The implementation audit re-runs each row as a negative control against the committed tree,
 including a real Keycloak token re-signed with `alg: HS256` using the realm's public key.
+
+## 11. Implementation notes — deviations from this plan
+
+- **Option validation lives in `src/issuers/trusted-issuer.ts`**, not inline in `auth-plugin.ts`;
+  `AuthPlugin(...)` calls it at construction, so every §3.2 refusal still throws there.
+- **`toPrincipal` throwing** is caught and reported as `verification-error`; the request stays
+  anonymous. Its test lives in `issuer-strategy.test.ts`.
+- **Health reports every issuer's state**, including `expired` (§3.5's past-`maxStaleMs` state),
+  rather than only `stale`/`unfetched` as §3.7 listed. The indicator performs no I/O, so it reads
+  `unfetched` until the first token from that issuer arrives.
+- **A token with a `crit` header is refused** (`crit-unsupported`): no extension is understood, and
+  RFC 7515 §4.1.11 requires refusing one that is not.
+- **The default HTTP seam does not follow redirects** (`redirect: 'manual'`), so a validated `https`
+  URL cannot be bounced to another scheme or host; the redirect's non-200 status is refused. The
+  first implementation used `'error'`, which code review found Cloudflare Workers THROWS on
+  (measured on workerd: "won't be implemented … at the edge"), failing every key-set fetch there.
+- **Key sets are closed at `onStopping`, not only `onClose`.** The kernel drains in-flight requests
+  before `onClose`, so a request parked on a key-set fetch held shutdown for up to `fetchTimeoutMs`
+  (measured: 10 s with an `onClose`-only abort, 89 ms with `onStopping`).
+- **Two refusals beyond §3.2**, both from code review: `keySet.ttlMs` above `keySet.maxStaleMs` (the
+  cap would drop a set still fresh by TTL, refusing a valid token each cycle), and `http` without
+  `issuers` (nothing would read it).
+- **The key-set cache tracks "ever fetched" explicitly.** Using a zero timestamp as the sentinel
+  broke under a monotonic clock that reads `0`, which the test fake did.
+- **Keycloak is a CI step in `ci.yml`, `release.yml` and `drift.yml`**, compared byte-for-byte by
+  `test/unit/release-notes.test.ts`, because the backend-parity test requires every suite-running
+  workflow to start it, not only the PR job.
+- **Security audit round 1 (commit `2e7e3269`, failed on three findings, all fixed):**
+  - **F1 (Medium):** one forged-`kid` token held every concurrent valid request behind its refresh
+    (measured 4985 ms against 2 ms), because `keys()` always awaited an in-flight refresh. A caller
+    whose set is fresh and who did not force a refresh now reads the cache without waiting. A caller
+    past its TTL still waits, which is ordinary expiry that no attacker can trigger.
+  - **F2 (Low):** a `fetchTimeoutMs` above 2³¹−1 ms overflowed the timer, aborting every fetch. It
+    is now refused at construction, without echoing the value.
+  - **F3 (Low):** `sub` is unique only within one issuer. The `toPrincipal` JSDoc, the README and
+    PUBLIC_API now say to namespace the id when more than one issuer is configured.
+- **Security audit round 2 (commit `e184b5e4`)** confirmed F1–F3 fixed with probes and negative
+  controls, and found **N1 (Low, fixed)**. The namespacing note said "more than one issuer", but a
+  self-issued `jwt` plus one issuer collide the same way, because `JwtStrategy` also maps `sub` to
+  the id. The note now covers every identity source in the JSDoc, README and PUBLIC_API, and the
+  README example namespaces unconditionally.
+- **Security audit round 3 (commit `f75a93be`)** confirmed N1 closed and found **N2 (Low, fixed)**,
+  which the N1 wording itself introduced. It claimed a namespaced outside id "cannot" collide, but
+  namespacing only one side does not stop a local id of the form `<issuer>|<sub>` (for example a
+  self-issued `sub` or a user-chosen username). All three sites now say to namespace every source,
+  or to keep the other sources' ids free of the separator.
+- **Folded in at the maintainer's direction:** a `mail-plugin` dependency bump, unrelated to this
+  milestone. CI's vulnerability scan failed on a new high advisory against `nodemailer` ≤10.0.5
+  (GHSA-v53p-9fqp-m79j). `SmtpProvider`'s lazy import moved from `npm:nodemailer@^9` to `@^10`, and
+  the lockfile was refreshed surgically. By convention this belongs on a `fix/…` branch; it ships
+  here, recorded rather than silent.
+- **PR review (CodeRabbit):** a non-object `keys`, a non-string `jwksUri`, or a non-array
+  `algorithms` from a plain-JavaScript caller threw a bare `TypeError` (or was coerced) instead of
+  `AuthPluginConfigurationError`. All three are now refused by name.
