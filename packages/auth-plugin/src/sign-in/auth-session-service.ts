@@ -17,7 +17,6 @@ import type {
   IAuthSessionService,
   IPrincipal,
   IRequestContext,
-  ISession,
   ISessionService,
   SignInOptions,
   SignInOutcome,
@@ -40,17 +39,20 @@ export interface AuthSessionRecord {
 }
 
 /**
- * Reads and validates the stored record.
+ * Validates a stored record read from under {@linkcode AUTH_SESSION_KEY}.
  *
  * The payload survived a JSON round-trip and an application can clear or corrupt
  * the session key, so nothing is trusted: a malformed record reads as "not
  * signed in" rather than producing a principal with an `id` of the wrong type.
  *
- * @param session - The request's session
+ * Takes the raw payload rather than a session, so the same validator serves the
+ * write-side service (which holds an `ISession`) and the authentication strategy
+ * (which holds only a read-only `SessionView`).
+ *
+ * @param raw - Whatever is stored under the key, or `undefined`
  * @returns The record, or `null` when absent or malformed
  */
-export function readAuthSessionRecord(session: ISession): AuthSessionRecord | null {
-  const raw = session.get<unknown>(AUTH_SESSION_KEY);
+export function parseAuthSessionRecord(raw: unknown): AuthSessionRecord | null {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     return null;
   }
@@ -139,7 +141,9 @@ export class AuthSessionService implements IAuthSessionService {
    * @throws {Error} If the session middleware did not run for this request
    */
   current(ctx: IRequestContext): IPrincipal | null {
-    const record = readAuthSessionRecord(this.#sessionService.from(ctx));
+    const record = parseAuthSessionRecord(
+      this.#sessionService.from(ctx).get(AUTH_SESSION_KEY),
+    );
     return record?.principal ?? null;
   }
 

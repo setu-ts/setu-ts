@@ -46,6 +46,9 @@ export class IssuerKeySet {
   #inflight: Promise<void> | null = null;
   #discovery: Readonly<Record<string, unknown>> | null = null;
   #discoveryAt = 0;
+  // Shared by the key-set path and the sign-in routes, so a burst of logins
+  // cannot each fetch the document.
+  #discoveryInflight: Promise<void> | null = null;
   #closed = false;
   readonly #controllers = new Set<AbortController>();
 
@@ -164,12 +167,49 @@ export class IssuerKeySet {
   }
 
   /**
-   * Reads `jwks_uri` from the discovery document, fetching it when absent or
-   * past the key-set TTL. The whole document is kept for later readers.
+   * The cached OpenID Connect discovery document, fetched when absent or past
+   * the key-set TTL, and checked against the configured issuer.
+   *
+   * Exposed so the sign-in routes (M100c) read the authorization, token, and
+   * end-session endpoints from the SAME issuer-checked document that supplies
+   * `jwks_uri` — otherwise a spoofed document could send a login one place and
+   * a verification another. Returns `null` when the document cannot be read,
+   * rather than throwing, so a provider outage answers a login failure instead
+   * of a 500.
+   *
+   * @returns The document, or `null` when it could not be fetched or was rejected
    */
-  async #discover(): Promise<string> {
+  async discovery(): Promise<Readonly<Record<string, unknown>> | null> {
+    if (this.#closed) {
+      return null;
+    }
+    try {
+      await this.#ensureDiscovery();
+    } catch (error) {
+      this.#report(
+        this.#issuer.name,
+        error instanceof RefreshError ? error.message : 'discovery-fetch-failed',
+      );
+      return null;
+    }
+    return this.#discovery;
+  }
+
+  /**
+   * Fetches the discovery document unless a fresh one is already held,
+   * de-duplicating concurrent readers onto one request.
+   */
+  async #ensureDiscovery(): Promise<void> {
     const now = this.#runtime.hrtime();
-    if (this.#discovery === null || now - this.#discoveryAt >= this.#issuer.timings.ttlMs) {
+    if (this.#discovery !== null && now - this.#discoveryAt < this.#issuer.timings.ttlMs) {
+      return;
+    }
+    // Concurrent logins must not each fetch: one in-flight read is shared.
+    if (this.#discoveryInflight !== null) {
+      await this.#discoveryInflight;
+      return;
+    }
+    this.#discoveryInflight = (async () => {
       const document = await this.#fetchJson(this.#issuer.discoveryUrl ?? '');
       // OpenID Connect Discovery §4.3: a mismatched issuer means a spoofed or
       // misrouted document.
@@ -178,8 +218,21 @@ export class IssuerKeySet {
       }
       this.#discovery = document;
       this.#discoveryAt = this.#runtime.hrtime();
+    })();
+    try {
+      await this.#discoveryInflight;
+    } finally {
+      this.#discoveryInflight = null;
     }
-    const jwksUri = this.#discovery.jwks_uri;
+  }
+
+  /**
+   * Reads `jwks_uri` from the discovery document, fetching it when absent or
+   * past the key-set TTL. The whole document is kept for later readers.
+   */
+  async #discover(): Promise<string> {
+    await this.#ensureDiscovery();
+    const jwksUri = this.#discovery?.jwks_uri;
     if (typeof jwksUri !== 'string' || !isAcceptableUrl(jwksUri)) {
       throw new RefreshError('discovery-jwks-uri-invalid');
     }
