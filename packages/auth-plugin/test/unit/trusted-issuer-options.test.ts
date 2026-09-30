@@ -125,6 +125,20 @@ describe('TrustedIssuer validation at construction', () => {
     expect(isAcceptableUrl('http://idp.test')).toBe(false);
     expect(isAcceptableUrl('ftp://x.test')).toBe(false);
     expect(isAcceptableUrl('not a url')).toBe(false);
+    // `new URL` strips these silently; the RAW string is what reaches a header
+    // (audit N2 round 2, N1).
+    for (
+      const raw of [
+        'https://x.test/a\nb',
+        'https://x.test/\ta',
+        'https://x.test/\r',
+        ' https://x.test',
+        'https://x.test/\u007f',
+      ]
+    ) {
+      expect(new URL(raw).protocol).toBe('https:');
+      expect(isAcceptableUrl(raw)).toBe(false);
+    }
   });
 
   it('accepts issuers as the only strategy', () => {

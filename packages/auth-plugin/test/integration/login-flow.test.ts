@@ -106,18 +106,18 @@ describe('sign-in login route', () => {
   });
 
   it('refuses a discovered endpoint that is not https (M100c F5)', async () => {
-    for (
-      const extra of [
-        { token_endpoint: 'http://attacker.example/token' },
-        { authorization_endpoint: 'javascript:alert(1)' },
-      ]
-    ) {
+    const cases: Record<string, unknown>[] = [
+      { token_endpoint: 'http://attacker.example/token' },
+      { authorization_endpoint: 'javascript:alert(1)' },
+      // Round-2 N1: `new URL` strips the LF, and the raw value would break `Location`.
+      { authorization_endpoint: `${ISSUER}/author\nize` },
+    ];
+    for (const [index, extra] of cases.entries()) {
       harness = await buildSignInApp({ discovery: discoveryDocument(extra) });
       const response = await new CookieJar().fetch(harness.app, '/auth/idp/login');
       expect(response.status).toBe(503);
       await response.body?.cancel();
-      if (extra.token_endpoint === undefined) break;
-      await harness.app.stop();
+      if (index < cases.length - 1) await harness.app.stop();
     }
   });
 

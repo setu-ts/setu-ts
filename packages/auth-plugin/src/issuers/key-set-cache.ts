@@ -242,17 +242,26 @@ export class IssuerKeySet {
   async #fetchJson(url: string): Promise<Readonly<Record<string, unknown>>> {
     const controller = new AbortController();
     this.#controllers.add(controller);
+    // Raced rather than trusted: an injected seam that ignores the signal would
+    // otherwise hold a sign-in route (and the stop drain) open. The abort —
+    // from the timer or from close() — settles the race either way.
+    const aborted = Promise.withResolvers<never>();
+    const onAbort = (): void => aborted.reject(new RefreshError('fetch-aborted'));
+    controller.signal.addEventListener('abort', onAbort, { once: true });
     const timer = this.#runtime.setTimeout(
       () => controller.abort(),
       this.#issuer.timings.fetchTimeoutMs,
     );
     let response: { readonly status: number; readonly body: string };
     try {
-      response = await this.#http.get(url, {
-        signal: controller.signal,
-        maxBytes: MAX_RESPONSE_BYTES,
-      });
+      response = await Promise.race([
+        this.#http.get(url, { signal: controller.signal, maxBytes: MAX_RESPONSE_BYTES }),
+        aborted.promise,
+      ]);
     } finally {
+      // Detached before anything can abort later: a rejection of `aborted` after
+      // the race settled would have no handler.
+      controller.signal.removeEventListener('abort', onAbort);
       this.#runtime.clearTimeout(timer);
       this.#controllers.delete(controller);
     }

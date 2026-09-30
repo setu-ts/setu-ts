@@ -351,3 +351,13 @@ afterwards.
   the provider under `__setu_auth_rp`; `IAuthSessionService.signIn` clears it and the stored ID
   token, so the sign-in that wrote them owns them.
 - `safeReturnTo` refuses a lone surrogate, which `encodeURIComponent` would otherwise throw on.
+
+### 11.3 Security audit round 2 (on `fdbd290a`) — findings and fixes
+
+- **N1:** `isAcceptableUrl` checked the PARSED URL, and `new URL` silently strips TAB/CR/LF, while
+  the raw string reached `Location`: a discovery endpoint with a newline made every login 500 and,
+  on the cookie strategy, a logout that did not log out. The raw string is now refused when it holds
+  a control character or space, for every caller (issuers included).
+- **N2:** the F8 note in §11.1 was overstated — only the token/userinfo calls were raced. The
+  discovery and JWKS fetches in `IssuerKeySet` now race their timer (and `close()`) too, reporting
+  `fetch-aborted`, so a seam that ignores the abort signal cannot hold a sign-in route open.

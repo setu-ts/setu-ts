@@ -156,7 +156,42 @@ describe('IssuerKeySet', () => {
       (_n, reason) => failures.push(reason),
     );
     expect(await keySet.keys()).toBeNull();
-    expect(failures).toEqual(['key-set-fetch-failed']);
+    expect(failures).toEqual(['fetch-aborted']);
+  });
+
+  it('settles on its timer even when the seam ignores the abort signal (audit N2)', async () => {
+    const runtime = createFakeRuntime();
+    const failures: string[] = [];
+    const keySet = new IssuerKeySet(
+      issuer({ keySet: { fetchTimeoutMs: 5 } }),
+      runtime,
+      getOnly(() => new Promise(() => {})),
+      (_n, reason) => failures.push(reason),
+    );
+    expect(await keySet.keys()).toBeNull();
+    expect(failures).toEqual(['fetch-aborted']);
+  });
+
+  it('close() settles an in-flight fetch whose seam ignores the signal', async () => {
+    const runtime = createFakeRuntime();
+    const keySet = new IssuerKeySet(
+      issuer(),
+      runtime,
+      getOnly(() => new Promise(() => {})),
+      () => {},
+    );
+    const pending = keySet.keys();
+    keySet.close();
+    expect(await pending).toBeNull();
+  });
+
+  it('a close() after a completed fetch raises no unhandled rejection', async () => {
+    const t = setup();
+    expect(await t.keySet.keys()).toEqual([KEY]);
+    // The listener is detached in finally; aborting now must reject nothing.
+    t.keySet.close();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(t.keySet.state()).toBe('current');
   });
 
   it('refuses a redirect response rather than following it', async () => {

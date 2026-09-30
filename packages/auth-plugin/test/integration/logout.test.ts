@@ -92,6 +92,18 @@ describe('sign-in logout route', () => {
     expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
   });
 
+  it('ends only the local session when the end-session endpoint carries a control character', async () => {
+    await signedIn({
+      oidc: { rpInitiatedLogout: { postLogoutRedirectUri: POST_LOGOUT } },
+      discovery: discoveryDocument({ end_session_endpoint: `${ISSUER}/log\nout` }),
+    });
+    const response = await jar.fetch(harness.app, '/auth/logout', { method: 'POST' });
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe('/');
+    // Round-2 N1: logout must actually log out on the cookie strategy.
+    expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+  });
+
   it('joins an end-session endpoint that already carries a query with & (M100c F6)', async () => {
     await signedIn({
       oidc: { rpInitiatedLogout: { postLogoutRedirectUri: POST_LOGOUT } },
