@@ -514,6 +514,7 @@ const app = createApplication({
         mfa: {
           required: (principal) => principal.id.startsWith('local|'),
           pendingTtlMs: 300_000,
+          challengePath: '/mfa',
         },
       },
     }),
@@ -563,14 +564,22 @@ app.router.get('/account/bank', {
   The session is anonymous until `completeSignIn` (or `completeSignInWithRecoveryCode`) succeeds, at
   which point the principal is recorded with `methods: ['pwd', 'otp']` (or `['fed', 'otp']`) and the
   session id is rotated. A pending record expires after `signIn.mfa.pendingTtlMs` (default 300 000
-  ms) and is refused when read after expiry; that option is the only place the TTL is configured,
-  because `TotpService` has no TTL option of its own. The internal promotion (`promotePending`) is
-  not exported — only `TotpService` can complete a pending sign-in.
+  ms; a positive integer, anything else is refused when `AuthPlugin(...)` is called). An expired
+  record is not reported by `pending(ctx)`, so `completeSignIn` answers `no-pending` without
+  checking — or spending — the code; that option is the only place the TTL is configured, because
+  `TotpService` has no TTL option of its own. The internal promotion (`promotePending`) is not
+  exported — only `TotpService` can complete a pending sign-in.
+- **Federated sign-ins.** A provider callback whose sign-in is held pending redirects to
+  `signIn.mfa.challengePath` (a same-origin absolute path) — the code form — instead of `returnTo`;
+  without it, it falls back to `returnTo`, where the page must read `pending(ctx)` to tell the
+  pending state from an anonymous one. The provider-session facts the callback records survive the
+  promotion, so RP-initiated logout still ends the provider session afterwards.
 - **Lockout.** Five failed attempts within 15 minutes lock the principal out of verification until
-  the window clears. The attempt is reserved BEFORE the code is checked, so the fifth failure is
-  what trips the lock and the sixth answers `locked` without computing or comparing anything.
-  Recovery codes share that counter: five wrong recovery codes lock out TOTP verification too. A
-  successful verification clears the count.
+  15 minutes after the oldest counted attempt. A refused attempt is not counted, so continued
+  guessing cannot extend the lock (and cannot grow the store without bound). The attempt is reserved
+  BEFORE the code is checked, so the fifth failure is what trips the lock and the sixth answers
+  `locked` without computing or comparing anything. Recovery codes share that counter: five wrong
+  recovery codes lock out TOTP verification too. A successful verification clears the count.
 - **Re-enrolment is non-destructive.** A confirmed factor stays confirmed and stays usable while a
   new secret awaits confirmation; confirming swaps the pending secret in and keeps the step counter
   monotonic, so a code valid before the swap is still refused afterwards. A backend that persists

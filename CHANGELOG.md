@@ -22,9 +22,14 @@ All notable changes to this project are documented here. The format follows
   a pending sign-in, each appending `otp` so the principal ends up recorded with
   `methods: ['pwd', 'otp']` (or `['fed', 'otp']`) and the session id rotated.
   `signIn.mfa.pendingTtlMs` (default 300 000 ms) is the single owner of how long a pending record
-  survives; `TotpService` has no TTL option of its own. Per-account lockout: five failed attempts
-  within 15 minutes lock the principal out of verification, recovery codes included; the attempt is
-  reserved before the credential is checked, and a successful verification clears the count. Replay
+  survives; `TotpService` has no TTL option of its own, and it must be a positive integer (`NaN`,
+  `0` and negatives are refused when `AuthPlugin(...)` is called, since `NaN` would never expire).
+  `pending(ctx)` does not report an expired record, so completing one spends no code. A provider
+  callback whose sign-in is held pending redirects to `signIn.mfa.challengePath` (else `returnTo`)
+  and keeps its RP-initiated-logout facts through the promotion. Per-account lockout: five failed
+  attempts within 15 minutes lock the principal out of verification, recovery codes included; the
+  attempt is reserved before the credential is checked, a refused attempt is not counted (so
+  continued guessing cannot extend the lock), and a successful verification clears the count. Replay
   protection: the store's `claimStep` is monotonic, so a captured code cannot be replayed. An
   enrolment never confirmed is not a factor — no verification path accepts its code — and starting a
   new enrolment leaves the confirmed factor in place until the new secret is confirmed, keeping the
