@@ -745,6 +745,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`setu add` printed `deno install` for every project.** A Node or Bun project was told to run a
+  command its toolchain does not use. It now prints the project's own install command —
+  `npm install` for Node and Cloudflare Workers, `bun install` for Bun, and
+  `deno install --min-dep-age 0` for Deno — and, when it writes an npm-compat `package.json` entry
+  into a Node, Bun or Workers project whose `.npmrc` does not route the `@jsr` scope, prints the
+  registry line the install needs. `setu add` still never installs for you. A `package.json` with no
+  `start` script (one the CLI did not write) is now read as Node, or Bun beside a `bun.lock` /
+  `bun.lockb`, unless a `deno.json` sits beside it — it was read as Deno. This also changes
+  `setu generate` in such a project: it emits the Node or Bun test harness rather than a Deno one
+  whose `@std/*` imports the project could not resolve.
+- **`setu add` at a workspace root wrote the pin into the root and exited `0`.** Framework packages
+  are pinned per member, and `setu generate` reads the member's manifest for plugin gating, so the
+  package looked installed while no member could use it. A workspace root — recognised by
+  `setu.workspace.json`, a `deno.json` `workspace` key, or a `package.json` `workspaces` key — is
+  now refused with exit `2`, writing nothing and naming `--dir <member directory>`. A script that
+  relied on the old exit `0` at a root will now fail.
+
 - **`mail-plugin` now loads `nodemailer` 10, closing a high-severity advisory.** `SmtpProvider`
   lazily imported `npm:nodemailer@^9`, and every 9.x release is inside GHSA-v53p-9fqp-m79j
   (quadratic backtracking in the address parser's free-text fallback, a remote denial of service,

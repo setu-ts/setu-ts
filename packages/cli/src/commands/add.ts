@@ -18,9 +18,17 @@
 import type { IFileSystem } from '@setu-ts/common';
 import { escapeName } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
-import { EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME, VERSION } from '../constants.ts';
+import {
+  EXIT_ERROR,
+  EXIT_OK,
+  EXIT_USAGE,
+  PROGRAM_NAME,
+  type TargetRuntime,
+  VERSION,
+} from '../constants.ts';
 import { joinPath, resolveDir } from '../utils/file-writer.ts';
 import { stringFlag } from '../args.ts';
+import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 
 /** What `runAddCommand` reaches the outside world through. */
 export interface AddCommandDependencies {
@@ -288,6 +296,17 @@ export async function runAddCommand(
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const specifier = `@setu-ts/${bare}`;
 
+  const workspaceMarker = await findWorkspaceMarker(deps.fs, dir);
+  if (workspaceMarker !== undefined) {
+    deps.error(
+      `${dir} is a workspace root (${workspaceMarker}); framework packages are pinned in each ` +
+        `member, because \`${PROGRAM_NAME} generate\` reads the member's manifest to decide what ` +
+        `is installed.`,
+    );
+    deps.error(`  Run it against a member: ${PROGRAM_NAME} add ${bare} --dir <member directory>`);
+    return EXIT_USAGE;
+  }
+
   // Both manifests are updated when both exist, because a Workers or Node
   // project carries a `package.json` for its toolchain AND a `deno.json` that
   // `setu generate` reads for plugin gating — writing only one would leave the
@@ -369,14 +388,118 @@ export async function runAddCommand(
     deps.log(`updated ${edit.path}`);
   }
 
+  const runtime = await detectTargetRuntime(deps.fs, dir);
   deps.log('');
   deps.log('Next:');
-  // `--min-dep-age 0` for the same reason the generated manifest carries
-  // `minimumDependencyAge` (D1): this pin is the CLI's own version, which on
-  // release day is younger than the policy allows.
-  deps.log(`  deno install --min-dep-age 0`);
+  deps.log(`  ${installCommand(runtime)}`);
+  // Deno is excluded on measurement, not assumption: a Deno full-stack project
+  // carries a `package.json` (its Vite build) and no `.npmrc`, and
+  // `deno install` resolves the `npm:@jsr/…` entry there without one.
+  if (runtime !== 'deno' && edits.some((edit) => edit.path === joinPath(dir, 'package.json'))) {
+    await printJsrRegistryNote(deps.fs, dir, deps.log);
+  }
   printPermissionNote(specifier, deps.log);
   return EXIT_OK;
+}
+
+/**
+ * Reports why a directory is a workspace root, or `undefined` when it is not.
+ *
+ * `setu add` at a root used to write the pin into the root manifest and exit 0.
+ * Nothing reads it there: plugin gating reads the MEMBER's manifest, so the
+ * package looked installed while every member's `generate` still refused the
+ * schematics it unlocks. Three markers, because a root is recognisable three
+ * ways — the CLI's own workspace manifest, a Deno `workspace` key, and an npm
+ * or Bun `workspaces` key — and a hand-built workspace may carry only one.
+ *
+ * @param fs - The filesystem to read through
+ * @param dir - The target directory
+ * @returns The marker found, for the refusal to name
+ */
+async function findWorkspaceMarker(fs: IFileSystem, dir: string): Promise<string | undefined> {
+  try {
+    await fs.stat(joinPath(dir, 'setu.workspace.json'));
+    return 'it has a setu.workspace.json';
+  } catch {
+    // Not a CLI-created workspace; the manifests may still say it is one.
+  }
+  const markers = [
+    { file: 'deno.json', key: 'workspace' },
+    { file: 'package.json', key: 'workspaces' },
+  ] as const;
+  for (const { file, key } of markers) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(await fs.readFile(joinPath(dir, file))));
+    } catch {
+      // Absent or unparseable: the edit loop reports an unparseable manifest.
+      continue;
+    }
+    if (parsed !== null && typeof parsed === 'object' && key in parsed) {
+      return `its ${file} declares "${key}"`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The install command for a project's toolchain.
+ *
+ * It used to be `deno install` unconditionally, so a Node or Bun project was
+ * told to run a command its toolchain does not use. The commands match what
+ * `setu new` prints for each target. Workers installs through npm, because
+ * `wrangler` bundles from `node_modules`; its `deno.json` exists only for
+ * plugin gating.
+ *
+ * @param runtime - The detected target runtime
+ * @returns The command to print
+ */
+function installCommand(runtime: TargetRuntime): string {
+  switch (runtime) {
+    case 'deno':
+      // `--min-dep-age 0` for the same reason the generated manifest carries
+      // `minimumDependencyAge` (D1): this pin is the CLI's own version, which on
+      // release day is younger than the policy allows.
+      return 'deno install --min-dep-age 0';
+    case 'bun':
+      return 'bun install';
+    case 'node':
+    case 'cloudflare-workers':
+      return 'npm install';
+  }
+}
+
+/** The registry line npm and Bun need to resolve an `npm:@jsr/…` entry. */
+const JSR_REGISTRY_LINE = '@jsr:registry=https://npm.jsr.io';
+
+/**
+ * Warns when a `package.json` entry was written that the project cannot resolve.
+ *
+ * The entry is `npm:@jsr/setu-ts__<pkg>`, which npm and Bun look up on the npm
+ * registry unless an `.npmrc` routes the `@jsr` scope to JSR. `setu new` emits
+ * that file; a project assembled by hand may not have it, and the install would
+ * then fail naming a package that does not exist on npm.
+ *
+ * @param fs - The filesystem to read through
+ * @param dir - The project directory
+ * @param log - Output sink
+ */
+async function printJsrRegistryNote(
+  fs: IFileSystem,
+  dir: string,
+  log: (message: string) => void,
+): Promise<void> {
+  try {
+    const npmrc = new TextDecoder().decode(await fs.readFile(joinPath(dir, '.npmrc')));
+    if (npmrc.split('\n').some((line) => line.trim() === JSR_REGISTRY_LINE)) return;
+  } catch {
+    // Missing: fall through to the note.
+  }
+  log('');
+  log('Note:');
+  log(`  Add this line to ${joinPath(dir, '.npmrc')}, or the install cannot`);
+  log('  find @jsr packages:');
+  log(`    ${JSR_REGISTRY_LINE}`);
 }
 
 /**
@@ -438,6 +561,6 @@ function printAddHelp(log: (message: string) => void): void {
   }
   log('');
   log('The full specifier works too, so `add auth` and `add @setu-ts/auth-plugin`');
-  log('are the same command. Run `deno install` afterwards; this writes the');
-  log('manifest and does not install for you.');
+  log('are the same command. This writes the manifest and does not install for');
+  log("you; it prints the project's install command (deno, npm or bun) to run.");
 }

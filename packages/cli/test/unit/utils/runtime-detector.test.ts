@@ -62,8 +62,27 @@ describe('detectTargetRuntime', () => {
     expect(await detectTargetRuntime(fs, '/app')).toBe('deno');
   });
 
-  it('falls back to deno for a package.json this CLI did not write', async () => {
+  it('reads node for a hand-written package.json with no start script', async () => {
     const fs = createFakeFs({ '/app/package.json': JSON.stringify({ name: 'x' }) });
+    expect(await detectTargetRuntime(fs, '/app')).toBe('node');
+  });
+
+  it('reads bun for a start-less package.json beside a bun lockfile', async () => {
+    for (const lockfile of ['bun.lock', 'bun.lockb']) {
+      const fs = createFakeFs({
+        '/app/package.json': JSON.stringify({ name: 'x' }),
+        [`/app/${lockfile}`]: '',
+      });
+      expect(await detectTargetRuntime(fs, '/app')).toBe('bun');
+    }
+  });
+
+  it('reads deno for a start-less package.json beside a deno.json (full-stack)', async () => {
+    // The full-stack template on Deno: `package.json` carries only the Vite build.
+    const fs = createFakeFs({
+      '/app/deno.json': '{}',
+      '/app/package.json': JSON.stringify({ name: 'web', scripts: { build: 'vite build' } }),
+    });
     expect(await detectTargetRuntime(fs, '/app')).toBe('deno');
   });
 });

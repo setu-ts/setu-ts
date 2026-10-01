@@ -8193,19 +8193,30 @@ build cannot disagree about what is installed. `deno.json` gets a `jsr:` specifi
 `package.json` gets the npm-compat `npm:@jsr/setu-ts__<name>` form under `dependencies`. Re-adding a
 package already present at the same version reports that and writes nothing.
 
-It writes the manifest and **reports** the install command rather than running it:
+It writes the manifest and **reports** the install command rather than running it. The command
+matches the project's toolchain, detected from its manifests the same way `setu generate` detects
+it:
 
-```
-Next:
-  deno install --min-dep-age 0
-```
+| Project            | Printed command                |
+| ------------------ | ------------------------------ |
+| Deno               | `deno install --min-dep-age 0` |
+| Node               | `npm install`                  |
+| Bun                | `bun install`                  |
+| Cloudflare Workers | `npm install`                  |
 
 That is deliberate. On the day of a release the pin is younger than Deno's 24-hour
 minimum-dependency-age policy, so the flags need to be visible rather than buried in a failing
-subprocess — and it keeps the command free of the `run` permission.
+subprocess — and it keeps the command free of the `run` permission. On Node, Bun or Workers, when it
+writes a `package.json` entry and the project's `.npmrc` does not route the `@jsr` scope to JSR, it
+also prints the `@jsr:registry=https://npm.jsr.io` line the install needs.
+
+A **workspace root** is refused (exit `2`, nothing written) — recognised by `setu.workspace.json`, a
+`deno.json` `workspace` key, or a `package.json` `workspaces` key. Framework packages are pinned in
+each member, because `setu generate` reads the member's manifest for plugin gating; run
+`setu add <plugin> --dir <member directory>` instead.
 
 Exit codes follow the table below: `0` on success, `1` when the directory holds no manifest or a
-manifest cannot be parsed, `2` for an unknown package name or a missing argument.
+manifest cannot be parsed, `2` for an unknown package name, a missing argument, or a workspace root.
 
 ### Exit codes
 
