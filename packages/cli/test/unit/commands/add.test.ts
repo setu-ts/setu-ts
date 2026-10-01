@@ -413,6 +413,17 @@ describe('setu add — install command per runtime', () => {
     expect(h.out.join('\n')).toContain('  npm install');
   });
 
+  it('prints npm install for a hand-written Node project with no start script', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ name: 'svc', dependencies: {} }),
+      '/app/.npmrc': '@jsr:registry=https://npm.jsr.io\n',
+    });
+    await h.run(['cache']);
+    const out = h.out.join('\n');
+    expect(out).toContain('  npm install');
+    expect(out).not.toContain('deno install');
+  });
+
   it('keeps the release-day flag for a Deno project', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST });
     await h.run(['cache']);

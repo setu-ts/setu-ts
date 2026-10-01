@@ -50,7 +50,9 @@ async function readText(fs: IFileSystem, path: string): Promise<string | undefin
  *
  * @param fs - The filesystem to read through
  * @param dir - The project directory
- * @returns The detected runtime, defaulting to `'deno'` when nothing marks it
+ * @returns The detected runtime: `'deno'` when no `package.json` marks another
+ *   target, and for a `package.json` with no `start` only when a `deno.json`
+ *   sits beside it
  */
 export async function detectTargetRuntime(
   fs: IFileSystem,
@@ -78,7 +80,16 @@ export async function detectTargetRuntime(
   if (start.startsWith('bun')) return 'bun';
   if (start !== '') return 'node';
 
-  // A `package.json` with no `start` is not one this CLI wrote. Deno is the
-  // safe answer: its harness is the only one that also type-checks elsewhere.
-  return 'deno';
+  // No `start`: either a Deno project whose `package.json` exists only for a
+  // frontend build (the full-stack template — it carries `deno.json` too), or a
+  // hand-written Node/Bun project. Answering `deno` for the second told a Node
+  // developer to run `deno install` and gave `setu generate` a Deno test
+  // harness whose `@std/*` imports that project cannot resolve. A `deno.json`
+  // decides it; otherwise the lockfile tells Bun from Node, the rule
+  // `detectProjectRuntime` already uses for `setu adopt`.
+  if (await readText(fs, joinPath(dir, 'deno.json')) !== undefined) return 'deno';
+  for (const lockfile of ['bun.lock', 'bun.lockb']) {
+    if (await readText(fs, joinPath(dir, lockfile)) !== undefined) return 'bun';
+  }
+  return 'node';
 }
