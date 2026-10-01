@@ -382,3 +382,116 @@ describe('setu add — permission notes (X8-9)', () => {
     expect(h.out.join('\n')).not.toContain('--allow-write');
   });
 });
+
+describe('setu add — install command per runtime', () => {
+  const pkg = (start: string) =>
+    JSON.stringify({ name: 'svc', scripts: { start }, dependencies: {} }, null, 2);
+
+  it('prints npm install for a Node project, never deno install', async () => {
+    const h = harness({ '/app/package.json': pkg('tsx main.ts'), '/app/.npmrc': '' });
+    expect(await h.run(['cache'])).toBe(0);
+    const out = h.out.join('\n');
+    expect(out).toContain('  npm install');
+    expect(out).not.toContain('deno install');
+  });
+
+  it('prints bun install for a Bun project', async () => {
+    const h = harness({ '/app/package.json': pkg('bun run main.ts') });
+    await h.run(['cache']);
+    const out = h.out.join('\n');
+    expect(out).toContain('  bun install');
+    expect(out).not.toContain('deno install');
+  });
+
+  it('prints npm install for a Workers project, which carries both manifests', async () => {
+    const h = harness({
+      '/app/wrangler.toml': 'name = "edge"\n',
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/package.json': pkg('wrangler dev'),
+    });
+    await h.run(['cache']);
+    expect(h.out.join('\n')).toContain('  npm install');
+  });
+
+  it('keeps the release-day flag for a Deno project', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+    await h.run(['cache']);
+    expect(h.out.join('\n')).toContain('  deno install --min-dep-age 0');
+  });
+
+  it('warns when an npm-compat entry is written with no @jsr registry in .npmrc', async () => {
+    const h = harness({ '/app/package.json': pkg('tsx main.ts') });
+    await h.run(['cache']);
+    expect(h.out.join('\n')).toContain('@jsr:registry=https://npm.jsr.io');
+  });
+
+  it('warns when .npmrc exists but does not route the @jsr scope', async () => {
+    const h = harness({
+      '/app/package.json': pkg('tsx main.ts'),
+      '/app/.npmrc': 'save-exact=true\n',
+    });
+    await h.run(['cache']);
+    expect(h.out.join('\n')).toContain('Add this line to /app/.npmrc');
+  });
+
+  it('says nothing about .npmrc when the registry line is present', async () => {
+    const h = harness({
+      '/app/package.json': pkg('tsx main.ts'),
+      '/app/.npmrc': 'save-exact=true\n@jsr:registry=https://npm.jsr.io\n',
+    });
+    await h.run(['cache']);
+    expect(h.out.join('\n')).not.toContain('.npmrc');
+  });
+
+  it('says nothing about .npmrc for a Deno project, which writes no npm entry', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST });
+    await h.run(['cache']);
+    expect(h.out.join('\n')).not.toContain('.npmrc');
+  });
+});
+
+describe('setu add — workspace roots', () => {
+  const member = '/app/apps/orders/deno.json';
+
+  for (
+    const [label, files, marker] of [
+      [
+        'a Deno workspace key',
+        { '/app/deno.json': JSON.stringify({ workspace: ['./apps/*'] }) },
+        '"workspace"',
+      ],
+      [
+        'an npm/Bun workspaces key',
+        { '/app/package.json': JSON.stringify({ name: 'root', workspaces: ['apps/*'] }) },
+        '"workspaces"',
+      ],
+      [
+        'a setu.workspace.json',
+        { '/app/deno.json': '{}', '/app/setu.workspace.json': '{}' },
+        'setu.workspace.json',
+      ],
+    ] as const
+  ) {
+    it(`refuses a root marked by ${label}, writing nothing`, async () => {
+      const h = harness({ ...files, [member]: DENO_MANIFEST });
+      const before = Object.keys(files).map((path) => h.read(path));
+
+      expect(await h.run(['cache'])).toBe(2);
+      const err = h.err.join('\n');
+      expect(err).toContain('workspace root');
+      expect(err).toContain(marker);
+      expect(err).toContain('--dir <member directory>');
+      expect(Object.keys(files).map((path) => h.read(path))).toEqual(before);
+      expect(h.read(member)).toBe(DENO_MANIFEST);
+    });
+  }
+
+  it('still adds to a member when pointed at it', async () => {
+    const h = harness({
+      '/app/deno.json': JSON.stringify({ workspace: ['./apps/*'] }),
+      [member]: DENO_MANIFEST,
+    });
+    expect(await h.run(['cache', '--dir', 'apps/orders'])).toBe(0);
+    expect(JSON.parse(h.read(member)).imports['@setu-ts/cache-plugin']).toBeDefined();
+  });
+});
