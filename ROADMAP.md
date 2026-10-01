@@ -11286,10 +11286,17 @@ and bytes describe the same settlement. Owner: `packages/storage-plugin`. Canoni
 
 ### Milestone 98o: Diagnostics Session Renewal
 
-**Status:** Not started. No plan yet; write `plans/milestone-98o-session-renewal.md` from
-`plans/TEMPLATE.md` before implementation. Owner: `packages/diagnostics-plugin`, with `packages/cli`
-only if the generated development entry needs a new option. Requested by the devtool repository as a
-prerequisite for its D04 free preview (devtool roadmap milestone D03b).
+**Status:** Planned. Plan: `plans/milestone-98o-session-renewal.md`. Its design security review
+(§10.1) is a draft awaiting independent review and three maintainer approvals; implementation does
+not start before both. Owner: `packages/diagnostics-plugin`, plus one emitted option in
+`packages/cli`'s generated development entry. Requested by the devtool repository as a prerequisite
+for its D04 free preview (devtool roadmap milestone D03b).
+
+**Release constraint:** the plan extends protocol v1 by adding an optional `renewal` member to the
+status body. That is possible only because `packages/diagnostics-plugin` has never been published: a
+published client refuses any status key it does not know (see the inspector-manifest paragraph under
+"Mandatory Security Audit Gates" below). So this letter is a HARD GATE on the first publication of
+`packages/diagnostics-plugin`, the same constraint M98d's manifest carried.
 
 **Why:** an M98b session lives 15 minutes by default and at most one hour (`ttlMs`, capped at
 `MAX_TTL_MS = 3_600_000` in `packages/diagnostics-plugin/src/plugin/diagnostics-plugin.ts`). After
@@ -11310,14 +11317,12 @@ asking for a longer `ttlMs`. Renewal has to be a framework operation, designed a
 
 **Deliverables:**
 
-- [ ] An authenticated renewal operation on the connector. The plan decides, with the design
-      security review, every point below rather than inheriting a default:
-  - whether renewal extends the current session or rotates to a fresh key or session ID;
-  - an absolute maximum session lifetime from activation that no number of renewals can exceed, and
-    whether it is configurable;
-  - how much each renewal extends, and the earliest point at which a renewal is accepted;
-  - whether this is a protocol v1 extension or a new protocol version. Protocol v1 is not extended
-    silently.
+- [ ] An authenticated renewal operation on the connector, as the plan decides it (§3): opt-in
+      through `maxSessionLifetimeMs` (absent means today's behaviour and today's status bytes); the
+      same key, session ID, instance and sequence space; each renewal sets the expiry to
+      `min(now + ttlMs, activation + maxSessionLifetimeMs)` and never shortens it; one new signed
+      `GET /v1/renew` operation and an optional status `renewal` member, inside protocol v1 and
+      recorded as such.
 - [ ] Refusal semantics, each tested: renewal after expiry is refused (expiry stays terminal); after
       `revoke()` it is refused; a replayed or reordered renewal request is refused by the existing
       sequence gate; a session bound to one application instance cannot renew against another.
