@@ -404,7 +404,10 @@ const authMethodUnionPinned: Equals<
   common.AuthMethod,
   'pwd' | 'otp' | 'pop' | 'fed'
 > = true;
-const signInOutcomePinned: Equals<common.SignInOutcome, { readonly status: 'signed-in' }> = true;
+const signInOutcomePinned: Equals<
+  common.SignInOutcome,
+  { readonly status: 'signed-in' } | { readonly status: 'second-factor-required' }
+> = true;
 
 describe('@setu-ts/common barrel — M100c auth-session contract', () => {
   it('exposes CAPABILITIES.AUTH_SESSION, and the value passes the token grammar', () => {
@@ -423,9 +426,11 @@ describe('@setu-ts/common barrel — M100c auth-session contract', () => {
         return Promise.resolve({ status: 'signed-in' });
       },
       current: (_ctx) => null,
+      pending: (_ctx) => null,
       signOut: (_ctx) => {},
     };
     expect(service.current({} as never)).toBeNull();
+    expect(service.pending({} as never)).toBeNull();
   });
 
   it('exports SignInOptions with the methods list (declared against the barrel)', () => {

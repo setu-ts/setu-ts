@@ -109,6 +109,20 @@ The `jwt` option is now optional. A configuration must still supply at least one
 strategy through `jwt`, `apiKey`, `session`, or `strategies`; `local` alone only verifies login
 credentials and is refused at startup.
 
+### Add `pending()` to a hand-written `IAuthSessionService`, and handle the new sign-in outcome
+
+`IAuthSessionService` (`@setu-ts/common`) gains a REQUIRED member,
+`pending(ctx): PendingSignIn | null`, so a class or object literal implementing the interface by
+hand no longer type-checks. Add the member; a service that never holds a sign-in back can return
+`null`. Applications that only consume the service `AuthPlugin` registers have nothing to add.
+
+`SignInOutcome` also widens from one arm to two: `signIn` now resolves
+`{ status: 'second-factor-required' }` when `signIn.mfa.required` answers `true`. Code that treated
+every resolved `signIn` as a completed sign-in must branch on `status` — on that arm the session
+holds a pending record, not the principal, so `requireAuth()` routes stay closed until the second
+factor is completed through `TotpService.completeSignIn`. Without an `mfa` option the second arm is
+never produced.
+
 ## 0.7.0
 
 ### Regenerate your client if you adopt `@HttpCode` or `@Redirect`

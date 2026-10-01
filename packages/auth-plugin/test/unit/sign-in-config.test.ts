@@ -96,6 +96,10 @@ describe('compileSignIn', () => {
 
   it('refuses an empty provider list and an unknown kind', () => {
     expect(refusal(config([]))).toContain('at least one provider');
+    // With mfa it is a password-only sign-in, not a mistake.
+    const passwordOnly = compileSignIn({ providers: [], mfa: { required: () => true } });
+    expect(passwordOnly.providers).toEqual([]);
+    expect(passwordOnly.mfa).not.toBeNull();
     expect(refusal(config([{ ...oidc(), kind: 'saml' }]))).toContain("must be 'oidc' or 'oauth2'");
   });
 
@@ -242,5 +246,36 @@ describe('compileSignIn', () => {
   it('requires a toPrincipal function and a non-empty clientId', () => {
     expect(refusal(config([oidc({ toPrincipal: undefined as never })]))).toContain('toPrincipal');
     expect(refusal(config([oidc({ clientId: '' })]))).toContain('clientId');
+  });
+
+  describe('mfa', () => {
+    const withMfa = (mfa: unknown): SignInConfig => ({ providers: [oidc()], mfa }) as SignInConfig;
+    const required = () => true;
+
+    it('is null when absent and passes a valid policy through', () => {
+      expect(compileSignIn(config([oidc()])).mfa).toBeNull();
+      const mfa = { required, pendingTtlMs: 60_000, challengePath: '/mfa' };
+      expect(compileSignIn(withMfa(mfa)).mfa).toBe(mfa);
+    });
+
+    it('refuses a pendingTtlMs that would never expire or always expire', () => {
+      // NaN is what Number(env.X) yields for an unset variable, and every
+      // comparison against it is false: the record would never expire.
+      for (const pendingTtlMs of [Number.NaN, 0, -1, 1.5, Infinity]) {
+        expect(refusal(withMfa({ required, pendingTtlMs })), String(pendingTtlMs))
+          .toContain('pendingTtlMs');
+      }
+    });
+
+    it('refuses a non-function required', () => {
+      expect(refusal(withMfa({ required: true }))).toContain('mfa.required');
+    });
+
+    it('refuses a challengePath that is not same-origin', () => {
+      for (const challengePath of ['', '//evil.test', 'https://evil.test/', 'mfa', '/\\evil']) {
+        expect(refusal(withMfa({ required, challengePath })), challengePath)
+          .toContain('challengePath');
+      }
+    });
   });
 });

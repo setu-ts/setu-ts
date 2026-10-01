@@ -15,7 +15,8 @@ import type { ErrorResponderTarget } from './error-responder.ts';
 export type AuthorizationFailure =
   | 'authentication-required'
   | 'not-configured'
-  | 'insufficient-privileges';
+  | 'insufficient-privileges'
+  | 'second-factor-required';
 
 /**
  * Write the framework-standard response for an authorization refusal.
@@ -27,7 +28,9 @@ export type AuthorizationFailure =
  *
  * The `insufficient-privileges` detail is deliberately fixed text: naming the
  * role or permission a caller lacks tells an unauthorized caller what to
- * acquire.
+ * acquire. The `second-factor-required` detail is likewise fixed: it says only
+ * what the caller must do, not which factor or which policy produced the
+ * refusal.
  *
  * @param target - The request context or response to write the refusal to
  * @param failure - Which refusal to write
@@ -57,6 +60,13 @@ export function respondWithAuthorizationFailure(
         status: 403,
         title: 'Forbidden',
         detail: 'Insufficient privileges',
+      });
+      return;
+    case 'second-factor-required':
+      respondWithError(target, {
+        status: 403,
+        title: 'Forbidden',
+        detail: 'Second factor required',
       });
       return;
   }

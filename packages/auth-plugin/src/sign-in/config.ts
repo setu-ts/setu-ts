@@ -16,6 +16,7 @@ import type { CompiledIssuer } from '../issuers/trusted-issuer.ts';
 import { compileIssuers, isAcceptableUrl } from '../issuers/trusted-issuer.ts';
 import { AuthPluginConfigurationError } from '../errors.ts';
 import type {
+  MfaOptions,
   OAuth2Provider,
   OidcProvider,
   ProviderTokens,
@@ -103,6 +104,10 @@ export interface CompiledSignIn {
    * have to re-read the raw option.
    */
   readonly refreshPrincipal: RefreshPrincipal | null;
+  /**
+   * The MFA policy, or `null` when no second factor is required.
+   */
+  readonly mfa: MfaOptions | null;
 }
 
 function refuse(name: string, reason: string): never {
@@ -293,12 +298,12 @@ function compileOAuth2(
  *
  * @param config - The configured value
  * @returns The compiled configuration, with route paths and defaults applied
- * @throws {AuthPluginConfigurationError} On an empty provider list, a duplicate or
+ * @throws {AuthPluginConfigurationError} On an empty provider list with no `mfa`, a duplicate or
  *   malformed name, a bad base path, a credential/secret mismatch, a `redirectUri`
  *   that does not end with the provider's callback path, a `failureRedirect` that is
  *   not same-origin, an `oidc` provider without the `openid` scope, an `oauth2`
  *   provider with `rpInitiatedLogout`, or more than one provider configured for
- *   RP-initiated logout
+ *   RP-initiated logout, or an invalid `mfa` option (see {@linkcode compileMfa})
  */
 export function compileSignIn(config: SignInConfig): CompiledSignIn {
   const configured = config.basePath ?? DEFAULT_SIGN_IN_BASE_PATH;
@@ -313,8 +318,16 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   }
   // `/` means no prefix at all; keeping it literal would build `//acme/login`.
   const basePath = configured === '/' ? '' : configured;
-  if (!Array.isArray(config.providers) || config.providers.length === 0) {
-    throw new AuthPluginConfigurationError('auth-plugin: signIn needs at least one provider');
+  // An empty list is a mistake UNLESS `mfa` is set: a password-only application
+  // signs in through IAuthSessionService.signIn itself and needs `signIn` only
+  // for the auth-session capability, the pending state and the logout route.
+  if (
+    !Array.isArray(config.providers) ||
+    (config.providers.length === 0 && config.mfa === undefined)
+  ) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: signIn needs at least one provider, or signIn.mfa for a password-only sign-in',
+    );
   }
 
   const names = new Set<string>();
@@ -370,5 +383,49 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
     logoutPath: `${basePath}/logout`,
     rpLogoutProvider: rpLogoutProviders[0] ?? null,
     refreshPrincipal: config.refreshPrincipal ?? null,
+    mfa: compileMfa(config.mfa),
   };
+}
+
+/**
+ * Validates the MFA policy at construction.
+ *
+ * `pendingTtlMs` must be a positive safe integer: every comparison against `NaN`
+ * is `false`, so `NaN` (what `Number(env.X)` yields for an unset variable) would
+ * make a pending record never expire, while `0` or a negative value would refuse
+ * every completion. `challengePath` is a redirect, so it gets the same
+ * same-origin check as `failureRedirect`.
+ *
+ * @param mfa - The raw option, or `undefined`
+ * @returns The validated option, or `null` when absent
+ * @throws {AuthPluginConfigurationError} On a non-function `required`, an
+ *   out-of-domain `pendingTtlMs`, or a `challengePath` that is not a same-origin
+ *   absolute path
+ */
+export function compileMfa(mfa: MfaOptions | undefined): MfaOptions | null {
+  if (mfa === undefined) {
+    return null;
+  }
+  if (!isFunction(mfa.required)) {
+    throw new AuthPluginConfigurationError('auth-plugin: signIn.mfa.required must be a function');
+  }
+  if (
+    mfa.pendingTtlMs !== undefined &&
+    !(Number.isSafeInteger(mfa.pendingTtlMs) && mfa.pendingTtlMs > 0)
+  ) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: signIn.mfa.pendingTtlMs must be a positive integer number of milliseconds',
+    );
+  }
+  if (
+    mfa.challengePath !== undefined &&
+    // `''` passes the comparison below (the fallback IS `''`), and a `Location: ""`
+    // re-requests the callback that has just spent its code.
+    (mfa.challengePath === '' || safeReturnTo(mfa.challengePath, '') !== mfa.challengePath)
+  ) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: signIn.mfa.challengePath must be a same-origin absolute path',
+    );
+  }
+  return mfa;
 }

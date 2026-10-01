@@ -46,13 +46,34 @@ export interface SignInOptions {
 /**
  * The result of {@linkcode IAuthSessionService.signIn}.
  *
- * A single arm today. A milestone that adds a second factor widens it with a
- * "second factor required" arm, so a caller that has to branch on it is written
- * now and stays correct afterwards.
+ * - `'signed-in'` — the session now holds the principal.
+ * - `'second-factor-required'` — the principal is held back in a pending
+ *   record; a second factor must be presented before the session is signed in.
  *
  * @since 0.8.0
  */
-export type SignInOutcome = { readonly status: 'signed-in' };
+export type SignInOutcome =
+  | { readonly status: 'signed-in' }
+  | { readonly status: 'second-factor-required' };
+
+/**
+ * A sign-in that is awaiting its second factor.
+ *
+ * Stored in the session under a reserved key (NOT the signed-in key), so a
+ * route guarded by `requireAuth()` stays closed during the pending state.
+ * The principal is held here — not in the signed-in record — so a password
+ * alone does not produce a signed-in session for a user who has enrolled.
+ *
+ * @since 0.8.0
+ */
+export interface PendingSignIn {
+  /** The identity that has passed the first factor. */
+  readonly principal: IPrincipal;
+  /** The methods that produced the principal so far. */
+  readonly methods: readonly AuthMethod[];
+  /** When the pending record was created, from `runtime.now()`, in milliseconds. */
+  readonly at: number;
+}
 
 /**
  * The one owner of "who is signed in" for a session.
@@ -83,6 +104,10 @@ export interface IAuthSessionService {
    * caller planted before authentication must not survive into the
    * authenticated session (session fixation).
    *
+   * When the `signIn.mfa.required` option answers `true` and the methods hold
+   * no second factor, the principal is stored in a pending record instead and
+   * the outcome is `{ status: 'second-factor-required' }`.
+   *
    * Requires the session middleware to have run for this request; it throws
    * otherwise, exactly as {@linkcode ISessionService.from} does.
    *
@@ -107,6 +132,22 @@ export interface IAuthSessionService {
    * @throws {Error} If the session middleware did not run for this request
    */
   current(ctx: IRequestContext): IPrincipal | null;
+
+  /**
+   * Reads the pending second-factor record, if one exists.
+   *
+   * A pending record is written by {@linkcode IAuthSessionService.signIn} when
+   * the `mfa.required` option answers `true` and the methods hold no second
+   * factor. It is consumed by the package's own verifiers (TOTP, passkeys),
+   * which promote it to the signed-in key after a successful factor check.
+   *
+   * @param ctx - The request context whose session is read
+   * @returns The pending record, or `null` when none is stored or it has
+   *   expired (an expired record can never be completed, so it is not reported)
+   * @throws {Error} If the session middleware did not run for this request
+   * @since 0.8.0
+   */
+  pending(ctx: IRequestContext): PendingSignIn | null;
 
   /**
    * Ends the signed-in session.

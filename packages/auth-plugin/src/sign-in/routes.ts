@@ -480,12 +480,16 @@ function registerCallback(
 
       // Awaited: an unawaited rejection would leave the user looking at a
       // redirected page where no identity was recorded.
-      await deps.authSessionService.signIn(ctx, principal, { methods: ['fed'] });
+      const outcome = await deps.authSessionService.signIn(ctx, principal, {
+        methods: ['fed'],
+      });
       // The ID token is stored only when RP-initiated logout opted in: a provider ID
       // token routinely runs to kilobytes, and past the session cookie's 4096-byte
       // budget the session plugin throws at commit — which would break the SIGN-IN,
       // not the logout that wanted the token.
-      // Written AFTER signIn, which clears both keys: this sign-in owns them.
+      // Written AFTER signIn, which clears both keys: this sign-in owns them —
+      // including when it is held pending a second factor, since the promotion
+      // that completes it keeps them.
       if (provider.rpInitiatedLogout !== undefined) {
         session.set(RP_PROVIDER_SESSION_KEY, provider.name);
         if (provider.rpInitiatedLogout.idTokenHint && typeof tokens.idToken === 'string') {
@@ -496,10 +500,16 @@ function registerCallback(
         try {
           await provider.onTokens(tokens);
         } catch {
-          // The user is signed in. Dropping the tokens is better than failing a
-          // completed login because an application callback threw.
+          // The provider has authenticated the user. Dropping the tokens is better
+          // than failing a completed login because an application callback threw.
           deps.debug?.(`auth-plugin: signIn['${provider.name}'] onTokens threw`);
         }
+      }
+      // A sign-in held back for a second factor is not signed in, so sending the
+      // browser to `returnTo` would land it on a page that answers anonymous with
+      // no hint of why. The configured code form is where it goes instead.
+      if (outcome.status === 'second-factor-required') {
+        return deps.config.mfa?.challengePath ?? entry.returnTo;
       }
       return entry.returnTo;
     }),

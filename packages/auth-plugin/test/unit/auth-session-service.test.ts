@@ -12,15 +12,18 @@
 
 import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { AuthMethod, IPrincipal } from '@setu-ts/common';
+import type { AuthMethod, IAuthSessionService, IPrincipal } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
 import {
+  asPendingPromotion,
   AUTH_SESSION_KEY,
   AuthSessionService,
+  DEFAULT_PENDING_TTL_MS,
   ID_TOKEN_SESSION_KEY,
+  PENDING_MFA_SESSION_KEY,
   RP_PROVIDER_SESSION_KEY,
 } from '../../src/sign-in/auth-session-service.ts';
 import { createFakeSession, createFakeSessionService } from '../fixtures/fake-session.ts';
@@ -58,6 +61,7 @@ describe('AuthSessionService', () => {
       `set:${AUTH_SESSION_KEY}`,
       `delete:${RP_PROVIDER_SESSION_KEY}`,
       `delete:${ID_TOKEN_SESSION_KEY}`,
+      `delete:${PENDING_MFA_SESSION_KEY}`,
       'regenerate',
     ]);
   });
@@ -107,6 +111,218 @@ describe('AuthSessionService', () => {
       session.set(AUTH_SESSION_KEY, corrupt);
       expect(impl.current(CTX), JSON.stringify(corrupt)).toBeNull();
     }
+  });
+
+  it('MFA required: stores pending record and returns second-factor-required', async () => {
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      mfa: {
+        required: () => true,
+        pendingTtlMs: 300_000,
+      },
+    });
+    const outcome = await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(outcome).toEqual({ status: 'second-factor-required' });
+    // The pending record is written, not the signed-in record.
+    expect(session.get(AUTH_SESSION_KEY)).toBeUndefined();
+    expect(session.get(PENDING_MFA_SESSION_KEY)).toEqual({
+      principal: PRINCIPAL,
+      methods: ['pwd'],
+      at: NOW,
+    });
+    // Session is rotated.
+    expect(session.id).toBe('session-1-rotated');
+  });
+
+  it('MFA required: pending() reads the pending record back', async () => {
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      mfa: {
+        required: () => true,
+        pendingTtlMs: 300_000,
+      },
+    });
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    const pending = impl.pending(CTX);
+    expect(pending).not.toBeNull();
+    expect(pending?.principal).toEqual(PRINCIPAL);
+    expect(pending?.methods).toEqual(['pwd']);
+  });
+
+  it('MFA not required: signs in normally', async () => {
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      mfa: {
+        required: () => false,
+        pendingTtlMs: 300_000,
+      },
+    });
+    const outcome = await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(outcome).toEqual({ status: 'signed-in' });
+    expect(session.get(AUTH_SESSION_KEY)).toBeDefined();
+    expect(session.get(PENDING_MFA_SESSION_KEY)).toBeUndefined();
+  });
+
+  it('MFA with otp in methods: skips the MFA check entirely', async () => {
+    const session = createFakeSession();
+    let called = false;
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      mfa: {
+        required: () => {
+          called = true;
+          return true;
+        },
+        pendingTtlMs: 300_000,
+      },
+    });
+    const outcome = await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd', 'otp'] });
+    expect(outcome).toEqual({ status: 'signed-in' });
+    expect(called).toBe(false);
+  });
+
+  it('pending() returns null when no pending record exists', () => {
+    const { impl } = service();
+    expect(impl.pending(CTX)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// promotePending: the internal promotion of a pending second-factor record,
+// and the ONE owner of its TTL — `signIn.mfa.pendingTtlMs`.
+// ---------------------------------------------------------------------------
+
+describe('AuthSessionService.promotePending', () => {
+  /** A controllable clock, so the TTL boundary is exact rather than slept for. */
+  function build(ttlMs: number | undefined, start = 1_000) {
+    let now = start;
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => now,
+      mfa: {
+        required: () => true,
+        ...(ttlMs === undefined ? {} : { pendingTtlMs: ttlMs }),
+      },
+    });
+    return { impl, session, setNow: (value: number) => (now = value) };
+  }
+
+  /** Puts a pending record into the session and returns the service. */
+  async function pending(harness: ReturnType<typeof build>) {
+    await harness.impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(harness.impl.pending(CTX)).not.toBeNull();
+    return harness;
+  }
+
+  it('appends the method, rotates the id, and clears the pending record', async () => {
+    const harness = await pending(build(300_000));
+    // Written AFTER the pending signIn, exactly as a federated callback writes
+    // them: they belong to the sign-in being completed.
+    harness.session.set(RP_PROVIDER_SESSION_KEY, 'idp');
+    harness.session.set(ID_TOKEN_SESSION_KEY, 'id-token');
+    harness.session.mutations.length = 0;
+
+    expect(harness.impl.promotePending(CTX, 'otp')).toBe('signed-in');
+    expect(harness.session.get(AUTH_SESSION_KEY)).toEqual({
+      principal: PRINCIPAL,
+      methods: ['pwd', 'otp'],
+      at: 1_000,
+    });
+    expect(harness.session.get(PENDING_MFA_SESSION_KEY)).toBeUndefined();
+    // Kept: deleting them would lose RP-initiated logout for every federated
+    // sign-in that needed a second factor.
+    expect(harness.session.get(RP_PROVIDER_SESSION_KEY)).toBe('idp');
+    expect(harness.session.get(ID_TOKEN_SESSION_KEY)).toBe('id-token');
+    expect(harness.session.mutations).toEqual([
+      `set:${AUTH_SESSION_KEY}`,
+      `delete:${PENDING_MFA_SESSION_KEY}`,
+      'regenerate',
+    ]);
+  });
+
+  it("a pending signIn clears an earlier sign-in's provider keys", async () => {
+    const harness = build(300_000);
+    harness.session.set(RP_PROVIDER_SESSION_KEY, 'idp');
+    harness.session.set(ID_TOKEN_SESSION_KEY, 'old-id-token');
+    await harness.impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(harness.session.get(RP_PROVIDER_SESSION_KEY)).toBeUndefined();
+    expect(harness.session.get(ID_TOKEN_SESSION_KEY)).toBeUndefined();
+  });
+
+  it('signIn tolerates a JavaScript caller omitting options', async () => {
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => 5,
+    });
+    const outcome = await impl.signIn(CTX, PRINCIPAL, undefined as unknown as { methods: [] });
+    expect(outcome).toEqual({ status: 'signed-in' });
+    expect(session.get(AUTH_SESSION_KEY)).toEqual({ principal: PRINCIPAL, methods: [], at: 5 });
+  });
+
+  it('pending() does not report an expired record', async () => {
+    const harness = await pending(build(1_000));
+    harness.setNow(2_000);
+    expect(harness.impl.pending(CTX)?.principal).toEqual(PRINCIPAL);
+    harness.setNow(2_001);
+    expect(harness.impl.pending(CTX)).toBeNull();
+  });
+
+  it('refuses a record older than the configured TTL and deletes it', async () => {
+    const harness = await pending(build(1_000));
+    harness.setNow(2_001);
+    expect(harness.impl.promotePending(CTX, 'otp')).toBe('no-pending');
+    // The stale record is gone, so a later attempt cannot resurrect it.
+    expect(harness.session.get(PENDING_MFA_SESSION_KEY)).toBeUndefined();
+    expect(harness.session.get(AUTH_SESSION_KEY)).toBeUndefined();
+    harness.setNow(2_002);
+    expect(harness.impl.promotePending(CTX, 'otp')).toBe('no-pending');
+  });
+
+  it('honours the TTL boundary inclusively (at the limit is still promotable)', async () => {
+    const harness = await pending(build(1_000));
+    harness.setNow(2_000);
+    expect(harness.impl.promotePending(CTX, 'otp')).toBe('signed-in');
+  });
+
+  it('defaults the TTL to 300 000 ms when the option is absent', async () => {
+    const harness = await pending(build(undefined));
+    // Just inside the default: promotable.
+    harness.setNow(1_000 + DEFAULT_PENDING_TTL_MS);
+    expect(harness.impl.promotePending(CTX, 'otp')).toBe('signed-in');
+
+    // One millisecond past it: refused. A pendingTtlMs nothing read would make
+    // both of these assertions answer the same way.
+    const second = await pending(build(undefined));
+    second.setNow(1_000 + DEFAULT_PENDING_TTL_MS + 1);
+    expect(second.impl.promotePending(CTX, 'otp')).toBe('no-pending');
+  });
+
+  it('answers no-pending when nothing is pending', () => {
+    const harness = build(300_000);
+    expect(harness.impl.promotePending(CTX, 'otp')).toBe('no-pending');
+  });
+
+  it('asPendingPromotion narrows the plugin service and refuses one without the seam', () => {
+    const harness = build(300_000);
+    expect(asPendingPromotion(harness.impl)?.promotePending).toBeInstanceOf(Function);
+
+    // An application's own IAuthSessionService has no promotion to offer.
+    const foreign: IAuthSessionService = {
+      signIn: () => Promise.resolve({ status: 'signed-in' }),
+      current: () => null,
+      pending: () => ({ principal: PRINCIPAL, methods: ['pwd'], at: 1_000 }),
+      signOut: () => {},
+    };
+    expect(asPendingPromotion(foreign)).toBeNull();
   });
 });
 

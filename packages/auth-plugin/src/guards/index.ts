@@ -214,6 +214,52 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
 }
 
 /**
+ * Guard that requires a second factor (MFA). Returns 401 if no principal,
+ * 403 `second-factor-required` if the principal's `amr` holds none of
+ * `otp`/`pop`.
+ *
+ * The `auth-session` strategy OVERWRITES `amr` from its own record, so a
+ * session principal cannot smuggle one in. Every other strategy's claims come
+ * from something the application controls: the JWT strategy copies claims from
+ * tokens the application itself signed, and a trusted issuer's `toPrincipal`
+ * decides what an outside issuer's claims become. So a self-issued JWT
+ * carrying `amr: ['otp']` passes the guard — deliberately, and pinned by a
+ * test.
+ *
+ * A non-array `amr` is treated as ABSENT, not coerced. `claims` is
+ * `Record<string, unknown>`, so an outside issuer or an application-built
+ * principal can carry `amr: 'otp'` (a bare string). Reading that as a string and
+ * calling `.includes` on it would make `'sotp'` — or any string merely
+ * CONTAINING the factor name — satisfy the guard.
+ *
+ * @returns Middleware function
+ *
+ * @example
+ * ```typescript
+ * app.router.get('/sensitive', { middleware: [requireMfa()], handler });
+ * ```
+ * @since 0.8.0
+ */
+export function requireMfa(): MiddlewareFunction {
+  const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+    const user = ctx.request.user;
+    if (!user) {
+      respondWithAuthorizationFailure(ctx, 'authentication-required');
+      return;
+    }
+    const raw = user.claims?.amr;
+    const amr: readonly string[] = Array.isArray(raw) ? (raw as readonly string[]) : [];
+    const hasSecondFactor = amr.includes('otp') || amr.includes('pop');
+    if (!hasSecondFactor) {
+      respondWithAuthorizationFailure(ctx, 'second-factor-required');
+      return;
+    }
+    await next();
+  };
+  return withSecurityMetadata(guard, AUTHENTICATED);
+}
+
+/**
  * Guard that allows public access (always continues).
  * Useful for explicitly marking routes as public when auth middleware is global.
  *

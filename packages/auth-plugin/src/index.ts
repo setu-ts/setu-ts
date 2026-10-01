@@ -69,6 +69,7 @@ export { requireRole } from './guards/index.ts';
 export { requirePermission } from './guards/index.ts';
 export { requireAnyRole } from './guards/index.ts';
 export { requireAllPermissions } from './guards/index.ts';
+export { requireMfa } from './guards/index.ts';
 export { publicRoute } from './guards/index.ts';
 
 // Refresh token service
@@ -94,6 +95,22 @@ export {
   DEFAULT_RATE_LIMIT_KEY_PREFIX,
   RedisRateLimitStore,
 } from './stores/redis-rate-limit-store.ts';
+
+// TOTP MFA (M100d)
+export { TotpService } from './mfa/totp-service.ts';
+export type {
+  ConfirmEnrolmentResult,
+  DisableResult,
+  RecoveryCodesResult,
+  RecoveryVerifyResult,
+  TotpCompleteSignInResult,
+  TotpProofResult,
+  TotpServiceOptions,
+  TotpVerifyResult,
+} from './mfa/totp-service.ts';
+export type { ITotpStore, ReserveAttemptResult, TotpEnrolment } from './stores/totp-store.ts';
+export { MemoryTotpStore } from './stores/totp-store.ts';
+export type { MfaOptions } from './interfaces/index.ts';
 
 // Re-export common contracts
 export type {

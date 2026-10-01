@@ -78,7 +78,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M100a: +1 for the automatic middleware exclusion example.
   // M100c: +3 for the sign-in configuration, password sign-in and logout-form
   // examples.
-  'packages/auth-plugin/README.md': 12,
+  'packages/auth-plugin/README.md': 13,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   'packages/session-plugin/README.md': 11,

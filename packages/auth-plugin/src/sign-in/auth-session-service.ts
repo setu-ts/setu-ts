@@ -18,6 +18,7 @@ import type {
   IPrincipal,
   IRequestContext,
   ISessionService,
+  PendingSignIn,
   SignInOptions,
   SignInOutcome,
 } from '@setu-ts/common';
@@ -33,6 +34,20 @@ export const RP_PROVIDER_SESSION_KEY = '__setu_auth_rp';
 
 /** The reserved key holding the ID token, when `idTokenHint` is opted in. */
 export const ID_TOKEN_SESSION_KEY = '__setu_auth_id_token';
+
+/**
+ * The reserved session key holding a pending second-factor record. Written by
+ * `signIn` when the `mfa.required` option answers `true` and the methods hold
+ * no second factor; consumed by the package's own verifiers through
+ * {@linkcode AuthSessionService.promotePending}.
+ */
+export const PENDING_MFA_SESSION_KEY = '__setu_auth_pending_mfa';
+
+/**
+ * How long a pending second-factor record may sit before it is refused, when
+ * `signIn.mfa.pendingTtlMs` is not configured: 300 000 ms (5 minutes).
+ */
+export const DEFAULT_PENDING_TTL_MS = 300_000;
 
 /** The authentication methods the framework recognises (RFC 8176 `amr` values). */
 const AUTH_METHODS: readonly AuthMethod[] = ['pwd', 'otp', 'pop', 'fed'];
@@ -89,12 +104,66 @@ export function parseAuthSessionRecord(raw: unknown): AuthSessionRecord | null {
   return { principal: principal as IPrincipal, methods, at: candidate.at };
 }
 
+/**
+ * Validates a pending MFA record read from under {@linkcode PENDING_MFA_SESSION_KEY}.
+ *
+ * The same trust rules as {@linkcode parseAuthSessionRecord}: the payload
+ * survived a JSON round-trip and an application can clear or corrupt the key.
+ *
+ * @param raw - Whatever is stored under the key, or `undefined`
+ * @returns The record, or `null` when absent or malformed
+ */
+export function parsePendingMfaRecord(raw: unknown): PendingSignIn | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const candidate = raw as Partial<PendingSignIn>;
+  const principal = candidate.principal;
+  if (
+    typeof principal !== 'object' ||
+    principal === null ||
+    Array.isArray(principal) ||
+    typeof (principal as IPrincipal).id !== 'string'
+  ) {
+    return null;
+  }
+  if (!Array.isArray(candidate.methods)) {
+    return null;
+  }
+  const methods = (candidate.methods as readonly unknown[]).filter((method): method is AuthMethod =>
+    typeof method === 'string' && AUTH_METHODS.includes(method as AuthMethod)
+  );
+  if (typeof candidate.at !== 'number' || !Number.isFinite(candidate.at)) {
+    return null;
+  }
+  return { principal: principal as IPrincipal, methods, at: candidate.at };
+}
+
 /** Deps for {@linkcode AuthSessionService}. */
 export interface AuthSessionServiceDeps {
   /** Opens the session for a request; throws when the middleware did not run. */
   readonly sessionService: ISessionService;
   /** The wall-clock time in milliseconds. */
   readonly now: () => number;
+  /**
+   * The MFA policy: decides whether a second factor is required for a given
+   * principal and set of methods. Absent means no second factor is ever
+   * required.
+   */
+  readonly mfa?: {
+    readonly required: (
+      principal: IPrincipal,
+      methods: readonly AuthMethod[],
+    ) => boolean | Promise<boolean>;
+    /**
+     * How long a pending second-factor record may sit before
+     * {@linkcode AuthSessionService.promotePending} refuses it, in milliseconds.
+     * Defaults to {@linkcode DEFAULT_PENDING_TTL_MS}. This is the ONLY owner of
+     * that TTL: the verifiers ask this service to promote and never supply a
+     * TTL of their own.
+     */
+    readonly pendingTtlMs?: number;
+  };
 }
 
 /**
@@ -103,54 +172,83 @@ export interface AuthSessionServiceDeps {
  * `signIn` writes the record and rotates the session id (a session id a caller
  * planted before authentication must not survive into the authenticated
  * session); `current` reads it back without running the strategy chain;
- * `signOut` destroys the session.
+ * `pending` reads the pending second-factor record; `signOut` destroys the
+ * session.
  */
 export class AuthSessionService implements IAuthSessionService {
   readonly #sessionService: ISessionService;
   readonly #now: () => number;
+  readonly #mfa: AuthSessionServiceDeps['mfa'];
+  readonly #pendingTtlMs: number;
 
   /**
-   * @param deps - The session service and the clock
+   * Builds the plugin's sign-in owner.
+   *
+   * @param deps - The session service, clock, and optional MFA policy (whose
+   *   `pendingTtlMs` is the only source of the pending-record TTL)
    */
   constructor(deps: AuthSessionServiceDeps) {
     this.#sessionService = deps.sessionService;
     this.#now = deps.now;
+    this.#mfa = deps.mfa;
+    this.#pendingTtlMs = deps.mfa?.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS;
   }
 
   /**
    * Records `principal` as the session's identity and rotates the session id.
    *
+   * When the `mfa.required` option answers `true` and the methods hold no
+   * second factor, the principal is stored in a pending record under
+   * {@linkcode PENDING_MFA_SESSION_KEY} (NOT the signed-in key) and the
+   * outcome is `{ status: 'second-factor-required' }`.
+   *
    * @param ctx - The request context whose session signs in
    * @param principal - The identity to record
    * @param options - The methods that authenticated it
-   * @returns `{ status: 'signed-in' }`
+   * @returns `{ status: 'signed-in' }` or `{ status: 'second-factor-required' }`
    * @throws {Error} If the session middleware did not run for this request
    */
-  signIn(
+  async signIn(
     ctx: IRequestContext,
     principal: IPrincipal,
     options: SignInOptions,
   ): Promise<SignInOutcome> {
-    // Not `async`, since nothing here awaits; the body is still wrapped so a
-    // missing session middleware REJECTS rather than throwing synchronously out
-    // of a method typed to return a promise (the M52b defect class).
-    try {
-      const session = this.#sessionService.from(ctx);
-      const methods = (options?.methods ?? []).filter((method) => AUTH_METHODS.includes(method));
-      const record: AuthSessionRecord = { principal, methods, at: this.#now() };
-      session.set(AUTH_SESSION_KEY, record);
-      // Provider-session facts belong to the sign-in that wrote them. A later
-      // sign-in in the same session (a password login after a federated one)
-      // must not inherit them, or logout would end a provider session this
-      // identity never had, carrying another sign-in's ID token.
-      session.delete(RP_PROVIDER_SESSION_KEY);
-      session.delete(ID_TOKEN_SESSION_KEY);
-      // Rotation keeps the data (ISession.regenerate), so it runs after the write.
-      session.regenerate();
-      return Promise.resolve({ status: 'signed-in' });
-    } catch (error) {
-      return Promise.reject(error);
+    const session = this.#sessionService.from(ctx);
+    // `options` is required by the type, but a JavaScript caller may omit it.
+    const methods = (options?.methods ?? []).filter((method) => AUTH_METHODS.includes(method));
+
+    // Check the MFA policy: when it answers `true` and the methods hold no
+    // second factor, hold the principal back in a pending record.
+    if (this.#mfa !== undefined) {
+      const hasSecondFactor = methods.some((m) => m === 'otp' || m === 'pop');
+      if (!hasSecondFactor) {
+        const required = await this.#mfa.required(principal, methods);
+        if (required) {
+          const pending: PendingSignIn = { principal, methods, at: this.#now() };
+          session.set(PENDING_MFA_SESSION_KEY, pending);
+          // Clear any prior signed-in record: the principal is NOT signed in.
+          session.delete(AUTH_SESSION_KEY);
+          session.delete(RP_PROVIDER_SESSION_KEY);
+          session.delete(ID_TOKEN_SESSION_KEY);
+          session.regenerate();
+          return { status: 'second-factor-required' };
+        }
+      }
     }
+
+    const record: AuthSessionRecord = { principal, methods, at: this.#now() };
+    session.set(AUTH_SESSION_KEY, record);
+    // Provider-session facts belong to the sign-in that wrote them. A later
+    // sign-in in the same session (a password login after a federated one)
+    // must not inherit them, or logout would end a provider session this
+    // identity never had, carrying another sign-in's ID token.
+    session.delete(RP_PROVIDER_SESSION_KEY);
+    session.delete(ID_TOKEN_SESSION_KEY);
+    // Clear any prior pending MFA record: a new sign-in supersedes it.
+    session.delete(PENDING_MFA_SESSION_KEY);
+    // Rotation keeps the data (ISession.regenerate), so it runs after the write.
+    session.regenerate();
+    return { status: 'signed-in' };
   }
 
   /**
@@ -168,6 +266,73 @@ export class AuthSessionService implements IAuthSessionService {
   }
 
   /**
+   * Reads the pending second-factor record, if one exists and has not expired.
+   *
+   * @param ctx - The request context whose session is read
+   * @returns The pending record, or `null` when none is stored or it is older
+   *   than the configured `signIn.mfa.pendingTtlMs`
+   * @throws {Error} If the session middleware did not run for this request
+   */
+  pending(ctx: IRequestContext): PendingSignIn | null {
+    const pending = parsePendingMfaRecord(
+      this.#sessionService.from(ctx).get(PENDING_MFA_SESSION_KEY),
+    );
+    return pending === null || this.#isExpired(pending) ? null : pending;
+  }
+
+  /**
+   * Whether a pending record is older than the configured TTL. The one expiry
+   * rule: `pending` and `promotePending` both read it, so a verifier that reads
+   * `pending` first never checks a code for a record promotion would refuse.
+   */
+  #isExpired(pending: PendingSignIn): boolean {
+    return this.#now() - pending.at > this.#pendingTtlMs;
+  }
+
+  /**
+   * Promotes a pending second-factor record to the signed-in key.
+   *
+   * Internal: NOT part of `IAuthSessionService` and NOT exported from
+   * `src/index.ts`. A public promotion call would let a caller decide what was
+   * verified, and a caller-supplied `{ method, principalId }` is not evidence;
+   * only the package's own verifiers (TOTP's `completeSignIn`, 100e's ceremony)
+   * reach this, and only after checking the factor against the pending
+   * principal.
+   *
+   * Reads the pending record from the session, refuses it when it is absent or
+   * older than the configured `signIn.mfa.pendingTtlMs`, then writes the
+   * signed-in record with the appended method, regenerates the session id, and
+   * deletes the pending record.
+   *
+   * @param ctx - The request context whose session is promoted
+   * @param method - The second-factor method to append (`'otp'` or `'pop'`)
+   * @returns `'signed-in'` on success, `'no-pending'` when nothing is pending
+   *   or the record has expired
+   * @throws {Error} If the session middleware did not run for this request
+   */
+  promotePending(ctx: IRequestContext, method: AuthMethod): 'signed-in' | 'no-pending' {
+    const session = this.#sessionService.from(ctx);
+    const pending = parsePendingMfaRecord(session.get(PENDING_MFA_SESSION_KEY));
+    if (pending === null) {
+      return 'no-pending';
+    }
+    if (this.#isExpired(pending)) {
+      // Expired: delete the stale record and refuse.
+      session.delete(PENDING_MFA_SESSION_KEY);
+      return 'no-pending';
+    }
+    const methods = [...pending.methods, method];
+    const record: AuthSessionRecord = { principal: pending.principal, methods, at: this.#now() };
+    session.set(AUTH_SESSION_KEY, record);
+    session.delete(PENDING_MFA_SESSION_KEY);
+    // The provider-session keys are KEPT: the pending `signIn` already cleared any
+    // earlier sign-in's, so whatever is present now was written by the sign-in
+    // being completed (a federated callback records them after `signIn`).
+    session.regenerate();
+    return 'signed-in';
+  }
+
+  /**
    * Ends the session.
    *
    * What that revokes depends on the session strategy: on the store strategy the
@@ -182,4 +347,44 @@ export class AuthSessionService implements IAuthSessionService {
   signOut(ctx: IRequestContext): void {
     this.#sessionService.from(ctx).destroy();
   }
+}
+
+/**
+ * The internal promotion seam {@linkcode asPendingPromotion} narrows to.
+ *
+ * Deliberately NOT part of `IAuthSessionService`: a public promotion call would
+ * let a caller decide what was verified, and a caller-supplied
+ * `{ method, principalId }` is not evidence. Only the package's own verifiers
+ * (TOTP's `completeSignIn`, 100e's ceremony) reach it, and only after checking
+ * the factor against the pending principal.
+ */
+export interface PendingPromotion {
+  /**
+   * Moves the session's pending second-factor record to the signed-in key,
+   * honouring the pending-record TTL the auth-session service owns.
+   */
+  promotePending(ctx: IRequestContext, method: AuthMethod): 'signed-in' | 'no-pending';
+}
+
+/**
+ * Narrows an {@linkcode IAuthSessionService} to its promotion seam, or `null`
+ * when the service does not offer one.
+ *
+ * The plugin's own `AuthSessionService` implements the seam; a service an
+ * application registered itself does not, and gets `null` rather than a
+ * promotion it never agreed to provide.
+ *
+ * @param service - The service resolved from `CAPABILITIES.AUTH_SESSION`
+ * @returns The promotion seam, or `null` when the service has none
+ */
+export function asPendingPromotion(
+  service: IAuthSessionService,
+): PendingPromotion | null {
+  // The two interfaces share no members, so the narrowing goes through
+  // `unknown` with the check done at runtime rather than trusting the type.
+  const candidate: unknown = service;
+  if (candidate === null || typeof (candidate as PendingPromotion).promotePending !== 'function') {
+    return null;
+  }
+  return candidate as PendingPromotion;
 }

@@ -5494,8 +5494,33 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   its abort signal), round 3 closed both and found R1, N1's residual for code points above U+00FF.
   R1 is fixed — `isAcceptableUrl` admits printable ASCII only — and was NOT re-audited, at the
   maintainer's direction — complete (PR #386).
-- **Next milestone** — **M100d** (`packages/auth-plugin` + `packages/common` — multi-factor
-  authentication (TOTP) and step-up; widens `SignInOutcome` with a second-factor arm).
+- **Milestone 100d** (`packages/auth-plugin` + `packages/common` — multi-factor authentication
+  (TOTP) and step-up): `AuthPluginOptions.signIn.mfa.required(principal, methods)` gates a second
+  factor on any sign-in that records its principal through `IAuthSessionService`; when required,
+  `signIn` stores a `PendingSignIn` under a private session key and returns the new
+  `second-factor-required` `SignInOutcome` arm instead of signing in. `TotpService` (app-
+  instantiated) computes RFC 6238 codes (HMAC-SHA1, 30-second step, 6 digits, ±1 window) from a
+  base32 secret and verifies them against an `ITotpStore` (shipped `MemoryTotpStore`); per-account
+  lockout (5 attempts / 15 minutes, reserved before the check), monotonic `claimStep` replay
+  protection, and 10 single-use 80-bit recovery codes stored as SHA-256 digests. `completeSignIn` /
+  `completeSignInWithRecoveryCode` promote the pending record with `methods: ['pwd'|'fed', 'otp']`
+  and rotate the session id; `promotePending` is internal. The new `requireMfa()` guard answers 401
+  anonymous / 403 `second-factor-required` when `claims.amr` lacks `otp` or `pop`. `common` gains
+  `PendingSignIn` and the `second-factor-required` `AuthorizationFailure` arm. Verification found a
+  federated callback that ignored the pending outcome (now `signIn.mfa.challengePath`, with the
+  RP-logout keys kept through promotion), an unvalidated `pendingTtlMs` that failed open on `NaN`,
+  and refused lockout attempts that were recorded and so extended the lock forever. The
+  committed-tree security audit failed round 1 on a High: the README's enrolment routes read the
+  principal from the request body and re-enrolment needed no proof, so anyone could take over a
+  second factor — replacing, regenerating codes for, or disabling a confirmed factor now requires
+  proof of the current one, and codes are minted only at confirmation. Round 2 failed on a Medium:
+  enrolment was a read-modify-write, so a concurrent enrolment against a slow shared store rolled a
+  claimed step back (reopening replay) or got its secret confirmed by the victim's code;
+  `ITotpStore` now writes through two atomic operations, `stageSecret` and a compare-and-set
+  `confirmSecret`, and a password-only `signIn` with `providers: []` is allowed when `mfa` is set —
+  complete (PR #388).
+- **Next milestone** — **M100e** (`packages/auth-plugin` — passkeys (WebAuthn); a passkey assertion
+  with user verification counts as a second factor for 100d's step-up model).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones

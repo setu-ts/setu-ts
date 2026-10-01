@@ -483,6 +483,201 @@ app.router.get('/account', (ctx) =>
 Not provided: the implicit and hybrid flows, the device flow, dynamic client registration, front-
 and back-channel logout, and account linking — `toPrincipal` decides what an identity maps to.
 
+## Multi-Factor Authentication (TOTP)
+
+`signIn.mfa` adds a TOTP second factor to any sign-in flow that records its principal through
+`IAuthSessionService` — a federated callback, a password login, or both. It is off by default;
+nothing changes until you set `signIn.mfa.required`.
+
+`TotpService` is an app-instantiated service (like `PasswordHasher` and `RefreshTokenService`) — it
+is not an `AuthPlugin` option and registers nothing. It computes RFC 6238 TOTP codes (HMAC-SHA1,
+30-second step, 6 digits, ±1 step window) from a base32 secret, and it verifies them against an
+`ITotpStore`. The shipped `MemoryTotpStore` is single-process; a multi-instance application supplies
+a shared implementation, and must implement `stageSecret`, `confirmSecret`, `claimStep`,
+`reserveAttempt` and `consumeRecoveryCode` as single atomic operations (a compare-and-set or a
+transaction) — each one closes a race that a read followed by a write reopens.
+
+A password-only application sets `providers: []` with `mfa` (an empty list is refused without it)
+and records its own principal through `IAuthSessionService.signIn`, as the `/login` route below
+does; `signIn` then supplies the auth-session capability, the pending state and the logout route.
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IAuthSessionService, IRequestContext } from '@setu-ts/common';
+import { AuthPlugin, MemoryTotpStore, requireMfa, TotpService } from '@setu-ts/auth-plugin';
+import { createRuntimeServices, RuntimePlugin } from '@setu-ts/runtime';
+import { SessionPlugin } from '@setu-ts/session-plugin';
+import { createApplication } from '@setu-ts/kernel';
+
+const runtime = createRuntimeServices();
+const totp = new TotpService({ store: new MemoryTotpStore(), runtime, issuer: 'MyApp' });
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
+    AuthPlugin({
+      signIn: {
+        providers: [],
+        mfa: {
+          // Typically: does this principal have a confirmed factor (or a policy
+          // that demands one)? Your own lookup decides.
+          required: (principal) => principal.id.startsWith('local|'),
+          pendingTtlMs: 300_000,
+          challengePath: '/mfa',
+        },
+      },
+    }),
+  ],
+});
+
+// Your own credential check — whatever your user store provides.
+declare function checkPassword(username: string, password: string): Promise<{ id: string } | null>;
+
+app.router.post('/login', async (ctx) => {
+  const { username, password } = await ctx.request.json<{ username: string; password: string }>();
+  const user = await checkPassword(username, password);
+  if (user === null) return ctx.response.status(401).json({ error: 'invalid credentials' });
+  const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
+  const outcome = await auth.signIn(ctx, { id: user.id, roles: [] }, { methods: ['pwd'] });
+  // 'second-factor-required': send the browser to the code form.
+  return ctx.response.json(outcome);
+});
+
+// Who is enrolling: the signed-in principal (a settings page), or — during a
+// sign-in held for its first second factor — the pending one. NEVER an id from
+// the request body: that would let anyone enrol a factor on another account.
+function enrollingPrincipal(ctx: IRequestContext): string | null {
+  const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
+  return ctx.request.user?.id ?? auth.pending(ctx)?.principal.id ?? null;
+}
+
+app.router.post('/mfa/enrol', async (ctx) => {
+  const principalId = enrollingPrincipal(ctx);
+  if (principalId === null) return ctx.response.status(401).json({ error: 'sign in first' });
+  const { secret, uri } = await totp.beginEnrolment(principalId, principalId);
+  return ctx.response.json({ secret, uri });
+});
+
+// `proof` is required only when REPLACING a confirmed factor: a code from the
+// current authenticator, or an unused recovery code.
+app.router.post('/mfa/confirm', async (ctx) => {
+  const principalId = enrollingPrincipal(ctx);
+  if (principalId === null) return ctx.response.status(401).json({ error: 'sign in first' });
+  const { code, proof } = await ctx.request.json<{ code: string; proof?: string }>();
+  const result = await totp.confirmEnrolment(principalId, code, proof);
+  if (result.status !== 'ok') return ctx.response.status(401).json({ error: result.status });
+  // Confirmation mints the recovery codes; show them to the user this once.
+  return ctx.response.json({ recoveryCodes: result.recoveryCodes });
+});
+
+app.router.post('/mfa/complete', async (ctx) => {
+  const { code } = await ctx.request.json<{ code: string }>();
+  const result = await totp.completeSignIn(ctx, code);
+  if (result !== 'signed-in') {
+    return ctx.response.status(401).json({ error: result });
+  }
+  return ctx.response.redirect('/', 302);
+});
+
+app.router.post('/mfa/complete-recovery', async (ctx) => {
+  const { code } = await ctx.request.json<{ code: string }>();
+  const result = await totp.completeSignInWithRecoveryCode(ctx, code);
+  if (result !== 'signed-in') {
+    return ctx.response.status(401).json({ error: result });
+  }
+  return ctx.response.redirect('/', 302);
+});
+
+// Settings: regenerating codes or disabling the factor takes the factor.
+app.router.post('/account/mfa/recovery-codes', {
+  middleware: [requireMfa()],
+  handler: async (ctx) => {
+    const { proof } = await ctx.request.json<{ proof: string }>();
+    const result = await totp.generateRecoveryCodes(ctx.request.user?.id ?? '', proof);
+    if (result.status !== 'ok') return ctx.response.status(401).json({ error: result.status });
+    return ctx.response.json({ recoveryCodes: result.recoveryCodes });
+  },
+});
+
+app.router.post('/account/mfa/disable', {
+  middleware: [requireMfa()],
+  handler: async (ctx) => {
+    const { proof } = await ctx.request.json<{ proof: string }>();
+    const result = await totp.disable(ctx.request.user?.id ?? '', proof);
+    return ctx.response.status(result === 'ok' ? 200 : 401).json({ result });
+  },
+});
+
+app.router.get('/account/bank', {
+  middleware: [requireMfa()],
+  handler: async (ctx) => ctx.response.json({ ok: true }),
+});
+```
+
+- **Who may change a factor.** Enrolment, confirmation, regeneration and disabling all take a
+  principal id, and the routes that call them must take it from the session — the signed-in
+  principal, or the pending one during a sign-in — never from the request. The service then enforces
+  the rest: confirming a REPLACEMENT for a confirmed factor, regenerating recovery codes, and
+  disabling a confirmed factor each require `proof` of the current factor (a code from it or an
+  unused recovery code), answering `proof-required` without it. So a caller who can name a principal
+  still cannot take over or remove its second factor. A FIRST enrolment needs no proof, because
+  there is nothing to prove: an account with no factor is trust-on-first-use, and whoever holds its
+  password during the pending state can enrol one. If that matters, enrol factors only from a
+  signed-in session, or have `mfa.required` answer `true` only for principals that already have one.
+  An administrator reset that cannot obtain proof calls `ITotpStore.deleteEnrolment` directly,
+  behind its own authorization.
+- **Pending sign-in.** When `mfa.required` returns `true`, `signIn` does NOT sign the session in. It
+  stores a `PendingSignIn` record under a private session key and returns `second-factor-required`.
+  The session is anonymous until `completeSignIn` (or `completeSignInWithRecoveryCode`) succeeds, at
+  which point the principal is recorded with `methods: ['pwd', 'otp']` (or `['fed', 'otp']`) and the
+  session id is rotated. A pending record expires after `signIn.mfa.pendingTtlMs` (default 300 000
+  ms; a positive integer, anything else is refused when `AuthPlugin(...)` is called). An expired
+  record is not reported by `pending(ctx)`, so `completeSignIn` answers `no-pending` without
+  checking — or spending — the code; that option is the only place the TTL is configured, because
+  `TotpService` has no TTL option of its own. The internal promotion (`promotePending`) is not
+  exported, and `TotpService` is the framework's only path that completes a pending sign-in — after
+  checking a factor for the pending principal. That is a guarantee about the framework's surface,
+  not a sandbox: application code holding the request can always call `signIn` with
+  `methods: ['pwd', 'otp']` itself, and is trusted to record only methods it verified.
+- **Federated sign-ins.** A provider callback whose sign-in is held pending redirects to
+  `signIn.mfa.challengePath` (a same-origin absolute path) — the code form — instead of `returnTo`;
+  without it, it falls back to `returnTo`, where the page must read `pending(ctx)` to tell the
+  pending state from an anonymous one. The provider-session facts the callback records survive the
+  promotion, so RP-initiated logout still ends the provider session afterwards.
+- **Lockout.** Five failed attempts within 15 minutes lock the principal out of verification until
+  15 minutes after the oldest counted attempt. A refused attempt is not counted, so continued
+  guessing cannot extend the lock. `MemoryTotpStore` keeps an entry only for a principal with an
+  attempt inside the window — expired entries are swept as the map grows — so its size is bounded by
+  the attempt rate, not by every principal id ever presented. The attempt is reserved BEFORE the
+  code is checked, so the fifth failure is what trips the lock and the sixth answers `locked`
+  without computing or comparing anything. Recovery codes share that counter: five wrong recovery
+  codes lock out TOTP verification too. A successful verification clears the count.
+- **Re-enrolment is non-destructive.** A confirmed factor stays confirmed and stays usable while a
+  new secret awaits confirmation; confirming swaps the pending secret in and keeps the step counter
+  monotonic, so a code valid before the swap is still refused afterwards. Confirmation succeeds only
+  if the secret its code was checked against is STILL the one awaiting confirmation
+  (`ITotpStore.confirmSecret`), so a secret staged concurrently by someone else is never confirmed
+  on the strength of the user's code — the user's confirmation answers `invalid` instead. A wrong
+  new code is checked before any recovery code offered as proof, so it does not spend one.
+- **Replay protection.** The store's `claimStep` is monotonic: a code whose step is ≤ the last
+  claimed step is refused, so a captured code cannot be replayed within its ±1 window.
+- **Recovery codes.** Confirming a factor mints the first set (`confirmEnrolment` returns it), so
+  codes never exist without a proven factor; `generateRecoveryCodes(principalId, proof)` replaces
+  the set later. Each set is 10 codes of 16 base32 characters (80 bits each). They are stored as
+  SHA-256 digests and consumed atomically on use — a code works exactly once. The plaintext list is
+  returned to the caller exactly once and is not recoverable.
+- **`requireMfa()` guard.** Answers `401` for an anonymous request and `403`
+  `second-factor-required` for a principal whose `claims.amr` lacks `otp` or `pop`. A session that
+  completed a second factor carries `amr: [..., 'otp']` and passes. A non-array `amr` — a bare
+  `'otp'`, a number, an object — is treated as ABSENT rather than coerced, so a string merely
+  containing a factor name cannot satisfy the guard. The guard is branded `AUTHENTICATED`, so it
+  composes with `requireRole`/`requirePermission` on the same route.
+- **Both completion paths append `otp`.** `completeSignIn` and `completeSignInWithRecoveryCode` each
+  append `otp` to the pending record's methods, so a password sign-in that finished with either ends
+  up with `methods: ['pwd', 'otp']` and `amr: ['pwd', 'otp']`. `requireMfa()` accepts `otp` or
+  `pop`.
+
 ## Refresh Tokens
 
 `RefreshTokenService` is an app-instantiated service (like `PasswordHasher`) — it is not an
@@ -655,6 +850,7 @@ MIT
 | `requireAllPermissions`             | function  |
 | `requireAnyRole`                    | function  |
 | `requireAuth`                       | function  |
+| `requireMfa`                        | function  |
 | `requirePermission`                 | function  |
 | `requireRole`                       | function  |
 | `AuthPluginConfigurationError`      | class     |
@@ -662,9 +858,11 @@ MIT
 | `MemoryAccessTokenRevocationStore`  | class     |
 | `MemoryRateLimitStore`              | class     |
 | `MemoryRefreshTokenStore`           | class     |
+| `MemoryTotpStore`                   | class     |
 | `PasswordHasher`                    | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
+| `TotpService`                       | class     |
 | `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
 | `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
 | `ApiKeyOptions`                     | interface |
@@ -679,9 +877,11 @@ MIT
 | `IAuthStrategy`                     | interface |
 | `IJwtService`                       | interface |
 | `IPrincipal`                        | interface |
+| `ITotpStore`                        | interface |
 | `JwtOptions`                        | interface |
 | `JwtSignOptions`                    | interface |
 | `LocalOptions`                      | interface |
+| `MfaOptions`                        | interface |
 | `OAuth2Provider`                    | interface |
 | `OidcProvider`                      | interface |
 | `ProviderTokens`                    | interface |
@@ -692,18 +892,28 @@ MIT
 | `RefreshTokenOptions`               | interface |
 | `RefreshTokenRecord`                | interface |
 | `RefreshTokenStore`                 | interface |
+| `ReserveAttemptResult`              | interface |
 | `RoleDefinition`                    | interface |
 | `SessionAuthOptions`                | interface |
 | `SignInConfig`                      | interface |
 | `SignInProviderBase`                | interface |
 | `TokenPair`                         | interface |
+| `TotpEnrolment`                     | interface |
+| `TotpServiceOptions`                | interface |
 | `TrustedIssuer`                     | interface |
+| `ConfirmEnrolmentResult`            | type      |
+| `DisableResult`                     | type      |
 | `IRefreshTokenRotation`             | type      |
 | `IssuerAlgorithm`                   | type      |
 | `IssuerKeySource`                   | type      |
+| `RecoveryCodesResult`               | type      |
+| `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |
 | `SignInProvider`                    | type      |
 | `TokenEndpointAuth`                 | type      |
+| `TotpCompleteSignInResult`          | type      |
+| `TotpProofResult`                   | type      |
+| `TotpVerifyResult`                  | type      |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

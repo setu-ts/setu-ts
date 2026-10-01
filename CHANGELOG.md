@@ -8,6 +8,58 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Multi-factor authentication with TOTP (M100d).** `AuthPluginOptions.signIn.mfa` adds a TOTP
+  second factor to any sign-in flow that records its principal through `IAuthSessionService`.
+  `TotpService` (app-instantiated, like `PasswordHasher`) computes RFC 6238 codes (HMAC-SHA1,
+  30-second step, 6 digits, ±1 step window) from a base32 secret and verifies them against an
+  `ITotpStore`; the shipped `MemoryTotpStore` is single-process.
+  `signIn.mfa.required(principal,
+  methods)` returns `true` to require a second factor; when it
+  does, `signIn` stores a `PendingSignIn` record (under a private session key, NOT the signed-in
+  key) and returns `second-factor-required` instead of signing the session in.
+  `TotpService.completeSignIn(ctx,
+  code)` and `completeSignInWithRecoveryCode(ctx, code)` complete
+  a pending sign-in, each appending `otp` so the principal ends up recorded with
+  `methods: ['pwd', 'otp']` (or `['fed', 'otp']`) and the session id rotated.
+  `signIn.mfa.pendingTtlMs` (default 300 000 ms) is the single owner of how long a pending record
+  survives; `TotpService` has no TTL option of its own, and it must be a positive integer (`NaN`,
+  `0` and negatives are refused when `AuthPlugin(...)` is called, since `NaN` would never expire).
+  `pending(ctx)` does not report an expired record, so completing one spends no code. A provider
+  callback whose sign-in is held pending redirects to `signIn.mfa.challengePath` (else `returnTo`)
+  and keeps its RP-initiated-logout facts through the promotion. Per-account lockout: five failed
+  attempts within 15 minutes lock the principal out of verification, recovery codes included; the
+  attempt is reserved before the credential is checked, a refused attempt is not counted (so
+  continued guessing cannot extend the lock), and a successful verification clears the count. Replay
+  protection: the store's `claimStep` is monotonic, so a captured code cannot be replayed. An
+  enrolment never confirmed is not a factor — no verification path accepts its code — and starting a
+  new enrolment leaves the confirmed factor in place until the new secret is confirmed, keeping the
+  step counter monotonic across the swap. Replacing a confirmed factor (`confirmEnrolment` with a
+  re-enrolment pending), regenerating recovery codes, and disabling a confirmed factor each require
+  `proof` of the CURRENT factor — a code from it or an unused recovery code — and answer
+  `proof-required` without it, so a caller able to name a principal cannot take over or remove its
+  second factor; a first enrolment is trust-on-first-use and needs none. The routes calling these
+  take the principal from the session, never the request, as the README example shows. Recovery
+  codes: confirmation mints the first set (`confirmEnrolment` returns it, so codes never exist
+  without a proven factor) and `generateRecoveryCodes(principalId, proof)` replaces it; each set is
+  10 codes of 16 base32 characters (80 bits), stored as SHA-256 digests, consumed atomically on use,
+  and accepted only in the canonical shape (trimmed, upper-cased, exactly 16 characters of
+  `A-Z2-7`). The new `requireMfa()` guard answers `401` for an anonymous request and `403`
+  `second-factor-required` for a principal whose `claims.amr` lacks `otp` or `pop`; a non-array
+  `amr` counts as absent rather than being coerced, so a string merely containing a factor name
+  cannot satisfy it. `@setu-ts/common` gains `PendingSignIn` and the `second-factor-required` arm of
+  `AuthorizationFailure`. New `@setu-ts/auth-plugin` exports: `TotpService`, `MemoryTotpStore`,
+  `requireMfa`, and the types `MfaOptions`, `ITotpStore`, `TotpVerifyResult`,
+  `RecoveryVerifyResult`, `TotpCompleteSignInResult`, `TotpServiceOptions`, `TotpEnrolment`,
+  `ReserveAttemptResult`, `TotpProofResult`, `ConfirmEnrolmentResult`, `RecoveryCodesResult`,
+  `DisableResult`. `ITotpStore` writes enrolment state only through two atomic operations —
+  `stageSecret` (never touches the claimed step) and `confirmSecret` (a compare-and-set on the
+  secret awaiting confirmation) — so a concurrent enrolment can neither roll back a claimed step and
+  reopen a code's replay, nor have its secret confirmed by another user's code. `signIn.providers`
+  may be empty when `signIn.mfa` is set, for a password-only sign-in. `MemoryTotpStore` sweeps
+  lockout entries whose attempts have all left the window, so its size tracks the attempt rate
+  rather than every principal id ever presented. The internal `promotePending` is not exported. With
+  `signIn.mfa` unset nothing changes.
+
 - **Sign-in with an outside provider (M100c).** `AuthPluginOptions.signIn` makes the application an
   OAuth 2.0 / OpenID Connect relying party over the authorization-code flow: per provider,
   `GET /auth/<name>/login` and `GET /auth/<name>/callback`, plus one `POST /auth/logout`. Providers
@@ -570,6 +622,18 @@ All notable changes to this project are documented here. The format follows
   the runbook.
 
 ### Changed
+
+- **`common` — `IAuthSessionService` gains a required `pending()` member and `SignInOutcome` widens
+  (M100d, breaking).** `IAuthSessionService` now requires `pending(ctx): PendingSignIn |
+  null`,
+  which reads the pending second-factor record (if any) for the session. `SignInOutcome` widens from
+  `{ status: 'signed-in' }` to `{ status: 'signed-in' } | { status:
+  'second-factor-required' }`,
+  so a sign-in that requires a second factor no longer returns `signed-in`. Applications that
+  implement `IAuthSessionService` by hand must add the `pending()` member; applications that consume
+  the outcome must handle the new `second-factor-required` arm. `@setu-ts/common` exports the new
+  `PendingSignIn` interface. With `signIn.mfa` unset the `auth-plugin`'s own `AuthSessionService`
+  never returns `second-factor-required`, so existing consumers see no behavioral change.
 
 - **`auth-plugin` — `AuthPlugin` now registers `authMiddleware()` globally by default (M100a).**
   Every request runs the passive strategy chain at priority 300, so `ctx.request.user` is populated

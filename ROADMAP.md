@@ -11874,7 +11874,7 @@ because one of them invalidated part of a previous run's claims:
 
 **Plans:** `plans/archive/milestone-100a-auth-composition.md`,
 `plans/archive/milestone-100b-external-token-verification.md`,
-`plans/milestone-100c-oidc-sign-in.md`, `plans/milestone-100d-totp-mfa.md`,
+`plans/archive/milestone-100c-oidc-sign-in.md`, `plans/archive/milestone-100d-totp-mfa.md`,
 `plans/milestone-100e-passkeys.md`, `plans/milestone-100f-saml-sp.md`. Each carries its design
 security review.
 
@@ -12310,6 +12310,6 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 100a      | ✅     | auth-plugin + starters — `jwt` optional; the plugin registers `authMiddleware()` itself ([#384](https://github.com/setu-ts/setu-ts/pull/384))                                                                                                 |
 | 100b      | ✅     | auth-plugin — tokens from an outside issuer (key sets, rotation, ES256/EdDSA) ([#385](https://github.com/setu-ts/setu-ts/pull/385))                                                                                                           |
 | 100c      | ✅     | auth-plugin + common — sign-in with an outside provider (OAuth 2.0 / OpenID Connect) (PR #386)                                                                                                                                                |
-| 100d      | ⬜     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                                                                                                                  |
+| 100d      | ✅     | auth-plugin — multi-factor authentication (TOTP) and step-up                                                                                                                                                                                  |
 | 100e      | ⬜     | auth-plugin — passkeys (WebAuthn)                                                                                                                                                                                                             |
 | 100f      | ⬜     | auth-plugin — SAML 2.0 service provider                                                                                                                                                                                                       |

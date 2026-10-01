@@ -301,9 +301,19 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           signInKeySets.push(keySet);
         }
 
+        const mfa = compiledSignIn.mfa;
         const authSessionService = new AuthSessionService({
           sessionService,
           now: () => runtime.now(),
+          ...(mfa === null ? {} : {
+            // The configured TTL passes through untouched; `AuthSessionService`
+            // owns the default and is the only reader of the value, so the
+            // option has exactly one owner.
+            mfa: {
+              required: mfa.required,
+              ...(mfa.pendingTtlMs === undefined ? {} : { pendingTtlMs: mfa.pendingTtlMs }),
+            },
+          }),
         });
         ctx.services.register(CAPABILITIES.AUTH_SESSION, authSessionService);
 
