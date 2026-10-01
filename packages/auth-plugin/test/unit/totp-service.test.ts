@@ -242,6 +242,17 @@ describe('TotpService', () => {
     expect((await ctx.service.generateRecoveryCodes('user1', fromJson)).status).toBe('invalid');
     expect(await ctx.service.verifyRecoveryCode('user1', fromJson)).toBe('invalid');
     expect(await ctx.service.verify('user1', fromJson)).toBe('invalid');
+    // Every JSON shape that is not a string, including the two that pass a bare
+    // length check (an array of six, `{ length: 6 }`), answers invalid.
+    // A fresh principal per shape, so the lockout never answers in its place.
+    const shapes = [null, ['1', '2', '3', '4', '5', '6'], { length: 6 }, 123456];
+    for (const [index, shape] of shapes.entries()) {
+      const principalId = `shape-${index}`;
+      await enrolledAndConfirmed(ctx, principalId);
+      const code = shape as unknown as string;
+      expect(await ctx.service.verify(principalId, code)).toBe('invalid');
+      expect((await ctx.service.confirmEnrolment(principalId, code)).status).toBe('invalid');
+    }
   });
 
   it('a secret staged during a confirmation is not confirmed by it (M1)', async () => {

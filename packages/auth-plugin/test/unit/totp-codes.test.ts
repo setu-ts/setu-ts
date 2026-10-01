@@ -62,4 +62,10 @@ describe('totp-codes', () => {
     expect(constantTimeEquals('12345', '123456')).toBe(false);
     expect(constantTimeEquals('123456', '12345')).toBe(false);
   });
+
+  it('constantTimeEquals refuses a non-string instead of throwing', () => {
+    for (const shape of [null, undefined, ['1', '2', '3', '4', '5', '6'], { length: 6 }, 123456]) {
+      expect(constantTimeEquals('123456', shape as unknown as string)).toBe(false);
+    }
+  });
 });

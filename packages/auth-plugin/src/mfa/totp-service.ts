@@ -301,8 +301,8 @@ export class TotpService {
   /**
    * The one code-matching implementation: the step within the ±1 window whose
    * code equals `code` (compared in constant time), or `null`. An undecodable
-   * secret matches nothing, and so does a non-string code: the comparison's
-   * length check refuses it.
+   * secret matches nothing, and so does a non-string code: the comparison
+   * refuses any non-string.
    */
   async #findStep(secretText: string, code: string): Promise<number | null> {
     let secret: Uint8Array;

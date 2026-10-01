@@ -85,10 +85,14 @@ export async function computeTotpCode(
  *
  * @param a - The first code
  * @param b - The second code
- * @returns `true` when the codes are identical
+ * @returns `true` when the codes are identical; `false` when they differ or either
+ *   is not a string
  */
 export function constantTimeEquals(a: string, b: string): boolean {
-  if (a.length !== b.length) {
+  // The submitted code comes from a request body, which can carry anything:
+  // an array or `{ length: 6 }` passes a length check and then throws on
+  // `charCodeAt`, and `null` throws on `.length`. Only a string is comparable.
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) {
     return false;
   }
   let result = 0;
