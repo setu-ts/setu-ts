@@ -342,12 +342,13 @@ describe('auth-session MFA', () => {
     expect((session.pending as Record<string, unknown>).at).toBe(0);
 
     // The code is valid for the next step, so the refusal is the expiry alone.
-    const result = await complete(
-      harness,
-      jar,
-      await codeForStep(harness, secret, confirmedAt + 1),
-    );
-    expect(result).toBe('no-pending');
+    const code = await codeForStep(harness, secret, confirmedAt + 1);
+    expect(await complete(harness, jar, code)).toBe('no-pending');
+
+    // The refusal did not spend the code: an expired record is refused BEFORE
+    // the code is checked, so its step stays unclaimed for a fresh sign-in.
+    await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+    expect(await complete(harness, jar, code)).toBe('signed-in');
   });
 
   it('a configured pendingTtlMs of 1 ms refuses completion (the option has effect)', async () => {

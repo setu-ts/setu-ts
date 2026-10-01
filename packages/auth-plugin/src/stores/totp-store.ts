@@ -92,6 +92,12 @@ export interface ITotpStore {
    * guesses all read a count under the limit, so a burst would bypass the
    * lockout.
    *
+   * An attempt refused as over the limit is NOT recorded. Recording it would let
+   * an attacker who keeps guessing hold the account locked indefinitely — the
+   * window would never clear — and would grow the stored count without bound.
+   * Only allowed attempts count, so a lock lifts `windowMs` after the oldest
+   * counted attempt, whatever arrives meanwhile.
+   *
    * @param principalId - The principal
    * @param now - The current wall-clock time in milliseconds
    * @param options - The limit and window
@@ -202,9 +208,12 @@ export class MemoryTotpStore implements ITotpStore {
     }
     const cutoff = now - options.windowMs;
     attempts.timestamps = attempts.timestamps.filter((ts) => ts > cutoff);
+    if (attempts.timestamps.length >= options.limit) {
+      // Refused, and deliberately not recorded: see ITotpStore.reserveAttempt.
+      return Promise.resolve({ allowed: false, count: attempts.timestamps.length + 1 });
+    }
     attempts.timestamps.push(now);
-    const count = attempts.timestamps.length;
-    return Promise.resolve({ allowed: count <= options.limit, count });
+    return Promise.resolve({ allowed: true, count: attempts.timestamps.length });
   }
 
   clearAttempts(principalId: string): Promise<void> {

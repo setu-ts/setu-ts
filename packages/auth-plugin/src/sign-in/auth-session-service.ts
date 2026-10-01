@@ -214,7 +214,8 @@ export class AuthSessionService implements IAuthSessionService {
     options: SignInOptions,
   ): Promise<SignInOutcome> {
     const session = this.#sessionService.from(ctx);
-    const methods = options.methods.filter((method) => AUTH_METHODS.includes(method));
+    // `options` is required by the type, but a JavaScript caller may omit it.
+    const methods = (options?.methods ?? []).filter((method) => AUTH_METHODS.includes(method));
 
     // Check the MFA policy: when it answers `true` and the methods hold no
     // second factor, hold the principal back in a pending record.
@@ -265,16 +266,27 @@ export class AuthSessionService implements IAuthSessionService {
   }
 
   /**
-   * Reads the pending second-factor record, if one exists.
+   * Reads the pending second-factor record, if one exists and has not expired.
    *
    * @param ctx - The request context whose session is read
-   * @returns The pending record, or `null` when none is stored
+   * @returns The pending record, or `null` when none is stored or it is older
+   *   than the configured `signIn.mfa.pendingTtlMs`
    * @throws {Error} If the session middleware did not run for this request
    */
   pending(ctx: IRequestContext): PendingSignIn | null {
-    return parsePendingMfaRecord(
+    const pending = parsePendingMfaRecord(
       this.#sessionService.from(ctx).get(PENDING_MFA_SESSION_KEY),
     );
+    return pending === null || this.#isExpired(pending) ? null : pending;
+  }
+
+  /**
+   * Whether a pending record is older than the configured TTL. The one expiry
+   * rule: `pending` and `promotePending` both read it, so a verifier that reads
+   * `pending` first never checks a code for a record promotion would refuse.
+   */
+  #isExpired(pending: PendingSignIn): boolean {
+    return this.#now() - pending.at > this.#pendingTtlMs;
   }
 
   /**
@@ -304,18 +316,18 @@ export class AuthSessionService implements IAuthSessionService {
     if (pending === null) {
       return 'no-pending';
     }
-    const now = this.#now();
-    if (now - pending.at > this.#pendingTtlMs) {
+    if (this.#isExpired(pending)) {
       // Expired: delete the stale record and refuse.
       session.delete(PENDING_MFA_SESSION_KEY);
       return 'no-pending';
     }
     const methods = [...pending.methods, method];
-    const record: AuthSessionRecord = { principal: pending.principal, methods, at: now };
+    const record: AuthSessionRecord = { principal: pending.principal, methods, at: this.#now() };
     session.set(AUTH_SESSION_KEY, record);
     session.delete(PENDING_MFA_SESSION_KEY);
-    session.delete(RP_PROVIDER_SESSION_KEY);
-    session.delete(ID_TOKEN_SESSION_KEY);
+    // The provider-session keys are KEPT: the pending `signIn` already cleared any
+    // earlier sign-in's, so whatever is present now was written by the sign-in
+    // being completed (a federated callback records them after `signIn`).
     session.regenerate();
     return 'signed-in';
   }

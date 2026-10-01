@@ -303,7 +303,7 @@ function compileOAuth2(
  *   that does not end with the provider's callback path, a `failureRedirect` that is
  *   not same-origin, an `oidc` provider without the `openid` scope, an `oauth2`
  *   provider with `rpInitiatedLogout`, or more than one provider configured for
- *   RP-initiated logout
+ *   RP-initiated logout, or an invalid `mfa` option (see {@linkcode compileMfa})
  */
 export function compileSignIn(config: SignInConfig): CompiledSignIn {
   const configured = config.basePath ?? DEFAULT_SIGN_IN_BASE_PATH;
@@ -375,6 +375,47 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
     logoutPath: `${basePath}/logout`,
     rpLogoutProvider: rpLogoutProviders[0] ?? null,
     refreshPrincipal: config.refreshPrincipal ?? null,
-    mfa: config.mfa ?? null,
+    mfa: compileMfa(config.mfa),
   };
+}
+
+/**
+ * Validates the MFA policy at construction.
+ *
+ * `pendingTtlMs` must be a positive safe integer: every comparison against `NaN`
+ * is `false`, so `NaN` (what `Number(env.X)` yields for an unset variable) would
+ * make a pending record never expire, while `0` or a negative value would refuse
+ * every completion. `challengePath` is a redirect, so it gets the same
+ * same-origin check as `failureRedirect`.
+ *
+ * @param mfa - The raw option, or `undefined`
+ * @returns The validated option, or `null` when absent
+ * @throws {AuthPluginConfigurationError} On a non-function `required`, an
+ *   out-of-domain `pendingTtlMs`, or a `challengePath` that is not a same-origin
+ *   absolute path
+ */
+export function compileMfa(mfa: MfaOptions | undefined): MfaOptions | null {
+  if (mfa === undefined) {
+    return null;
+  }
+  if (!isFunction(mfa.required)) {
+    throw new AuthPluginConfigurationError('auth-plugin: signIn.mfa.required must be a function');
+  }
+  if (
+    mfa.pendingTtlMs !== undefined &&
+    !(Number.isSafeInteger(mfa.pendingTtlMs) && mfa.pendingTtlMs > 0)
+  ) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: signIn.mfa.pendingTtlMs must be a positive integer number of milliseconds',
+    );
+  }
+  if (
+    mfa.challengePath !== undefined &&
+    safeReturnTo(mfa.challengePath, '') !== mfa.challengePath
+  ) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: signIn.mfa.challengePath must be a same-origin absolute path',
+    );
+  }
+  return mfa;
 }

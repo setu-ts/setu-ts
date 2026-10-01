@@ -178,4 +178,22 @@ describe('MemoryTotpStore', () => {
     });
     expect(result.count).toBe(1);
   });
+
+  it('a refused attempt is not recorded, so continued guessing cannot extend the lock', async () => {
+    const store = new MemoryTotpStore();
+    const window = { limit: 5, windowMs: 900_000 };
+    for (let i = 0; i < 5; i++) {
+      expect((await store.reserveAttempt('user1', i, window)).allowed).toBe(true);
+    }
+    // An attacker keeps guessing for the whole window.
+    for (let t = 5; t < 900_004; t += 1_000) {
+      const refused = await store.reserveAttempt('user1', t, window);
+      expect(refused).toEqual({ allowed: false, count: 6 });
+    }
+    // The window measured from the fifth counted attempt has passed: unlocked.
+    expect(await store.reserveAttempt('user1', 900_005, window)).toEqual({
+      allowed: true,
+      count: 1,
+    });
+  });
 });

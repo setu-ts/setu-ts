@@ -224,6 +224,8 @@ describe('AuthSessionService.promotePending', () => {
 
   it('appends the method, rotates the id, and clears the pending record', async () => {
     const harness = await pending(build(300_000));
+    // Written AFTER the pending signIn, exactly as a federated callback writes
+    // them: they belong to the sign-in being completed.
     harness.session.set(RP_PROVIDER_SESSION_KEY, 'idp');
     harness.session.set(ID_TOKEN_SESSION_KEY, 'id-token');
     harness.session.mutations.length = 0;
@@ -235,16 +237,43 @@ describe('AuthSessionService.promotePending', () => {
       at: 1_000,
     });
     expect(harness.session.get(PENDING_MFA_SESSION_KEY)).toBeUndefined();
-    // The prior sign-in's provider facts do not survive a new promotion.
-    expect(harness.session.get(RP_PROVIDER_SESSION_KEY)).toBeUndefined();
-    expect(harness.session.get(ID_TOKEN_SESSION_KEY)).toBeUndefined();
+    // Kept: deleting them would lose RP-initiated logout for every federated
+    // sign-in that needed a second factor.
+    expect(harness.session.get(RP_PROVIDER_SESSION_KEY)).toBe('idp');
+    expect(harness.session.get(ID_TOKEN_SESSION_KEY)).toBe('id-token');
     expect(harness.session.mutations).toEqual([
       `set:${AUTH_SESSION_KEY}`,
       `delete:${PENDING_MFA_SESSION_KEY}`,
-      `delete:${RP_PROVIDER_SESSION_KEY}`,
-      `delete:${ID_TOKEN_SESSION_KEY}`,
       'regenerate',
     ]);
+  });
+
+  it("a pending signIn clears an earlier sign-in's provider keys", async () => {
+    const harness = build(300_000);
+    harness.session.set(RP_PROVIDER_SESSION_KEY, 'idp');
+    harness.session.set(ID_TOKEN_SESSION_KEY, 'old-id-token');
+    await harness.impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(harness.session.get(RP_PROVIDER_SESSION_KEY)).toBeUndefined();
+    expect(harness.session.get(ID_TOKEN_SESSION_KEY)).toBeUndefined();
+  });
+
+  it('signIn tolerates a JavaScript caller omitting options', async () => {
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => 5,
+    });
+    const outcome = await impl.signIn(CTX, PRINCIPAL, undefined as unknown as { methods: [] });
+    expect(outcome).toEqual({ status: 'signed-in' });
+    expect(session.get(AUTH_SESSION_KEY)).toEqual({ principal: PRINCIPAL, methods: [], at: 5 });
+  });
+
+  it('pending() does not report an expired record', async () => {
+    const harness = await pending(build(1_000));
+    harness.setNow(2_000);
+    expect(harness.impl.pending(CTX)?.principal).toEqual(PRINCIPAL);
+    harness.setNow(2_001);
+    expect(harness.impl.pending(CTX)).toBeNull();
   });
 
   it('refuses a record older than the configured TTL and deletes it', async () => {

@@ -495,9 +495,19 @@ export interface MfaOptions {
   ) => boolean | Promise<boolean>;
   /**
    * How long a pending second-factor record may sit before it is refused, in
-   * milliseconds. Defaults to 300 000 (5 minutes).
+   * milliseconds. Defaults to 300 000 (5 minutes). Must be a positive integer;
+   * anything else is refused when `AuthPlugin(...)` is called.
    */
   readonly pendingTtlMs?: number;
+  /**
+   * Where a provider callback sends the browser when its sign-in resolved
+   * `second-factor-required` — the application's code form. A same-origin
+   * absolute path; anything else is refused when `AuthPlugin(...)` is called.
+   * Absent, the callback redirects to the sign-in's `returnTo`, where the
+   * application reads `IAuthSessionService.pending` to tell the
+   * pending state apart from an anonymous one.
+   */
+  readonly challengePath?: string;
 }
 
 /**

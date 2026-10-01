@@ -142,7 +142,8 @@ export interface IAuthSessionService {
    * which promote it to the signed-in key after a successful factor check.
    *
    * @param ctx - The request context whose session is read
-   * @returns The pending record, or `null` when none is stored
+   * @returns The pending record, or `null` when none is stored or it has
+   *   expired (an expired record can never be completed, so it is not reported)
    * @throws {Error} If the session middleware did not run for this request
    * @since 0.8.0
    */
