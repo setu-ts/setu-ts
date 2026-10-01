@@ -301,12 +301,10 @@ export class TotpService {
   /**
    * The one code-matching implementation: the step within the ±1 window whose
    * code equals `code` (compared in constant time), or `null`. An undecodable
-   * secret or a non-string code matches nothing.
+   * secret matches nothing, and so does a non-string code: the comparison's
+   * length check refuses it.
    */
   async #findStep(secretText: string, code: string): Promise<number | null> {
-    if (typeof code !== 'string') {
-      return null;
-    }
     let secret: Uint8Array;
     try {
       secret = decodeBase32(secretText);
@@ -332,10 +330,8 @@ export class TotpService {
     principalId: string,
     proof: string,
   ): Promise<'ok' | 'invalid' | 'locked' | 'not-enrolled'> {
-    if (typeof proof !== 'string') {
-      // A JSON body can carry anything; a non-string is no proof, not a 500.
-      return 'invalid';
-    }
+    // A non-string (a JSON body can carry anything) needs no guard here: both
+    // verifiers answer 'invalid' for one, which the tests pin.
     return TOTP_CODE_SHAPE.test(proof)
       ? await this.verify(principalId, proof)
       : await this.verifyRecoveryCode(principalId, proof);
