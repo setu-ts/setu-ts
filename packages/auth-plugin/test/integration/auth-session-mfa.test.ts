@@ -38,7 +38,10 @@ interface MfaHarness {
   readonly runtime: IRuntimeServices;
 }
 
-async function buildMfaApp(mfa: MfaOptions): Promise<MfaHarness> {
+async function buildMfaApp(
+  mfa: MfaOptions,
+  options: { readonly passwordOnly?: boolean } = {},
+): Promise<MfaHarness> {
   const key = await generateTestKey('RS256', 'k1');
   const { http, requests } = createFakeHttp({
     [`${ISSUER}/.well-known/openid-configuration`]: {
@@ -86,13 +89,12 @@ async function buildMfaApp(mfa: MfaOptions): Promise<MfaHarness> {
     plugins: [
       RuntimePlugin(),
       SessionPlugin({ secret: SESSION_SECRET }),
-      AuthPlugin({
-        http,
-        signIn: {
-          providers: [oidc],
-          mfa,
-        },
-      }),
+      // `passwordOnly`: no provider at all — the README's password-only shape.
+      AuthPlugin(
+        options.passwordOnly === true
+          ? { signIn: { providers: [], mfa } }
+          : { http, signIn: { providers: [oidc], mfa } },
+      ),
     ],
   });
 
@@ -296,6 +298,18 @@ describe('auth-session MFA', () => {
 
   afterEach(async () => {
     await harness.app.stop();
+  });
+
+  it('a password-only application (no provider) runs the whole second-factor flow', async () => {
+    harness = await buildMfaApp(ALWAYS_REQUIRED, { passwordOnly: true });
+    const jar = new CookieJar();
+    const secret = await enrolAndConfirm(harness, jar);
+    const confirmedAt = totpCounter(harness.runtime.now());
+    await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+    expect(
+      await complete(harness, jar, await codeForStep(harness, secret, confirmedAt + 1)),
+    ).toBe('signed-in');
+    expect((await jar.fetch(harness.app, '/protected')).status).toBe(200);
   });
 
   it('password sign-in with MFA required returns second-factor-required', async () => {

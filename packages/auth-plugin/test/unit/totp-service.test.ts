@@ -220,6 +220,30 @@ describe('TotpService', () => {
     expect(await ctx.service.verify('user1', await codeAtStep(ctx, 'user1', 6))).toBe('invalid');
   });
 
+  it('a wrong new code does not spend a recovery code offered as proof', async () => {
+    const ctx = buildService(59_000);
+    const codes = await enrolledAndConfirmed(ctx, 'user1');
+    advanceToStep(ctx, 3);
+    await ctx.service.beginEnrolment('user1', 'new-device');
+    const result = await ctx.service.confirmEnrolment('user1', '000000', codes[0]);
+    expect(result.status).toBe('invalid');
+    // The proof was never consulted, so the recovery code is still unused.
+    expect(await ctx.service.verifyRecoveryCode('user1', codes[0] ?? '')).toBe('ok');
+  });
+
+  it('a non-string proof or code answers invalid rather than throwing', async () => {
+    const ctx = buildService(59_000);
+    await enrolledAndConfirmed(ctx, 'user1');
+    advanceToStep(ctx, 3);
+    const { secret } = await ctx.service.beginEnrolment('user1', 'new-device');
+    const fromJson = 123456 as unknown as string;
+    const newCode = await codeForSecret(ctx, secret, 3);
+    expect((await ctx.service.confirmEnrolment('user1', newCode, fromJson)).status).toBe('invalid');
+    expect((await ctx.service.generateRecoveryCodes('user1', fromJson)).status).toBe('invalid');
+    expect(await ctx.service.verifyRecoveryCode('user1', fromJson)).toBe('invalid');
+    expect(await ctx.service.verify('user1', fromJson)).toBe('invalid');
+  });
+
   it('a secret staged during a confirmation is not confirmed by it (M1)', async () => {
     // A shared store's read takes real time. The victim's confirmation reads
     // their secret; while that read is in flight a password holder, pending as
