@@ -20,6 +20,7 @@ import type { IAuthSessionService, IRequestContext } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { TotpService } from '../../src/mfa/totp-service.ts';
 import { MemoryTotpStore } from '../../src/stores/totp-store.ts';
+import type { ITotpStore } from '../../src/stores/totp-store.ts';
 import { AuthSessionService } from '../../src/sign-in/auth-session-service.ts';
 import { decodeBase32 } from '../../src/mfa/base32.ts';
 import { computeTotpCode, TOTP_PERIOD_SECONDS, totpCounter } from '../../src/mfa/totp-codes.ts';
@@ -217,6 +218,47 @@ describe('TotpService', () => {
     expect(await ctx.service.verify('user1', await codeAtStep(ctx, 'user1', 4))).toBe('ok');
     // Two steps after the current counter is never computed.
     expect(await ctx.service.verify('user1', await codeAtStep(ctx, 'user1', 6))).toBe('invalid');
+  });
+
+  it('a secret staged during a confirmation is not confirmed by it (M1)', async () => {
+    // A shared store's read takes real time. The victim's confirmation reads
+    // their secret; while that read is in flight a password holder, pending as
+    // the victim, stages their OWN secret. Confirming whatever is staged at
+    // write time would hand the attacker the factor while telling the victim
+    // it succeeded — so the confirmation must refuse instead.
+    const runtime = createFakeRuntime(59_000);
+    const inner = new MemoryTotpStore();
+    let slowReads = false;
+    // Every write delegates to the real store; only the read is slowed.
+    const store: ITotpStore = {
+      getEnrolment: async (principalId) => {
+        const record = await inner.getEnrolment(principalId);
+        if (slowReads) await new Promise((resolve) => setTimeout(resolve, 20));
+        return record;
+      },
+      stageSecret: (id, secret, label) => inner.stageSecret(id, secret, label),
+      confirmSecret: (id, secret, minStep) => inner.confirmSecret(id, secret, minStep),
+      deleteEnrolment: (id) => inner.deleteEnrolment(id),
+      claimStep: (id, step) => inner.claimStep(id, step),
+      reserveAttempt: (id, now, options) => inner.reserveAttempt(id, now, options),
+      clearAttempts: (id) => inner.clearAttempts(id),
+      saveRecoveryCodes: (id, digests) => inner.saveRecoveryCodes(id, digests),
+      consumeRecoveryCode: (id, digest) => inner.consumeRecoveryCode(id, digest),
+    };
+    const service = new TotpService({ store, runtime, issuer: 'TestApp' });
+    const ctx: TestContext = { service, runtime, store: inner };
+
+    const { secret: victim } = await service.beginEnrolment('user1', 'victim');
+    const victimCode = await codeForSecret(ctx, victim, totpCounter(runtime.now()));
+    slowReads = true;
+    const confirming = service.confirmEnrolment('user1', victimCode);
+    const { secret: attacker } = await service.beginEnrolment('user1', 'attacker');
+    const result = await confirming;
+
+    expect(result.status).toBe('invalid');
+    const stored = await inner.getEnrolment('user1');
+    expect(stored?.secret).toBe(attacker);
+    expect(stored?.confirmed).toBe(false);
   });
 
   it('disable removes the enrolment given proof of the factor', async () => {

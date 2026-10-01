@@ -60,12 +60,32 @@ export interface ITotpStore {
   getEnrolment(principalId: string): Promise<TotpEnrolment | null>;
 
   /**
-   * Stores or updates an enrolment, including its optional pending secret. A
-   * backend that persists only some fields must persist `pendingSecret` and
-   * `pendingLabel` too: a re-enrolment awaiting confirmation is otherwise lost,
-   * and the old confirmed secret comes back.
+   * Atomically stages `secret` as the one awaiting confirmation.
+   *
+   * - No enrolment: creates an unconfirmed one with `lastClaimedStep` 0.
+   * - An unconfirmed enrolment: replaces its `secret`/`label`.
+   * - A confirmed enrolment: sets `pendingSecret`/`pendingLabel`, leaving the
+   *   confirmed secret in force.
+   *
+   * It NEVER writes `lastClaimedStep` or `confirmed` on an existing record. That
+   * is the point of it being a single operation rather than a read followed by
+   * a whole-record write: a write-back racing a concurrent `claimStep` would roll
+   * the claimed step back and reopen replay of a code just used.
    */
-  saveEnrolment(principalId: string, enrolment: TotpEnrolment): Promise<void>;
+  stageSecret(principalId: string, secret: string, label: string): Promise<void>;
+
+  /**
+   * Atomically confirms `secret`, but only if it is STILL the one awaiting
+   * confirmation (the pending secret of a confirmed enrolment, else the secret
+   * of an unconfirmed one): it becomes the active, confirmed secret, the pending
+   * fields are cleared, and `lastClaimedStep` is raised to at least `minStep`.
+   *
+   * Returns `false`, changing nothing, when another secret was staged meanwhile —
+   * the code the caller checked belongs to a secret that is no longer awaiting,
+   * and confirming the new one on its strength would confirm a secret nobody
+   * proved.
+   */
+  confirmSecret(principalId: string, secret: string, minStep: number): Promise<boolean>;
 
   /**
    * Deletes the enrolment for a principal, including any recovery codes
@@ -206,9 +226,46 @@ export class MemoryTotpStore implements ITotpStore {
     return Promise.resolve({ ...record });
   }
 
-  saveEnrolment(principalId: string, enrolment: TotpEnrolment): Promise<void> {
-    this.#enrolments.set(principalId, { ...enrolment });
+  stageSecret(principalId: string, secret: string, label: string): Promise<void> {
+    const record = this.#enrolments.get(principalId);
+    if (record === undefined) {
+      this.#enrolments.set(principalId, {
+        secret,
+        label,
+        confirmed: false,
+        lastClaimedStep: 0,
+      });
+    } else if (record.confirmed) {
+      record.pendingSecret = secret;
+      record.pendingLabel = label;
+    } else {
+      // Unconfirmed: the record is replaced, keeping its claimed step.
+      this.#enrolments.set(principalId, {
+        secret,
+        label,
+        confirmed: false,
+        lastClaimedStep: record.lastClaimedStep,
+      });
+    }
     return Promise.resolve();
+  }
+
+  confirmSecret(principalId: string, secret: string, minStep: number): Promise<boolean> {
+    const record = this.#enrolments.get(principalId);
+    if (record === undefined) {
+      return Promise.resolve(false);
+    }
+    const awaiting = record.confirmed ? record.pendingSecret : record.secret;
+    if (awaiting !== secret) {
+      return Promise.resolve(false);
+    }
+    this.#enrolments.set(principalId, {
+      secret,
+      label: record.confirmed ? (record.pendingLabel ?? record.label) : record.label,
+      confirmed: true,
+      lastClaimedStep: Math.max(record.lastClaimedStep, minStep),
+    });
+    return Promise.resolve(true);
   }
 
   deleteEnrolment(principalId: string): Promise<void> {

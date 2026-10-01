@@ -9,15 +9,17 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MemoryTotpStore, sweepExpiredAttempts } from '../../src/stores/totp-store.ts';
 
+/** A store holding a CONFIRMED factor whose last claimed step is `step`. */
+async function confirmedStore(step = 0): Promise<MemoryTotpStore> {
+  const store = new MemoryTotpStore();
+  await store.stageSecret('user1', 'TESTSECRET', 'test');
+  expect(await store.confirmSecret('user1', 'TESTSECRET', step)).toBe(true);
+  return store;
+}
+
 describe('MemoryTotpStore', () => {
   it('concurrent claimStep yields exactly one success', async () => {
-    const store = new MemoryTotpStore();
-    await store.saveEnrolment('user1', {
-      secret: 'TESTSECRET',
-      label: 'test',
-      confirmed: true,
-      lastClaimedStep: 0,
-    });
+    const store = await confirmedStore();
 
     const results = await Promise.all(
       Array.from({ length: 10 }, () => store.claimStep('user1', 5)),
@@ -27,13 +29,7 @@ describe('MemoryTotpStore', () => {
   });
 
   it('claimStep refuses a step at or below the last claimed', async () => {
-    const store = new MemoryTotpStore();
-    await store.saveEnrolment('user1', {
-      secret: 'TESTSECRET',
-      label: 'test',
-      confirmed: true,
-      lastClaimedStep: 5,
-    });
+    const store = await confirmedStore(5);
 
     expect(await store.claimStep('user1', 5)).toBe(false);
     expect(await store.claimStep('user1', 4)).toBe(false);
@@ -46,15 +42,13 @@ describe('MemoryTotpStore', () => {
     expect(await store.claimStep('unknown', 5)).toBe(false);
   });
 
-  it('round-trips a pending secret without disturbing the confirmed one', async () => {
+  it('stageSecret on a confirmed factor sets the pending secret and touches nothing else', async () => {
     const store = new MemoryTotpStore();
-    await store.saveEnrolment('user1', {
-      secret: 'OLDCONFIRMED',
-      label: 'alice@old',
-      confirmed: true,
-      lastClaimedStep: 7,
-    });
-    await store.saveEnrolment('user1', {
+    await store.stageSecret('user1', 'OLDCONFIRMED', 'alice@old');
+    await store.confirmSecret('user1', 'OLDCONFIRMED', 7);
+    await store.stageSecret('user1', 'NEWUNCONFIRMED', 'alice@new');
+
+    expect(await store.getEnrolment('user1')).toEqual({
       secret: 'OLDCONFIRMED',
       label: 'alice@old',
       confirmed: true,
@@ -62,31 +56,62 @@ describe('MemoryTotpStore', () => {
       pendingSecret: 'NEWUNCONFIRMED',
       pendingLabel: 'alice@new',
     });
-
-    const stored = await store.getEnrolment('user1');
-    expect(stored?.secret).toBe('OLDCONFIRMED');
-    expect(stored?.pendingSecret).toBe('NEWUNCONFIRMED');
-    expect(stored?.pendingLabel).toBe('alice@new');
-    // The step counter survives the re-enrolment write.
-    expect(stored?.lastClaimedStep).toBe(7);
-    // And the old secret's claimed step is still refused.
+    // The old secret's claimed step is still refused.
     expect(await store.claimStep('user1', 7)).toBe(false);
   });
 
-  it('a saved enrolment without a pending secret reads back without one', async () => {
+  it('stageSecret creates, then replaces, an unconfirmed enrolment keeping its step', async () => {
     const store = new MemoryTotpStore();
-    await store.saveEnrolment('user1', {
-      secret: 'AAA',
-      label: 'a',
-      confirmed: false,
-      lastClaimedStep: 0,
-    });
+    await store.stageSecret('user1', 'AAA', 'a');
     expect(await store.getEnrolment('user1')).toEqual({
       secret: 'AAA',
       label: 'a',
       confirmed: false,
       lastClaimedStep: 0,
     });
+    expect(await store.claimStep('user1', 9)).toBe(true);
+    await store.stageSecret('user1', 'BBB', 'b');
+    expect(await store.getEnrolment('user1')).toEqual({
+      secret: 'BBB',
+      label: 'b',
+      confirmed: false,
+      lastClaimedStep: 9,
+    });
+  });
+
+  it('stageSecret never rolls back a step claimed between a read and the write (M1)', async () => {
+    // The race a whole-record write-back loses: a step is claimed after the
+    // service's read but before its write. stageSecret has no read to be stale.
+    const store = await confirmedStore(3);
+    expect(await store.claimStep('user1', 4)).toBe(true);
+    await store.stageSecret('user1', 'NEWSECRET', 'new');
+    expect((await store.getEnrolment('user1'))?.lastClaimedStep).toBe(4);
+    expect(await store.claimStep('user1', 4)).toBe(false);
+  });
+
+  it('confirmSecret confirms only the secret still awaiting confirmation', async () => {
+    const store = new MemoryTotpStore();
+    expect(await store.confirmSecret('nobody', 'X', 1)).toBe(false);
+
+    // First enrolment: a secret staged after the one checked wins nothing.
+    await store.stageSecret('user1', 'VICTIM', 'v');
+    await store.stageSecret('user1', 'ATTACKER', 'a');
+    expect(await store.confirmSecret('user1', 'VICTIM', 2)).toBe(false);
+    expect((await store.getEnrolment('user1'))?.confirmed).toBe(false);
+    expect(await store.confirmSecret('user1', 'ATTACKER', 2)).toBe(true);
+
+    // Re-enrolment: the pending secret is swapped in, the step only rises.
+    await store.stageSecret('user1', 'NEXT', 'next');
+    expect(await store.confirmSecret('user1', 'ATTACKER', 9)).toBe(false);
+    expect(await store.confirmSecret('user1', 'NEXT', 1)).toBe(true);
+    expect(await store.getEnrolment('user1')).toEqual({
+      secret: 'NEXT',
+      label: 'next',
+      confirmed: true,
+      lastClaimedStep: 2,
+    });
+    // A confirmed factor with nothing pending has nothing awaiting.
+    expect(await store.confirmSecret('user1', 'NEXT', 5)).toBe(false);
   });
 
   it('concurrent reserveAttempt counts correctly', async () => {
@@ -158,13 +183,7 @@ describe('MemoryTotpStore', () => {
   });
 
   it('deleteEnrolment removes enrolment, attempts, and recovery codes', async () => {
-    const store = new MemoryTotpStore();
-    await store.saveEnrolment('user1', {
-      secret: 'TESTSECRET',
-      label: 'test',
-      confirmed: true,
-      lastClaimedStep: 0,
-    });
+    const store = await confirmedStore();
     await store.saveRecoveryCodes('user1', ['digest-a']);
     await store.reserveAttempt('user1', 59_000, { limit: 5, windowMs: 900_000 });
 

@@ -298,7 +298,7 @@ function compileOAuth2(
  *
  * @param config - The configured value
  * @returns The compiled configuration, with route paths and defaults applied
- * @throws {AuthPluginConfigurationError} On an empty provider list, a duplicate or
+ * @throws {AuthPluginConfigurationError} On an empty provider list with no `mfa`, a duplicate or
  *   malformed name, a bad base path, a credential/secret mismatch, a `redirectUri`
  *   that does not end with the provider's callback path, a `failureRedirect` that is
  *   not same-origin, an `oidc` provider without the `openid` scope, an `oauth2`
@@ -318,8 +318,16 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   }
   // `/` means no prefix at all; keeping it literal would build `//acme/login`.
   const basePath = configured === '/' ? '' : configured;
-  if (!Array.isArray(config.providers) || config.providers.length === 0) {
-    throw new AuthPluginConfigurationError('auth-plugin: signIn needs at least one provider');
+  // An empty list is a mistake UNLESS `mfa` is set: a password-only application
+  // signs in through IAuthSessionService.signIn itself and needs `signIn` only
+  // for the auth-session capability, the pending state and the logout route.
+  if (
+    !Array.isArray(config.providers) ||
+    (config.providers.length === 0 && config.mfa === undefined)
+  ) {
+    throw new AuthPluginConfigurationError(
+      'auth-plugin: signIn needs at least one provider, or signIn.mfa for a password-only sign-in',
+    );
   }
 
   const names = new Set<string>();

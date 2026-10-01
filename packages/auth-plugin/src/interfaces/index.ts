@@ -518,7 +518,13 @@ export interface MfaOptions {
 export interface SignInConfig {
   /** Route prefix. Defaults to `/auth`. */
   readonly basePath?: string;
-  /** The providers to offer. At least one. */
+  /**
+   * The providers to offer. At least one — unless `mfa` is set, when an empty
+   * list configures a password-only sign-in: the application records its own
+   * principal through `IAuthSessionService.signIn`, and `signIn` supplies the
+   * auth-session capability, the pending second-factor state and the logout
+   * route.
+   */
   readonly providers: readonly SignInProvider[];
   /**
    * Re-read the principal on every request instead of trusting the session

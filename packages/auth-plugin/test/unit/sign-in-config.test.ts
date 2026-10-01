@@ -96,6 +96,10 @@ describe('compileSignIn', () => {
 
   it('refuses an empty provider list and an unknown kind', () => {
     expect(refusal(config([]))).toContain('at least one provider');
+    // With mfa it is a password-only sign-in, not a mistake.
+    const passwordOnly = compileSignIn({ providers: [], mfa: { required: () => true } });
+    expect(passwordOnly.providers).toEqual([]);
+    expect(passwordOnly.mfa).not.toBeNull();
     expect(refusal(config([{ ...oidc(), kind: 'saml' }]))).toContain("must be 'oidc' or 'oauth2'");
   });
 

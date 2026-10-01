@@ -159,25 +159,9 @@ export class TotpService {
     const uri = `otpauth://totp/${encodeURIComponent(this.#issuer)}:${encodeURIComponent(label)}` +
       `?secret=${secret}&issuer=${encodeURIComponent(this.#issuer)}` +
       `&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_PERIOD_SECONDS}`;
-    const existing = await this.#store.getEnrolment(principalId);
-    if (existing !== null && existing.confirmed) {
-      // A confirmed factor stays in force; the new secret waits for confirmation.
-      await this.#store.saveEnrolment(principalId, {
-        secret: existing.secret,
-        label: existing.label,
-        confirmed: true,
-        lastClaimedStep: existing.lastClaimedStep,
-        pendingSecret: secret,
-        pendingLabel: label,
-      });
-    } else {
-      await this.#store.saveEnrolment(principalId, {
-        secret,
-        label,
-        confirmed: false,
-        lastClaimedStep: existing?.lastClaimedStep ?? 0,
-      });
-    }
+    // One atomic store operation, never a read followed by a whole-record write:
+    // a write-back racing a sign-in's step claim would roll the claimed step back.
+    await this.#store.stageSecret(principalId, secret, label);
     return { secret, uri };
   }
 
@@ -216,50 +200,40 @@ export class TotpService {
     if (existing === null) {
       return { status: 'not-enrolled' };
     }
-
-    if (existing.confirmed && existing.pendingSecret !== undefined) {
+    const replacing = existing.confirmed && existing.pendingSecret !== undefined;
+    if (replacing && proof === undefined) {
       // Re-enrolment: the current factor must be proven before anything moves.
-      if (proof === undefined) {
-        return { status: 'proof-required' };
-      }
-      const proven = await this.#verifyProof(principalId, proof);
+      return { status: 'proof-required' };
+    }
+    // The secret this code is checked against: the one awaiting confirmation,
+    // or — for a confirmed factor with nothing pending — the factor itself, in
+    // which case the code is its own proof and the call re-mints the codes.
+    const awaiting = existing.pendingSecret ?? existing.secret;
+
+    // The NEW code is checked first, so a mistyped one does not spend a
+    // recovery code offered as proof.
+    const step = await this.#matchStep(principalId, awaiting, code);
+    if (typeof step !== 'number') {
+      return { status: step };
+    }
+    if (replacing) {
+      const proven = await this.#verifyProof(principalId, proof ?? '');
       if (proven !== 'ok') {
         return { status: proven };
       }
-      // Re-read: the proof claimed a step or consumed a code.
-      const current = await this.#store.getEnrolment(principalId);
-      if (current === null || current.pendingSecret === undefined) {
-        return { status: 'not-enrolled' };
-      }
-      const step = await this.#matchStep(principalId, current.pendingSecret, code);
-      if (typeof step !== 'number') {
-        return { status: step };
-      }
-      await this.#store.saveEnrolment(principalId, {
-        secret: current.pendingSecret,
-        label: current.pendingLabel ?? current.label,
-        confirmed: true,
-        // The proof may already have claimed this step under the old secret.
-        lastClaimedStep: Math.max(current.lastClaimedStep, step),
-      });
-      return { status: 'ok', recoveryCodes: await this.#mintRecoveryCodes(principalId) };
+    } else if (!(await this.#store.claimStep(principalId, step))) {
+      // The code's step is already spent: a replay.
+      return { status: 'invalid' };
     }
+    await this.#store.clearAttempts(principalId);
 
-    const result = await this.#verifyCode(principalId, code, true);
-    if (result !== 'ok') {
-      return { status: result };
+    if (!existing.confirmed || replacing) {
+      // Atomic, and only if `awaiting` is STILL the staged secret: a secret
+      // staged concurrently must not be confirmed on the strength of this code.
+      if (!(await this.#store.confirmSecret(principalId, awaiting, step))) {
+        return { status: 'invalid' };
+      }
     }
-    // Re-read: claiming the step mutated the stored record.
-    const enrolment = await this.#store.getEnrolment(principalId);
-    if (enrolment === null) {
-      return { status: 'not-enrolled' };
-    }
-    await this.#store.saveEnrolment(principalId, {
-      secret: enrolment.pendingSecret ?? enrolment.secret,
-      label: enrolment.pendingLabel ?? enrolment.label,
-      confirmed: true,
-      lastClaimedStep: enrolment.lastClaimedStep,
-    });
     return { status: 'ok', recoveryCodes: await this.#mintRecoveryCodes(principalId) };
   }
 
@@ -280,101 +254,73 @@ export class TotpService {
    * @param code - The six-digit code
    * @returns The verification result
    */
-  verify(principalId: string, code: string): Promise<TotpVerifyResult> {
-    return this.#verifyCode(principalId, code, false);
-  }
-
-  /**
-   * The one code-verification implementation.
-   *
-   * @param principalId - The principal to verify for
-   * @param code - The six-digit code
-   * @param allowUnconfirmed - When `true`, the secret awaiting confirmation is
-   *   the one tried, and an unconfirmed enrolment is not refused. Only
-   *   {@linkcode confirmEnrolment} passes `true`.
-   */
-  async #verifyCode(
-    principalId: string,
-    code: string,
-    allowUnconfirmed: boolean,
-  ): Promise<TotpVerifyResult> {
-    const now = this.#runtime.now();
-    const attempt = await this.#store.reserveAttempt(principalId, now, {
-      limit: LOCKOUT_LIMIT,
-      windowMs: LOCKOUT_WINDOW_MS,
-    });
-    if (!attempt.allowed) {
+  async verify(principalId: string, code: string): Promise<TotpVerifyResult> {
+    // Lockout first: a locked principal is refused before its record is read or
+    // any code is computed.
+    if (!(await this.#reserve(principalId))) {
       return 'locked';
     }
-
     const enrolment = await this.#store.getEnrolment(principalId);
-    if (enrolment === null) {
-      return 'not-enrolled';
-    }
-    if (!allowUnconfirmed && !enrolment.confirmed) {
+    if (enrolment === null || !enrolment.confirmed) {
       // A factor the user has never confirmed is not a factor yet.
       return 'not-enrolled';
     }
-    const secretText = allowUnconfirmed
-      ? (enrolment.pendingSecret ?? enrolment.secret)
-      : enrolment.secret;
-
-    let secret: Uint8Array;
-    try {
-      secret = decodeBase32(secretText);
-    } catch {
+    const step = await this.#findStep(enrolment.secret, code);
+    if (step === null || !(await this.#store.claimStep(principalId, step))) {
       return 'invalid';
     }
-    const current = totpCounter(now);
-
-    for (let delta = -TOTP_WINDOW; delta <= TOTP_WINDOW; delta++) {
-      const step = current + delta;
-      const candidate = await computeTotpCode(this.#runtime.subtle, secret, step);
-      if (constantTimeEquals(candidate, code)) {
-        const claimed = await this.#store.claimStep(principalId, step);
-        if (!claimed) {
-          return 'invalid';
-        }
-        await this.#store.clearAttempts(principalId);
-        return 'ok';
-      }
-    }
-    return 'invalid';
+    await this.#store.clearAttempts(principalId);
+    return 'ok';
   }
 
   /**
-   * Checks a code against a secret that is not yet the active one, counting the
-   * attempt toward lockout, without claiming a step: the caller decides what
-   * the matched step means. Returns the matched step, or why it was refused.
+   * Checks a code against a secret, counting the attempt toward lockout,
+   * without claiming a step or clearing the count: the caller decides what the
+   * matched step means. Returns the matched step, or why it was refused.
    */
   async #matchStep(
     principalId: string,
     secretText: string,
     code: string,
   ): Promise<number | 'invalid' | 'locked'> {
-    const now = this.#runtime.now();
-    const attempt = await this.#store.reserveAttempt(principalId, now, {
+    if (!(await this.#reserve(principalId))) {
+      return 'locked';
+    }
+    return (await this.#findStep(secretText, code)) ?? 'invalid';
+  }
+
+  /** Reserves one attempt against the lockout; `false` when locked out. */
+  async #reserve(principalId: string): Promise<boolean> {
+    const attempt = await this.#store.reserveAttempt(principalId, this.#runtime.now(), {
       limit: LOCKOUT_LIMIT,
       windowMs: LOCKOUT_WINDOW_MS,
     });
-    if (!attempt.allowed) {
-      return 'locked';
+    return attempt.allowed;
+  }
+
+  /**
+   * The one code-matching implementation: the step within the ±1 window whose
+   * code equals `code` (compared in constant time), or `null`. An undecodable
+   * secret or a non-string code matches nothing.
+   */
+  async #findStep(secretText: string, code: string): Promise<number | null> {
+    if (typeof code !== 'string') {
+      return null;
     }
     let secret: Uint8Array;
     try {
       secret = decodeBase32(secretText);
     } catch {
-      return 'invalid';
+      return null;
     }
-    const current = totpCounter(now);
+    const current = totpCounter(this.#runtime.now());
     for (let delta = -TOTP_WINDOW; delta <= TOTP_WINDOW; delta++) {
       const candidate = await computeTotpCode(this.#runtime.subtle, secret, current + delta);
       if (constantTimeEquals(candidate, code)) {
-        await this.#store.clearAttempts(principalId);
         return current + delta;
       }
     }
-    return 'invalid';
+    return null;
   }
 
   /**
@@ -386,6 +332,10 @@ export class TotpService {
     principalId: string,
     proof: string,
   ): Promise<'ok' | 'invalid' | 'locked' | 'not-enrolled'> {
+    if (typeof proof !== 'string') {
+      // A JSON body can carry anything; a non-string is no proof, not a 500.
+      return 'invalid';
+    }
     return TOTP_CODE_SHAPE.test(proof)
       ? await this.verify(principalId, proof)
       : await this.verifyRecoveryCode(principalId, proof);
@@ -459,15 +409,12 @@ export class TotpService {
    * @returns The verification result
    */
   async verifyRecoveryCode(principalId: string, code: string): Promise<RecoveryVerifyResult> {
-    const now = this.#runtime.now();
-    const attempt = await this.#store.reserveAttempt(principalId, now, {
-      limit: LOCKOUT_LIMIT,
-      windowMs: LOCKOUT_WINDOW_MS,
-    });
-    if (!attempt.allowed) {
+    if (!(await this.#reserve(principalId))) {
       return 'locked';
     }
-
+    if (typeof code !== 'string') {
+      return 'invalid';
+    }
     // Normalise, then require the exact canonical shape BEFORE decoding: a
     // decoded-length check would still accept a code with trailing characters.
     const normalised = code.trim().toUpperCase();
