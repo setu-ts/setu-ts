@@ -197,6 +197,24 @@ describe('MemoryTotpStore', () => {
     });
   });
 
+  it('a principal whose first attempt triggers a sweep is still counted', async () => {
+    const store = new MemoryTotpStore();
+    const window = { limit: 5, windowMs: 1_000 };
+    // One short of the initial sweep threshold (1 024) of expired entries, so a
+    // NEW principal's entry is the one that reaches it. Sweeping after that entry
+    // is created would delete it (an empty entry counts as expired) and count
+    // into a detached object, so the next attempt would start again at 1.
+    for (let i = 0; i < 1_023; i++) await store.reserveAttempt(`old-${i}`, 0, window);
+    expect(await store.reserveAttempt('fresh', 10_000, window)).toEqual({
+      allowed: true,
+      count: 1,
+    });
+    expect(await store.reserveAttempt('fresh', 10_001, window)).toEqual({
+      allowed: true,
+      count: 2,
+    });
+  });
+
   it('a principal inside its window keeps its lock through sweeps', async () => {
     const store = new MemoryTotpStore();
     const window = { limit: 5, windowMs: 1_000 };
