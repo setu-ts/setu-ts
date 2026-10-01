@@ -685,8 +685,8 @@ All notable changes to this project are documented here. The format follows
   command its toolchain does not use. It now prints the project's own install command —
   `npm install` for Node and Cloudflare Workers, `bun install` for Bun, and
   `deno install --min-dep-age 0` for Deno — and, when it writes an npm-compat `package.json` entry
-  into a project whose `.npmrc` does not route the `@jsr` scope, prints the registry line the
-  install needs. `setu add` still never installs for you.
+  into a Node, Bun or Workers project whose `.npmrc` does not route the `@jsr` scope, prints the
+  registry line the install needs. `setu add` still never installs for you.
 - **`setu add` at a workspace root wrote the pin into the root and exited `0`.** Framework packages
   are pinned per member, and `setu generate` reads the member's manifest for plugin gating, so the
   package looked installed while no member could use it. A workspace root — recognised by

@@ -443,6 +443,19 @@ describe('setu add — install command per runtime', () => {
     expect(h.out.join('\n')).not.toContain('.npmrc');
   });
 
+  it('says nothing about .npmrc for a Deno project that carries a package.json', async () => {
+    // The full-stack template on Deno: a `package.json` for the Vite build, no
+    // `start` script, no `.npmrc`. `deno install` resolves `npm:@jsr/…` itself.
+    const h = harness({
+      '/app/deno.json': DENO_MANIFEST,
+      '/app/package.json': JSON.stringify({ name: 'web', scripts: { build: 'vite build' } }),
+    });
+    expect(await h.run(['cache'])).toBe(0);
+    const out = h.out.join('\n');
+    expect(out).toContain('  deno install --min-dep-age 0');
+    expect(out).not.toContain('.npmrc');
+  });
+
   it('says nothing about .npmrc for a Deno project, which writes no npm entry', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST });
     await h.run(['cache']);

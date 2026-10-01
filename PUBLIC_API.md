@@ -8189,9 +8189,9 @@ it:
 
 That is deliberate. On the day of a release the pin is younger than Deno's 24-hour
 minimum-dependency-age policy, so the flags need to be visible rather than buried in a failing
-subprocess — and it keeps the command free of the `run` permission. When it writes a `package.json`
-entry and the project's `.npmrc` does not route the `@jsr` scope to JSR, it also prints the
-`@jsr:registry=https://npm.jsr.io` line the install needs.
+subprocess — and it keeps the command free of the `run` permission. On Node, Bun or Workers, when it
+writes a `package.json` entry and the project's `.npmrc` does not route the `@jsr` scope to JSR, it
+also prints the `@jsr:registry=https://npm.jsr.io` line the install needs.
 
 A **workspace root** is refused (exit `2`, nothing written) — recognised by `setu.workspace.json`, a
 `deno.json` `workspace` key, or a `package.json` `workspaces` key. Framework packages are pinned in

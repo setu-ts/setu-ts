@@ -392,7 +392,10 @@ export async function runAddCommand(
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
-  if (edits.some((edit) => edit.path === joinPath(dir, 'package.json'))) {
+  // Deno is excluded on measurement, not assumption: a Deno full-stack project
+  // carries a `package.json` (its Vite build) and no `.npmrc`, and
+  // `deno install` resolves the `npm:@jsr/…` entry there without one.
+  if (runtime !== 'deno' && edits.some((edit) => edit.path === joinPath(dir, 'package.json'))) {
     await printJsrRegistryNote(deps.fs, dir, deps.log);
   }
   printPermissionNote(specifier, deps.log);
