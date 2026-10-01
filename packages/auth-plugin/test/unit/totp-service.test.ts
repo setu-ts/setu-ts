@@ -70,11 +70,19 @@ function currentCode(ctx: TestContext, principalId: string): Promise<string> {
   return codeAtStep(ctx, principalId, totpCounter(ctx.runtime.now()));
 }
 
-/** Enrols and confirms a factor at counter 1, spending that step. */
-async function enrolledAndConfirmed(ctx: TestContext, principalId: string): Promise<void> {
+/**
+ * Enrols and confirms a factor at counter 1, spending that step, and returns
+ * the recovery codes confirmation minted.
+ */
+async function enrolledAndConfirmed(
+  ctx: TestContext,
+  principalId: string,
+): Promise<readonly string[]> {
   await ctx.service.beginEnrolment(principalId, 'alice');
   const code = await currentCode(ctx, principalId);
-  expect(await ctx.service.confirmEnrolment(principalId, code)).toBe('ok');
+  const result = await ctx.service.confirmEnrolment(principalId, code);
+  if (result.status !== 'ok') throw new Error(`confirmation refused: ${result.status}`);
+  return result.recoveryCodes;
 }
 
 describe('TotpService', () => {
@@ -95,7 +103,10 @@ describe('TotpService', () => {
     const ctx = buildService(59_000);
     await ctx.service.beginEnrolment('user1', 'alice');
     const code = await currentCode(ctx, 'user1');
-    expect(await ctx.service.confirmEnrolment('user1', code)).toBe('ok');
+    const result = await ctx.service.confirmEnrolment('user1', code);
+    expect(result.status).toBe('ok');
+    // Confirmation mints the first recovery-code set.
+    expect(result.status === 'ok' ? result.recoveryCodes : []).toHaveLength(10);
     const enrolment = await ctx.store.getEnrolment('user1');
     expect(enrolment?.confirmed).toBe(true);
   });
@@ -128,7 +139,7 @@ describe('TotpService', () => {
     expect(await ctx.service.verify('user1', code)).toBe('not-enrolled');
     // confirmEnrolment is the one path that accepts the unconfirmed secret, and
     // that same code confirms it.
-    expect(await ctx.service.confirmEnrolment('user1', code)).toBe('ok');
+    expect((await ctx.service.confirmEnrolment('user1', code)).status).toBe('ok');
   });
 
   it('a re-enrolment does not destroy the confirmed factor', async () => {
@@ -152,10 +163,16 @@ describe('TotpService', () => {
       'invalid',
     );
 
-    // Confirmation swaps the pending secret in and keeps the step monotonic.
+    // Confirmation needs proof of the CURRENT factor; with it, it swaps the
+    // pending secret in and keeps the step monotonic.
     advanceToStep(ctx, 5);
-    expect(await ctx.service.confirmEnrolment('user1', await codeForSecret(ctx, newSecret, 5)))
-      .toBe('ok');
+    expect(
+      (await ctx.service.confirmEnrolment(
+        'user1',
+        await codeForSecret(ctx, newSecret, 5),
+        await codeForSecret(ctx, oldSecret ?? '', 5),
+      )).status,
+    ).toBe('ok');
     const after = await ctx.store.getEnrolment('user1');
     expect(after?.secret).toBe(newSecret);
     // The pending label becomes the active one; the pending fields are cleared.
@@ -202,10 +219,133 @@ describe('TotpService', () => {
     expect(await ctx.service.verify('user1', await codeAtStep(ctx, 'user1', 6))).toBe('invalid');
   });
 
-  it('disable removes the enrolment', async () => {
+  it('disable removes the enrolment given proof of the factor', async () => {
     const ctx = buildService(59_000);
     await enrolledAndConfirmed(ctx, 'user1');
-    await ctx.service.disable('user1');
+    advanceToStep(ctx, 3);
+    expect(await ctx.service.disable('user1', await currentCode(ctx, 'user1'))).toBe('ok');
+    expect(await ctx.store.getEnrolment('user1')).toBeNull();
+  });
+
+  // --------------------------------------------------------------------------
+  // Proof of the current factor (security audit H1): replacing, regenerating
+  // for, or removing a confirmed factor takes the factor.
+  // --------------------------------------------------------------------------
+
+  it('a re-enrolment without proof is refused and changes nothing', async () => {
+    const ctx = buildService(59_000);
+    const codes = await enrolledAndConfirmed(ctx, 'user1');
+    const before = await ctx.store.getEnrolment('user1');
+    advanceToStep(ctx, 3);
+    // The attacker begins an enrolment and confirms their OWN secret.
+    const { secret: attacker } = await ctx.service.beginEnrolment('user1', 'mallory');
+    const own = await codeForSecret(ctx, attacker, 3);
+    expect((await ctx.service.confirmEnrolment('user1', own)).status).toBe('proof-required');
+    expect((await ctx.service.confirmEnrolment('user1', own, '000000')).status).toBe('invalid');
+    expect((await ctx.service.confirmEnrolment('user1', own, 'AAAAAAAAAAAAAAAA')).status).toBe(
+      'invalid',
+    );
+    // The victim's factor and recovery codes still work.
+    const after = await ctx.store.getEnrolment('user1');
+    expect(after?.secret).toBe(before?.secret);
+    expect(after?.confirmed).toBe(true);
+    expect(await ctx.service.verify('user1', await currentCode(ctx, 'user1'))).toBe('ok');
+    expect(await ctx.service.verifyRecoveryCode('user1', codes[0])).toBe('ok');
+  });
+
+  it('a recovery code proves the current factor for a re-enrolment', async () => {
+    const ctx = buildService(59_000);
+    const codes = await enrolledAndConfirmed(ctx, 'user1');
+    advanceToStep(ctx, 3);
+    const { secret } = await ctx.service.beginEnrolment('user1', 'new-device');
+    const result = await ctx.service.confirmEnrolment(
+      'user1',
+      await codeForSecret(ctx, secret, 3),
+      codes[0],
+    );
+    expect(result.status).toBe('ok');
+    expect((await ctx.store.getEnrolment('user1'))?.secret).toBe(secret);
+    // The swap minted a fresh set: the old set no longer works.
+    expect(await ctx.service.verifyRecoveryCode('user1', codes[1])).toBe('invalid');
+    const fresh = result.status === 'ok' ? result.recoveryCodes : [];
+    expect(await ctx.service.verifyRecoveryCode('user1', fresh[0] ?? '')).toBe('ok');
+  });
+
+  it('a re-enrolment with valid proof but a wrong new code is refused', async () => {
+    const ctx = buildService(59_000);
+    await enrolledAndConfirmed(ctx, 'user1');
+    advanceToStep(ctx, 3);
+    const { secret } = await ctx.service.beginEnrolment('user1', 'new-device');
+    const result = await ctx.service.confirmEnrolment(
+      'user1',
+      '000000',
+      await currentCode(ctx, 'user1'),
+    );
+    expect(result.status).toBe('invalid');
+    expect((await ctx.store.getEnrolment('user1'))?.pendingSecret).toBe(secret);
+  });
+
+  it('a locked account refuses the proof without consulting it', async () => {
+    const ctx = buildService(59_000);
+    await enrolledAndConfirmed(ctx, 'user1');
+    advanceToStep(ctx, 3);
+    for (let i = 0; i < 5; i++) await ctx.service.verify('user1', '000000');
+    const { secret } = await ctx.service.beginEnrolment('user1', 'new-device');
+    const result = await ctx.service.confirmEnrolment(
+      'user1',
+      await codeForSecret(ctx, secret, 3),
+      await currentCode(ctx, 'user1'),
+    );
+    expect(result.status).toBe('locked');
+    expect((await ctx.service.generateRecoveryCodes('user1', '123456')).status).toBe('locked');
+    expect(await ctx.service.disable('user1', '123456')).toBe('locked');
+  });
+
+  it('confirmEnrolment answers not-enrolled for an unknown principal', async () => {
+    const { service } = buildService(59_000);
+    expect((await service.confirmEnrolment('nobody', '123456')).status).toBe('not-enrolled');
+  });
+
+  it('generateRecoveryCodes requires proof and replaces the set', async () => {
+    const ctx = buildService(59_000);
+    const first = await enrolledAndConfirmed(ctx, 'user1');
+    expect((await ctx.service.generateRecoveryCodes('user1')).status).toBe('proof-required');
+    expect((await ctx.service.generateRecoveryCodes('user1', '000000')).status).toBe('invalid');
+    // The first set still works: nothing was regenerated.
+    advanceToStep(ctx, 3);
+    const result = await ctx.service.generateRecoveryCodes(
+      'user1',
+      await currentCode(ctx, 'user1'),
+    );
+    expect(result.status).toBe('ok');
+    const second = result.status === 'ok' ? result.recoveryCodes : [];
+    expect(second).toHaveLength(10);
+    expect(await ctx.service.verifyRecoveryCode('user1', first[0] ?? '')).toBe('invalid');
+    expect(await ctx.service.verifyRecoveryCode('user1', second[0] ?? '')).toBe('ok');
+  });
+
+  it('generateRecoveryCodes refuses a principal with no confirmed factor', async () => {
+    const ctx = buildService(59_000);
+    expect((await ctx.service.generateRecoveryCodes('nobody', '123456')).status).toBe(
+      'not-enrolled',
+    );
+    await ctx.service.beginEnrolment('user1', 'alice');
+    expect((await ctx.service.generateRecoveryCodes('user1')).status).toBe('not-enrolled');
+  });
+
+  it('disable refuses a confirmed factor without valid proof', async () => {
+    const ctx = buildService(59_000);
+    await enrolledAndConfirmed(ctx, 'user1');
+    expect(await ctx.service.disable('user1')).toBe('proof-required');
+    expect(await ctx.service.disable('user1', '000000')).toBe('invalid');
+    expect((await ctx.store.getEnrolment('user1'))?.confirmed).toBe(true);
+  });
+
+  it('disable removes an unconfirmed enrolment without proof, and reports none', async () => {
+    const ctx = buildService(59_000);
+    expect(await ctx.service.disable('user1')).toBe('not-enrolled');
+    await ctx.service.beginEnrolment('user1', 'alice');
+    expect(await ctx.service.disable('user1')).toBe('ok');
     expect(await ctx.store.getEnrolment('user1')).toBeNull();
   });
 
@@ -389,8 +529,7 @@ describe('TotpService', () => {
       startOfStep(1) + 1_000,
       { required: () => true, pendingTtlMs: 1 },
     );
-    await enrolledAndConfirmed(harness, 'user1');
-    const codes = await harness.service.generateRecoveryCodes('user1');
+    const codes = await enrolledAndConfirmed(harness, 'user1');
     await signInAndPend(harness);
     advanceToStep(harness, 3);
     expect(
@@ -400,8 +539,7 @@ describe('TotpService', () => {
 
   it('completeSignInWithRecoveryCode signs in inside the default TTL (control)', async () => {
     const harness = buildCompleteHarness(startOfStep(1) + 1_000, { required: () => true });
-    await enrolledAndConfirmed(harness, 'user1');
-    const codes = await harness.service.generateRecoveryCodes('user1');
+    const codes = await enrolledAndConfirmed(harness, 'user1');
     await signInAndPend(harness);
     expect(
       await harness.service.completeSignInWithRecoveryCode(harness.ctx, codes[0]),

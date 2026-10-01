@@ -137,6 +137,33 @@ export interface ITotpStore {
   consumeRecoveryCode(principalId: string, digest: string): Promise<boolean>;
 }
 
+/**
+ * Drops every principal whose counted attempts have all left the window, once
+ * the map has reached `sweepAt` entries, and returns the next threshold
+ * (twice the surviving size, at least 1 024). Internal — not exported from the
+ * package barrel; exported from this module so its bound is unit-testable.
+ *
+ * @param attempts - The per-principal attempt map, mutated in place
+ * @param cutoff - Timestamps at or below this are outside the window
+ * @param sweepAt - The size at which to sweep
+ * @returns The threshold for the next sweep
+ */
+export function sweepExpiredAttempts(
+  attempts: Map<string, { timestamps: number[] }>,
+  cutoff: number,
+  sweepAt: number,
+): number {
+  if (attempts.size < sweepAt) {
+    return sweepAt;
+  }
+  for (const [principalId, entry] of attempts) {
+    if (entry.timestamps.every((ts) => ts <= cutoff)) {
+      attempts.delete(principalId);
+    }
+  }
+  return Math.max(1_024, attempts.size * 2);
+}
+
 /** Attempt tracking for the memory store. */
 interface MemoryAttempts {
   /** The timestamps of attempts in the current window. */
@@ -162,6 +189,13 @@ interface MemoryRecoveryCodes {
 export class MemoryTotpStore implements ITotpStore {
   #enrolments = new Map<string, TotpEnrolment>();
   #attempts = new Map<string, MemoryAttempts>();
+  /**
+   * The attempt-map size at which the next expired-entry sweep runs. Doubling it
+   * after each sweep keeps the sweep amortised O(1) per attempt, while bounding
+   * the map to the principals with an attempt inside the window — without it,
+   * one entry per principal id ever presented would be kept forever.
+   */
+  #sweepAt = 1_024;
   #recoveryCodes = new Map<string, MemoryRecoveryCodes>();
 
   getEnrolment(principalId: string): Promise<TotpEnrolment | null> {
@@ -201,12 +235,14 @@ export class MemoryTotpStore implements ITotpStore {
     now: number,
     options: { readonly limit: number; readonly windowMs: number },
   ): Promise<ReserveAttemptResult> {
+    const cutoff = now - options.windowMs;
+    // Before the lookup: a sweep after it could delete the entry being counted.
+    this.#sweep(cutoff);
     let attempts = this.#attempts.get(principalId);
     if (attempts === undefined) {
       attempts = { timestamps: [] };
       this.#attempts.set(principalId, attempts);
     }
-    const cutoff = now - options.windowMs;
     attempts.timestamps = attempts.timestamps.filter((ts) => ts > cutoff);
     if (attempts.timestamps.length >= options.limit) {
       // Refused, and deliberately not recorded: see ITotpStore.reserveAttempt.
@@ -214,6 +250,11 @@ export class MemoryTotpStore implements ITotpStore {
     }
     attempts.timestamps.push(now);
     return Promise.resolve({ allowed: true, count: attempts.timestamps.length });
+  }
+
+  /** Drops expired principals once the map reaches the sweep threshold. */
+  #sweep(cutoff: number): void {
+    this.#sweepAt = sweepExpiredAttempts(this.#attempts, cutoff, this.#sweepAt);
   }
 
   clearAttempts(principalId: string): Promise<void> {

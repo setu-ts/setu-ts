@@ -45,6 +45,33 @@ export type TotpVerifyResult = 'ok' | 'invalid' | 'locked' | 'not-enrolled';
 /** The result of a recovery-code verification. */
 export type RecoveryVerifyResult = 'ok' | 'invalid' | 'locked';
 
+/**
+ * The result of a factor-changing call that needs proof of the CURRENT factor:
+ * confirming a re-enrolment, regenerating recovery codes, or disabling.
+ *
+ * - `'proof-required'` — a confirmed factor exists and no proof was supplied.
+ * - `'invalid'` / `'locked'` — the proof (or, for a confirmation, the new code)
+ *   failed, or the account is locked out.
+ * - `'not-enrolled'` — there is no factor to act on.
+ */
+export type TotpProofResult = 'proof-required' | 'invalid' | 'locked' | 'not-enrolled';
+
+/**
+ * The result of {@linkcode TotpService.confirmEnrolment}: on success, the ten
+ * recovery codes minted for the newly confirmed factor, returned this once.
+ */
+export type ConfirmEnrolmentResult =
+  | { readonly status: 'ok'; readonly recoveryCodes: readonly string[] }
+  | { readonly status: TotpProofResult };
+
+/** The result of {@linkcode TotpService.generateRecoveryCodes}. */
+export type RecoveryCodesResult =
+  | { readonly status: 'ok'; readonly recoveryCodes: readonly string[] }
+  | { readonly status: TotpProofResult };
+
+/** The result of {@linkcode TotpService.disable}. */
+export type DisableResult = 'ok' | TotpProofResult;
+
 /** The result of completing a sign-in with a second factor. */
 export type TotpCompleteSignInResult =
   | 'signed-in'
@@ -74,6 +101,9 @@ const RECOVERY_CODE_DECODED_BYTES = 10;
 
 /** A recovery code as the user is expected to type it: 16 base32 characters. */
 const RECOVERY_CODE_SHAPE = /^[A-Z2-7]{16}$/;
+
+/** A TOTP code: exactly six digits. Anything else offered as proof is a recovery code. */
+const TOTP_CODE_SHAPE = /^\d{6}$/;
 
 /**
  * TOTP service for enrolment, verification, recovery codes, and sign-in
@@ -152,27 +182,77 @@ export class TotpService {
   }
 
   /**
-   * Confirms a TOTP enrolment with a valid code.
+   * Confirms a TOTP enrolment with a valid code from the secret awaiting
+   * confirmation, and mints the principal's recovery codes.
    *
-   * The code must come from the secret awaiting confirmation — the pending one
-   * when a re-enrolment is in progress, otherwise the stored one. On success the
-   * pending secret becomes the active secret, the enrolment becomes confirmed,
-   * and `lastClaimedStep` is carried over unchanged, so a step claimed under the
-   * old secret stays claimed.
+   * A FIRST enrolment (no confirmed factor yet) needs only the new code. A
+   * RE-enrolment — a confirmed factor exists and {@linkcode beginEnrolment}
+   * stored a pending secret — also needs `proof` of the CURRENT factor: a code
+   * from it or an unused recovery code. Without that rule anyone able to call
+   * this with a principal id could swap in their own authenticator and take the
+   * account's second factor; with it, replacing a factor takes the factor.
+   *
+   * On success the pending secret becomes the active one, `lastClaimedStep`
+   * stays monotonic across the swap, and a fresh set of ten recovery codes
+   * REPLACES any earlier set — so recovery codes only ever exist for a proven
+   * factor. The plaintext codes are returned this once.
+   *
+   * Called for a confirmed factor with NO re-enrolment pending, `code` is
+   * checked against the confirmed secret, so it is itself the proof; that call
+   * re-mints the recovery codes.
    *
    * @param principalId - The principal whose enrolment is confirmed
-   * @param code - The six-digit code from the authenticator app
-   * @returns The verification result
+   * @param code - A six-digit code from the secret awaiting confirmation
+   * @param proof - For a re-enrolment, a code from the current factor or an
+   *   unused recovery code
+   * @returns The recovery codes on success, otherwise why it was refused
    */
-  async confirmEnrolment(principalId: string, code: string): Promise<TotpVerifyResult> {
+  async confirmEnrolment(
+    principalId: string,
+    code: string,
+    proof?: string,
+  ): Promise<ConfirmEnrolmentResult> {
+    const existing = await this.#store.getEnrolment(principalId);
+    if (existing === null) {
+      return { status: 'not-enrolled' };
+    }
+
+    if (existing.confirmed && existing.pendingSecret !== undefined) {
+      // Re-enrolment: the current factor must be proven before anything moves.
+      if (proof === undefined) {
+        return { status: 'proof-required' };
+      }
+      const proven = await this.#verifyProof(principalId, proof);
+      if (proven !== 'ok') {
+        return { status: proven };
+      }
+      // Re-read: the proof claimed a step or consumed a code.
+      const current = await this.#store.getEnrolment(principalId);
+      if (current === null || current.pendingSecret === undefined) {
+        return { status: 'not-enrolled' };
+      }
+      const step = await this.#matchStep(principalId, current.pendingSecret, code);
+      if (typeof step !== 'number') {
+        return { status: step };
+      }
+      await this.#store.saveEnrolment(principalId, {
+        secret: current.pendingSecret,
+        label: current.pendingLabel ?? current.label,
+        confirmed: true,
+        // The proof may already have claimed this step under the old secret.
+        lastClaimedStep: Math.max(current.lastClaimedStep, step),
+      });
+      return { status: 'ok', recoveryCodes: await this.#mintRecoveryCodes(principalId) };
+    }
+
     const result = await this.#verifyCode(principalId, code, true);
     if (result !== 'ok') {
-      return result;
+      return { status: result };
     }
     // Re-read: claiming the step mutated the stored record.
     const enrolment = await this.#store.getEnrolment(principalId);
     if (enrolment === null) {
-      return 'not-enrolled';
+      return { status: 'not-enrolled' };
     }
     await this.#store.saveEnrolment(principalId, {
       secret: enrolment.pendingSecret ?? enrolment.secret,
@@ -180,7 +260,7 @@ export class TotpService {
       confirmed: true,
       lastClaimedStep: enrolment.lastClaimedStep,
     });
-    return 'ok';
+    return { status: 'ok', recoveryCodes: await this.#mintRecoveryCodes(principalId) };
   }
 
   /**
@@ -263,27 +343,101 @@ export class TotpService {
   }
 
   /**
-   * Generates ten recovery codes for a principal.
-   *
-   * Each code is 10 random bytes encoded as 16 base32 characters (80 bits).
-   * The codes are stored as SHA-256 digests; the plaintext codes are returned
-   * once and never stored.
-   *
-   * @param principalId - The principal to generate codes for
-   * @returns The ten plaintext recovery codes
+   * Checks a code against a secret that is not yet the active one, counting the
+   * attempt toward lockout, without claiming a step: the caller decides what
+   * the matched step means. Returns the matched step, or why it was refused.
    */
-  async generateRecoveryCodes(principalId: string): Promise<string[]> {
+  async #matchStep(
+    principalId: string,
+    secretText: string,
+    code: string,
+  ): Promise<number | 'invalid' | 'locked'> {
+    const now = this.#runtime.now();
+    const attempt = await this.#store.reserveAttempt(principalId, now, {
+      limit: LOCKOUT_LIMIT,
+      windowMs: LOCKOUT_WINDOW_MS,
+    });
+    if (!attempt.allowed) {
+      return 'locked';
+    }
+    let secret: Uint8Array;
+    try {
+      secret = decodeBase32(secretText);
+    } catch {
+      return 'invalid';
+    }
+    const current = totpCounter(now);
+    for (let delta = -TOTP_WINDOW; delta <= TOTP_WINDOW; delta++) {
+      const candidate = await computeTotpCode(this.#runtime.subtle, secret, current + delta);
+      if (constantTimeEquals(candidate, code)) {
+        await this.#store.clearAttempts(principalId);
+        return current + delta;
+      }
+    }
+    return 'invalid';
+  }
+
+  /**
+   * Verifies proof of a principal's CURRENT factor: a six-digit code from the
+   * confirmed secret, otherwise an unused recovery code (consumed). Both paths
+   * count toward the same lockout.
+   */
+  async #verifyProof(
+    principalId: string,
+    proof: string,
+  ): Promise<'ok' | 'invalid' | 'locked' | 'not-enrolled'> {
+    return TOTP_CODE_SHAPE.test(proof)
+      ? await this.verify(principalId, proof)
+      : await this.verifyRecoveryCode(principalId, proof);
+  }
+
+  /** Mints and stores ten recovery codes, replacing any earlier set. */
+  async #mintRecoveryCodes(principalId: string): Promise<string[]> {
     const codes: string[] = [];
     const digests: string[] = [];
     for (let i = 0; i < RECOVERY_CODE_COUNT; i++) {
       const raw = this.#runtime.randomBytes(RECOVERY_CODE_BYTES);
-      const code = encodeBase32(raw);
-      codes.push(code);
+      codes.push(encodeBase32(raw));
       const digest = await this.#runtime.subtle.digest('SHA-256', toBuffer(raw));
       digests.push(bytesToHex(new Uint8Array(digest)));
     }
     await this.#store.saveRecoveryCodes(principalId, digests);
     return codes;
+  }
+
+  /**
+   * Regenerates the ten recovery codes for a principal with a confirmed factor,
+   * replacing the earlier set.
+   *
+   * Requires `proof` of the current factor (a TOTP code or an unused recovery
+   * code): regenerating invalidates every code the user holds and hands the new
+   * ones to the caller, so without proof it would let anyone able to name the
+   * principal mint codes that complete its sign-in. The first set is minted by
+   * {@linkcode confirmEnrolment}, not here.
+   *
+   * Each code is 10 random bytes encoded as 16 base32 characters (80 bits),
+   * stored as a SHA-256 digest; the plaintext is returned this once.
+   *
+   * @param principalId - The principal to regenerate codes for
+   * @param proof - A code from the current factor or an unused recovery code
+   * @returns The new codes, or why the regeneration was refused
+   */
+  async generateRecoveryCodes(
+    principalId: string,
+    proof?: string,
+  ): Promise<RecoveryCodesResult> {
+    const enrolment = await this.#store.getEnrolment(principalId);
+    if (enrolment === null || !enrolment.confirmed) {
+      return { status: 'not-enrolled' };
+    }
+    if (proof === undefined) {
+      return { status: 'proof-required' };
+    }
+    const proven = await this.#verifyProof(principalId, proof);
+    if (proven !== 'ok') {
+      return { status: proven };
+    }
+    return { status: 'ok', recoveryCodes: await this.#mintRecoveryCodes(principalId) };
   }
 
   /**
@@ -347,13 +501,36 @@ export class TotpService {
   }
 
   /**
-   * Disables TOTP for a principal, deleting the enrolment, recovery codes,
-   * and attempt counts.
+   * Disables TOTP for a principal, deleting the enrolment, recovery codes, and
+   * attempt counts.
+   *
+   * A confirmed factor needs `proof` of itself (a TOTP code or an unused
+   * recovery code): disabling it and then enrolling a new authenticator would
+   * otherwise be a takeover by anyone able to name the principal. An
+   * unconfirmed enrolment is removed without proof, since it was never a
+   * factor. An administrator reset that cannot obtain proof calls the store's
+   * `deleteEnrolment` directly, behind its own authorization.
    *
    * @param principalId - The principal to disable TOTP for
+   * @param proof - A code from the current factor or an unused recovery code
+   * @returns `'ok'`, or why the call was refused
    */
-  async disable(principalId: string): Promise<void> {
+  async disable(principalId: string, proof?: string): Promise<DisableResult> {
+    const enrolment = await this.#store.getEnrolment(principalId);
+    if (enrolment === null) {
+      return 'not-enrolled';
+    }
+    if (enrolment.confirmed) {
+      if (proof === undefined) {
+        return 'proof-required';
+      }
+      const proven = await this.#verifyProof(principalId, proof);
+      if (proven !== 'ok') {
+        return proven;
+      }
+    }
     await this.#store.deleteEnrolment(principalId);
+    return 'ok';
   }
 
   /**

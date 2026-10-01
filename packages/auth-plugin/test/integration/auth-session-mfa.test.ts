@@ -128,16 +128,6 @@ async function buildMfaApp(mfa: MfaOptions): Promise<MfaHarness> {
     return ctx.response.json({ result });
   });
 
-  // Recovery code generation route (enrolment/settings path).
-  app.router.post('/mfa/recovery', async (ctx) => {
-    const service = new TotpService({
-      store: totpStore,
-      runtime: captureRuntime(ctx),
-      issuer: 'TestApp',
-    });
-    return ctx.response.json({ codes: await service.generateRecoveryCodes('alice') });
-  });
-
   // Enrolment route: begins TOTP enrolment for the pending principal.
   app.router.post('/mfa/enrol', async (ctx) => {
     const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
@@ -168,7 +158,10 @@ async function buildMfaApp(mfa: MfaOptions): Promise<MfaHarness> {
       issuer: 'TestApp',
     });
     const result = await service.confirmEnrolment(pending.principal.id, body.code);
-    return ctx.response.json({ result });
+    return ctx.response.json({
+      result: result.status,
+      codes: result.status === 'ok' ? result.recoveryCodes : [],
+    });
   });
 
   // Protected route.
@@ -186,12 +179,14 @@ async function buildMfaApp(mfa: MfaOptions): Promise<MfaHarness> {
     });
   });
 
-  // Age the pending MFA record past any TTL.
+  // Age the pending MFA record: past any TTL by default, or by `?by=<ms>`.
   app.router.post('/_age-pending-mfa', (ctx) => {
     const session = getSession(ctx);
     const pending = session.get<Record<string, unknown>>(PENDING_MFA_SESSION_KEY);
+    const by = ctx.query.by;
     if (pending !== null && pending !== undefined) {
-      session.set(PENDING_MFA_SESSION_KEY, { ...pending, at: 0 });
+      const at = by === undefined ? 0 : (pending.at as number) - Number(by);
+      session.set(PENDING_MFA_SESSION_KEY, { ...pending, at });
     }
     return ctx.response.json({ ok: true });
   });
@@ -255,6 +250,14 @@ async function codeForStep(
 
 /** Password sign-in, enrolment, and confirmation, leaving the session pending. */
 async function enrolAndConfirm(harness: MfaHarness, jar: CookieJar): Promise<string> {
+  return (await enrolConfirmAndCodes(harness, jar)).secret;
+}
+
+/** As {@linkcode enrolAndConfirm}, also returning the recovery codes confirmation minted. */
+async function enrolConfirmAndCodes(
+  harness: MfaHarness,
+  jar: CookieJar,
+): Promise<{ secret: string; codes: string[] }> {
   const login = await json(
     await jar.fetch(harness.app, '/password-login', { method: 'POST' }),
   );
@@ -270,12 +273,7 @@ async function enrolAndConfirm(harness: MfaHarness, jar: CookieJar): Promise<str
     }),
   );
   expect(confirm.result).toBe('ok');
-  return secret;
-}
-
-/** Real delay, so a 1 ms TTL has definitely elapsed (the clock is `Date.now()`). */
-async function elapse(milliseconds: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+  return { secret, codes: confirm.codes as string[] };
 }
 
 async function complete(
@@ -351,14 +349,16 @@ describe('auth-session MFA', () => {
     expect(await complete(harness, jar, code)).toBe('signed-in');
   });
 
-  it('a configured pendingTtlMs of 1 ms refuses completion (the option has effect)', async () => {
-    harness = await buildMfaApp({ required: () => true, pendingTtlMs: 1 });
+  it('a configured pendingTtlMs refuses completion (the option has effect)', async () => {
+    // 60 s configured: a record aged 120 s is refused, though the 300 s default
+    // would accept it — so the refusal is the configured value, not the default.
+    harness = await buildMfaApp({ required: () => true, pendingTtlMs: 60_000 });
     const jar = new CookieJar();
     const secret = await enrolAndConfirm(harness, jar);
     const confirmedAt = totpCounter(harness.runtime.now());
 
     await jar.fetch(harness.app, '/password-login', { method: 'POST' });
-    await elapse(10);
+    await jar.fetch(harness.app, '/_age-pending-mfa?by=120000', { method: 'POST' });
     const result = await complete(
       harness,
       jar,
@@ -367,13 +367,14 @@ describe('auth-session MFA', () => {
     expect(result).toBe('no-pending');
   });
 
-  it('the default TTL completes the same flow (control for the 1 ms case above)', async () => {
+  it('the default TTL completes the same aged flow (control for the case above)', async () => {
     harness = await buildMfaApp(ALWAYS_REQUIRED);
     const jar = new CookieJar();
     const secret = await enrolAndConfirm(harness, jar);
     const confirmedAt = totpCounter(harness.runtime.now());
 
     await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+    await jar.fetch(harness.app, '/_age-pending-mfa?by=120000', { method: 'POST' });
     const result = await complete(
       harness,
       jar,
@@ -446,11 +447,7 @@ describe('auth-session MFA', () => {
   it('a recovery code completes a pending sign-in and is single-use', async () => {
     harness = await buildMfaApp(ALWAYS_REQUIRED);
     const jar = new CookieJar();
-    await enrolAndConfirm(harness, jar);
-    const generated = await json(
-      await jar.fetch(harness.app, '/mfa/recovery', { method: 'POST' }),
-    );
-    const codes = generated.codes as string[];
+    const { codes } = await enrolConfirmAndCodes(harness, jar);
     expect(codes).toHaveLength(10);
 
     await jar.fetch(harness.app, '/password-login', { method: 'POST' });

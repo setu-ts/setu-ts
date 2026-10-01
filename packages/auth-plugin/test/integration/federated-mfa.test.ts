@@ -101,7 +101,7 @@ describe('federated sign-in with a second factor', () => {
     const enrol = new TotpService({ store, runtime: rt(), issuer: 'Test' });
     const { secret } = await enrol.beginEnrolment(PRINCIPAL_ID, 'user-1');
     const step = totpCounter(rt().now());
-    expect(await enrol.confirmEnrolment(PRINCIPAL_ID, await codeAt(secret, step - 1)))
+    expect((await enrol.confirmEnrolment(PRINCIPAL_ID, await codeAt(secret, step - 1))).status)
       .toBe('ok');
 
     (await federate(jar)).body?.cancel();

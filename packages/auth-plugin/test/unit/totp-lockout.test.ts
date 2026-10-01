@@ -40,8 +40,9 @@ async function currentCode(ctx: TestContext, principalId: string): Promise<strin
 /** Enrols and confirms, so `verify` answers as a real factor does. */
 async function enrolledAndConfirmed(ctx: TestContext, principalId: string): Promise<void> {
   await ctx.service.beginEnrolment(principalId, 'alice');
-  expect(await ctx.service.confirmEnrolment(principalId, await currentCode(ctx, principalId)))
-    .toBe('ok');
+  expect(
+    (await ctx.service.confirmEnrolment(principalId, await currentCode(ctx, principalId))).status,
+  ).toBe('ok');
 }
 
 describe('TotpService lockout', () => {

@@ -268,7 +268,7 @@ describe('compileSignIn', () => {
     });
 
     it('refuses a challengePath that is not same-origin', () => {
-      for (const challengePath of ['//evil.test', 'https://evil.test/', 'mfa', '/\\evil']) {
+      for (const challengePath of ['', '//evil.test', 'https://evil.test/', 'mfa', '/\\evil']) {
         expect(refusal(withMfa({ required, challengePath })), challengePath)
           .toContain('challengePath');
       }

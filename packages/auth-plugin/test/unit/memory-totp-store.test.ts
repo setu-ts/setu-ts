@@ -7,7 +7,7 @@
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import { MemoryTotpStore } from '../../src/stores/totp-store.ts';
+import { MemoryTotpStore, sweepExpiredAttempts } from '../../src/stores/totp-store.ts';
 
 describe('MemoryTotpStore', () => {
   it('concurrent claimStep yields exactly one success', async () => {
@@ -195,5 +195,45 @@ describe('MemoryTotpStore', () => {
       allowed: true,
       count: 1,
     });
+  });
+
+  it('a principal inside its window keeps its lock through sweeps', async () => {
+    const store = new MemoryTotpStore();
+    const window = { limit: 5, windowMs: 1_000 };
+    for (let i = 0; i < 5; i++) await store.reserveAttempt('victim', 20_000, window);
+    // Enough distinct ids to trigger several sweeps.
+    for (let i = 0; i < 5_000; i++) await store.reserveAttempt(`burst-${i}`, 20_500, window);
+    expect((await store.reserveAttempt('victim', 20_600, window)).allowed).toBe(false);
+    // And a fresh principal is counted, not swept away mid-count.
+    expect(await store.reserveAttempt('fresh', 20_700, window)).toEqual({
+      allowed: true,
+      count: 1,
+    });
+    expect(await store.reserveAttempt('fresh', 20_701, window)).toEqual({
+      allowed: true,
+      count: 2,
+    });
+  });
+});
+
+describe('sweepExpiredAttempts', () => {
+  const entries = (n: number, ts: number) =>
+    new Map(Array.from({ length: n }, (_, i) => [`id-${i}`, { timestamps: [ts] }]));
+
+  it('does nothing below the threshold', () => {
+    const map = entries(10, 0);
+    expect(sweepExpiredAttempts(map, 100, 1_024)).toBe(1_024);
+    expect(map.size).toBe(10);
+  });
+
+  it('drops only fully expired entries and doubles the threshold from what survives', () => {
+    const map = entries(3_000, 0);
+    map.set('live', { timestamps: [0, 500] });
+    expect(sweepExpiredAttempts(map, 100, 1_024)).toBe(1_024);
+    expect([...map.keys()]).toEqual(['live']);
+
+    const busy = entries(2_000, 500);
+    expect(sweepExpiredAttempts(busy, 100, 1_024)).toBe(4_000);
+    expect(busy.size).toBe(2_000);
   });
 });

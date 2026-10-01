@@ -99,8 +99,12 @@ export {
 // TOTP MFA (M100d)
 export { TotpService } from './mfa/totp-service.ts';
 export type {
+  ConfirmEnrolmentResult,
+  DisableResult,
+  RecoveryCodesResult,
   RecoveryVerifyResult,
   TotpCompleteSignInResult,
+  TotpProofResult,
   TotpServiceOptions,
   TotpVerifyResult,
 } from './mfa/totp-service.ts';

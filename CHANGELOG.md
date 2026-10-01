@@ -33,18 +33,27 @@ All notable changes to this project are documented here. The format follows
   protection: the store's `claimStep` is monotonic, so a captured code cannot be replayed. An
   enrolment never confirmed is not a factor — no verification path accepts its code — and starting a
   new enrolment leaves the confirmed factor in place until the new secret is confirmed, keeping the
-  step counter monotonic across the swap. Recovery codes: `generateRecoveryCodes` mints 10 codes of
-  16 base32 characters (80 bits), stored as SHA-256 digests, consumed atomically on use, and
-  accepted only in the canonical shape (trimmed, upper-cased, exactly 16 characters of `A-Z2-7`).
-  The new `requireMfa()` guard answers `401` for an anonymous request and `403`
+  step counter monotonic across the swap. Replacing a confirmed factor (`confirmEnrolment` with a
+  re-enrolment pending), regenerating recovery codes, and disabling a confirmed factor each require
+  `proof` of the CURRENT factor — a code from it or an unused recovery code — and answer
+  `proof-required` without it, so a caller able to name a principal cannot take over or remove its
+  second factor; a first enrolment is trust-on-first-use and needs none. The routes calling these
+  take the principal from the session, never the request, as the README example shows. Recovery
+  codes: confirmation mints the first set (`confirmEnrolment` returns it, so codes never exist
+  without a proven factor) and `generateRecoveryCodes(principalId, proof)` replaces it; each set is
+  10 codes of 16 base32 characters (80 bits), stored as SHA-256 digests, consumed atomically on use,
+  and accepted only in the canonical shape (trimmed, upper-cased, exactly 16 characters of
+  `A-Z2-7`). The new `requireMfa()` guard answers `401` for an anonymous request and `403`
   `second-factor-required` for a principal whose `claims.amr` lacks `otp` or `pop`; a non-array
   `amr` counts as absent rather than being coerced, so a string merely containing a factor name
   cannot satisfy it. `@setu-ts/common` gains `PendingSignIn` and the `second-factor-required` arm of
   `AuthorizationFailure`. New `@setu-ts/auth-plugin` exports: `TotpService`, `MemoryTotpStore`,
   `requireMfa`, and the types `MfaOptions`, `ITotpStore`, `TotpVerifyResult`,
   `RecoveryVerifyResult`, `TotpCompleteSignInResult`, `TotpServiceOptions`, `TotpEnrolment`,
-  `ReserveAttemptResult`. The internal `promotePending` is not exported. With `signIn.mfa` unset
-  nothing changes.
+  `ReserveAttemptResult`, `TotpProofResult`, `ConfirmEnrolmentResult`, `RecoveryCodesResult`,
+  `DisableResult`. `MemoryTotpStore` sweeps lockout entries whose attempts have all left the window,
+  so its size tracks the attempt rate rather than every principal id ever presented. The internal
+  `promotePending` is not exported. With `signIn.mfa` unset nothing changes.
 
 - **Sign-in with an outside provider (M100c).** `AuthPluginOptions.signIn` makes the application an
   OAuth 2.0 / OpenID Connect relying party over the authorization-code flow: per provider,

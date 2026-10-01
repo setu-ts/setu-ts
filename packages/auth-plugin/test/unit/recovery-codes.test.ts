@@ -9,6 +9,8 @@ import { expect } from '@std/expect';
 import { TotpService } from '../../src/mfa/totp-service.ts';
 import { MemoryTotpStore } from '../../src/stores/totp-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { decodeBase32 } from '../../src/mfa/base32.ts';
+import { computeTotpCode, totpCounter } from '../../src/mfa/totp-codes.ts';
 
 interface TestContext {
   service: TotpService;
@@ -23,12 +25,26 @@ function buildService(nowMs: number): TestContext {
   return { service, runtime, store };
 }
 
-describe('recovery codes', () => {
-  it('generates ten codes of 16 base32 characters', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
+/**
+ * Enrols and confirms `user1`; confirmation is what mints the first recovery-code
+ * set, so a principal never holds codes without a proven factor.
+ */
+async function enrolWithCodes(ctx: TestContext): Promise<readonly string[]> {
+  const { secret } = await ctx.service.beginEnrolment('user1', 'alice');
+  const code = await computeTotpCode(
+    ctx.runtime.subtle,
+    decodeBase32(secret),
+    totpCounter(ctx.runtime.now()),
+  );
+  const result = await ctx.service.confirmEnrolment('user1', code);
+  if (result.status !== 'ok') throw new Error(`confirmation refused: ${result.status}`);
+  return result.recoveryCodes;
+}
 
-    const codes = await service.generateRecoveryCodes('user1');
+describe('recovery codes', () => {
+  it('confirmation mints ten codes of 16 base32 characters', async () => {
+    const ctx = buildService(59_000);
+    const codes = await enrolWithCodes(ctx);
     expect(codes).toHaveLength(10);
     for (const code of codes) {
       expect(code).toMatch(/^[A-Z2-7]{16}$/);
@@ -36,10 +52,10 @@ describe('recovery codes', () => {
   });
 
   it('a recovery code is single-use', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
+    const ctx = buildService(59_000);
+    const { service } = ctx;
 
-    const codes = await service.generateRecoveryCodes('user1');
+    const codes = await enrolWithCodes(ctx);
     // First use succeeds.
     expect(await service.verifyRecoveryCode('user1', codes[0])).toBe('ok');
     // Second use of the same code is refused.
@@ -47,18 +63,18 @@ describe('recovery codes', () => {
   });
 
   it('accepts the generated code in lower case and with surrounding whitespace', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
-    const codes = await service.generateRecoveryCodes('user1');
+    const ctx = buildService(59_000);
+    const { service } = ctx;
+    const codes = await enrolWithCodes(ctx);
 
     // The documented normalisation: trim, then upper-case.
     expect(await service.verifyRecoveryCode('user1', `  ${codes[0].toLowerCase()}  `)).toBe('ok');
   });
 
   it('refuses a valid code with an extra character appended', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
-    const codes = await service.generateRecoveryCodes('user1');
+    const ctx = buildService(59_000);
+    const { service } = ctx;
+    const codes = await enrolWithCodes(ctx);
 
     // decodeBase32 drops leftover bits, so the 17-character string can decode to
     // the same 10 bytes as the code inside it. The length check runs first.
@@ -69,9 +85,9 @@ describe('recovery codes', () => {
   });
 
   it('refuses a truncated code and a code with an out-of-alphabet character', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
-    const codes = await service.generateRecoveryCodes('user1');
+    const ctx = buildService(59_000);
+    const { service } = ctx;
+    const codes = await enrolWithCodes(ctx);
 
     expect(await service.verifyRecoveryCode('user1', codes[0].slice(0, 15))).toBe('invalid');
     expect(await service.verifyRecoveryCode('user1', `${codes[0].slice(0, 15)}1`)).toBe('invalid');
@@ -79,10 +95,10 @@ describe('recovery codes', () => {
   });
 
   it('digests are stored, never plaintext', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
+    const ctx = buildService(59_000);
+    const { service } = ctx;
 
-    const codes = await service.generateRecoveryCodes('user1');
+    const codes = await enrolWithCodes(ctx);
     // A plaintext code that was NOT generated should not work.
     expect(await service.verifyRecoveryCode('user1', 'AAAAAAAAAAAAAAAA')).toBe('invalid');
     // A generated code works.
@@ -90,17 +106,17 @@ describe('recovery codes', () => {
   });
 
   it('a wrong recovery code is refused', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
-    await service.generateRecoveryCodes('user1');
+    const ctx = buildService(59_000);
+    const { service } = ctx;
+    await enrolWithCodes(ctx);
 
     expect(await service.verifyRecoveryCode('user1', 'BBBBBBBBBBBBBBBB')).toBe('invalid');
   });
 
   it('recovery code lockout works like TOTP lockout', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
-    await service.generateRecoveryCodes('user1');
+    const ctx = buildService(59_000);
+    const { service } = ctx;
+    await enrolWithCodes(ctx);
 
     // Five wrong recovery codes.
     for (let i = 0; i < 5; i++) {
@@ -111,9 +127,9 @@ describe('recovery codes', () => {
   });
 
   it('concurrent use of the same recovery code yields exactly one success', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
-    const codes = await service.generateRecoveryCodes('user1');
+    const ctx = buildService(59_000);
+    const { service } = ctx;
+    const codes = await enrolWithCodes(ctx);
 
     // Four concurrent uses: within the lockout limit of 5.
     const results = await Promise.all(

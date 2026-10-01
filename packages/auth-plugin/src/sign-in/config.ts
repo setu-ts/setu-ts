@@ -411,7 +411,9 @@ export function compileMfa(mfa: MfaOptions | undefined): MfaOptions | null {
   }
   if (
     mfa.challengePath !== undefined &&
-    safeReturnTo(mfa.challengePath, '') !== mfa.challengePath
+    // `''` passes the comparison below (the fallback IS `''`), and a `Location: ""`
+    // re-requests the callback that has just spent its code.
+    (mfa.challengePath === '' || safeReturnTo(mfa.challengePath, '') !== mfa.challengePath)
   ) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: signIn.mfa.challengePath must be a same-origin absolute path',
