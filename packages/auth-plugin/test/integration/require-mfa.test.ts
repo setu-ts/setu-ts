@@ -150,8 +150,8 @@ describe('requireMfa() guard', () => {
       [['otp'], 200],
       [['pwd', 'pop'], 200],
     ];
+    harness = await buildMfaGuardApp();
     for (const [amr, expected] of cases) {
-      harness = await buildMfaGuardApp();
       const token = await harness.sign({ amr });
       const response = await harness.app.fetch(
         new Request(`${BASE}/mfa-protected`, {

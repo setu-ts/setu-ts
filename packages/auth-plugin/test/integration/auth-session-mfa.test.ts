@@ -181,6 +181,12 @@ async function buildMfaApp(
     });
   });
 
+  // Persist a session before sign-in, so its id can be compared across it.
+  app.router.post('/_touch', (ctx) => {
+    getSession(ctx).set('touched', true);
+    return ctx.response.json({ ok: true });
+  });
+
   // Age the pending MFA record: past any TTL by default, or by `?by=<ms>`.
   app.router.post('/_age-pending-mfa', (ctx) => {
     const session = getSession(ctx);
@@ -333,12 +339,18 @@ describe('auth-session MFA', () => {
   it('session id changes at sign-in (rotation)', async () => {
     harness = await buildMfaApp(ALWAYS_REQUIRED);
     const jar = new CookieJar();
+    // Persist a session and prove its id is stable across requests, so the
+    // comparison below cannot pass merely because every read mints a new id.
+    await jar.fetch(harness.app, '/_touch', { method: 'POST' });
+    const before = (await json(await jar.fetch(harness.app, '/_session'))).id;
+    const again = (await json(await jar.fetch(harness.app, '/_session'))).id;
+    expect(again).toBe(before);
     // Sign in (triggers MFA pending, rotates session).
     await jar.fetch(harness.app, '/password-login', { method: 'POST' });
-    const session = await json(await jar.fetch(harness.app, '/_session'));
-    expect(session.id).toBeDefined();
-    expect(typeof session.id).toBe('string');
-    expect((session.id as string).length).toBeGreaterThan(0);
+    const after = (await json(await jar.fetch(harness.app, '/_session'))).id;
+    expect(typeof after).toBe('string');
+    expect((after as string).length).toBeGreaterThan(0);
+    expect(after).not.toBe(before);
   });
 
   it('an expired pending record is refused at completion', async () => {
