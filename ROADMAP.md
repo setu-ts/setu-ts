@@ -10669,10 +10669,14 @@ observations and the `GET /v1/queues` inspector; 98e complete
 minimized completed-span trace observations and the `GET /v1/traces` inspector; 98i complete
 ([#374](https://github.com/setu-ts/setu-ts/pull/374)) — cache operation counters and the
 `GET /v1/cache` inspector; 98h complete ([#376](https://github.com/setu-ts/setu-ts/pull/376)) —
-authorization decision explanations and the `GET /v1/authorization` inspector. These nine are
-implemented, awaiting publication in the next release cycle. 98j is complete
-([#375](https://github.com/setu-ts/setu-ts/pull/375)) — event dispatch observations. **98k–98n are
-planned**, each with its own implementation plan and mandatory security audit. This umbrella records
+authorization decision explanations and the `GET /v1/authorization` inspector; 98j complete
+([#375](https://github.com/setu-ts/setu-ts/pull/375)) — event dispatch observations; 98k complete
+([#379](https://github.com/setu-ts/setu-ts/pull/379)) — scheduler execution observations; 98l
+complete ([#377](https://github.com/setu-ts/setu-ts/pull/377)) — realtime lifecycle observations;
+98m complete ([#383](https://github.com/setu-ts/setu-ts/pull/383)) — storage operation counters; 98n
+complete ([#380](https://github.com/setu-ts/setu-ts/pull/380)) — outbound HTTP attempt observations.
+98a–98n are implemented and awaiting publication in the next release cycle. **98o (session renewal)
+is open**, requested by the devtool as a prerequisite for its D04 preview. This umbrella records
 framework work for the separately maintained devtool; adding the later letters does not make them
 prerequisites for publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE
 exception recorded under the release requirements below — M98d's status-shape change must precede
@@ -11279,6 +11283,60 @@ and bytes describe the same settlement. Owner: `packages/storage-plugin`. Canoni
       audit. Verify exact input/init and Response identity, stream untouched, original synchronous
       throws and promise rejections, abort, SDK retry count and redirects delegated unchanged. Test
       with real local HTTP via SDK injected fetch; no public network test dependency.
+
+### Milestone 98o: Diagnostics Session Renewal
+
+**Status:** Not started. No plan yet; write `plans/milestone-98o-session-renewal.md` from
+`plans/TEMPLATE.md` before implementation. Owner: `packages/diagnostics-plugin`, with `packages/cli`
+only if the generated development entry needs a new option. Requested by the devtool repository as a
+prerequisite for its D04 free preview (devtool roadmap milestone D03b).
+
+**Why:** an M98b session lives 15 minutes by default and at most one hour (`ttlMs`, capped at
+`MAX_TTL_MS = 3_600_000` in `packages/diagnostics-plugin/src/plugin/diagnostics-plugin.ts`). After
+expiry the only remedy is to relaunch the application with a fresh credential pair. The devtool is
+an editor extension that stays open all day, so a forced relaunch every 15 minutes makes it unusable
+for its main workflow, and the devtool must not work around that by relaunching silently or by
+asking for a longer `ttlMs`. Renewal has to be a framework operation, designed and audited here.
+
+**What exists today, verified from source:**
+
+- The status body already carries `expiresInMs` (`protocol/protocol.ts`), and the server answers a
+  MAC-valid request after expiry with the value-free `expired` code (401).
+- The native client exposes neither: it does not surface `expiresInMs`, and every non-200 response
+  becomes the generic `connection` error (`client/client.ts`), so a consumer cannot tell expiry from
+  revocation, rate limiting or a network failure.
+- There is no renewal operation. Expiry runs on the runtime's monotonic clock from activation;
+  `revoke()` runs on stopping and close.
+
+**Deliverables:**
+
+- [ ] An authenticated renewal operation on the connector. The plan decides, with the design
+      security review, every point below rather than inheriting a default:
+  - whether renewal extends the current session or rotates to a fresh key or session ID;
+  - an absolute maximum session lifetime from activation that no number of renewals can exceed, and
+    whether it is configurable;
+  - how much each renewal extends, and the earliest point at which a renewal is accepted;
+  - whether this is a protocol v1 extension or a new protocol version. Protocol v1 is not extended
+    silently.
+- [ ] Refusal semantics, each tested: renewal after expiry is refused (expiry stays terminal); after
+      `revoke()` it is refused; a replayed or reordered renewal request is refused by the existing
+      sequence gate; a session bound to one application instance cannot renew against another.
+- [ ] Native client support: a renewal method, the remaining lifetime from the status body, and a
+      fixed, value-free classification of `expired` versus other failures, so a consumer can choose
+      between renewing and relaunching. Credentials and the session key never appear in an error.
+- [ ] `docs/diagnostics-protocol.md`, the protocol fixtures the devtool consumes, the
+      `diagnostics-plugin` README and `PUBLIC_API.md` updated in the same PR.
+- [ ] A consumer exercise against a real application: pair, renew, keep reading past the original
+      `ttlMs`, be refused past the absolute maximum, and be refused after `revoke()`.
+- [ ] Both security gates below: a recorded design security review in the plan before
+      implementation, and a committed-tree audit run in a context that did not implement the letter.
+      This changes credential lifetime on an authenticated transport, so the M98b design review does
+      not cover it.
+
+**Out of scope:** remote connections, persistent sessions that survive an application restart (a
+restart is a new instance and needs a new pairing), and any extension UI. The devtool's own consumer
+work, and the updates to its design documents that currently forbid renewal, stay in the devtool
+repository.
 
 ### Mandatory Security Audit Gates for M98d–M98n
 
@@ -12285,7 +12343,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                                                                                                                      |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                                                                                                                          |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                                                                                                                            |
-| 98        | ✅     | secure read-only devtool diagnostics (umbrella; 98a–98n complete)                                                                                                                                                                             |
+| 98        | ⬜     | secure read-only devtool diagnostics (umbrella; 98a–98n complete, 98o open)                                                                                                                                                                   |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                                                                                                                    |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))                                                                                                     |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                                                                                                                 |
@@ -12300,6 +12358,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98l       | ✅     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations                                                                                                                                          |
 | 98m       | ✅     | storage-plugin + common + diagnostics-plugin — storage operation counters ([#383](https://github.com/setu-ts/setu-ts/pull/383))                                                                                                               |
 | 98n       | ✅     | sdk + common + diagnostics-plugin — outbound HTTP attempt observations ([#380](https://github.com/setu-ts/setu-ts/pull/380))                                                                                                                  |
+| 98o       | ⬜     | diagnostics-plugin — diagnostics session renewal                                                                                                                                                                                              |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High, plus the 99e maintainer report)                                                                                                                                                    |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                                                                                                                            |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                                                                                                                          |
