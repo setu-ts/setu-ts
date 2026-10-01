@@ -5506,7 +5506,19 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `completeSignInWithRecoveryCode` promote the pending record with `methods: ['pwd'|'fed', 'otp']`
   and rotate the session id; `promotePending` is internal. The new `requireMfa()` guard answers 401
   anonymous / 403 `second-factor-required` when `claims.amr` lacks `otp` or `pop`. `common` gains
-  `PendingSignIn` and the `second-factor-required` `AuthorizationFailure` arm — complete.
+  `PendingSignIn` and the `second-factor-required` `AuthorizationFailure` arm. Verification found a
+  federated callback that ignored the pending outcome (now `signIn.mfa.challengePath`, with the
+  RP-logout keys kept through promotion), an unvalidated `pendingTtlMs` that failed open on `NaN`,
+  and refused lockout attempts that were recorded and so extended the lock forever. The
+  committed-tree security audit failed round 1 on a High: the README's enrolment routes read the
+  principal from the request body and re-enrolment needed no proof, so anyone could take over a
+  second factor — replacing, regenerating codes for, or disabling a confirmed factor now requires
+  proof of the current one, and codes are minted only at confirmation. Round 2 failed on a Medium:
+  enrolment was a read-modify-write, so a concurrent enrolment against a slow shared store rolled a
+  claimed step back (reopening replay) or got its secret confirmed by the victim's code;
+  `ITotpStore` now writes through two atomic operations, `stageSecret` and a compare-and-set
+  `confirmSecret`, and a password-only `signIn` with `providers: []` is allowed when `mfa` is set —
+  complete (PR pending).
 - **Next milestone** — **M100e** (`packages/auth-plugin` — passkeys (WebAuthn); a passkey assertion
   with user verification counts as a second factor for 100d's step-up model).
 

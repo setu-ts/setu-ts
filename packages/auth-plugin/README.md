@@ -493,7 +493,13 @@ nothing changes until you set `signIn.mfa.required`.
 is not an `AuthPlugin` option and registers nothing. It computes RFC 6238 TOTP codes (HMAC-SHA1,
 30-second step, 6 digits, ±1 step window) from a base32 secret, and it verifies them against an
 `ITotpStore`. The shipped `MemoryTotpStore` is single-process; a multi-instance application supplies
-a shared implementation.
+a shared implementation, and must implement `stageSecret`, `confirmSecret`, `claimStep`,
+`reserveAttempt` and `consumeRecoveryCode` as single atomic operations (a compare-and-set or a
+transaction) — each one closes a race that a read followed by a write reopens.
+
+A password-only application sets `providers: []` with `mfa` (an empty list is refused without it)
+and records its own principal through `IAuthSessionService.signIn`, as the `/login` route below
+does; `signIn` then supplies the auth-session capability, the pending state and the logout route.
 
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
@@ -523,6 +529,19 @@ const app = createApplication({
       },
     }),
   ],
+});
+
+// Your own credential check — whatever your user store provides.
+declare function checkPassword(username: string, password: string): Promise<{ id: string } | null>;
+
+app.router.post('/login', async (ctx) => {
+  const { username, password } = await ctx.request.json<{ username: string; password: string }>();
+  const user = await checkPassword(username, password);
+  if (user === null) return ctx.response.status(401).json({ error: 'invalid credentials' });
+  const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
+  const outcome = await auth.signIn(ctx, { id: user.id, roles: [] }, { methods: ['pwd'] });
+  // 'second-factor-required': send the browser to the code form.
+  return ctx.response.json(outcome);
 });
 
 // Who is enrolling: the signed-in principal (a settings page), or — during a
@@ -636,9 +655,11 @@ app.router.get('/account/bank', {
   codes lock out TOTP verification too. A successful verification clears the count.
 - **Re-enrolment is non-destructive.** A confirmed factor stays confirmed and stays usable while a
   new secret awaits confirmation; confirming swaps the pending secret in and keeps the step counter
-  monotonic, so a code valid before the swap is still refused afterwards. A backend that persists
-  only some enrolment fields must persist `pendingSecret`/`pendingLabel` as well, or the factor
-  awaiting confirmation is lost and the old one silently returns.
+  monotonic, so a code valid before the swap is still refused afterwards. Confirmation succeeds only
+  if the secret its code was checked against is STILL the one awaiting confirmation
+  (`ITotpStore.confirmSecret`), so a secret staged concurrently by someone else is never confirmed
+  on the strength of the user's code — the user's confirmation answers `invalid` instead. A wrong
+  new code is checked before any recovery code offered as proof, so it does not spend one.
 - **Replay protection.** The store's `claimStep` is monotonic: a code whose step is ≤ the last
   claimed step is refused, so a captured code cannot be replayed within its ±1 window.
 - **Recovery codes.** Confirming a factor mints the first set (`confirmEnrolment` returns it), so

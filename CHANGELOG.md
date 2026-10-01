@@ -51,9 +51,14 @@ All notable changes to this project are documented here. The format follows
   `requireMfa`, and the types `MfaOptions`, `ITotpStore`, `TotpVerifyResult`,
   `RecoveryVerifyResult`, `TotpCompleteSignInResult`, `TotpServiceOptions`, `TotpEnrolment`,
   `ReserveAttemptResult`, `TotpProofResult`, `ConfirmEnrolmentResult`, `RecoveryCodesResult`,
-  `DisableResult`. `MemoryTotpStore` sweeps lockout entries whose attempts have all left the window,
-  so its size tracks the attempt rate rather than every principal id ever presented. The internal
-  `promotePending` is not exported. With `signIn.mfa` unset nothing changes.
+  `DisableResult`. `ITotpStore` writes enrolment state only through two atomic operations —
+  `stageSecret` (never touches the claimed step) and `confirmSecret` (a compare-and-set on the
+  secret awaiting confirmation) — so a concurrent enrolment can neither roll back a claimed step and
+  reopen a code's replay, nor have its secret confirmed by another user's code. `signIn.providers`
+  may be empty when `signIn.mfa` is set, for a password-only sign-in. `MemoryTotpStore` sweeps
+  lockout entries whose attempts have all left the window, so its size tracks the attempt rate
+  rather than every principal id ever presented. The internal `promotePending` is not exported. With
+  `signIn.mfa` unset nothing changes.
 
 - **Sign-in with an outside provider (M100c).** `AuthPluginOptions.signIn` makes the application an
   OAuth 2.0 / OpenID Connect relying party over the authorization-code flow: per provider,
