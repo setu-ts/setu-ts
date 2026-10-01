@@ -11874,7 +11874,7 @@ because one of them invalidated part of a previous run's claims:
 
 **Plans:** `plans/archive/milestone-100a-auth-composition.md`,
 `plans/archive/milestone-100b-external-token-verification.md`,
-`plans/milestone-100c-oidc-sign-in.md`, `plans/milestone-100d-totp-mfa.md`,
+`plans/archive/milestone-100c-oidc-sign-in.md`, `plans/archive/milestone-100d-totp-mfa.md`,
 `plans/milestone-100e-passkeys.md`, `plans/milestone-100f-saml-sp.md`. Each carries its design
 security review.
 
