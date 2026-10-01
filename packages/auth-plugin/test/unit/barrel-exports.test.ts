@@ -8,6 +8,7 @@ import type {
   AuthPluginOptions,
   IAuthHttp,
   IAuthorizationDiagnosticsSource,
+  IPasskeyStore,
   IRefreshTokenRotation,
   IssuerAlgorithm,
   IssuerKeySource,
@@ -15,6 +16,7 @@ import type {
   MfaOptions,
   OAuth2Provider,
   OidcProvider,
+  PasskeyOptions,
   ProviderTokens,
   RecoveryVerifyResult,
   RefreshPrincipal,
@@ -23,6 +25,7 @@ import type {
   SignInConfig,
   SignInProvider,
   SignInProviderBase,
+  StoredPasskey,
   TokenEndpointAuth,
   TotpCompleteSignInResult,
   TotpEnrolment,
@@ -153,6 +156,37 @@ describe('barrel exports', () => {
     // callers pass `now` to reserveAttempt.
     expect(auth.MemoryTotpStore).toBeDefined();
     expect(auth.MemoryTotpStore.length).toBe(0);
+    // MemoryPasskeyStore (M100e) likewise takes no arguments.
+    expect(auth.MemoryPasskeyStore).toBeDefined();
+    expect(auth.MemoryPasskeyStore.length).toBe(0);
+  });
+
+  it('exports the M100e passkey types (declared against the barrel)', () => {
+    // Compile-time: each M100e type resolves from the barrel. Dropping a
+    // re-export stops this file compiling.
+    const store: IPasskeyStore = new auth.MemoryPasskeyStore();
+    const credential: StoredPasskey = {
+      id: 'cred-1',
+      principalId: 'alice',
+      userHandle: 'handle',
+      publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+      algorithm: -7,
+      counter: 0,
+      backedUp: false,
+      transports: ['internal'],
+      attestation: 'unverified',
+      createdAt: 0,
+    };
+    const options: PasskeyOptions = {
+      rpId: 'localhost',
+      rpName: 'Test',
+      origins: ['https://localhost'],
+      store,
+      resolvePrincipal: () => Promise.resolve(null),
+    };
+    expect(credential.attestation).toBe('unverified');
+    expect(options.rpId).toBe('localhost');
+    expect('userVerification' in options).toBe(false);
   });
 
   it('exports TotpService and the M100d MFA types (declared against the barrel)', () => {

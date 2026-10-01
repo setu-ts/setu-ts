@@ -19,6 +19,7 @@ import type {
   MfaOptions,
   OAuth2Provider,
   OidcProvider,
+  PasskeyOptions,
   ProviderTokens,
   RefreshPrincipal,
   SignInConfig,
@@ -108,6 +109,12 @@ export interface CompiledSignIn {
    * The MFA policy, or `null` when no second factor is required.
    */
   readonly mfa: MfaOptions | null;
+  /**
+   * The raw passkeys option (M100e), or `null` when absent. Carried through
+   * here so the plugin compiles it once, beside the sign-in arm, with the
+   * same construction-time refusals.
+   */
+  readonly passkeys: PasskeyOptions | null;
 }
 
 function refuse(name: string, reason: string): never {
@@ -384,6 +391,7 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
     rpLogoutProvider: rpLogoutProviders[0] ?? null,
     refreshPrincipal: config.refreshPrincipal ?? null,
     mfa: compileMfa(config.mfa),
+    passkeys: config.passkeys ?? null,
   };
 }
 

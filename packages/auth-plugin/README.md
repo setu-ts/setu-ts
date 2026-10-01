@@ -678,6 +678,97 @@ app.router.get('/account/bank', {
   up with `methods: ['pwd', 'otp']` and `amr: ['pwd', 'otp']`. `requireMfa()` accepts `otp` or
   `pop`.
 
+## Passkeys (WebAuthn)
+
+`signIn.passkeys` registers the four ceremony routes — `POST <basePath>/passkeys/register/options`,
+`POST /passkeys/register/verify`, `POST /passkeys/login/options`, `POST /passkeys/login/verify` —
+and lets a passkey assertion with user verification count as the second factor for `signIn.mfa`'s
+step-up model. Registration and authentication ceremonies are WebAuthn Level 2 with attestation
+conveyance `none`; ES256, RS256 and EdDSA credentials are accepted.
+
+The verifier is **zero-dependency**: a bounded CBOR/COSE decoder over `runtime.subtle`. It does not
+use `@simplewebauthn/server`, because importing that library installs a global `Reflect.getMetadata`
+polyfill in every application that enables passkeys (its `reflect-metadata` dependency) and
+advertises ML-DSA-44 on some runtimes only — the framework requires no reflection library, and the
+plugin keeps that true. The library appears only in the package's own differential test, as a test
+oracle.
+
+Verification checks `clientDataJSON` (ceremony type, the session-held challenge, the origin against
+an exact allowlist, `crossOrigin` refused), `authenticatorData` (RP ID hash, user-present and
+user-verified flags), and the signature over `authenticatorData ‖ SHA-256(clientDataJSON)`.
+Challenges are held in the session with a 5-minute expiry AND claimed once in the credential store:
+on the default encrypted-cookie session strategy an older cookie still carries a consumed challenge,
+and a synced passkey's counter is always `0`, so the session alone cannot stop a replayed assertion.
+
+```typescript
+import type { IPrincipal } from '@setu-ts/common';
+import { AuthPlugin, MemoryPasskeyStore } from '@setu-ts/auth-plugin';
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
+import { SessionPlugin } from '@setu-ts/session-plugin';
+
+/** The application's own principal lookup; `null` refuses the sign-in. */
+function loadPrincipal(principalId: string): Promise<IPrincipal | null> {
+  return Promise.resolve(null);
+}
+
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    SessionPlugin({ secret: 'replace-with-at-least-32-characters!!' }),
+    AuthPlugin({
+      signIn: {
+        providers: [],
+        mfa: { required: (principal) => principal.roles?.includes('admin') === true },
+        passkeys: {
+          rpId: 'example.com',
+          rpName: 'My App',
+          origins: ['https://example.com'],
+          store: new MemoryPasskeyStore(),
+          resolvePrincipal: loadPrincipal,
+        },
+      },
+    }),
+  ],
+});
+```
+
+The browser calls the routes with `navigator.credentials` and the CSRF header token the session
+plugin's form CSRF check requires:
+
+```js
+const options = await fetch('/auth/passkeys/login/options', {
+  method: 'POST',
+  headers: { 'x-csrf-token': csrfToken },
+}).then((r) => r.json());
+
+const assertion = await navigator.credentials.get({ publicKey: options });
+
+const result = await fetch('/auth/passkeys/login/verify', {
+  method: 'POST',
+  headers: { 'content-type': 'application/json', 'x-csrf-token': csrfToken },
+  body: JSON.stringify(assertion),
+}).then((r) => r.json());
+// { status: 'signed-in' } — or { status: 'second-factor-required' }
+```
+
+Credentials are the application's data: `PasskeyOptions.store` is a required `IPasskeyStore`, and
+the shipped `MemoryPasskeyStore` is single-process. A multi-instance application supplies a shared
+implementation and **must implement `updateCounter` as an atomic compare-and-advance** — it stores
+the observed counter only when it is greater than the stored one (or both are zero) and reports
+whether it did. A read-then-write lets two concurrent assertions both validate against the same
+stored value and lets the lower one overwrite the higher, which is exactly how a cloned
+authenticator's stale counter slips through. `claimChallenge` must be atomic too.
+
+A UV-unset assertion is refused for a username-less sign-in and accepted only as the second factor
+after a first one: without user verification it proves possession alone, and recording `pop` for it
+would satisfy `requireMfa()` with one factor. The recorded method is always `pop` (proof of
+possession) — never `hwk`/`swk`, which the plugin cannot know with attestation unverified.
+
+Attestation statements are NOT verified: `attestation: 'none'` is requested, any `fmt` the client
+sends is accepted with its statement unread, and the stored credential records
+`attestation: 'unverified'`. Verifying attestations against trust roots is out of scope.
+
 ## Refresh Tokens
 
 `RefreshTokenService` is an app-instantiated service (like `PasswordHasher`) — it is not an
@@ -859,6 +950,7 @@ MIT
 | `MemoryRateLimitStore`              | class     |
 | `MemoryRefreshTokenStore`           | class     |
 | `MemoryTotpStore`                   | class     |
+| `MemoryPasskeyStore`                | class     |
 | `PasswordHasher`                    | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
@@ -882,6 +974,7 @@ MIT
 | `JwtSignOptions`                    | interface |
 | `LocalOptions`                      | interface |
 | `MfaOptions`                        | interface |
+| `IPasskeyStore`                     | interface |
 | `OAuth2Provider`                    | interface |
 | `OidcProvider`                      | interface |
 | `ProviderTokens`                    | interface |
@@ -910,6 +1003,8 @@ MIT
 | `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |
 | `SignInProvider`                    | type      |
+| `PasskeyOptions`                    | interface |
+| `StoredPasskey`                     | interface |
 | `TokenEndpointAuth`                 | type      |
 | `TotpCompleteSignInResult`          | type      |
 | `TotpProofResult`                   | type      |

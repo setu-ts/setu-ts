@@ -13,6 +13,7 @@ import type {
   SessionView,
 } from '@setu-ts/common';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
+import type { IPasskeyStore } from '../stores/passkey-store.ts';
 
 /**
  * JWT configuration options.
@@ -511,6 +512,50 @@ export interface MfaOptions {
 }
 
 /**
+ * Passkeys (WebAuthn) configuration for sign-in (plan §3.6).
+ *
+ * @since 0.8.0
+ */
+export interface PasskeyOptions {
+  /**
+   * The RP ID: the origin's host or a registrable suffix of it. Compared
+   * against SHA-256 as the ceremony's `rpIdHash`; the browser refuses an RP ID
+   * that is not a registrable suffix of the origin at the ceremony.
+   */
+  readonly rpId: string;
+  /** The RP name the browser shows the user during the ceremony. */
+  readonly rpName: string;
+  /**
+   * The exact-match origin allowlist `clientDataJSON.origin` is verified
+   * against. Each origin must be `https`, or `http` on a loopback host, and
+   * carry no path, query or fragment.
+   */
+  readonly origins: readonly string[];
+  /**
+   * The credential store. Credentials are the application's data — a
+   * production store should encrypt the public keys' records at rest and
+   * honour `IPasskeyStore.updateCounter` as an atomic compare-and-advance.
+   */
+  readonly store: IPasskeyStore;
+  /**
+   * Resolves a credential's stored principal id to a principal at sign-in.
+   * Returning `null` refuses the sign-in with `403`, which is how a
+   * deactivation or a revoked account takes effect without deleting the
+   * credential.
+   */
+  readonly resolvePrincipal: (
+    principalId: string,
+  ) => IPrincipal | null | Promise<IPrincipal | null>;
+  /**
+   * The user-verification policy the ceremonies request and enforce. Defaults
+   * to `required`; `preferred` accepts a UV-unset assertion at registration
+   * and as the second factor after a first one, but never for a username-less
+   * sign-in.
+   */
+  readonly userVerification?: 'required' | 'preferred' | 'discouraged';
+}
+
+/**
  * Sign-in configuration (plan §3.2–§3.8).
  *
  * @since 0.8.0
@@ -540,4 +585,12 @@ export interface SignInConfig {
    * @since 0.8.0
    */
   readonly mfa?: MfaOptions;
+  /**
+   * Passkeys (WebAuthn): registers the four ceremony routes under
+   * `<basePath>/passkeys` and lets a passkey assertion with user verification
+   * count as the second factor for `mfa`. Requires the session capability.
+   *
+   * @since 0.8.0
+   */
+  readonly passkeys?: PasskeyOptions;
 }
