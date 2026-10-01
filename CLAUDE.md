@@ -5518,7 +5518,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   claimed step back (reopening replay) or got its secret confirmed by the victim's code;
   `ITotpStore` now writes through two atomic operations, `stageSecret` and a compare-and-set
   `confirmSecret`, and a password-only `signIn` with `providers: []` is allowed when `mfa` is set —
-  complete (PR pending).
+  complete (PR #388).
 - **Next milestone** — **M100e** (`packages/auth-plugin` — passkeys (WebAuthn); a passkey assertion
   with user verification counts as a second factor for 100d's step-up model).
 
