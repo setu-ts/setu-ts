@@ -476,7 +476,7 @@ export type RefreshPrincipal = (
 /**
  * MFA policy for sign-in (plan §3.1, §4.1).
  *
- * @since 0.9.0
+ * @since 0.8.0
  */
 export interface MfaOptions {
   /**
@@ -521,7 +521,7 @@ export interface SignInConfig {
    * MFA policy: decides when a second factor is required at sign-in. Absent
    * means no second factor is ever required.
    *
-   * @since 0.9.0
+   * @since 0.8.0
    */
   readonly mfa?: MfaOptions;
 }

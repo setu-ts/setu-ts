@@ -502,12 +502,7 @@ import { SessionPlugin } from '@setu-ts/session-plugin';
 import { createApplication } from '@setu-ts/kernel';
 
 const runtime = createRuntimeServices();
-const totp = new TotpService({
-  store: new MemoryTotpStore(runtime),
-  runtime,
-  issuer: 'MyApp',
-  pendingTtlMs: 300_000,
-});
+const totp = new TotpService({ store: new MemoryTotpStore(), runtime, issuer: 'MyApp' });
 
 const app = createApplication({
   plugins: [
@@ -567,13 +562,20 @@ app.router.get('/account/bank', {
   stores a `PendingSignIn` record under a private session key and returns `second-factor-required`.
   The session is anonymous until `completeSignIn` (or `completeSignInWithRecoveryCode`) succeeds, at
   which point the principal is recorded with `methods: ['pwd', 'otp']` (or `['fed', 'otp']`) and the
-  session id is rotated. A pending record expires after `pendingTtlMs` and is refused when read
-  after expiry. The internal promotion (`promotePending`) is not exported — only `TotpService` can
-  complete a pending sign-in.
-- **Lockout.** Five failed TOTP attempts within 15 minutes lock the account out of TOTP verification
-  until the window clears. The attempt is reserved BEFORE the code is checked, so the fifth failure
-  is what trips the lock. Recovery codes are not subject to TOTP lockout; a failed recovery-code
-  attempt is recorded but does not extend the lock.
+  session id is rotated. A pending record expires after `signIn.mfa.pendingTtlMs` (default 300 000
+  ms) and is refused when read after expiry; that option is the only place the TTL is configured,
+  because `TotpService` has no TTL option of its own. The internal promotion (`promotePending`) is
+  not exported — only `TotpService` can complete a pending sign-in.
+- **Lockout.** Five failed attempts within 15 minutes lock the principal out of verification until
+  the window clears. The attempt is reserved BEFORE the code is checked, so the fifth failure is
+  what trips the lock and the sixth answers `locked` without computing or comparing anything.
+  Recovery codes share that counter: five wrong recovery codes lock out TOTP verification too. A
+  successful verification clears the count.
+- **Re-enrolment is non-destructive.** A confirmed factor stays confirmed and stays usable while a
+  new secret awaits confirmation; confirming swaps the pending secret in and keeps the step counter
+  monotonic, so a code valid before the swap is still refused afterwards. A backend that persists
+  only some enrolment fields must persist `pendingSecret`/`pendingLabel` as well, or the factor
+  awaiting confirmation is lost and the old one silently returns.
 - **Replay protection.** The store's `claimStep` is monotonic: a code whose step is ≤ the last
   claimed step is refused, so a captured code cannot be replayed within its ±1 window.
 - **Recovery codes.** `generateRecoveryCodes` mints 10 codes of 16 base32 characters (80 bits each).
@@ -581,11 +583,14 @@ app.router.get('/account/bank', {
   plaintext list is returned to the caller exactly once and is not recoverable.
 - **`requireMfa()` guard.** Answers `401` for an anonymous request and `403`
   `second-factor-required` for a principal whose `claims.amr` lacks `otp` or `pop`. A session that
-  completed TOTP carries `amr: [..., 'otp']` and passes. The guard is branded `AUTHENTICATED`, so it
+  completed a second factor carries `amr: [..., 'otp']` and passes. A non-array `amr` — a bare
+  `'otp'`, a number, an object — is treated as ABSENT rather than coerced, so a string merely
+  containing a factor name cannot satisfy the guard. The guard is branded `AUTHENTICATED`, so it
   composes with `requireRole`/`requirePermission` on the same route.
-- **Recovery-code sign-in records `methods: ['otp']`.** A sign-in completed with a recovery code
-  (rather than a TOTP code) records `otp` in `amr` — the second factor was a one-time code, not a
-  time-based one. `requireMfa()` accepts both.
+- **Both completion paths append `otp`.** `completeSignIn` and `completeSignInWithRecoveryCode` each
+  append `otp` to the pending record's methods, so a password sign-in that finished with either ends
+  up with `methods: ['pwd', 'otp']` and `amr: ['pwd', 'otp']`. `requireMfa()` accepts `otp` or
+  `pop`.
 
 ## Refresh Tokens
 

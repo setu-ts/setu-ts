@@ -11,18 +11,32 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@setu-ts/common';
-
 /** A TOTP enrolment record. */
 export interface TotpEnrolment {
-  /** The base32 secret (RFC 4648, no padding). */
+  /**
+   * The base32 secret (RFC 4648, no padding) that verifies today. While a
+   * re-enrolment awaits confirmation this stays the OLD confirmed secret, so
+   * beginning a new enrolment never removes the working factor.
+   */
   readonly secret: string;
-  /** The label shown in the authenticator app. */
+  /** The label shown in the authenticator app, belonging to {@linkcode secret}. */
   readonly label: string;
   /** Whether the enrolment has been confirmed with a valid code. */
   confirmed: boolean;
-  /** The last claimed TOTP step; a step must be greater than this to be accepted. */
+  /**
+   * The last claimed TOTP step; a step must be greater than this to be accepted.
+   * Monotonic across re-enrolment: a step claimed under the old secret stays
+   * claimed after the new one is confirmed.
+   */
   lastClaimedStep: number;
+  /**
+   * The base32 secret of a re-enrolment awaiting confirmation, if one is in
+   * progress. Only {@linkcode ITotpStore} and the confirmation path read it;
+   * verification of a confirmed factor uses {@linkcode secret} alone.
+   */
+  pendingSecret?: string;
+  /** The label belonging to {@linkcode pendingSecret}. */
+  pendingLabel?: string;
 }
 
 /** The result of reserving an attempt for lockout purposes. */
@@ -46,7 +60,10 @@ export interface ITotpStore {
   getEnrolment(principalId: string): Promise<TotpEnrolment | null>;
 
   /**
-   * Stores or updates an enrolment.
+   * Stores or updates an enrolment, including its optional pending secret. A
+   * backend that persists only some fields must persist `pendingSecret` and
+   * `pendingLabel` too: a re-enrolment awaiting confirmation is otherwise lost,
+   * and the old confirmed secret comes back.
    */
   saveEnrolment(principalId: string, enrolment: TotpEnrolment): Promise<void>;
 
@@ -133,21 +150,13 @@ interface MemoryRecoveryCodes {
  *
  * For tests and single-process development. All operations are synchronous
  * internally but exposed through the async port so a remote backend can be
- * substituted without a breaking change.
+ * substituted without a breaking change. No constructor arguments: the store
+ * needs no clock, because callers pass `now` to {@linkcode ITotpStore.reserveAttempt}.
  */
 export class MemoryTotpStore implements ITotpStore {
   #enrolments = new Map<string, TotpEnrolment>();
   #attempts = new Map<string, MemoryAttempts>();
   #recoveryCodes = new Map<string, MemoryRecoveryCodes>();
-
-  /**
-   * @param _runtime - Runtime services (present for interface symmetry; the
-   *   memory store does not need a clock because callers pass `now` to
-   *   `reserveAttempt`).
-   */
-  constructor(_runtime: IRuntimeServices) {
-    // Intentionally unused.
-  }
 
   getEnrolment(principalId: string): Promise<TotpEnrolment | null> {
     const record = this.#enrolments.get(principalId);

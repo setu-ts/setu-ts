@@ -1,18 +1,15 @@
 /**
- * Unit — TOTP code generation and verification (RFC 6238).
+ * Unit — TOTP code generation (RFC 6238): the Appendix B vectors, the counter,
+ * and the constant-time compare. Both are the functions `TotpService` runs in
+ * production; the ±window is exercised through `TotpService.verify` in
+ * `totp-service.test.ts`, so no symbol here is read only by its own test.
  *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import {
-  computeTotpCode,
-  constantTimeEquals,
-  totpCounter,
-  verifyTotpCode,
-} from '../../src/mfa/totp-codes.ts';
+import { computeTotpCode, constantTimeEquals, totpCounter } from '../../src/mfa/totp-codes.ts';
 import { decodeBase32 } from '../../src/mfa/base32.ts';
-import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 /**
  * RFC 6238 Appendix B SHA-1 test vectors.
@@ -50,53 +47,6 @@ describe('totp-codes', () => {
     expect(totpCounter(30_000)).toBe(1);
     expect(totpCounter(59_999)).toBe(1);
     expect(totpCounter(60_000)).toBe(2);
-  });
-
-  it('verifies a code at the current step', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const secret = decodeBase32(RFC6238_SECRET);
-    const code = (await computeTotpCode(runtime.subtle, secret, totpCounter(runtime.now()))).slice(
-      -6,
-    );
-    expect(await verifyTotpCode(runtime, secret, code)).toBe(true);
-  });
-
-  it('verifies a code one step before the current step', async () => {
-    const runtime = createFakeRuntime(61_000); // counter = 2
-    const secret = decodeBase32(RFC6238_SECRET);
-    // Code for counter 1 (one step before).
-    const code = (await computeTotpCode(runtime.subtle, secret, 1)).slice(-6);
-    expect(await verifyTotpCode(runtime, secret, code)).toBe(true);
-  });
-
-  it('verifies a code one step after the current step', async () => {
-    const runtime = createFakeRuntime(59_000); // counter = 1
-    const secret = decodeBase32(RFC6238_SECRET);
-    // Code for counter 2 (one step after).
-    const code = (await computeTotpCode(runtime.subtle, secret, 2)).slice(-6);
-    expect(await verifyTotpCode(runtime, secret, code)).toBe(true);
-  });
-
-  it('refuses a code two steps before the current step', async () => {
-    const runtime = createFakeRuntime(91_000); // counter = 3
-    const secret = decodeBase32(RFC6238_SECRET);
-    // Code for counter 1 (two steps before).
-    const code = (await computeTotpCode(runtime.subtle, secret, 1)).slice(-6);
-    expect(await verifyTotpCode(runtime, secret, code)).toBe(false);
-  });
-
-  it('refuses a code two steps after the current step', async () => {
-    const runtime = createFakeRuntime(59_000); // counter = 1
-    const secret = decodeBase32(RFC6238_SECRET);
-    // Code for counter 3 (two steps after).
-    const code = (await computeTotpCode(runtime.subtle, secret, 3)).slice(-6);
-    expect(await verifyTotpCode(runtime, secret, code)).toBe(false);
-  });
-
-  it('refuses a random code', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const secret = decodeBase32(RFC6238_SECRET);
-    expect(await verifyTotpCode(runtime, secret, '000000')).toBe(false);
   });
 
   it('constantTimeEquals returns true for identical strings', () => {

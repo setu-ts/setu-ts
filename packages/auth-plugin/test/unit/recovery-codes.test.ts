@@ -1,5 +1,6 @@
 /**
- * Unit — Recovery codes: generation, single-use, digest storage.
+ * Unit — Recovery codes: generation, single-use, digest storage, and the exact
+ * canonical shape a code must have before the store is consulted.
  *
  * @module
  */
@@ -17,7 +18,7 @@ interface TestContext {
 
 function buildService(nowMs: number): TestContext {
   const runtime = createFakeRuntime(nowMs);
-  const store = new MemoryTotpStore(runtime);
+  const store = new MemoryTotpStore();
   const service = new TotpService({ store, runtime, issuer: 'Test' });
   return { service, runtime, store };
 }
@@ -45,13 +46,45 @@ describe('recovery codes', () => {
     expect(await service.verifyRecoveryCode('user1', codes[0])).toBe('invalid');
   });
 
+  it('accepts the generated code in lower case and with surrounding whitespace', async () => {
+    const { service } = buildService(59_000);
+    await service.beginEnrolment('user1', 'alice');
+    const codes = await service.generateRecoveryCodes('user1');
+
+    // The documented normalisation: trim, then upper-case.
+    expect(await service.verifyRecoveryCode('user1', `  ${codes[0].toLowerCase()}  `)).toBe('ok');
+  });
+
+  it('refuses a valid code with an extra character appended', async () => {
+    const { service } = buildService(59_000);
+    await service.beginEnrolment('user1', 'alice');
+    const codes = await service.generateRecoveryCodes('user1');
+
+    // decodeBase32 drops leftover bits, so the 17-character string can decode to
+    // the same 10 bytes as the code inside it. The length check runs first.
+    expect(await service.verifyRecoveryCode('user1', `${codes[0]}A`)).toBe('invalid');
+    // And the code is still unconsumed, so it is refused for the right reason:
+    // shape, not a spent code.
+    expect(await service.verifyRecoveryCode('user1', codes[0])).toBe('ok');
+  });
+
+  it('refuses a truncated code and a code with an out-of-alphabet character', async () => {
+    const { service } = buildService(59_000);
+    await service.beginEnrolment('user1', 'alice');
+    const codes = await service.generateRecoveryCodes('user1');
+
+    expect(await service.verifyRecoveryCode('user1', codes[0].slice(0, 15))).toBe('invalid');
+    expect(await service.verifyRecoveryCode('user1', `${codes[0].slice(0, 15)}1`)).toBe('invalid');
+    expect(await service.verifyRecoveryCode('user1', '')).toBe('invalid');
+  });
+
   it('digests are stored, never plaintext', async () => {
     const { service } = buildService(59_000);
     await service.beginEnrolment('user1', 'alice');
 
     const codes = await service.generateRecoveryCodes('user1');
     // A plaintext code that was NOT generated should not work.
-    expect(await service.verifyRecoveryCode('user1', 'AAAAAAAAAAAAAA==')).toBe('invalid');
+    expect(await service.verifyRecoveryCode('user1', 'AAAAAAAAAAAAAAAA')).toBe('invalid');
     // A generated code works.
     expect(await service.verifyRecoveryCode('user1', codes[1])).toBe('ok');
   });

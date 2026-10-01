@@ -11,15 +11,23 @@ import type {
   IRefreshTokenRotation,
   IssuerAlgorithm,
   IssuerKeySource,
+  ITotpStore,
+  MfaOptions,
   OAuth2Provider,
   OidcProvider,
   ProviderTokens,
+  RecoveryVerifyResult,
   RefreshPrincipal,
+  ReserveAttemptResult,
   SessionAuthOptions,
   SignInConfig,
   SignInProvider,
   SignInProviderBase,
   TokenEndpointAuth,
+  TotpCompleteSignInResult,
+  TotpEnrolment,
+  TotpServiceOptions,
+  TotpVerifyResult,
   TrustedIssuer,
 } from '../../src/index.ts';
 
@@ -129,6 +137,11 @@ describe('barrel exports', () => {
 
     expect(auth.publicRoute).toBeDefined();
     expect(typeof auth.publicRoute).toBe('function');
+
+    // requireMfa (M100d) is a guard factory like the rest; its behaviour is
+    // covered by test/integration/require-mfa.test.ts.
+    expect(auth.requireMfa).toBeDefined();
+    expect(typeof auth.requireMfa).toBe('function');
   });
 
   it('exports stores', () => {
@@ -136,6 +149,40 @@ describe('barrel exports', () => {
     expect(auth.MemoryRefreshTokenStore).toBeDefined();
     expect(auth.MemoryRateLimitStore).toBeDefined();
     expect(auth.RedisRateLimitStore).toBeDefined();
+    // MemoryTotpStore (M100d) takes no arguments: it needs no clock, because
+    // callers pass `now` to reserveAttempt.
+    expect(auth.MemoryTotpStore).toBeDefined();
+    expect(auth.MemoryTotpStore.length).toBe(0);
+  });
+
+  it('exports TotpService and the M100d MFA types (declared against the barrel)', () => {
+    expect(auth.TotpService).toBeDefined();
+    expect(typeof auth.TotpService).toBe('function');
+    // Compile-time: each M100d type resolves from the barrel. Dropping a
+    // re-export stops this file compiling.
+    const store: ITotpStore = new auth.MemoryTotpStore();
+    const enrolment: TotpEnrolment = {
+      secret: 'AAA',
+      label: 'alice',
+      confirmed: false,
+      lastClaimedStep: 0,
+    };
+    const reserved: ReserveAttemptResult = { allowed: true, count: 1 };
+    const options: TotpServiceOptions = {
+      store,
+      runtime: undefined as unknown as TotpServiceOptions['runtime'],
+      issuer: 'Test',
+    };
+    const mfa: MfaOptions = { required: () => true };
+    const verified: TotpVerifyResult = 'not-enrolled';
+    const recovery: RecoveryVerifyResult = 'invalid';
+    const completed: TotpCompleteSignInResult = 'no-pending';
+    expect(options.issuer).toBe('Test');
+    expect(mfa.required({ id: 'u1' }, ['pwd'])).toBe(true);
+    expect([enrolment.secret, reserved.count, verified, recovery, completed].length).toBe(5);
+    // TotpServiceOptions carries no pendingTtlMs: `signIn.mfa.pendingTtlMs` is
+    // the only owner of that TTL, so the property must not exist.
+    expect('pendingTtlMs' in options).toBe(false);
   });
 
   it('type exports', () => {

@@ -39,9 +39,15 @@ export const ID_TOKEN_SESSION_KEY = '__setu_auth_id_token';
  * The reserved session key holding a pending second-factor record. Written by
  * `signIn` when the `mfa.required` option answers `true` and the methods hold
  * no second factor; consumed by the package's own verifiers through
- * {@linkcode promotePending}.
+ * {@linkcode AuthSessionService.promotePending}.
  */
 export const PENDING_MFA_SESSION_KEY = '__setu_auth_pending_mfa';
+
+/**
+ * How long a pending second-factor record may sit before it is refused, when
+ * `signIn.mfa.pendingTtlMs` is not configured: 300 000 ms (5 minutes).
+ */
+export const DEFAULT_PENDING_TTL_MS = 300_000;
 
 /** The authentication methods the framework recognises (RFC 8176 `amr` values). */
 const AUTH_METHODS: readonly AuthMethod[] = ['pwd', 'otp', 'pop', 'fed'];
@@ -149,7 +155,14 @@ export interface AuthSessionServiceDeps {
       principal: IPrincipal,
       methods: readonly AuthMethod[],
     ) => boolean | Promise<boolean>;
-    readonly pendingTtlMs: number;
+    /**
+     * How long a pending second-factor record may sit before
+     * {@linkcode AuthSessionService.promotePending} refuses it, in milliseconds.
+     * Defaults to {@linkcode DEFAULT_PENDING_TTL_MS}. This is the ONLY owner of
+     * that TTL: the verifiers ask this service to promote and never supply a
+     * TTL of their own.
+     */
+    readonly pendingTtlMs?: number;
   };
 }
 
@@ -166,14 +179,19 @@ export class AuthSessionService implements IAuthSessionService {
   readonly #sessionService: ISessionService;
   readonly #now: () => number;
   readonly #mfa: AuthSessionServiceDeps['mfa'];
+  readonly #pendingTtlMs: number;
 
   /**
-   * @param deps - The session service, clock, and optional MFA policy
+   * Builds the plugin's sign-in owner.
+   *
+   * @param deps - The session service, clock, and optional MFA policy (whose
+   *   `pendingTtlMs` is the only source of the pending-record TTL)
    */
   constructor(deps: AuthSessionServiceDeps) {
     this.#sessionService = deps.sessionService;
     this.#now = deps.now;
     this.#mfa = deps.mfa;
+    this.#pendingTtlMs = deps.mfa?.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS;
   }
 
   /**
@@ -260,6 +278,49 @@ export class AuthSessionService implements IAuthSessionService {
   }
 
   /**
+   * Promotes a pending second-factor record to the signed-in key.
+   *
+   * Internal: NOT part of `IAuthSessionService` and NOT exported from
+   * `src/index.ts`. A public promotion call would let a caller decide what was
+   * verified, and a caller-supplied `{ method, principalId }` is not evidence;
+   * only the package's own verifiers (TOTP's `completeSignIn`, 100e's ceremony)
+   * reach this, and only after checking the factor against the pending
+   * principal.
+   *
+   * Reads the pending record from the session, refuses it when it is absent or
+   * older than the configured `signIn.mfa.pendingTtlMs`, then writes the
+   * signed-in record with the appended method, regenerates the session id, and
+   * deletes the pending record.
+   *
+   * @param ctx - The request context whose session is promoted
+   * @param method - The second-factor method to append (`'otp'` or `'pop'`)
+   * @returns `'signed-in'` on success, `'no-pending'` when nothing is pending
+   *   or the record has expired
+   * @throws {Error} If the session middleware did not run for this request
+   */
+  promotePending(ctx: IRequestContext, method: AuthMethod): 'signed-in' | 'no-pending' {
+    const session = this.#sessionService.from(ctx);
+    const pending = parsePendingMfaRecord(session.get(PENDING_MFA_SESSION_KEY));
+    if (pending === null) {
+      return 'no-pending';
+    }
+    const now = this.#now();
+    if (now - pending.at > this.#pendingTtlMs) {
+      // Expired: delete the stale record and refuse.
+      session.delete(PENDING_MFA_SESSION_KEY);
+      return 'no-pending';
+    }
+    const methods = [...pending.methods, method];
+    const record: AuthSessionRecord = { principal: pending.principal, methods, at: now };
+    session.set(AUTH_SESSION_KEY, record);
+    session.delete(PENDING_MFA_SESSION_KEY);
+    session.delete(RP_PROVIDER_SESSION_KEY);
+    session.delete(ID_TOKEN_SESSION_KEY);
+    session.regenerate();
+    return 'signed-in';
+  }
+
+  /**
    * Ends the session.
    *
    * What that revokes depends on the session strategy: on the store strategy the
@@ -276,56 +337,42 @@ export class AuthSessionService implements IAuthSessionService {
   }
 }
 
-/** Deps for {@linkcode promotePending}. */
-export interface PromotePendingDeps {
-  /** Opens the session for a request. */
-  readonly sessionService: ISessionService;
-  /** The wall-clock time in milliseconds. */
-  readonly now: () => number;
-  /** How long a pending record may sit before it is refused, in milliseconds. */
-  readonly pendingTtlMs: number;
+/**
+ * The internal promotion seam {@linkcode asPendingPromotion} narrows to.
+ *
+ * Deliberately NOT part of `IAuthSessionService`: a public promotion call would
+ * let a caller decide what was verified, and a caller-supplied
+ * `{ method, principalId }` is not evidence. Only the package's own verifiers
+ * (TOTP's `completeSignIn`, 100e's ceremony) reach it, and only after checking
+ * the factor against the pending principal.
+ */
+export interface PendingPromotion {
+  /**
+   * Moves the session's pending second-factor record to the signed-in key,
+   * honouring the pending-record TTL the auth-session service owns.
+   */
+  promotePending(ctx: IRequestContext, method: AuthMethod): 'signed-in' | 'no-pending';
 }
 
 /**
- * Promotes a pending second-factor record to the signed-in key.
+ * Narrows an {@linkcode IAuthSessionService} to its promotion seam, or `null`
+ * when the service does not offer one.
  *
- * Internal: reached ONLY through the package's own verifiers
- * (`TotpService.completeSignIn`, 100e's ceremony). NOT exported from
- * `src/index.ts` — a public promotion call would let a caller decide what was
- * verified, and a caller-supplied `{ method, principalId }` is not evidence.
+ * The plugin's own `AuthSessionService` implements the seam; a service an
+ * application registered itself does not, and gets `null` rather than a
+ * promotion it never agreed to provide.
  *
- * Reads the pending record from the session, checks it is not expired, writes
- * the signed-in record with the appended method, regenerates the session id,
- * and deletes the pending record.
- *
- * @param ctx - The request context
- * @param method - The second-factor method to append (`'otp'` or `'pop'`)
- * @param deps - Session service, clock, and TTL
- * @returns `'signed-in'` on success, `'no-pending'` when nothing is pending or
- *   the record is expired
+ * @param service - The service resolved from `CAPABILITIES.AUTH_SESSION`
+ * @returns The promotion seam, or `null` when the service has none
  */
-export function promotePending(
-  ctx: IRequestContext,
-  method: AuthMethod,
-  deps: PromotePendingDeps,
-): 'signed-in' | 'no-pending' {
-  const session = deps.sessionService.from(ctx);
-  const pending = parsePendingMfaRecord(session.get(PENDING_MFA_SESSION_KEY));
-  if (pending === null) {
-    return 'no-pending';
+export function asPendingPromotion(
+  service: IAuthSessionService,
+): PendingPromotion | null {
+  // The two interfaces share no members, so the narrowing goes through
+  // `unknown` with the check done at runtime rather than trusting the type.
+  const candidate: unknown = service;
+  if (candidate === null || typeof (candidate as PendingPromotion).promotePending !== 'function') {
+    return null;
   }
-  const now = deps.now();
-  if (now - pending.at > deps.pendingTtlMs) {
-    // Expired: delete the stale record and refuse.
-    session.delete(PENDING_MFA_SESSION_KEY);
-    return 'no-pending';
-  }
-  const methods = [...pending.methods, method];
-  const record: AuthSessionRecord = { principal: pending.principal, methods, at: now };
-  session.set(AUTH_SESSION_KEY, record);
-  session.delete(PENDING_MFA_SESSION_KEY);
-  session.delete(RP_PROVIDER_SESSION_KEY);
-  session.delete(ID_TOKEN_SESSION_KEY);
-  session.regenerate();
-  return 'signed-in';
+  return candidate as PendingPromotion;
 }

@@ -1,17 +1,17 @@
 /**
- * Unit — MemoryTotpStore: concurrent claimStep, reserveAttempt, consumeRecoveryCode.
+ * Unit — MemoryTotpStore: concurrent claimStep, reserveAttempt,
+ * consumeRecoveryCode, and the pending-secret round-trip a safe re-enrolment
+ * depends on.
  *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { MemoryTotpStore } from '../../src/stores/totp-store.ts';
-import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('MemoryTotpStore', () => {
   it('concurrent claimStep yields exactly one success', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
     await store.saveEnrolment('user1', {
       secret: 'TESTSECRET',
       label: 'test',
@@ -27,8 +27,7 @@ describe('MemoryTotpStore', () => {
   });
 
   it('claimStep refuses a step at or below the last claimed', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
     await store.saveEnrolment('user1', {
       secret: 'TESTSECRET',
       label: 'test',
@@ -43,14 +42,55 @@ describe('MemoryTotpStore', () => {
   });
 
   it('claimStep returns false for an unknown principal', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
     expect(await store.claimStep('unknown', 5)).toBe(false);
   });
 
+  it('round-trips a pending secret without disturbing the confirmed one', async () => {
+    const store = new MemoryTotpStore();
+    await store.saveEnrolment('user1', {
+      secret: 'OLDCONFIRMED',
+      label: 'alice@old',
+      confirmed: true,
+      lastClaimedStep: 7,
+    });
+    await store.saveEnrolment('user1', {
+      secret: 'OLDCONFIRMED',
+      label: 'alice@old',
+      confirmed: true,
+      lastClaimedStep: 7,
+      pendingSecret: 'NEWUNCONFIRMED',
+      pendingLabel: 'alice@new',
+    });
+
+    const stored = await store.getEnrolment('user1');
+    expect(stored?.secret).toBe('OLDCONFIRMED');
+    expect(stored?.pendingSecret).toBe('NEWUNCONFIRMED');
+    expect(stored?.pendingLabel).toBe('alice@new');
+    // The step counter survives the re-enrolment write.
+    expect(stored?.lastClaimedStep).toBe(7);
+    // And the old secret's claimed step is still refused.
+    expect(await store.claimStep('user1', 7)).toBe(false);
+  });
+
+  it('a saved enrolment without a pending secret reads back without one', async () => {
+    const store = new MemoryTotpStore();
+    await store.saveEnrolment('user1', {
+      secret: 'AAA',
+      label: 'a',
+      confirmed: false,
+      lastClaimedStep: 0,
+    });
+    expect(await store.getEnrolment('user1')).toEqual({
+      secret: 'AAA',
+      label: 'a',
+      confirmed: false,
+      lastClaimedStep: 0,
+    });
+  });
+
   it('concurrent reserveAttempt counts correctly', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
 
     const results = await Promise.all(
       Array.from(
@@ -65,8 +105,7 @@ describe('MemoryTotpStore', () => {
   });
 
   it('reserveAttempt evicts old timestamps outside the window', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
 
     // Five attempts at t=0.
     for (let i = 0; i < 5; i++) {
@@ -82,8 +121,7 @@ describe('MemoryTotpStore', () => {
   });
 
   it('clearAttempts removes the count', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
 
     for (let i = 0; i < 5; i++) {
       await store.reserveAttempt('user1', 59_000, { limit: 5, windowMs: 900_000 });
@@ -98,8 +136,7 @@ describe('MemoryTotpStore', () => {
   });
 
   it('concurrent consumeRecoveryCode yields exactly one success', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
     await store.saveRecoveryCodes('user1', ['digest-a', 'digest-b', 'digest-c']);
 
     const results = await Promise.all(
@@ -110,21 +147,18 @@ describe('MemoryTotpStore', () => {
   });
 
   it('consumeRecoveryCode returns false for an unknown digest', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
     await store.saveRecoveryCodes('user1', ['digest-a']);
     expect(await store.consumeRecoveryCode('user1', 'digest-z')).toBe(false);
   });
 
   it('consumeRecoveryCode returns false for an unknown principal', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
     expect(await store.consumeRecoveryCode('unknown', 'digest-a')).toBe(false);
   });
 
   it('deleteEnrolment removes enrolment, attempts, and recovery codes', async () => {
-    const runtime = createFakeRuntime(59_000);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
     await store.saveEnrolment('user1', {
       secret: 'TESTSECRET',
       label: 'test',

@@ -1,17 +1,28 @@
 /**
- * Unit — TotpService: enrolment, verification, replay protection,
- * and the completeSignIn / completeSignInWithRecoveryCode paths.
+ * Unit — TotpService: enrolment, confirmation, verification, the ±1 step window,
+ * replay protection, recovery-code shape, and the completeSignIn /
+ * completeSignInWithRecoveryCode paths.
+ *
+ * The completion paths run against the REAL `AuthSessionService`, because the
+ * pending-record TTL it owns is part of what these tests assert — a fake that
+ * answers `pending()` and nothing else cannot show that a configured
+ * `signIn.mfa.pendingTtlMs` is honoured.
+ *
+ * Step arithmetic: `confirmEnrolment` claims the step its code was computed for,
+ * so a test verifies on a LATER step (`advanceToStep`) rather than the one
+ * confirmation spent.
  *
  * @module
  */
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
-import type { IAuthSessionService, IRequestContext, PendingSignIn } from '@setu-ts/common';
+import type { IAuthSessionService, IRequestContext } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { TotpService } from '../../src/mfa/totp-service.ts';
 import { MemoryTotpStore } from '../../src/stores/totp-store.ts';
+import { AuthSessionService } from '../../src/sign-in/auth-session-service.ts';
 import { decodeBase32 } from '../../src/mfa/base32.ts';
-import { computeTotpCode, totpCounter } from '../../src/mfa/totp-codes.ts';
+import { computeTotpCode, TOTP_PERIOD_SECONDS, totpCounter } from '../../src/mfa/totp-codes.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createFakeSession, createFakeSessionService } from '../fixtures/fake-session.ts';
 
@@ -23,18 +34,47 @@ interface TestContext {
 
 function buildService(nowMs: number): TestContext {
   const runtime = createFakeRuntime(nowMs);
-  const store = new MemoryTotpStore(runtime);
+  const store = new MemoryTotpStore();
   const service = new TotpService({ store, runtime, issuer: 'TestApp' });
   return { service, runtime, store };
 }
 
-/** Computes the current 6-digit TOTP code for a principal using the shared store. */
-async function currentCode(ctx: TestContext, principalId: string): Promise<string> {
+/** The wall-clock ms at the start of the given TOTP counter. */
+function startOfStep(counter: number): number {
+  return counter * TOTP_PERIOD_SECONDS * 1000;
+}
+
+/** Moves the controllable clock to the middle of the given TOTP counter. */
+function advanceToStep(ctx: TestContext, counter: number): void {
+  ctx.runtime.setNow(startOfStep(counter) + 1_000);
+}
+
+/** The code `step` produces for `secretText`, independent of the current clock. */
+async function codeForSecret(
+  ctx: TestContext,
+  secretText: string,
+  step: number,
+): Promise<string> {
+  return (await computeTotpCode(ctx.runtime.subtle, decodeBase32(secretText), step)).slice(-6);
+}
+
+/** The code for the secret currently stored as active, at `step`. */
+async function codeAtStep(ctx: TestContext, principalId: string, step: number): Promise<string> {
   const enrolment = await ctx.store.getEnrolment(principalId);
   if (enrolment === null) throw new Error('not enrolled');
-  const secret = decodeBase32(enrolment.secret);
-  const code8 = await computeTotpCode(ctx.runtime.subtle, secret, totpCounter(ctx.runtime.now()));
-  return code8.slice(-6);
+  return codeForSecret(ctx, enrolment.secret, step);
+}
+
+/** The code for the current counter. */
+function currentCode(ctx: TestContext, principalId: string): Promise<string> {
+  return codeAtStep(ctx, principalId, totpCounter(ctx.runtime.now()));
+}
+
+/** Enrols and confirms a factor at counter 1, spending that step. */
+async function enrolledAndConfirmed(ctx: TestContext, principalId: string): Promise<void> {
+  await ctx.service.beginEnrolment(principalId, 'alice');
+  const code = await currentCode(ctx, principalId);
+  expect(await ctx.service.confirmEnrolment(principalId, code)).toBe('ok');
 }
 
 describe('TotpService', () => {
@@ -55,36 +95,84 @@ describe('TotpService', () => {
     const ctx = buildService(59_000);
     await ctx.service.beginEnrolment('user1', 'alice');
     const code = await currentCode(ctx, 'user1');
-    const result = await ctx.service.confirmEnrolment('user1', code);
-    expect(result).toBe('ok');
+    expect(await ctx.service.confirmEnrolment('user1', code)).toBe('ok');
     const enrolment = await ctx.store.getEnrolment('user1');
     expect(enrolment?.confirmed).toBe(true);
   });
 
   it('verify returns not-enrolled for an unknown principal', async () => {
     const { service } = buildService(59_000);
-    const result = await service.verify('unknown', '123456');
-    expect(result).toBe('not-enrolled');
+    expect(await service.verify('unknown', '123456')).toBe('not-enrolled');
   });
 
-  it('verify returns ok for a valid code', async () => {
+  it('verify returns ok for a valid code on a confirmed factor', async () => {
     const ctx = buildService(59_000);
-    await ctx.service.beginEnrolment('user1', 'alice');
-    const code = await currentCode(ctx, 'user1');
-    const result = await ctx.service.verify('user1', code);
-    expect(result).toBe('ok');
+    await enrolledAndConfirmed(ctx, 'user1');
+    advanceToStep(ctx, 3);
+    expect(await ctx.service.verify('user1', await currentCode(ctx, 'user1'))).toBe('ok');
   });
 
   it('verify returns invalid for a wrong code', async () => {
-    const { service } = buildService(59_000);
-    await service.beginEnrolment('user1', 'alice');
-    const result = await service.verify('user1', '000000');
-    expect(result).toBe('invalid');
+    const ctx = buildService(59_000);
+    await enrolledAndConfirmed(ctx, 'user1');
+    advanceToStep(ctx, 3);
+    expect(await ctx.service.verify('user1', '000000')).toBe('invalid');
+  });
+
+  it('an unconfirmed enrolment never verifies', async () => {
+    const ctx = buildService(59_000);
+    await ctx.service.beginEnrolment('user1', 'alice');
+    // The code is perfectly correct for the secret that was just generated, and
+    // there is still no factor: confirmation is what makes a secret a factor.
+    const code = await currentCode(ctx, 'user1');
+    expect(await ctx.service.verify('user1', code)).toBe('not-enrolled');
+    // confirmEnrolment is the one path that accepts the unconfirmed secret, and
+    // that same code confirms it.
+    expect(await ctx.service.confirmEnrolment('user1', code)).toBe('ok');
+  });
+
+  it('a re-enrolment does not destroy the confirmed factor', async () => {
+    const ctx = buildService(59_000);
+    await enrolledAndConfirmed(ctx, 'user1'); // claims counter 1
+    advanceToStep(ctx, 3);
+    // Spend step 3 under the old secret.
+    expect(await ctx.service.verify('user1', await currentCode(ctx, 'user1'))).toBe('ok');
+
+    const oldSecret = (await ctx.store.getEnrolment('user1'))?.secret;
+    const { secret: newSecret } = await ctx.service.beginEnrolment('user1', 'alice@new');
+    const stored = await ctx.store.getEnrolment('user1');
+    expect(stored?.confirmed).toBe(true);
+    expect(stored?.secret).toBe(oldSecret);
+    expect(stored?.pendingSecret).toBe(newSecret);
+
+    // The OLD secret still verifies (step 4 is in the window and unclaimed).
+    expect(await ctx.service.verify('user1', await codeAtStep(ctx, 'user1', 4))).toBe('ok');
+    // The NEW secret does not verify while it awaits confirmation.
+    expect(await ctx.service.verify('user1', await codeForSecret(ctx, newSecret, 3))).toBe(
+      'invalid',
+    );
+
+    // Confirmation swaps the pending secret in and keeps the step monotonic.
+    advanceToStep(ctx, 5);
+    expect(await ctx.service.confirmEnrolment('user1', await codeForSecret(ctx, newSecret, 5)))
+      .toBe('ok');
+    const after = await ctx.store.getEnrolment('user1');
+    expect(after?.secret).toBe(newSecret);
+    // The pending label becomes the active one; the pending fields are cleared.
+    expect(after?.label).toBe('alice@new');
+    expect(after?.pendingLabel).toBeUndefined();
+    expect(after?.pendingSecret).toBeUndefined();
+    expect(after?.lastClaimedStep).toBe(5);
+    // A step claimed before the swap is still refused after it.
+    expect(await ctx.service.verify('user1', await codeForSecret(ctx, newSecret, 4))).toBe(
+      'invalid',
+    );
   });
 
   it('replay of the same step is refused', async () => {
     const ctx = buildService(59_000);
-    await ctx.service.beginEnrolment('user1', 'alice');
+    await enrolledAndConfirmed(ctx, 'user1');
+    advanceToStep(ctx, 3);
     const code = await currentCode(ctx, 'user1');
     // First verification succeeds and claims the step.
     expect(await ctx.service.verify('user1', code)).toBe('ok');
@@ -93,54 +181,59 @@ describe('TotpService', () => {
   });
 
   it('an earlier step is refused after a newer one was accepted', async () => {
-    const ctx = buildService(59_000); // counter = 1
-    await ctx.service.beginEnrolment('user1', 'alice');
-    // Verify the code for counter 1 (current).
-    const code1 = await currentCode(ctx, 'user1');
-    expect(await ctx.service.verify('user1', code1)).toBe('ok');
-    // Now advance to counter 2.
-    ctx.runtime.setNow(91_000);
-    // The code for counter 1 should now be refused (earlier step).
-    const enrolment = await ctx.store.getEnrolment('user1');
-    const secret = decodeBase32(enrolment!.secret);
-    const oldCode = (await computeTotpCode(ctx.runtime.subtle, secret, 1)).slice(-6);
-    expect(await ctx.service.verify('user1', oldCode)).toBe('invalid');
+    const ctx = buildService(59_000);
+    await enrolledAndConfirmed(ctx, 'user1');
+    advanceToStep(ctx, 3);
+    const code3 = await codeAtStep(ctx, 'user1', 3);
+    expect(await ctx.service.verify('user1', code3)).toBe('ok');
+    // Advance: step 3 is now earlier than the current one and already claimed.
+    advanceToStep(ctx, 4);
+    expect(await ctx.service.verify('user1', code3)).toBe('invalid');
+  });
+
+  it('the ±1 step window is accepted, two steps out is not', async () => {
+    const ctx = buildService(59_000);
+    await enrolledAndConfirmed(ctx, 'user1'); // claims counter 1
+    advanceToStep(ctx, 3);
+    // One step before and one step after the current counter are both accepted.
+    expect(await ctx.service.verify('user1', await codeAtStep(ctx, 'user1', 2))).toBe('ok');
+    expect(await ctx.service.verify('user1', await codeAtStep(ctx, 'user1', 4))).toBe('ok');
+    // Two steps after the current counter is never computed.
+    expect(await ctx.service.verify('user1', await codeAtStep(ctx, 'user1', 6))).toBe('invalid');
   });
 
   it('disable removes the enrolment', async () => {
     const ctx = buildService(59_000);
-    await ctx.service.beginEnrolment('user1', 'alice');
+    await enrolledAndConfirmed(ctx, 'user1');
     await ctx.service.disable('user1');
     expect(await ctx.store.getEnrolment('user1')).toBeNull();
   });
 
-  // -----------------------------------------------------------------------
-  // completeSignIn / completeSignInWithRecoveryCode — unit-level branch
-  // coverage through a fake request context.
-  // -----------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // completeSignIn / completeSignInWithRecoveryCode — through the REAL
+  // AuthSessionService, whose configured pendingTtlMs governs promotion.
+  // --------------------------------------------------------------------------
 
-  function buildCompleteSignInHarness(
-    nowMs: number,
-    pending: PendingSignIn | null,
-  ): {
-    service: TotpService;
-    runtime: ReturnType<typeof createFakeRuntime>;
-    store: MemoryTotpStore;
+  interface CompleteHarness extends TestContext {
+    authSession: AuthSessionService;
     ctx: IRequestContext;
-  } {
+  }
+
+  function buildCompleteHarness(
+    nowMs: number,
+    mfa: { readonly required: () => boolean; readonly pendingTtlMs?: number } | undefined,
+  ): CompleteHarness {
     const runtime = createFakeRuntime(nowMs);
-    const store = new MemoryTotpStore(runtime);
+    const store = new MemoryTotpStore();
     const service = new TotpService({ store, runtime, issuer: 'TestApp' });
 
     const session = createFakeSession();
     const sessionService = createFakeSessionService(session);
-
-    const authSessionService: IAuthSessionService = {
-      signIn: () => Promise.resolve({ status: 'signed-in' }),
-      current: () => null,
-      pending: () => pending,
-      signOut: () => {},
-    };
+    const authSession = new AuthSessionService({
+      sessionService,
+      now: () => runtime.now(),
+      ...(mfa === undefined ? {} : { mfa }),
+    });
 
     const ctx = {
       id: 'test',
@@ -148,7 +241,7 @@ describe('TotpService', () => {
       response: {} as never,
       services: {
         get: (token: string) => {
-          if (token === CAPABILITIES.AUTH_SESSION) return authSessionService;
+          if (token === CAPABILITIES.AUTH_SESSION) return authSession;
           if (token === CAPABILITIES.SESSION) return sessionService;
           throw new Error(`unexpected token: ${token}`);
         },
@@ -165,64 +258,154 @@ describe('TotpService', () => {
       signal: new AbortController().signal,
     } as unknown as IRequestContext;
 
-    return { service, runtime, store, ctx };
+    return { service, runtime, store, authSession, ctx };
+  }
+
+  /** Puts the session into the pending state through the real signIn. */
+  async function signInAndPend(harness: CompleteHarness): Promise<void> {
+    const outcome = await harness.authSession.signIn(
+      harness.ctx,
+      { id: 'user1', roles: [] },
+      { methods: ['pwd'] },
+    );
+    expect(outcome.status).toBe('second-factor-required');
   }
 
   it('completeSignIn returns no-pending when there is no pending record', async () => {
-    const { service, ctx } = buildCompleteSignInHarness(59_000, null);
-    const result = await service.completeSignIn(ctx, '123456');
-    expect(result).toBe('no-pending');
+    const { service, ctx } = buildCompleteHarness(59_000, undefined);
+    expect(await service.completeSignIn(ctx, '123456')).toBe('no-pending');
   });
 
   it('completeSignIn returns invalid for a wrong code', async () => {
-    const pending: PendingSignIn = { principal: { id: 'user1' }, methods: ['pwd'], at: 59_000 };
-    const harness = buildCompleteSignInHarness(59_000, pending);
+    const harness = buildCompleteHarness(59_000, { required: () => true });
+    await enrolledAndConfirmed(harness, 'user1');
+    await signInAndPend(harness);
+    advanceToStep(harness, 3);
+    expect(await harness.service.completeSignIn(harness.ctx, '000000')).toBe('invalid');
+  });
+
+  it('completeSignIn returns not-enrolled for an unconfirmed factor', async () => {
+    const harness = buildCompleteHarness(59_000, { required: () => true });
     await harness.service.beginEnrolment('user1', 'alice');
-    const result = await harness.service.completeSignIn(harness.ctx, '000000');
-    expect(result).toBe('invalid');
+    await signInAndPend(harness);
+    advanceToStep(harness, 3);
+    const code = await currentCode(harness, 'user1');
+    expect(await harness.service.completeSignIn(harness.ctx, code)).toBe('not-enrolled');
   });
 
   it('completeSignIn returns locked when the account is locked out', async () => {
-    const pending: PendingSignIn = { principal: { id: 'user1' }, methods: ['pwd'], at: 59_000 };
-    const harness = buildCompleteSignInHarness(59_000, pending);
-    await harness.service.beginEnrolment('user1', 'alice');
+    const harness = buildCompleteHarness(59_000, { required: () => true });
+    await enrolledAndConfirmed(harness, 'user1');
+    await signInAndPend(harness);
     // Exhaust the lockout: 5 failed attempts.
     for (let i = 0; i < 5; i++) {
-      await harness.service.verify('user1', '000000');
+      expect(await harness.service.verify('user1', '000000')).toBe('invalid');
     }
-    const result = await harness.service.completeSignIn(harness.ctx, '123456');
-    expect(result).toBe('locked');
+    expect(await harness.service.completeSignIn(harness.ctx, '123456')).toBe('locked');
+  });
+
+  it('completeSignIn honours the configured signIn.mfa.pendingTtlMs', async () => {
+    const harness = buildCompleteHarness(
+      startOfStep(1) + 1_000,
+      { required: () => true, pendingTtlMs: 1 },
+    );
+    await enrolledAndConfirmed(harness, 'user1');
+    await signInAndPend(harness);
+    // Advance past the configured TTL on the same controllable clock the service
+    // reads; the code itself is valid for the new step.
+    advanceToStep(harness, 3);
+    const code = await currentCode(harness, 'user1');
+    expect(await harness.service.completeSignIn(harness.ctx, code)).toBe('no-pending');
+  });
+
+  it('completeSignIn signs in inside the default TTL (control for the one above)', async () => {
+    const harness = buildCompleteHarness(startOfStep(1) + 1_000, { required: () => true });
+    await enrolledAndConfirmed(harness, 'user1');
+    await signInAndPend(harness);
+    advanceToStep(harness, 3);
+    const code = await currentCode(harness, 'user1');
+    expect(await harness.service.completeSignIn(harness.ctx, code)).toBe('signed-in');
+    expect(harness.authSession.current(harness.ctx)?.id).toBe('user1');
+  });
+
+  it('completeSignIn refuses to promote through a service with no promotion seam', async () => {
+    // A hand-built IAuthSessionService that can report a pending record but has
+    // no promotePending: the verifier must refuse rather than promote something
+    // the service never agreed to promote.
+    const harness = buildCompleteHarness(startOfStep(1) + 1_000, { required: () => true });
+    await enrolledAndConfirmed(harness, 'user1');
+    advanceToStep(harness, 3);
+    const code = await currentCode(harness, 'user1');
+
+    const foreign: IAuthSessionService = {
+      signIn: () => Promise.resolve({ status: 'signed-in' }),
+      current: () => null,
+      pending: () => ({ principal: { id: 'user1' }, methods: ['pwd'], at: harness.runtime.now() }),
+      signOut: () => {},
+    };
+    const ctx = {
+      services: {
+        get: (token: string) => {
+          if (token === CAPABILITIES.AUTH_SESSION) return foreign;
+          throw new Error(`unexpected token: ${token}`);
+        },
+      },
+    } as unknown as IRequestContext;
+
+    // The code verifies (the step is claimed), and then promotion is refused.
+    expect(await harness.service.completeSignIn(ctx, code)).toBe('no-pending');
   });
 
   it('completeSignInWithRecoveryCode returns no-pending when there is no pending record', async () => {
-    const { service, ctx } = buildCompleteSignInHarness(59_000, null);
-    const result = await service.completeSignInWithRecoveryCode(ctx, 'ABCDEFGHIJKLMNOP');
-    expect(result).toBe('no-pending');
+    const { service, ctx } = buildCompleteHarness(59_000, undefined);
+    expect(await service.completeSignInWithRecoveryCode(ctx, 'ABCDEFGHIJKLMNOP')).toBe(
+      'no-pending',
+    );
   });
 
   it('completeSignInWithRecoveryCode returns invalid for an unknown recovery code', async () => {
-    const pending: PendingSignIn = { principal: { id: 'user1' }, methods: ['pwd'], at: 59_000 };
-    const harness = buildCompleteSignInHarness(59_000, pending);
-    // No recovery codes have been generated, so any code is invalid.
-    const result = await harness.service.completeSignInWithRecoveryCode(
-      harness.ctx,
-      'ABCDEFGHIJKLMNOP',
-    );
-    expect(result).toBe('invalid');
+    const harness = buildCompleteHarness(59_000, { required: () => true });
+    await signInAndPend(harness);
+    expect(
+      await harness.service.completeSignInWithRecoveryCode(harness.ctx, 'ABCDEFGHIJKLMNOP'),
+    ).toBe('invalid');
   });
 
   it('completeSignInWithRecoveryCode returns locked when the account is locked out', async () => {
-    const pending: PendingSignIn = { principal: { id: 'user1' }, methods: ['pwd'], at: 59_000 };
-    const harness = buildCompleteSignInHarness(59_000, pending);
-    await harness.service.beginEnrolment('user1', 'alice');
+    const harness = buildCompleteHarness(59_000, { required: () => true });
+    await enrolledAndConfirmed(harness, 'user1');
+    await signInAndPend(harness);
     // Exhaust the lockout: 5 failed TOTP attempts.
     for (let i = 0; i < 5; i++) {
       await harness.service.verify('user1', '000000');
     }
-    const result = await harness.service.completeSignInWithRecoveryCode(
-      harness.ctx,
-      'ABCDEFGHIJKLMNOP',
+    expect(
+      await harness.service.completeSignInWithRecoveryCode(harness.ctx, 'ABCDEFGHIJKLMNOP'),
+    ).toBe('locked');
+  });
+
+  it('completeSignInWithRecoveryCode honours the configured pendingTtlMs', async () => {
+    const harness = buildCompleteHarness(
+      startOfStep(1) + 1_000,
+      { required: () => true, pendingTtlMs: 1 },
     );
-    expect(result).toBe('locked');
+    await enrolledAndConfirmed(harness, 'user1');
+    const codes = await harness.service.generateRecoveryCodes('user1');
+    await signInAndPend(harness);
+    advanceToStep(harness, 3);
+    expect(
+      await harness.service.completeSignInWithRecoveryCode(harness.ctx, codes[0]),
+    ).toBe('no-pending');
+  });
+
+  it('completeSignInWithRecoveryCode signs in inside the default TTL (control)', async () => {
+    const harness = buildCompleteHarness(startOfStep(1) + 1_000, { required: () => true });
+    await enrolledAndConfirmed(harness, 'user1');
+    const codes = await harness.service.generateRecoveryCodes('user1');
+    await signInAndPend(harness);
+    expect(
+      await harness.service.completeSignInWithRecoveryCode(harness.ctx, codes[0]),
+    ).toBe('signed-in');
+    expect(harness.authSession.current(harness.ctx)?.id).toBe('user1');
   });
 });

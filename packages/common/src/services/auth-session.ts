@@ -64,7 +64,7 @@ export type SignInOutcome =
  * The principal is held here — not in the signed-in record — so a password
  * alone does not produce a signed-in session for a user who has enrolled.
  *
- * @since 0.9.0
+ * @since 0.8.0
  */
 export interface PendingSignIn {
   /** The identity that has passed the first factor. */
@@ -144,7 +144,7 @@ export interface IAuthSessionService {
    * @param ctx - The request context whose session is read
    * @returns The pending record, or `null` when none is stored
    * @throws {Error} If the session middleware did not run for this request
-   * @since 0.9.0
+   * @since 0.8.0
    */
   pending(ctx: IRequestContext): PendingSignIn | null;
 

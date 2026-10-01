@@ -12,7 +12,6 @@
  * @module
  */
 
-import type { IRuntimeServices } from '@setu-ts/common';
 import { toBuffer } from '../utils/buffer.ts';
 
 /** TOTP period in seconds (RFC 6238 default). */
@@ -97,28 +96,4 @@ export function constantTimeEquals(a: string, b: string): boolean {
     result |= a.charCodeAt(i) ^ b.charCodeAt(i);
   }
   return result === 0;
-}
-
-/**
- * Verifies a TOTP code against a secret, accepting the current step and one
- * step before and after it.
- *
- * @param runtime - Runtime services (for `subtle` and `now()`)
- * @param secret - The base32-decoded secret key
- * @param code - The six-digit code to verify
- * @returns `true` when the code matches any step in the window
- */
-export async function verifyTotpCode(
-  runtime: IRuntimeServices,
-  secret: Uint8Array,
-  code: string,
-): Promise<boolean> {
-  const current = totpCounter(runtime.now());
-  for (let delta = -TOTP_WINDOW; delta <= TOTP_WINDOW; delta++) {
-    const candidate = await computeTotpCode(runtime.subtle, secret, current + delta);
-    if (constantTimeEquals(candidate, code)) {
-      return true;
-    }
-  }
-  return false;
 }

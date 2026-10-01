@@ -19,14 +19,22 @@ All notable changes to this project are documented here. The format follows
   key) and returns `second-factor-required` instead of signing the session in.
   `TotpService.completeSignIn(ctx,
   code)` and `completeSignInWithRecoveryCode(ctx, code)` complete
-  a pending sign-in, recording the principal with `methods: ['pwd', 'otp']` (or `['fed', 'otp']`)
-  and rotating the session id. Per-account lockout: five failed TOTP attempts within 15 minutes lock
-  the account out; the attempt is reserved before the code is checked. Replay protection: the
-  store's `claimStep` is monotonic, so a captured code cannot be replayed. Recovery codes:
-  `generateRecoveryCodes` mints 10 codes of 16 base32 characters (80 bits), stored as SHA-256
-  digests, consumed atomically on use. The new `requireMfa()` guard answers `401` for an anonymous
+  a pending sign-in, each appending `otp` so the principal ends up recorded with
+  `methods: ['pwd', 'otp']` (or `['fed', 'otp']`) and the session id rotated. `signIn.mfa.pendingTtlMs`
+  (default 300 000 ms) is the single owner of how long a pending record survives; `TotpService` has no
+  TTL option of its own. Per-account lockout: five failed attempts within 15 minutes lock the principal
+  out of verification, recovery codes included; the attempt is reserved before the credential is
+  checked, and a successful verification clears the count. Replay protection: the store's `claimStep`
+  is monotonic, so a captured code cannot be replayed. An enrolment never confirmed is not a factor —
+  no verification path accepts its code — and starting a new enrolment leaves the confirmed factor in
+  place until the new secret is confirmed, keeping the step counter monotonic across the swap. Recovery
+  codes: `generateRecoveryCodes` mints 10 codes of 16 base32 characters (80 bits), stored as SHA-256
+  digests, consumed atomically on use, and accepted only in the canonical shape (trimmed, upper-cased,
+  exactly 16 characters of `A-Z2-7`). The new `requireMfa()` guard answers `401` for an anonymous
   request and `403` `second-factor-required` for a principal whose `claims.amr` lacks `otp` or
-  `pop`. `@setu-ts/common` gains `PendingSignIn` and the `second-factor-required` arm of
+  `pop`; a non-array `amr` counts as absent rather than being coerced, so a string merely containing a
+  factor name cannot satisfy it. `@setu-ts/common` gains `PendingSignIn` and the
+  `second-factor-required` arm of
   `AuthorizationFailure`. New `@setu-ts/auth-plugin` exports: `TotpService`, `MemoryTotpStore`,
   `requireMfa`, and the types `MfaOptions`, `ITotpStore`, `TotpVerifyResult`,
   `RecoveryVerifyResult`, `TotpCompleteSignInResult`, `TotpServiceOptions`, `TotpEnrolment`,

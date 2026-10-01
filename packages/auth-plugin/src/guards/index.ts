@@ -226,13 +226,19 @@ export function requireAllPermissions(permissions: readonly string[]): Middlewar
  * carrying `amr: ['otp']` passes the guard — deliberately, and pinned by a
  * test.
  *
+ * A non-array `amr` is treated as ABSENT, not coerced. `claims` is
+ * `Record<string, unknown>`, so an outside issuer or an application-built
+ * principal can carry `amr: 'otp'` (a bare string). Reading that as a string and
+ * calling `.includes` on it would make `'sotp'` — or any string merely
+ * CONTAINING the factor name — satisfy the guard.
+ *
  * @returns Middleware function
  *
  * @example
  * ```typescript
  * app.router.get('/sensitive', { middleware: [requireMfa()], handler });
  * ```
- * @since 0.9.0
+ * @since 0.8.0
  */
 export function requireMfa(): MiddlewareFunction {
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
@@ -241,7 +247,8 @@ export function requireMfa(): MiddlewareFunction {
       respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
-    const amr = (user.claims?.amr ?? []) as readonly string[];
+    const raw = user.claims?.amr;
+    const amr: readonly string[] = Array.isArray(raw) ? (raw as readonly string[]) : [];
     const hasSecondFactor = amr.includes('otp') || amr.includes('pop');
     if (!hasSecondFactor) {
       respondWithAuthorizationFailure(ctx, 'second-factor-required');

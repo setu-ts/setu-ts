@@ -134,4 +134,31 @@ describe('requireMfa() guard', () => {
     const body = (await response.json()) as Record<string, unknown>;
     expect(body.detail).toBe('Second factor required');
   });
+
+  it('treats a NON-ARRAY amr as absent instead of substring-matching it', async () => {
+    // `claims` is `Record<string, unknown>`, so amr can arrive as a bare string.
+    // Reading it as a string and calling `.includes` would let 'sotp' — or any
+    // string merely containing a factor name — satisfy the guard. Each value is
+    // asserted against the answer it must produce, so the enumeration cannot
+    // drift from the code.
+    const cases: Array<[unknown, number]> = [
+      ['sotp', 403],
+      ['otp', 403],
+      ['pop', 403],
+      [7, 403],
+      [{ 0: 'otp', length: 1 }, 403],
+      [['otp'], 200],
+      [['pwd', 'pop'], 200],
+    ];
+    for (const [amr, expected] of cases) {
+      harness = await buildMfaGuardApp();
+      const token = await harness.sign({ amr });
+      const response = await harness.app.fetch(
+        new Request(`${BASE}/mfa-protected`, {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+      );
+      expect(response.status, `amr=${JSON.stringify(amr)}`).toBe(expected);
+    }
+  });
 });

@@ -1,8 +1,9 @@
 /**
- * Integration — auth-session MFA: password sign-in with MFA required →
- * second-factor-required, requireAuth route still 401; after a valid code →
- * signed in with amr: ['pwd','otp']; session id changed at both steps;
- * expired pending refused.
+ * Integration — auth-session MFA through a real kernel app: password sign-in
+ * with MFA required → second-factor-required, requireAuth route still 401; after
+ * a confirmed factor and a valid code → signed in with amr: ['pwd','otp']; the
+ * session id changes at both steps; an expired pending record is refused, and
+ * the configured signIn.mfa.pendingTtlMs governs that refusal.
  *
  * @module
  */
@@ -10,14 +11,14 @@ import { afterEach, describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IAuthSessionService, IRuntimeServices } from '@setu-ts/common';
+import type { IAuthSessionService, IRequestContext, IRuntimeServices } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
 
 import { AuthPlugin, MemoryTotpStore, requireAuth, TotpService } from '../../src/index.ts';
-import type { OidcProvider } from '../../src/index.ts';
+import type { MfaOptions, OidcProvider } from '../../src/index.ts';
 import { PENDING_MFA_SESSION_KEY } from '../../src/sign-in/auth-session-service.ts';
 import { decodeBase32 } from '../../src/mfa/base32.ts';
 import { computeTotpCode, totpCounter } from '../../src/mfa/totp-codes.ts';
@@ -34,9 +35,10 @@ interface MfaHarness {
   readonly key: TestKey;
   readonly requests: RecordedRequest[];
   readonly totpStore: MemoryTotpStore;
+  readonly runtime: IRuntimeServices;
 }
 
-async function buildMfaApp(): Promise<MfaHarness> {
+async function buildMfaApp(mfa: MfaOptions): Promise<MfaHarness> {
   const key = await generateTestKey('RS256', 'k1');
   const { http, requests } = createFakeHttp({
     [`${ISSUER}/.well-known/openid-configuration`]: {
@@ -59,35 +61,14 @@ async function buildMfaApp(): Promise<MfaHarness> {
     },
   });
 
-  // The shared TOTP store, wired to the app's runtime via a closure that
-  // resolves the runtime at request time.
+  const totpStore = new MemoryTotpStore();
+  // The app's runtime, captured from a request context: services resolve per
+  // request, so there is nothing to read at this point.
   let runtimeRef: IRuntimeServices | null = null;
-  const totpStore = new MemoryTotpStore({
-    get now() {
-      return () => runtimeRef?.now() ?? Date.now();
-    },
-    get randomBytes() {
-      return (n: number) => runtimeRef?.randomBytes(n) ?? new Uint8Array(n);
-    },
-    get subtle() {
-      return runtimeRef?.subtle ?? globalThis.crypto.subtle;
-    },
-    // Minimal stubs for the remaining IRuntimeServices members; the memory
-    // store never calls them.
-    platform: () => 'deno' as const,
-    version: () => 'test',
-    hostname: () => 'localhost',
-    hrtime: () => 0,
-    setTimeout: (fn: () => void) => ({ id: setTimeout(fn, 0) }),
-    clearTimeout: (h: { id: number }) => clearTimeout(h.id),
-    setInterval: (fn: () => void) => ({ id: setInterval(fn, 0) }),
-    clearInterval: (h: { id: number }) => clearInterval(h.id),
-    uuid: () => crypto.randomUUID(),
-    env: {},
-    exit: () => {
-      throw new Error('exit');
-    },
-  } as IRuntimeServices);
+  const captureRuntime = (ctx: IRequestContext): IRuntimeServices => {
+    runtimeRef = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+    return runtimeRef;
+  };
 
   const oidc: OidcProvider = {
     kind: 'oidc',
@@ -109,9 +90,7 @@ async function buildMfaApp(): Promise<MfaHarness> {
         http,
         signIn: {
           providers: [oidc],
-          mfa: {
-            required: () => true,
-          },
+          mfa,
         },
       }),
     ],
@@ -119,7 +98,7 @@ async function buildMfaApp(): Promise<MfaHarness> {
 
   // Password login route: signs in with MFA policy active.
   app.router.post('/password-login', async (ctx) => {
-    runtimeRef = ctx.services.get<IRuntimeServices>('runtime');
+    captureRuntime(ctx);
     const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
     const outcome = await auth.signIn(ctx, { id: 'alice', roles: ['user'] }, { methods: ['pwd'] });
     return ctx.response.json({ outcome: outcome.status });
@@ -128,9 +107,11 @@ async function buildMfaApp(): Promise<MfaHarness> {
   // TOTP complete route: uses the TotpService to complete the pending sign-in.
   app.router.post('/mfa/complete', async (ctx) => {
     const body = (await ctx.request.json()) as { code: string };
-    const runtime = ctx.services.get<IRuntimeServices>('runtime');
-    runtimeRef = runtime;
-    const service = new TotpService({ store: totpStore, runtime, issuer: 'TestApp' });
+    const service = new TotpService({
+      store: totpStore,
+      runtime: captureRuntime(ctx),
+      issuer: 'TestApp',
+    });
     const result = await service.completeSignIn(ctx, body.code);
     return ctx.response.json({ result });
   });
@@ -138,23 +119,37 @@ async function buildMfaApp(): Promise<MfaHarness> {
   // Recovery code complete route.
   app.router.post('/mfa/complete-recovery', async (ctx) => {
     const body = (await ctx.request.json()) as { code: string };
-    const runtime = ctx.services.get<IRuntimeServices>('runtime');
-    runtimeRef = runtime;
-    const service = new TotpService({ store: totpStore, runtime, issuer: 'TestApp' });
+    const service = new TotpService({
+      store: totpStore,
+      runtime: captureRuntime(ctx),
+      issuer: 'TestApp',
+    });
     const result = await service.completeSignInWithRecoveryCode(ctx, body.code);
     return ctx.response.json({ result });
   });
 
+  // Recovery code generation route (enrolment/settings path).
+  app.router.post('/mfa/recovery', async (ctx) => {
+    const service = new TotpService({
+      store: totpStore,
+      runtime: captureRuntime(ctx),
+      issuer: 'TestApp',
+    });
+    return ctx.response.json({ codes: await service.generateRecoveryCodes('alice') });
+  });
+
   // Enrolment route: begins TOTP enrolment for the pending principal.
   app.router.post('/mfa/enrol', async (ctx) => {
-    const runtime = ctx.services.get<IRuntimeServices>('runtime');
-    runtimeRef = runtime;
     const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
     const pending = auth.pending(ctx);
     if (pending === null) {
       return ctx.response.status(400).json({ error: 'no-pending' });
     }
-    const service = new TotpService({ store: totpStore, runtime, issuer: 'TestApp' });
+    const service = new TotpService({
+      store: totpStore,
+      runtime: captureRuntime(ctx),
+      issuer: 'TestApp',
+    });
     const { secret, uri } = await service.beginEnrolment(pending.principal.id, 'alice');
     return ctx.response.json({ secret, uri });
   });
@@ -162,14 +157,16 @@ async function buildMfaApp(): Promise<MfaHarness> {
   // Confirm enrolment route.
   app.router.post('/mfa/confirm', async (ctx) => {
     const body = (await ctx.request.json()) as { code: string };
-    const runtime = ctx.services.get<IRuntimeServices>('runtime');
-    runtimeRef = runtime;
     const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
     const pending = auth.pending(ctx);
     if (pending === null) {
       return ctx.response.status(400).json({ error: 'no-pending' });
     }
-    const service = new TotpService({ store: totpStore, runtime, issuer: 'TestApp' });
+    const service = new TotpService({
+      store: totpStore,
+      runtime: captureRuntime(ctx),
+      issuer: 'TestApp',
+    });
     const result = await service.confirmEnrolment(pending.principal.id, body.code);
     return ctx.response.json({ result });
   });
@@ -189,7 +186,7 @@ async function buildMfaApp(): Promise<MfaHarness> {
     });
   });
 
-  // Age the pending MFA record past its TTL.
+  // Age the pending MFA record past any TTL.
   app.router.post('/_age-pending-mfa', (ctx) => {
     const session = getSession(ctx);
     const pending = session.get<Record<string, unknown>>(PENDING_MFA_SESSION_KEY);
@@ -201,7 +198,18 @@ async function buildMfaApp(): Promise<MfaHarness> {
 
   await app.start();
 
-  return { app, key, requests, totpStore };
+  return {
+    app,
+    key,
+    requests,
+    totpStore,
+    get runtime() {
+      if (runtimeRef === null) {
+        throw new Error('the app runtime has not been captured yet — make a request first');
+      }
+      return runtimeRef;
+    },
+  };
 }
 
 /** A single-cookie jar tracking the session cookie across `app.fetch` calls. */
@@ -236,6 +244,55 @@ async function json(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
 }
 
+/** The 6-digit code `secretText` produces for `step`, on the app's clock. */
+async function codeForStep(
+  harness: MfaHarness,
+  secretText: string,
+  step: number,
+): Promise<string> {
+  return (await computeTotpCode(harness.runtime.subtle, decodeBase32(secretText), step)).slice(-6);
+}
+
+/** Password sign-in, enrolment, and confirmation, leaving the session pending. */
+async function enrolAndConfirm(harness: MfaHarness, jar: CookieJar): Promise<string> {
+  const login = await json(
+    await jar.fetch(harness.app, '/password-login', { method: 'POST' }),
+  );
+  expect(login.outcome).toBe('second-factor-required');
+  const enrol = await json(await jar.fetch(harness.app, '/mfa/enrol', { method: 'POST' }));
+  const secret = enrol.secret as string;
+  const step = totpCounter(harness.runtime.now());
+  const confirm = await json(
+    await jar.fetch(harness.app, '/mfa/confirm', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code: await codeForStep(harness, secret, step) }),
+    }),
+  );
+  expect(confirm.result).toBe('ok');
+  return secret;
+}
+
+/** Real delay, so a 1 ms TTL has definitely elapsed (the clock is `Date.now()`). */
+async function elapse(milliseconds: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function complete(
+  harness: MfaHarness,
+  jar: CookieJar,
+  code: string,
+): Promise<unknown> {
+  const response = await jar.fetch(harness.app, '/mfa/complete', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  return (await json(response)).result;
+}
+
+const ALWAYS_REQUIRED: MfaOptions = { required: () => true };
+
 describe('auth-session MFA', () => {
   let harness: MfaHarness;
 
@@ -244,7 +301,7 @@ describe('auth-session MFA', () => {
   });
 
   it('password sign-in with MFA required returns second-factor-required', async () => {
-    harness = await buildMfaApp();
+    harness = await buildMfaApp(ALWAYS_REQUIRED);
     const jar = new CookieJar();
     const response = await jar.fetch(harness.app, '/password-login', { method: 'POST' });
     const body = await json(response);
@@ -252,7 +309,7 @@ describe('auth-session MFA', () => {
   });
 
   it('requireAuth route is still 401 during pending state', async () => {
-    harness = await buildMfaApp();
+    harness = await buildMfaApp(ALWAYS_REQUIRED);
     const jar = new CookieJar();
     // Sign in (triggers MFA pending).
     await jar.fetch(harness.app, '/password-login', { method: 'POST' });
@@ -262,7 +319,7 @@ describe('auth-session MFA', () => {
   });
 
   it('session id changes at sign-in (rotation)', async () => {
-    harness = await buildMfaApp();
+    harness = await buildMfaApp(ALWAYS_REQUIRED);
     const jar = new CookieJar();
     // Sign in (triggers MFA pending, rotates session).
     await jar.fetch(harness.app, '/password-login', { method: 'POST' });
@@ -272,21 +329,75 @@ describe('auth-session MFA', () => {
     expect((session.id as string).length).toBeGreaterThan(0);
   });
 
-  it('expired pending record is refused', async () => {
-    harness = await buildMfaApp();
+  it('an expired pending record is refused at completion', async () => {
+    harness = await buildMfaApp(ALWAYS_REQUIRED);
     const jar = new CookieJar();
-    // Sign in (triggers MFA pending).
+    const secret = await enrolAndConfirm(harness, jar);
+    const confirmedAt = totpCounter(harness.runtime.now());
+
+    // A fresh sign-in, aged past any TTL.
     await jar.fetch(harness.app, '/password-login', { method: 'POST' });
-    // Age the pending record past its TTL.
     await jar.fetch(harness.app, '/_age-pending-mfa', { method: 'POST' });
-    // The pending record should now be expired (at=0).
+    const session = await json(await jar.fetch(harness.app, '/_session'));
+    expect((session.pending as Record<string, unknown>).at).toBe(0);
+
+    // The code is valid for the next step, so the refusal is the expiry alone.
+    const result = await complete(
+      harness,
+      jar,
+      await codeForStep(harness, secret, confirmedAt + 1),
+    );
+    expect(result).toBe('no-pending');
+  });
+
+  it('a configured pendingTtlMs of 1 ms refuses completion (the option has effect)', async () => {
+    harness = await buildMfaApp({ required: () => true, pendingTtlMs: 1 });
+    const jar = new CookieJar();
+    const secret = await enrolAndConfirm(harness, jar);
+    const confirmedAt = totpCounter(harness.runtime.now());
+
+    await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+    await elapse(10);
+    const result = await complete(
+      harness,
+      jar,
+      await codeForStep(harness, secret, confirmedAt + 1),
+    );
+    expect(result).toBe('no-pending');
+  });
+
+  it('the default TTL completes the same flow (control for the 1 ms case above)', async () => {
+    harness = await buildMfaApp(ALWAYS_REQUIRED);
+    const jar = new CookieJar();
+    const secret = await enrolAndConfirm(harness, jar);
+    const confirmedAt = totpCounter(harness.runtime.now());
+
+    await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+    const result = await complete(
+      harness,
+      jar,
+      await codeForStep(harness, secret, confirmedAt + 1),
+    );
+    expect(result).toBe('signed-in');
+  });
+
+  it('an unconfirmed enrolment cannot complete a sign-in', async () => {
+    harness = await buildMfaApp(ALWAYS_REQUIRED);
+    const jar = new CookieJar();
+    await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+    const enrol = await json(await jar.fetch(harness.app, '/mfa/enrol', { method: 'POST' }));
+    const secret = enrol.secret as string;
+    const step = totpCounter(harness.runtime.now());
+    // The code is correct for the secret just generated; there is no factor yet.
+    const result = await complete(harness, jar, await codeForStep(harness, secret, step));
+    expect(result).toBe('not-enrolled');
+    // Still pending: the refusal did not sign anyone in.
     const session = await json(await jar.fetch(harness.app, '/_session'));
     expect(session.pending).not.toBeNull();
-    expect((session.pending as Record<string, unknown>).at).toBe(0);
   });
 
   it("a code from principal B does not complete principal A's pending sign-in", async () => {
-    harness = await buildMfaApp();
+    harness = await buildMfaApp(ALWAYS_REQUIRED);
     const jar = new CookieJar();
     // Sign in as alice (triggers MFA pending).
     await jar.fetch(harness.app, '/password-login', { method: 'POST' });
@@ -301,45 +412,65 @@ describe('auth-session MFA', () => {
     expect(['invalid', 'not-enrolled']).toContain(body.result);
   });
 
-  it('full MFA flow: enrol, complete sign-in', async () => {
-    harness = await buildMfaApp();
+  it('full MFA flow: enrol, confirm, complete sign-in, amr carries both factors', async () => {
+    harness = await buildMfaApp(ALWAYS_REQUIRED);
     const jar = new CookieJar();
 
-    // Step 1: password sign-in → pending.
+    // Steps 1–3: password sign-in → pending; enrol; confirm the factor.
+    const secret = await enrolAndConfirm(harness, jar);
+    const confirmedAt = totpCounter(harness.runtime.now());
+
+    // Step 4: a fresh pending sign-in, completed with the confirmed factor.
     const loginRes = await jar.fetch(harness.app, '/password-login', { method: 'POST' });
     const loginBody = await json(loginRes);
     expect(loginBody.outcome).toBe('second-factor-required');
 
-    // Step 2: begin enrolment.
-    const enrolRes = await jar.fetch(harness.app, '/mfa/enrol', { method: 'POST' });
-    const enrolBody = await json(enrolRes);
-    expect(enrolBody.secret).toBeDefined();
-    expect(enrolBody.uri).toContain('otpauth://totp/');
-
-    // Step 3: compute the current TOTP code and complete the sign-in.
-    // (confirmEnrolment is for the settings page; the sign-in path goes
-    // straight from enrolment to completeSignIn.)
-    const runtime = harness.app.services.get<IRuntimeServices>('runtime');
-    const enrolment = await harness.totpStore.getEnrolment('alice');
-    expect(enrolment).not.toBeNull();
-    const secret = decodeBase32(enrolment!.secret);
-    const code = (await computeTotpCode(runtime.subtle, secret, totpCounter(runtime.now()))).slice(
-      -6,
-    );
     const completeRes = await jar.fetch(harness.app, '/mfa/complete', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code: await codeForStep(harness, secret, confirmedAt + 1) }),
     });
     const completeBody = await json(completeRes);
     expect(completeBody.result).toBe('signed-in');
 
-    // Step 4: the protected route now returns 200.
+    // Step 5: the protected route now returns 200.
     const protectedRes = await jar.fetch(harness.app, '/protected');
     expect(protectedRes.status).toBe(200);
     const protectedBody = await json(protectedRes);
     expect(protectedBody.user).toBeDefined();
     const amr = (protectedBody.user as Record<string, unknown>).claims as Record<string, unknown>;
     expect(amr.amr).toEqual(['pwd', 'otp']);
+  });
+
+  it('a recovery code completes a pending sign-in and is single-use', async () => {
+    harness = await buildMfaApp(ALWAYS_REQUIRED);
+    const jar = new CookieJar();
+    await enrolAndConfirm(harness, jar);
+    const generated = await json(
+      await jar.fetch(harness.app, '/mfa/recovery', { method: 'POST' }),
+    );
+    const codes = generated.codes as string[];
+    expect(codes).toHaveLength(10);
+
+    await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+    const first = await json(
+      await jar.fetch(harness.app, '/mfa/complete-recovery', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: `${codes[0]}A` }),
+      }),
+    );
+    // A valid code with one extra character is refused: the canonical shape is
+    // enforced before the store is consulted.
+    expect(first.result).toBe('invalid');
+
+    const second = await json(
+      await jar.fetch(harness.app, '/mfa/complete-recovery', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: codes[0] }),
+      }),
+    );
+    expect(second.result).toBe('signed-in');
   });
 });
