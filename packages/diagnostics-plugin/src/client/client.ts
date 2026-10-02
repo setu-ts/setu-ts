@@ -363,6 +363,11 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         throw new Error(CLIENT_ERRORS.connection);
       }
       if (response.status !== 200) {
+        // Refusal bodies are never read (they are unsigned), but the stream
+        // must still be released: an unread body keeps the connection open
+        // until garbage collection. Cancel without awaiting, so a source that
+        // never settles its cancel cannot hold the exchange open.
+        void response.body?.cancel().catch(() => {});
         throw new Error(CLIENT_ERRORS.connection);
       }
       const bodyBytes = await readBoundedBody(response);

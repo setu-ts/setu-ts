@@ -15,7 +15,9 @@ All notable changes to this project are documented here. The format follows
   `DiagnosticsSessionLifetime`. Renewal keeps the same key, session ID, instance binding and
   sequence space, remains behind replay/rate/instance gates, and the expiry timer re-arms only for
   opted-in sessions. The CLI's generated devtool entry selects an 8-hour cap. These required client
-  methods widen the previously unpublished `IDiagnosticsClient` interface.
+  methods widen the previously unpublished `IDiagnosticsClient` interface. The client also now
+  cancels an unread non-200 response body, which it never parses, instead of leaving the
+  connection's body open until garbage collection.
 
 - **Multi-factor authentication with TOTP (M100d).** `AuthPluginOptions.signIn.mfa` adds a TOTP
   second factor to any sign-in flow that records its principal through `IAuthSessionService`.

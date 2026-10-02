@@ -666,6 +666,64 @@ describe('Client — session renewal', () => {
   });
 });
 
+describe('Client — refusal bodies', () => {
+  /**
+   * A refusal body that records whether it was read or cancelled. A zero
+   * high-water mark means nothing is pulled unless a reader asks.
+   */
+  function trackedRefusal(status: number) {
+    const tracker = { pulled: 0, cancelled: 0 };
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        tracker.pulled += 1;
+        controller.enqueue(new TextEncoder().encode('canary-refusal-body'));
+        controller.close();
+      },
+      cancel() {
+        tracker.cancelled += 1;
+      },
+    }, { highWaterMark: 0 });
+    return { tracker, response: new Response(body, { status }) };
+  }
+
+  for (const status of [400, 401, 429, 503]) {
+    it(`cancels an unread ${status} refusal body on the initial exchange`, async () => {
+      const { tracker, response } = trackedRefusal(status);
+      const { client } = buildClient({ client: { fetch: () => Promise.resolve(response) } });
+      await expect(client.session()).rejects.toThrow(CLIENT_ERRORS.connection);
+      await Promise.resolve();
+      expect(tracker).toEqual({ pulled: 0, cancelled: 1 });
+      client.close();
+    });
+  }
+
+  it('cancels an unread refusal body on a paired operation', async () => {
+    const honest = recording(fakeServer(crypto.subtle, { renewal: true }).fetch);
+    const { tracker, response } = trackedRefusal(401);
+    const { client } = buildClient({
+      client: {
+        fetch: (input, init) =>
+          String(input).endsWith('/v1/renew') ? Promise.resolve(response) : honest(input, init),
+      },
+    });
+    await client.session();
+    await expect(client.renew()).rejects.toThrow(CLIENT_ERRORS.connection);
+    await Promise.resolve();
+    expect(tracker).toEqual({ pulled: 0, cancelled: 1 });
+    // Non-terminal: the paired client keeps working.
+    expect((await client.session()).renewal).not.toBe(null);
+    client.close();
+  });
+
+  it('refuses a bodiless refusal with the same fixed error', async () => {
+    const { client } = buildClient({
+      client: { fetch: () => Promise.resolve(new Response(null, { status: 401 })) },
+    });
+    await expect(client.session()).rejects.toThrow(CLIENT_ERRORS.connection);
+    client.close();
+  });
+});
+
 describe('Client — verification and bounds', () => {
   it('treats a mutated response body as a connection failure', async () => {
     const { client } = buildClient({
