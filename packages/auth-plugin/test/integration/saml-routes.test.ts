@@ -163,7 +163,9 @@ function assertion(overrides: Record<string, unknown> = {}): Record<string, unkn
     $: { ID: '_a1' },
     Subject: [{
       SubjectConfirmation: [{
-        SubjectConfirmationData: [{ $: { Recipient: ACS_URL, NotOnOrAfter: 'not-a-date' } }],
+        SubjectConfirmationData: [{
+          $: { Recipient: ACS_URL, InResponseTo: '_req1', NotOnOrAfter: 'not-a-date' },
+        }],
       }],
     }],
     ...overrides,

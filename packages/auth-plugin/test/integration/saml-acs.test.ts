@@ -172,6 +172,19 @@ describe('SAML ACS (real node-saml)', () => {
       },
     },
     {
+      // The response envelope is unsigned when only the assertion is: its
+      // InResponseTo alone cannot bind a signed assertion to this login.
+      name: 'a signed assertion with no InResponseTo of its own, wrapped in a fresh response',
+      build: (id) => signedResponse(key, id, { inResponseTo: null }),
+    },
+    {
+      name: 'a signed assertion bound to a different request',
+      build: (id) => {
+        const fields = validFields(id, { inResponseTo: '_some-other-request' });
+        return encode(responseXml(signElement(assertionXml(fields), fields.id, key), id));
+      },
+    },
+    {
       name: 'a response answering a request this server never issued',
       build: () => signedResponse(key, '_never-issued'),
     },

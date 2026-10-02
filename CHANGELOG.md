@@ -22,11 +22,13 @@ All notable changes to this project are documented here. The format follows
   the library is set explicitly, because node-saml 5.1.0 defaults `validateInResponseTo` to
   `'never'`. Two checks node-saml 5.1.0 does NOT make on an authentication response are made by the
   plugin from the verified assertion: its `Issuer` must equal `idp.entityId` (the library reads
-  `idpIssuer` only for logout messages), and every `SubjectConfirmationData` `Recipient` must equal
-  `acsUrl`. The response's `InResponseTo` must name a pending request this server issued; pending
-  requests (`SamlPendingRequest`) live in an `ISamlRequestStore` (`MemorySamlRequestStore` by
-  default, single replica only) that is also the library's `cacheProvider`, are consumed exactly
-  once, and are bound to the browser that started the login by a `__Host-setu-saml` cookie
+  `idpIssuer` only for logout messages), and every `SubjectConfirmationData` must name `acsUrl` as
+  its `Recipient` and the consumed request as its `InResponseTo` — the signed binding, since the
+  response envelope's own `InResponseTo` is unsigned when only the assertion is. The response's
+  `InResponseTo` must name a pending request this server issued; pending requests
+  (`SamlPendingRequest`) live in an `ISamlRequestStore` (`MemorySamlRequestStore` by default, single
+  replica only) that is also the library's `cacheProvider`, are consumed exactly once, and are bound
+  to the browser that started the login by a `__Host-setu-saml` cookie
   (`SameSite=None; Secure; HttpOnly;
   Path=/; Max-Age=600`) — because the IdP's cross-site POST
   does not carry the `Lax` session cookie, and without the binding a posted foreign response would

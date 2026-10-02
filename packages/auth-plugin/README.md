@@ -544,12 +544,14 @@ Three routes per provider:
 **What the ACS checks.** The assertion must be signed by one of `idp.certs` (a signature only on the
 response envelope is not enough, and an unsigned or encrypted assertion is refused); its `Issuer`
 must equal `idp.entityId`; its `Audience` must be `entityId`; every `SubjectConfirmationData` must
-name `acsUrl` as its `Recipient`; `NotBefore`/`NotOnOrAfter` must hold with 60 seconds of skew; the
-response's `InResponseTo` must name a pending request this server issued for this provider, and that
-request is consumed — once; the assertion `ID` must not have been used before; and the browser must
-present the binding cookie set at login. Two posts of one captured response cannot both sign in.
-**IdP-initiated (unsolicited) login is refused**: it has no request to bind to. XML signature
-verification, including resistance to signature-wrapping, is delegated to
+name `acsUrl` as its `Recipient` and carry an `InResponseTo` naming the consumed request (the
+response envelope is unsigned when only the assertion is, so its own `InResponseTo` cannot bind the
+assertion); `NotBefore`/`NotOnOrAfter` must hold with 60 seconds of skew; the response's
+`InResponseTo` must name a pending request this server issued for this provider, and that request is
+consumed — once; the assertion `ID` must not have been used before; and the browser must present the
+binding cookie set at login. Two posts of one captured response cannot both sign in. **IdP-initiated
+(unsolicited) login is refused**: it has no request to bind to. XML signature verification,
+including resistance to signature-wrapping, is delegated to
 [`@node-saml/node-saml`](https://github.com/node-saml/node-saml) rather than hand-written.
 
 **Refusals** answer `401` — or redirect to `failureRedirect` with `?error=<code>` — with one of two

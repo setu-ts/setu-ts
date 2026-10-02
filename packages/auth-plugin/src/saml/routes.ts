@@ -156,6 +156,8 @@ function childrenOf(node: unknown, name: string): readonly unknown[] {
 interface AssertionFacts {
   readonly id: string;
   readonly recipients: readonly unknown[];
+  /** Every `SubjectConfirmationData` `InResponseTo`, inside the signature. */
+  readonly inResponseTos: readonly unknown[];
   /** The latest `NotOnOrAfter` found, in ms, or `null` when none parsed. */
   readonly expiresAt: number | null;
 }
@@ -175,6 +177,7 @@ function assertionFacts(profile: SamlLibraryProfile): AssertionFacts | null {
     return null;
   }
   const recipients: unknown[] = [];
+  const inResponseTos: unknown[] = [];
   const deadlines: unknown[] = [];
   for (const subject of childrenOf(assertion, 'Subject')) {
     for (const confirmation of childrenOf(subject, 'SubjectConfirmation')) {
@@ -183,9 +186,11 @@ function assertionFacts(profile: SamlLibraryProfile): AssertionFacts | null {
         // A confirmation without data carries no Recipient: it cannot be bound
         // to this ACS, so it counts as a mismatch rather than being skipped.
         recipients.push(undefined);
+        inResponseTos.push(undefined);
       }
       for (const entry of data) {
         recipients.push(attributeOf(entry, 'Recipient'));
+        inResponseTos.push(attributeOf(entry, 'InResponseTo'));
         deadlines.push(attributeOf(entry, 'NotOnOrAfter'));
       }
     }
@@ -200,7 +205,7 @@ function assertionFacts(profile: SamlLibraryProfile): AssertionFacts | null {
       expiresAt = ms;
     }
   }
-  return { id, recipients, expiresAt };
+  return { id, recipients, inResponseTos, expiresAt };
 }
 
 /** Builds the frozen profile `toPrincipal` receives, or `null` without a NameID. */
@@ -269,7 +274,7 @@ function registerLogin(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         url = await saml.getAuthorizeUrlAsync('', undefined, {});
       } catch (error) {
         deps.debug?.(
-          `auth-plugin: signIn['${provider.name}'] AuthnRequest failed (${describe(error)})`,
+          `auth-plugin: signIn['${provider.name}'] AuthnRequest failed (${describeError(error)})`,
         );
         url = '';
       }
@@ -303,8 +308,13 @@ async function readSamlResponse(ctx: IRequestContext): Promise<string | null> {
 }
 
 /** A short, non-quoting description of a thrown value for the debug log. */
-function describe(error: unknown): string {
-  return error instanceof Error ? error.message : 'non-error thrown';
+export function describeError(error: unknown): string {
+  // The library's messages can quote attacker-supplied values (an audience, an
+  // issuer), so control characters are removed and the length capped before
+  // the text reaches a log line.
+  const text = error instanceof Error ? error.message : 'non-error thrown';
+  // deno-lint-ignore no-control-regex
+  return text.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 200);
 }
 
 function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
@@ -348,7 +358,7 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         // The library has already consumed the request on its failure path, so a
         // response that fails validation cannot be retried against its request.
         deps.debug?.(
-          `auth-plugin: signIn['${provider.name}'] response refused (${describe(error)})`,
+          `auth-plugin: signIn['${provider.name}'] response refused (${describeError(error)})`,
         );
         return fail(provider, ctx, 'assertion-invalid');
       }
@@ -389,6 +399,18 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         facts.recipients.some((recipient) => recipient !== provider.acsUrl)
       ) {
         deps.debug?.(`auth-plugin: signIn['${provider.name}'] response refused (recipient)`);
+        return fail(provider, ctx, 'assertion-invalid');
+      }
+      // The response envelope is unsigned when only the assertion is signed, so
+      // its InResponseTo alone cannot bind a signed assertion to this login: a
+      // captured assertion with no InResponseTo of its own could be re-wrapped
+      // in a fresh response for the attacker's own pending request. node-saml
+      // compares the two only when both are present, so the binding is
+      // required here, inside the signature, on every confirmation.
+      if (facts.inResponseTos.some((value) => value !== request.requestId)) {
+        deps.debug?.(
+          `auth-plugin: signIn['${provider.name}'] response refused (unbound assertion)`,
+        );
         return fail(provider, ctx, 'assertion-invalid');
       }
       const now = deps.runtime.now();
