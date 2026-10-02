@@ -5550,7 +5550,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   bound, with a full-map sweep on every write — and a Low: node-saml copies attributes onto its
   profile, so an assertion with no `Issuer`/`NameID` element but same-named attributes supplied
   both. The store is now capped (`maxPendingRequests`, oldest evicted, amortized sweeps) and both
-  values are read from the signed elements; round 2 passed on `cc4cdd30` — complete (PR pending).
+  values are read from the signed elements; round 2 passed on `cc4cdd30` — complete (PR #393).
 - **Next milestone** — **M98o** (`diagnostics-plugin` — diagnostics session renewal).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
