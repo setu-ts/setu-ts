@@ -34,7 +34,12 @@ All notable changes to this project are documented here. The format follows
   and the `passkeys` option is validated when `AuthPlugin(...)` is called; the recorded method is
   always `pop` (RFC 8176), never `hwk`/`swk` — with attestation unverified the plugin cannot know
   how the key is protected. Any attestation `fmt` is accepted with its statement unread. Attestation
-  verification against trust roots remains out of scope.
+  verification against trust roots remains out of scope. Registration is gated: a principal who
+  already holds a passkey must have proved a second factor (`otp`/`pop`) in the session
+  (`403 second-factor-required`), the first passkey is trusted on first use, and the optional
+  `PasskeyOptions.mayRegister` (context type `PasskeyRegistrationContext`) can refuse more
+  (`403 registration-refused`). One principal holds at most 16 credentials (`409 credential-limit`),
+  only defined `transports` values are stored, and an EC2 key must be a point on P-256.
 - **Multi-factor authentication with TOTP (M100d).** `AuthPluginOptions.signIn.mfa` adds a TOTP
   second factor to any sign-in flow that records its principal through `IAuthSessionService`.
   `TotpService` (app-instantiated, like `PasswordHasher`) computes RFC 6238 codes (HMAC-SHA1,

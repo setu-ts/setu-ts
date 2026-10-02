@@ -1,14 +1,19 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { createCeremoniesHarness, ORIGIN, RP_ID } from '../fixtures/passkey-ceremonies.ts';
+import {
+  createCeremoniesHarness,
+  ORIGIN,
+  registrationOptionsOf,
+  RP_ID,
+} from '../fixtures/passkey-ceremonies.ts';
 import { fromBase64Url, VirtualAuthenticator } from '../fixtures/virtual-authenticator.ts';
 import { CHALLENGE_TTL_MS, WEBAUTHN_CHALLENGE_SESSION_KEY } from '../../src/passkeys/ceremonies.ts';
 
 describe('challenge handling', () => {
   it('stores the challenge in the session with a 5-minute expiry', async () => {
     const harness = createCeremoniesHarness();
-    const optionsJson = await harness.ceremonies.registrationOptions(harness.ctx);
+    const optionsJson = await registrationOptionsOf(harness);
     const stored = harness.session.get<Record<string, unknown>>(WEBAUTHN_CHALLENGE_SESSION_KEY);
     expect(stored?.kind).toBe('registration');
     expect(stored?.challenge).toBe(optionsJson?.challenge);
@@ -18,7 +23,7 @@ describe('challenge handling', () => {
   it('removes the challenge from the session before verification', async () => {
     const harness = createCeremoniesHarness();
     const authenticator = await VirtualAuthenticator.create('ES256');
-    const optionsJson = await harness.ceremonies.registrationOptions(harness.ctx);
+    const optionsJson = await registrationOptionsOf(harness);
     const body = await authenticator.registrationResult({ challenge: optionsJson!.challenge });
     expect(harness.session.has(WEBAUTHN_CHALLENGE_SESSION_KEY)).toBe(true);
     await harness.ceremonies.verifyRegistration(harness.ctx, body, { id: 'alice' });
@@ -54,7 +59,7 @@ describe('challenge handling', () => {
     const authenticator = await VirtualAuthenticator.create('ES256');
     // Enrol first: the replay's refusal must come from the claim, not from an
     // unknown credential.
-    const registration = await harness.ceremonies.registrationOptions(harness.ctx);
+    const registration = await registrationOptionsOf(harness);
     const registrationBody = await authenticator.registrationResult({
       challenge: registration!.challenge,
     });

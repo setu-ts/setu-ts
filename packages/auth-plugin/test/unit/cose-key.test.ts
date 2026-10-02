@@ -2,7 +2,12 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { decodeCbor } from '../../src/passkeys/cbor.ts';
-import { algorithmName, coseAlgorithm, coseKeyToJwk } from '../../src/passkeys/cose-key.ts';
+import {
+  algorithmName,
+  coseAlgorithm,
+  coseKeyToJwk,
+  isOnP256,
+} from '../../src/passkeys/cose-key.ts';
 import {
   coseKeyBytes,
   encodeByteString,
@@ -44,23 +49,20 @@ describe('coseAlgorithm', () => {
 });
 
 describe('coseKeyToJwk', () => {
-  it('converts an EC2/P-256 key to a JWK', () => {
-    const decoded = decodeCbor(coseKeyBytes('ES256', {
-      kty: 'EC',
-      crv: 'P-256',
-      x: 'MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7B4',
-      y: '4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM',
-    }));
+  it('converts an EC2/P-256 key to a JWK', async () => {
+    // A generated key: the converter now refuses a point off the curve, which a
+    // hand-written coordinate pair almost always is.
+    const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
+      'sign',
+      'verify',
+    ]);
+    const exported = await crypto.subtle.exportKey('jwk', pair.publicKey);
+    const x = exported.x!;
+    const y = exported.y!;
+    const decoded = decodeCbor(coseKeyBytes('ES256', { kty: 'EC', crv: 'P-256', x, y }));
     expect(decoded.ok).toBe(true);
     const jwk = decoded.ok ? coseKeyToJwk(decoded.value, 'ES256') : null;
-    expect(jwk).toEqual({
-      kty: 'EC',
-      crv: 'P-256',
-      x: 'MKBCTNIcKUSDii11ySs3526iDZ8AiTo7Tu6KPAqv7B4',
-      y: '4Etl6SRW2YiLUrN5vfvVHuhp7x8PxltmWWlbbM4IFyM',
-      key_ops: ['verify'],
-      ext: true,
-    });
+    expect(jwk).toEqual({ kty: 'EC', crv: 'P-256', x, y, key_ops: ['verify'], ext: true });
   });
 
   it('converts an RSA key to a JWK', () => {
@@ -119,5 +121,22 @@ describe('coseKeyToJwk', () => {
   it('refuses a non-map key', () => {
     expect(coseKeyToJwk('not a map', 'ES256')).toBeNull();
     expect(coseKeyToJwk(42, 'RS256')).toBeNull();
+  });
+
+  it('isOnP256 accepts a real point and refuses off-curve and out-of-field coordinates', async () => {
+    const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
+      'sign',
+      'verify',
+    ]);
+    const raw = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+    const x = raw.slice(1, 33);
+    const y = raw.slice(33, 65);
+    expect(isOnP256(x, y)).toBe(true);
+    const tweaked = y.slice();
+    tweaked[31] = tweaked[31]! ^ 1;
+    expect(isOnP256(x, tweaked)).toBe(false);
+    // A coordinate at or above the field prime is refused before the equation.
+    expect(isOnP256(new Uint8Array(32).fill(0xff), y)).toBe(false);
+    expect(isOnP256(x, new Uint8Array(32).fill(0xff))).toBe(false);
   });
 });

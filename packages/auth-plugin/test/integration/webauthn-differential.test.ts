@@ -1,7 +1,12 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { createCeremoniesHarness, ORIGIN, RP_ID } from '../fixtures/passkey-ceremonies.ts';
+import {
+  createCeremoniesHarness,
+  ORIGIN,
+  registrationOptionsOf,
+  RP_ID,
+} from '../fixtures/passkey-ceremonies.ts';
 import { fromBase64Url, VirtualAuthenticator } from '../fixtures/virtual-authenticator.ts';
 
 /**
@@ -82,7 +87,7 @@ describe('webauthn differential', () => {
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');
-      const options = await harness.ceremonies.registrationOptions(harness.ctx);
+      const options = await registrationOptionsOf(harness);
       const body = await authenticator.registrationResult({
         challenge: options!.challenge,
         rpId: RP_ID,
@@ -103,7 +108,7 @@ describe('webauthn differential', () => {
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');
-      const options = await harness.ceremonies.registrationOptions(harness.ctx);
+      const options = await registrationOptionsOf(harness);
       const body = await authenticator.registrationResult({
         challenge: options!.challenge,
         rpId: RP_ID,
@@ -129,7 +134,7 @@ describe('webauthn differential', () => {
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');
-      const registration = await harness.ceremonies.registrationOptions(harness.ctx);
+      const registration = await registrationOptionsOf(harness);
       const registrationBody = await authenticator.registrationResult({
         challenge: registration!.challenge,
         rpId: RP_ID,
@@ -166,7 +171,7 @@ describe('webauthn differential', () => {
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');
-      const registration = await harness.ceremonies.registrationOptions(harness.ctx);
+      const registration = await registrationOptionsOf(harness);
       const registrationBody = await authenticator.registrationResult({
         challenge: registration!.challenge,
         rpId: RP_ID,
@@ -214,7 +219,7 @@ describe('webauthn differential', () => {
     async () => {
       const harness = createCeremoniesHarness();
       const authenticator = await VirtualAuthenticator.create('ES256');
-      const registration = await harness.ceremonies.registrationOptions(harness.ctx);
+      const registration = await registrationOptionsOf(harness);
       const registrationBody = await authenticator.registrationResult({
         challenge: registration!.challenge,
         rpId: RP_ID,

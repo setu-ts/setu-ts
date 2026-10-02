@@ -17,6 +17,7 @@ import type {
   OAuth2Provider,
   OidcProvider,
   PasskeyOptions,
+  PasskeyRegistrationContext,
   ProviderTokens,
   RecoveryVerifyResult,
   RefreshPrincipal,
@@ -187,6 +188,12 @@ describe('barrel exports', () => {
     expect(credential.attestation).toBe('unverified');
     expect(options.rpId).toBe('localhost');
     expect('userVerification' in options).toBe(false);
+    const context: PasskeyRegistrationContext = {
+      principal: { id: 'alice' },
+      methods: ['pwd'],
+      credentialCount: 0,
+    };
+    expect(context.credentialCount).toBe(0);
   });
 
   it('exports TotpService and the M100d MFA types (declared against the barrel)', () => {

@@ -122,4 +122,19 @@ describe('compilePasskeys', () => {
       })
     ).toThrow(AuthPluginConfigurationError);
   });
+
+  it('refuses a mayRegister that is not a function', () => {
+    expect(() =>
+      compilePasskeys({
+        ...({
+          rpId: 'localhost',
+          rpName: 'Test',
+          origins: ['http://localhost'],
+          store: new MemoryPasskeyStore(),
+          resolvePrincipal: () => null,
+        }),
+        mayRegister: 'yes',
+      } as unknown as PasskeyOptions)
+    ).toThrow(AuthPluginConfigurationError);
+  });
 });

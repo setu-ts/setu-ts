@@ -1,7 +1,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { createCeremoniesHarness, ORIGIN } from '../fixtures/passkey-ceremonies.ts';
+import {
+  createCeremoniesHarness,
+  ORIGIN,
+  registrationOptionsOf,
+} from '../fixtures/passkey-ceremonies.ts';
 import type { CeremoniesHarness } from '../fixtures/passkey-ceremonies.ts';
 import { fromBase64Url, VirtualAuthenticator } from '../fixtures/virtual-authenticator.ts';
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
@@ -9,7 +13,7 @@ import { encodeBase64Url } from '../../src/utils/base64url.ts';
 /** Registers one credential on the harness and returns the authenticator. */
 async function enrol(harness: CeremoniesHarness): Promise<VirtualAuthenticator> {
   const authenticator = await VirtualAuthenticator.create('ES256');
-  const optionsJson = await harness.ceremonies.registrationOptions(harness.ctx);
+  const optionsJson = await registrationOptionsOf(harness);
   const body = await authenticator.registrationResult({ challenge: optionsJson!.challenge });
   const outcome = await harness.ceremonies.verifyRegistration(harness.ctx, body, { id: 'alice' });
   if (!outcome.ok) {

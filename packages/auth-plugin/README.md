@@ -775,6 +775,17 @@ accepted, and the `passkeys` option is validated when `AuthPlugin(...)` is calle
 origin or `rpId` refuses before an application exists. The recorded method is always `pop` (proof of
 possession) — never `hwk`/`swk`, which the plugin cannot know with attestation unverified.
 
+**Registration is gated.** Registering a passkey requires a signed-in principal (401 otherwise), and
+a principal who ALREADY holds a passkey must have proved a second factor (`otp` or `pop`) in the
+current session — otherwise a stolen password alone could enrol the attacker's own authenticator,
+whose later assertions are recorded as `pop` and pass `requireMfa()`. That is refused with
+`403 second-factor-required`, at both `register/options` and `register/verify`. The FIRST passkey is
+trusted on first use; `PasskeyOptions.mayRegister` is an optional extra policy, consulted after the
+built-in rule, that can refuse more (for example the first passkey too) — `false` or a throw answers
+`403 registration-refused`. One principal holds at most 16 credentials (`409 credential-limit`), and
+only the six defined WebAuthn `transports` values are stored, each once. An EC2 key is checked to be
+a point on P-256 at registration, because the runtimes disagree on whether Web Crypto does.
+
 Attestation statements are NOT verified: `attestation: 'none'` is requested, any `fmt` the client
 sends is accepted with its statement unread, and the stored credential records
 `attestation: 'unverified'`. Verifying attestations against trust roots is out of scope.
@@ -1014,6 +1025,7 @@ MIT
 | `RefreshPrincipal`                  | type      |
 | `SignInProvider`                    | type      |
 | `PasskeyOptions`                    | interface |
+| `PasskeyRegistrationContext`        | interface |
 | `StoredPasskey`                     | interface |
 | `TokenEndpointAuth`                 | type      |
 | `TotpCompleteSignInResult`          | type      |

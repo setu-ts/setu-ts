@@ -19,7 +19,7 @@ import type {
   ISessionService,
 } from '@setu-ts/common';
 import type { IPasskeyStore, StoredPasskey } from '../stores/passkey-store.ts';
-import type { PasskeyOptions } from '../interfaces/index.ts';
+import type { PasskeyOptions, PasskeyRegistrationContext } from '../interfaces/index.ts';
 import type { PendingPromotion } from '../sign-in/auth-session-service.ts';
 import { asPendingPromotion } from '../sign-in/auth-session-service.ts';
 import { AuthPluginConfigurationError } from '../errors.ts';
@@ -46,6 +46,29 @@ const CHALLENGE_BYTES = 32;
 
 /** The byte length of the opaque per-principal user handle (plan §3.2). */
 const USER_HANDLE_BYTES = 32;
+
+/**
+ * The most credentials one principal may register. Credentials are permanent
+ * and every one is echoed back in `excludeCredentials`, so an uncapped list is
+ * unbounded memory in the store and an unbounded response. The check runs
+ * before the write and is not atomic across sessions, so concurrent
+ * registrations can overshoot it by at most the number of parallel ceremonies.
+ */
+export const MAX_CREDENTIALS_PER_PRINCIPAL = 16;
+
+/**
+ * The `AuthenticatorTransport` values WebAuthn Level 3 defines. Anything else a
+ * client sends is dropped rather than stored: the list is persisted and echoed
+ * back, so an unfiltered one is unbounded client data in the store.
+ */
+const KNOWN_TRANSPORTS: ReadonlySet<string> = new Set([
+  'ble',
+  'hybrid',
+  'internal',
+  'nfc',
+  'smart-card',
+  'usb',
+]);
 
 /** Which ceremony a stored challenge belongs to. */
 export type CeremonyKind = 'registration' | 'authentication';
@@ -80,6 +103,10 @@ export interface CompiledPasskeys {
   ) => IPrincipal | null | Promise<IPrincipal | null>;
   /** The user-verification policy. Defaults to `required`. */
   readonly userVerification: UserVerification;
+  /** The optional extra registration policy, or `null`. */
+  readonly mayRegister:
+    | ((context: PasskeyRegistrationContext) => boolean | Promise<boolean>)
+    | null;
 }
 
 /** The reason a ceremony refused a response. Fixed codes, never client text. */
@@ -101,7 +128,10 @@ export type PasskeyRefusal =
   | 'signature-invalid'
   | 'counter-refused'
   | 'principal-refused'
-  | 'sign-in-required';
+  | 'sign-in-required'
+  | 'second-factor-required'
+  | 'registration-refused'
+  | 'credential-limit';
 
 /** The outcome of a registration verify. */
 export type RegistrationOutcome =
@@ -250,6 +280,9 @@ export function compilePasskeys(options: PasskeyOptions): CompiledPasskeys {
   ) {
     refuse("userVerification must be 'required', 'preferred' or 'discouraged'");
   }
+  if (options.mayRegister !== undefined && typeof options.mayRegister !== 'function') {
+    refuse('mayRegister must be a function');
+  }
   return {
     rpId,
     rpName: options.rpName,
@@ -257,6 +290,7 @@ export function compilePasskeys(options: PasskeyOptions): CompiledPasskeys {
     store,
     resolvePrincipal: options.resolvePrincipal,
     userVerification,
+    mayRegister: options.mayRegister ?? null,
   };
 }
 
@@ -448,7 +482,8 @@ export class PasskeyCeremonies {
       return { ok: false, reason: 'origin-refused' };
     }
     // An embedding iframe on another site would otherwise run the ceremony
-    // (plan §3.2): only an absent or `false` `crossOrigin` passes.
+    // (plan §3.2): a `crossOrigin` of `true` is refused. Browsers send only a
+    // boolean, so any other value is treated as absent.
     if (clientData.crossOrigin === true) {
       return { ok: false, reason: 'cross-origin' };
     }
@@ -476,21 +511,29 @@ export class PasskeyCeremonies {
   /**
    * Builds the registration options (plan §3.2).
    *
-   * The user handle is an opaque 32-byte value generated once per principal
-   * and reused for every later credential, so a principal id used directly —
-   * which could exceed WebAuthn's 64-byte limit or leak the id to the
-   * authenticator — never reaches the client.
+   * The user HANDLE is an opaque 32-byte value generated once per principal
+   * and reused for every later credential, so a principal id used as the
+   * handle — which could exceed WebAuthn's 64-byte limit — is never needed.
+   * The principal id IS sent as `user.name` and `user.displayName`: the
+   * browser shows those in its account picker, so they are display data and
+   * reach the client and the authenticator by design.
    *
    * @param ctx - The request context; the session middleware must have run
-   * @returns The options, or `null` when no principal is signed in
+   * @returns The options, or why registration is refused
    */
-  async registrationOptions(ctx: IRequestContext): Promise<RegistrationOptionsJson | null> {
+  async registrationOptions(
+    ctx: IRequestContext,
+  ): Promise<RegistrationOptionsJson | PasskeyRefusal> {
     const principal = this.#authSession.current(ctx);
     if (principal === null) {
-      return null;
+      return 'sign-in-required';
     }
     const session = this.#sessionService.from(ctx);
     const existing = await this.#config.store.listByPrincipal(principal.id);
+    const gate = await this.#registrationGate(ctx, principal, existing.length);
+    if (gate !== null) {
+      return gate;
+    }
     const userHandle = existing[0]?.userHandle ??
       encodeBase64Url(this.#runtime.randomBytes(USER_HANDLE_BYTES));
     const challenge = encodeBase64Url(this.#runtime.randomBytes(CHALLENGE_BYTES));
@@ -526,6 +569,49 @@ export class PasskeyCeremonies {
   }
 
   /**
+   * Decides whether the signed-in principal may register another credential.
+   *
+   * A principal who already holds a passkey must have proved a second factor
+   * (`otp` or `pop`) in THIS session: otherwise one factor — a stolen password
+   * — could enrol the attacker's own authenticator, whose later assertions are
+   * recorded as `pop` and satisfy `requireMfa()`. The FIRST passkey is trusted
+   * on first use; `mayRegister` can refuse it too. The per-principal cap bounds
+   * what the store holds and what `excludeCredentials` echoes.
+   *
+   * @returns The refusal, or `null` when registration may proceed
+   */
+  async #registrationGate(
+    ctx: IRequestContext,
+    principal: IPrincipal,
+    credentialCount: number,
+  ): Promise<PasskeyRefusal | null> {
+    if (credentialCount >= MAX_CREDENTIALS_PER_PRINCIPAL) {
+      return 'credential-limit';
+    }
+    // Without the plugin's own session service the recorded methods cannot be
+    // read, so the gate fails closed for a principal that already has one.
+    const methods = asPendingPromotion(this.#authSession)?.currentMethods(ctx) ?? [];
+    if (credentialCount > 0 && !methods.some((m) => m === 'otp' || m === 'pop')) {
+      return 'second-factor-required';
+    }
+    if (this.#config.mayRegister !== null) {
+      let allowed = false;
+      try {
+        allowed = (await this.#config.mayRegister({ principal, methods, credentialCount })) ===
+          true;
+      } catch {
+        // A throwing policy refuses: failing open would admit the registration
+        // the policy exists to stop.
+        this.#report('auth-plugin: passkeys mayRegister threw; registration refused');
+      }
+      if (!allowed) {
+        return 'registration-refused';
+      }
+    }
+    return null;
+  }
+
+  /**
    * Verifies a registration response (plan §3.2).
    *
    * The attestation `fmt` is accepted in ANY value and its `attStmt` is never
@@ -558,6 +644,13 @@ export class PasskeyCeremonies {
     const attestationObject = strField(responseRecord, 'attestationObject');
     if (clientDataJson === null || attestationObject === null) {
       return { ok: false, reason: 'malformed' };
+    }
+    // The gate runs at verify too, not only at options: the options response
+    // is advisory, and verify is where the credential is written.
+    const existing = await this.#config.store.listByPrincipal(principal.id);
+    const gate = await this.#registrationGate(ctx, principal, existing.length);
+    if (gate !== null) {
+      return { ok: false, reason: gate };
     }
 
     const session = this.#sessionService.from(ctx);
@@ -896,10 +989,19 @@ function algorithmOf(coseAlg: number): PasskeyAlgorithm | null {
   return null;
 }
 
-/** Reads the optional `transports` array, accepting only strings. */
+/**
+ * Reads the optional `transports` array, keeping only the WebAuthn transport
+ * values, each once. Bounded by construction: at most the six defined values.
+ */
 function readTransports(value: unknown): readonly string[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value.filter((item): item is string => typeof item === 'string');
+  const kept = new Set<string>();
+  for (const item of value.slice(0, 32)) {
+    if (typeof item === 'string' && KNOWN_TRANSPORTS.has(item)) {
+      kept.add(item);
+    }
+  }
+  return [...kept];
 }

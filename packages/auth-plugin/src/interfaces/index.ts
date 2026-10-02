@@ -554,6 +554,25 @@ export interface PasskeyOptions {
    * a first one, but never for a username-less sign-in.
    */
   readonly userVerification?: 'required' | 'preferred' | 'discouraged';
+  /**
+   * An optional extra registration policy, consulted AFTER the built-in rule
+   * that a principal who already holds a passkey must have proved a second
+   * factor (`otp` or `pop`) in this session. It can only refuse further — for
+   * example, to require a second factor for the FIRST passkey too, which the
+   * built-in rule trusts on first use. Answering `false` (or throwing) refuses
+   * the registration with `403 registration-refused`.
+   */
+  readonly mayRegister?: (context: PasskeyRegistrationContext) => boolean | Promise<boolean>;
+}
+
+/** What {@linkcode PasskeyOptions.mayRegister} is told about a registration. */
+export interface PasskeyRegistrationContext {
+  /** The signed-in principal registering a credential. */
+  readonly principal: IPrincipal;
+  /** The methods the session's sign-in recorded (RFC 8176 `amr` values). */
+  readonly methods: readonly string[];
+  /** How many credentials the principal already holds. */
+  readonly credentialCount: number;
 }
 
 /**

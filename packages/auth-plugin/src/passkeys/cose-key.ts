@@ -71,6 +71,39 @@ function entry(cose: ReadonlyMap<CborValue, CborValue>, label: number): CborValu
 }
 
 /** Whether `value` is a byte string of exactly `length` bytes. */
+/** The P-256 field prime and curve coefficient `b` (SEC 2 §2.4.2); `a = -3`. */
+const P256_P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn;
+const P256_B = 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604bn;
+
+/** A big-endian byte string as an unsigned integer. */
+function toBigInt(bytes: Uint8Array): bigint {
+  let value = 0n;
+  for (const byte of bytes) {
+    value = (value << 8n) + BigInt(byte);
+  }
+  return value;
+}
+
+/**
+ * Whether `(x, y)` is a point on P-256: both coordinates below the field prime
+ * and `y² ≡ x³ − 3x + b (mod p)`.
+ *
+ * Checked here rather than left to the runtime because the runtimes disagree:
+ * measured, Node's Web Crypto refuses an off-curve JWK at import while Deno's
+ * accepts it — so a credential that can never verify would be stored on one
+ * runtime and refused on another.
+ */
+export function isOnP256(xBytes: Uint8Array, yBytes: Uint8Array): boolean {
+  const x = toBigInt(xBytes);
+  const y = toBigInt(yBytes);
+  if (x >= P256_P || y >= P256_P) {
+    return false;
+  }
+  const left = (y * y) % P256_P;
+  const right = (((x * x % P256_P) * x - 3n * x + P256_B) % P256_P + P256_P) % P256_P;
+  return left === right;
+}
+
 function isBytes(value: CborValue | null, length: number): value is Uint8Array {
   return value instanceof Uint8Array && value.length === length;
 }
@@ -109,7 +142,7 @@ export function coseKeyToJwk(
     }
     const x = entry(cose, X);
     const y = entry(cose, Y);
-    if (!isBytes(x, COORDINATE_BYTES) || !isBytes(y, COORDINATE_BYTES)) {
+    if (!isBytes(x, COORDINATE_BYTES) || !isBytes(y, COORDINATE_BYTES) || !isOnP256(x, y)) {
       return null;
     }
     return {

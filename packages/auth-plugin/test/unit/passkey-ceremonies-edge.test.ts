@@ -1,7 +1,11 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { createCeremoniesHarness, ORIGIN } from '../fixtures/passkey-ceremonies.ts';
+import {
+  createCeremoniesHarness,
+  ORIGIN,
+  registrationOptionsOf,
+} from '../fixtures/passkey-ceremonies.ts';
 import { fromBase64Url, VirtualAuthenticator } from '../fixtures/virtual-authenticator.ts';
 import { compilePasskeys } from '../../src/passkeys/ceremonies.ts';
 import { WEBAUTHN_CHALLENGE_SESSION_KEY } from '../../src/passkeys/ceremonies.ts';
@@ -84,7 +88,7 @@ describe('ceremony edge branches', () => {
 
   it('refuses a registration whose session challenge lost its user handle', async () => {
     const harness = createCeremoniesHarness();
-    const options = await harness.ceremonies.registrationOptions(harness.ctx);
+    const options = await registrationOptionsOf(harness);
     // Replant the record WITHOUT the user handle.
     harness.session.set(WEBAUTHN_CHALLENGE_SESSION_KEY, {
       kind: 'registration',
@@ -145,12 +149,12 @@ describe('ceremony edge branches', () => {
 
   it('reuses the per-principal user handle for a second credential', async () => {
     const harness = createCeremoniesHarness();
-    const first = await harness.ceremonies.registrationOptions(harness.ctx);
+    const first = await registrationOptionsOf(harness);
     const firstHandle = first!.user.id;
     // No credential was stored, so the second options request generates a NEW
     // handle: the reuse happens through the store, which is covered by the
     // route test registering two authenticators for one principal.
-    const second = await harness.ceremonies.registrationOptions(harness.ctx);
+    const second = await registrationOptionsOf(harness);
     expect(second!.user.id).not.toBe(firstHandle);
   });
 });

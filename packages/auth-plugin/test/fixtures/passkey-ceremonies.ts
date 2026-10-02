@@ -25,7 +25,7 @@ import {
   PENDING_MFA_SESSION_KEY,
 } from '../../src/sign-in/auth-session-service.ts';
 import { compilePasskeys } from '../../src/passkeys/ceremonies.ts';
-import type { CompiledPasskeys } from '../../src/passkeys/ceremonies.ts';
+import type { CompiledPasskeys, RegistrationOptionsJson } from '../../src/passkeys/ceremonies.ts';
 import { PasskeyCeremonies } from '../../src/passkeys/ceremonies.ts';
 import { createFakeRuntime } from './fake-runtime.ts';
 import { createFakeSession, createFakeSessionService } from './fake-session.ts';
@@ -116,6 +116,16 @@ export class FakeAuthSessionService implements IAuthSessionService {
     this.#session.delete(AUTH_SESSION_KEY);
   }
 
+  /** The signed-in record's methods, mirroring the real service's seam. */
+  currentMethods(ctx: IRequestContext): readonly ('pwd' | 'otp' | 'pop' | 'fed')[] | null {
+    void ctx;
+    const raw = this.#session.get<Record<string, unknown>>(AUTH_SESSION_KEY);
+    if (typeof raw !== 'object' || raw === null || !Array.isArray(raw.methods)) {
+      return null;
+    }
+    return raw.methods as ('pwd' | 'otp' | 'pop' | 'fed')[];
+  }
+
   /**
    * Promotes a pending record to the signed-in key, mirroring the real
    * service's internal promotion seam the ceremonies narrow to.
@@ -156,6 +166,12 @@ export interface HarnessOptions {
   readonly passkeys?: Partial<PasskeyOptions>;
   /** The principal the signed-in record holds; `null` leaves the session anonymous. */
   readonly principal?: IPrincipal | null;
+  /**
+   * The methods the signed-in record holds. Defaults to `['pwd', 'otp']` — a
+   * fully signed-in session, which the registration gate admits for a second
+   * credential; the gate's own tests pass `['pwd']`.
+   */
+  readonly methods?: readonly string[];
 }
 
 /**
@@ -172,7 +188,11 @@ export function createCeremoniesHarness(options: HarnessOptions = {}): Ceremonie
     ? { id: 'alice', roles: ['user'] }
     : options.principal;
   if (principal !== null) {
-    session.set(AUTH_SESSION_KEY, { principal, methods: ['pwd'], at: runtime.now() });
+    session.set(AUTH_SESSION_KEY, {
+      principal,
+      methods: [...(options.methods ?? ['pwd', 'otp'])],
+      at: runtime.now(),
+    });
   }
   const passkeys: PasskeyOptions = {
     rpId: RP_ID,
@@ -199,4 +219,21 @@ export function createCeremoniesHarness(options: HarnessOptions = {}): Ceremonie
     ctx,
     authSession,
   };
+}
+
+/**
+ * The registration options for the harness's signed-in principal, failing the
+ * test when the ceremonies refuse them instead.
+ *
+ * @param harness - The built harness
+ * @returns The options JSON
+ */
+export async function registrationOptionsOf(
+  harness: CeremoniesHarness,
+): Promise<RegistrationOptionsJson> {
+  const options = await harness.ceremonies.registrationOptions(harness.ctx);
+  if (typeof options === 'string') {
+    throw new Error(`registration options refused: ${options}`);
+  }
+  return options;
 }

@@ -50,6 +50,9 @@ const REFUSAL_STATUS: Readonly<Record<PasskeyRefusal, number>> = {
   'counter-refused': 400,
   'principal-refused': 403,
   'sign-in-required': 401,
+  'second-factor-required': 403,
+  'registration-refused': 403,
+  'credential-limit': 409,
 };
 
 /** The titles the responder writes beside each status. */
@@ -130,10 +133,10 @@ export function registerPasskeyRoutes(deps: PasskeyRouteDeps): void {
     `${prefix}/register/options`,
     ceremonyRoute(async (ctx) => {
       const options = await ceremonies.registrationOptions(ctx);
-      if (options === null) {
-        // Registering a passkey requires a signed-in principal: an anonymous
-        // caller has no identity to bind the credential to.
-        return 'sign-in-required';
+      if (typeof options === 'string') {
+        // An anonymous caller has no identity to bind the credential to; a
+        // signed-in one may still be refused by the registration gate.
+        return options;
       }
       ctx.state.set(RESULT_STATE_KEY, options);
       return null;

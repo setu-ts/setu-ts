@@ -144,15 +144,18 @@ describe('passkey routes', () => {
       origin: ORIGIN,
     });
     expect((await jar.postJson(app, REGISTER_VERIFY, body)).status).toBe(200);
-    // The same credential id again: refused with the duplicate's own status,
-    // which exercises the 409 branch the unit tests cannot reach by route.
-    const secondOptions = await (await jar.postJson(app, REGISTER_OPTIONS, {})).json();
+    // The same credential id again, from ANOTHER principal's first enrolment
+    // (so the registration gate admits it): refused with the duplicate's own
+    // status, which exercises the 409 branch the unit tests cannot reach.
+    const bob = new CookieJar();
+    await bob.postJson(app, '/password-login', { id: 'bob' });
+    const secondOptions = await (await bob.postJson(app, REGISTER_OPTIONS, {})).json();
     const secondBody = await authenticator.registrationResult({
       challenge: secondOptions.challenge,
       rpId: secondOptions.rp.id,
       origin: ORIGIN,
     });
-    const duplicate = await jar.postJson(app, REGISTER_VERIFY, secondBody);
+    const duplicate = await bob.postJson(app, REGISTER_VERIFY, secondBody);
     expect(duplicate.status).toBe(409);
     expect((await duplicate.json()).detail).toBe('credential-duplicate');
   });
@@ -185,5 +188,79 @@ describe('passkey routes', () => {
       'x-csrf-token': token,
     });
     expect(accepted.status).toBe(200);
+  });
+
+  it('refuses a second passkey from a one-factor session, admits it after a passkey sign-in', async () => {
+    const { app, store } = await buildPasskeyApp();
+    const jar = new CookieJar();
+    await jar.postJson(app, '/password-login', {});
+    const first = await VirtualAuthenticator.create('ES256');
+    const firstOptions = await (await jar.postJson(app, REGISTER_OPTIONS, {})).json();
+    // A real authenticator stores the handle the server issued.
+    first.userHandle = fromBase64Url(firstOptions.user.id);
+    const firstBody = await first.registrationResult({
+      challenge: firstOptions.challenge,
+      rpId: firstOptions.rp.id,
+      origin: ORIGIN,
+    });
+    // The FIRST passkey is trusted on first use.
+    expect((await jar.postJson(app, REGISTER_VERIFY, firstBody)).status).toBe(200);
+
+    // A password alone (a stolen one) cannot enrol the attacker's authenticator.
+    const attacker = new CookieJar();
+    await attacker.postJson(app, '/password-login', {});
+    const refusedOptions = await attacker.postJson(app, REGISTER_OPTIONS, {});
+    expect(refusedOptions.status).toBe(403);
+    expect((await refusedOptions.json()).detail).toBe('second-factor-required');
+    // Verify is gated too — the options response is advisory.
+    const rogue = await VirtualAuthenticator.create('ES256');
+    const rogueBody = await rogue.registrationResult({
+      challenge: firstOptions.challenge,
+      rpId: 'localhost',
+      origin: ORIGIN,
+    });
+    const refusedVerify = await attacker.postJson(app, REGISTER_VERIFY, rogueBody);
+    expect(refusedVerify.status).toBe(403);
+    expect((await refusedVerify.json()).detail).toBe('second-factor-required');
+    expect((await store.listByPrincipal('alice')).length).toBe(1);
+
+    // After signing in WITH the passkey (pop), a second one may be added.
+    const owner = new CookieJar();
+    const loginOptions = await (await owner.postJson(app, LOGIN_OPTIONS, {})).json();
+    const assertion = await first.assertionResult({
+      challenge: loginOptions.challenge,
+      rpId: loginOptions.rpId,
+      origin: ORIGIN,
+    });
+    expect((await owner.postJson(app, LOGIN_VERIFY, assertion)).status).toBe(200);
+    expect((await owner.postJson(app, REGISTER_OPTIONS, {})).status).toBe(200);
+  });
+
+  it('honours mayRegister, and a throwing policy refuses', async () => {
+    for (const mayRegister of [() => false, () => Promise.reject(new Error('policy down'))]) {
+      const { app } = await buildPasskeyApp({ passkeys: { mayRegister } });
+      const jar = new CookieJar();
+      await jar.postJson(app, '/password-login', {});
+      const response = await jar.postJson(app, REGISTER_OPTIONS, {});
+      expect(response.status).toBe(403);
+      expect((await response.json()).detail).toBe('registration-refused');
+    }
+    const seen: unknown[] = [];
+    const { app } = await buildPasskeyApp({
+      passkeys: {
+        mayRegister: (context) => {
+          seen.push(context);
+          return true;
+        },
+      },
+    });
+    const jar = new CookieJar();
+    await jar.postJson(app, '/password-login', {});
+    expect((await jar.postJson(app, REGISTER_OPTIONS, {})).status).toBe(200);
+    expect(seen).toEqual([{
+      principal: { id: 'alice', roles: ['user'] },
+      methods: ['pwd'],
+      credentialCount: 0,
+    }]);
   });
 });

@@ -153,7 +153,10 @@ export async function buildPasskeyApp(options: BuildPasskeyOptions = {}): Promis
   // `second-factor-required`, which is the pending state a passkey completes.
   app.router.post('/password-login', async (ctx) => {
     const auth = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
-    const outcome = await auth.signIn(ctx, { id: 'alice', roles: ['user'] }, { methods: ['pwd'] });
+    // `{ id }` selects another principal; absent, the session signs in as alice.
+    const body = await ctx.request.json<{ id?: string }>().catch(() => ({} as { id?: string }));
+    const id = typeof body.id === 'string' ? body.id : 'alice';
+    const outcome = await auth.signIn(ctx, { id, roles: ['user'] }, { methods: ['pwd'] });
     return ctx.response.json({ ok: true, outcome: outcome.status });
   });
 

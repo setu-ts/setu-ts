@@ -97,7 +97,7 @@ export {
 } from './stores/redis-rate-limit-store.ts';
 
 // Passkeys (M100e)
-export type { PasskeyOptions } from './interfaces/index.ts';
+export type { PasskeyOptions, PasskeyRegistrationContext } from './interfaces/index.ts';
 export type { IPasskeyStore, StoredPasskey } from './stores/passkey-store.ts';
 export { MemoryPasskeyStore } from './stores/passkey-store.ts';
 

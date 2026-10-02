@@ -1,9 +1,19 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
-import { createCeremoniesHarness, ORIGIN } from '../fixtures/passkey-ceremonies.ts';
+import {
+  createCeremoniesHarness,
+  ORIGIN,
+  registrationOptionsOf,
+} from '../fixtures/passkey-ceremonies.ts';
 import type { CeremoniesHarness } from '../fixtures/passkey-ceremonies.ts';
-import { VirtualAuthenticator } from '../fixtures/virtual-authenticator.ts';
+import type { IAuthSessionService, ISessionService } from '@setu-ts/common';
+import {
+  coseKeyBytes,
+  toBase64Url,
+  VirtualAuthenticator,
+} from '../fixtures/virtual-authenticator.ts';
+import { MAX_CREDENTIALS_PER_PRINCIPAL, PasskeyCeremonies } from '../../src/passkeys/ceremonies.ts';
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
 
 /** The tamper knobs the registration tests pass to the authenticator. */
@@ -29,10 +39,7 @@ async function register(
   authenticator: VirtualAuthenticator,
   options: RegisterOptions = {},
 ) {
-  const optionsJson = await harness.ceremonies.registrationOptions(harness.ctx);
-  if (optionsJson === null) {
-    throw new Error('no signed-in principal in the harness');
-  }
+  const optionsJson = await registrationOptionsOf(harness);
   const { challengeOverride, ...rest } = options;
   const challenge = challengeOverride ?? optionsJson.challenge;
   const body = await authenticator.registrationResult({ ...rest, challenge });
@@ -53,7 +60,7 @@ describe('registration ceremony', () => {
   it('records the credential as unverified with its flags and transports', async () => {
     const harness = createCeremoniesHarness();
     const authenticator = await VirtualAuthenticator.create('ES256');
-    const optionsJson = await harness.ceremonies.registrationOptions(harness.ctx);
+    const optionsJson = await registrationOptionsOf(harness);
     const body = await authenticator.registrationResult({
       challenge: optionsJson!.challenge,
       backedUp: true,
@@ -92,7 +99,7 @@ describe('registration ceremony', () => {
       passkeys: { userVerification: 'preferred' },
     });
     const authenticator = await VirtualAuthenticator.create('ES256');
-    const optionsJson = await harness.ceremonies.registrationOptions(harness.ctx);
+    const optionsJson = await registrationOptionsOf(harness);
     const body = await authenticator.registrationResult({
       challenge: optionsJson!.challenge,
       uv: false,
@@ -190,7 +197,7 @@ describe('registration ceremony', () => {
 
   it('refuses a malformed attestation object', async () => {
     const harness = createCeremoniesHarness();
-    const optionsJson = await harness.ceremonies.registrationOptions(harness.ctx);
+    const optionsJson = await registrationOptionsOf(harness);
     const { buildClientData } = await import('../fixtures/virtual-authenticator.ts');
     const outcome = await harness.ceremonies.verifyRegistration(
       harness.ctx,
@@ -211,7 +218,7 @@ describe('registration ceremony', () => {
 
   it('refuses a body with no response object', async () => {
     const harness = createCeremoniesHarness();
-    await harness.ceremonies.registrationOptions(harness.ctx);
+    await registrationOptionsOf(harness);
     const outcome = await harness.ceremonies.verifyRegistration(harness.ctx, {}, { id: 'alice' });
     expect(outcome).toEqual({ ok: false, reason: 'malformed' });
   });
@@ -219,12 +226,92 @@ describe('registration ceremony', () => {
   it('refuses a second registration with a consumed challenge', async () => {
     const harness = createCeremoniesHarness();
     const authenticator = await VirtualAuthenticator.create('ES256');
-    const optionsJson = await harness.ceremonies.registrationOptions(harness.ctx);
+    const optionsJson = await registrationOptionsOf(harness);
     const body = await authenticator.registrationResult({ challenge: optionsJson!.challenge });
     const first = await harness.ceremonies.verifyRegistration(harness.ctx, body, { id: 'alice' });
     expect(first.ok).toBe(true);
     // The session challenge is gone; the same body replayed is refused.
     const replay = await harness.ceremonies.verifyRegistration(harness.ctx, body, { id: 'alice' });
     expect(replay).toEqual({ ok: false, reason: 'challenge-missing' });
+  });
+
+  it('keeps only defined transport values, once each', async () => {
+    const harness = createCeremoniesHarness();
+    const authenticator = await VirtualAuthenticator.create('ES256');
+    const huge = 'x'.repeat(100_000);
+    const outcome = await register(harness, authenticator, {
+      transports: ['usb', huge, 'usb', 'internal', 'bogus', 'nfc'],
+    });
+    expect(outcome.ok).toBe(true);
+    const [stored] = await harness.store.listByPrincipal('alice');
+    expect(stored?.transports).toEqual(['usb', 'internal', 'nfc']);
+  });
+
+  it('refuses a key the runtime will not import (an EC point off the curve)', async () => {
+    const harness = createCeremoniesHarness();
+    const authenticator = await VirtualAuthenticator.create('ES256');
+    const jwk = await authenticator.publicKeyJwk();
+    // Same shape and lengths, but (x, y) = (1, 1) is not on P-256.
+    const one = new Uint8Array(32);
+    one[31] = 1;
+    const offCurve = coseKeyBytes('ES256', {
+      ...jwk,
+      x: toBase64Url(one),
+      y: toBase64Url(one),
+    });
+    const outcome = await register(harness, authenticator, { coseKeyOverride: offCurve });
+    expect(outcome).toEqual({ ok: false, reason: 'malformed' });
+    expect(await harness.store.listByPrincipal('alice')).toEqual([]);
+  });
+
+  it('caps the credentials one principal may hold', async () => {
+    const harness = createCeremoniesHarness();
+    for (let i = 0; i < MAX_CREDENTIALS_PER_PRINCIPAL; i++) {
+      await harness.store.save({
+        id: `seed-${i}`,
+        principalId: 'alice',
+        userHandle: 'h',
+        publicKey: { kty: 'OKP', crv: 'Ed25519', x: 'x' },
+        algorithm: -8,
+        counter: 0,
+        backedUp: false,
+        transports: [],
+        attestation: 'unverified',
+        createdAt: 0,
+      });
+    }
+    expect(await harness.ceremonies.registrationOptions(harness.ctx)).toBe('credential-limit');
+    const authenticator = await VirtualAuthenticator.create('ES256');
+    const body = await authenticator.registrationResult({ challenge: 'x' });
+    const outcome = await harness.ceremonies.verifyRegistration(harness.ctx, body, { id: 'alice' });
+    expect(outcome).toEqual({ ok: false, reason: 'credential-limit' });
+  });
+
+  it('refuses a second credential from a session without a second factor', async () => {
+    const harness = createCeremoniesHarness({ methods: ['pwd'] });
+    // The first credential is trusted on first use.
+    expect((await register(harness, await VirtualAuthenticator.create('ES256'))).ok).toBe(true);
+    expect(await harness.ceremonies.registrationOptions(harness.ctx)).toBe(
+      'second-factor-required',
+    );
+  });
+
+  it('fails closed when the sign-in owner cannot report the recorded methods', async () => {
+    const harness = createCeremoniesHarness();
+    expect((await register(harness, await VirtualAuthenticator.create('ES256'))).ok).toBe(true);
+    // A third-party IAuthSessionService without the package's internal seam.
+    const opaque: IAuthSessionService = {
+      signIn: (ctx, principal, options) => harness.authSession.signIn(ctx, principal, options),
+      current: (ctx) => harness.authSession.current(ctx),
+      pending: (ctx) => harness.authSession.pending(ctx),
+      signOut: (ctx) => harness.authSession.signOut(ctx),
+    };
+    const ceremonies = new PasskeyCeremonies({
+      config: harness.config,
+      runtime: harness.runtime,
+      sessionService: { from: () => harness.session } as unknown as ISessionService,
+      authSession: opaque,
+    });
+    expect(await ceremonies.registrationOptions(harness.ctx)).toBe('second-factor-required');
   });
 });
