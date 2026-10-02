@@ -331,7 +331,7 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   // through the passkey ceremony routes.
   if (
     !Array.isArray(config.providers) ||
-    (config.providers.length === 0 && config.mfa === undefined && config.passkeys === undefined)
+    (config.providers.length === 0 && config.mfa === undefined && config.passkeys == null)
   ) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: signIn needs at least one provider, signIn.passkeys for a passkey sign-in, ' +

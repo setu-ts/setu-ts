@@ -25,15 +25,16 @@ All notable changes to this project are documented here. The format follows
   compare-and-set (it stores a NEW credential only when its id is absent and reports whether it did
   — a blind write lets two concurrent registrations of the same credential id both succeed and lets
   the later record silently replace the earlier one, `principalId` included); the shipped
-  `MemoryPasskeyStore` does both and purges expired claims on every claim so its map stays bounded.
-  Stored credentials (`StoredPasskey`) record `attestation: 'unverified'` and a `backedUp` flag that
-  is display only. Under the default `userVerification: 'required'` a UV-unset assertion is refused
-  everywhere; under `'preferred'`/`'discouraged'` it is refused for a username-less sign-in and
-  accepted only as the second factor after a first one. A passkey-only `signIn` (`providers: []`, no
-  `mfa`) is accepted, and the `passkeys` option is validated when `AuthPlugin(...)` is called; the
-  recorded method is always `pop` (RFC 8176), never `hwk`/`swk` — with attestation unverified the
-  plugin cannot know how the key is protected. Any attestation `fmt` is accepted with its statement
-  unread. Attestation verification against trust roots remains out of scope.
+  `MemoryPasskeyStore` does both and purges expired claims in an amortized sweep (when the claim map
+  doubles) so its map stays bounded without a per-claim scan. Stored credentials (`StoredPasskey`)
+  record `attestation: 'unverified'` and a `backedUp` flag that is display only. Under the default
+  `userVerification: 'required'` a UV-unset assertion is refused everywhere; under
+  `'preferred'`/`'discouraged'` it is refused for a username-less sign-in and accepted only as the
+  second factor after a first one. A passkey-only `signIn` (`providers: []`, no `mfa`) is accepted,
+  and the `passkeys` option is validated when `AuthPlugin(...)` is called; the recorded method is
+  always `pop` (RFC 8176), never `hwk`/`swk` — with attestation unverified the plugin cannot know
+  how the key is protected. Any attestation `fmt` is accepted with its statement unread. Attestation
+  verification against trust roots remains out of scope.
 - **Multi-factor authentication with TOTP (M100d).** `AuthPluginOptions.signIn.mfa` adds a TOTP
   second factor to any sign-in flow that records its principal through `IAuthSessionService`.
   `TotpService` (app-instantiated, like `PasswordHasher`) computes RFC 6238 codes (HMAC-SHA1,

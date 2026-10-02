@@ -115,6 +115,10 @@ describe('compileSignIn', () => {
     expect(passkeyOnly.providers).toEqual([]);
     expect(passkeyOnly.mfa).toBeNull();
     expect(passkeyOnly.passkeys).not.toBeNull();
+    // A null `passkeys` from an untyped caller is no sign-in method at all.
+    expect(refusal({ providers: [], passkeys: null } as unknown as SignInConfig)).toContain(
+      'at least one provider',
+    );
     expect(refusal(config([{ ...oidc(), kind: 'saml' }]))).toContain("must be 'oidc' or 'oauth2'");
   });
 

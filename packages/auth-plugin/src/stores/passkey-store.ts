@@ -121,6 +121,12 @@ function copyPasskey(credential: StoredPasskey): StoredPasskey {
   };
 }
 
+/**
+ * The smallest claim-map size that triggers a sweep. Below it a full scan costs
+ * nothing worth amortizing.
+ */
+const MIN_SWEEP_SIZE = 64;
+
 /** The memory store's challenge-claim row. */
 interface ClaimRow {
   readonly expiresAt: number;
@@ -129,14 +135,19 @@ interface ClaimRow {
 /**
  * The in-memory passkey store.
  *
- * Challenge claims are purged past their expiry on every claim, so the map
- * stays bounded (the `MemoryLock` lesson): a store that only grows would hand
- * a long-running process an unbounded map keyed by attacker-supplied
- * challenges.
+ * Challenge claims past their expiry are purged so the map stays bounded (the
+ * `MemoryLock` lesson): a store that only grows would hand a long-running
+ * process an unbounded map keyed by attacker-supplied challenges. The sweep is
+ * AMORTIZED — it runs when the map has doubled since the previous one — because
+ * a full scan on every claim is quadratic in the live claims, and claims are
+ * reachable from unauthenticated requests. The map therefore holds at most
+ * twice the claims that are live at the last sweep.
  */
 export class MemoryPasskeyStore implements IPasskeyStore {
   readonly #credentials = new Map<string, StoredPasskey>();
   readonly #claims = new Map<string, ClaimRow>();
+  /** The claim-map size at which the next sweep runs. */
+  #sweepAt = MIN_SWEEP_SIZE;
 
   /**
    * Lists every credential registered for a principal.
@@ -209,14 +220,20 @@ export class MemoryPasskeyStore implements IPasskeyStore {
 
   /** Atomically records a challenge as used until `expiresAt`, answering `false` on a second claim. */
   claimChallenge(challenge: string, now: number, expiresAt: number): Promise<boolean> {
-    // Purge first, on the caller's clock: entries whose claim has lapsed can
-    // never win a future comparison, so keeping them only grows the map.
-    for (const [key, row] of this.#claims) {
-      if (row.expiresAt <= now) {
-        this.#claims.delete(key);
+    // Purge on the caller's clock, amortized: entries whose claim has lapsed
+    // can never win a future comparison, so keeping them only grows the map —
+    // but scanning on every claim would cost O(live claims) per request.
+    if (this.#claims.size >= this.#sweepAt) {
+      for (const [key, row] of this.#claims) {
+        if (row.expiresAt <= now) {
+          this.#claims.delete(key);
+        }
       }
+      this.#sweepAt = Math.max(MIN_SWEEP_SIZE, this.#claims.size * 2);
     }
-    if (this.#claims.has(challenge)) {
+    // An unswept row that has lapsed is treated exactly as a purged one.
+    const existing = this.#claims.get(challenge);
+    if (existing !== undefined && existing.expiresAt > now) {
       return Promise.resolve(false);
     }
     this.#claims.set(challenge, { expiresAt });

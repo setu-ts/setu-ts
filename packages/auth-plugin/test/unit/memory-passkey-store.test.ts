@@ -169,4 +169,30 @@ describe('MemoryPasskeyStore', () => {
     expect(again?.transports).toEqual(['internal']);
     expect(again?.transports).not.toBe(read.transports);
   });
+
+  it('claimChallenge stays linear in the live claims — no full scan per claim', async () => {
+    // Claims are reachable from unauthenticated requests, so a per-claim scan of
+    // every live claim is quadratic: 40 000 live claims took ~2.6 s that way,
+    // and 60 000 takes several seconds. Amortized, it is tens of milliseconds;
+    // the bound leaves a wide margin for a slow runner.
+    const store = new MemoryPasskeyStore();
+    const start = performance.now();
+    for (let i = 0; i < 60_000; i++) {
+      await store.claimChallenge(`live-${i}`, 1000, 1_000_000);
+    }
+    expect(performance.now() - start).toBeLessThan(1500);
+    // Every one of them is still a live claim.
+    expect(await store.claimChallenge('live-0', 1000, 1_000_000)).toBe(false);
+    expect(await store.claimChallenge('live-59999', 1000, 1_000_000)).toBe(false);
+  });
+
+  it('claimChallenge treats an unswept lapsed claim as free and sweeps once the map doubles', async () => {
+    const store = new MemoryPasskeyStore();
+    for (let i = 0; i < 200; i++) {
+      await store.claimChallenge(`old-${i}`, 1000, 2000);
+    }
+    // Lapsed, whether or not a sweep has removed the row yet.
+    expect(await store.claimChallenge('old-199', 5000, 6000)).toBe(true);
+    expect(await store.claimChallenge('old-0', 5000, 6000)).toBe(true);
+  });
 });

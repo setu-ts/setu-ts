@@ -497,9 +497,10 @@ a shared implementation, and must implement `stageSecret`, `confirmSecret`, `cla
 `reserveAttempt` and `consumeRecoveryCode` as single atomic operations (a compare-and-set or a
 transaction) — each one closes a race that a read followed by a write reopens.
 
-A password-only application sets `providers: []` with `mfa` (an empty list is refused without it)
-and records its own principal through `IAuthSessionService.signIn`, as the `/login` route below
-does; `signIn` then supplies the auth-session capability, the pending state and the logout route.
+A password-only application sets `providers: []` with `mfa` (an empty list is refused unless `mfa`
+or `passkeys` is set) and records its own principal through `IAuthSessionService.signIn`, as the
+`/login` route below does; `signIn` then supplies the auth-session capability, the pending state and
+the logout route.
 
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
