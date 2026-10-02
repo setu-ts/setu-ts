@@ -91,3 +91,37 @@ export const PUBLISHED_PACKAGES: readonly string[] = [
  * summary of "0 deliberately excluded".
  */
 export const UNPUBLISHED_PACKAGES: readonly string[] = [];
+
+/**
+ * One package that must not reach JSR yet, and why.
+ */
+export interface PublicationHold {
+  /** The workspace path, as it appears in {@linkcode PUBLISHED_PACKAGES}. */
+  readonly packageDir: string;
+  /** Why the package is held, and what removes the hold. */
+  readonly reason: string;
+}
+
+/**
+ * Packages that block EVERY release while they are listed here.
+ *
+ * A hold is enforced at publish time only. `scripts/publish-packages.ts`
+ * refuses before publishing anything, `--dry-run` included, so a release
+ * rehearsal warns early. `scripts/verify-release.ts` only reports a hold,
+ * because CI runs it on every pull request and a failure there would turn
+ * every unrelated PR red until the hold is lifted.
+ *
+ * A held package stays in `PUBLISHED_PACKAGES` deliberately. Moving it to
+ * `UNPUBLISHED_PACKAGES` would let a release skip it silently, and the
+ * released CLI's `--devtool` scaffolding imports `@setu-ts/diagnostics-plugin`,
+ * so its generated projects could not install.
+ */
+export const PUBLICATION_HOLDS: readonly PublicationHold[] = [
+  {
+    packageDir: 'packages/diagnostics-plugin',
+    reason: 'M98o (diagnostics session renewal) extends protocol v1 with an optional status ' +
+      'member, which a published client would refuse. The status shape freezes at first ' +
+      "publication, so this package must not publish before M98o merges; M98o's PR removes " +
+      'this hold.',
+  },
+];

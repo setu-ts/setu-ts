@@ -19,9 +19,19 @@
  * JSR), but continuing past a failure would publish dependents against a
  * dependency version that does not exist.
  */
-import { PUBLISHED_PACKAGES } from './release-packages.ts';
+import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES } from './release-packages.ts';
+import { publicationHoldRefusal } from './publication-hold.ts';
 
 const dryRun = Deno.args.includes('--dry-run');
+
+// A hold blocks every release, `--dry-run` included, so a rehearsal warns as
+// early as the real run. It is checked before anything else, so nothing is
+// published or simulated while one applies.
+const holdRefusal = publicationHoldRefusal(PUBLICATION_HOLDS, PUBLISHED_PACKAGES);
+if (holdRefusal !== null) {
+  console.error(holdRefusal);
+  Deno.exit(1);
+}
 
 // `deno publish` falls back to interactive browser auth only when it is
 // attached to a TTY. It is not one here — this script spawns it as a

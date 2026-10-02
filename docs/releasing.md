@@ -247,6 +247,15 @@ deno task check:versions
 deno task release:publish --dry-run
 ```
 
+**A publication hold blocks every release.** `PUBLICATION_HOLDS` in `scripts/release-packages.ts`
+names packages that must not reach JSR yet, and why. While a hold applies, `release:publish` refuses
+before publishing anything, `--dry-run` included, and names each hold. `release:verify` prints a
+`⚠ publication hold` line but does not fail, because CI runs it on every pull request. If the dry
+run refuses, either finish the work the hold names or remove the hold on purpose, in its own
+reviewed change. Do not move the package to `UNPUBLISHED_PACKAGES` to get past it: the released
+CLI's `--devtool` scaffolding imports `@setu-ts/diagnostics-plugin`, so skipping that package ships
+a CLI whose generated projects cannot install.
+
 `check:versions` sweeps the sites the other two gates structurally cannot see. `release:verify`
 reads manifests and `check:docs` reads Markdown, which leaves TypeScript `src` trees and lockfiles
 covered by nothing — and a stale `@setu-ts` specifier there still **resolves**, because the previous
