@@ -82,7 +82,6 @@ export interface CompiledPasskeys {
   readonly userVerification: UserVerification;
 }
 
-/** The configured `signIn.passkeys` option (plan §3.6). */
 /** The reason a ceremony refused a response. Fixed codes, never client text. */
 export type PasskeyRefusal =
   | 'malformed'
@@ -167,9 +166,9 @@ function isLoopbackHost(hostname: string): boolean {
 }
 
 /**
- * Validates and compiles the `signIn.passkeys` option at construction, so
- * every refusal happens before an application exists rather than at the first
- * ceremony (plan §3.6).
+ * Validates and compiles the `signIn.passkeys` option. `AuthPlugin` calls it
+ * from its factory, so every refusal happens before an application exists
+ * rather than at the first ceremony (plan §3.6).
  *
  * An origin must be `https`, or `http` on a loopback host, and carry no path,
  * query or fragment — it is compared against `clientDataJSON.origin` as an
@@ -778,9 +777,15 @@ export class PasskeyCeremonies {
     }
 
     const pending = this.#authSession.pending(ctx);
-    // A UV-less assertion proves possession alone: refused for username-less
-    // sign-in, accepted only as the second factor after a first one (§3.3).
-    if (pending === null && !authData.userVerified) {
+    // A UV-less assertion proves possession alone. Under the `required` policy
+    // it is refused everywhere: the options told the browser UV is required, so
+    // the server enforces what it advertised. Under `preferred` or `discouraged`
+    // it is refused for username-less sign-in and accepted only as the second
+    // factor after a first one (§3.3).
+    if (
+      !authData.userVerified &&
+      (pending === null || this.#config.userVerification === 'required')
+    ) {
       return { ok: false, reason: 'flags-refused' };
     }
 

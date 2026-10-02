@@ -141,4 +141,32 @@ describe('MemoryPasskeyStore', () => {
     // An old challenge can be claimed again after the purge.
     expect(await store.claimChallenge('challenge-0', 100_000, 101_000)).toBe(true);
   });
+
+  it('hands back detached copies, so mutating a returned record cannot change the store', async () => {
+    const store = new MemoryPasskeyStore();
+    await store.save({
+      id: 'c1',
+      principalId: 'alice',
+      userHandle: 'h',
+      publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+      algorithm: -7,
+      counter: 4,
+      backedUp: false,
+      transports: ['internal'],
+      attestation: 'unverified',
+      createdAt: 0,
+    });
+    const read = await store.findById('c1');
+    if (read === null) throw new Error('expected the stored credential');
+    read.counter = 99;
+    read.publicKey.x = 'tampered';
+    const [listed] = await store.listByPrincipal('alice');
+    if (listed === undefined) throw new Error('expected the listed credential');
+    listed.counter = 77;
+    const again = await store.findById('c1');
+    expect(again?.counter).toBe(4);
+    expect(again?.publicKey.x).toBe('x');
+    expect(again?.transports).toEqual(['internal']);
+    expect(again?.transports).not.toBe(read.transports);
+  });
 });

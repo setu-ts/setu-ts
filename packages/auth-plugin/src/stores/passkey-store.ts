@@ -108,6 +108,19 @@ export interface IPasskeyStore {
   claimChallenge(challenge: string, now: number, expiresAt: number): Promise<boolean>;
 }
 
+/**
+ * A detached copy of a stored credential — its JWK and transports included —
+ * so neither a caller's later mutation of a saved record nor a mutation of a
+ * record the store handed back can change what the store holds.
+ */
+function copyPasskey(credential: StoredPasskey): StoredPasskey {
+  return {
+    ...credential,
+    publicKey: { ...credential.publicKey },
+    transports: [...credential.transports],
+  };
+}
+
 /** The memory store's challenge-claim row. */
 interface ClaimRow {
   readonly expiresAt: number;
@@ -137,7 +150,7 @@ export class MemoryPasskeyStore implements IPasskeyStore {
     const found: StoredPasskey[] = [];
     for (const credential of this.#credentials.values()) {
       if (credential.principalId === principalId) {
-        found.push(credential);
+        found.push(copyPasskey(credential));
       }
     }
     return Promise.resolve(found);
@@ -145,7 +158,8 @@ export class MemoryPasskeyStore implements IPasskeyStore {
 
   /** Reads one credential by id, or `null` when it is not stored. */
   findById(id: string): Promise<StoredPasskey | null> {
-    return Promise.resolve(this.#credentials.get(id) ?? null);
+    const credential = this.#credentials.get(id);
+    return Promise.resolve(credential === undefined ? null : copyPasskey(credential));
   }
 
   /**
@@ -166,11 +180,7 @@ export class MemoryPasskeyStore implements IPasskeyStore {
     // A deep copy, so a caller mutating its own object after `save` cannot
     // change what the store hands back — the record's array and JWK members
     // are copied too, not shared by reference.
-    this.#credentials.set(credential.id, {
-      ...credential,
-      publicKey: { ...credential.publicKey },
-      transports: [...credential.transports],
-    });
+    this.#credentials.set(credential.id, copyPasskey(credential));
     return Promise.resolve(true);
   }
 

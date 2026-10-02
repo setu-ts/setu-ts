@@ -325,15 +325,17 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   }
   // `/` means no prefix at all; keeping it literal would build `//acme/login`.
   const basePath = configured === '/' ? '' : configured;
-  // An empty list is a mistake UNLESS `mfa` is set: a password-only application
-  // signs in through IAuthSessionService.signIn itself and needs `signIn` only
-  // for the auth-session capability, the pending state and the logout route.
+  // An empty list is a mistake UNLESS another sign-in method is configured: a
+  // password-only application (`mfa` set) signs in through
+  // IAuthSessionService.signIn itself, and a passkey-only application signs in
+  // through the passkey ceremony routes.
   if (
     !Array.isArray(config.providers) ||
-    (config.providers.length === 0 && config.mfa === undefined)
+    (config.providers.length === 0 && config.mfa === undefined && config.passkeys === undefined)
   ) {
     throw new AuthPluginConfigurationError(
-      'auth-plugin: signIn needs at least one provider, or signIn.mfa for a password-only sign-in',
+      'auth-plugin: signIn needs at least one provider, signIn.passkeys for a passkey sign-in, ' +
+        'or signIn.mfa for a password-only sign-in',
     );
   }
 

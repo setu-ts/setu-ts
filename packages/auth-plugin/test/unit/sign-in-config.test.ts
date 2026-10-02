@@ -9,6 +9,7 @@
 import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 import { compileSignIn, DEFAULT_SIGN_IN_BASE_PATH } from '../../src/sign-in/config.ts';
+import { MemoryPasskeyStore } from '../../src/stores/passkey-store.ts';
 import type { OAuth2Provider, OidcProvider, SignInConfig } from '../../src/interfaces/index.ts';
 
 const oidc = (overrides: Partial<OidcProvider> = {}): OidcProvider => ({
@@ -100,6 +101,20 @@ describe('compileSignIn', () => {
     const passwordOnly = compileSignIn({ providers: [], mfa: { required: () => true } });
     expect(passwordOnly.providers).toEqual([]);
     expect(passwordOnly.mfa).not.toBeNull();
+    // With passkeys it is a passkey-only sign-in, also not a mistake.
+    const passkeyOnly = compileSignIn({
+      providers: [],
+      passkeys: {
+        rpId: 'localhost',
+        rpName: 'Test',
+        origins: ['http://localhost'],
+        store: new MemoryPasskeyStore(),
+        resolvePrincipal: () => null,
+      },
+    });
+    expect(passkeyOnly.providers).toEqual([]);
+    expect(passkeyOnly.mfa).toBeNull();
+    expect(passkeyOnly.passkeys).not.toBeNull();
     expect(refusal(config([{ ...oidc(), kind: 'saml' }]))).toContain("must be 'oidc' or 'oauth2'");
   });
 

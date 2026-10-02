@@ -107,6 +107,12 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   const compiledSignIn: CompiledSignIn | null = options.signIn === undefined
     ? null
     : compileSignIn(options.signIn);
+  // Passkeys (M100e): validated at construction too, beside the sign-in arm,
+  // so a malformed origin or rpId refuses before an application exists.
+  const compiledPasskeys: CompiledPasskeys | null =
+    compiledSignIn === null || compiledSignIn.passkeys === null
+      ? null
+      : compilePasskeys(compiledSignIn.passkeys);
   if (options.http !== undefined && compiledIssuers.length === 0 && compiledSignIn === null) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: http is only read for issuers and signIn; configure one or drop http',
@@ -344,9 +350,6 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         // Passkeys (M100e): the ceremonies ride the same session and
         // auth-session services the sign-in arm built, and register the four
         // ceremony routes under the sign-in base path.
-        const compiledPasskeys: CompiledPasskeys | null = compiledSignIn.passkeys === null
-          ? null
-          : compilePasskeys(compiledSignIn.passkeys);
         if (compiledPasskeys !== null) {
           const ceremonies = new PasskeyCeremonies({
             config: compiledPasskeys,

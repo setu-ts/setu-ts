@@ -117,16 +117,19 @@ export async function buildPasskeyApp(options: BuildPasskeyOptions = {}): Promis
     ...options.passkeys,
   };
 
-  // `compileSignIn` refuses an empty provider list without `mfa`, so the
-  // default policy is "never required" — the same answer a passkey-only app
-  // without step-up gives.
-  const mfaRequired = options.mfaRequired ?? (() => false);
+  // A passkey-only sign-in needs no `mfa`; it is set only when a test asks
+  // for step-up.
+  const mfaRequired = options.mfaRequired;
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
       SessionPlugin({ secret: SESSION_SECRET, ...options.session }),
       AuthPlugin({
-        signIn: { providers: [], mfa: { required: mfaRequired }, passkeys },
+        signIn: {
+          providers: [],
+          passkeys,
+          ...(mfaRequired === undefined ? {} : { mfa: { required: mfaRequired } }),
+        },
       }),
       ...(options.plugins ?? []),
     ],

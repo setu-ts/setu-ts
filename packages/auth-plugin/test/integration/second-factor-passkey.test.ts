@@ -121,14 +121,14 @@ describe('passkey as a second factor', () => {
     expect((await jar.fetch(mfaApp.app, '/me')).status).toBe(401);
   });
 
-  it('accepts a UV-less assertion as the second factor', async () => {
+  it("accepts a UV-less assertion as the second factor under 'preferred'", async () => {
     const first = await buildPasskeyApp();
     const firstJar = new CookieJar();
     await firstJar.postJson(first.app, '/password-login', {});
     const { authenticator } = await enrol(first.app, firstJar);
 
     const mfaApp = await buildPasskeyApp({
-      passkeys: { store: first.store },
+      passkeys: { store: first.store, userVerification: 'preferred' },
       mfaRequired: () => true,
     });
     const mfaJar = new CookieJar();
@@ -146,5 +146,33 @@ describe('passkey as a second factor', () => {
     const response = await mfaJar.postJson(mfaApp.app, LOGIN_VERIFY, assertion);
     expect(response.status).toBe(200);
     expect((await response.json()).status).toBe('signed-in');
+  });
+
+  it("refuses a UV-less second factor under the default 'required' policy", async () => {
+    const first = await buildPasskeyApp();
+    const firstJar = new CookieJar();
+    await firstJar.postJson(first.app, '/password-login', {});
+    const { authenticator } = await enrol(first.app, firstJar);
+
+    const mfaApp = await buildPasskeyApp({
+      passkeys: { store: first.store },
+      mfaRequired: () => true,
+    });
+    const mfaJar = new CookieJar();
+    await mfaJar.postJson(mfaApp.app, '/password-login', {});
+    const loginOptions = await (await mfaJar.postJson(mfaApp.app, LOGIN_OPTIONS, {})).json();
+    // The options told the browser UV is required; the server enforces it.
+    const assertion = await authenticator.assertionResult({
+      challenge: loginOptions.challenge,
+      rpId: loginOptions.rpId,
+      origin: ORIGIN,
+      uv: false,
+      counter: 0,
+    });
+    const response = await mfaJar.postJson(mfaApp.app, LOGIN_VERIFY, assertion);
+    expect(response.status).toBe(400);
+    expect((await response.json()).detail).toBe('flags-refused');
+    // The session stays pending.
+    expect((await mfaJar.fetch(mfaApp.app, '/me')).status).toBe(401);
   });
 });

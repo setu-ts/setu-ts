@@ -4,6 +4,7 @@ import { expect } from '@std/expect';
 import { compilePasskeys } from '../../src/passkeys/ceremonies.ts';
 import { MemoryPasskeyStore } from '../../src/stores/passkey-store.ts';
 import { AuthPluginConfigurationError } from '../../src/errors.ts';
+import { AuthPlugin } from '../../src/plugin/auth-plugin.ts';
 import type { PasskeyOptions } from '../../src/interfaces/index.ts';
 
 /** A valid option the refusals mutate. */
@@ -101,6 +102,24 @@ describe('compilePasskeys', () => {
       compilePasskeys(
         valid({ userVerification: 'sometimes' as unknown as 'required' }),
       )
+    ).toThrow(AuthPluginConfigurationError);
+  });
+
+  it('refuses a malformed option when AuthPlugin(...) is called, before any application exists', () => {
+    // Construction, not register(): the refusal must not wait for app.start().
+    expect(() =>
+      AuthPlugin({
+        signIn: {
+          providers: [],
+          passkeys: {
+            rpId: 'localhost',
+            rpName: 'Test',
+            origins: ['ftp://localhost'],
+            store: new MemoryPasskeyStore(),
+            resolvePrincipal: () => null,
+          },
+        },
+      })
     ).toThrow(AuthPluginConfigurationError);
   });
 });

@@ -763,9 +763,15 @@ stores a NEW credential only when its id is absent and reports whether it did; a
 two concurrent registrations of the same credential id both succeed and lets the later record
 silently replace the earlier one, `principalId` included. `claimChallenge` must be atomic too.
 
-A UV-unset assertion is refused for a username-less sign-in and accepted only as the second factor
-after a first one: without user verification it proves possession alone, and recording `pop` for it
-would satisfy `requireMfa()` with one factor. The recorded method is always `pop` (proof of
+Under the default `userVerification: 'required'` a UV-unset assertion is refused everywhere — the
+options told the browser user verification is required, so the server enforces it. Under
+`'preferred'` or `'discouraged'` a UV-unset assertion is refused for a username-less sign-in and
+accepted only as the second factor after a first one: without user verification it proves possession
+alone, and recording `pop` for it would satisfy `requireMfa()` with one factor.
+
+A passkey-only application needs no provider and no `mfa`: `signIn: { providers: [], passkeys }` is
+accepted, and the `passkeys` option is validated when `AuthPlugin(...)` is called, so a malformed
+origin or `rpId` refuses before an application exists. The recorded method is always `pop` (proof of
 possession) — never `hwk`/`swk`, which the plugin cannot know with attestation unverified.
 
 Attestation statements are NOT verified: `attestation: 'none'` is requested, any `fmt` the client

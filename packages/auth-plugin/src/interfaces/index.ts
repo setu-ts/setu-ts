@@ -548,9 +548,10 @@ export interface PasskeyOptions {
   ) => IPrincipal | null | Promise<IPrincipal | null>;
   /**
    * The user-verification policy the ceremonies request and enforce. Defaults
-   * to `required`; `preferred` accepts a UV-unset assertion at registration
-   * and as the second factor after a first one, but never for a username-less
-   * sign-in.
+   * to `required`, which refuses a UV-unset assertion everywhere — registration,
+   * username-less sign-in and the second factor. `preferred` and `discouraged`
+   * accept a UV-unset assertion at registration and as the second factor after
+   * a first one, but never for a username-less sign-in.
    */
   readonly userVerification?: 'required' | 'preferred' | 'discouraged';
 }
