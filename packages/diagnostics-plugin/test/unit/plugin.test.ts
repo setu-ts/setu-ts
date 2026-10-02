@@ -189,6 +189,44 @@ async function fakeRenewRequest(key: CryptoKey, sequence: number): Promise<IRequ
   });
 }
 
+/**
+ * Fake runtime timers that count outstanding handles and fire the oldest one
+ * on demand, so re-arming is observable without real time.
+ *
+ * @returns The timer seam plus inspection helpers
+ */
+function countedTimers() {
+  let nextHandle = 1;
+  const callbacks = new Map<number, () => void>();
+  const delays: number[] = [];
+  return {
+    delays,
+    setTimeout(fn: () => void, ms: number): number {
+      const handle = nextHandle++;
+      callbacks.set(handle, fn);
+      delays.push(ms);
+      return handle;
+    },
+    clearTimeout(handle: unknown): void {
+      callbacks.delete(handle as number);
+    },
+    outstanding(): number {
+      return callbacks.size;
+    },
+    peek(): (() => void) | undefined {
+      return callbacks.values().next().value;
+    },
+    fire(): void {
+      const [handle, fn] = callbacks.entries().next().value ?? [];
+      if (handle === undefined || fn === undefined) {
+        throw new Error('no outstanding timer');
+      }
+      callbacks.delete(handle);
+      fn();
+    },
+  };
+}
+
 describe('Plugin — metadata and validation', () => {
   it('declares the connector dependency, provides nothing, and revokes', () => {
     const plugin: IDiagnosticsPluginLike = DiagnosticsPlugin(OPTIONS);
@@ -384,6 +422,78 @@ describe('Plugin — activation', () => {
     expect(listener.closeCount).toBe(1);
     expect(callbacks.size).toBe(0);
   });
+
+  it('revokes at the activation cap even though the session was renewed', async () => {
+    const timers = countedTimers();
+    const listener = fakeListener();
+    const plugin = DiagnosticsPlugin({ ...OPTIONS, ttlMs: 100, maxSessionLifetimeMs: 150 });
+    const { ctx, hooks, handlers, clock } = fakeContext(
+      listener,
+      fakeSource(minimalSnapshot(), minimalBatch()),
+      undefined,
+      undefined,
+      timers,
+    );
+    plugin.register(ctx);
+    await hooks.bootstrap[0]();
+    const key = await importTestKey(crypto.subtle);
+    await handlers[0](await fakeStatusRequest(key, 1));
+    clock.advance(60);
+    // Renewal is clamped to the cap: expiry moves from 100 to 150, not 160.
+    await handlers[0](await fakeRenewRequest(key, 2));
+
+    clock.advance(40);
+    timers.fire();
+    expect(listener.closeCount).toBe(0);
+    expect(timers.delays).toEqual([100, 50]);
+
+    clock.advance(50);
+    timers.fire();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(listener.closeCount).toBe(1);
+    expect(timers.outstanding()).toBe(0);
+  });
+
+  for (const stop of ['stopping', 'close', 'revoke'] as const) {
+    it(`leaves no outstanding timer when ${stop} runs while a re-arm is pending`, async () => {
+      const timers = countedTimers();
+      const listener = fakeListener();
+      const plugin = DiagnosticsPlugin({ ...OPTIONS, ttlMs: 100, maxSessionLifetimeMs: 300 });
+      const { ctx, hooks, handlers, clock } = fakeContext(
+        listener,
+        fakeSource(minimalSnapshot(), minimalBatch()),
+        undefined,
+        undefined,
+        timers,
+      );
+      plugin.register(ctx);
+      await hooks.bootstrap[0]();
+      const key = await importTestKey(crypto.subtle);
+      await handlers[0](await fakeStatusRequest(key, 1));
+      clock.advance(50);
+      await handlers[0](await fakeRenewRequest(key, 2));
+      clock.advance(50);
+      timers.fire();
+      // The re-armed handle is the live one.
+      expect(timers.outstanding()).toBe(1);
+      const pending = timers.peek();
+
+      if (stop === 'revoke') {
+        await plugin.revoke();
+      } else {
+        await hooks[stop][0]();
+      }
+      expect(listener.closeCount).toBe(1);
+      expect(timers.outstanding()).toBe(0);
+      // A callback that was already dequeued when revocation landed re-arms
+      // nothing.
+      clock.advance(1_000);
+      pending?.();
+      expect(timers.outstanding()).toBe(0);
+      expect(listener.closeCount).toBe(1);
+    });
+  }
 
   it('does not reopen after revocation and never reactivates', async () => {
     const listener = fakeListener();

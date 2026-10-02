@@ -303,6 +303,29 @@ describe('Security — hostile raw requests over a real socket', () => {
     await app.stop();
   });
 
+  it('closes the listener at the renewal cap so a renewed session cannot outlive it', async () => {
+    const { app, port } = await startApp({ ttlMs: 200, maxSessionLifetimeMs: 400 });
+    const key = await importTestKey(crypto.subtle);
+    const statusMac = await signForPort(crypto.subtle, key, port, '/v1/status', 1);
+    const status = await rawRequest(port, signedRaw(port, '/v1/status', 1, statusMac));
+    expect(status.status).toEqual(200);
+    const instance = (JSON.parse(status.body) as { instanceId: string }).instanceId;
+
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const renewMac = await signForPort(crypto.subtle, key, port, '/v1/renew', 2, instance);
+    // Positive control: a renewal inside the cap is served.
+    expect((await rawRequest(port, signedRaw(port, '/v1/renew', 2, renewMac, instance))).status)
+      .toEqual(200);
+
+    // Past the 400 ms cap the expiry timer has dropped the key and closed
+    // the port: the next connection is refused, not answered.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const lateMac = await signForPort(crypto.subtle, key, port, '/v1/renew', 3, instance);
+    await expect(rawRequest(port, signedRaw(port, '/v1/renew', 3, lateMac, instance))).rejects
+      .toThrow();
+    await app.stop();
+  });
+
   it('serves no canary from a hostile provider result and keeps allowed metadata', async () => {
     // This is covered in depth at the handler level (canary absence with
     // allowed metadata visible); over the real socket we prove the

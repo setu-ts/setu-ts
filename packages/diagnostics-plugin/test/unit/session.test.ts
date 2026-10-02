@@ -84,20 +84,22 @@ describe('Session — renewal', () => {
     expect(session.lifetime(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 3_000 });
 
     clock.advance(600);
-    expect(session.renew(clock)).toBe(true);
+    // The renew result is read from the same instant as the mutation.
+    expect(session.renew(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 2_400 });
     expect(session.lifetime(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 2_400 });
     // An immediate repeat cannot bank another TTL.
-    expect(session.renew(clock)).toBe(true);
+    expect(session.renew(clock)?.expiresInMs).toEqual(1_000);
     expect(session.lifetime(clock)?.expiresInMs).toEqual(1_000);
 
     clock.advance(900);
-    expect(session.renew(clock)).toBe(true);
-    expect(session.lifetime(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 1_500 });
+    expect(session.renew(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 1_500 });
     clock.advance(500);
-    expect(session.renew(clock)).toBe(true);
-    expect(session.lifetime(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 1_000 });
-    clock.advance(1_000);
-    expect(session.renew(clock)).toBe(false);
+    expect(session.renew(clock)).toEqual({ expiresInMs: 1_000, maxRemainingMs: 1_000 });
+    // Past the cap a renewal is accepted but cannot extend.
+    clock.advance(400);
+    expect(session.renew(clock)).toEqual({ expiresInMs: 600, maxRemainingMs: 600 });
+    clock.advance(600);
+    expect(session.renew(clock)).toBe(null);
     expect(session.lifetime(clock)).toEqual({ expiresInMs: 0, maxRemainingMs: 0 });
   });
 
@@ -127,7 +129,7 @@ describe('Session — renewal', () => {
     );
     expect(session.isRenewable).toBe(false);
     expect(session.lifetime(clock)).toBe(null);
-    expect(session.renew(clock)).toBe(false);
+    expect(session.renew(clock)).toBe(null);
 
     const renewable = await DiagnosticsSessionState.create(
       crypto.subtle,
@@ -138,7 +140,7 @@ describe('Session — renewal', () => {
       2_000,
     );
     renewable.revoke();
-    expect(renewable.renew(clock)).toBe(false);
+    expect(renewable.renew(clock)).toBe(null);
   });
 });
 

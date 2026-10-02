@@ -103,53 +103,55 @@ describe('Lifecycle', () => {
     await app.stop();
   });
 
-  it('revoke during a renewal digest releases no successful body', async () => {
-    let blockDigest = false;
-    let signalDigestStarted: () => void = () => {};
-    let releaseDigest: () => void = () => {};
-    const digestStarted = new Promise<void>((resolve) => {
-      signalDigestStarted = resolve;
-    });
-    const digestReleased = new Promise<void>((resolve) => {
-      releaseDigest = resolve;
-    });
-    const base = createRuntimeServices({ platform: 'deno' }).subtle;
-    const delayedSubtle = new Proxy(base, {
-      get(target, property): unknown {
-        if (property === 'digest') {
-          return async (
-            algorithm: AlgorithmIdentifier,
-            data: BufferSource,
-          ): Promise<ArrayBuffer> => {
-            if (blockDigest) {
-              signalDigestStarted();
-              await digestReleased;
-            }
-            return await target.digest(algorithm, data);
-          };
-        }
-        const value: unknown = Reflect.get(target, property, target);
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    });
-    const { app, port, plugin } = await startApp(
-      { ttlMs: 1_000, maxSessionLifetimeMs: 3_000 },
-      delayedSubtle,
-    );
-    const diagnostics = client(port);
-    await diagnostics.session();
+  for (const operation of ['digest', 'sign'] as const) {
+    it(`revoke during a renewal ${operation} releases no successful body`, async () => {
+      let blockCall = false;
+      let signalCallStarted: () => void = () => {};
+      let releaseCall: () => void = () => {};
+      const callStarted = new Promise<void>((resolve) => {
+        signalCallStarted = resolve;
+      });
+      const callReleased = new Promise<void>((resolve) => {
+        releaseCall = resolve;
+      });
+      const base = createRuntimeServices({ platform: 'deno' }).subtle;
+      const delayedSubtle = new Proxy(base, {
+        get(target, property): unknown {
+          if (property === operation) {
+            const original = Reflect.get(target, property, target) as (
+              ...args: unknown[]
+            ) => Promise<ArrayBuffer>;
+            return async (...args: unknown[]): Promise<ArrayBuffer> => {
+              if (blockCall) {
+                signalCallStarted();
+                await callReleased;
+              }
+              return await original.apply(target, args);
+            };
+          }
+          const value: unknown = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+      const { app, port, plugin } = await startApp(
+        { ttlMs: 1_000, maxSessionLifetimeMs: 3_000 },
+        delayedSubtle,
+      );
+      const diagnostics = client(port);
+      await diagnostics.session();
 
-    blockDigest = true;
-    const renewal = diagnostics.renew();
-    await digestStarted;
-    const revocation = plugin.revoke();
-    releaseDigest();
+      blockCall = true;
+      const renewal = diagnostics.renew();
+      await callStarted;
+      const revocation = plugin.revoke();
+      releaseCall();
 
-    await expect(renewal).rejects.toThrow();
-    await revocation;
-    diagnostics.close();
-    await app.stop();
-  });
+      await expect(renewal).rejects.toThrow();
+      await revocation;
+      diagnostics.close();
+      await app.stop();
+    });
+  }
 
   it('a failed parent startup closes an already-open listener', async () => {
     const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });

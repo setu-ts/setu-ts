@@ -106,7 +106,7 @@ export interface DiagnosticsPluginOptions {
  * @since 0.8.0
  */
 export interface DiagnosticsSessionLifetime {
-  /** Whole milliseconds remaining in the current session window. */
+  /** Whole milliseconds remaining in the current session window, rounded down. */
   readonly expiresInMs: number;
   /** The renewable cap remaining from activation, or `null` when unsupported. */
   readonly renewal: Readonly<{ readonly maxRemainingMs: number }> | null;

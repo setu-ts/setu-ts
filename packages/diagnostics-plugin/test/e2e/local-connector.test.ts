@@ -84,7 +84,12 @@ describe('Local connector e2e', () => {
     await client.renew();
     await new Promise((resolve) => setTimeout(resolve, 550));
     expect((await client.snapshot()).state).toBe('running');
-    await client.renew();
+    const capped = await client.renew();
+    // Past half the 2 s cap, one more TTL would overshoot it: the renewal is
+    // clamped, so the window now ends exactly at the cap.
+    expect(capped.renewal).not.toBe(null);
+    expect(capped.renewal!.maxRemainingMs).toBeLessThan(1_000);
+    expect(capped.expiresInMs).toEqual(capped.renewal!.maxRemainingMs);
     await new Promise((resolve) => setTimeout(resolve, 950));
     await expect(client.snapshot()).rejects.toThrow();
     client.close();

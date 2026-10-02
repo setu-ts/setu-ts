@@ -11387,27 +11387,29 @@ optional collection failures without weakening session authentication or integri
 M98d owns a fixed, authenticated v1 inspector-support manifest in the status response, and landing
 it is a HARD GATE on the first publication of `packages/diagnostics-plugin`. That is the one narrow
 exception to the decoupling stated above, and it is a wire-compatibility constraint rather than a
-scope one: the shipped client accepts a status body of EXACTLY `version`, `instanceId` and
-`expiresInMs` (`packages/diagnostics-plugin/src/protocol/protocol.ts:294-322`) and latches a
-terminal pairing failure on anything else, so publishing the package first would freeze that body
-for the lifetime of every client in the field. The request carries no client-version signal, so a
-published server cannot serve the old shape to an old client. The gate costs nothing today, because
-98a–98c are merged and awaiting publication: no client exists to break, and settling the shape is
-one edit. Adding the later letters still makes none of them a prerequisite for the devtool's initial
-D01–D04 preview, and only M98d's status shape — not its route, its source or the other letters —
-must precede that publication. The manifest declares connector operation support separately from
-application source availability; M98e–M98n activate their reserved fixed entries as their operations
-ship. The reverse skew is covered by a fallback: a new client treats the exact legacy three-field
-M98b status body as all addon operations unsupported — a permanently supported reading with its own
-tests, not a migration crutch — so it never probes an unknown route or derives support from a
-generic error. The eleven reserved keys are `health`, `configuration`, `queues`, `traces`,
-`authorization`, `cache`, `events`, `scheduler`, `realtime`, `storage`, and `outboundHttp`. This
-expands the unpublished M98d proposal; reserve all keys before first publication, with false values
-until their operations ship. Future inspectors beyond the eleven fixed entries require a new
-protocol version. Verify credential expiry/revocation, request/response instance binding, replay
-protection, protocol bounds and refusal of arbitrary method/file access or application/diagnostic
-mutation for every added operation. Shared backends require their own allowed resource/tenant scope;
-a local session key does not authorize enumeration of all data reachable by the application.
+scope one: the client accepts only the exact status shapes it knows — the legacy three-field
+`version`, `instanceId`, `expiresInMs` body, that body plus `inspectors`, and (since M98o) that body
+plus `inspectors` and `renewal` (`parseStatusBody` in
+`packages/diagnostics-plugin/src/protocol/protocol.ts`) — and latches a terminal pairing failure on
+anything else, so publishing the package first would freeze that body for the lifetime of every
+client in the field. The request carries no client-version signal, so a published server cannot
+serve the old shape to an old client. The gate costs nothing today, because 98a–98c are merged and
+awaiting publication: no client exists to break, and settling the shape is one edit. Adding the
+later letters still makes none of them a prerequisite for the devtool's initial D01–D04 preview, and
+only M98d's status shape — not its route, its source or the other letters — must precede that
+publication. The manifest declares connector operation support separately from application source
+availability; M98e–M98n activate their reserved fixed entries as their operations ship. The reverse
+skew is covered by a fallback: a new client treats the exact legacy three-field M98b status body as
+all addon operations unsupported — a permanently supported reading with its own tests, not a
+migration crutch — so it never probes an unknown route or derives support from a generic error. The
+eleven reserved keys are `health`, `configuration`, `queues`, `traces`, `authorization`, `cache`,
+`events`, `scheduler`, `realtime`, `storage`, and `outboundHttp`. This expands the unpublished M98d
+proposal; reserve all keys before first publication, with false values until their operations ship.
+Future inspectors beyond the eleven fixed entries require a new protocol version. Verify credential
+expiry/revocation, request/response instance binding, replay protection, protocol bounds and refusal
+of arbitrary method/file access or application/diagnostic mutation for every added operation. Shared
+backends require their own allowed resource/tenant scope; a local session key does not authorize
+enumeration of all data reachable by the application.
 
 ### Threat Model and Acceptance Evidence
 

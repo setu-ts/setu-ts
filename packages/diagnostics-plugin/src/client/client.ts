@@ -417,8 +417,13 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
     expiresInMs: number,
     renewal: Readonly<{ readonly maxRemainingMs: number }> | null,
   ): DiagnosticsSessionLifetime => {
+    // A status without renewal keeps the pre-M98o FRACTIONAL monotonic
+    // `expiresInMs` on the wire; flooring here makes the documented
+    // whole-millisecond contract hold for every session. A renewable status
+    // and the renew body are already validated as safe integers, for which
+    // the floor is the identity.
     return Object.freeze({
-      expiresInMs,
+      expiresInMs: Math.floor(expiresInMs),
       renewal: renewal === null ? null : Object.freeze({ maxRemainingMs: renewal.maxRemainingMs }),
     });
   };

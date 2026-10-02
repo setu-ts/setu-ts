@@ -35,6 +35,14 @@ export interface SessionClock {
 const MAX_SEQUENCE = Number.MAX_SAFE_INTEGER;
 
 /**
+ * Both remaining windows of a renewable session, in whole milliseconds, read
+ * from one monotonic clock reading so `expiresInMs <= maxRemainingMs` holds.
+ *
+ * @internal
+ */
+export type SessionLifetimeReading = Readonly<{ expiresInMs: number; maxRemainingMs: number }>;
+
+/**
  * One paired native-client session.
  *
  * Created at activation with the launch's credentials; keyed material lives
@@ -157,38 +165,41 @@ export class DiagnosticsSessionState {
    * @param clock - The monotonic clock
    * @returns Whole milliseconds remaining, or `null` when renewal is disabled
    */
-  lifetime(
-    clock: SessionClock,
-  ): Readonly<{ expiresInMs: number; maxRemainingMs: number }> | null {
+  lifetime(clock: SessionClock): SessionLifetimeReading | null {
     const maxExpiresAtHr = this.#maxExpiresAtHr;
     if (maxExpiresAtHr === null) {
       return null;
     }
-    const now = clock.hrtime();
-    return {
-      expiresInMs: Math.floor(Math.max(0, this.#expiresAtHr - now)),
-      maxRemainingMs: Math.floor(Math.max(0, maxExpiresAtHr - now)),
-    };
+    return this.#readLifetime(clock.hrtime(), maxExpiresAtHr);
   }
 
   /**
    * Extends the current window from one monotonic reading, without shortening
-   * it or crossing the activation-time cap.
+   * it or crossing the activation-time cap. The returned lifetime is measured
+   * from that SAME reading, so the renew body and the mutation agree.
    *
    * @param clock - The monotonic clock
-   * @returns `true` when the live renewable session accepted the operation
+   * @returns The renewed lifetime, or `null` when the session is revoked,
+   *   expired, or was activated without a renewal cap
    */
-  renew(clock: SessionClock): boolean {
+  renew(clock: SessionClock): SessionLifetimeReading | null {
     const maxExpiresAtHr = this.#maxExpiresAtHr;
     const now = clock.hrtime();
     if (this.#revoked || maxExpiresAtHr === null || now >= this.#expiresAtHr) {
-      return false;
+      return null;
     }
     this.#expiresAtHr = Math.max(
       this.#expiresAtHr,
       Math.min(now + this.#ttlMs, maxExpiresAtHr),
     );
-    return true;
+    return this.#readLifetime(now, maxExpiresAtHr);
+  }
+
+  #readLifetime(now: number, maxExpiresAtHr: number): SessionLifetimeReading {
+    return {
+      expiresInMs: Math.floor(Math.max(0, this.#expiresAtHr - now)),
+      maxRemainingMs: Math.floor(Math.max(0, maxExpiresAtHr - now)),
+    };
   }
 
   /**

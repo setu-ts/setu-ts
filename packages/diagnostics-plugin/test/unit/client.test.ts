@@ -86,6 +86,8 @@ function fakeServer(
     renewal?: boolean;
     /** Decide renewal presence independently for each status exchange. */
     statusRenewal?: () => boolean;
+    /** Override the status body's `expiresInMs` (e.g. a fractional legacy value). */
+    statusExpiresInMs?: number;
     /** Override the renewal response body. */
     renewBody?: Record<string, unknown>;
     /** The body to serve for `/v1/health`; defaults to a ready snapshot. */
@@ -163,7 +165,7 @@ function fakeServer(
         const body: Record<string, unknown> = {
           version: 1,
           instanceId: TEST_INSTANCE_ID,
-          expiresInMs: 899_000,
+          expiresInMs: overrides.statusExpiresInMs ?? 899_000,
         };
         if (!overrides.legacyStatus) {
           body.inspectors = overrides.statusInspectors ?? currentInspectorsManifest();
@@ -595,6 +597,20 @@ describe('Client — session renewal', () => {
     });
     expect(requests.map((request) => request.target)).toEqual(['/v1/status', '/v1/renew']);
     client.close();
+  });
+
+  it('reports whole milliseconds for a fractional status without renewal', async () => {
+    // A non-renewable server sends the pre-M98o fractional monotonic value
+    // (measured on Deno: e.g. 899992.600016); the client contract is integer.
+    for (const legacyStatus of [false, true]) {
+      const { client } = buildClient({
+        server: { statusExpiresInMs: 899_992.600016, legacyStatus },
+      });
+      const lifetime = await client.session();
+      expect(lifetime).toEqual({ expiresInMs: 899_992, renewal: null });
+      expect(Number.isSafeInteger(lifetime.expiresInMs)).toBe(true);
+      client.close();
+    }
   });
 
   it('pairs first and sends no renew request when renewal is unsupported', async () => {

@@ -1130,10 +1130,10 @@ export function createConnectorHandler(
         if (!deps.session.isRenewable) {
           return refusalResponse('invalid-request');
         }
-        if (!deps.session.renew(deps.clock)) {
-          return refusalResponse('expired');
-        }
-        const lifetime = deps.session.lifetime(deps.clock);
+        // `renew` declines only when the session reached expiry between the
+        // admit gate and here (an advancing fractional clock makes that
+        // possible); no renewal happened and no body is built.
+        const lifetime = deps.session.renew(deps.clock);
         if (lifetime === null) {
           return refusalResponse('expired');
         }
