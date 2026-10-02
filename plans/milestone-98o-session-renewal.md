@@ -1,11 +1,10 @@
 # Milestone 98o — Diagnostics session renewal (`@setu-ts/diagnostics-plugin`)
 
-> **Status:** Planning, revision 3. Branch: `feat/m98o-session-renewal`. `main` is protected — all
+> **Status:** Planning, revision 4. Branch: `feat/m98o-session-renewal`. `main` is protected — all
 > work (implementation + fixes) stays on this one branch until it merges via a single PR. The design
-> security review (§10.1) has had two independent rounds, both of which blocked; this revision
-> resolves the round-2 findings and needs a third independent round plus the open maintainer
-> approvals in §10.1 before implementation starts (ROADMAP, "Mandatory Security Audit Gates for
-> M98d–M98n").
+> security review (§10.1) is complete: round 3 approved revision 3, and revision 4 folds in its
+> non-blocking findings. Implementation still waits on the four open maintainer decisions in §10.1
+> (ROADMAP, "Mandatory Security Audit Gates for M98d–M98n").
 
 ## 0. Objective & scope
 
@@ -72,7 +71,7 @@ M98b meaning: when the session really expires, the key is dropped and the listen
 | CLI use of the package                 | `packages/cli/src/devtool/planner.ts:215`; `packages/cli/src/commands/devtool.ts:65`; `dev-entry.ts:80`                   | Generated projects depend on and import `@setu-ts/diagnostics-plugin`, so a release that skipped it would ship a CLI whose `--devtool` projects cannot install.                                                                                                                                                                                                                                                      |
 | Status-shape publication gate          | `ROADMAP.md`, "Mandatory Security Audit Gates for M98d–M98n" (inspector-manifest paragraph)                               | A client refuses any status key it does not know and latches a terminal pairing failure, so the status body is frozen at first publication. That paragraph cites `protocol.ts:294-322`; the parser is now at `:590-617`.                                                                                                                                                                                             |
 | Devtool consumer                       | `setu-ts-devtool/src/diagnostics/client.ts`; `setu-ts-devtool/scripts/framework-pin.json`; `setu-ts-devtool/package.json` | The devtool bundles `createDiagnosticsClient` from framework commit `26aebd0e`; that client refuses a status body carrying `renewal`. The devtool itself is unpublished (`"private": true`, version 0.0.1). Users also run `setu new --devtool` themselves (`setu-ts-devtool/docs/framework-compatibility.md:175`).                                                                                                  |
-| "Read-only" commitments                | `ROADMAP.md:10692-10694`, `:10819-10823`, `:11403-11404`, `:11426`, the M98 progress row                                  | M98's objective excludes "mutation controls"; the ticked M98b deliverable says the protocol has no "mutation command"; the audit gates require "refusal of … mutation for every added operation"; the acceptance evidence requires refusing "every attempted write/control operation"; the progress row says "secure read-only devtool diagnostics".                                                                 |
+| "Read-only" commitments                | `ROADMAP.md:10692-10694`, `:10819-10823`, `:11403-11404`, `:11425`, the M98 progress row                                  | M98's objective excludes "mutation controls"; the ticked M98b deliverable says the protocol has no "mutation command"; the audit gates require "refusal of … mutation for every added operation"; the acceptance evidence requires refusing "every attempted write/control operation"; the progress row says "secure read-only devtool diagnostics".                                                                 |
 | `ILifecycleApi.onStopping`             | `packages/common/src/plugin.ts:381`                                                                                       | Exists; revocation already uses it. No kernel change.                                                                                                                                                                                                                                                                                                                                                                |
 | `IRuntimeServices.setTimeout`          | `packages/common/src/runtime.ts:359`                                                                                      | `setTimeout(fn, ms): TimerHandle`, cancelled by `clearTimeout`. The expiry re-check reads `hrtime()`, so timer lateness never closes a session early.                                                                                                                                                                                                                                                                |
 
@@ -117,8 +116,10 @@ M98b meaning: when the session really expires, the key is dropped and the listen
 
 ### 3.3 Renewal arithmetic, on one clock reading
 
-- **Decision:** at activation the session records `activatedAtHr` and
-  `maxExpiresAtHr = activatedAtHr + maxSessionLifetimeMs`. `renew(clock)` reads `now` ONCE and sets
+- **Decision:** at activation the session reads the clock ONCE: `activatedAtHr = clock.hrtime()`,
+  `expiresAtHr = activatedAtHr + ttlMs`, `maxExpiresAtHr = activatedAtHr + maxSessionLifetimeMs`.
+  Deriving all three from one reading is what guarantees `expiresAtHr ≤ maxExpiresAtHr` even when
+  `ttlMs === maxSessionLifetimeMs`. `renew(clock)` reads `now` ONCE and sets
   `expiresAtHr = max(expiresAtHr, min(now + ttlMs, maxExpiresAtHr))`. Every lifetime report — the
   renew body and the status `renewal` member — is built from one `lifetime(clock)` call that reads
   `now` once and returns `expiresInMs = floor(max(0, expiresAtHr - now))` and
@@ -155,11 +156,13 @@ M98b meaning: when the session really expires, the key is dropped and the listen
   - Both stay in protocol v1; `MAC_DOMAIN` is unchanged.
 - **Why:** the protocol is GET-only with a zero-body policy and the request MAC fixes the method, so
   a GET with no new field keeps every existing gate valid. A state change behind a GET is safe here
-  only because every request is signed, sequence-gated, `Cache-Control: no-store`, refused from any
-  browser origin and refused through forwarding headers. The status member lets a client learn
-  support without probing an unknown route. Adding a status key is legal only because no client has
-  been PUBLISHED (§1). After first publication it would break every client in the field, so this
-  letter must merge before `packages/diagnostics-plugin` first publishes (§3.9).
+  only because every request is signed, sequence-gated, `Cache-Control: no-store`, carries the
+  non-safelisted `X-Setu-*` headers — so a browser must preflight, and the connector refuses the
+  `OPTIONS` request — and is refused through forwarding headers. (The `Origin` refusal alone is not
+  the guarantee: a no-cors GET carries no `Origin`.) The status member lets a client learn support
+  without probing an unknown route. Adding a status key is legal only because no client has been
+  PUBLISHED (§1). After first publication it would break every client in the field, so this letter
+  must merge before `packages/diagnostics-plugin` first publishes (§3.9).
 - **Test home:** `test/unit/protocol.test.ts`, `test/unit/connector-handler.test.ts`, fixture
   vectors in `test/fixtures/protocol-v1.json`.
 
@@ -193,9 +196,10 @@ M98b meaning: when the session really expires, the key is dropped and the listen
   - Without `maxSessionLifetimeMs` the timer is exactly today's: armed for `ttlMs` after `listen`,
     revoking unconditionally. No re-arm code runs.
   - With it, the callback first returns if `revoked`, if `generation !== startGeneration`, or if the
-    plugin-level `session` (nulled by `revoke()`) is `null`. Otherwise it calls `revoke()` when
-    `!active.isAdmissible(clock)`, and else re-arms for `Math.ceil(active.remainingMs(clock))` — the
-    unfloored remainder, rounded up, so the listener never closes while the handler still admits.
+    plugin-level `session` (nulled by `revoke()`) is `null`. Otherwise it reads
+    `active.remainingMs(clock)` ONCE: at zero it calls `revoke()`, and otherwise it re-arms for
+    `Math.ceil` of that unfloored remainder, so the listener never closes while the handler still
+    admits. The first arm, after `listen`, is for the initial remainder read the same way.
   - Every re-armed handle is written back to `expiryTimer`, so `revoke()` (from stop, close or the
     timer) always clears the live handle and no timer outlives the plugin.
 - **Why the option gates it:** the existing TTL test's clock never advances (§1), so a re-arming
@@ -214,9 +218,10 @@ M98b meaning: when the session really expires, the key is dropped and the listen
 ### 3.7 Client surface
 
 - **Decision:**
-  - `session(): Promise<DiagnosticsSessionLifetime>` performs a signed status exchange (pairing
-    first if needed) and returns a frozen `{ expiresInMs, renewal: { maxRemainingMs } | null }`. A
-    later status whose `renewal` presence differs from the paired one is refused with the fixed
+  - `session(): Promise<DiagnosticsSessionLifetime>` performs exactly one signed status exchange: on
+    an unpaired client that exchange IS the pairing, and on a paired client it is a fresh status
+    exchange. It returns a frozen `{ expiresInMs, renewal: { maxRemainingMs } | null }`. A later
+    status whose `renewal` presence differs from the paired one is refused with the fixed
     `connection` error. That refusal is non-terminal: it does not latch `pairingFailed`, like every
     other post-pairing verification failure.
   - `renew(): Promise<DiagnosticsSessionLifetime>` pairs first if needed. If the paired status had
@@ -260,9 +265,14 @@ M98b meaning: when the session really expires, the key is dropped and the listen
   start, before publishing any package, while a package in `PUBLISHED_PACKAGES` carries a hold, and
   names the hold's reason (M98o). `release:verify` reports the hold without failing on it, because
   CI runs it on every pull request (§1) and a failing check there would turn every unrelated PR red
-  until M98o merges. This letter's PR removes the hold. Moving the package to `UNPUBLISHED_PACKAGES`
-  was rejected: the released CLI's `--devtool` scaffolding imports `@setu-ts/diagnostics-plugin`, so
-  a release that silently skipped it would ship a CLI whose generated projects cannot install.
+  until M98o merges. The hold lives as an exported constant in `scripts/release-packages.ts`, read
+  by `publish-packages.ts` (which refuses) and `verify-release.ts` (which reports); the refusal is
+  an extracted, unit-tested function. It also refuses `release:publish --dry-run`, so the
+  `workflow_dispatch` rehearsal and the runbook dry run warn early. It blocks EVERY release while
+  present, not just this package. M98o's PR is gated on the hold having merged and removes it.
+  Moving the package to `UNPUBLISHED_PACKAGES` was rejected: the released CLI's `--devtool`
+  scaffolding imports `@setu-ts/diagnostics-plugin`, so a release that silently skipped it would
+  ship a CLI whose generated projects cannot install.
 - **Why:** the status shape freezes at first publication (§3.4), and today only a manual check
   stands between a release and that freeze. A failing release forces the decision — finish M98o or
   remove the hold on purpose — instead of letting it happen by accident.
@@ -280,9 +290,10 @@ M98b meaning: when the session really expires, the key is dropped and the listen
 | `DiagnosticsPlugin`, `createDiagnosticsClient`, existing types | unchanged                                  | Existing consumers.                                                                                     |
 
 No error class is added (cut in revision 2, §3.7). No `common` export changes. `session()` and
-`renew()` become required members of the exported `IDiagnosticsClient`, which is breaking for an
-out-of-repo implementor of that interface; the only implementations are in-repo, and the devtool
-wraps the client rather than implementing it. The CHANGELOG entry says so.
+`renew()` become required members of the exported `IDiagnosticsClient`, widening an interface that
+has never been published; the only implementations are in-repo, and the devtool wraps the client
+rather than implementing it. `CLIENT_ERRORS` is not exported, so a consumer branches on
+`session().renewal`, never on the `notRenewable` message text; the client JSDoc says so.
 
 ### 4.1 Options — every option names its consumer
 
@@ -308,15 +319,15 @@ wraps the client rather than implementing it. The CHANGELOG entry says so.
 
 | Test file                                              | src covered                            | Key assertions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------------------------------------------------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/unit/session.test.ts` (extend)                   | `session.ts`                           | Fake `SessionClock`: renew before cap, clamped at cap, no-op past cap, never shortens, never beyond `now + ttlMs`; refused after expiry and after revoke (expiry unchanged); not renewable without a cap; `lifetime()` keeps `expiresInMs ≤ maxRemainingMs` at the cap with fractional clocks.                                                                                                                                                                                                                                                                                        |
+| `test/unit/session.test.ts` (extend)                   | `session.ts`                           | Fake `SessionClock`: renew before cap, clamped at cap, no-op past cap, never shortens, never beyond `now + ttlMs`; refused after expiry and after revoke (expiry unchanged); not renewable without a cap; `lifetime()` keeps `expiresInMs ≤ maxRemainingMs` at the cap with fractional clocks, including `ttlMs === maxSessionLifetimeMs` with fractional activation readings.                                                                                                                                                                                                        |
 | `test/unit/protocol.test.ts` (extend)                  | `protocol.ts`                          | `/v1/renew` parses; `/v1/renew?x`, `/v1/renew/`, `/v1/Renew` refused. Status body without the option is byte-identical to the pre-M98o body; with it carries exactly one more key. Parsers refuse every extra key, `renewal` without `inspectors`, negative and non-finite numbers. The renew parser and a status carrying `renewal` also refuse fractional numbers and `expiresInMs > maxRemainingMs`; legacy and no-renewal status bodies with a fractional `expiresInMs` are still accepted. A renewable status built at the cap with a fractional clock satisfies its own parser. |
 | `test/unit/connector-handler.test.ts` (extend)         | `connector-handler.ts`                 | Renew without a bound instance → `invalid-request` before verification; renew disabled → `invalid-request` only after a valid MAC and a free budget; two copies of one signed renew → one 200; renew after expiry → `expired`; `renew()` declining after admission → `expired`, no body; `rate-limited` renew leaves expiry unchanged; disabled renew with a wrong instance → `unauthorized`; signed response MAC verifies over `/v1/renew`.                                                                                                                                          |
-| `test/unit/plugin.test.ts` (extend)                    | `diagnostics-plugin.ts`                | `maxSessionLifetimeMs` below `ttlMs`, above 43,200,000, fractional and `NaN` each throw a message containing no value; absent accepted. Re-arming timer (fake counted `setTimeout`, advancing fake clock): a renewed session survives the original `ttlMs`; revocation at the renewed expiry and at the cap, never while admissible; zero outstanding handles after revoke, after stop, and after stop during a re-arm; the existing TTL test unchanged without the option.                                                                                                           |
+| `test/unit/plugin.test.ts` (extend)                    | `diagnostics-plugin.ts`                | `maxSessionLifetimeMs` below `ttlMs`, above 43,200,000, fractional and `NaN` each throw a message containing no value; absent accepted. Re-arming timer (fake counted `setTimeout`, advancing fake clock): a renewed session survives the original `ttlMs`; revocation at the renewed expiry and at the cap, never while admissible; zero outstanding handles after revoke, after stop, and after stop during a re-arm; expiry landing at a firing revokes rather than re-arming; the existing TTL test unchanged without the option.                                                 |
 | `test/unit/client.test.ts` (extend)                    | `client.ts`                            | `session()` pairs then returns the lifetime; `renew()` pairs first when unpaired; `renew()` without support throws `notRenewable` and sends no renew request; a later status whose `renewal` presence changed → `connection`, and a following call still works (non-terminal); a renew body with a wrong instance, extra key or broken inequality → `connection`.                                                                                                                                                                                                                     |
 | `test/index.test.ts` (extend)                          | `index.ts`                             | `DiagnosticsSessionLifetime` reachable from the barrel at the type level; `session`/`renew` on a real client instance.                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `test/integration/security.test.ts` (extend)           | handler + session over a real socket   | Raw `Deno.connect`: renew with wrong key, replayed sequence, wrong instance and after revoke refused with the existing uniform codes; after real expiry the listener is closed (connection refused); a valid renew is served (positive control).                                                                                                                                                                                                                                                                                                                                      |
 | `test/integration/lifecycle.test.ts` (extend)          | plugin + handler                       | Revoke landing during the renew's `sha256Hex` and `sign` awaits releases no body; the listener closes as before.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `test/e2e/local-connector.test.ts` (extend)            | whole package                          | Real app, `ttlMs: 1_000`, `maxSessionLifetimeMs: 3_000`: pair, renew at half the remaining time, `snapshot()` succeeds after the original second, renewals stop extending at the cap, then the listener closes and `snapshot()` throws `connection`. Arithmetic edge cases stay on the fake clock.                                                                                                                                                                                                                                                                                    |
+| `test/e2e/local-connector.test.ts` (extend)            | whole package                          | Real app, `ttlMs: 1_000`, `maxSessionLifetimeMs: 3_000`: pair, renew at half the remaining time, `snapshot()` succeeds after the original second, renewals stop extending at the cap, then the listener closes and `snapshot()` throws `connection`. A second run revokes mid-session and `snapshot()` then throws `connection`. Arithmetic edge cases stay on the fake clock.                                                                                                                                                                                                        |
 | `test/fixtures/protocol-v1.json` (extend)              | —                                      | Renew request/response vectors computed with plain Web Crypto outside the production helpers, like the existing vectors.                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `test/inspect-local-diagnostics.test.ts` (extend)      | `scripts/inspect-local-diagnostics.ts` | The subprocess consumer reports a renewed lifetime.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `packages/cli/test/unit/dev-entry.test.ts` (extend)    | `dev-entry.ts`                         | Emitted entry contains the option with the decided value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
@@ -371,7 +382,7 @@ that did not implement the milestone.
 
 ## 10. Required security reviews and acceptance evidence
 
-### 10.1 Design security review — revision 2, awaiting a second independent round
+### 10.1 Design security review — complete (round 3 approved revision 3)
 
 **History.**
 
@@ -384,8 +395,11 @@ that did not implement the milestone.
 - **Round 2** was run on 2026-10-02 against `e01371b0` by a second independent agent, and its
   verdict was **blocked** (findings 1–3 below). It showed, by simulating the revision-2 timer, that
   the existing TTL test's never-advancing clock makes a re-arming callback re-arm forever.
-- **Revision 3** resolves every round-2 finding. It is not recorded as complete until a third
-  independent round passes.
+- **Revision 3** resolved every round-2 finding.
+- **Round 3** was run on 2026-10-02 against `20d51185` by a third independent agent. Verdict:
+  **approve**, with five Low and four Note findings, none blocking.
+- **Revision 4** folds in all nine (table below). At the maintainer's direction there is no further
+  review round; the committed-tree audit (§10.2) remains the next security gate.
 
 **Round-1 findings and dispositions.**
 
@@ -419,6 +433,20 @@ that did not implement the milestone.
 | 9  | Low      | Citation drift (`ROADMAP.md:11418`, `parseTarget` at :74).                                                                           | §1 corrected.                                                                                              |
 | 10 | Low      | Unsupported `renew()` names no message; terminality of a changed `renewal` presence unspecified; refusal order not pinned by a test. | §3.7: `notRenewable` message, non-terminal; §6 order test.                                                 |
 | 11 | Note     | New required members on `IDiagnosticsClient` are breaking for implementors; the status-parser freeze is the last chance to decide.   | §4 and CHANGELOG note; status-parser tolerance added to the maintainer decisions below.                    |
+
+**Round-3 findings and dispositions.**
+
+| # | Severity | Finding                                                                                                                                        | Disposition                                                |
+| - | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| 1 | Low      | Initial expiry and cap could come from separate clock readings, breaking `expiresAtHr ≤ maxExpiresAtHr` when `ttlMs === maxSessionLifetimeMs`. | §3.3: one activation reading; §6 fake-clock case.          |
+| 2 | Low      | §10.1 heading was stale.                                                                                                                       | Corrected.                                                 |
+| 3 | Low      | The hold's home, dry-run behaviour, tests and merge ordering were unspecified.                                                                 | §3.9 specifies all four.                                   |
+| 4 | Low      | The timer callback read the clock twice; the initial arm was unstated.                                                                         | §3.6: one reading per firing; initial arm stated; §6 case. |
+| 5 | Low      | The e2e omitted the ROADMAP's "refused after `revoke()`" step.                                                                                 | §6 e2e row extended.                                       |
+| 6 | Note     | "Refused from any browser origin" overstated a GET's safety.                                                                                   | §3.4 reworded to the preflight-forcing headers.            |
+| 7 | Note     | "Breaking" overstated for an unpublished interface; `notRenewable` is not exported.                                                            | §4 reworded; consumers branch on `session().renewal`.      |
+| 8 | Note     | `session()` on an unpaired client was ambiguous.                                                                                               | §3.7: exactly one status exchange.                         |
+| 9 | Note     | Citation `ROADMAP.md:11426` should be `:11425`.                                                                                                | §1 and C4 corrected.                                       |
 
 **Reviewed flow:** native client → signed `GET /v1/renew` with the bound instance → every existing
 M98b control (Host, Origin, forwarding headers, framing, target, session-ID lane, `subtle.verify`) →
