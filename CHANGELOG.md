@@ -22,9 +22,11 @@ All notable changes to this project are documented here. The format follows
   in the credential store (`IPasskeyStore.claimChallenge`), so a replayed assertion against an older
   cookie copy is refused even though a synced passkey's counter is always `0`. `updateCounter` MUST
   be implemented by custom stores as an atomic compare-and-advance, and `save` MUST be an atomic
-  compare-and-set (it stores a NEW credential only when its id is absent and reports whether it did
-  — a blind write lets two concurrent registrations of the same credential id both succeed and lets
-  the later record silently replace the earlier one, `principalId` included); the shipped
+  compare-and-set (it stores a NEW credential only when its id is absent AND the principal is below
+  `maxPerPrincipal`, both checked in the same step as the insert, and answers `'saved'` /
+  `'duplicate'` / `'limit'` — a blind write lets two concurrent registrations of the same credential
+  id both succeed and lets the later record silently replace the earlier one, `principalId`
+  included, and a count read before a separate write lets a burst overshoot the cap); the shipped
   `MemoryPasskeyStore` does both and purges expired claims in an amortized sweep (when the claim map
   doubles) so its map stays bounded without a per-claim scan. Stored credentials (`StoredPasskey`)
   record `attestation: 'unverified'` and a `backedUp` flag that is display only. Under the default

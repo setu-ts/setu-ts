@@ -601,7 +601,9 @@ export class PasskeyCeremonies {
       return 'credential-limit';
     }
     // Without the plugin's own session service the recorded methods cannot be
-    // read, so the gate fails closed for a principal that already has one.
+    // read, so they count as none: the gate then fails closed wherever it
+    // requires a second factor (an existing passkey, or `mfa` without
+    // `mayRegister`).
     const methods = asPendingPromotion(this.#authSession)?.currentMethods(ctx) ?? [];
     if (!methods.some((m) => m === 'otp' || m === 'pop')) {
       // An existing passkey is a second factor this session has not proved.
