@@ -1,9 +1,7 @@
 # Milestone 100f — SAML 2.0 Service Provider (`@setu-ts/auth-plugin`)
 
-> **Status:** Implemented. Developed on the session-designated branch
-> `claude/gracious-lovelace-4575ac` rather than `feat/m100f-saml-sp` — the harness pins the branch;
-> recorded as a deviation. Depends on 100a, 100c and 100d. See §11 for what implementation
-> corrected.
+> **Status:** Implemented on `feat/m100f-saml-sp`. Depends on 100a, 100c and 100d. See §11 for what
+> implementation corrected.
 
 ## 0. Objective & scope
 
