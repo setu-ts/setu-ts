@@ -165,7 +165,7 @@ interface AssertionFacts {
  * the latest `NotOnOrAfter`, from the VERIFIED assertion the library returned
  * (`getAssertion()` parses the signed XML, not the unsigned envelope).
  */
-export function assertionFacts(profile: SamlLibraryProfile): AssertionFacts | null {
+function assertionFacts(profile: SamlLibraryProfile): AssertionFacts | null {
   const parsed = typeof profile.getAssertion === 'function' ? profile.getAssertion() : undefined;
   const assertion = typeof parsed === 'object' && parsed !== null
     ? (parsed as Record<string, unknown>).Assertion
@@ -204,7 +204,7 @@ export function assertionFacts(profile: SamlLibraryProfile): AssertionFacts | nu
 }
 
 /** Builds the frozen profile `toPrincipal` receives, or `null` without a NameID. */
-export function toSamlProfile(profile: SamlLibraryProfile): SamlProfile | null {
+function toSamlProfile(profile: SamlLibraryProfile): SamlProfile | null {
   const issuer = stringOf(profile.issuer);
   const nameID = stringOf(profile.nameID);
   if (issuer === undefined || nameID === undefined) {
