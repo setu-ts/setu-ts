@@ -1,11 +1,11 @@
 # Milestone 98o — Diagnostics session renewal (`@setu-ts/diagnostics-plugin`)
 
-> **Status:** Planning, revision 4. Branch: `feat/m98o-session-renewal`. `main` is protected — all
-> work (implementation + fixes) stays on this one branch until it merges via a single PR. The design
-> security review (§10.1) is complete: round 3 approved revision 3, and revision 4 folds in its
-> non-blocking findings. Every maintainer decision in §10.1 is approved (2026-10-02), so the plan is
-> ready to implement; implementation has not started (ROADMAP, "Mandatory Security Audit Gates for
-> M98d–M98n").
+> **Status:** Implementation in progress, revision 4. Branch: `feat/m98o-session-renewal`. `main` is
+> protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> single PR. The design security review (§10.1) is complete: round 3 approved revision 3, and
+> revision 4 folds in its non-blocking findings. Every maintainer decision in §10.1 is approved
+> (2026-10-02), so the plan is ready to implement; implementation started 2026-10-02 (ROADMAP,
+> "Mandatory Security Audit Gates for M98d–M98n").
 
 ## 0. Objective & scope
 

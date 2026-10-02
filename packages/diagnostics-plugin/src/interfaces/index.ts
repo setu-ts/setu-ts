@@ -86,6 +86,30 @@ export interface DiagnosticsPluginOptions {
    * is 1 through 3,600,000.
    */
   readonly ttlMs?: number;
+  /**
+   * Absolute renewable-session lifetime in milliseconds, measured from
+   * activation on the runtime's monotonic clock. Omit this option to disable
+   * renewal and preserve the legacy status body and expiry timer behavior.
+   * When present it must be at least `ttlMs` and at most 43,200,000 (12 hours
+   * of awake time).
+   */
+  readonly maxSessionLifetimeMs?: number;
+}
+
+/**
+ * The authenticated remaining lifetime of a diagnostics session.
+ *
+ * `renewal` is `null` when the application did not opt into renewal. When it
+ * is present, clients should renew with margin (normally after half of
+ * `expiresInMs`) rather than waiting for the session to approach expiry.
+ *
+ * @since 0.8.0
+ */
+export interface DiagnosticsSessionLifetime {
+  /** Whole milliseconds remaining in the current session window. */
+  readonly expiresInMs: number;
+  /** The renewable cap remaining from activation, or `null` when unsupported. */
+  readonly renewal: Readonly<{ readonly maxRemainingMs: number }> | null;
 }
 
 /**
@@ -178,6 +202,29 @@ export interface DiagnosticsClientOptions {
  * @since 0.8.0
  */
 export interface IDiagnosticsClient {
+  /**
+   * Reads the session lifetime through exactly one signed status exchange.
+   * On an unpaired client this exchange also performs pairing.
+   *
+   * @returns The frozen authenticated session lifetime
+   * @throws {Error} Under the same conditions as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  session(): Promise<DiagnosticsSessionLifetime>;
+  /**
+   * Extends the current session window without changing its key, session ID,
+   * instance binding, or sequence space. An unpaired client pairs first. If
+   * the authenticated status did not advertise renewal, this throws locally
+   * without sending a renewal request.
+   *
+   * Schedule this call with margin, normally after half of `expiresInMs`.
+   *
+   * @returns The frozen authenticated lifetime after renewal
+   * @throws {Error} When renewal is unsupported or under the same conditions
+   * as {@linkcode snapshot}
+   * @since 0.8.0
+   */
+  renew(): Promise<DiagnosticsSessionLifetime>;
   /**
    * Reads the current application-composition snapshot through the signed
    * protocol. Performs the `/v1/status` pairing exchange first if the

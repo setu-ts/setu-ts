@@ -44,6 +44,7 @@ describe('renderDevEntry', () => {
     const entry = renderDevEntry({ devtoolPort: 4919 });
     expect(entry).toContain('port: 4919,');
     expect(entry).toContain('enabled: true,');
+    expect(entry).toContain('maxSessionLifetimeMs: 28_800_000,');
     // The entry READS; it never mints a pair.
     expect(entry).not.toContain('getRandomValues');
     expect(entry).not.toContain('crypto.randomUUID');

@@ -48,7 +48,8 @@ export class DiagnosticsSessionState {
   #subtle: SubtleCrypto;
   #key: CryptoKey | null;
   readonly sessionId: string;
-  readonly #expiresAtHr: number;
+  #expiresAtHr: number;
+  readonly #maxExpiresAtHr: number | null;
   readonly #ttlMs: number;
   #instanceId: string | null = null;
   #highestSequence = 0;
@@ -60,12 +61,14 @@ export class DiagnosticsSessionState {
     sessionId: string,
     ttlMs: number,
     expiresAtHr: number,
+    maxExpiresAtHr: number | null,
   ) {
     this.#subtle = subtle;
     this.#key = key;
     this.sessionId = sessionId;
     this.#ttlMs = ttlMs;
     this.#expiresAtHr = expiresAtHr;
+    this.#maxExpiresAtHr = maxExpiresAtHr;
   }
 
   /**
@@ -77,6 +80,7 @@ export class DiagnosticsSessionState {
    * @param sessionKey - The launch's 32-byte session key
    * @param ttlMs - Lifetime in milliseconds
    * @param clock - The monotonic clock
+   * @param maxSessionLifetimeMs - Absolute renewable lifetime, or `undefined`
    * @returns The active session
    */
   static async create(
@@ -85,14 +89,17 @@ export class DiagnosticsSessionState {
     sessionKey: Uint8Array,
     ttlMs: number,
     clock: SessionClock,
+    maxSessionLifetimeMs?: number,
   ): Promise<DiagnosticsSessionState> {
     const key = await importSessionKey(subtle, sessionKey);
+    const activatedAtHr = clock.hrtime();
     return new DiagnosticsSessionState(
       subtle,
       key,
       sessionId,
       ttlMs,
-      clock.hrtime() + ttlMs,
+      activatedAtHr + ttlMs,
+      maxSessionLifetimeMs === undefined ? null : activatedAtHr + maxSessionLifetimeMs,
     );
   }
 
@@ -129,13 +136,59 @@ export class DiagnosticsSessionState {
   }
 
   /**
-   * The session's remaining lifetime in whole milliseconds, never negative.
+   * The session's remaining lifetime in milliseconds, never negative. The
+   * monotonic runtime clock may make this value fractional.
    *
    * @param clock - The monotonic clock
    * @returns Remaining milliseconds
    */
   remainingMs(clock: SessionClock): number {
     return Math.max(0, this.#expiresAtHr - clock.hrtime());
+  }
+
+  /** Whether this session was activated with an absolute renewal cap. */
+  get isRenewable(): boolean {
+    return this.#maxExpiresAtHr !== null;
+  }
+
+  /**
+   * Returns both remaining windows from one monotonic clock reading.
+   *
+   * @param clock - The monotonic clock
+   * @returns Whole milliseconds remaining, or `null` when renewal is disabled
+   */
+  lifetime(
+    clock: SessionClock,
+  ): Readonly<{ expiresInMs: number; maxRemainingMs: number }> | null {
+    const maxExpiresAtHr = this.#maxExpiresAtHr;
+    if (maxExpiresAtHr === null) {
+      return null;
+    }
+    const now = clock.hrtime();
+    return {
+      expiresInMs: Math.floor(Math.max(0, this.#expiresAtHr - now)),
+      maxRemainingMs: Math.floor(Math.max(0, maxExpiresAtHr - now)),
+    };
+  }
+
+  /**
+   * Extends the current window from one monotonic reading, without shortening
+   * it or crossing the activation-time cap.
+   *
+   * @param clock - The monotonic clock
+   * @returns `true` when the live renewable session accepted the operation
+   */
+  renew(clock: SessionClock): boolean {
+    const maxExpiresAtHr = this.#maxExpiresAtHr;
+    const now = clock.hrtime();
+    if (this.#revoked || maxExpiresAtHr === null || now >= this.#expiresAtHr) {
+      return false;
+    }
+    this.#expiresAtHr = Math.max(
+      this.#expiresAtHr,
+      Math.min(now + this.#ttlMs, maxExpiresAtHr),
+    );
+    return true;
   }
 
   /**

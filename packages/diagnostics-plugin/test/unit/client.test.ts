@@ -82,6 +82,12 @@ function fakeServer(
     legacyStatus?: boolean;
     /** The manifest to serve in the status body; defaults to the current one. */
     statusInspectors?: Record<string, boolean>;
+    /** Advertise renewal in status. */
+    renewal?: boolean;
+    /** Decide renewal presence independently for each status exchange. */
+    statusRenewal?: () => boolean;
+    /** Override the renewal response body. */
+    renewBody?: Record<string, unknown>;
     /** The body to serve for `/v1/health`; defaults to a ready snapshot. */
     healthBody?: Record<string, unknown>;
     /** The body to serve for `/v1/config`; defaults to a ready snapshot. */
@@ -162,7 +168,19 @@ function fakeServer(
         if (!overrides.legacyStatus) {
           body.inspectors = overrides.statusInspectors ?? currentInspectorsManifest();
         }
+        if (overrides.statusRenewal?.() ?? overrides.renewal) {
+          body.renewal = { maxRemainingMs: 28_000_000 };
+        }
         bodyText = JSON.stringify(body);
+      } else if (target === '/v1/renew') {
+        bodyText = JSON.stringify(
+          overrides.renewBody ?? {
+            version: 1,
+            instanceId: TEST_INSTANCE_ID,
+            expiresInMs: 900_000,
+            maxRemainingMs: 27_999_000,
+          },
+        );
       } else if (target === '/v1/snapshot') {
         bodyText = JSON.stringify(overrides.snapshotBody?.() ?? minimalSnapshot());
       } else if (target === '/v1/health') {
@@ -557,6 +575,78 @@ describe('Client — pairing and reads', () => {
       expect(sequences[i]).toBeGreaterThan(sequences[i - 1]);
     }
     client.close();
+  });
+});
+
+describe('Client — session renewal', () => {
+  it('pairs through session() and renews through the authenticated target', async () => {
+    const { client, requests } = buildClient({ server: { renewal: true } });
+    const initial = await client.session();
+    expect(initial).toEqual({
+      expiresInMs: 899_000,
+      renewal: { maxRemainingMs: 28_000_000 },
+    });
+    expect(Object.isFrozen(initial)).toBe(true);
+    expect(Object.isFrozen(initial.renewal)).toBe(true);
+    const renewed = await client.renew();
+    expect(renewed).toEqual({
+      expiresInMs: 900_000,
+      renewal: { maxRemainingMs: 27_999_000 },
+    });
+    expect(requests.map((request) => request.target)).toEqual(['/v1/status', '/v1/renew']);
+    client.close();
+  });
+
+  it('pairs first and sends no renew request when renewal is unsupported', async () => {
+    const { client, requests } = buildClient();
+    await expect(client.renew()).rejects.toThrow(CLIENT_ERRORS.notRenewable);
+    expect(requests.map((request) => request.target)).toEqual(['/v1/status']);
+    client.close();
+  });
+
+  it('refuses a changed renewal presence without latching terminal pairing failure', async () => {
+    let statusCalls = 0;
+    const { client } = buildClient({
+      server: {
+        statusRenewal() {
+          statusCalls += 1;
+          return statusCalls !== 2;
+        },
+      },
+    });
+    await client.session();
+    await expect(client.session()).rejects.toThrow(CLIENT_ERRORS.connection);
+    expect((await client.renew()).expiresInMs).toBe(900_000);
+    client.close();
+  });
+
+  it('refuses malformed renew bodies', async () => {
+    const bodies: readonly Record<string, unknown>[] = [
+      {
+        version: 1,
+        instanceId: 'wrong',
+        expiresInMs: 1,
+        maxRemainingMs: 2,
+      },
+      {
+        version: 1,
+        instanceId: TEST_INSTANCE_ID,
+        expiresInMs: 3,
+        maxRemainingMs: 2,
+      },
+      {
+        version: 1,
+        instanceId: TEST_INSTANCE_ID,
+        expiresInMs: 1,
+        maxRemainingMs: 2,
+        extra: true,
+      },
+    ];
+    for (const renewBody of bodies) {
+      const { client } = buildClient({ server: { renewal: true, renewBody } });
+      await expect(client.renew()).rejects.toThrow(CLIENT_ERRORS.connection);
+      client.close();
+    }
   });
 });
 

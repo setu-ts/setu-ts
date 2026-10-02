@@ -8,6 +8,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Diagnostics session renewal (M98o).** `DiagnosticsPluginOptions.maxSessionLifetimeMs` opts a
+  launch into renewing its existing authenticated session for up to 12 hours of awake monotonic
+  time. Protocol v1 gains signed `GET /v1/renew` and an optional status `renewal` member; the native
+  client gains required `session()` and `renew()` methods returning the new
+  `DiagnosticsSessionLifetime`. Renewal keeps the same key, session ID, instance binding and
+  sequence space, remains behind replay/rate/instance gates, and the expiry timer re-arms only for
+  opted-in sessions. The CLI's generated devtool entry selects an 8-hour cap. These required client
+  methods widen the previously unpublished `IDiagnosticsClient` interface.
+
 - **Multi-factor authentication with TOTP (M100d).** `AuthPluginOptions.signIn.mfa` adds a TOTP
   second factor to any sign-in flow that records its principal through `IAuthSessionService`.
   `TotpService` (app-instantiated, like `PasswordHasher`) computes RFC 6238 codes (HMAC-SHA1,

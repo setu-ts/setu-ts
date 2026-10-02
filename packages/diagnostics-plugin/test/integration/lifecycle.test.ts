@@ -8,7 +8,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import { createApplication } from '../../../kernel/src/index.ts';
-import { RuntimePlugin } from '../../../runtime/src/index.ts';
+import { createRuntimeServices, RuntimePlugin } from '../../../runtime/src/index.ts';
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import type { IDiagnosticsPlugin } from '../../src/interfaces/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
@@ -19,7 +19,10 @@ import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
  * @param pluginOptions - Optional plugin option overrides
  * @returns The running app, port, and plugin
  */
-async function startApp(pluginOptions?: { ttlMs?: number }): Promise<{
+async function startApp(
+  pluginOptions?: { ttlMs?: number; maxSessionLifetimeMs?: number },
+  subtle?: SubtleCrypto,
+): Promise<{
   app: ReturnType<typeof createApplication>;
   port: number;
   plugin: IDiagnosticsPlugin;
@@ -35,7 +38,17 @@ async function startApp(pluginOptions?: { ttlMs?: number }): Promise<{
     ...pluginOptions,
   });
   const app = createApplication({
-    plugins: [RuntimePlugin(), plugin],
+    plugins: [
+      RuntimePlugin(
+        subtle === undefined ? undefined : {
+          platform: 'deno',
+          adapters: {
+            deno: () => ({ ...createRuntimeServices({ platform: 'deno' }), subtle }),
+          },
+        },
+      ),
+      plugin,
+    ],
     diagnostics: {},
   });
   await app.start();
@@ -86,6 +99,54 @@ describe('Lifecycle', () => {
     // The parent application still serves.
     const injected = await app.inject({ method: 'GET', url: '/nope' });
     expect(injected.statusCode).toBeGreaterThan(0);
+    diagnostics.close();
+    await app.stop();
+  });
+
+  it('revoke during a renewal digest releases no successful body', async () => {
+    let blockDigest = false;
+    let signalDigestStarted: () => void = () => {};
+    let releaseDigest: () => void = () => {};
+    const digestStarted = new Promise<void>((resolve) => {
+      signalDigestStarted = resolve;
+    });
+    const digestReleased = new Promise<void>((resolve) => {
+      releaseDigest = resolve;
+    });
+    const base = createRuntimeServices({ platform: 'deno' }).subtle;
+    const delayedSubtle = new Proxy(base, {
+      get(target, property): unknown {
+        if (property === 'digest') {
+          return async (
+            algorithm: AlgorithmIdentifier,
+            data: BufferSource,
+          ): Promise<ArrayBuffer> => {
+            if (blockDigest) {
+              signalDigestStarted();
+              await digestReleased;
+            }
+            return await target.digest(algorithm, data);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const { app, port, plugin } = await startApp(
+      { ttlMs: 1_000, maxSessionLifetimeMs: 3_000 },
+      delayedSubtle,
+    );
+    const diagnostics = client(port);
+    await diagnostics.session();
+
+    blockDigest = true;
+    const renewal = diagnostics.renew();
+    await digestStarted;
+    const revocation = plugin.revoke();
+    releaseDigest();
+
+    await expect(renewal).rejects.toThrow();
+    await revocation;
     diagnostics.close();
     await app.stop();
   });

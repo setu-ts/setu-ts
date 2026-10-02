@@ -24,26 +24,29 @@ verified.
 
 ## Operations
 
-| Target                                  | Answer                                                                                                                                                                           |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /v1/status`                        | `{ version: 1, instanceId, expiresInMs, inspectors }` — binds the session to the application instance on the first exchange; `inspectors` is the M98d inspector manifest (below) |
-| `GET /v1/snapshot`                      | M98a's compact final snapshot JSON (not an envelope)                                                                                                                             |
-| `GET /v1/events?after=N&limit=N`        | M98a's frozen event batch; `after` is a canonical non-negative decimal, `limit` is 1–128, in exactly this order                                                                  |
-| `GET /v1/health`                        | M98d's minimized health-observation snapshot (below)                                                                                                                             |
-| `GET /v1/config`                        | M98e's value-free configuration-provenance snapshot (below)                                                                                                                      |
-| `GET /v1/queues?after=N&limit=N`        | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                                                  |
-| `GET /v1/cache`                         | M98i's cache operation counters across every cache source (below)                                                                                                                |
-| `GET /v1/scheduler`                     | M98k's scheduler execution observations across every scheduler source (below)                                                                                                    |
-| `GET /v1/traces?after=N&limit=N`        | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
-| `GET /v1/authorization?after=N&limit=N` | M98h's authorization-decision-explanation batch (below); the same canonical query grammar as `/v1/events`                                                                        |
-| `GET /v1/event`                         | M98j's aggregated event-dispatch observation snapshot (below); a SNAPSHOT operation — no query is admitted, exactly like `/v1/health` and `/v1/config`                           |
-| `GET /v1/realtime`                      | M98l's realtime lifecycle observations across every WebSocket, SSE and backplane source (below); a SNAPSHOT operation — no query is admitted                                     |
-| `GET /v1/outbound-http`                 | M98n's outbound HTTP attempt counters across every observed-fetch helper (below); a SNAPSHOT operation — no query is admitted                                                    |
-| `GET /v1/storage`                       | M98m's storage operation counters across every storage source (below); a SNAPSHOT operation — no query is admitted, exactly like `/v1/cache`                                     |
+| Target                                  | Answer                                                                                                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /v1/status`                        | `{ version: 1, instanceId, expiresInMs, inspectors, renewal? }` — binds the session; `renewal` is present only when the application opted in (below)   |
+| `GET /v1/renew`                         | Extends the same authenticated session within its activation-time cap and returns `{ version: 1, instanceId, expiresInMs, maxRemainingMs }`            |
+| `GET /v1/snapshot`                      | M98a's compact final snapshot JSON (not an envelope)                                                                                                   |
+| `GET /v1/events?after=N&limit=N`        | M98a's frozen event batch; `after` is a canonical non-negative decimal, `limit` is 1–128, in exactly this order                                        |
+| `GET /v1/health`                        | M98d's minimized health-observation snapshot (below)                                                                                                   |
+| `GET /v1/config`                        | M98e's value-free configuration-provenance snapshot (below)                                                                                            |
+| `GET /v1/queues?after=N&limit=N`        | M98f's merged queue-observation batch (below); the same canonical query grammar as `/v1/events`                                                        |
+| `GET /v1/cache`                         | M98i's cache operation counters across every cache source (below)                                                                                      |
+| `GET /v1/scheduler`                     | M98k's scheduler execution observations across every scheduler source (below)                                                                          |
+| `GET /v1/traces?after=N&limit=N`        | M98g's completed-sampled-span observation batch (below); the same canonical query grammar as `/v1/events`                                              |
+| `GET /v1/authorization?after=N&limit=N` | M98h's authorization-decision-explanation batch (below); the same canonical query grammar as `/v1/events`                                              |
+| `GET /v1/event`                         | M98j's aggregated event-dispatch observation snapshot (below); a SNAPSHOT operation — no query is admitted, exactly like `/v1/health` and `/v1/config` |
+| `GET /v1/realtime`                      | M98l's realtime lifecycle observations across every WebSocket, SSE and backplane source (below); a SNAPSHOT operation — no query is admitted           |
+| `GET /v1/outbound-http`                 | M98n's outbound HTTP attempt counters across every observed-fetch helper (below); a SNAPSHOT operation — no query is admitted                          |
+| `GET /v1/storage`                       | M98m's storage operation counters across every storage source (below); a SNAPSHOT operation — no query is admitted, exactly like `/v1/cache`           |
 
 Everything else — unknown operations, extra path segments, percent-encoded aliases, reordered,
-duplicated, or unknown query fields, non-canonical numbers (leading zeros), write methods — is
-refused.
+duplicated, or unknown query fields, non-canonical numbers (leading zeros), application or
+diagnostic mutation operations, and write methods — is refused. Session renewal is the sole
+operation whose purpose is to change connector state; it cannot change application or diagnostic
+state.
 
 ## Required request headers
 
@@ -103,7 +106,12 @@ keep that property for its canonical target.
 - Sequence numbers are strictly monotonic per session; the server atomically advances its highest
   accepted number after `subtle.verify` and re-checks revocation and expiry in the same synchronous
   gate. Replays and races cannot both pass.
-- Expiry uses the runtime's monotonic clock from activation (15 minutes default, 1 ms–1 h range).
+- The initial expiry window uses the runtime's monotonic clock from activation (15 minutes default,
+  1 ms–1 h range). An application may opt into renewal with `maxSessionLifetimeMs`, from the initial
+  TTL through 43,200,000 ms (12 hours of awake time). Each accepted renewal keeps the same key,
+  session ID, instance binding and sequence space and sets expiry to
+  `max(current expiry, min(now + ttlMs, activation + maxSessionLifetimeMs))`. It never revives or
+  shortens a session. Without the option, the status bytes and expiry behavior are unchanged.
 - The first successful signed status exchange binds the session to M98a's non-null instance UUID;
   later requests must present exactly that ID, and an empty instance is never accepted after the
   initial exchange. Obtaining a UUID alone grants nothing.
@@ -145,14 +153,14 @@ Unauthenticated refusals are not signed and use one fixed shape:
 { "version": 1, "error": "invalid-request" }
 ```
 
-| Code                  | Status | When                                             |
-| --------------------- | ------ | ------------------------------------------------ |
-| `invalid-request`     | 400    | structural/grammar/framing violation             |
-| `unauthorized`        | 401    | wrong session, wrong key, wrong instance, replay |
-| `expired`             | 401    | monotonic expiry reached                         |
-| `unsupported-version` | 400    | source DTO version is not 1                      |
-| `unavailable`         | 503    | internal failure or an over-limit result         |
-| `rate-limited`        | 429    | refusal budget exhausted or session budget spent |
+| Code                  | Status | When                                                                                             |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------ |
+| `invalid-request`     | 400    | structural/grammar/framing violation, or an authenticated operation the session does not support |
+| `unauthorized`        | 401    | wrong session, wrong key, wrong instance, replay                                                 |
+| `expired`             | 401    | monotonic expiry reached, or revocation landed while a request was in flight                     |
+| `unsupported-version` | 400    | source DTO version is not 1                                                                      |
+| `unavailable`         | 503    | internal failure or an over-limit result                                                         |
+| `rate-limited`        | 429    | refusal budget exhausted or session budget spent                                                 |
 
 No refusal ever echoes supplied input, error causes, or stacks. A wrong key, a wrong instance and a
 replay are all the same `unauthorized` while the session is live (a replay is refused by the
@@ -164,6 +172,27 @@ anonymous refusal budget, so once that budget is exhausted a wrong session ID an
 while the matching session ID with an invalid MAC answers `unauthorized`. That confirms only a
 candidate session ID; it reveals nothing about whether the session is live or has ended (see the
 design security review, R7).
+
+## Session renewal (M98o)
+
+Renewal is opt-in. A renewable signed status body adds exactly:
+
+```json
+"renewal": { "maxRemainingMs": 28799000 }
+```
+
+For that body, `expiresInMs` and `maxRemainingMs` are non-negative safe integers measured from one
+monotonic-clock reading, with `expiresInMs <= maxRemainingMs`. A status without renewal retains the
+pre-M98o numeric `expiresInMs` contract, including fractional monotonic values. `renewal` is valid
+only beside the exact `inspectors` manifest; it is not admitted on the legacy three-field status.
+
+`GET /v1/renew` passes every ordinary authentication, sequence, budget, and bound-instance gate
+before it mutates the expiry. A disabled renewal is therefore refused only after authentication as
+`invalid-request`; a wrong instance remains `unauthorized`; expiry remains terminal. The response
+uses the exact four-field DTO shown in the operations table, and both lifetime values obey the same
+safe-integer and inequality rules. The native client never parses an unsigned refusal body:
+`session()` obtains a fresh signed status lifetime, while `renew()` sends no renew request when the
+paired status did not advertise support.
 
 ## Health observations (M98d)
 

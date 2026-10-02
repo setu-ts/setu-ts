@@ -4238,25 +4238,26 @@ app.router.post('/thumbnail', async (ctx) => {
 An authenticated local connector between a native devtool client and M98a's kernel diagnostics,
 served over a runtime-owned IPv4 loopback listener. Deno and bounded polling only; no browser UI, no
 application data, no control commands, and no environment fallback. Activation is explicit:
-`DiagnosticsPlugin({ enabled: true, port, sessionId, sessionKey, ttlMs? })` — an omitted or `false`
-`enabled`, an invalid port or credential, an unsupported runtime, or an application without M98a
-diagnostics refuses activation. `enabled` is typed as the LITERAL `true`, not `boolean`: there is no
-disabled mode, so `enabled: !isProduction` — which would throw at composition and stop a production
-application booting — is a compile error rather than an outage. Keep the connector out of production
-by deciding whether to CONSTRUCT it, ideally from a development-only entry point the production
-graph never imports; the package README has the worked composition and the Deno permission grant
-that refuses the bind independently. Loopback is not authentication (the HMAC-SHA-256 signed
-protocol is) and not encryption (a privileged local sniffer reads authenticated bytes; remote and
-production use are unsupported).
+`DiagnosticsPlugin({ enabled: true, port, sessionId, sessionKey, ttlMs?, maxSessionLifetimeMs? })` —
+an omitted or `false` `enabled`, an invalid port or credential, an unsupported runtime, or an
+application without M98a diagnostics refuses activation. `enabled` is typed as the LITERAL `true`,
+not `boolean`: there is no disabled mode, so `enabled: !isProduction` — which would throw at
+composition and stop a production application booting — is a compile error rather than an outage.
+Keep the connector out of production by deciding whether to CONSTRUCT it, ideally from a
+development-only entry point the production graph never imports; the package README has the worked
+composition and the Deno permission grant that refuses the bind independently. Loopback is not
+authentication (the HMAC-SHA-256 signed protocol is) and not encryption (a privileged local sniffer
+reads authenticated bytes; remote and production use are unsupported).
 
-| Export                     | Kind      | Since |
-| -------------------------- | --------- | ----- |
-| `DiagnosticsPlugin`        | function  | 0.8.0 |
-| `IDiagnosticsPlugin`       | interface | 0.8.0 |
-| `DiagnosticsPluginOptions` | interface | 0.8.0 |
-| `createDiagnosticsClient`  | function  | 0.8.0 |
-| `IDiagnosticsClient`       | interface | 0.8.0 |
-| `DiagnosticsClientOptions` | interface | 0.8.0 |
+| Export                       | Kind      | Since |
+| ---------------------------- | --------- | ----- |
+| `DiagnosticsPlugin`          | function  | 0.8.0 |
+| `IDiagnosticsPlugin`         | interface | 0.8.0 |
+| `DiagnosticsPluginOptions`   | interface | 0.8.0 |
+| `createDiagnosticsClient`    | function  | 0.8.0 |
+| `IDiagnosticsClient`         | interface | 0.8.0 |
+| `DiagnosticsClientOptions`   | interface | 0.8.0 |
+| `DiagnosticsSessionLifetime` | interface | 0.8.0 |
 
 `IDiagnosticsPlugin.revoke()` immediately disables authorization, drops key references, and closes
 the listener without stopping the parent application; it is idempotent, and a revoked instance never
@@ -4273,6 +4274,18 @@ edge records and the event batch's events and cursor included (see
 A middleware node's `priority` and an event's `statusCode` are left unranged because the application
 sets both: either may be any finite number (a status is not necessarily a valid HTTP status), and
 the kernel omits a non-finite value rather than letting it serialize to `null`.
+
+**Session renewal (M98o).** `maxSessionLifetimeMs` explicitly opts a session into renewal; it must
+be an integer from `ttlMs` through 43,200,000 (12 hours of awake, monotonic time). Without it,
+status bytes and timer behavior are unchanged. With it, signed status adds
+`renewal: { maxRemainingMs }`, `client.session(): Promise<DiagnosticsSessionLifetime>` returns the
+fresh authenticated lifetime, and `client.renew()` extends the same key/session/instance/sequence
+space by at most one TTL window without crossing the activation-time cap. Both returned lifetime
+values are deeply frozen non-negative safe integers and `expiresInMs <= maxRemainingMs`; renewal
+support is represented by `renewal === null`, not an exported error type. Consumers should renew at
+roughly half the remaining window. The connector serves the authenticated, replay-protected
+`GET /v1/renew`; the client still treats every non-200 as its fixed connection error and never
+parses unsigned refusal bodies.
 
 **Health observations (M98d).** The status body now carries an `inspectors` manifest —
 `{ health: true, configuration: true, queues: true, traces: true, authorization: true,

@@ -55,6 +55,7 @@ const diagnostics = DiagnosticsPlugin({
   sessionId, // 16 random bytes as 32 lowercase hex, per launch
   sessionKey, // 32 random bytes, per launch
   ttlMs: 900_000, // optional; 15 minutes default, max 1 hour
+  maxSessionLifetimeMs: 28_800_000, // optional renewal cap; max 12 hours awake time
 });
 
 const app = createApplication({
@@ -178,6 +179,13 @@ maintained devtool. Every dependency is injected (`subtle`, `fetch`, a `timing` 
 serialized with strictly increasing sequence numbers; the initial pairing exchange is terminal on
 failure; response MACs verify over the exact bounded bytes before parsing.
 
+`client.session()` returns the authenticated remaining lifetime. When its `renewal` member is not
+`null`, `client.renew()` extends the same session — same key, session ID, instance binding and
+sequence space — by at most one `ttlMs` window and never beyond the activation-time
+`maxSessionLifetimeMs`. Schedule renewal with margin, normally after half of `expiresInMs`. Omitting
+`maxSessionLifetimeMs` preserves the legacy status bytes and expiry timer and makes `renew()` throw
+locally without probing `/v1/renew`.
+
 The M98d inspector operation is read through `client.health(): Promise<HealthDiagnosticsSnapshot>` —
 the minimized health-observation snapshot the health plugin registers under
 `CAPABILITIES.HEALTH_DIAGNOSTICS`. A connector without a health source answers a typed
@@ -270,14 +278,15 @@ arrival age at one process, never a global timeline.
 
 ## Exports
 
-| Export                     | Kind      |
-| -------------------------- | --------- |
-| `createDiagnosticsClient`  | function  |
-| `DiagnosticsPlugin`        | function  |
-| `DiagnosticsClientOptions` | interface |
-| `DiagnosticsPluginOptions` | interface |
-| `IDiagnosticsClient`       | interface |
-| `IDiagnosticsPlugin`       | interface |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `createDiagnosticsClient`    | function  |
+| `DiagnosticsPlugin`          | function  |
+| `DiagnosticsClientOptions`   | interface |
+| `DiagnosticsPluginOptions`   | interface |
+| `DiagnosticsSessionLifetime` | interface |
+| `IDiagnosticsClient`         | interface |
+| `IDiagnosticsPlugin`         | interface |
 
 Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
 drifts.

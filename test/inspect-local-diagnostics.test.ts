@@ -33,6 +33,7 @@ describe('inspect-local-diagnostics demo', () => {
 
     // The evidence lines, in order.
     expect(output).toContain('paired and read snapshot: state=running');
+    expect(output).toMatch(/renewed session: before=\d+ after=\d+ cap=\d+/);
     expect(output).toMatch(/read [1-9]\d* event\(s\)/);
     expect(output).toContain('post-revoke read refused: true');
     expect(output).toContain('application still serves: GET /items -> 200');

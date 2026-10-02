@@ -87,6 +87,7 @@ import {
   PROTOCOL_ERRORS,
   PROTOCOL_RESPONSE_HEADERS,
   type ProtocolErrorCode,
+  renewBody,
   statusBody,
 } from '../protocol/protocol.ts';
 
@@ -1112,10 +1113,34 @@ export function createConnectorHandler(
           return refusalResponse('unauthorized');
         }
         deps.session.bindInstance(snapshot.instanceId);
-        projected = statusBody(
-          snapshot.instanceId,
-          deps.session.remainingMs(deps.clock),
-          currentInspectorsManifest(),
+        const lifetime = deps.session.lifetime(deps.clock);
+        projected = lifetime === null
+          ? statusBody(
+            snapshot.instanceId,
+            deps.session.remainingMs(deps.clock),
+            currentInspectorsManifest(),
+          )
+          : statusBody(
+            snapshot.instanceId,
+            lifetime.expiresInMs,
+            currentInspectorsManifest(),
+            { maxRemainingMs: lifetime.maxRemainingMs },
+          );
+      } else if (target.op === 'renew') {
+        if (!deps.session.isRenewable) {
+          return refusalResponse('invalid-request');
+        }
+        if (!deps.session.renew(deps.clock)) {
+          return refusalResponse('expired');
+        }
+        const lifetime = deps.session.lifetime(deps.clock);
+        if (lifetime === null) {
+          return refusalResponse('expired');
+        }
+        projected = renewBody(
+          parsed.instance as string,
+          lifetime.expiresInMs,
+          lifetime.maxRemainingMs,
         );
       } else if (target.op === 'snapshot') {
         const snapshot = deps.source.snapshot();

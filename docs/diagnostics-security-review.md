@@ -97,23 +97,24 @@ Outside the threat model, and stated rather than implied:
 
 Fixed, not configurable — a configurable security bound is one more thing to set wrongly.
 
-| Bound                                            | Value                        |
-| ------------------------------------------------ | ---------------------------- |
-| Bind address                                     | `127.0.0.1` only             |
-| Port                                             | 1024–65535, no fallback      |
-| Active listeners                                 | 1                            |
-| Simultaneous connector handlers                  | 8, one reserved for verified |
-| Unpaired lanes (anonymous and verify)            | 7 of the 8                   |
-| Verify lane                                      | 4                            |
-| Anonymous refusal budget                         | 5/s, burst 10                |
-| Session budget (debited only after verification) | 20/s, burst 40               |
-| Parsed header bytes                              | 8 KiB                        |
-| Request body                                     | 0 bytes                      |
-| Response body                                    | 256 KiB, measured as sent    |
-| Events per read                                  | 128                          |
-| Session lifetime                                 | 15 min default, 1 ms – 1 h   |
-| Client request deadline                          | 5 s                          |
-| Sequence space                                   | 1 – `MAX_SAFE_INTEGER`       |
+| Bound                                            | Value                         |
+| ------------------------------------------------ | ----------------------------- |
+| Bind address                                     | `127.0.0.1` only              |
+| Port                                             | 1024–65535, no fallback       |
+| Active listeners                                 | 1                             |
+| Simultaneous connector handlers                  | 8, one reserved for verified  |
+| Unpaired lanes (anonymous and verify)            | 7 of the 8                    |
+| Verify lane                                      | 4                             |
+| Anonymous refusal budget                         | 5/s, burst 10                 |
+| Session budget (debited only after verification) | 20/s, burst 40                |
+| Parsed header bytes                              | 8 KiB                         |
+| Request body                                     | 0 bytes                       |
+| Response body                                    | 256 KiB, measured as sent     |
+| Events per read                                  | 128                           |
+| Initial session window                           | 15 min default, 1 ms – 1 h    |
+| Renewable maximum (explicit opt-in)              | initial TTL – 12 h awake time |
+| Client request deadline                          | 5 s                           |
+| Sequence space                                   | 1 – `MAX_SAFE_INTEGER`        |
 
 ## Threats and resolutions
 
@@ -174,8 +175,8 @@ coalesces the very headers these cases are about.
 4. **Framing (T10).** A body by `Content-Length`, by `Transfer-Encoding`, and a duplicate singleton
    header line are refused before mapping, over a raw socket.
 5. **Canonicalization (T5, T7, R2).** Every signed request and response field is mutated one at a
-   time and each mutation is refused. Every canonical target the handler accepts, across all seven
-   operations, is shown to contain no LF.
+   time and each mutation is refused. Every canonical target the handler accepts, including
+   `/v1/renew`, is shown to contain no LF.
 6. **Floods (T8).** With the anonymous and verify lanes saturated by unpaired traffic, the paired
    client is still served. The session budget is shown not to move under unverified traffic.
 7. **Revocation in flight (T12).** A revocation landing during the read, during serialization and

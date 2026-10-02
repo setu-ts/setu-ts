@@ -72,6 +72,8 @@ export const PROTOCOL_RESPONSE_HEADERS: Readonly<Record<string, string>> = {
  * @internal
  */
 export const STATUS_TARGET = '/v1/status';
+/** The authenticated session-renewal target; it carries no query. */
+export const RENEW_TARGET = '/v1/renew';
 export const SNAPSHOT_TARGET = '/v1/snapshot';
 export const HEALTH_TARGET = '/v1/health';
 export const CONFIG_TARGET = '/v1/config';
@@ -164,6 +166,7 @@ const EVENTS_QUERY = /^after=([0-9]+)&limit=([0-9]+)$/;
 export interface ParsedTarget {
   readonly op:
     | 'status'
+    | 'renew'
     | 'snapshot'
     | 'events'
     | 'health'
@@ -201,6 +204,9 @@ export interface ParsedTarget {
 export function parseTarget(path: string, search: string): ParsedTarget | null {
   if (path === STATUS_TARGET && search === '') {
     return { op: 'status', canonicalTarget: STATUS_TARGET, after: 0, limit: 0 };
+  }
+  if (path === RENEW_TARGET && search === '') {
+    return { op: 'renew', canonicalTarget: RENEW_TARGET, after: 0, limit: 0 };
   }
   if (path === SNAPSHOT_TARGET && search === '') {
     return { op: 'snapshot', canonicalTarget: SNAPSHOT_TARGET, after: 0, limit: 0 };
@@ -415,8 +421,20 @@ export function statusBody(
   instanceId: string,
   expiresInMs: number,
   inspectors: InspectorsManifest,
+  renewal?: Readonly<{ maxRemainingMs: number }>,
 ): Record<string, unknown> {
-  return { version: 1, instanceId, expiresInMs, inspectors };
+  return renewal === undefined
+    ? { version: 1, instanceId, expiresInMs, inspectors }
+    : { version: 1, instanceId, expiresInMs, inspectors, renewal };
+}
+
+/** Builds the exact signed renewal response body. */
+export function renewBody(
+  instanceId: string,
+  expiresInMs: number,
+  maxRemainingMs: number,
+): Record<string, unknown> {
+  return { version: 1, instanceId, expiresInMs, maxRemainingMs };
 }
 
 /**
@@ -526,6 +544,43 @@ export interface ParsedStatusBody {
   readonly instanceId: string;
   readonly expiresInMs: number;
   readonly inspectors: InspectorsManifest;
+  readonly renewal: Readonly<{ readonly maxRemainingMs: number }> | null;
+}
+
+/** A validated renewal response body. */
+export interface ParsedRenewBody {
+  readonly instanceId: string;
+  readonly expiresInMs: number;
+  readonly maxRemainingMs: number;
+}
+
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Parses the exact renewal response DTO. */
+export function parseRenewBody(value: unknown): ParsedRenewBody | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const keys = Object.keys(value);
+  if (
+    keys.length !== 4 ||
+    !['version', 'instanceId', 'expiresInMs', 'maxRemainingMs'].every((key) => key in value) ||
+    value.version !== 1 ||
+    typeof value.instanceId !== 'string' ||
+    value.instanceId.length === 0 ||
+    !isNonNegativeSafeInteger(value.expiresInMs) ||
+    !isNonNegativeSafeInteger(value.maxRemainingMs) ||
+    value.expiresInMs > value.maxRemainingMs
+  ) {
+    return null;
+  }
+  return {
+    instanceId: value.instanceId,
+    expiresInMs: value.expiresInMs,
+    maxRemainingMs: value.maxRemainingMs,
+  };
 }
 
 /**
@@ -593,7 +648,8 @@ export function parseStatusBody(value: unknown): ParsedStatusBody | null {
   }
   const keys = Object.keys(value);
   const hasInspectors = 'inspectors' in value;
-  const expectedCount = STATUS_BASE_KEYS.length + (hasInspectors ? 1 : 0);
+  const hasRenewal = 'renewal' in value;
+  const expectedCount = STATUS_BASE_KEYS.length + (hasInspectors ? 1 : 0) + (hasRenewal ? 1 : 0);
   if (keys.length !== expectedCount || STATUS_BASE_KEYS.some((k) => !(k in value))) {
     return null;
   }
@@ -613,7 +669,21 @@ export function parseStatusBody(value: unknown): ParsedStatusBody | null {
   if (inspectors === null) {
     return null;
   }
-  return { instanceId: value.instanceId, expiresInMs: value.expiresInMs, inspectors };
+  let renewal: Readonly<{ readonly maxRemainingMs: number }> | null = null;
+  if (hasRenewal) {
+    if (
+      !hasInspectors || !isRecord(value.renewal) ||
+      Object.keys(value.renewal).length !== 1 ||
+      !('maxRemainingMs' in value.renewal) ||
+      !isNonNegativeSafeInteger(value.expiresInMs) ||
+      !isNonNegativeSafeInteger(value.renewal.maxRemainingMs) ||
+      value.expiresInMs > value.renewal.maxRemainingMs
+    ) {
+      return null;
+    }
+    renewal = { maxRemainingMs: value.renewal.maxRemainingMs };
+  }
+  return { instanceId: value.instanceId, expiresInMs: value.expiresInMs, inspectors, renewal };
 }
 
 /** The exact snapshot keys a core M98a snapshot carries. */

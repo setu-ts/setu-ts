@@ -15,6 +15,10 @@
  */
 
 export { DiagnosticsPlugin } from './plugin/diagnostics-plugin.ts';
-export type { DiagnosticsPluginOptions, IDiagnosticsPlugin } from './interfaces/index.ts';
+export type {
+  DiagnosticsPluginOptions,
+  DiagnosticsSessionLifetime,
+  IDiagnosticsPlugin,
+} from './interfaces/index.ts';
 export { createDiagnosticsClient } from './client/client.ts';
 export type { DiagnosticsClientOptions, IDiagnosticsClient } from './interfaces/index.ts';

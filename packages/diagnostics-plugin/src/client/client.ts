@@ -38,7 +38,11 @@ import {
   signFields,
   verifyFields,
 } from '../security/authentication.ts';
-import type { DiagnosticsClientOptions, IDiagnosticsClient } from '../interfaces/index.ts';
+import type {
+  DiagnosticsClientOptions,
+  DiagnosticsSessionLifetime,
+  IDiagnosticsClient,
+} from '../interfaces/index.ts';
 import {
   AUTHORIZATION_PATH,
   CACHE_TARGET,
@@ -51,9 +55,11 @@ import {
   isHealthSnapshotProjection,
   isSnapshotProjection,
   OUTBOUND_HTTP_TARGET,
+  parseRenewBody,
   parseStatusBody,
   QUEUES_PATH,
   REALTIME_TARGET,
+  RENEW_TARGET,
   SCHEDULER_TARGET,
   SNAPSHOT_TARGET,
   STATUS_TARGET,
@@ -103,6 +109,7 @@ export const CLIENT_ERRORS = {
   connection:
     'Diagnostics client: the connection failed verification or bounds; treat as a connection failure.',
   exhausted: 'Diagnostics client: the sequence space is exhausted; relaunch the application.',
+  notRenewable: 'Diagnostics client: this session does not support renewal.',
 } as const;
 
 /**
@@ -272,6 +279,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
   // all-false manifest, so `health()` answers `unsupported` without sending
   // an addon request.
   let inspectors: InspectorsManifest | null = null;
+  let renewalSupported: boolean | null = null;
   let nextSequence = 1;
   let keyPromise: Promise<CryptoKey> | null = null;
   const inFlight = new Set<AbortController>();
@@ -385,7 +393,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       // header identity is an input to the MAC rather than a constant of it.
       // Once paired, the request presented `instance`, and a signed response
       // naming any other identity is refused. The unpaired status exchange
-      // presents '' and is bound against its own body in `exchangeAndBind`.
+      // presents '' and is bound against its own body in `exchangeStatus`.
       if (instance !== '' && responseInstance !== instance) {
         throw new Error(CLIENT_ERRORS.connection);
       }
@@ -405,15 +413,27 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
     }
   };
 
-  const exchangeAndBind = async (target: string): Promise<void> => {
+  const toLifetime = (
+    expiresInMs: number,
+    renewal: Readonly<{ readonly maxRemainingMs: number }> | null,
+  ): DiagnosticsSessionLifetime => {
+    return Object.freeze({
+      expiresInMs,
+      renewal: renewal === null ? null : Object.freeze({ maxRemainingMs: renewal.maxRemainingMs }),
+    });
+  };
+
+  const exchangeStatus = async (initial: boolean): Promise<DiagnosticsSessionLifetime> => {
     let result;
     try {
-      result = await exchange(target);
+      result = await exchange(STATUS_TARGET);
     } catch (error) {
       // ANY failure of the initial pairing exchange is terminal: discard
       // the session and relaunch rather than accepting another server
       // under the same identity.
-      pairingFailed = true;
+      if (initial) {
+        pairingFailed = true;
+      }
       throw error;
     }
     // The status body is parsed only AFTER its MAC verified, and the parsed
@@ -425,24 +445,62 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
     try {
       parsed = parseBody(result.bodyText);
     } catch (error) {
-      pairingFailed = true;
+      if (initial) {
+        pairingFailed = true;
+      }
       throw error;
     }
     const status = parseStatusBody(parsed);
-    if (status === null || status.instanceId !== result.responseInstance) {
-      pairingFailed = true;
+    if (
+      status === null || status.instanceId !== result.responseInstance ||
+      (!initial && status.instanceId !== instanceId) ||
+      (!initial && renewalSupported !== (status.renewal !== null))
+    ) {
+      if (initial) {
+        pairingFailed = true;
+      }
       throw new Error(CLIENT_ERRORS.connection);
     }
     instanceId = status.instanceId;
     inspectors = status.inspectors;
+    renewalSupported = status.renewal !== null;
+    return toLifetime(status.expiresInMs, status.renewal);
   };
 
   return {
+    async session(): Promise<DiagnosticsSessionLifetime> {
+      return await enqueue(async () => {
+        checkUsable();
+        return await exchangeStatus(instanceId === null);
+      });
+    },
+
+    async renew(): Promise<DiagnosticsSessionLifetime> {
+      return await enqueue(async () => {
+        checkUsable();
+        if (instanceId === null) {
+          await exchangeStatus(true);
+          checkUsable();
+        }
+        if (renewalSupported !== true) {
+          throw new Error(CLIENT_ERRORS.notRenewable);
+        }
+        const result = await exchange(RENEW_TARGET);
+        const parsed = parseRenewBody(parseBody(result.bodyText));
+        if (parsed === null || parsed.instanceId !== instanceId) {
+          throw new Error(CLIENT_ERRORS.connection);
+        }
+        return toLifetime(parsed.expiresInMs, {
+          maxRemainingMs: parsed.maxRemainingMs,
+        });
+      });
+    },
+
     async snapshot(): Promise<DiagnosticsSnapshot> {
       return await enqueue(async () => {
         checkUsable();
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const result = await exchange(SNAPSHOT_TARGET);
@@ -466,7 +524,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         checkUsable();
         const effectiveLimit = validatePagedArgs(after, limit);
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const target = `/v1/events?after=${after}&limit=${effectiveLimit}`;
@@ -495,10 +553,10 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       return await enqueue(async () => {
         checkUsable();
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
-        // exchangeAndBind sets the instance or throws; capture it locally so
+        // exchangeStatus sets the instance or throws; capture it locally so
         // the typed unsupported DTO below is built from a non-null UUID.
         const bound = instanceId;
         if (bound === null) {
@@ -540,10 +598,10 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       return await enqueue(async () => {
         checkUsable();
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
-        // exchangeAndBind sets the instance or throws; capture it locally so
+        // exchangeStatus sets the instance or throws; capture it locally so
         // the typed unsupported DTO below is built from a non-null UUID.
         const bound = instanceId;
         if (bound === null) {
@@ -583,7 +641,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       return await enqueue(async () => {
         checkUsable();
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const bound = instanceId;
@@ -616,7 +674,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       return await enqueue(async () => {
         checkUsable();
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const bound = instanceId;
@@ -649,7 +707,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       return await enqueue(async () => {
         checkUsable();
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const bound = instanceId;
@@ -682,7 +740,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       return await enqueue(async () => {
         checkUsable();
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const bound = instanceId;
@@ -715,7 +773,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       return await enqueue(async () => {
         checkUsable();
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const bound = instanceId;
@@ -747,7 +805,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         checkUsable();
         const effectiveLimit = validatePagedArgs(after, limit);
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const bound = instanceId;
@@ -796,7 +854,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         checkUsable();
         const effectiveLimit = validatePagedArgs(after, limit);
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const bound = instanceId;
@@ -845,7 +903,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
       return await enqueue(async () => {
         checkUsable();
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const bound = instanceId;
@@ -884,7 +942,7 @@ export function createDiagnosticsClient(options: DiagnosticsClientOptions): IDia
         checkUsable();
         const effectiveLimit = validatePagedArgs(after, limit);
         if (instanceId === null) {
-          await exchangeAndBind(STATUS_TARGET);
+          await exchangeStatus(true);
           checkUsable();
         }
         const bound = instanceId;

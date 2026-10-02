@@ -58,6 +58,9 @@ const DEFAULT_TTL_MS = 900_000;
  */
 const MAX_TTL_MS = 3_600_000;
 
+/** The hard renewable-session ceiling: 12 hours of awake time. */
+const MAX_SESSION_LIFETIME_MS = 43_200_000;
+
 /**
  * Fixed activation errors. Each names the refusal, never a supplied value.
  *
@@ -70,6 +73,8 @@ export const PLUGIN_ERRORS = {
   invalidSessionId: 'DiagnosticsPlugin: sessionId must be exactly 32 lowercase hex characters.',
   invalidSessionKey: 'DiagnosticsPlugin: sessionKey must be exactly 32 bytes.',
   invalidTtl: 'DiagnosticsPlugin: ttlMs must be an integer from 1 to 3600000.',
+  invalidMaxSessionLifetime:
+    'DiagnosticsPlugin: maxSessionLifetimeMs must be an integer from ttlMs to 43200000.',
   tooManySchedulerSources:
     'DiagnosticsPlugin: more than 16 scheduler-diagnostics sources are registered; ' +
     'the connector reads at most 16.',
@@ -102,7 +107,9 @@ export const PLUGIN_ERRORS = {
  * @throws {Error} With one fixed message on any invalid option
  * @internal
  */
-export function validatePluginOptions(options: DiagnosticsPluginOptions): number {
+export function validatePluginOptions(
+  options: DiagnosticsPluginOptions,
+): Readonly<{ ttlMs: number; maxSessionLifetimeMs: number | undefined }> {
   if (options.enabled !== true) {
     throw new Error(PLUGIN_ERRORS.notEnabled);
   }
@@ -119,7 +126,16 @@ export function validatePluginOptions(options: DiagnosticsPluginOptions): number
   if (!Number.isSafeInteger(ttl) || ttl < 1 || ttl > MAX_TTL_MS) {
     throw new Error(PLUGIN_ERRORS.invalidTtl);
   }
-  return ttl;
+  const maxSessionLifetimeMs = options.maxSessionLifetimeMs;
+  if (
+    maxSessionLifetimeMs !== undefined &&
+    (!Number.isSafeInteger(maxSessionLifetimeMs) ||
+      maxSessionLifetimeMs < ttl ||
+      maxSessionLifetimeMs > MAX_SESSION_LIFETIME_MS)
+  ) {
+    throw new Error(PLUGIN_ERRORS.invalidMaxSessionLifetime);
+  }
+  return { ttlMs: ttl, maxSessionLifetimeMs };
 }
 
 /**
@@ -145,7 +161,7 @@ export function validatePluginOptions(options: DiagnosticsPluginOptions): number
  * @since 0.8.0
  */
 export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosticsPlugin {
-  const ttlMs = validatePluginOptions(options);
+  const { ttlMs, maxSessionLifetimeMs } = validatePluginOptions(options);
 
   // Declared before the revoke closure reads it: revoke() is valid before
   // register() runs, where `runtime` is still null.
@@ -283,6 +299,7 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           options.sessionKey,
           ttlMs,
           ctx.runtime,
+          maxSessionLifetimeMs,
         );
         // Post-await check: a revoke during key import leaves nothing bound.
         if (revoked || generation !== startGeneration) {
@@ -433,15 +450,32 @@ export function DiagnosticsPlugin(options: DiagnosticsPluginOptions): IDiagnosti
           return;
         }
         listener = opened;
-        expiryTimer = ctx.runtime.setTimeout(() => {
-          // Swallow deliberately: revoke() awaits listener.close(), whose
-          // shutdown may reject on an already-errored socket. An unhandled
-          // rejection terminates the whole process — exactly what revoke()
-          // must never do to the parent application. The socket is released
-          // by the OS regardless, and a DIRECT revoke() caller still sees
-          // the rejection.
-          revoke().catch(() => {});
-        }, ttlMs);
+        if (maxSessionLifetimeMs === undefined) {
+          expiryTimer = ctx.runtime.setTimeout(() => {
+            // Swallow deliberately: revoke() awaits listener.close(), whose
+            // shutdown may reject on an already-errored socket. An unhandled
+            // rejection terminates the whole process — exactly what revoke()
+            // must never do to the parent application. The socket is released
+            // by the OS regardless, and a DIRECT revoke() caller still sees
+            // the rejection.
+            revoke().catch(() => {});
+          }, ttlMs);
+          return;
+        }
+
+        const armRenewableExpiry = (): void => {
+          const current = session;
+          if (revoked || generation !== startGeneration || current === null) {
+            return;
+          }
+          const remainingMs = current.remainingMs(ctx.runtime);
+          if (remainingMs === 0) {
+            revoke().catch(() => {});
+            return;
+          }
+          expiryTimer = ctx.runtime.setTimeout(armRenewableExpiry, Math.ceil(remainingMs));
+        };
+        armRenewableExpiry();
       });
     },
 

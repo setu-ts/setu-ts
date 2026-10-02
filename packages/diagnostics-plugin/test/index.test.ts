@@ -7,7 +7,7 @@ import { describe, it } from '@std/testing/bdd';
 import { expect } from '@std/expect';
 
 import * as diagnosticsPlugin from '../src/index.ts';
-import type { IDiagnosticsClient } from '../src/interfaces/index.ts';
+import type { DiagnosticsSessionLifetime, IDiagnosticsClient } from '../src/interfaces/index.ts';
 
 describe('Diagnostics plugin — public surface', () => {
   it('exports the plugin factory and the client factory', () => {
@@ -31,6 +31,16 @@ describe('Diagnostics plugin — public surface', () => {
     // adds, beside the M98g traces() member.
     const probe = (client: IDiagnosticsClient): ReturnType<IDiagnosticsClient['authorization']> =>
       client.authorization(0, 128);
+    expect(typeof probe).toBe('function');
+  });
+
+  it('exposes the M98o session lifetime and client methods', () => {
+    const probe = (
+      client: IDiagnosticsClient,
+    ): readonly [Promise<DiagnosticsSessionLifetime>, Promise<DiagnosticsSessionLifetime>] => [
+      client.session(),
+      client.renew(),
+    ];
     expect(typeof probe).toBe('function');
   });
 });
