@@ -280,3 +280,11 @@ Run in fresh contexts per `.roo/skills/security-audit/SKILL.md`.
 - **Round 1** (on `b609e081`): FAILED — Finding 1 (Medium, unbounded and quadratic-cost memory
   request store) and Finding 2 (Low, `Issuer`/`NameID` sourced from attributes). Both fixed (K9,
   K10).
+- **Round 2** (on `cc4cdd30`): PASSED — both round-1 fixes verified with negative controls on a
+  scratch copy (attribute-sourced `nameID` signs in as `admin`; attribute-sourced issuer check fails
+  the committed `saml-routes` test; eviction disabled holds 1,000 entries against a cap of 100);
+  signature wrapping, comment truncation, replay and 8-way concurrency, binding, open redirect,
+  error disclosure, session fixation and XML DoS probes all refused. No finding open. Info only: I1
+  a login flood evicts pending logins (documented, fails closed); I2 the binding cookie is checked
+  after XML/signature work; I3 the ACS body is unbounded without `maxBodyBytes` (documented); I4 a
+  cross-site POST to the ACS clears the binding cookie (nuisance, fails closed).

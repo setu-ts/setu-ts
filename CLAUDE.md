@@ -5542,8 +5542,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   login is refused. Driven against the real node-saml (tampered, unsigned, wrong-key, wrapped before
   and after, wrong audience/issuer/recipient, expired, unsolicited, replayed, foreign-browser and
   concurrent posts) and against a real Keycloak 26.4 SAML client. A negative control found the
-  wrong-provider test passing vacuously through the binding check; it was tightened. The
-  committed-tree security audit has NOT yet been run — complete (PR pending).
+  wrong-provider test passing vacuously through the binding check; it was tightened. Code review
+  then found a signed assertion lacking its own `InResponseTo`, re-wrapped in a fresh response,
+  signing in (node-saml compares the signed and envelope values only when both exist), so every
+  `SubjectConfirmationData` must now name the consumed request. The fresh-context security audit
+  failed round 1 on a Medium — the unauthenticated login route grew `MemorySamlRequestStore` without
+  bound, with a full-map sweep on every write — and a Low: node-saml copies attributes onto its
+  profile, so an assertion with no `Issuer`/`NameID` element but same-named attributes supplied
+  both. The store is now capped (`maxPendingRequests`, oldest evicted, amortized sweeps) and both
+  values are read from the signed elements; round 2 passed on `cc4cdd30` — complete (PR pending).
 - **Next milestone** — **M98o** (`diagnostics-plugin` — diagnostics session renewal).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
