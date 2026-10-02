@@ -19,6 +19,7 @@ import type {
   MfaOptions,
   OAuth2Provider,
   OidcProvider,
+  PasskeyOptions,
   ProviderTokens,
   RefreshPrincipal,
   SignInConfig,
@@ -108,6 +109,12 @@ export interface CompiledSignIn {
    * The MFA policy, or `null` when no second factor is required.
    */
   readonly mfa: MfaOptions | null;
+  /**
+   * The raw passkeys option (M100e), or `null` when absent. Carried through
+   * here so the plugin compiles it once, beside the sign-in arm, with the
+   * same construction-time refusals.
+   */
+  readonly passkeys: PasskeyOptions | null;
 }
 
 function refuse(name: string, reason: string): never {
@@ -318,15 +325,17 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   }
   // `/` means no prefix at all; keeping it literal would build `//acme/login`.
   const basePath = configured === '/' ? '' : configured;
-  // An empty list is a mistake UNLESS `mfa` is set: a password-only application
-  // signs in through IAuthSessionService.signIn itself and needs `signIn` only
-  // for the auth-session capability, the pending state and the logout route.
+  // An empty list is a mistake UNLESS another sign-in method is configured: a
+  // password-only application (`mfa` set) signs in through
+  // IAuthSessionService.signIn itself, and a passkey-only application signs in
+  // through the passkey ceremony routes.
   if (
     !Array.isArray(config.providers) ||
-    (config.providers.length === 0 && config.mfa === undefined)
+    (config.providers.length === 0 && config.mfa === undefined && config.passkeys == null)
   ) {
     throw new AuthPluginConfigurationError(
-      'auth-plugin: signIn needs at least one provider, or signIn.mfa for a password-only sign-in',
+      'auth-plugin: signIn needs at least one provider, signIn.passkeys for a passkey sign-in, ' +
+        'or signIn.mfa for a password-only sign-in',
     );
   }
 
@@ -384,6 +393,7 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
     rpLogoutProvider: rpLogoutProviders[0] ?? null,
     refreshPrincipal: config.refreshPrincipal ?? null,
     mfa: compileMfa(config.mfa),
+    passkeys: config.passkeys ?? null,
   };
 }
 

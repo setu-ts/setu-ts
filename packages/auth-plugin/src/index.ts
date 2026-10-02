@@ -96,6 +96,16 @@ export {
   RedisRateLimitStore,
 } from './stores/redis-rate-limit-store.ts';
 
+// Passkeys (M100e)
+export type { PasskeyOptions, PasskeyRegistrationContext } from './interfaces/index.ts';
+export type {
+  IPasskeyStore,
+  PasskeySaveOptions,
+  PasskeySaveResult,
+  StoredPasskey,
+} from './stores/passkey-store.ts';
+export { MemoryPasskeyStore } from './stores/passkey-store.ts';
+
 // TOTP MFA (M100d)
 export { TotpService } from './mfa/totp-service.ts';
 export type {

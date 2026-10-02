@@ -8,6 +8,45 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Passkeys / WebAuthn (M100e).** `AuthPluginOptions.signIn.passkeys` (the published
+  `PasskeyOptions` type: `rpId` / `rpName` / `origins` / `store` / `resolvePrincipal` /
+  `userVerification`) registers the four ceremony routes —
+  `POST <basePath>/passkeys/{register,login}/{options,verify}` — and lets a passkey assertion with
+  user verification count as the second factor for `signIn.mfa`'s step-up model. The ceremonies are
+  WebAuthn Level 2 with attestation conveyance `none`, accepting ES256, RS256 and EdDSA credentials.
+  The verifier is zero-dependency: a bounded CBOR/COSE decoder over `runtime.subtle` (definite
+  lengths only, depth 4, 4 KiB, every unsupported major type refused). `@simplewebauthn/server` was
+  rejected as a runtime dependency because importing it installs a global `Reflect.getMetadata`
+  polyfill in every application that enables passkeys; it appears only in the package's differential
+  test as a test oracle. Challenges are held in the session with a 5-minute expiry AND claimed once
+  in the credential store (`IPasskeyStore.claimChallenge`), so a replayed assertion against an older
+  cookie copy is refused even though a synced passkey's counter is always `0`. `updateCounter` MUST
+  be implemented by custom stores as an atomic compare-and-advance, and `save` MUST be an atomic
+  compare-and-set (it stores a NEW credential only when its id is absent AND the principal is below
+  `maxPerPrincipal`, both checked in the same step as the insert, and answers `'saved'` /
+  `'duplicate'` / `'limit'` — a blind write lets two concurrent registrations of the same credential
+  id both succeed and lets the later record silently replace the earlier one, `principalId`
+  included, and a count read before a separate write lets a burst overshoot the cap); the shipped
+  `MemoryPasskeyStore` does both and purges expired claims in an amortized sweep (when the claim map
+  doubles) so its map stays bounded without a per-claim scan. Stored credentials (`StoredPasskey`)
+  record `attestation: 'unverified'` and a `backedUp` flag that is display only. Under the default
+  `userVerification: 'required'` a UV-unset assertion is refused everywhere; under
+  `'preferred'`/`'discouraged'` it is refused for a username-less sign-in and accepted only as the
+  second factor after a first one. A passkey-only `signIn` (`providers: []`, no `mfa`) is accepted,
+  and the `passkeys` option is validated when `AuthPlugin(...)` is called; the recorded method is
+  always `pop` (RFC 8176), never `hwk`/`swk` — with attestation unverified the plugin cannot know
+  how the key is protected. Any attestation `fmt` is accepted with its statement unread. Attestation
+  verification against trust roots remains out of scope. Registration is gated: a principal who
+  already holds a passkey must have proved a second factor (`otp`/`pop`) in the session
+  (`403 second-factor-required`). The first passkey is trusted on first use only without
+  `signIn.mfa`; with it, and no `PasskeyOptions.mayRegister`, the first passkey needs a proven
+  second factor too, because the principal may hold a TOTP factor the plugin cannot see. A set
+  `mayRegister` (context type `PasskeyRegistrationContext`) decides the first passkey and can refuse
+  more (`403 registration-refused`). One principal holds at most 16 credentials
+  (`409 credential-limit`), enforced atomically by
+  `IPasskeyStore.save(credential, { maxPerPrincipal })`, which answers a `PasskeySaveResult`
+  (`'saved'` / `'duplicate'` / `'limit'`) configured by `PasskeySaveOptions`. Only defined
+  `transports` values are stored, and an EC2 key must be a point on P-256.
 - **Multi-factor authentication with TOTP (M100d).** `AuthPluginOptions.signIn.mfa` adds a TOTP
   second factor to any sign-in flow that records its principal through `IAuthSessionService`.
   `TotpService` (app-instantiated, like `PasswordHasher`) computes RFC 6238 codes (HMAC-SHA1,

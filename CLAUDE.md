@@ -5519,8 +5519,15 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `ITotpStore` now writes through two atomic operations, `stageSecret` and a compare-and-set
   `confirmSecret`, and a password-only `signIn` with `providers: []` is allowed when `mfa` is set —
   complete (PR #388).
-- **Next milestone** — **M100e** (`packages/auth-plugin` — passkeys (WebAuthn); a passkey assertion
-  with user verification counts as a second factor for 100d's step-up model).
+- **Milestone 100e** (`packages/auth-plugin` — passkeys (WebAuthn): `signIn.passkeys` registers the
+  four ceremony routes, and a passkey assertion with user verification counts as a second factor for
+  100d's step-up model. Zero-dependency verifier — a bounded CBOR/COSE decoder over
+  `runtime.subtle`, with `@simplewebauthn/server` only as the differential test's oracle, because
+  importing it installs a global `Reflect.getMetadata`; challenges held in the session AND claimed
+  once in the store; `updateCounter` an atomic compare-and-advance; `pop` only, and a UV-less
+  assertion refused for username-less sign-in) — complete (PR #391).
+- **Next milestone** — **M100f** (`packages/auth-plugin` — SAML 2.0 Service Provider; the
+  highest-risk letter, over `@node-saml/node-saml@5` inject-or-lazy).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
