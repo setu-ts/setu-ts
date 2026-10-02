@@ -685,10 +685,10 @@ app.router.get('/account/bank', {
 
 `signIn.passkeys` registers the four ceremony routes — `POST <basePath>/passkeys/register/options`,
 `POST <basePath>/passkeys/register/verify`, `POST <basePath>/passkeys/login/options` and
-`POST <basePath>/passkeys/login/verify` (`basePath` defaults to `/auth`) —
-and lets a passkey assertion with user verification count as the second factor for `signIn.mfa`'s
-step-up model. Registration and authentication ceremonies are WebAuthn Level 2 with attestation
-conveyance `none`; ES256, RS256 and EdDSA credentials are accepted.
+`POST <basePath>/passkeys/login/verify` (`basePath` defaults to `/auth`) — and lets a passkey
+assertion with user verification count as the second factor for `signIn.mfa`'s step-up model.
+Registration and authentication ceremonies are WebAuthn Level 2 with attestation conveyance `none`;
+ES256, RS256 and EdDSA credentials are accepted.
 
 The verifier is **zero-dependency**: a bounded CBOR/COSE decoder over `runtime.subtle`. It does not
 use `@simplewebauthn/server`, because importing that library installs a global `Reflect.getMetadata`
