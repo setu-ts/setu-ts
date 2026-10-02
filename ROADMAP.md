@@ -11287,16 +11287,19 @@ and bytes describe the same settlement. Owner: `packages/storage-plugin`. Canoni
 ### Milestone 98o: Diagnostics Session Renewal
 
 **Status:** Planned. Plan: `plans/milestone-98o-session-renewal.md`. Its design security review
-(§10.1) is a draft awaiting independent review and three maintainer approvals; implementation does
-not start before both. Owner: `packages/diagnostics-plugin`, plus one emitted option in
-`packages/cli`'s generated development entry. Requested by the devtool repository as a prerequisite
-for its D04 free preview (devtool roadmap milestone D03b).
+(§10.1) has had one independent round, which blocked revision 1; revision 2 resolves its findings
+and awaits a second round and three remaining maintainer approvals. Implementation does not start
+before both. Owner: `packages/diagnostics-plugin`, plus one emitted option in `packages/cli`'s
+generated development entry. Requested by the devtool repository as a prerequisite for its D04 free
+preview (devtool roadmap milestone D03b).
 
 **Release constraint:** the plan extends protocol v1 by adding an optional `renewal` member to the
 status body. That is possible only because `packages/diagnostics-plugin` has never been published: a
 published client refuses any status key it does not know (see the inspector-manifest paragraph under
 "Mandatory Security Audit Gates" below). So this letter is a HARD GATE on the first publication of
-`packages/diagnostics-plugin`, the same constraint M98d's manifest carried.
+`packages/diagnostics-plugin`, the same constraint M98d's manifest carried. A release-tooling hold
+that makes `release:verify` fail while that package is unfinished lands on its own branch before the
+next release (plan §3.9).
 
 **Why:** an M98b session lives 15 minutes by default and at most one hour (`ttlMs`, capped at
 `MAX_TTL_MS = 3_600_000` in `packages/diagnostics-plugin/src/plugin/diagnostics-plugin.ts`). After
@@ -11312,8 +11315,9 @@ asking for a longer `ttlMs`. Renewal has to be a framework operation, designed a
 - The native client exposes neither: it does not surface `expiresInMs`, and every non-200 response
   becomes the generic `connection` error (`client/client.ts`), so a consumer cannot tell expiry from
   revocation, rate limiting or a network failure.
-- There is no renewal operation. Expiry runs on the runtime's monotonic clock from activation;
-  `revoke()` runs on stopping and close.
+- There is no renewal operation. Expiry runs on the runtime's monotonic clock from activation, and a
+  timer armed after `listen` revokes the session at `ttlMs` (`plugin/diagnostics-plugin.ts`);
+  `revoke()` also runs on stopping and close.
 
 **Deliverables:**
 
@@ -11322,17 +11326,21 @@ asking for a longer `ttlMs`. Renewal has to be a framework operation, designed a
       same key, session ID, instance and sequence space; each renewal sets the expiry to
       `min(now + ttlMs, activation + maxSessionLifetimeMs)` and never shortens it; one new signed
       `GET /v1/renew` operation and an optional status `renewal` member, inside protocol v1 and
-      recorded as such.
+      recorded as such. The plugin's expiry timer, which today revokes at the original `ttlMs`,
+      re-arms for the renewed remainder, and real expiry still drops the key and closes the
+      listener.
 - [ ] Refusal semantics, each tested: renewal after expiry is refused (expiry stays terminal); after
       `revoke()` it is refused; a replayed or reordered renewal request is refused by the existing
       sequence gate; a session bound to one application instance cannot renew against another.
-- [ ] Native client support: a renewal method, the remaining lifetime from the status body, and a
-      fixed, value-free classification of `expired` versus other failures, so a consumer can choose
-      between renewing and relaunching. Credentials and the session key never appear in an error.
+- [ ] Native client support: `session()` returns the remaining lifetime from a signed status
+      exchange and `renew()` extends it. No refusal body is parsed: at real expiry the listener
+      closes, so a consumer schedules renewal from the remaining lifetime rather than waiting for an
+      error.
 - [ ] `docs/diagnostics-protocol.md`, the protocol fixtures the devtool consumes, the
       `diagnostics-plugin` README and `PUBLIC_API.md` updated in the same PR.
 - [ ] A consumer exercise against a real application: pair, renew, keep reading past the original
-      `ttlMs`, be refused past the absolute maximum, and be refused after `revoke()`.
+      `ttlMs`, find the listener closed once the absolute maximum is reached, and be refused after
+      `revoke()`.
 - [ ] Both security gates below: a recorded design security review in the plan before
       implementation, and a committed-tree audit run in a context that did not implement the letter.
       This changes credential lifetime on an authenticated transport, so the M98b design review does
