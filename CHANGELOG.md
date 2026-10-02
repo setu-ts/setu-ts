@@ -21,14 +21,17 @@ All notable changes to this project are documented here. The format follows
   test as a test oracle. Challenges are held in the session with a 5-minute expiry AND claimed once
   in the credential store (`IPasskeyStore.claimChallenge`), so a replayed assertion against an older
   cookie copy is refused even though a synced passkey's counter is always `0`. `updateCounter` MUST
-  be implemented by custom stores as an atomic compare-and-advance; the shipped `MemoryPasskeyStore`
-  purges expired claims on every claim so its map stays bounded. Stored credentials
-  (`StoredPasskey`) record `attestation: 'unverified'` and a `backedUp` flag that is display only. A
-  UV-unset assertion is refused for a username-less sign-in and accepted only as the second factor
-  after a first one; the recorded method is always `pop` (RFC 8176), never `hwk`/`swk` — with
-  attestation unverified the plugin cannot know how the key is protected. Any attestation `fmt` is
-  accepted with its statement unread. Attestation verification against trust roots remains out of
-  scope.
+  be implemented by custom stores as an atomic compare-and-advance, and `save` MUST be an atomic
+  compare-and-set (it stores a NEW credential only when its id is absent and reports whether it did
+  — a blind write lets two concurrent registrations of the same credential id both succeed and lets
+  the later record silently replace the earlier one, `principalId` included); the shipped
+  `MemoryPasskeyStore` does both and purges expired claims on every claim so its map stays bounded.
+  Stored credentials (`StoredPasskey`) record `attestation: 'unverified'` and a `backedUp` flag that
+  is display only. A UV-unset assertion is refused for a username-less sign-in and accepted only as
+  the second factor after a first one; the recorded method is always `pop` (RFC 8176), never
+  `hwk`/`swk` — with attestation unverified the plugin cannot know how the key is protected. Any
+  attestation `fmt` is accepted with its statement unread. Attestation verification against trust
+  roots remains out of scope.
 - **Multi-factor authentication with TOTP (M100d).** `AuthPluginOptions.signIn.mfa` adds a TOTP
   second factor to any sign-in flow that records its principal through `IAuthSessionService`.
   `TotpService` (app-instantiated, like `PasswordHasher`) computes RFC 6238 codes (HMAC-SHA1,

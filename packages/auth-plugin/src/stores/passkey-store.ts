@@ -55,8 +55,23 @@ export interface IPasskeyStore {
   /** Reads one credential by id, or `null` when it is not stored. */
   findById(id: string): Promise<StoredPasskey | null>;
 
-  /** Stores a newly registered credential. */
-  save(credential: StoredPasskey): Promise<void>;
+  /**
+   * Atomically stores a NEWLY registered credential.
+   *
+   * This is a compare-and-set, not a blind write: it stores `credential`
+   * only when no credential with the same id is already present, and reports
+   * whether it did. Two ceremonies registering the same credential id
+   * concurrently — a synced or cloned authenticator shared across accounts —
+   * must not both succeed with the later record silently replacing the
+   * earlier one (including its `principalId`, which decides whose principal a
+   * later username-less sign-in resolves). The registration ceremony treats a
+   * `false` answer as `credential-duplicate`.
+   *
+   * @param credential - The credential to store
+   * @returns `true` when the credential was stored, `false` when the id was
+   *   already present
+   */
+  save(credential: StoredPasskey): Promise<boolean>;
 
   /**
    * Atomically advances the stored counter to `observed`.
@@ -133,12 +148,30 @@ export class MemoryPasskeyStore implements IPasskeyStore {
     return Promise.resolve(this.#credentials.get(id) ?? null);
   }
 
-  /** Stores a newly registered credential, copying it so a later mutation of the caller object cannot change what the store hands back. */
-  save(credential: StoredPasskey): Promise<void> {
-    // A copy, so a caller mutating its own object after `save` cannot change
-    // what the store hands back.
-    this.#credentials.set(credential.id, { ...credential });
-    return Promise.resolve();
+  /**
+   * Atomically stores a newly registered credential, refusing an id that is
+   * already present and copying the record (its array and JWK members
+   * included) so a later mutation of the caller's object cannot change what
+   * the store hands back.
+   */
+  save(credential: StoredPasskey): Promise<boolean> {
+    // Compare-and-set: an id that is already present is refused, never
+    // overwritten — the registration ceremony's duplicate check runs before
+    // this call, but the two are separate awaits, and a concurrent ceremony
+    // carrying the same credential id must not silently replace this
+    // principal's record with its own.
+    if (this.#credentials.has(credential.id)) {
+      return Promise.resolve(false);
+    }
+    // A deep copy, so a caller mutating its own object after `save` cannot
+    // change what the store hands back — the record's array and JWK members
+    // are copied too, not shared by reference.
+    this.#credentials.set(credential.id, {
+      ...credential,
+      publicKey: { ...credential.publicKey },
+      transports: [...credential.transports],
+    });
+    return Promise.resolve(true);
   }
 
   /** Atomically advances the stored counter to `observed`, reporting whether it did. */

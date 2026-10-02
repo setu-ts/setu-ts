@@ -54,6 +54,9 @@ const REFUSAL_STATUS: Readonly<Record<PasskeyRefusal, number>> = {
 
 /** The titles the responder writes beside each status. */
 function statusTitle(status: number): string {
+  if (status === 401) {
+    return 'Unauthorized';
+  }
   if (status === 403) {
     return 'Forbidden';
   }

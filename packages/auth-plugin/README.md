@@ -758,7 +758,10 @@ implementation and **must implement `updateCounter` as an atomic compare-and-adv
 the observed counter only when it is greater than the stored one (or both are zero) and reports
 whether it did. A read-then-write lets two concurrent assertions both validate against the same
 stored value and lets the lower one overwrite the higher, which is exactly how a cloned
-authenticator's stale counter slips through. `claimChallenge` must be atomic too.
+authenticator's stale counter slips through. **`save` must be an atomic compare-and-set** — it
+stores a NEW credential only when its id is absent and reports whether it did; a blind write lets
+two concurrent registrations of the same credential id both succeed and lets the later record
+silently replace the earlier one, `principalId` included. `claimChallenge` must be atomic too.
 
 A UV-unset assertion is refused for a username-less sign-in and accepted only as the second factor
 after a first one: without user verification it proves possession alone, and recording `pop` for it

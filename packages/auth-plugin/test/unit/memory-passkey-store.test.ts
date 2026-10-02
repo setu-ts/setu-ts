@@ -90,6 +90,40 @@ describe('MemoryPasskeyStore', () => {
     expect((await store.findById('cred-1'))?.counter).toBe(0);
   });
 
+  it('hands back a deep copy: the array and JWK members are not shared', async () => {
+    const store = new MemoryPasskeyStore();
+    const record = credential();
+    await store.save(record);
+    // Mutate the CALLER's nested members: the store's copy must be its own.
+    (record.transports as string[]).push('usb');
+    (record.publicKey as Record<string, unknown>).kty = 'RSA';
+    const stored = await store.findById('cred-1');
+    expect(stored?.transports).toEqual(['internal']);
+    expect((stored?.publicKey as JsonWebKey).kty).toBe('EC');
+  });
+
+  it('save refuses an id that is already present, never overwriting', async () => {
+    const store = new MemoryPasskeyStore();
+    expect(await store.save(credential())).toBe(true);
+    // The same credential id from another principal: refused, and the first
+    // principal's record survives.
+    expect(await store.save(credential({ principalId: 'bob', createdAt: 2 }))).toBe(false);
+    const stored = await store.findById('cred-1');
+    expect(stored?.principalId).toBe('alice');
+    expect(stored?.createdAt).toBe(1000);
+  });
+
+  it('concurrent saves of one id leave exactly the first stored', async () => {
+    const store = new MemoryPasskeyStore();
+    const outcomes = await Promise.all([
+      store.save(credential({ principalId: 'alice' })),
+      store.save(credential({ principalId: 'bob' })),
+    ]);
+    // Exactly one caller stored; the other was refused as a duplicate.
+    expect(outcomes.filter((outcome) => outcome === true).length).toBe(1);
+    expect(outcomes.filter((outcome) => outcome === false).length).toBe(1);
+  });
+
   it('claimChallenge is single-use until its expiry', async () => {
     const store = new MemoryPasskeyStore();
     expect(await store.claimChallenge('challenge-1', 1000, 2000)).toBe(true);

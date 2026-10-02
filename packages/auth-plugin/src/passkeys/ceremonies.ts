@@ -19,6 +19,7 @@ import type {
   ISessionService,
 } from '@setu-ts/common';
 import type { IPasskeyStore, StoredPasskey } from '../stores/passkey-store.ts';
+import type { PasskeyOptions } from '../interfaces/index.ts';
 import type { PendingPromotion } from '../sign-in/auth-session-service.ts';
 import { asPendingPromotion } from '../sign-in/auth-session-service.ts';
 import { AuthPluginConfigurationError } from '../errors.ts';
@@ -82,23 +83,6 @@ export interface CompiledPasskeys {
 }
 
 /** The configured `signIn.passkeys` option (plan §3.6). */
-export interface PasskeyOptions {
-  /** The RP ID: the origin's host or a registrable suffix of it. */
-  readonly rpId: string;
-  /** The RP name shown to the user by the browser. */
-  readonly rpName: string;
-  /** The exact-match origin allowlist the ceremonies verify `clientDataJSON` against. */
-  readonly origins: readonly string[];
-  /** The credential store; see {@linkcode IPasskeyStore}. */
-  readonly store: IPasskeyStore;
-  /** Resolves a credential's stored principal id to a principal; `null` refuses. */
-  readonly resolvePrincipal: (
-    principalId: string,
-  ) => IPrincipal | null | Promise<IPrincipal | null>;
-  /** The user-verification policy. Defaults to `required`. */
-  readonly userVerification?: UserVerification;
-}
-
 /** The reason a ceremony refused a response. Fixed codes, never client text. */
 export type PasskeyRefusal =
   | 'malformed'
@@ -472,9 +456,21 @@ export class PasskeyCeremonies {
     return { ok: true, bytes };
   }
 
-  /** Compares `authenticatorData`'s RP ID hash against SHA-256 of the RP ID. */
+  #rpIdHash?: Promise<Uint8Array>;
+
+  /**
+   * The SHA-256 of the RP ID, computed once per instance: it is a constant of
+   * the compiled configuration, so digesting it on every verification would
+   * be per-request work a registration-time constant owns.
+   */
+  #rpIdHashOnce(): Promise<Uint8Array> {
+    this.#rpIdHash ??= sha256(this.#runtime, new TextEncoder().encode(this.#config.rpId));
+    return this.#rpIdHash;
+  }
+
+  /** Compares `authenticatorData`'s RP ID hash against the configured one. */
   async #checkRpIdHash(authData: { rpIdHash: Uint8Array }): Promise<PasskeyRefusal | null> {
-    const expected = await sha256(this.#runtime, new TextEncoder().encode(this.#config.rpId));
+    const expected = await this.#rpIdHashOnce();
     return bytesEqual(authData.rpIdHash, expected) ? null : 'rp-id-mismatch';
   }
 
@@ -653,7 +649,14 @@ export class PasskeyCeremonies {
       attestation: 'unverified',
       createdAt: this.#runtime.now(),
     };
-    await this.#config.store.save(stored);
+    // `save` is a compare-and-set (plan §3.2's duplicate refusal, made
+    // concurrency-safe): the findById check above runs across an await
+    // boundary, so a concurrent ceremony carrying the same credential id can
+    // pass it too — the atomic store refuses the second write rather than
+    // silently replacing the first principal's record with its own.
+    if (!(await this.#config.store.save(stored))) {
+      return { ok: false, reason: 'credential-duplicate' };
+    }
     return { ok: true, credentialId };
   }
 

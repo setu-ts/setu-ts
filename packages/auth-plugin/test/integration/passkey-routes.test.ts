@@ -68,6 +68,12 @@ describe('passkey routes', () => {
     const jar = new CookieJar();
     const response = await jar.postJson(app, REGISTER_OPTIONS, {});
     expect(response.status).toBe(401);
+    // The full body, asserted: the title must agree with the status line, so
+    // a 401 whose error field reads "Bad Request" fails here.
+    expect(await response.json()).toEqual({
+      error: 'Unauthorized',
+      detail: 'sign-in-required',
+    });
   });
 
   it('signs out, then signs in username-less and reaches a guarded route', async () => {
