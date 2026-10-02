@@ -10675,14 +10675,15 @@ authorization decision explanations and the `GET /v1/authorization` inspector; 9
 complete ([#377](https://github.com/setu-ts/setu-ts/pull/377)) — realtime lifecycle observations;
 98m complete ([#383](https://github.com/setu-ts/setu-ts/pull/383)) — storage operation counters; 98n
 complete ([#380](https://github.com/setu-ts/setu-ts/pull/380)) — outbound HTTP attempt observations.
-98a–98n are implemented and awaiting publication in the next release cycle. **98o (session renewal)
-is in progress**, requested by the devtool as a prerequisite for its D04 preview. This umbrella
-records framework work for the separately maintained devtool; adding the later letters does not make
-them prerequisites for publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE
-exception recorded under the release requirements below — M98d's status-shape change must precede
-the first publication of `packages/diagnostics-plugin`, because the shipped client refuses a status
-body it does not expect and that body is otherwise frozen for the lifetime of every published
-client. A roadmap status is not evidence that a security audit has passed.
+98o complete (PR pending) — diagnostics session renewal. 98a–98o are implemented and awaiting
+publication in the next release cycle; 98o was requested by the devtool as a prerequisite for its
+D04 preview. This umbrella records framework work for the separately maintained devtool; adding the
+later letters does not make them prerequisites for publishing 98a–98c or for the devtool's initial
+D01–D04 preview, with ONE exception recorded under the release requirements below — M98d's
+status-shape change must precede the first publication of `packages/diagnostics-plugin`, because the
+shipped client refuses a status body it does not expect and that body is otherwise frozen for the
+lifetime of every published client. A roadmap status is not evidence that a security audit has
+passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -11290,13 +11291,14 @@ and bytes describe the same settlement. Owner: `packages/storage-plugin`. Canoni
 
 ### Milestone 98o: Diagnostics Session Renewal
 
-**Status:** In progress. Plan: `plans/milestone-98o-session-renewal.md`. Its design security review
-(§10.1) is complete: rounds 1 and 2 blocked, round 3 approved, and revision 4 folds in its
-non-blocking findings. Every maintainer decision is approved (2026-10-02): the 12-hour ceiling, the
-8-hour CLI value, the v1 extension with its publication hold, and an exact status parser.
-Implementation started 2026-10-02. Owner: `packages/diagnostics-plugin`, plus one emitted option in
-`packages/cli`'s generated development entry. Requested by the devtool repository as a prerequisite
-for its D04 free preview (devtool roadmap milestone D03b).
+**Status:** Complete (PR pending). Plan: `plans/archive/milestone-98o-session-renewal.md`. Its
+design security review (§10.1) is complete: rounds 1 and 2 blocked, round 3 approved, and revision 4
+folds in its non-blocking findings. Every maintainer decision is approved (2026-10-02): the 12-hour
+ceiling, the 8-hour CLI value, the v1 extension with its publication hold, and an exact status
+parser. Implemented 2026-10-02; the committed-tree security audit passed with no findings. Owner:
+`packages/diagnostics-plugin`, plus one emitted option in `packages/cli`'s generated development
+entry. Requested by the devtool repository as a prerequisite for its D04 free preview (devtool
+roadmap milestone D03b).
 
 **Release constraint:** the plan extends protocol v1 by adding an optional `renewal` member to the
 status body. That is possible only because `packages/diagnostics-plugin` has never been published: a
@@ -11326,7 +11328,7 @@ asking for a longer `ttlMs`. Renewal has to be a framework operation, designed a
 
 **Deliverables:**
 
-- [ ] An authenticated renewal operation on the connector, as the plan decides it (§3): opt-in
+- [x] An authenticated renewal operation on the connector, as the plan decides it (§3): opt-in
       through `maxSessionLifetimeMs` (absent means today's behaviour and today's status bytes); the
       same key, session ID, instance and sequence space; each renewal sets the expiry to
       `min(now + ttlMs, activation + maxSessionLifetimeMs)` and never shortens it; one new signed
@@ -11334,19 +11336,19 @@ asking for a longer `ttlMs`. Renewal has to be a framework operation, designed a
       recorded as such. The plugin's expiry timer, which today revokes at the original `ttlMs`,
       re-arms for the renewed remainder only when renewal is configured, and real expiry still drops
       the key and closes the listener.
-- [ ] Refusal semantics, each tested: renewal after expiry is refused (expiry stays terminal); after
+- [x] Refusal semantics, each tested: renewal after expiry is refused (expiry stays terminal); after
       `revoke()` it is refused; a replayed or reordered renewal request is refused by the existing
       sequence gate; a session bound to one application instance cannot renew against another.
-- [ ] Native client support: `session()` returns the remaining lifetime from a signed status
+- [x] Native client support: `session()` returns the remaining lifetime from a signed status
       exchange and `renew()` extends it. No refusal body is parsed: at real expiry the listener
       closes, so a consumer schedules renewal from the remaining lifetime rather than waiting for an
       error.
-- [ ] `docs/diagnostics-protocol.md`, the protocol fixtures the devtool consumes, the
+- [x] `docs/diagnostics-protocol.md`, the protocol fixtures the devtool consumes, the
       `diagnostics-plugin` README and `PUBLIC_API.md` updated in the same PR.
-- [ ] A consumer exercise against a real application: pair, renew, keep reading past the original
+- [x] A consumer exercise against a real application: pair, renew, keep reading past the original
       `ttlMs`, find the listener closed once the absolute maximum is reached, and be refused after
       `revoke()`.
-- [ ] Both security gates below: a recorded design security review in the plan before
+- [x] Both security gates below: a recorded design security review in the plan before
       implementation, and a committed-tree audit run in a context that did not implement the letter.
       This changes credential lifetime on an authenticated transport, so the M98b design review does
       not cover it.
@@ -12364,7 +12366,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 97a       | ✅     | decorator-plugin + cli — decorators for non-HTTP ingress                                                                                                                                                                                      |
 | 97b       | ✅     | decorator-plugin + common + openapi-plugin — response shaping for decorated handlers                                                                                                                                                          |
 | 97c       | ✅     | config-plugin — typed configuration sections ([#330](https://github.com/setu-ts/setu-ts/pull/330))                                                                                                                                            |
-| 98        | ⬜     | secure application-read-only devtool diagnostics (umbrella; 98a–98n complete, 98o open)                                                                                                                                                       |
+| 98        | ⬜     | secure application-read-only devtool diagnostics (umbrella; 98a–98o complete)                                                                                                                                                                 |
 | 98a       | ✅     | kernel + common — metadata and execution observation ([#345](https://github.com/setu-ts/setu-ts/pull/345))                                                                                                                                    |
 | 98b       | ✅     | runtime + common + diagnostics-plugin — runtime-owned authenticated local connector ([#347](https://github.com/setu-ts/setu-ts/pull/347))                                                                                                     |
 | 98c       | ✅     | cli — devtool scaffolding for standalone projects and workspace members ([#352](https://github.com/setu-ts/setu-ts/pull/352))                                                                                                                 |
@@ -12379,7 +12381,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98l       | ✅     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations                                                                                                                                          |
 | 98m       | ✅     | storage-plugin + common + diagnostics-plugin — storage operation counters ([#383](https://github.com/setu-ts/setu-ts/pull/383))                                                                                                               |
 | 98n       | ✅     | sdk + common + diagnostics-plugin — outbound HTTP attempt observations ([#380](https://github.com/setu-ts/setu-ts/pull/380))                                                                                                                  |
-| 98o       | ⬜     | diagnostics-plugin — diagnostics session renewal                                                                                                                                                                                              |
+| 98o       | ✅     | diagnostics-plugin — diagnostics session renewal (PR pending; security audit passed)                                                                                                                                                          |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High, plus the 99e maintainer report)                                                                                                                                                    |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                                                                                                                            |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                                                                                                                          |

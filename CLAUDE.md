@@ -5519,6 +5519,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `ITotpStore` now writes through two atomic operations, `stageSecret` and a compare-and-set
   `confirmSecret`, and a password-only `signIn` with `providers: []` is allowed when `mfa` is set —
   complete (PR #388).
+- **Milestone 98o** (`packages/diagnostics-plugin` + `packages/cli` — diagnostics session renewal):
+  an opt-in `maxSessionLifetimeMs` (from `ttlMs` up to 12 hours of awake, monotonic time) lets the
+  native client renew the SAME session — same key, session ID, instance binding and sequence space —
+  through a signed `GET /v1/renew` inside protocol v1, advertised by an optional status `renewal`
+  member. Renewal runs inside the existing synchronous post-verify gate, never shortens or revives a
+  session, and cannot bank time past `now + ttlMs` or the activation-time cap. Without the option
+  the status bytes and the expiry timer are unchanged; with it the timer re-arms for the renewed
+  remainder, so real expiry still drops the key and closes the listener. The client gains
+  `session()` and `renew()` returning `DiagnosticsSessionLifetime`, and the CLI's generated devtool
+  entry sets an 8-hour cap. The publication hold M98o required was removed here. Code review found a
+  whole-millisecond JSDoc/PUBLIC_API claim false for non-renewable sessions (the client now floors
+  `expiresInMs`), a dead connector branch, skipped plan-committed tests, and a missed ROADMAP
+  citation (C7). The independent committed-tree audit of `9e3db547` passed with no findings; its one
+  out-of-scope observation — the client never cancelled an unread refusal body — was fixed on this
+  branch. Verified beyond the gates: the client on Node, Bun and Deno against a Deno server, process
+  freeze/resume, and a live 364 s machine suspend showing the cap counts awake time — complete (PR
+  pending).
 - **Next milestone** — **M100e** (`packages/auth-plugin` — passkeys (WebAuthn); a passkey assertion
   with user verification counts as a second factor for 100d's step-up model).
 
