@@ -62,6 +62,38 @@
         "pkce.code.challenge.method": "S256",
         "post.logout.redirect.uris": "http://localhost/signed-out"
       }
+    },
+    {
+      "clientId": "https://sp.setu.test",
+      "name": "setu-saml",
+      "enabled": true,
+      "protocol": "saml",
+      "frontchannelLogout": false,
+      "redirectUris": [
+        "http://localhost/auth/keycloak-saml/acs"
+      ],
+      "attributes": {
+        "saml_assertion_consumer_url_post": "http://localhost/auth/keycloak-saml/acs",
+        "saml.assertion.signature": "true",
+        "saml.server.signature": "false",
+        "saml.client.signature": "false",
+        "saml.authnstatement": "true",
+        "saml.signature.algorithm": "RSA_SHA256",
+        "saml_name_id_format": "username",
+        "saml.force.name.id.format": "true"
+      },
+      "protocolMappers": [
+        {
+          "name": "email",
+          "protocol": "saml",
+          "protocolMapper": "saml-user-property-mapper",
+          "config": {
+            "user.attribute": "email",
+            "attribute.name": "email",
+            "attribute.nameformat": "Basic"
+          }
+        }
+      ]
     }
   ],
   "verifyEmail": false,

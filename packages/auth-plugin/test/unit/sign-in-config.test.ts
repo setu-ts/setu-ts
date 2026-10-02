@@ -119,7 +119,9 @@ describe('compileSignIn', () => {
     expect(refusal({ providers: [], passkeys: null } as unknown as SignInConfig)).toContain(
       'at least one provider',
     );
-    expect(refusal(config([{ ...oidc(), kind: 'saml' }]))).toContain("must be 'oidc' or 'oauth2'");
+    expect(refusal(config([{ ...oidc(), kind: 'ldap' } as unknown as OidcProvider]))).toContain(
+      "must be 'oidc', 'oauth2' or 'saml'",
+    );
   });
 
   it('refuses a redirectUri that does not end with the provider callback path', () => {

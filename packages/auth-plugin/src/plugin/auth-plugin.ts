@@ -42,6 +42,9 @@ import { compilePasskeys } from '../passkeys/ceremonies.ts';
 import type { CompiledPasskeys } from '../passkeys/ceremonies.ts';
 import { PasskeyCeremonies } from '../passkeys/ceremonies.ts';
 import { registerPasskeyRoutes } from '../passkeys/routes.ts';
+import { loadSaml } from '../saml/loader.ts';
+import { registerSamlRoutes } from '../saml/routes.ts';
+import type { LoadedSamlProvider } from '../saml/routes.ts';
 import denoJson from '../../deno.json' with { type: 'json' };
 
 const AUTH_MIDDLEWARE_PRIORITY = 300;
@@ -137,7 +140,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     optionalDependencies: [CAPABILITIES.SESSION],
     priority: PLUGIN_PRIORITY.NORMAL,
 
-    register(ctx: IPluginContext): void {
+    register(ctx: IPluginContext): void | Promise<void> {
       // Resolve runtime
       const runtime = ctx.services.get<IRuntimeServices>('runtime');
 
@@ -281,6 +284,9 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       // session strategy so a session carrying an explicit identity is consulted
       // before this plugin's own record, and before any caller-supplied strategy.
       const signInKeySets: IssuerKeySet[] = [];
+      // Set only when a saml provider is configured; awaited as register()'s
+      // last step, so every other configuration still registers synchronously.
+      let loadSamlRoutes: (() => Promise<void>) | null = null;
       if (compiledSignIn !== null) {
         // The session is what holds the signed-in record and the pending state,
         // so this arm cannot work without it. Named as a startup error rather than
@@ -346,6 +352,28 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           keySets,
           debug,
         });
+
+        // SAML (M100f): the library load is awaited by register() (below), so a
+        // missing package or a Workers deployment without nodejs_compat fails at
+        // startup with SamlRuntimeLoadError rather than at the first login.
+        if (compiledSignIn.samlProviders.length > 0) {
+          const samlProviders = compiledSignIn.samlProviders;
+          const challengePath = mfa?.challengePath;
+          loadSamlRoutes = async () => {
+            const loaded: LoadedSamlProvider[] = [];
+            for (const provider of samlProviders) {
+              loaded.push({ provider, SAML: await loadSaml(provider.module) });
+            }
+            registerSamlRoutes({
+              router: ctx.router,
+              providers: loaded,
+              authSessionService,
+              runtime,
+              debug,
+              ...(challengePath === undefined ? {} : { challengePath }),
+            });
+          };
+        }
 
         // Passkeys (M100e): the ceremonies ride the same session and
         // auth-session services the sign-in arm built, and register the four
@@ -482,6 +510,10 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           authorizationSource.close();
         }
       });
+
+      // Last, after every synchronous refusal above: a load failure rejects
+      // register() with SamlRuntimeLoadError.
+      return loadSamlRoutes === null ? undefined : loadSamlRoutes();
     },
   };
 }

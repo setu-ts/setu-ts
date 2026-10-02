@@ -14,6 +14,7 @@ import type {
 } from '@setu-ts/common';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
 import type { IPasskeyStore } from '../stores/passkey-store.ts';
+import type { ISamlRequestStore } from '../stores/saml-request-store.ts';
 
 /**
  * JWT configuration options.
@@ -456,12 +457,117 @@ export interface OAuth2Provider extends SignInProviderBase {
 }
 
 /**
- * A sign-in provider: either an OpenID Connect provider with discovery and ID
- * tokens, or a plain OAuth 2.0 provider with a userinfo endpoint.
+ * The verified identity a SAML assertion carried, handed to
+ * {@linkcode SamlProvider.toPrincipal}.
+ *
+ * Built only from an assertion whose signature, issuer, audience, recipient,
+ * time window and `InResponseTo` have all been checked. A plain frozen object:
+ * none of the library's own accessors are passed through.
  *
  * @since 0.8.0
  */
-export type SignInProvider = OidcProvider | OAuth2Provider;
+export interface SamlProfile {
+  /** The assertion's `Issuer` — the IdP's entity id. */
+  readonly issuer: string;
+  /** The subject's `NameID`. Unique only within its issuer. */
+  readonly nameID: string;
+  /** The `NameID` `Format`, when the IdP sent one. */
+  readonly nameIDFormat?: string;
+  /** The `AuthnStatement` `SessionIndex`, when the IdP sent one. */
+  readonly sessionIndex?: string;
+  /**
+   * The `AttributeStatement` values by attribute `Name`: a string for a single
+   * value, an array for several.
+   */
+  readonly attributes: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * The structural shape of the SAML library module, injected
+ * through {@linkcode SamlProvider.module} instead of the lazy
+ * `npm:@node-saml/node-saml@^5` import — on a runtime where dynamic `npm:`
+ * imports are unavailable, or to pin a vetted build.
+ *
+ * Only the `SAML` class is read; it is checked to be a constructor when the
+ * plugin registers.
+ *
+ * @since 0.8.0
+ */
+export interface SamlModule {
+  /** node-saml's `SAML` class. */
+  readonly SAML: unknown;
+}
+
+/**
+ * A SAML 2.0 identity provider, for which this application acts as the
+ * service provider (M100f).
+ *
+ * Login is SP-initiated over the HTTP-Redirect binding and the response
+ * returns to the assertion consumer service over HTTP-POST. Assertions must be
+ * signed; IdP-initiated (unsolicited) responses, encrypted assertions and
+ * single logout are refused or not offered.
+ *
+ * @since 0.8.0
+ */
+export interface SamlProvider {
+  /** Discriminant. */
+  readonly kind: 'saml';
+  /** Kebab-case name, used in the route paths (`/auth/<name>/login`). */
+  readonly name: string;
+  /**
+   * This application's SP entity id. Sent as the AuthnRequest `Issuer`,
+   * required as the assertion's `Audience`, and published in the metadata.
+   */
+  readonly entityId: string;
+  /** The identity provider. */
+  readonly idp: {
+    /** The IdP's entity id; the assertion `Issuer` must equal it exactly. */
+    readonly entityId: string;
+    /** The IdP's single-sign-on URL for the HTTP-Redirect binding. */
+    readonly ssoUrl: string;
+    /**
+     * The IdP's signing certificates, PEM. More than one lets a key rotation
+     * overlap; an assertion signed by any of them verifies.
+     */
+    readonly certs: readonly string[];
+  };
+  /**
+   * The absolute assertion consumer service URL the IdP posts to. Its path
+   * must end with `<basePath>/<name>/acs`; the assertion's `Recipient` and the
+   * response's `Destination` must equal it.
+   */
+  readonly acsUrl: string;
+  /**
+   * Maps the verified profile to a principal; return `null` to refuse the
+   * sign-in with `403`. A `NameID` is unique only within its issuer, so an
+   * application with several identity sources must namespace the id.
+   */
+  toPrincipal(profile: SamlProfile): IPrincipal | null | Promise<IPrincipal | null>;
+  /**
+   * Redirect here with a fixed `?error=` code instead of answering `401`.
+   * Same-origin absolute path.
+   */
+  readonly failureRedirect?: string;
+  /**
+   * Pending-request and assertion-replay store. Defaults to a
+   * `MemorySamlRequestStore`, which is correct for ONE replica only.
+   */
+  readonly store?: ISamlRequestStore;
+  /**
+   * An injected SAML library module; skips the lazy
+   * `npm:@node-saml/node-saml@^5` import.
+   */
+  readonly module?: SamlModule;
+}
+
+/**
+ * A sign-in provider: an OpenID Connect provider with discovery and ID
+ * tokens, a plain OAuth 2.0 provider with a userinfo endpoint, or a SAML 2.0
+ * identity provider.
+ *
+ * @since 0.8.0
+ */
+export type SignInProvider = OidcProvider | OAuth2Provider | SamlProvider;
 
 /**
  * Re-reads the stored principal on each request. Returning `null` makes that

@@ -26,7 +26,7 @@
 // Plugin factory
 export { AuthPlugin } from './plugin/auth-plugin.ts';
 export type { AuthMiddlewareOption, AuthPluginOptions } from './interfaces/index.ts';
-export { AuthPluginConfigurationError } from './errors.ts';
+export { AuthPluginConfigurationError, SamlRuntimeLoadError } from './errors.ts';
 
 // Option types
 export type { JwtOptions } from './interfaces/index.ts';
@@ -45,6 +45,9 @@ export type {
   OidcProvider,
   ProviderTokens,
   RefreshPrincipal,
+  SamlModule,
+  SamlProfile,
+  SamlProvider,
   SignInConfig,
   SignInProvider,
   SignInProviderBase,
@@ -105,6 +108,10 @@ export type {
   StoredPasskey,
 } from './stores/passkey-store.ts';
 export { MemoryPasskeyStore } from './stores/passkey-store.ts';
+
+// SAML 2.0 service provider (M100f)
+export type { ISamlRequestStore, SamlPendingRequest } from './stores/saml-request-store.ts';
+export { MemorySamlRequestStore } from './stores/saml-request-store.ts';
 
 // TOTP MFA (M100d)
 export { TotpService } from './mfa/totp-service.ts';
