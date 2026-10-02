@@ -684,7 +684,8 @@ app.router.get('/account/bank', {
 ## Passkeys (WebAuthn)
 
 `signIn.passkeys` registers the four ceremony routes — `POST <basePath>/passkeys/register/options`,
-`POST /passkeys/register/verify`, `POST /passkeys/login/options`, `POST /passkeys/login/verify` —
+`POST <basePath>/passkeys/register/verify`, `POST <basePath>/passkeys/login/options` and
+`POST <basePath>/passkeys/login/verify` (`basePath` defaults to `/auth`) —
 and lets a passkey assertion with user verification count as the second factor for `signIn.mfa`'s
 step-up model. Registration and authentication ceremonies are WebAuthn Level 2 with attestation
 conveyance `none`; ES256, RS256 and EdDSA credentials are accepted.
@@ -745,7 +746,11 @@ const options = await fetch('/auth/passkeys/login/options', {
   headers: { 'x-csrf-token': csrfToken },
 }).then((r) => r.json());
 
-const assertion = await navigator.credentials.get({ publicKey: options });
+// The options are JSON (base64url strings); WebAuthn needs ArrayBuffers. Registration
+// does the same with `parseCreationOptionsFromJSON` before `navigator.credentials.create`.
+const assertion = await navigator.credentials.get({
+  publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(options),
+});
 
 const result = await fetch('/auth/passkeys/login/verify', {
   method: 'POST',
