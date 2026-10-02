@@ -5535,7 +5535,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   out-of-scope observation — the client never cancelled an unread refusal body — was fixed on this
   branch. Verified beyond the gates: the client on Node, Bun and Deno against a Deno server, process
   freeze/resume, and a live 364 s machine suspend showing the cap counts awake time — complete (PR
-  pending).
+  #392).
 - **Next milestone** — **M100e** (`packages/auth-plugin` — passkeys (WebAuthn); a passkey assertion
   with user verification counts as a second factor for 100d's step-up model).
 

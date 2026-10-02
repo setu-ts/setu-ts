@@ -1,6 +1,6 @@
 # Milestone 98o — Diagnostics session renewal (`@setu-ts/diagnostics-plugin`)
 
-> **Status:** Complete (PR pending), revision 4. Branch: `feat/m98o-session-renewal`. The design
+> **Status:** Complete (PR #392), revision 4. Branch: `feat/m98o-session-renewal`. The design
 > security review (§10.1) was approved in round 3; the committed-tree security audit (§10.2) of
 > `9e3db547` passed with no findings, recorded in the PR.
 

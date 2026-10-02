@@ -10675,15 +10675,15 @@ authorization decision explanations and the `GET /v1/authorization` inspector; 9
 complete ([#377](https://github.com/setu-ts/setu-ts/pull/377)) — realtime lifecycle observations;
 98m complete ([#383](https://github.com/setu-ts/setu-ts/pull/383)) — storage operation counters; 98n
 complete ([#380](https://github.com/setu-ts/setu-ts/pull/380)) — outbound HTTP attempt observations.
-98o complete (PR pending) — diagnostics session renewal. 98a–98o are implemented and awaiting
-publication in the next release cycle; 98o was requested by the devtool as a prerequisite for its
-D04 preview. This umbrella records framework work for the separately maintained devtool; adding the
-later letters does not make them prerequisites for publishing 98a–98c or for the devtool's initial
-D01–D04 preview, with ONE exception recorded under the release requirements below — M98d's
-status-shape change must precede the first publication of `packages/diagnostics-plugin`, because the
-shipped client refuses a status body it does not expect and that body is otherwise frozen for the
-lifetime of every published client. A roadmap status is not evidence that a security audit has
-passed.
+98o complete ([#392](https://github.com/setu-ts/setu-ts/pull/392)) — diagnostics session renewal.
+98a–98o are implemented and awaiting publication in the next release cycle; 98o was requested by the
+devtool as a prerequisite for its D04 preview. This umbrella records framework work for the
+separately maintained devtool; adding the later letters does not make them prerequisites for
+publishing 98a–98c or for the devtool's initial D01–D04 preview, with ONE exception recorded under
+the release requirements below — M98d's status-shape change must precede the first publication of
+`packages/diagnostics-plugin`, because the shipped client refuses a status body it does not expect
+and that body is otherwise frozen for the lifetime of every published client. A roadmap status is
+not evidence that a security audit has passed.
 
 **Interface selected (98a, C1):** the observation handoff is a PULL-ONLY reader —
 `IApplication.diagnostics` with `snapshot()` and `read(after, limit?)`. There are no observers and
@@ -11291,9 +11291,9 @@ and bytes describe the same settlement. Owner: `packages/storage-plugin`. Canoni
 
 ### Milestone 98o: Diagnostics Session Renewal
 
-**Status:** Complete (PR pending). Plan: `plans/archive/milestone-98o-session-renewal.md`. Its
-design security review (§10.1) is complete: rounds 1 and 2 blocked, round 3 approved, and revision 4
-folds in its non-blocking findings. Every maintainer decision is approved (2026-10-02): the 12-hour
+**Status:** Complete (PR #392). Plan: `plans/archive/milestone-98o-session-renewal.md`. Its design
+security review (§10.1) is complete: rounds 1 and 2 blocked, round 3 approved, and revision 4 folds
+in its non-blocking findings. Every maintainer decision is approved (2026-10-02): the 12-hour
 ceiling, the 8-hour CLI value, the v1 extension with its publication hold, and an exact status
 parser. Implemented 2026-10-02; the committed-tree security audit passed with no findings. Owner:
 `packages/diagnostics-plugin`, plus one emitted option in `packages/cli`'s generated development
@@ -12381,7 +12381,7 @@ The enterprise-SSO case, and the highest-risk letter, so it is last.
 | 98l       | ✅     | websocket + sse + realtime-backplane + common + diagnostics-plugin — realtime lifecycle observations                                                                                                                                          |
 | 98m       | ✅     | storage-plugin + common + diagnostics-plugin — storage operation counters ([#383](https://github.com/setu-ts/setu-ts/pull/383))                                                                                                               |
 | 98n       | ✅     | sdk + common + diagnostics-plugin — outbound HTTP attempt observations ([#380](https://github.com/setu-ts/setu-ts/pull/380))                                                                                                                  |
-| 98o       | ✅     | diagnostics-plugin — diagnostics session renewal (PR pending; security audit passed)                                                                                                                                                          |
+| 98o       | ✅     | diagnostics-plugin — diagnostics session renewal ([#392](https://github.com/setu-ts/setu-ts/pull/392); security audit passed)                                                                                                                 |
 | 99        | ✅     | the `v0.7.0` smoke closeout (umbrella; 8 findings, 3 High, plus the 99e maintainer report)                                                                                                                                                    |
 | 99a       | ✅     | logger-plugin + common + messaging-plugin — a control that reports safe for what it does not cover                                                                                                                                            |
 | 99b       | ✅     | cli + docs — what the CLI writes cannot then be used                                                                                                                                                                                          |
