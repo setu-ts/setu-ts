@@ -77,7 +77,8 @@ export interface AssertionFields {
   /** The signed SubjectConfirmationData InResponseTo; `null` omits it. */
   inResponseTo: string | null;
   issuer: string;
-  nameID: string;
+  /** The `NameID` element text; `null` omits the element. */
+  nameID: string | null;
   audience: string;
   recipient: string | null;
   notBefore: number;
@@ -98,7 +99,11 @@ export function assertionXml(fields: AssertionFields): string {
   const recipient = fields.recipient === null ? '' : ` Recipient="${fields.recipient}"`;
   return `<saml:Assertion xmlns:saml="${SAML_NS}" ID="${fields.id}" Version="2.0" IssueInstant="${
     iso(fields.notBefore)
-  }"><saml:Issuer>${fields.issuer}</saml:Issuer><saml:Subject><saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">${fields.nameID}</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData${
+  }"><saml:Issuer>${fields.issuer}</saml:Issuer><saml:Subject>${
+    fields.nameID === null
+      ? ''
+      : `<saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">${fields.nameID}</saml:NameID>`
+  }<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData${
     fields.inResponseTo === null ? '' : ` InResponseTo="${fields.inResponseTo}"`
   } NotOnOrAfter="${
     iso(fields.notOnOrAfter)

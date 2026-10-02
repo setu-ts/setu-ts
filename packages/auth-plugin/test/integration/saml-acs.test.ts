@@ -185,6 +185,16 @@ describe('SAML ACS (real node-saml)', () => {
       },
     },
     {
+      // node-saml copies every attribute onto its profile, so without reading
+      // the element an attribute named `nameID` would choose the principal.
+      name: 'an assertion with no NameID element but a nameID attribute',
+      build: (id) =>
+        signedResponse(key, id, {
+          nameID: null,
+          attributes: { nameID: 'from-attribute', issuer: 'https://idp.test/saml' },
+        }),
+    },
+    {
       name: 'a response answering a request this server never issued',
       build: () => signedResponse(key, '_never-issued'),
     },

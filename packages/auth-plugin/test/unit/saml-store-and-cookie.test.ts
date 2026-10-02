@@ -70,6 +70,54 @@ describe('MemorySamlRequestStore', () => {
     expect(await store.claimAssertionId('a1', 300, 100)).toBe(true);
     expect(await store.claimAssertionId('a2', 300, 100)).toBe(true);
   });
+
+  it('evicts the oldest pending request once the cap is reached', async () => {
+    const store = new MemorySamlRequestStore({ maxPendingRequests: 2 });
+    await store.saveRequest(request('r1'), 0);
+    await store.saveRequest(request('r2'), 0);
+    await store.saveRequest(request('r3'), 0);
+    expect(await store.peekRequest('r1', 0)).toBeNull();
+    expect(await store.peekRequest('r2', 0)).not.toBeNull();
+    expect(await store.peekRequest('r3', 0)).not.toBeNull();
+  });
+
+  it('re-saving an id replaces it without evicting another', async () => {
+    const store = new MemorySamlRequestStore({ maxPendingRequests: 2 });
+    await store.saveRequest(request('r1'), 0);
+    await store.saveRequest(request('r2'), 0);
+    await store.saveRequest(request('r2', 2_000), 0);
+    expect(await store.peekRequest('r1', 0)).not.toBeNull();
+    expect((await store.peekRequest('r2', 1_500))?.expiresAt).toBe(2_000);
+  });
+
+  it('drops expired requests before evicting a live one', async () => {
+    const store = new MemorySamlRequestStore({ maxPendingRequests: 2 });
+    await store.saveRequest(request('old', 10), 0);
+    await store.saveRequest(request('live', 1_000), 0);
+    await store.saveRequest(request('new', 1_000), 20);
+    expect(await store.peekRequest('live', 20)).not.toBeNull();
+    expect(await store.peekRequest('new', 20)).not.toBeNull();
+  });
+
+  for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    it(`refuses maxPendingRequests ${bad}`, () => {
+      expect(() => new MemorySamlRequestStore({ maxPendingRequests: bad })).toThrow(RangeError);
+    });
+  }
+
+  it('sweeps aged-out assertion claims and keeps live ones refused', async () => {
+    const store = new MemorySamlRequestStore();
+    for (let i = 0; i < 40; i++) {
+      expect(await store.claimAssertionId(`old${i}`, 10, 0)).toBe(true);
+    }
+    for (let i = 0; i < 40; i++) {
+      expect(await store.claimAssertionId(`live${i}`, 1_000, 20)).toBe(true);
+    }
+    // The sweep ran at the 64th entry; every live claim is still held.
+    for (let i = 0; i < 40; i++) {
+      expect(await store.claimAssertionId(`live${i}`, 1_000, 30)).toBe(false);
+    }
+  });
 });
 
 function fakeContext(cookie?: string): IRequestContext & { setCookies: string[] } {

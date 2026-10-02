@@ -110,8 +110,15 @@ export type {
 export { MemoryPasskeyStore } from './stores/passkey-store.ts';
 
 // SAML 2.0 service provider (M100f)
-export type { ISamlRequestStore, SamlPendingRequest } from './stores/saml-request-store.ts';
-export { MemorySamlRequestStore } from './stores/saml-request-store.ts';
+export type {
+  ISamlRequestStore,
+  MemorySamlRequestStoreOptions,
+  SamlPendingRequest,
+} from './stores/saml-request-store.ts';
+export {
+  DEFAULT_MAX_PENDING_SAML_REQUESTS,
+  MemorySamlRequestStore,
+} from './stores/saml-request-store.ts';
 
 // TOTP MFA (M100d)
 export { TotpService } from './mfa/totp-service.ts';

@@ -549,9 +549,12 @@ response envelope is unsigned when only the assertion is, so its own `InResponse
 assertion); `NotBefore`/`NotOnOrAfter` must hold with 60 seconds of skew; the response's
 `InResponseTo` must name a pending request this server issued for this provider, and that request is
 consumed — once; the assertion `ID` must not have been used before; and the browser must present the
-binding cookie set at login. Two posts of one captured response cannot both sign in. **IdP-initiated
-(unsolicited) login is refused**: it has no request to bind to. XML signature verification,
-including resistance to signature-wrapping, is delegated to
+binding cookie set at login. Two posts of one captured response cannot both sign in. The `Issuer`
+and `NameID` the plugin checks and hands to `toPrincipal` are read from the signed assertion's own
+`<Issuer>` and `<Subject><NameID>` elements — never from the library's profile object, where a
+same-named IdP attribute could stand in for them — and an assertion missing either is refused.
+**IdP-initiated (unsolicited) login is refused**: it has no request to bind to. XML signature
+verification, including resistance to signature-wrapping, is delegated to
 [`@node-saml/node-saml`](https://github.com/node-saml/node-saml) rather than hand-written.
 
 **Refusals** answer `401` — or redirect to `failureRedirect` with `?error=<code>` — with one of two
@@ -583,6 +586,14 @@ session; `returnTo` is the supported way to resume.
 **Several replicas need a shared store.** The default `MemorySamlRequestStore` is correct for ONE
 process: a login started on one replica and answered on another is refused. Implement
 `ISamlRequestStore` over a shared backend; `consumeRequest` and `claimAssertionId` MUST be atomic.
+
+**The login route is unauthenticated, so bound what it can cost.** Each `GET …/login` records a
+pending request for its lifetime. `MemorySamlRequestStore` caps how many it holds
+(`maxPendingRequests`, default `DEFAULT_MAX_PENDING_SAML_REQUESTS` = 10,000): past the cap the
+OLDEST pending request is evicted, so its login fails closed and is retried while memory stays
+bounded. A shared store needs its own bound (a TTL and a size limit). Rate-limit the login route as
+well, and set `RuntimePlugin({ maxBodyBytes })` — the ACS reads a form body, and a SAML response is
+a few kilobytes, so a cap of tens of kilobytes is ample.
 
 **CSRF composition.** The IdP's `POST` carries no form token and an `Origin` naming the IdP, so with
 the session plugin's form CSRF the ACS path must be in `csrf.exclude`, and with
@@ -1123,6 +1134,7 @@ MIT
 | `RefreshTokenService`               | class     |
 | `SamlRuntimeLoadError`              | class     |
 | `TotpService`                       | class     |
+| `DEFAULT_MAX_PENDING_SAML_REQUESTS` | const     |
 | `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS` | const     |
 | `DEFAULT_RATE_LIMIT_KEY_PREFIX`     | const     |
 | `ApiKeyOptions`                     | interface |
@@ -1143,6 +1155,7 @@ MIT
 | `JwtOptions`                        | interface |
 | `JwtSignOptions`                    | interface |
 | `LocalOptions`                      | interface |
+| `MemorySamlRequestStoreOptions`     | interface |
 | `MfaOptions`                        | interface |
 | `OAuth2Provider`                    | interface |
 | `OidcProvider`                      | interface |

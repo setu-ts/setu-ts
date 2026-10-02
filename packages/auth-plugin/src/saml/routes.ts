@@ -152,10 +152,28 @@ function childrenOf(node: unknown, name: string): readonly unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+/** Reads an xml2js element's text: a bare string, or its `_` character key. */
+function textOf(node: unknown): string | undefined {
+  if (typeof node === 'string') {
+    return stringOf(node);
+  }
+  return typeof node === 'object' && node !== null
+    ? stringOf((node as Record<string, unknown>)._)
+    : undefined;
+}
+
 /** What the plugin reads from the verified assertion itself. */
 interface AssertionFacts {
   readonly id: string;
   readonly recipients: readonly unknown[];
+  /** The assertion's `Issuer` element text, or `undefined` when absent. */
+  readonly issuer: string | undefined;
+  /** The `Subject`'s `NameID` element text, or `undefined` when absent. */
+  readonly nameID: string | undefined;
+  /** The `NameID` `Format`, when present. */
+  readonly nameIDFormat: string | undefined;
+  /** The first `AuthnStatement` `SessionIndex`, when present. */
+  readonly sessionIndex: string | undefined;
   /** Every `SubjectConfirmationData` `InResponseTo`, inside the signature. */
   readonly inResponseTos: readonly unknown[];
   /** The latest `NotOnOrAfter` found, in ms, or `null` when none parsed. */
@@ -205,26 +223,40 @@ function assertionFacts(profile: SamlLibraryProfile): AssertionFacts | null {
       expiresAt = ms;
     }
   }
-  return { id, recipients, inResponseTos, expiresAt };
+  const subject = childrenOf(assertion, 'Subject')[0];
+  const nameIdNode = childrenOf(subject, 'NameID')[0];
+  return {
+    id,
+    // Read from the elements, never from node-saml's merged `profile`: it
+    // copies every attribute onto the profile, so an assertion with no
+    // `Issuer` or `NameID` element but an attribute of that name would
+    // otherwise supply both.
+    issuer: textOf(childrenOf(assertion, 'Issuer')[0]),
+    nameID: textOf(nameIdNode),
+    nameIDFormat: stringOf(attributeOf(nameIdNode, 'Format')),
+    sessionIndex: stringOf(attributeOf(childrenOf(assertion, 'AuthnStatement')[0], 'SessionIndex')),
+    recipients,
+    inResponseTos,
+    expiresAt,
+  };
 }
 
-/** Builds the frozen profile `toPrincipal` receives, or `null` without a NameID. */
-function toSamlProfile(profile: SamlLibraryProfile): SamlProfile | null {
-  const issuer = stringOf(profile.issuer);
-  const nameID = stringOf(profile.nameID);
-  if (issuer === undefined || nameID === undefined) {
+/**
+ * Builds the frozen profile `toPrincipal` receives from the signed assertion's
+ * own elements, or `null` when it carries no `Issuer` or no `NameID`.
+ */
+function toSamlProfile(facts: AssertionFacts, profile: SamlLibraryProfile): SamlProfile | null {
+  if (facts.issuer === undefined || facts.nameID === undefined) {
     return null;
   }
   const attributes = typeof profile.attributes === 'object' && profile.attributes !== null
     ? { ...(profile.attributes as Record<string, unknown>) }
     : {};
-  const format = stringOf(profile.nameIDFormat);
-  const sessionIndex = stringOf(profile.sessionIndex);
   return Object.freeze({
-    issuer,
-    nameID,
-    ...(format === undefined ? {} : { nameIDFormat: format }),
-    ...(sessionIndex === undefined ? {} : { sessionIndex }),
+    issuer: facts.issuer,
+    nameID: facts.nameID,
+    ...(facts.nameIDFormat === undefined ? {} : { nameIDFormat: facts.nameIDFormat }),
+    ...(facts.sessionIndex === undefined ? {} : { sessionIndex: facts.sessionIndex }),
     attributes: Object.freeze(attributes),
   });
 }
@@ -386,14 +418,14 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         return fail(provider, ctx, 'state-invalid');
       }
 
+      const facts = assertionFacts(profile);
       // node-saml 5.1.0 checks `idpIssuer` only on logout messages, never on an
-      // authentication assertion (`lib/saml.js` verifyIssuer), so the verified
-      // assertion's Issuer is bound to the configured IdP here.
-      if (profile.issuer !== provider.idp.entityId) {
+      // authentication assertion (`lib/saml.js` verifyIssuer), so the signed
+      // assertion's own Issuer ELEMENT is bound to the configured IdP here.
+      if (facts !== null && facts.issuer !== provider.idp.entityId) {
         deps.debug?.(`auth-plugin: signIn['${provider.name}'] response refused (issuer)`);
         return fail(provider, ctx, 'assertion-invalid');
       }
-      const facts = assertionFacts(profile);
       if (
         facts === null || facts.recipients.length === 0 ||
         facts.recipients.some((recipient) => recipient !== provider.acsUrl)
@@ -425,7 +457,7 @@ function registerAcs(loaded: LoadedSamlProvider, deps: SamlRouteDeps): void {
         return fail(provider, ctx, 'assertion-invalid');
       }
 
-      const samlProfile = toSamlProfile(profile);
+      const samlProfile = toSamlProfile(facts, profile);
       if (samlProfile === null) {
         return fail(provider, ctx, 'assertion-invalid');
       }

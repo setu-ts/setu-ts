@@ -33,13 +33,18 @@ All notable changes to this project are documented here. The format follows
   Path=/; Max-Age=600`) — because the IdP's cross-site POST
   does not carry the `Lax` session cookie, and without the binding a posted foreign response would
   sign the victim in as the attacker. Assertion ids are claimed once (`claimAssertionId`), so two
-  concurrent posts of one captured response cannot both sign in. IdP-initiated login is refused.
-  Refusals answer `401` (or `failureRedirect?error=`) with one of two fixed codes,
-  `assertion-invalid` and `state-invalid`; the library's message reaches only the `debug` log.
-  `toPrincipal` receives a frozen `SamlProfile`. The ACS signs in on a NEW session, since the
-  previous session's cookie is not sent with the IdP's POST. Encrypted assertions, single logout,
-  the Artifact binding and signed AuthnRequests are not offered. Proven against the real node-saml
-  on every run and against a real Keycloak 26.4 SAML client (`test/e2e/keycloak-saml-real.test.ts`).
+  concurrent posts of one captured response cannot both sign in. The checked `Issuer` and the
+  `nameID` handed to `toPrincipal` are read from the assertion's own elements, never from
+  attribute-overlaid profile fields. `MemorySamlRequestStore` caps its pending requests
+  (`MemorySamlRequestStoreOptions.maxPendingRequests`, default `DEFAULT_MAX_PENDING_SAML_REQUESTS` =
+  10,000, oldest evicted first), so an unauthenticated login flood cannot grow memory without bound.
+  IdP-initiated login is refused. Refusals answer `401` (or `failureRedirect?error=`) with one of
+  two fixed codes, `assertion-invalid` and `state-invalid`; the library's message reaches only the
+  `debug` log. `toPrincipal` receives a frozen `SamlProfile`. The ACS signs in on a NEW session,
+  since the previous session's cookie is not sent with the IdP's POST. Encrypted assertions, single
+  logout, the Artifact binding and signed AuthnRequests are not offered. Proven against the real
+  node-saml on every run and against a real Keycloak 26.4 SAML client
+  (`test/e2e/keycloak-saml-real.test.ts`).
 - **Passkeys / WebAuthn (M100e).** `AuthPluginOptions.signIn.passkeys` (the published
   `PasskeyOptions` type: `rpId` / `rpName` / `origins` / `store` / `resolvePrincipal` /
   `userVerification`) registers the four ceremony routes —

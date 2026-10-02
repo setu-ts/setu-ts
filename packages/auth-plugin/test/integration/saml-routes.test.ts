@@ -161,7 +161,10 @@ const savingAuthorize = async (cache: SamlCacheProvider): Promise<string> => {
 function assertion(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     $: { ID: '_a1' },
+    // A bare string, as xml2js yields for an element with no attributes.
+    Issuer: ['https://idp.test/saml'],
     Subject: [{
+      NameID: [{ _: 'alice' }],
       SubjectConfirmation: [{
         SubjectConfirmationData: [{
           $: { Recipient: ACS_URL, InResponseTo: '_req1', NotOnOrAfter: 'not-a-date' },
@@ -179,6 +182,22 @@ function profile(overrides: Record<string, unknown> = {}, parsed = assertion()):
     inResponseTo: '_req1',
     getAssertion: () => ({ Assertion: parsed }),
     ...overrides,
+  };
+}
+
+function withoutNameId(): Record<string, unknown> {
+  const base = assertion();
+  const subject = (base.Subject as Record<string, unknown>[])[0];
+  return { ...base, Subject: [{ SubjectConfirmation: subject.SubjectConfirmation }] };
+}
+
+function withFormatAndSession(): Record<string, unknown> {
+  const base = assertion();
+  const subject = (base.Subject as Record<string, unknown>[])[0];
+  return {
+    ...base,
+    Subject: [{ ...subject, NameID: [{ _: 'alice', $: { Format: 'fmt' } }] }],
+    AuthnStatement: [{ $: { SessionIndex: 's' } }],
   };
 }
 
@@ -306,8 +325,20 @@ describe('SAML routes (injected library)', () => {
           loggedOut: false,
         }),
     }, 'assertion-invalid'],
+    ['an assertion with no Issuer element (the issuer only as an attribute)', {
+      validate: () => {
+        const { Issuer: _dropped, ...noIssuer } = assertion();
+        return Promise.resolve({ profile: profile({}, noIssuer), loggedOut: false });
+      },
+    }, 'assertion-invalid'],
     ['a profile without a NameID', {
-      validate: () => Promise.resolve({ profile: profile({ nameID: '' }), loggedOut: false }),
+      // node-saml's merged profile still carries `nameID` (from an attribute
+      // of that name); only the missing ELEMENT may decide.
+      validate: () =>
+        Promise.resolve({
+          profile: profile({ nameID: 'from-attribute' }, withoutNameId()),
+          loggedOut: false,
+        }),
     }, 'assertion-invalid'],
   ];
   for (const [label, behaviour, detail] of refusals) {
@@ -341,7 +372,7 @@ describe('SAML routes (injected library)', () => {
       {
         validate: () =>
           Promise.resolve({
-            profile: profile({ nameIDFormat: 'fmt', sessionIndex: 's', attributes: 'x' }),
+            profile: profile({ attributes: 'x' }, withFormatAndSession()),
             loggedOut: false,
           }),
       },
