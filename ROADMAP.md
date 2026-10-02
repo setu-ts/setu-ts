@@ -11287,8 +11287,8 @@ and bytes describe the same settlement. Owner: `packages/storage-plugin`. Canoni
 ### Milestone 98o: Diagnostics Session Renewal
 
 **Status:** Planned. Plan: `plans/milestone-98o-session-renewal.md`. Its design security review
-(§10.1) has had one independent round, which blocked revision 1; revision 2 resolves its findings
-and awaits a second round and three remaining maintainer approvals. Implementation does not start
+(§10.1) has had two independent rounds, both of which blocked; revision 3 resolves their findings
+and awaits a third round and four remaining maintainer decisions. Implementation does not start
 before both. Owner: `packages/diagnostics-plugin`, plus one emitted option in `packages/cli`'s
 generated development entry. Requested by the devtool repository as a prerequisite for its D04 free
 preview (devtool roadmap milestone D03b).
@@ -11297,8 +11297,8 @@ preview (devtool roadmap milestone D03b).
 status body. That is possible only because `packages/diagnostics-plugin` has never been published: a
 published client refuses any status key it does not know (see the inspector-manifest paragraph under
 "Mandatory Security Audit Gates" below). So this letter is a HARD GATE on the first publication of
-`packages/diagnostics-plugin`, the same constraint M98d's manifest carried. A release-tooling hold
-that makes `release:verify` fail while that package is unfinished lands on its own branch before the
+`packages/diagnostics-plugin`, the same constraint M98d's manifest carried. A release-tooling hold,
+enforced when publishing (not in the per-PR `release:verify`), lands on its own branch before the
 next release (plan §3.9).
 
 **Why:** an M98b session lives 15 minutes by default and at most one hour (`ttlMs`, capped at
@@ -11327,8 +11327,8 @@ asking for a longer `ttlMs`. Renewal has to be a framework operation, designed a
       `min(now + ttlMs, activation + maxSessionLifetimeMs)` and never shortens it; one new signed
       `GET /v1/renew` operation and an optional status `renewal` member, inside protocol v1 and
       recorded as such. The plugin's expiry timer, which today revokes at the original `ttlMs`,
-      re-arms for the renewed remainder, and real expiry still drops the key and closes the
-      listener.
+      re-arms for the renewed remainder only when renewal is configured, and real expiry still drops
+      the key and closes the listener.
 - [ ] Refusal semantics, each tested: renewal after expiry is refused (expiry stays terminal); after
       `revoke()` it is refused; a replayed or reordered renewal request is refused by the existing
       sequence gate; a session bound to one application instance cannot renew against another.
