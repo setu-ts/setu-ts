@@ -11288,10 +11288,11 @@ and bytes describe the same settlement. Owner: `packages/storage-plugin`. Canoni
 
 **Status:** Planned. Plan: `plans/milestone-98o-session-renewal.md`. Its design security review
 (§10.1) is complete: rounds 1 and 2 blocked, round 3 approved, and revision 4 folds in its
-non-blocking findings. Four maintainer decisions remain open. Implementation does not start before
-both. Owner: `packages/diagnostics-plugin`, plus one emitted option in `packages/cli`'s generated
-development entry. Requested by the devtool repository as a prerequisite for its D04 free preview
-(devtool roadmap milestone D03b).
+non-blocking findings. Every maintainer decision is approved (2026-10-02): the 12-hour ceiling, the
+8-hour CLI value, the v1 extension with its publication hold, and an exact status parser.
+Implementation has not started. Owner: `packages/diagnostics-plugin`, plus one emitted option in
+`packages/cli`'s generated development entry. Requested by the devtool repository as a prerequisite
+for its D04 free preview (devtool roadmap milestone D03b).
 
 **Release constraint:** the plan extends protocol v1 by adding an optional `renewal` member to the
 status body. That is possible only because `packages/diagnostics-plugin` has never been published: a

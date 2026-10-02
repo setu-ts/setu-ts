@@ -3,8 +3,9 @@
 > **Status:** Planning, revision 4. Branch: `feat/m98o-session-renewal`. `main` is protected — all
 > work (implementation + fixes) stays on this one branch until it merges via a single PR. The design
 > security review (§10.1) is complete: round 3 approved revision 3, and revision 4 folds in its
-> non-blocking findings. Implementation still waits on the four open maintainer decisions in §10.1
-> (ROADMAP, "Mandatory Security Audit Gates for M98d–M98n").
+> non-blocking findings. Every maintainer decision in §10.1 is approved (2026-10-02), so the plan is
+> ready to implement; implementation has not started (ROADMAP, "Mandatory Security Audit Gates for
+> M98d–M98n").
 
 ## 0. Objective & scope
 
@@ -477,9 +478,9 @@ reach grows.
 | RN9  | The new canonical target breaks MAC injectivity (T7).              | `/v1/renew` contains no LF; the canonicalization audit obligation covers it.                                                                                                                                                    |
 | RN10 | The timer ends a renewed session early, or outlives a revoked one. | The callback revokes only when `!isAdmissible`, re-arms for the rounded-up unfloored remainder, writes every handle back to `expiryTimer`, and returns once revoked or superseded, so `revoke()` always clears the live handle. |
 
-**Approved budgets (proposed):** `maxSessionLifetimeMs` from `ttlMs` to 43,200,000 (12 hours of
-awake time); no renewal count limit (the cap bounds it); renew requests debit the existing session
-budget.
+**Approved budgets (approved 2026-10-02):** `maxSessionLifetimeMs` from `ttlMs` to 43,200,000 (12
+hours of awake time); no renewal count limit (the cap bounds it); renew requests debit the existing
+session budget.
 
 **Maintainer decisions.**
 
@@ -488,15 +489,14 @@ budget.
   - The C4 definition of "read-only".
   - The CLI emission ships in step with the devtool re-pin, and the devtool runs a pinned CLI
     version (§3.8).
-- Still required before implementation:
-  1. The hard ceiling of 12 hours of awake time for `maxSessionLifetimeMs`.
-  2. The CLI's generated value of 8 hours.
-  3. Shipping renewal as a protocol v1 extension, which ties this milestone to the first publication
-     of `packages/diagnostics-plugin` and requires the §3.9 hold.
-  4. Whether the status parser stays exact at first publication. Exact (today's rule, and this
-     plan's default) means every future status addition needs protocol v2. The alternative is for a
-     client to ignore unknown keys in a SIGNED status body, decided before first publication; that
-     keeps the MAC guarantee but weakens the exact-DTO rule the client applies everywhere else.
+  - The hard ceiling of 12 hours of awake time for `maxSessionLifetimeMs` (§3.1).
+  - The CLI's generated value of 8 hours (§3.8).
+  - Shipping renewal as a protocol v1 extension, which ties this milestone to the first publication
+    of `packages/diagnostics-plugin` and requires the §3.9 hold (§3.4, §3.9).
+  - The status parser stays exact at first publication (§3.7): every future status addition needs
+    protocol v2. Tolerating unknown keys in a signed status body was considered and rejected,
+    because it weakens the exact-DTO rule the client applies everywhere else.
+- No maintainer decision remains open.
 
 ### 10.2 Committed-tree audit obligations — not yet executed
 
